@@ -211,3 +211,142 @@ export function surfaceTurn(input: {
 
 export type SurfaceTurn = ReturnType<typeof surfaceTurn>;
 export type SurfacePin = SurfaceTurn["pins"][number];
+
+export interface SurfacePinGroup {
+	/** The member the pill names when none of its members is open. */
+	leader: SurfacePin;
+	/** In strip order. */
+	members: SurfacePin[];
+	row: 0 | 1;
+	/** The first member's strip position (%), where the pill's tick lands. */
+	x: number;
+	left: number;
+	width: number;
+	/** The tick's offset inside the pill, in px. */
+	tick: number;
+}
+
+const URGENCY: Readonly<Record<string, number>> = {
+	ask: 0,
+	blocked: 1,
+	risk: 2,
+	scope: 2,
+	replan: 3,
+	correction: 3,
+	decision: 3,
+	finding: 4,
+	milestone: 4,
+};
+
+/**
+ * Lays the pins into two rows. The open Ask and the pending pin go first and are
+ * never grouped; every other pin, in strip order, takes the first row with room or
+ * joins the pill placed before it. A row that still overflows merges its closest
+ * groupable neighbours. Density is presentation only: stepping and scrubbing still
+ * reach every pin.
+ */
+export function surfacePinRows(
+	view: Pick<SurfaceTurn, "pins" | "openAsk">,
+	laneWidth: number,
+	phone: boolean,
+): SurfacePinGroup[] {
+	const width = laneWidth > 0 ? laneWidth : 1000;
+	const gap = 10;
+	const digit = phone ? 7.2 : 6.6;
+	const fixed = (pin: SurfacePin) =>
+		pin.pending || pin.part.uuid === view.openAsk?.uuid;
+	// A Blocked always leads; otherwise the most urgent, then the latest.
+	const rank = (pin: SurfacePin) =>
+		pin.category === "blocked" ? -1 : (URGENCY[pin.category ?? ""] ?? 5);
+	const pill = (members: SurfacePin[], row: 0 | 1, x: number) => {
+		// Sized for the widest member, so the pill keeps its width as the open member changes.
+		const pillWidth =
+			Math.max(
+				...members.map(
+					(pin) =>
+						(phone ? 26 : 22) +
+						String(pin.number ?? "").length * digit +
+						(pin.part.surfacingMark ? 8 : 0),
+				),
+			) +
+			(members.length > 1 ? 6 + `+${members.length - 1}`.length * digit : 0);
+		const leader = members.reduce((best, pin) =>
+			(rank(pin) - rank(best) || best.step - pin.step) < 0 ? pin : best,
+		);
+		return {
+			leader,
+			members: [...members].sort((a, b) => a.step - b.step),
+			row,
+			x,
+			width: pillWidth,
+			left: Math.min(
+				Math.max((x / 100) * width - pillWidth / 2, 0),
+				width - pillWidth,
+			),
+			tick: 0,
+		};
+	};
+	const clear = (a: SurfacePinGroup, b: SurfacePinGroup) =>
+		a.left + a.width + gap <= b.left || b.left + b.width + gap <= a.left;
+
+	const groups: SurfacePinGroup[] = [];
+	let host: SurfacePinGroup | undefined;
+	for (const pin of [
+		...view.pins.filter(fixed),
+		...view.pins.filter((pin) => !fixed(pin)),
+	]) {
+		const chip = pill([pin], 0, pin.x);
+		const row = ([0, 1] as const).find((r) =>
+			groups.every((group) => group.row !== r || clear(group, chip)),
+		);
+		if (row === undefined && host && !fixed(pin)) {
+			Object.assign(host, pill([...host.members, pin], host.row, host.x));
+			continue;
+		}
+		const placed = { ...chip, row: row ?? 1 };
+		groups.push(placed);
+		if (!fixed(pin)) host = placed;
+	}
+
+	for (const row of [0, 1] as const) {
+		for (;;) {
+			const items = groups
+				.filter((group) => group.row === row)
+				.sort((a, b) => a.x - b.x);
+			// Push overlapping pills right, then back inside the lane's right edge.
+			let edge = 0;
+			for (const group of items) {
+				group.left = Math.max(pill(group.members, row, group.x).left, edge);
+				edge = group.left + group.width + gap;
+			}
+			edge = width + gap;
+			for (const group of [...items].reverse()) {
+				group.left = Math.min(group.left, edge - gap - group.width);
+				edge = group.left;
+			}
+			if ((items[0]?.left ?? 0) >= 0) break;
+			const closest = items
+				.slice(1)
+				.map((group, index) => [items[index], group] as const)
+				.filter(
+					(pair): pair is readonly [SurfacePinGroup, SurfacePinGroup] =>
+						!!pair[0] && !fixed(pair[0].leader) && !fixed(pair[1].leader),
+				)
+				.sort(([a, b], [c, d]) => b.x - a.x - (d.x - c.x))[0];
+			// Only protected pins are left to merge; let them overlap rather than hide one.
+			if (!closest) break;
+			const [first, second] = closest;
+			Object.assign(
+				first,
+				pill([...first.members, ...second.members], row, first.x),
+			);
+			groups.splice(groups.indexOf(second), 1);
+		}
+	}
+	for (const group of groups)
+		group.tick = Math.min(
+			Math.max((group.x / 100) * width - group.left, 9),
+			group.width - 9,
+		);
+	return groups.sort((a, b) => a.x - b.x || a.row - b.row);
+}

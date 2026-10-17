@@ -51,6 +51,37 @@ Examples:
   | desktop  |
   | phone    |
 
+Scenario Outline: Dense All pins fill two rows without hiding the open Ask or a Blocked leader
+  Given message surfacing is active at All
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a dense turn
+  Then dense surfaced messages occupy two non-overlapping rows with labelled groups
+  And the open Ask stays separate and a Blocked message leads its group
+  And the messages region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline                 | threshold |
+  | desktop  | surfacing-dense-desktop   | 98        |
+  | phone    | surfacing-dense-phone     | 98        |
+
+Scenario Outline: Group taps and scrubbing preserve access to every dense message
+  Given message surfacing is active at All
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a dense turn
+  Then tapping a group cycles through its own members from the leader and wraps
+  And scrubbing and stepping reach every member and fill its group pill
+  When the pin lane narrows to 180 pixels
+  Then dense surfaced messages occupy two non-overlapping rows with labelled groups
+  And the open Ask stays separate and a Blocked message leads its group
+  And the messages region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline                    | threshold |
+  | desktop  | surfacing-overflow-desktop   | 98        |
+  | phone    | surfacing-overflow-phone     | 98        |
+
 Scenario Outline: Levels filter pins without renumbering and Final preserves the strip
   Given message surfacing is active at Balanced
   And the conduit app is served with the connected mockup
