@@ -8,6 +8,7 @@
 		controls,
 		send,
 		splitFooter = false,
+		singleRow = false,
 		class: className,
 		...rest
 	}: {
@@ -16,6 +17,7 @@
 		controls: Snippet;
 		send: Snippet;
 		splitFooter?: boolean | undefined;
+		singleRow?: boolean | undefined;
 		class?: string | undefined;
 	} & Omit<HTMLAttributes<HTMLDivElement>, "children" | "class"> = $props();
 
@@ -93,7 +95,7 @@
 			probe.textContent = "\u200b";
 			const lineHeight = probe.scrollHeight;
 			probe.textContent = textarea.value ? `${textarea.value}\u200b` : textarea.placeholder;
-			element.dataset["rows"] = splitFooter || probe.scrollHeight > lineHeight + 1 ? "2" : "1";
+			element.dataset["rows"] = splitFooter || (!singleRow && probe.scrollHeight > lineHeight + 1) ? "2" : "1";
 
 			// A placeholder longer than even the full-width field must grow too.
 			// The field can use this inherited minimum height with an absolute editor.
@@ -192,19 +194,27 @@
 	}
 
 	.split-footer[data-rows="2"] {
-		grid-template-columns: auto auto minmax(0, 1fr);
+		grid-template-columns: auto minmax(0, 1fr) auto;
 		align-items: center;
-		column-gap: 8px;
+		column-gap: 2px;
 		row-gap: 6px;
 	}
 
 	.split-footer > [data-slot="controls"] {
 		margin-left: 0;
+		width: 100%;
 	}
 
 	.split-footer > [data-slot="send"] {
 		justify-content: flex-end;
 		gap: 2px;
+	}
+	/* An empty controls slot leaves the grid, so send sits beside the field. */
+	.composer-layout:has(> [data-slot="controls"]:empty) {
+		grid-template-columns: auto minmax(0, 1fr) auto;
+	}
+	[data-slot="controls"]:empty {
+		display: none;
 	}
 
 	[data-slot="field"] :global(textarea:placeholder-shown) {

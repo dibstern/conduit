@@ -118,9 +118,11 @@ export async function seedComposerPickerCatalog(
 		await page.keyboard.press("Escape");
 		await expect(page.getByTestId("model-picker")).toHaveCount(0);
 	}
-	// The phone button shows only a short tag (S5); its accessible name has the full model.
+	// The unified trigger and Words controls announce the complete model name.
 	await expect(
-		page.getByTestId(/^(model-picker-trigger|composer-word-model)$/),
+		page.getByTestId(
+			/^(model-picker-trigger|composer-word-model|composer-words-sheet-trigger)$/,
+		),
 	).toHaveAttribute("aria-label", claude ? /Sonnet 5/ : /Sonnet 4/);
 	pickerFixtureQuotaReads.set(
 		page,
@@ -132,12 +134,22 @@ export async function seedComposerPickerCatalog(
 
 export const composerPickerHandlers: StepHandler[] = [
 	{
+		name: "assert desktop model chip returns to the picker root",
+		match: /^the picker root shows Harness and focuses Model$/,
+		run: async ({ world }) => {
+			const picker = world.page.getByTestId("model-picker");
+			await expect(picker.getByTestId("picker-harness-section")).toBeVisible();
+			await expect(picker.getByTestId("picker-back")).toHaveCount(0);
+			await expect(picker.getByTestId("picker-row-model")).toBeFocused();
+		},
+	},
+	{
 		name: "assert empty draft model label",
 		match: /^the draft composer reads Select model$/,
 		run: async ({ world }) => {
 			const trigger = world.page
 				.locator(
-					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 				)
 				.first();
 			await expect(trigger).toHaveText("Select model");
@@ -152,7 +164,7 @@ export const composerPickerHandlers: StepHandler[] = [
 			await expect(
 				world.page
 					.locator(
-						'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+						'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 					)
 					.first(),
 			).toHaveAttribute("data-shown-model", match[1] ?? "");
@@ -167,7 +179,8 @@ export const composerPickerHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert desktop icons control opens its picker section",
-		match: /^the icons control opens the picker at (Harness|Model|Effort)$/,
+		match:
+			/^the icons control opens the picker at (Harness|Account|Model|Effort)$/,
 		run: async ({ world, match }) => {
 			const picker = world.page.getByTestId("model-picker");
 			await expect(picker).toBeVisible();
@@ -179,6 +192,17 @@ export const composerPickerHandlers: StepHandler[] = [
 				await expect(
 					picker.getByTestId(phone ? "picker-back" : "model-picker-search"),
 				).toBeFocused();
+			} else if (match[1] === "Account") {
+				await expect(
+					picker.getByTestId("picker-account-section"),
+				).toBeVisible();
+				await expect
+					.poll(() =>
+						picker
+							.getByTestId("picker-account-section")
+							.evaluate((element) => element.contains(document.activeElement)),
+					)
+					.toBe(true);
 			} else {
 				await expect(picker.getByTestId("picker-back")).toHaveCount(0);
 				await expect(

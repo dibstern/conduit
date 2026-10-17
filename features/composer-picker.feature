@@ -16,12 +16,33 @@ Scenario Outline: E1 desktop icons open the picker at each control's section and
 
 Examples:
   | tier   | control | section | baseline                                | threshold |
-  | wide   | harness | Harness | composer-icons-picker-e1-harness        | 98        |
-  | narrow | harness | Harness | composer-icons-picker-e1-harness-narrow | 98        |
-  | wide   | model   | Model   | composer-icons-picker-e1-model          | 98        |
-  | narrow | model   | Model   | composer-icons-picker-e1-model-narrow   | 98        |
+  | wide   | model   | Harness | composer-icons-picker-e1-harness        | 98        |
+  | narrow | model   | Harness | composer-icons-picker-e1-harness-narrow | 98        |
   | wide   | effort  | Effort  | composer-icons-picker-e1-effort         | 98        |
   | narrow | effort  | Effort  | composer-icons-picker-e1-effort-narrow  | 98        |
+
+Scenario Outline: desktop icons reach the model list through the root's Model row
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  And the harness logo is viewed in the <tier> tier
+  And the composer uses icons controls
+  And the Claude accounts are claude as personal, self as work
+  And the composer picker has the Claude catalog
+  When I tap the icons model control
+  Then the icons control opens the picker at Harness
+  When I view Model choices in the picker
+  Then the icons control opens the picker at Model
+  And the picker is a desktop popover
+  And the model-picker region visually matches <baseline> at <threshold> percent
+  When I go Back in the picker
+  Then the picker root shows Harness and focuses Model
+  When I close the model picker
+  Then the icons model control is focused
+
+Examples:
+  | tier   | baseline                              | threshold |
+  | wide   | composer-icons-picker-e1-model        | 98        |
+  | narrow | composer-icons-picker-e1-model-narrow | 98        |
 
 Scenario Outline: E1 desktop icons mode uses the existing approvals menu
   Given the conduit app is served with the connected mockup
@@ -35,7 +56,8 @@ Scenario Outline: E1 desktop icons mode uses the existing approvals menu
   And the shared composer picker is closed
   When I set approvals to auto
   Then the approvals menu is closed
-  And the icons mode control has hot tint true
+  And the mode shield names Auto
+  And the mode shield uses the warning tone
   And the composer region visually matches <baseline> at <threshold> percent
 
 Examples:

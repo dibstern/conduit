@@ -27,8 +27,7 @@ export class InputPage {
 	}
 
 	async isStopMode(): Promise<boolean> {
-		const classes = (await this.sendBtn.getAttribute("class")) ?? "";
-		return classes.includes("stop");
+		return this.page.locator("#stop").isVisible();
 	}
 
 	async openAttachMenu(): Promise<void> {

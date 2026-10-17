@@ -330,7 +330,7 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 		),
 	});
 	const picker = page.locator(
-		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 	);
 	await openPickerRoot(page, picker);
 	await page.getByTestId("picker-harness-opencode").click();

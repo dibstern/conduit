@@ -142,8 +142,10 @@ Scenario Outline: header has no checkout
   And a named OpenCode instance Bedrock is already configured
   And the composer uses words controls
   And the composer checkout is conduit / account-chip as worktree
+  When I open the phone composer sheet
   Then the composer checkout shows conduit / account-chip with a worktree icon
-  And the skills chip reads 3 skills used
+  When I close the phone composer sheet
+  Then the skills chip reads 3 skills used
   And the session header has no checkout
   And the session header has no account or instance control
   And the session bar is expanded

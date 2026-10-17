@@ -61,7 +61,7 @@ const otherOpenCodeModel = {
 	modelID: "mimo-v2-omni-free",
 };
 const pickerSelector =
-	'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible';
+	'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible';
 
 // Each case starts a daemon and provider processes. Keep cases sequential
 // within a viewport, while desktop and mobile still run independently.
@@ -1241,8 +1241,10 @@ test.describe("session composer owns its stored pick", () => {
 			browser.rpc.GetModels({ sessionId: sessionB }),
 		);
 		const mode = page.locator(
-			'[data-testid="permission-mode-badge"]:visible, [data-testid="composer-word-approvals"]:visible',
+			'[data-testid="permission-mode-badge"]:visible, [data-testid="composer-word-approvals"]:visible, [data-testid="composer-more-mode"]:visible',
 		);
+		const phoneWords = page.getByTestId("composer-words-sheet-trigger");
+		let openedComposer = false;
 		const older = observed.hold("GetModels", sessionA, { once: true });
 		let stage = "A-row-read";
 		let before: string | null | undefined;
@@ -1273,8 +1275,22 @@ test.describe("session composer owns its stored pick", () => {
 				.click();
 			await expect(page).toHaveURL(new RegExp(`/s/${sessionB}\\?`));
 			await expectShown(picker, shownFromGetModels(reportedB, "claude"));
-			await expect(mode).toHaveAttribute("title", "Approvals (Full access)");
-			before = await mode.getAttribute("title");
+			await expect(picker).toHaveAttribute(
+				"data-shown-permission-mode",
+				"full",
+			);
+			before = await picker.getAttribute("data-shown-permission-mode");
+			if (await phoneWords.isVisible())
+				await expect(
+					phoneWords.getByText("full", { exact: true }),
+				).toBeVisible();
+			if (!(await mode.isVisible())) {
+				await picker.click();
+				openedComposer = true;
+			}
+			await expect(mode).toHaveAccessibleName(
+				"Approvals: Full access. Open options",
+			);
 			stage = "A-stale-delivered";
 			older.release();
 			deliveredRequestIds = await observed.received(older.frames);
@@ -1284,9 +1300,15 @@ test.describe("session composer owns its stored pick", () => {
 						requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
 					),
 			);
-			after = await mode.evaluateAll(
-				(elements) => elements[0]?.getAttribute("title") ?? null,
+			after = await picker.getAttribute("data-shown-permission-mode");
+			await expect(mode).toHaveAccessibleName(
+				"Approvals: Full access. Open options",
 			);
+			if (openedComposer) await page.keyboard.press("Escape");
+			if (await phoneWords.isVisible())
+				await expect(
+					phoneWords.getByText("full", { exact: true }),
+				).toBeVisible();
 			shown = await readShown(picker);
 			expect(after).toBe(before);
 			expect(shown).toEqual(shownFromGetModels(reportedB, "claude"));
@@ -1930,12 +1952,21 @@ async function selectFullPermission(page: Page): Promise<void> {
 	if (await trigger.count()) {
 		await trigger.click();
 	} else {
-		await page.getByTestId("composer-more").click();
+		await page.locator(pickerSelector).click();
 		await page.getByTestId("composer-more-mode").click();
 	}
 	await page.getByTestId("permission-mode-option-full").click();
+	await expect(
+		page.getByRole("button", {
+			name: "Approvals: Full access. Open options",
+			exact: true,
+		}),
+	).toBeVisible();
 	await page.keyboard.press("Escape");
-	await expect(trigger).toHaveAttribute("title", "Approvals (Full access)");
+	await expect(page.locator(pickerSelector)).toHaveAttribute(
+		"data-shown-permission-mode",
+		"full",
+	);
 }
 
 function readDraftReceipt(

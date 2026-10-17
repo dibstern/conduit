@@ -201,28 +201,18 @@ export const sessionGoalHandlers: StepHandler[] = [
 			await expect
 				.poll(() =>
 					world.page.locator("#input-row").evaluate((el, kind) => {
+						// The frame draws the goal as an outline around the box.
 						const style = getComputedStyle(el);
 						const probe = document.createElement("span");
-						probe.style.color =
-							kind === "dashed violet"
-								? "color-mix(in srgb, var(--color-status-goal) 60%, var(--color-border))"
-								: "var(--color-status-goal)";
+						probe.style.color = "var(--color-status-goal)";
 						el.append(probe);
 						const color = getComputedStyle(probe).color;
 						probe.remove();
-						if (kind === "normal")
-							return (
-								style.borderStyle === "solid" &&
-								style.borderColor !== color &&
-								!style.boxShadow.includes("3px")
-							);
+						if (kind === "normal") return style.outlineColor !== color;
 						return (
-							style.borderColor === color &&
-							style.borderStyle ===
-								(kind === "dashed violet" ? "dashed" : "solid") &&
-							(kind === "dashed violet"
-								? style.boxShadow === "none"
-								: style.boxShadow.includes("3px"))
+							style.outlineColor === color &&
+							style.outlineStyle ===
+								(kind === "dashed violet" ? "dashed" : "solid")
 						);
 					}, match[1]),
 				)
@@ -263,10 +253,16 @@ export const sessionGoalHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert met goal bar",
-		match: /^the met goal bar reads (.+)$/,
+		match: /^the met goal bar reads (.+) and ends (.+)$/,
 		run: async ({ world, match }) => {
 			const bar = world.page.getByTestId("composer-goal-met");
-			await expect(bar.locator(":scope > span")).toHaveText(match[1] ?? "");
+			// The headline names the goal; the small line under it carries the check time and tally.
+			const [head, tail] = [match[1] ?? "", match[2] ?? ""].map((part) =>
+				part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+			);
+			await expect(bar.locator(":scope > div")).toHaveText(
+				new RegExp(`^${head}\\s*Checked .+${tail}$`),
+			);
 			await expect(
 				bar.getByRole("button", { name: "Dismiss", exact: true }),
 			).toBeVisible();

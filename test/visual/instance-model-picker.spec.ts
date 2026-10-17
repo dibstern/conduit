@@ -50,14 +50,7 @@ test.describe("InstanceModelPicker", () => {
 
 		await expect(page.getByTestId("model-picker")).toBeHidden();
 
-		// Desktop's harness trigger opens the root; the phone's combined trigger
-		// opens the model list, one Back away from it.
-		if (isPhone(page)) {
-			await page.getByTestId("model-picker-trigger").click();
-			await page.getByTestId("picker-back").click();
-		} else {
-			await page.getByTestId("composer-harness-trigger").click();
-		}
+		await page.getByTestId("model-picker-trigger").click();
 		await expect(page.getByTestId("model-picker")).toBeVisible();
 		await expect(page.getByTestId("model-picker")).toContainText(
 			"Harness & model",

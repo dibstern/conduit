@@ -78,7 +78,7 @@ async function openDraft(
 	await page.locator("#new-session-btn:visible").click();
 	await expect(page).toHaveURL(/\/new\?/);
 	return page.locator(
-		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 	);
 }
 

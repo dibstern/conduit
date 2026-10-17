@@ -63,16 +63,15 @@
 	import Surface from "../ui/Surface.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
-	let { variant = "icons", phoneControls }: {
+	let { variant = "icons", phoneControls, phoneMode }: {
 		variant?: "icons" | "words" | undefined;
-		phoneControls?: Snippet<[rows: Snippet]> | undefined;
+		phoneControls?: Snippet<[rows: Snippet, trigger: Snippet<[{ props: Record<string, unknown>; attention?: boolean }]>]> | undefined;
+		phoneMode?: Snippet | undefined;
 	} = $props();
 
 	const pickerOpen = $derived(composerPickerState.request !== null);
 	let view = $state<"root" | "model" | "agent">("root");
 	const phone = $derived(sessionViewState.composerTier === "phone");
-	// A thin desktop composer has no room for separate harness and model chips, so it uses the phone's combined trigger.
-	const combinedTrigger = $derived(phone || sessionViewState.composerTier === "thin");
 	let searchQuery = $state("");
 	let favoritesOnly = $state(false);
 	let variantRef: ModelVariant | undefined = $state();
@@ -175,7 +174,7 @@
 			status: instance.status ?? "healthy",
 		}));
 	});
-	const hasAccountWord = $derived(sessionViewState.composerTier === "wide" && (hasAccountUsage ? accounts.accounts.length >= 2 : driverInstances.length >= 2));
+	const hasAccountWord = $derived(!phone);
 
 	const scopedGroups = $derived(getProviderGroupsForInstance(selectedId));
 	const filteredGroups = $derived.by(() => {
@@ -198,7 +197,6 @@
 	const activeModel = $derived(
 		getActiveModel(activeModelId, activeProviderId),
 	);
-	const hasModel = $derived(!!activeModelId);
 	const parameters = $derived(activeModel?.parameters);
 	const defaultCombination = $derived(
 		parameters?.combinations.find((entry) => entry.isDefault) ?? parameters?.combinations[0],
@@ -287,18 +285,6 @@
 			return stripDateSuffix(activeModelId);
 		}
 		return sessionLoading ? "Loading…" : "Select model";
-	});
-
-	/** The phone button's two-or-three letter model tag: "Sonnet 5" → S5, "GPT-6 Sol" → Sol. */
-	const shortModelLabel = $derived.by(() => {
-		const name = activeModel ? stripDateSuffix(formatModelName(activeModel)) : stripDateSuffix(activeModelId ?? "");
-		if (!name) return sessionLoading ? "Loading…" : "Select model";
-		const words = (/\s/.test(name) ? name.split(/\s+/) : name.split("-")).filter((word) => !/^claude$/i.test(word));
-		const index = words.findIndex((word, i) => /^[a-z]+$/i.test(word) && /^\d+(\.\d+)?$/.test(words[i + 1] ?? ""));
-		const word = words[index];
-		if (word) return `${word.charAt(0).toUpperCase()}${words[index + 1]}`;
-		const last = words.at(-1) ?? name;
-		return last.length <= 4 ? last : last.slice(0, 3);
 	});
 
 	const visibleAgents = $derived(needsAccount ? [] : getVisibleAgents());
@@ -491,6 +477,10 @@
 		closePicker();
 	}
 
+	// The root focuses the row of the subview just left, so Back returns where it came from.
+	// Plain variables: the focus effect also reruns when bound elements change, without a view change.
+	let shownView: typeof view = "root";
+	let leftView: "model" | "agent" | undefined;
 	$effect(() => {
 		const request = composerPickerState.request;
 		if (!request) return;
@@ -501,6 +491,8 @@
 			pickerTriggerEl = request.opener ?? pickerTriggerEl ?? triggerEl;
 			variantRef?.close();
 			searchQuery = "";
+			shownView = "root";
+			leftView = undefined;
 			view = request.section === "model" || request.section === "agent"
 				? request.section
 				: "root";
@@ -509,7 +501,11 @@
 
 	$effect(() => {
 		if (!pickerOpen) return;
-		const section = composerPickerState.request?.section;
+		if (view !== shownView) {
+			leftView = shownView === "root" ? undefined : shownView;
+			shownView = view;
+		}
+		const section = leftView ?? composerPickerState.request?.section;
 		const root = view === "root";
 		// Phones skip the search box: focusing it would raise the keyboard over the list.
 		const target = view === "model" && !phone ? searchEl : backEl;
@@ -926,21 +922,60 @@
 	</SheetChrome>
 {/snippet}
 
+{#snippet modelTrigger({ props, attention = false }: { props: Record<string, unknown>; attention?: boolean })}
+	<Button
+		{...props}
+		bind:element={triggerEl}
+		variant={variant === "words" ? "composer-summary" : "composer-model"}
+		size={variant === "words" ? "content" : "composer-chip"}
+		align="start"
+		touchTarget
+		data-testid={variant === "words" ? "composer-words-sheet-trigger" : "model-picker-trigger"}
+		data-instance-id={selectedId}
+		data-shown-harness={selectedDriver ?? ""}
+		data-shown-provider={activeProviderId ?? ""}
+		data-shown-model={activeModelId ?? ""}
+		data-shown-effort={effort.current ?? ""}
+		data-shown-context-window={selectedContext?.value ?? ""}
+		data-shown-permission-mode={discoveryState.permissionMode}
+		disabled={sessionLoading}
+		class="model-btn max-w-full {phone && variant === 'words' ? 'w-full' : ''}"
+		title="Switch model"
+		ariaLabel={`${phone ? "Composer options" : "Harness and model"}: ${displayName}${contextLabel ? `, context ${contextLabel}` : ""}, ${wordAccountName}`}
+		aria-haspopup="dialog"
+		aria-expanded={phone ? props["aria-expanded"] === "true" || props["aria-expanded"] === true : pickerOpen}
+		onclick={(event) => {
+			if (phone && phoneControls) { if (typeof props["onclick"] === "function") props["onclick"](event); }
+			else togglePicker(event);
+		}}
+	>
+		{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={variant === "words" ? 15 : 17} surface="box" />{/if}
+		<span class="model-label min-w-0 truncate">{displayName}</span>
+		{#if phone && attention}<span data-testid="composer-more-attention" class="size-[6px] shrink-0 rounded-full bg-status-ask" aria-hidden="true"></span>{/if}
+		{#if contextLabel}<span data-testid="picker-selected-context" class="shrink-0 font-mono text-[11.5px] text-text-muted">{contextLabel}</span>{/if}
+		{#if variant === "words"}
+			{@const effortWord = parameters ? parameterEffortWord : effort.current === "medium" ? "med" : effort.current}
+			{#if effortWord}<span aria-hidden="true">·</span><span class="shrink-0">{effortWord}</span>{/if}
+			<span aria-hidden="true">·</span>{@render phoneMode?.()}
+		{/if}
+		<span data-testid="model-chip-chevron" class="inline-flex shrink-0 text-text-muted"><Icon name="chevron-down" size={12} /></span>
+		{#if variant === "words" && contextPercent > 0}<span data-testid="composer-word-context-usage" data-warning={contextWarning ? "true" : undefined} class="ml-auto shrink-0 pl-[8px]" class:text-status-ask={contextWarning}>{Math.round(contextPercent)}%</span>{/if}
+	</Button>
+{/snippet}
+
 <div
 	id="model-display"
-	class="relative inline-flex min-w-0 items-center {variant === 'words' ? 'gap-[5px]' : phone ? 'gap-[8px]' : 'shrink-0 gap-[2px]'}"
+	class="relative inline-flex min-w-0 items-center gap-[5px] {phone && variant === 'words' ? 'w-full' : 'flex-[0_1_auto]'}"
 	use:dismiss={{ onDismiss: closePicker, enabled: pickerOpen && !phone }}
 >
 	{#if needsAccount}
 		<Button variant="ghost-accent" size="content" class="shrink-0 gap-1 px-1.5 py-1 text-[11.5px]" data-testid="add-claude-account-btn" onclick={() => { closePicker(); openSettings("server", "instances"); }}><Icon name="plus" size={12} />Add account</Button>
 	{/if}
-	{#if variant === "words"}
+	{#if variant === "words" && !phone}
 		<Button
 			bind:element={triggerEl}
-			variant="ghost"
+			variant="composer-word"
 			size="content"
-			tone="muted"
-			hoverFill="none"
 			data-testid="composer-word-harness"
 			class="shrink-0 mr-[6px]"
 			ariaLabel={`Account: ${wordAccountName}. Open account options`}
@@ -953,25 +988,21 @@
 		</Button>
 		{#if hasAccountWord}
 			<Button
-				variant="ghost"
+				variant="composer-word"
 				size="content"
-				tone="muted"
-				hoverFill="none"
 				data-testid="composer-word-account"
-				class="shrink-0 text-[11.5px] font-normal font-sans"
+				class="min-w-[16px] text-[12px]"
 				ariaLabel={`Account: ${wordAccountName}. Open account options`}
 				aria-haspopup="dialog"
 				aria-expanded={pickerOpen}
 				aria-controls={pickerOpen ? "model-picker" : undefined}
 				onclick={(event) => togglePicker(event, "account")}
-			><span class="border-b border-dotted border-border-chip">{wordAccountName}{switchingTo ? "…" : ""}</span></Button>
+			><span class="block min-w-0 truncate">{wordAccountName}{switchingTo ? "…" : ""}</span></Button>
 			<span aria-hidden="true" class="text-border-chip">·</span>
 		{/if}
 		<Button
-			variant="ghost"
+			variant="composer-word"
 			size="content"
-			tone="muted"
-			hoverFill="none"
 			data-testid="composer-word-model"
 			data-instance-id={selectedId}
 			data-shown-harness={selectedDriver ?? ""}
@@ -981,7 +1012,7 @@
 			data-shown-context-window={selectedContext?.value ?? ""}
 			data-shown-permission-mode={discoveryState.permissionMode}
 			disabled={sessionLoading}
-			class="shrink-0 text-[11.5px] font-normal font-sans"
+			class="min-w-[16px] text-[12px]"
 			title="Switch model"
 			ariaLabel={`Model: ${displayName}. Open model options`}
 			aria-haspopup="dialog"
@@ -989,15 +1020,13 @@
 			aria-controls={pickerOpen ? "model-picker" : undefined}
 			onclick={(event) => togglePicker(event, "model")}
 		>
-			<span class="border-b border-dotted border-border-chip">{phone ? shortModelLabel : displayName}</span>
+			<span class="block min-w-0 truncate">{displayName}</span>
 		</Button>
 		{#if showContextWord}
 			<span aria-hidden="true" class="text-border-chip">·</span>
 			<Button
-				variant="ghost"
+				variant="composer-word"
 				size="content"
-				tone="muted"
-				hoverFill="none"
 				data-testid="composer-word-context"
 				class="shrink-0 text-[11.5px] font-normal font-sans"
 				ariaLabel={`Context window: ${contextLabel}. Open harness and model options`}
@@ -1012,97 +1041,17 @@
 		{#if effort.options.length > 0 || (sessionState.currentId && effort.current)}
 			<span aria-hidden="true" class="text-border-chip">·</span>
 		{/if}
-	{:else if !combinedTrigger}
-		<Button
-			bind:element={triggerEl}
-			variant="ghost"
-			size="content"
-			tone="inherit"
-			hoverFill="none"
-			data-testid="composer-harness-trigger"
-			data-instance-id={selectedLogoInstanceId}
-			class="h-[26px] shrink-0 gap-[5px] rounded-[7px] bg-bg-alt px-[6px] text-[11.5px] font-normal font-sans text-text whitespace-nowrap hover:bg-text/7"
-			ariaLabel={`Harness: ${driverLabel(selectedDriver)}, account: ${wordAccountName}${switchingTo ? ", switching" : ""}. Open harness options`}
-			aria-haspopup="dialog"
-			aria-expanded={pickerOpen}
-			aria-controls={pickerOpen ? "model-picker" : undefined}
-			onclick={(event) => togglePicker(event, "harness")}
-		>
-			{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={13} surface="box" />{/if}
-			{#if sessionViewState.composerTier === "wide"}
-				<span data-testid="composer-harness-label">{driverLabel(selectedDriver)}</span>
-				{#if wordAccountName !== driverLabel(selectedDriver)}
-					<span aria-hidden="true" class="text-text-dimmer">·</span>
-					<span data-testid="composer-harness-account">{wordAccountName}{switchingTo ? "…" : ""}</span>
-				{/if}
-			{/if}
-			<Icon name="chevron-down" size={10} class="text-text-dimmer" />
-		</Button>
-		<span data-testid="composer-control-divider" aria-hidden="true" class="mx-[4px] h-[14px] w-px shrink-0 bg-border"></span>
-		<Button
-			variant="ghost"
-			size="content"
-			tone="inherit"
-			hoverFill="none"
-			data-testid="model-picker-trigger"
-			data-instance-id={selectedId}
-			data-shown-harness={selectedDriver ?? ""}
-			data-shown-provider={activeProviderId ?? ""}
-			data-shown-model={activeModelId ?? ""}
-			data-shown-effort={effort.current ?? ""}
-			data-shown-context-window={selectedContext?.value ?? ""}
-			data-shown-permission-mode={discoveryState.permissionMode}
-			disabled={sessionLoading}
-			class="model-btn h-[26px] shrink-0 gap-[5px] rounded-[7px] px-[6px] text-[11.5px] font-normal font-sans text-text-secondary whitespace-nowrap hover:bg-text/7 {hasModel ? '' : 'opacity-50'}"
-			title="Switch model"
-			ariaLabel={`Model: ${displayName}${contextLabel ? `, context ${contextLabel}` : ""}. Open model options`}
-			aria-haspopup="dialog"
-			aria-expanded={pickerOpen}
-			aria-controls={pickerOpen ? "model-picker" : undefined}
-			onclick={(event) => togglePicker(event, "model")}
-		>
-			<span class="model-label">{displayName}</span>
-			{#if contextLabel}<span aria-hidden="true" class="text-text-dimmer">·</span><span data-testid="picker-selected-context">{contextLabel}</span>{/if}
-			<span data-testid="model-chip-chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-down" size={10} /></span>
-		</Button>
-	{:else}
-		<!-- Phone and thin composers keep one logo and short model tag. -->
-		<Button
-			bind:element={triggerEl}
-			variant="ghost"
-			size="content"
-			tone="inherit"
-			hoverFill="none"
-			data-testid="model-picker-trigger"
-			data-instance-id={selectedId}
-			data-shown-harness={selectedDriver ?? ""}
-			data-shown-provider={activeProviderId ?? ""}
-			data-shown-model={activeModelId ?? ""}
-			data-shown-effort={effort.current ?? ""}
-			data-shown-context-window={selectedContext?.value ?? ""}
-			data-shown-permission-mode={discoveryState.permissionMode}
-			disabled={sessionLoading}
-			class="model-btn min-w-0 h-[26px] text-[11.5px] font-normal text-text-secondary font-sans hover:bg-text/7 gap-[5px] px-[6px] rounded-[7px] {hasModel ? '' : 'opacity-50'}"
-			title="Switch model"
-			ariaLabel={`Harness and model: ${selectedLabel}, ${displayName}${contextLabel ? `, context ${contextLabel}` : ""}`}
-			aria-haspopup="dialog"
-			aria-expanded={pickerOpen}
-			aria-controls={pickerOpen ? "model-picker" : undefined}
-			onclick={(event) => togglePicker(event, "model")}
-		>
-			{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={13} surface="box" />{/if}
-			<span class="model-label text-[11.5px] font-normal whitespace-nowrap">{shortModelLabel}</span>
-		</Button>
+	{:else if !phone || !phoneControls}
+		{@render modelTrigger({ props: {} })}
 	{/if}
 
-	{#if variant === "icons" && phone && phoneControls}
+	{#if phone && phoneControls}
 		<!-- Keep the effort owner mounted so Ctrl+T also works with the sheet closed. -->
 		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant="row">
 			{#snippet children(effortRow)}
 				{#snippet rows()}
 					<Button
-						variant="ghost" size="content" tone="inherit" hoverFill="none" layout="flow"
-						class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-sans text-text hover:bg-text/7"
+						variant="composer-row" size="content"
 						data-testid="composer-harness-trigger"
 						data-instance-id={selectedLogoInstanceId}
 						ariaLabel={`Harness: ${driverLabel(selectedDriver)}, account: ${wordAccountName}. Open harness options`}
@@ -1110,12 +1059,16 @@
 						onclick={(event) => togglePicker(event, "harness")}
 					>
 						<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Harness</span>
-						<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[7px] font-semibold">{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={16} surface="surface" />{/if}<span class="min-w-0 truncate">{driverLabel(selectedDriver)}{wordAccountName !== driverLabel(selectedDriver) ? ` · ${wordAccountName}` : ""}{switchingTo ? "…" : ""}</span></span>
+						<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[7px] font-semibold">{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={16} surface="surface" />{/if}<span class="min-w-0 truncate">{driverLabel(selectedDriver)}</span></span>
+						<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
+					</Button>
+					<Button variant="composer-row" size="content" data-testid="composer-more-account" ariaLabel={`Account: ${wordAccountName}. Open account options`} onclick={(event) => togglePicker(event, "account")}>
+						<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Account</span>
+						<span data-part="value" class="min-w-0 flex-1 truncate font-semibold">{wordAccountName}</span>
 						<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 					</Button>
 					<Button
-						variant="ghost" size="content" tone="inherit" hoverFill="none" layout="flow"
-						class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-sans text-text hover:bg-text/7"
+						variant="composer-row" size="content"
 						data-testid="composer-more-model"
 						ariaLabel={`Model: ${displayName}. Open model options`}
 						aria-haspopup="dialog"
@@ -1127,19 +1080,17 @@
 					</Button>
 					{@render effortRow()}
 				{/snippet}
-				{@render phoneControls(rows)}
+				{@render phoneControls(rows, modelTrigger)}
 			{/snippet}
 		</ModelVariant>
 	{:else}
-		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant={variant === "icons" && !phone ? "control" : variant} wordLabel={parameters ? parameterEffortWord : undefined} />
+		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant={variant === "icons" ? "control" : variant} wordLabel={parameters ? parameterEffortWord : undefined} />
 	{/if}
-	{#if variant === "words" && selectedTraits?.composerModeControl === "agent"}
+	{#if variant === "words" && !phone && selectedTraits?.composerModeControl === "agent"}
 		<span aria-hidden="true" class="text-border-chip">·</span>
 		<Button
-			variant="ghost"
+			variant="composer-word"
 			size="content"
-			tone="muted"
-			hoverFill="none"
 			data-testid="composer-word-agent"
 			class="shrink-0 text-[11.5px] font-normal font-sans"
 			ariaLabel={`Agent: ${activeAgent ? agentLabel(activeAgent) : "Default"}. Open agent options`}

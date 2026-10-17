@@ -73,7 +73,7 @@ Scenario Outline: the send button queues while working and sends when idle
   And the composer picker has the Claude catalog
   When the open session starts working
   Then send is hidden while the field is empty
-  And stop is a 32 pixel square filled with the text colour around a 10 pixel square
+  And stop is a 34 pixel neutral circle around a 10 pixel square
   When I type <message> into the composer
   Then the send button reads Queue message
   And send and stop are both visible

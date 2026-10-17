@@ -3,6 +3,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { SessionMode } from "../../../src/lib/contracts/project-file.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import type { ProjectInfo } from "../../../src/lib/shared-types.js";
+import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { chooseSettingsOption } from "../helpers/settings.js";
@@ -586,13 +587,12 @@ for (const viewport of [
 			const before = rpc
 				.getRequests()
 				.filter(({ tag }) => tag === "ResolveSessionMode").length;
-			await press(
+			await openPickerRoot(
+				page,
 				page.locator(
-					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 				),
 			);
-			const back = page.getByTestId("picker-back");
-			if (await back.isVisible()) await press(back);
 			await press(page.getByTestId("picker-harness-opencode"));
 			await page.keyboard.press("Escape");
 			await expect

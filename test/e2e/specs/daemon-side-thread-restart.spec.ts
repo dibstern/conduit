@@ -151,9 +151,9 @@ test("a Side Thread keeps Plan and its read-only rules after a daemon restart", 
 		const app = new AppPage(page);
 		await page.goto(`http://127.0.0.1:${daemon.port}/s/${sideId}`);
 		await app.connectOverlay.waitFor({ state: "detached", timeout: 30_000 });
-		await expect(page.getByTestId("permission-mode-badge")).toContainText(
-			"Plan",
-		);
+		await expect(
+			page.getByTestId("permission-mode-badge"),
+		).toHaveAccessibleName("Approvals: Plan. Open options");
 
 		await app.sendMessage("List the files here.");
 		const agents = async () =>

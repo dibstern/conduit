@@ -75,12 +75,12 @@ function pendingApprovals(): () => void {
 }
 
 const ranked = [
-	["dontAsk", "Never ask", "Denies anything not pre-approved.", true],
-	["plan", "Plan", "Reads and proposes. No edits.", true],
-	["ask", "Ask", "Asks before each edit or command.", false],
-	["acceptEdits", "Edits", "File edits run without asking.", false],
-	["auto", "Auto", "A model approves or denies each action.", true],
-	["full", "Full access", "Everything runs. No prompts.", false],
+	["dontAsk", "Never ask", "Denies anything not pre-approved", true],
+	["plan", "Plan", "Reads and plans, changes nothing", true],
+	["ask", "Ask before edits", "The default", false],
+	["acceptEdits", "Auto-accept edits", "Still asks before commands", false],
+	["auto", "Auto", "A model approves or denies each action", true],
+	["full", "Full access", "Never asks. Use in a sandbox", false],
 ] as const;
 
 async function assertMode(
@@ -90,10 +90,9 @@ async function assertMode(
 	await waitFor(() => expect(discoveryState.permissionMode).toBe(mode));
 	await tick();
 	const badge = within(canvasElement).queryByTestId("permission-mode-badge");
-	if (sessionViewState.compact && mode === "ask") {
-		await expect(badge).not.toBeInTheDocument();
-		return;
-	}
+	await expect(badge).toBeVisible();
+	await expect(badge?.textContent?.trim()).toBe("");
+	await expect(badge?.querySelector("svg")).toBeInTheDocument();
 	const label = ranked.find(([value]) => value === mode)?.[1];
 	await expect(badge).toHaveAccessibleName(
 		new RegExp(`Approvals:? ${label}\\. Open options`),
@@ -179,6 +178,7 @@ export const DropdownOpen: Story = {
 		);
 		await expect(menu).toBeVisible();
 		await expect(menu).toHaveAttribute("role", "menu");
+		await expect(within(menu).getAllByRole("separator")).toHaveLength(1);
 		await expect(
 			within(menu).getByTestId("permission-mode-option-ask"),
 		).toHaveAttribute("aria-checked", "true");
@@ -196,6 +196,24 @@ export const DropdownOpen: Story = {
 			);
 		}
 	},
+};
+
+export const DropdownOpenLight: Story = {
+	...DropdownOpen,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
+};
+
+export const PhoneDefault: Story = {
+	beforeEach: () => viewport(393),
+	play: async ({ canvasElement }) => {
+		await assertMode(canvasElement, "ask");
+	},
+};
+
+export const PhoneDefaultLight: Story = {
+	...PhoneDefault,
+	globals: { theme: "light" },
 };
 
 export const Hover: Story = {
@@ -347,10 +365,10 @@ export const Responsive: Story = {
 	beforeEach: () => viewport(393),
 	play: async ({ canvasElement }) => {
 		await assertMode(canvasElement, "ask");
-		// Phone hides the default mode, so end wide for the capture; the story's
-		// cleanup restores the viewport.
-		viewport(768);
-		await assertMode(canvasElement, "ask");
+		for (const width of [296, 366, 395, 768, 1280]) {
+			viewport(width);
+			await assertMode(canvasElement, "ask");
+		}
 	},
 };
 

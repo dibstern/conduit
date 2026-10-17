@@ -449,7 +449,7 @@ for (const dismiss of [false, true]) {
 				await app.goto(`${harness.baseUrl}/?p=${encodeURIComponent(slug)}`);
 				await page.locator("#new-session-btn:visible").click();
 				const picker = page.locator(
-					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 				);
 				await openPickerRoot(page, picker);
 				await page.getByTestId("picker-harness-claude").click();
@@ -498,12 +498,12 @@ for (const dismiss of [false, true]) {
 				const cutOffTag = page.getByTestId("cut-off-tag");
 				await test.step("limited-session strip and cut-off tag", async () => {
 					const phone = testInfo.project.name === "mobile";
-					const resets = `resets ${formatSnoozeTime(1791370800 * 1000)}`;
+					const resets = `Resets at ${formatSnoozeTime(1791370800 * 1000)}.`;
 					await expect(strip.getByTestId("usage-limit-title")).toHaveText(
-						phone ? "Usage limit reached" : "Usage limit reached · Account 1",
+						"Account 1 hit its weekly limit.",
 					);
 					await expect(strip.getByTestId("usage-limit-detail")).toHaveText(
-						phone ? `Account 1 · ${resets}` : `Weekly limit · ${resets}`,
+						resets,
 					);
 					await expect(cutOffTag).toHaveCount(1);
 					await expect(
@@ -780,9 +780,7 @@ for (const decision of [
 				await expect.poll(() => usageProbes().length).toBe(1);
 				viewed = 1;
 				await expect(page.getByTestId("usage-limit-detail")).toHaveText(
-					testInfo.project.name === "mobile"
-						? "Retry account · reset time unavailable"
-						: "Reset time unavailable",
+					"Reset time unavailable",
 				);
 				await expect(tryAgain).toHaveText("Try again");
 				await page.screenshot({
@@ -2066,7 +2064,7 @@ test("scenario 12: changing agents sends a budgeted hidden handoff to a fresh na
 		await page.locator("#new-session-btn:visible").click();
 		await expect(page).toHaveURL(/\/new\?/);
 		const picker = page.locator(
-			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 		);
 		await openPickerRoot(page, picker);
 		await page.getByTestId("picker-harness-claude").click();
@@ -2246,7 +2244,7 @@ test("scenario 13: the new agent reads omitted history through the registered MC
 		await page.locator("#new-session-btn:visible").click();
 		await expect(page).toHaveURL(/\/new\?/);
 		const picker = page.locator(
-			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 		);
 		await openPickerRoot(page, picker);
 		await page.getByTestId("picker-harness-claude").click();
@@ -3212,8 +3210,14 @@ test("story 16: composer account cards switch the session, not the project", asy
 		await expect(bar.locator("[data-account]")).toHaveCount(0);
 		await page.screenshot({ path: join(artifacts, "01-composer.png") });
 
-		const trigger = page.getByTestId("composer-word-harness");
-		await trigger.click();
+		// Phones reach the account through the Composer sheet.
+		const openAccounts = async () => {
+			if ((page.viewportSize()?.width ?? 0) < 768) {
+				await page.getByTestId("composer-words-sheet-trigger").click();
+				await page.getByTestId("composer-more-account").click();
+			} else await page.getByTestId("composer-word-harness").click();
+		};
+		await openAccounts();
 		const row = page.getByTestId(`picker-account-${target.id}`);
 		const current = page.getByTestId(`picker-account-${source.id}`);
 		await expect(current).toHaveAttribute("aria-checked", "true");
@@ -3241,7 +3245,7 @@ test("story 16: composer account cards switch the session, not the project", asy
 			from: source.id,
 		});
 		expect(await registeredProject()).not.toHaveProperty("instanceId");
-		await trigger.click();
+		await openAccounts();
 		await expect(row).toHaveAttribute("aria-checked", "true");
 		await expect(row).toBeDisabled();
 		await page.keyboard.press("Escape");

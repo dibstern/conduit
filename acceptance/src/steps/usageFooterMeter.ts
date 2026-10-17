@@ -626,7 +626,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 			await world.page.keyboard.press("Escape");
 			await expect(
 				world.page.locator(
-					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 				),
 			).toHaveAttribute("data-instance-id", match[1] ?? "");
 		},

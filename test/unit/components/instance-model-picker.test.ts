@@ -270,7 +270,7 @@ describe("InstanceModelPicker", () => {
 			sessionId ?? undefined,
 		);
 		const { getByTestId } = render(InstanceModelPicker);
-		await fireEvent.click(getByTestId("composer-harness-trigger"));
+		await fireEvent.click(getByTestId("model-picker-trigger"));
 		expect(getByTestId("picker-row-context").textContent).toContain("1M");
 	});
 
@@ -312,8 +312,9 @@ describe("InstanceModelPicker", () => {
 	});
 
 	it("refreshes active-provider agents after switching model", async () => {
-		const { container, getByTitle } = render(InstanceModelPicker);
+		const { container, getByTestId, getByTitle } = render(InstanceModelPicker);
 		await fireEvent.click(getByTitle("Switch model"));
+		await fireEvent.click(getByTestId("picker-row-model"));
 		const opus = container.querySelector<HTMLButtonElement>(
 			'[data-model-id="claude-opus-4-7"]',
 		);
@@ -338,8 +339,9 @@ describe("InstanceModelPicker", () => {
 	it("keeps a successful model switch when the follow-up agent refresh fails", async () => {
 		getAgentsRpcSpy.mockRejectedValueOnce(new Error("agent discovery failed"));
 
-		const { container, getByTitle } = render(InstanceModelPicker);
+		const { container, getByTestId, getByTitle } = render(InstanceModelPicker);
 		await fireEvent.click(getByTitle("Switch model"));
+		await fireEvent.click(getByTestId("picker-row-model"));
 		const opus = container.querySelector<HTMLButtonElement>(
 			'[data-model-id="claude-opus-4-7"][data-provider-id="claude"]',
 		);
@@ -366,8 +368,9 @@ describe("InstanceModelPicker", () => {
 	});
 
 	it("sets the default model through RPC", async () => {
-		const { container, getByTitle } = render(InstanceModelPicker);
+		const { container, getByTestId, getByTitle } = render(InstanceModelPicker);
 		await fireEvent.click(getByTitle("Switch model"));
+		await fireEvent.click(getByTestId("picker-row-model"));
 		const opus = container.querySelector<HTMLButtonElement>(
 			'[data-model-id="claude-opus-4-7"]',
 		);
@@ -390,8 +393,9 @@ describe("InstanceModelPicker", () => {
 	});
 
 	it("renders screen-reader text for the default model star", async () => {
-		const { getByText, getByTitle } = render(InstanceModelPicker);
+		const { getByText, getByTestId, getByTitle } = render(InstanceModelPicker);
 		await fireEvent.click(getByTitle("Switch model"));
+		await fireEvent.click(getByTestId("picker-row-model"));
 
 		const defaultModelText = getByText("Default model");
 		expect(defaultModelText.classList.contains("sr-only")).toBe(true);
@@ -399,8 +403,9 @@ describe("InstanceModelPicker", () => {
 	});
 
 	it("reloads provider session through RPC", async () => {
-		const { getByTitle } = render(InstanceModelPicker);
+		const { getByTestId, getByTitle } = render(InstanceModelPicker);
 		await fireEvent.click(getByTitle("Switch model"));
+		await fireEvent.click(getByTestId("picker-row-model"));
 		await fireEvent.click(getByTitle("Reload skills and commands from disk"));
 
 		await waitFor(() => {
@@ -434,7 +439,7 @@ describe("InstanceModelPicker", () => {
 		});
 
 		const { container, getByTestId } = render(InstanceModelPicker);
-		await fireEvent.click(getByTestId("composer-harness-trigger"));
+		await fireEvent.click(getByTestId("model-picker-trigger"));
 
 		const claudeRail = getByTestId("picker-harness-claude");
 		const opencodeRail = getByTestId("picker-harness-opencode");

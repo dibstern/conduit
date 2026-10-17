@@ -511,7 +511,7 @@ async function pickDraftInstance(
 	instanceId: string,
 ): Promise<void> {
 	const picker = page.locator(
-		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 	);
 	// Every fixture instance shares one harness, so the picker shows only account cards.
 	await openPickerRoot(page, picker);
@@ -542,7 +542,7 @@ test("a named instance pick is scoped to the draft and resets on reload", async 
 	await waitForChatReady(page);
 	await expect(
 		page.locator(
-			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 		),
 	).toHaveAttribute("data-instance-id", "personal");
 	await page.screenshot({

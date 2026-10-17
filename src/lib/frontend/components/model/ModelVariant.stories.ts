@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, spyOn, userEvent, waitFor, within } from "storybook/test";
+import { composerPickerState } from "../../stores/composer-picker.svelte.js";
 import { effort } from "../../stores/composer-settings.svelte.js";
 import {
 	chooseModel,
@@ -100,6 +101,8 @@ const meta = {
 		const compact = sessionViewState.compact;
 		const composerWidth = sessionViewState.composerWidth;
 		const instances = instanceState.instances;
+		const pickerRequest = composerPickerState.request;
+		composerPickerState.request = null;
 		clearDiscoveryState();
 		// A draft changes local discovery state without a session or RPC connection.
 		sessionState.currentId = null;
@@ -117,6 +120,7 @@ const meta = {
 			window.dispatchEvent(new Event("resize"));
 			clearDiscoveryState();
 			instanceState.instances = instances;
+			composerPickerState.request = pickerRequest;
 		};
 	},
 } satisfies Meta<typeof ModelVariant>;
@@ -142,6 +146,43 @@ export const High: Story = {
 		await expect(button).toHaveTextContent("High");
 		await assertMeter(button, 4, 3);
 	},
+};
+
+export const ComposerControl: Story = {
+	args: { variant: "control" },
+	beforeEach: () => seed("high", fiveLevels),
+	play: async ({ canvasElement }) => {
+		const button = within(canvasElement).getByTestId("variant-badge");
+		await expect(button).toHaveAccessibleName(
+			"Effort: High. Open effort options",
+		);
+		await assertMeter(button, 5, 3);
+		await userEvent.click(button);
+		await expect(composerPickerState.request?.section).toBe("effort");
+		await expect(composerPickerState.request?.opener).toBe(button);
+	},
+};
+
+export const ComposerControlLight: Story = {
+	...ComposerControl,
+	globals: { theme: "light" },
+};
+
+export const ComposerWords: Story = {
+	args: { variant: "words" },
+	beforeEach: () => seed("high", fiveLevels),
+	play: async ({ canvasElement }) => {
+		const button = within(canvasElement).getByTestId("composer-word-effort");
+		await expect(button).toHaveTextContent("high");
+		await userEvent.click(button);
+		await expect(composerPickerState.request?.section).toBe("effort");
+		await expect(composerPickerState.request?.opener).toBe(button);
+	},
+};
+
+export const ComposerWordsLight: Story = {
+	...ComposerWords,
+	globals: { theme: "light" },
 };
 
 export const DropdownOpen: Story = {

@@ -481,6 +481,14 @@ if (stories.length > 0) {
 		// still earns its keep here.
 		["overlays-attentionbanner--no-notifications", "all"],
 
+		// A 395px composer cannot fit the 393px mobile viewport; desktop proves it.
+		["input-inputarea--narrow-395", "mobile"],
+		["input-inputarea--narrow-395-light", "mobile"],
+		["input-inputarea--narrow-goal-395", "mobile"],
+		["input-inputarea--narrow-goal-395-light", "mobile"],
+		["input-inputarea--narrow-limited-395", "mobile"],
+		["input-inputarea--narrow-limited-395-light", "mobile"],
+
 		// The views rail is desktop-only (hidden below md); phones switch views
 		// from the session bar instead, so there is nothing to capture at mobile.
 		["layout-viewsrail--independent-views", "mobile"],

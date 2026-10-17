@@ -95,18 +95,14 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"FollowLive scrolls away and clicks Jump to live, so it must land on exactly the live frame LiveTurnVisible opens on; the detach and the pill are asserted in play()",
 	"chat-messagelist--follow-live-light | chat-messagelist--live-turn-visible-light":
 		"the light pair of FollowLive and LiveTurnVisible, identical for the same reason",
-	"input-inputarea--goal-checking | input-inputarea--goal-not-yet-idle":
-		"the goal check now reports in the session subtitle, not the composer, so an idle composer with a goal looks the same while checking; GoalChecking asserts the absent status header and the goal border in play()",
-	"input-inputarea--goal-checking-light | input-inputarea--goal-not-yet-idle-light":
-		"the light pair of GoalChecking and GoalNotYetIdle, identical for the same reason",
 
 	// Verified legitimate (conduit-test-dfvd composer redesign).
 	"input-attachmenu--open | input-attachmenu--open-code":
 		"Open uses the default OpenCode provider; OpenCode asserts the disabled 'Claude only' Goal entry in play()",
-	"input-permissionmodeselector--default | input-permissionmodeselector--open-code-normalizes-auto | input-permissionmodeselector--responsive":
-		"all three end on the wide Ask badge (phone hides the default mode, bn6x.9); normalisation and the breakpoint are asserted in play()",
-	"input-permissionmodeselector--phone-claude-cycle | input-permissionmodeselector--phone-keyboard | input-permissionmodeselector--phone-select-closes":
-		"the phone badge draws the same plain shield for every non-default mode (bn6x.9); each story asserts its final mode in play()",
+	"input-permissionmodeselector--default | input-permissionmodeselector--open-code-normalizes-auto | input-permissionmodeselector--phone-default | input-permissionmodeselector--responsive":
+		"the Final badge is the same icon-only Ask shield at every width (aoqb.6); normalisation, the phone default and each breakpoint are asserted in play()",
+	"input-permissionmodeselector--light | input-permissionmodeselector--phone-default-light":
+		"the light pair of Default and PhoneDefault, identical for the same reason",
 	"layout-sessionbar--expanded-by-chevron | layout-sessionbar--goal-cleared | layout-sessionbar--phone-claude-header | layout-sessionbar--phone-no-checkout | layout-sessionbar--phone-open-code-header":
 		"a cleared goal renders no subtitle and the A1 header (bn6x.10) shows no checkout, account pill or instance badge for either harness, so all five end on the plain expanded phone bar; the header stories assert those absences in play()",
 
