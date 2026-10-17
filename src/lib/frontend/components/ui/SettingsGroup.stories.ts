@@ -13,6 +13,7 @@ type Story = StoryObj<typeof meta>;
 
 /** Plain groups (title, caption, toggle, control and text rows) and collapsible groups, open and closed. */
 export const Gallery: Story = {};
+export const GalleryLight: Story = { globals: { theme: "light" } };
 
 /** Header actions sit outside the disclosure button, so pressing one must not expand the group. */
 export const ActionsDoNotToggle: Story = {

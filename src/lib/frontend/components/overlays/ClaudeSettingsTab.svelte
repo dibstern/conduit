@@ -35,7 +35,7 @@
 	import { createFrontendLogger } from "../../utils/logger.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import Button from "../ui/Button.svelte";
-	import Select from "../ui/Select.svelte";
+	import SettingsPicker from "../ui/SettingsPicker.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
@@ -260,11 +260,9 @@
 	);
 
 
-	function updateDefaultPermissionMode(event: Event): void {
-		const select = event.currentTarget;
-		if (!(select instanceof HTMLSelectElement)) return;
+	function updateDefaultPermissionMode(value: string): void {
 		const mode = DEFAULT_MODE_OPTIONS.find(
-			(candidate) => candidate.mode === select.value,
+			(candidate) => candidate.mode === value,
 		)?.mode;
 		const projectSlug = getCurrentSlug();
 		if (!mode || !projectSlug) return;
@@ -307,17 +305,14 @@
 
 
 {#snippet defaultPermissionModeControl()}
-	<Select
+	<SettingsPicker
 		id="claude-default-permission-mode"
+		label="Default approval mode"
 		value={discoveryState.defaultPermissionMode}
-		onchange={updateDefaultPermissionMode}
-		class="w-[220px] max-w-full"
+		onvaluechange={updateDefaultPermissionMode}
 		data-testid="claude-setting-defaultPermissionMode-select"
-	>
-		{#each DEFAULT_MODE_OPTIONS as { mode, label: modeLabel } (mode)}
-			<option value={mode}>{modeLabel}</option>
-		{/each}
-	</Select>
+		options={DEFAULT_MODE_OPTIONS.map(({ mode, label }) => ({ value: mode, label }))}
+	/>
 {/snippet}
 
 {#snippet defaultPermissionModeNotes()}

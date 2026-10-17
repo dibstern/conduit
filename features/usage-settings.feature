@@ -49,7 +49,7 @@ Scenario Outline: one account has a full-screen Usage screen on phones
   And the Usage single-account limit section has only auto-resume
   And the usage limit settings heading reads When the account reaches its limit
   And the Auto-resume limited sessions toggle is off and reads Same account, at reset.
-  And the Usage warning choices read 70, 80, 90, off
+  And the Usage warning choices read 70%, 80%, 90%, off
   And the phone Usage warning choices are 44px tall
   And the usage-settings region visually matches <baseline> at <threshold> percent
 
@@ -115,7 +115,7 @@ Scenario Outline: several account cards and limit controls fit the phone screen
   And the Usage account spare five_hour reset reads no window open
   And the Usage no-data card claude reads <emptyMessage>
   And the Usage order hint reads Drag ⠿ to set the auto-switch order.
-  And the Usage warning choices read 70, 80, 90, off
+  And the Usage warning choices read 70%, 80%, 90%, off
   And the phone Usage warning choices are 44px tall
   And the usage limit settings heading reads When an account reaches its limit
   And the Auto-resume limited sessions toggle is off and reads Same account, at reset.

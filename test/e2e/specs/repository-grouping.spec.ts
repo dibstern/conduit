@@ -6,6 +6,7 @@ import type {
 } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
+import { chooseSettingsOption } from "../helpers/settings.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 // Failure cases: linked checkouts lose their project qualifiers; lone projects
@@ -191,14 +192,14 @@ async function recordLabels(page: Page, phase: string) {
 				.sort((a, b) => (a.id ?? "").localeCompare(b.id ?? "")),
 		);
 	const recorded = observations.get(page) ?? [];
-	const defaultField = page.getByRole("combobox", {
+	const defaultField = page.getByRole("button", {
 		name: /^Default repository grouping\b/,
 	});
 	recorded.push({
 		phase,
 		rows,
 		...((await defaultField.count())
-			? { defaultMode: await defaultField.inputValue() }
+			? { defaultMode: (await defaultField.getAttribute("data-value")) ?? "" }
 			: {}),
 	});
 	observations.set(page, recorded);
@@ -236,7 +237,7 @@ async function openSettings(page: Page) {
 	await page.getByTestId("settings-tab-general").click();
 	const panel = page.locator("#settings-panel");
 	await expect(panel).toBeVisible();
-	return panel.getByRole("combobox", {
+	return panel.getByRole("button", {
 		name: /^Default repository grouping\b/,
 	});
 }
@@ -366,23 +367,25 @@ for (const mode of [
 			const rpc = await openProjectList(page, harness.relayBaseUrl);
 			const timeOrigin = await page.evaluate(() => performance.timeOrigin);
 			let field = await openSettings(page);
-			await expect(field).toHaveValue("repository");
+			await expect(field).toHaveAttribute("data-value", "repository");
 			await rpc.waitForRequest(({ tag }) => tag === "GetDefaultGroupingMode");
 			expect(
 				rpc.getRequests().find(({ tag }) => tag === "GetDefaultGroupingMode")
 					?.payload,
 			).toMatchObject({ _tag: "GetDefaultGroupingMode" });
-			await expect(field.locator("option")).toHaveText([
+			await field.click();
+			await expect(page.getByRole("menuitemradio")).toHaveText([
 				"By repository",
 				"By repository and subfolder",
 				"Off",
 			]);
+			await page.keyboard.press("Escape");
 			for (const [value, apiLabel, webLabel] of [
 				["repository+subfolder", "myapp", "myapp"],
 				["off", "API package", "Web package"],
 				["repository", "myapp · API package", "myapp · Web package"],
 			] as const) {
-				await field.selectOption(value);
+				await chooseSettingsOption(page, field, value);
 				await expect
 					.poll(
 						() =>
@@ -402,7 +405,7 @@ for (const mode of [
 				);
 				await recordLabels(page, value);
 				field = await openSettings(page);
-				await expect(field).toHaveValue(value);
+				await expect(field).toHaveAttribute("data-value", value);
 			}
 			await page.getByTestId("settings-close-btn").click();
 			expect(await page.evaluate(() => performance.timeOrigin)).toBe(
@@ -502,7 +505,7 @@ for (const mode of [
 					effectiveGroupingMode: project.groupingMode ?? "off",
 				})),
 			});
-			await expect(field).toHaveValue("off");
+			await expect(field).toHaveAttribute("data-value", "off");
 			await expect(projectLabel(page, slug)).toHaveText("API package");
 			await expect(projectLabel(page, "web-checkout")).toHaveText(
 				"Web package",
@@ -515,7 +518,7 @@ for (const mode of [
 					document.documentElement.dataset["groupingStaleReadRendered"] ===
 					"true",
 			);
-			await expect(field).toHaveValue("off");
+			await expect(field).toHaveAttribute("data-value", "off");
 			await expect(projectLabel(page, slug)).toHaveText("API package");
 			await expect(projectLabel(page, "web-checkout")).toHaveText(
 				"Web package",

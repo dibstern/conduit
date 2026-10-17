@@ -42,7 +42,7 @@
 	let {
 		value = $bindable(),
 		options,
-		variant = "field",
+		variant = "joined",
 		label,
 		class: className,
 	}: {

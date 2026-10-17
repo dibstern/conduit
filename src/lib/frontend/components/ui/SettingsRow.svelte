@@ -3,7 +3,7 @@
   on the left, the control on the right. SettingsGroup draws the card and the
   hairlines between rows; a row draws neither.
 
-  Two shapes, as a union:
+  Three shapes, as a union:
   - toggle (`checked`, `onchange`, `disabled`): the WHOLE row is one
     role="switch" button. No nested interactive elements, and the full row is
     the touch target on phones. Acceptance steps find these by `ariaLabel`.
@@ -11,6 +11,8 @@
     Pass `labelFor` when the control is a single form field, so the label
     names it. Without one the row is just text, for rows whose editor sits
     below them.
+  - navigation (`onclick`, optional `summary` and `expanded`): a chevron-led
+    row for navigation or a collapsible group's header.
 
   The row wraps rather than squeezing: the label keeps a 12rem basis, so a
   switch always fits beside it, while a wide control (segments, a full-width
@@ -24,6 +26,7 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
 	import Switch from "./Switch.svelte";
+	import Icon from "./Icon.svelte";
 
 	type Common = {
 		label: string;
@@ -44,19 +47,40 @@
 		labelFor?: string;
 		checked?: undefined;
 	};
+	type NavigationProps = Common & {
+		onclick: () => void;
+		summary?: string;
+		expanded?: boolean;
+		labelId?: string;
+		disabled?: boolean;
+		checked?: undefined;
+	};
 
-	const props: ToggleProps | ControlProps = $props();
-	const padding = $derived(props.class ?? "px-[12px] py-[8px] min-h-[40px]");
+	const props: ToggleProps | ControlProps | NavigationProps = $props();
+	const padding = $derived(props.class ?? "px-[14px] py-[8px] min-h-[46px] max-md:min-h-[48px]");
 </script>
 
 {#snippet text()}
-	<span class="block text-[12.5px] text-text">{props.label}</span>
+	<span class="block text-[13.5px] max-md:text-[15px] text-text">{props.label}</span>
 	{#if props.description}
-		<span class="block text-[11px] leading-[1.35] text-text-muted">{props.description}</span>
+		<span class="mt-px block text-[12px] leading-[1.4] text-text-muted">{props.description}</span>
 	{/if}
 {/snippet}
 
-{#if props.checked !== undefined}
+{#if "onclick" in props}
+	<button
+		type="button"
+		onclick={props.onclick}
+		aria-expanded={props.expanded}
+		disabled={props.disabled}
+		data-testid={props.testId}
+		class="flex min-h-[42px] max-md:min-h-[44px] w-full items-center gap-[8px] px-[14px] py-2 text-left text-[13.5px] text-text-secondary cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text disabled:opacity-50 disabled:cursor-not-allowed {props.class ?? ''}"
+	>
+		<Icon name="chevron-right" size={13} class="shrink-0 text-text-dimmer transition-transform {props.expanded ? 'rotate-90' : ''}" />
+		<span id={props.labelId} class="min-w-0 flex-1">{props.label}</span>
+		{#if props.summary}<span class="min-w-0 truncate text-[12px] text-text-dimmer">{props.summary}</span>{/if}
+	</button>
+{:else if props.checked !== undefined}
 	<button
 		type="button"
 		role="switch"

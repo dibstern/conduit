@@ -36,7 +36,8 @@
 	import AccountDot from "../ui/AccountDot.svelte";
 	import Button from "../ui/Button.svelte";
 	import SortableList from "../ui/SortableList.svelte";
-	import SegmentedControl from "../ui/SegmentedControl.svelte";
+	import SettingsPicker from "../ui/SettingsPicker.svelte";
+	import SettingsBanner from "../ui/SettingsBanner.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import UsageForecast from "./UsageForecast.svelte";
 	import UsageLimitsSettings from "./UsageLimitsSettings.svelte";
@@ -242,7 +243,7 @@
 		{/if}
 	</div>
 	{#if several}
-		<div id="usage-settings-headline" data-testid="usage-settings-headline" class="mb-[12px] rounded-[12px] border px-[12px] py-[8px] text-[12px] leading-[1.45] {headline.limited ? 'border-fill-red/40 bg-fill-red/[0.06] text-error' : headline.warning ? 'border-fill-amber/35 bg-fill-amber/[0.05] text-fill-amber' : 'border-border bg-bg text-text-secondary'}">{#if headline.bold}<b>{headline.bold}</b>{headline.text.slice(headline.bold.length)}{:else}{headline.text}{/if}</div>
+		<SettingsBanner id="usage-settings-headline" data-testid="usage-settings-headline" class="mb-[12px]" tone={headline.limited ? "danger" : headline.warning ? "warning" : "neutral"}>{#if headline.bold}<b>{headline.bold}</b>{headline.text.slice(headline.bold.length)}{:else}{headline.text}{/if}</SettingsBanner>
 		<SortableList items={accounts} key={(account) => account.accountId} label={nameOf} ariaLabel="Auto-switch account order" variant="cards" disabled={setting === null} onreorder={(next) => {
 			if (setting) void save({ ...setting, order: next.map((account) => account.accountId) });
 		}}>
@@ -294,12 +295,15 @@
 		<p class="text-[12px] leading-[1.5] text-text-dimmer">No plan limits for this login. Conduit reads them from a Claude subscription sign-in; API keys, Bedrock, Vertex and proxy routes don't report them.</p>
 	{/if}
 	<div class="mt-[6px] flex min-h-[30px] items-center gap-[8px] border-t border-border pt-[10px]">
-		<span class="flex-1 text-[12px] text-text">Warn me at</span>
-		<SegmentedControl
-			variant="joined"
+		<label for="usage-settings-warn" class="flex-1 text-[12px] text-text">Warn me at</label>
+		<SettingsPicker
+			id="usage-settings-warn"
+			data-testid="usage-settings-warn"
+			disabled={setting === null}
 			label="Warn me at"
-			options={warnOptions.map((warnAt) => ({ value: String(warnAt), label: warnAt === "off" ? "off" : sessionViewState.compact ? String(warnAt) : `${warnAt}%`, testId: `usage-settings-warn-${warnAt}`, disabled: setting === null }))}
-			bind:value={() => String(setting?.warnAt ?? 80), (next) => {
+			options={warnOptions.map((warnAt) => ({ value: String(warnAt), label: warnAt === "off" ? "off" : `${warnAt}%`, testId: `usage-settings-warn-${warnAt}` }))}
+			value={String(setting?.warnAt ?? 80)}
+			onvaluechange={(next) => {
 				const warnAt = warnOptions.find((option) => String(option) === next);
 				if (setting && warnAt !== undefined) void save({ ...setting, warnAt });
 			}}

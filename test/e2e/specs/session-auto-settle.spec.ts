@@ -5,6 +5,7 @@ import { Effect, Exit, Layer, Scope } from "effect";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import type { ReplayHarness } from "../helpers/e2e-harness.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { chooseSettingsOption } from "../helpers/settings.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
@@ -71,19 +72,19 @@ test("auto-settle toggle and idle window survive reload", async ({
 	await page.getByTestId("overflow-settings").click();
 	await page.getByTestId("settings-tab-general").click();
 	const select = page.getByTestId("settings-auto-settle-select");
-	await expect(select).toHaveValue("3");
-	await select.selectOption("7");
+	await expect(select).toHaveAttribute("data-value", "3");
+	await chooseSettingsOption(page, select, "7");
 	await expect(select).toBeEnabled();
 	await page.getByTestId("settings-close-btn").click();
 	await page.getByTestId("session-bar-overflow").click();
 	await page.getByTestId("overflow-settings").click();
 	await page.getByTestId("settings-tab-general").click();
-	await expect(select).toHaveValue("7");
+	await expect(select).toHaveAttribute("data-value", "7");
 	await page.reload();
 	await page.getByTestId("session-bar-overflow").click();
 	await page.getByTestId("overflow-settings").click();
 	await page.getByTestId("settings-tab-general").click();
-	await expect(select).toHaveValue("7");
+	await expect(select).toHaveAttribute("data-value", "7");
 });
 
 test("the auto-settle outlook reads the same with or without a viewer", async ({

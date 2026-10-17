@@ -14,6 +14,7 @@ import type {
 	ProcessHarness,
 } from "../../helpers/process-harness.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
+import { chooseSettingsOption } from "../helpers/settings.js";
 import { AppPage } from "../page-objects/app.page.js";
 
 const claudeModels: readonly ModelInfo[] = [
@@ -98,13 +99,13 @@ async function openSettings(
 	}
 	await page.getByTestId("settings-tab-models").click();
 	await field(page, "claude", "model").waitFor();
+	await field(page, "claude", "model").click();
+	await expect(
+		page.getByRole("menuitemradio", { name: "Sonnet", exact: true }),
+	).toBeVisible();
+	await page.keyboard.press("Escape");
 	await page.waitForFunction(
 		() =>
-			Boolean(
-				document.querySelector(
-					'[data-testid="settings-harness-default-claude-model"] optgroup',
-				),
-			) &&
 			document
 				.querySelector('[data-testid="settings-harness-default-claude-status"]')
 				?.getAttribute("data-status") !== "unverified",
@@ -112,33 +113,37 @@ async function openSettings(
 }
 
 async function shown(page: Page) {
-	const rows = await Promise.all(
-		(["claude", "opencode"] as const).map(async (harness) => {
-			const model = field(page, harness, "model");
-			const effort = field(page, harness, "effort");
-			const context = field(page, harness, "context");
-			const status = field(page, harness, "status");
-			return [
-				harness,
-				{
-					model: await model.inputValue(),
-					flagged: (await model.getAttribute("aria-invalid")) === "true",
-					selectedDisabled: await model.evaluate(
-						(select: HTMLSelectElement) =>
-							select.selectedOptions[0]?.disabled ?? false,
-					),
-					effort: (await effort.count()) ? await effort.inputValue() : "",
-					contextWindow: (await context.count())
-						? await context.inputValue()
-						: "",
-					status: (await status.count())
-						? await status.getAttribute("data-status")
-						: "ok",
-					problem: (await status.count()) ? await status.textContent() : null,
-				},
-			] as const;
-		}),
-	);
+	const rows = [];
+	for (const harness of ["claude", "opencode"] as const) {
+		const model = field(page, harness, "model");
+		const effort = field(page, harness, "effort");
+		const context = field(page, harness, "context");
+		const status = field(page, harness, "status");
+		await model.click();
+		const selectedDisabled =
+			(await page
+				.getByRole("menuitemradio", { checked: true })
+				.getAttribute("aria-disabled")) === "true";
+		await page.keyboard.press("Escape");
+		rows.push([
+			harness,
+			{
+				model: await model.getAttribute("data-value"),
+				flagged: (await model.getAttribute("data-invalid")) === "true",
+				selectedDisabled,
+				effort: (await effort.count())
+					? await effort.getAttribute("data-value")
+					: "",
+				contextWindow: (await context.count())
+					? await context.getAttribute("data-value")
+					: "",
+				status: (await status.count())
+					? await status.getAttribute("data-status")
+					: "ok",
+				problem: (await status.count()) ? await status.textContent() : null,
+			},
+		] as const);
+	}
 	return Object.fromEntries(rows);
 }
 
@@ -200,7 +205,11 @@ test("UI persists model effort and context and preserves the other harness", asy
 		}),
 	);
 	await openSettings(page, harness);
-	await field(page, "claude", "model").selectOption("claude/opus");
+	await chooseSettingsOption(
+		page,
+		field(page, "claude", "model"),
+		"claude/opus",
+	);
 	await page
 		.locator(
 			'[data-testid="settings-harness-default-claude-model"]:not(:disabled)',
@@ -212,13 +221,13 @@ test("UI persists model effort and context and preserves the other harness", asy
 		effort: "high",
 		contextWindow: "",
 	});
-	await field(page, "claude", "effort").selectOption("max");
-	await field(page, "claude", "context").selectOption("1m");
+	await chooseSettingsOption(page, field(page, "claude", "effort"), "max");
+	await chooseSettingsOption(page, field(page, "claude", "context"), "1m");
 	await page.waitForFunction(() => {
-		const select = document.querySelector<HTMLSelectElement>(
+		const select = document.querySelector<HTMLButtonElement>(
 			'[data-testid="settings-harness-default-claude-context"]',
 		);
-		return select?.value === "1m" && !select.disabled;
+		return select?.dataset["value"] === "1m" && !select.disabled;
 	});
 	await page.reload();
 	await openSettings(page, harness);
@@ -362,9 +371,9 @@ test("defaults follow RPC writes across relays", async ({
 	);
 	await page.waitForFunction(
 		() =>
-			document.querySelector<HTMLSelectElement>(
+			document.querySelector<HTMLButtonElement>(
 				'[data-testid="settings-harness-default-claude-model"]',
-			)?.value === "claude/opus",
+			)?.dataset["value"] === "claude/opus",
 	);
 	const published = latestDefaults(other);
 	await artifact(testInfo, "5-relay-fanout", page, harness, {

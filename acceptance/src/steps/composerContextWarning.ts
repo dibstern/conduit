@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import { chooseSettingsOption } from "../../../test/e2e/helpers/settings.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	mockInstances,
@@ -15,10 +16,12 @@ export const composerContextWarningHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const threshold = match[1] ?? "default";
 			const control = world.page.getByTestId(
-				`settings-composer-context-warning-${threshold === "default" ? "80" : threshold.toLowerCase()}`,
+				"settings-composer-context-warning",
 			);
-			if (threshold !== "default") await control.click();
-			await expect(control).toHaveAttribute("aria-checked", "true");
+			const value = threshold === "default" ? "80" : threshold.toLowerCase();
+			if (threshold !== "default")
+				await chooseSettingsOption(world.page, control, value);
+			await expect(control).toHaveAttribute("data-value", value);
 			await world.page.getByTestId("settings-close-btn").click();
 			await expect(world.page.locator("#settings-panel")).toBeHidden();
 		},

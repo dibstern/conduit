@@ -5,6 +5,7 @@ import {
 	composerPreferences,
 	setComposerPreferences,
 } from "../../stores/composer-preferences.svelte.js";
+import { cursorAuth } from "../../stores/cursor-auth.svelte.js";
 import {
 	clearDiscoveryState,
 	handleAgentList,
@@ -25,6 +26,7 @@ import {
 	applyUsageLimitsSetting,
 	applyUsageReadings,
 } from "../../stores/usage.svelte.js";
+import { connectedSocket, failRpc } from "../../stories/sockets.js";
 import SettingsPanel from "./SettingsPanel.svelte";
 
 function resetState() {
@@ -60,6 +62,13 @@ function resetState() {
 	});
 	applyUsageReadings([]);
 	applyUsageLimitsSetting(DEFAULT_USAGE_LIMITS);
+	// GetCursorAuth is never answered in stories, so seed a settled logged-out reply.
+	cursorAuth.current = {
+		source: "none",
+		status: "logged-out",
+		expiresSoon: false,
+		login: { state: "idle" },
+	};
 	featureFlags.debug = false;
 	localStorage.setItem(
 		"notif-settings",
@@ -130,9 +139,16 @@ const meta = {
 	beforeEach: () => {
 		const compact = sessionViewState.compact;
 		sessionViewState.compact = window.innerWidth < 768;
+		// Mount-time reads wait on an open socket instead of failing whenever the
+		// real dial gives up; proxy detection settles at once as "not found".
+		const restoreSocket = connectedSocket();
+		const restoreDetectProxy = failRpc("DetectProxy");
 		resetState();
 		return () => {
 			sessionViewState.compact = compact;
+			cursorAuth.current = undefined;
+			restoreDetectProxy();
+			restoreSocket();
 		};
 	},
 } satisfies Meta<typeof SettingsPanel>;
@@ -184,20 +200,24 @@ export const Composer: Story = {
 		await userEvent.click(icons);
 		await expect(icons).toHaveAttribute("aria-checked", "true");
 		await expect(composerPreferences.controls).toBe("icons");
-		const warning = body.getByTestId("settings-composer-context-warning-80");
-		await expect(warning).toHaveAttribute("aria-checked", "true");
+		const warning = body.getByTestId("settings-composer-context-warning");
+		await expect(warning).toHaveAttribute("data-value", "80");
 		for (const threshold of [60, 70, 80, 90, "never"] as const) {
+			await userEvent.click(warning);
 			const option = body.getByTestId(
 				`settings-composer-context-warning-${threshold}`,
 			);
 			await userEvent.click(option);
-			await expect(option).toHaveAttribute("aria-checked", "true");
+			await expect(warning).toHaveAttribute("data-value", String(threshold));
 			await expect(composerPreferences.contextWarning).toBe(threshold);
 		}
 		await expect(
 			JSON.parse(localStorage.getItem("conduit-composer-preferences") ?? "{}"),
 		).toEqual({ controls: "icons", contextWarning: "never" });
 		await userEvent.click(warning);
+		await userEvent.click(
+			body.getByTestId("settings-composer-context-warning-80"),
+		);
 		// userEvent focus reads as keyboard focus; keep its ring out of the baseline.
 		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
 	},
@@ -217,6 +237,7 @@ export const Advanced: Story = {
 			name: /^Advanced.*Debug off$/,
 		});
 		await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+		await canvasElement.ownerDocument.fonts.ready;
 		disclosure.scrollIntoView({ block: "nearest" });
 		await userEvent.click(disclosure);
 		const toggle = body.getByRole("switch", {
@@ -226,6 +247,7 @@ export const Advanced: Story = {
 		await userEvent.click(toggle);
 		await expect(disclosure).toHaveTextContent("Debug on");
 		await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+		await canvasElement.ownerDocument.fonts.ready;
 		toggle.scrollIntoView({ block: "nearest" });
 		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
 	},
@@ -241,16 +263,19 @@ export const WorktreeCleanup: Story = {
 		});
 		await userEvent.click(disclosure);
 		await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+		// The web font reflows the groups above; scroll once it has settled.
+		await canvasElement.ownerDocument.fonts.ready;
 		disclosure.scrollIntoView({ block: "start" });
-		await expect(body.getByTestId("settings-cleanup-on-settle")).toHaveValue(
-			"merged",
-		);
-		await expect(body.getByTestId("settings-cleanup-idle")).toHaveValue(
+		await expect(
+			body.getByTestId("settings-cleanup-on-settle"),
+		).toHaveAttribute("data-value", "merged");
+		await expect(body.getByTestId("settings-cleanup-idle")).toHaveAttribute(
+			"data-value",
 			"never",
 		);
-		await expect(body.getByTestId("settings-cleanup-keep-when")).toHaveValue(
-			"uncommitted-changes",
-		);
+		await expect(
+			body.getByTestId("settings-cleanup-keep-when"),
+		).toHaveAttribute("data-value", "uncommitted-changes");
 		await expect(
 			body.getByTestId("settings-cleanup-keep-warning"),
 		).toHaveTextContent(/^Ignored files, like \.env/);
@@ -263,6 +288,22 @@ export const VisibilityEmpty: Story = {
 };
 
 function populateVisibility() {
+	// Claude's catalog belongs to its default account, so the project default resolves against it.
+	applyInstanceListResponse({
+		instances: [
+			{
+				id: "claude",
+				name: "Personal Claude",
+				driver: "claude",
+				isDefault: true,
+				port: 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 1_772_011_800_000,
+			},
+		],
+	});
 	handleModelList({
 		providers: [
 			{
@@ -459,6 +500,7 @@ export const Claude: Story = {
 		await expect(
 			canvas.queryByTestId("claude-setting-attribution"),
 		).not.toBeInTheDocument();
+		await canvasElement.ownerDocument.fonts.ready;
 		canvas
 			.getByTestId("claude-attribution-group")
 			.scrollIntoView({ block: "end" });
@@ -490,6 +532,7 @@ export const ClaudeAttributionExpanded: Story = {
 		await expect(
 			canvas.getByTestId("claude-setting-attribution-provenance"),
 		).toBeVisible();
+		await canvasElement.ownerDocument.fonts.ready;
 		canvas
 			.getByTestId("claude-attribution-group")
 			.scrollIntoView({ block: "end" });
@@ -510,8 +553,8 @@ export const Server: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(
-			canvas.getByRole("combobox", { name: /^Log level\b/ }),
-		).toHaveValue("info");
+			canvas.getByRole("button", { name: /^Log level\b/ }),
+		).toHaveAttribute("data-value", "info");
 		// The fixture has no PIN, so this frame is also the PIN-off state.
 		await expect(
 			canvas.getByTestId("server-access-settings"),
@@ -553,6 +596,7 @@ export const Server: Story = {
 			canvas.queryByTestId("server-shutdown-confirmation"),
 		).not.toBeInTheDocument();
 		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
+		await canvasElement.ownerDocument.fonts.ready;
 		canvas
 			.getByTestId("server-startup-settings")
 			.scrollIntoView({ block: "end" });
@@ -581,6 +625,7 @@ export const ServerStartupExpanded: Story = {
 			"Installed",
 		);
 		await expect(within(startup).queryByRole("switch")).not.toBeInTheDocument();
+		await canvasElement.ownerDocument.fonts.ready;
 		startup.scrollIntoView({ block: "end" });
 	},
 };
@@ -597,6 +642,7 @@ export const PowerCommandEdit: Story = {
 		await expect(canvas.getByTestId("server-power-args")).toHaveValue("-di");
 		await expect(canvas.getByTestId("server-power-save")).toBeVisible();
 		await expect(canvas.getByTestId("server-power-cancel")).toBeVisible();
+		await canvasElement.ownerDocument.fonts.ready;
 		canvas
 			.getByTestId("server-power-settings")
 			.scrollIntoView({ block: "end" });
@@ -620,6 +666,7 @@ export const PowerNotAvailable: Story = {
 		await expect(
 			canvas.queryByTestId("server-power-edit"),
 		).not.toBeInTheDocument();
+		await canvasElement.ownerDocument.fonts.ready;
 		canvas
 			.getByTestId("server-power-settings")
 			.scrollIntoView({ block: "end" });
@@ -640,6 +687,7 @@ export const PinOn: Story = {
 		);
 		await expect(canvas.getByTestId("server-pin-change-btn")).toBeVisible();
 		await expect(canvas.getByTestId("server-pin-remove-btn")).toBeVisible();
+		await canvasElement.ownerDocument.fonts.ready;
 		security.scrollIntoView({ block: "nearest" });
 	},
 };
@@ -657,6 +705,7 @@ export const ChangePin: Story = {
 		await expect(canvas.getByTestId("server-pin-form")).toHaveTextContent(
 			"Every browser, including this one, will ask for the new PIN.",
 		);
+		await canvasElement.ownerDocument.fonts.ready;
 		canvas.getByTestId("server-security-settings").scrollIntoView({
 			block: "end",
 		});

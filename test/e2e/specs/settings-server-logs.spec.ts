@@ -11,6 +11,7 @@ import {
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
+import { chooseSettingsOption } from "../helpers/settings.js";
 import { AppPage } from "../page-objects/app.page.js";
 
 const test = base.extend<{ harness: ProcessHarness }>({
@@ -110,24 +111,29 @@ test("Log level updates daemon status and survives reopening Settings", async ({
 	await new AppPage(page).goto(harness.baseUrl);
 	await openServer(page);
 	const logs = page.getByTestId("server-logs-group");
-	const select = logs.getByRole("combobox", { name: /^Log level\b/ });
+	const select = logs.getByRole("button", { name: /^Log level\b/ });
 	await expect(select).toBeEnabled();
 	await expect.poll(() => reads.length).toBeGreaterThan(0);
-	await expect(select).toHaveValue(reads.at(-1)?.logLevel ?? "missing");
-	await expect(select.locator("option")).toHaveText([
+	await expect(select).toHaveAttribute(
+		"data-value",
+		reads.at(-1)?.logLevel ?? "missing",
+	);
+	await select.click();
+	await expect(page.getByRole("menuitemradio")).toHaveText([
 		...RpcLogLevelSchema.literals,
 	]);
+	await page.keyboard.press("Escape");
 	await expect(logs).toContainText(
 		"Whole daemon · resets when conduit restarts",
 	);
 
 	const nextLevel = reads.at(-1)?.logLevel === "debug" ? "warn" : "debug";
 	const readsBefore = reads.length;
-	await select.selectOption(nextLevel);
+	await chooseSettingsOption(page, select, nextLevel);
 	await expect.poll(() => reads.length).toBeGreaterThan(readsBefore);
 	await expect.poll(() => reads.at(-1)?.logLevel).toBe(nextLevel);
 	await expect(select).toBeEnabled();
-	await expect(select).toHaveValue(nextLevel);
+	await expect(select).toHaveAttribute("data-value", nextLevel);
 	expect((await harness.requestRpc(new GetStatus({}))).logLevel).toBe(
 		nextLevel,
 	);
@@ -136,7 +142,7 @@ test("Log level updates daemon status and survives reopening Settings", async ({
 	await page.getByTestId("settings-close-btn").click();
 	await expect(page.locator("#settings-panel")).toBeHidden();
 	await openServer(page);
-	await expect(select).toHaveValue(nextLevel);
+	await expect(select).toHaveAttribute("data-value", nextLevel);
 
 	// A new page must read the same level from the daemon, without a cached store.
 	const readsBeforeReload = reads.length;
@@ -145,7 +151,7 @@ test("Log level updates daemon status and survives reopening Settings", async ({
 	await expect.poll(() => reads.length).toBeGreaterThan(readsBeforeReload);
 	await expect.poll(() => reads.at(-1)?.logLevel).toBe(nextLevel);
 	await expect(select).toBeEnabled();
-	await expect(select).toHaveValue(nextLevel);
+	await expect(select).toHaveAttribute("data-value", nextLevel);
 	await select.evaluate((element) => element.blur());
 
 	const artifacts = resolve("test-results/settings-server-logs");
