@@ -252,7 +252,7 @@ export const composerWordsHandlers: StepHandler[] = [
 			const right = row.getByTestId("composer-words-right");
 			await expect(
 				left.getByTestId("composer-word-harness").getByTestId("harness-logo"),
-			).toHaveCSS("width", "12px");
+			).toHaveCSS("width", "15px");
 			const order = await left.evaluate((element) =>
 				Array.from(
 					element.querySelectorAll('[data-testid^="composer-word-"]'),

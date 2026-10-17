@@ -599,7 +599,7 @@
 								<HarnessLogo
 									driver={option.value}
 									instanceId={option.value === selectedDriver ? selectedLogoInstanceId : instanceForDriver(option.value)?.id}
-									size={15}
+									size={18}
 									surface="surface"
 								/>
 								{option.label}
@@ -725,7 +725,7 @@
 				{/if}
 				{#if parameters ? parameterEffort : effortSegments.length > 0 || (sessionState.currentId && effort.current)}
 					<div data-testid="picker-row-effort" aria-disabled={effortSegments.length === 0 || undefined} tabindex="-1" class="flex min-h-[36px] flex-wrap items-center gap-[10px] px-[10px] py-[6px] text-[13.5px] max-md:min-h-[50px]">
-						<Icon name="sliders-horizontal" size={16} class="shrink-0 text-text-muted" />
+						<Icon name="settings-2" size={16} class="shrink-0 text-text-muted" />
 						<span class="flex-1">Effort</span>
 						{#if effortSegments.length > (parameters ? 1 : 0)}
 							<SegmentedControl
@@ -960,7 +960,7 @@
 			else togglePicker(event);
 		}}
 	>
-		{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={variant === "words" ? 15 : 17} surface="box" />{/if}
+		{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={variant === "words" ? 15 : 18} surface="box" />{/if}
 		<span class="model-label min-w-0 truncate">{displayName}</span>
 		{#if phone && attention}<span data-testid="composer-more-attention" class="size-[6px] shrink-0 rounded-full bg-status-ask" aria-hidden="true"></span>{/if}
 		{#if contextLabel}<span data-testid="picker-selected-context" class="shrink-0 font-mono text-[11.5px] text-text-muted">{contextLabel}</span>{/if}
@@ -995,7 +995,7 @@
 			aria-controls={pickerOpen ? "model-picker" : undefined}
 			onclick={(event) => togglePicker(event, "account")}
 		>
-			{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={12} surface="page" />{/if}
+			{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={15} surface="page" />{/if}
 		</Button>
 		{#if hasAccountWord}
 			<Button
@@ -1070,7 +1070,7 @@
 						onclick={(event) => togglePicker(event, "harness")}
 					>
 						<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Harness</span>
-						<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[7px] font-semibold">{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={16} surface="surface" />{/if}<span class="min-w-0 truncate">{driverLabel(selectedDriver)}</span></span>
+						<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[7px] font-semibold">{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={18} surface="surface" />{/if}<span class="min-w-0 truncate">{driverLabel(selectedDriver)}</span></span>
 						<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 					</Button>
 					<Button variant="composer-row" size="content" data-testid="composer-more-account" ariaLabel={`Account: ${wordAccountName}. Open account options`} onclick={(event) => togglePicker(event, "account")}>
