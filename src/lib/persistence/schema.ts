@@ -94,6 +94,8 @@ export const LEGACY_FORKS_MIGRATION = "0061_legacy_forks.sql";
 export const GOAL_CHECK_METADATA_MIGRATION = "0062_goal_check_metadata.sql";
 export const MESSAGE_PART_SURFACING_MIGRATION =
 	"0063_message_part_surfacing.sql";
+export const SESSIONS_SETTLED_SHELF_INDEX_MIGRATION =
+	"0064_sessions_settled_shelf_index.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

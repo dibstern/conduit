@@ -670,6 +670,15 @@ export const DaemonSessionCursorSchema = Schema.Struct({
 export const ListDaemonSessionsResponseSchema = Schema.Struct({
 	projectSlug: Schema.optional(Schema.String),
 	sessions: Schema.Array(SessionInfoSchema),
+	/** Full shelf counts per available project, unaffected by page/cursor. */
+	settledCounts: Schema.optional(
+		Schema.Array(
+			Schema.Struct({
+				projectSlug: Schema.String,
+				count: Schema.NonNegativeInt,
+			}),
+		),
+	),
 	availability: Schema.Array(ProjectSessionAvailabilitySchema),
 	hasMore: Schema.Boolean,
 	nextCursor: Schema.NullOr(DaemonSessionCursorSchema),

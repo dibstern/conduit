@@ -115,6 +115,7 @@ describe("Bound project provenance", () => {
 			"0062_legacy_forks",
 			"0063_goal_check_metadata",
 			"0064_message_part_surfacing",
+			"0065_sessions_settled_shelf_index",
 		]);
 	});
 

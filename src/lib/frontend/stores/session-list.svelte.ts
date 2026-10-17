@@ -17,6 +17,7 @@ import { saveShell } from "./saved-shell.js";
 import {
 	clearSessionSearch,
 	getFilteredSessions,
+	getSettledSessionCount,
 	loadDaemonSessions,
 	loadMoreDaemonSessions,
 	loadMoreSearchResults,
@@ -42,6 +43,7 @@ export interface SearchQuery {
 
 export interface SessionListView {
 	readonly rows: readonly SessionRow[];
+	readonly settledCount: { readonly count: number; readonly exact: boolean };
 	readonly settled: boolean;
 	readonly status: FeedStatus;
 	readonly staleSince: number | null;
@@ -73,6 +75,9 @@ const rows = $derived.by(() => getFilteredSessions());
 export const sessionList: SessionListView = {
 	get rows() {
 		return rows;
+	},
+	get settledCount() {
+		return getSettledSessionCount();
 	},
 	get settled() {
 		return sessionSubscription.status._tag === "live";
@@ -205,8 +210,12 @@ export function currentSearchQuery(): SearchQuery | null {
 
 /** Re-fetches whichever list is on screen. Other projects' rows get no live
  *  updates on this socket, so a change made to one must be re-read to show. */
-export function refreshListedSessions(): Promise<void> {
-	return currentSearchQuery() === null
-		? refreshSessionList()
-		: sessionList.search(sessionState.searchQuery).ready;
+export async function refreshListedSessions(): Promise<void> {
+	// A command in search also changes the browse rows and totals shown on clear.
+	await Promise.all([
+		refreshSessionList(),
+		currentSearchQuery() === null
+			? Promise.resolve()
+			: sessionList.search(sessionState.searchQuery).ready,
+	]);
 }

@@ -253,7 +253,7 @@ describe("session triage list", () => {
 			vi.useRealTimers();
 		}
 	});
-	it("places Pinned first and hides settled rows behind a count-free disclosure", () => {
+	it("places Pinned first and hides settled rows behind a counted disclosure", () => {
 		const { container } = render(SessionList);
 		expect(
 			container.querySelector(".session-group-label")?.textContent?.trim(),
@@ -265,7 +265,7 @@ describe("session triage list", () => {
 		).toBe("pin");
 		expect(screen.queryByText("Finished work")).toBeNull();
 		const toggle = screen.getByTestId("settled-shelf-toggle");
-		expect(toggle.textContent?.trim()).toBe("Settled");
+		expect(toggle.textContent?.trim()).toBe("Settled 1");
 		expect(toggle.getAttribute("aria-expanded")).toBe("false");
 		expect(
 			document.getElementById(toggle.getAttribute("aria-controls") ?? ""),

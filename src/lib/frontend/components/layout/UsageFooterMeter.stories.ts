@@ -215,6 +215,24 @@ export const PhoneSingleAccount: Story = {
 	args: { phone: true, width: 393 },
 };
 
+export const PhoneHiddenCodexAccount: Story = {
+	args: { phone: true, width: 393 },
+	beforeEach: () => {
+		seed(
+			readings.filter(
+				(reading) =>
+					reading.accountId === "personal" || reading.accountId === "codex",
+			),
+		);
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByTestId("usage-phone-more-count"),
+		).toHaveTextContent("+1 Codex account");
+	},
+};
+
 export const PhoneSheet: Story = {
 	...PhoneDock,
 	tags: ["viewport-capture"],

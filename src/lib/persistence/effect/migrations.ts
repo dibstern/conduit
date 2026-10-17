@@ -59,6 +59,7 @@ import {
 	SESSIONS_READ_AT_MIGRATION,
 	SESSIONS_RESUMES_MIGRATION,
 	SESSIONS_SETTLED_PINNED_MIGRATION,
+	SESSIONS_SETTLED_SHELF_INDEX_MIGRATION,
 	SESSIONS_SIDE_THREAD_MIGRATION,
 	SESSIONS_SNOOZED_MIGRATION,
 	SESSIONS_WORKSPACE_HINT_MIGRATION,
@@ -1263,6 +1264,9 @@ export const effectMigrationEntries = {
 				);
 		}
 	}),
+	"0065_sessions_settled_shelf_index": executeSqlStatements(
+		readMigrationSql(SESSIONS_SETTLED_SHELF_INDEX_MIGRATION),
+	),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

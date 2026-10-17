@@ -504,6 +504,12 @@ export interface ReadQueryEffect {
 		},
 	) => Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError>;
 
+	/** Full shelf size, independent of a session page or keyset cursor. */
+	readonly countSettledSessions: (
+		scope: SessionScope,
+		opts?: { roots?: boolean; titleQuery?: string },
+	) => Effect.Effect<number, ReadQueryEffectError | SqlError>;
+
 	readonly listSessionInfos: (
 		scope: SessionScope,
 		opts?: {
@@ -1173,6 +1179,23 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
+	// Shared by the page and the shelf count, so a count can never match
+	// different rows than the list it labels.
+	const sessionFilters = (
+		scope: SessionScope,
+		opts?: { roots?: boolean; titleQuery?: string },
+	) => {
+		const predicates = [sql`project_id IN ${sql.in(scope.projectIds)}`];
+		if (opts?.roots) predicates.push(sql`parent_id IS NULL`);
+		if (opts?.titleQuery !== undefined) {
+			const escapedQuery = opts.titleQuery.replace(/[\\%_]/g, "\\$&");
+			const pattern = `%${escapedQuery}%`;
+			// SQLite LIKE is ASCII-case-insensitive; we accept non-ASCII case sensitivity until deep search adds a collation.
+			predicates.push(sql`title LIKE ${pattern} ESCAPE '\\'`);
+		}
+		return predicates;
+	};
+
 	// `readSessionList` is the only producer of the single session type (ni8.5
 	// T-1) — what the shell subscription streams and what the browser holds.
 	// The per-row re-query it replaced is gone: a subscriber asks for what moved
@@ -1199,14 +1222,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		},
 	): Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError> =>
 		Effect.gen(function* () {
-			const predicates = [sql`project_id IN ${sql.in(scope.projectIds)}`];
-			if (opts?.roots) predicates.push(sql`parent_id IS NULL`);
-			if (opts?.titleQuery !== undefined) {
-				const escapedQuery = opts.titleQuery.replace(/[\\%_]/g, "\\$&");
-				const pattern = `%${escapedQuery}%`;
-				// SQLite LIKE is ASCII-case-insensitive; we accept non-ASCII case sensitivity until deep search adds a collation.
-				predicates.push(sql`title LIKE ${pattern} ESCAPE '\\'`);
-			}
+			const predicates = sessionFilters(scope, opts);
 			if (opts?.before !== undefined) {
 				predicates.push(
 					sql`(updated_at < ${opts.before.updatedAt} OR (updated_at = ${opts.before.updatedAt} AND id < ${opts.before.id}))`,
@@ -1231,6 +1247,30 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							operation: "listSessions",
 							cause: e,
 						}),
+			),
+		);
+
+	const countSettledSessions: ReadQueryEffect["countSettledSessions"] = (
+		scope,
+		opts,
+	) =>
+		Effect.gen(function* () {
+			const predicates = [
+				...sessionFilters(scope, opts),
+				sql`settled_at IS NOT NULL AND pinned_at IS NULL`,
+			];
+			const rows = yield* sql<{
+				count: number;
+			}>`SELECT COUNT(*) AS count FROM sessions
+				WHERE ${sql.and(predicates)}`;
+			return rows[0]?.count ?? 0;
+		}).pipe(
+			Effect.mapError(
+				(cause) =>
+					new ReadQueryEffectError({
+						operation: "countSettledSessions",
+						cause,
+					}),
 			),
 		);
 
@@ -2487,6 +2527,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getAllSessionStatuses,
 		getAllSessionStatusesWithProviders,
 		listSessions,
+		countSettledSessions,
 		listSessionInfos,
 		listSessionGitRefreshTargets,
 		getSessionLineage,

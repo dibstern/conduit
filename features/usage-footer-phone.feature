@@ -152,3 +152,18 @@ Scenario: live readings dock warning accounts from other harnesses in account or
   And the phone usage footer folds 2 more accounts
   And the phone usage footer clears the new-session button and the last row text
   And the SubscribeUsage RPC has no project payload
+
+Scenario Outline: one folded account names its provider
+  Given the usage footer has a Claude account and a hidden <provider> account named <account>
+  When I tap back to the session list
+  Then the phone usage rows are claude in that order
+  And the phone usage footer labels the hidden account "+1 <provider> account"
+  And the sidebar region visually matches <baseline> at <threshold> percent
+  When I open the phone usage sheet
+  Then the usage sheet shows the hidden account named <account>
+
+Examples:
+  | provider | account  | baseline                         | threshold |
+  | Codex    | Personal | usage-footer-hidden-codex-phone   | 98        |
+  | Claude   | Work     | usage-footer-hidden-claude-phone  | 98        |
+  | Cursor   | Team     | usage-footer-hidden-cursor-phone  | 98        |

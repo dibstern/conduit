@@ -172,7 +172,7 @@
 	{#if folded.length > 0}
 		<!-- Its height is the distance the sheet's rest slides up to close the gap it leaves. -->
 		<span data-testid="{morePrefix}-more" aria-hidden={prefix === "usage-sheet" || undefined} class="flex h-[28px] items-center gap-[6px] px-[6px] text-[12.5px] text-text-muted {prefix === 'usage-sheet' ? 'sheet-fades' : ''}">
-			<span data-testid="{morePrefix}-more-count">+{folded.length} more</span>
+			<span data-testid="{morePrefix}-more-count">{folded.length === 1 && folded[0] ? `+1 ${harnessLabels[folded[0].harness]} account` : `+${folded.length} more`}</span>
 			{#each folded as reading (reading.accountId)}
 				<AccountDot instanceId={reading.accountId} size={6} data-testid="{morePrefix}-folded-{reading.accountId}" />
 			{/each}
