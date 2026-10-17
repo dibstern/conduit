@@ -36,6 +36,7 @@ describe("Schema Migration", () => {
 				expect(yield* makeEffectSqlMigrator()).toEqual([
 					[65, "sessions_settled_shelf_index"],
 					[66, "surfacing_marks"],
+					[67, "message_part_read"],
 				]);
 				for (const [filter, count] of [
 					["", 2],
@@ -86,6 +87,7 @@ describe("Schema Migration", () => {
 					[64, "message_part_surfacing"],
 					[65, "sessions_settled_shelf_index"],
 					[66, "surfacing_marks"],
+					[67, "message_part_read"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -114,6 +116,7 @@ describe("Schema Migration", () => {
 				"command_receipts",
 				"daemon_store_imports",
 				"events",
+				"message_part_read_state",
 				"message_part_tombstones",
 				"message_parts",
 				"message_tombstones",

@@ -466,6 +466,7 @@ export interface HistoryMessagePart {
 	surfacingProbabilities?: Record<string, number> | null;
 	surfacingSetVersion?: number;
 	surfacingModel?: string;
+	surfacingRead?: boolean;
 	type: PartType | "thinking" | "error" | "setup";
 	/** Daemon setup notice, carried by the normal durable transcript. */
 	setup?: ProjectSetupState;

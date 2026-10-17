@@ -136,6 +136,8 @@ export interface MessagePartRow {
 	surfacing_set_version?: number | null;
 	surfacing_model?: string | null;
 	surfacing_mark?: string | null;
+	/** Set by the read query from `message_part_read_state`. */
+	surfacing_read?: boolean;
 	rest_payload?: string | null;
 	/** Set when a previewing read cut `result`: the whole output's UTF-8 size. */
 	result_bytes?: number | null;

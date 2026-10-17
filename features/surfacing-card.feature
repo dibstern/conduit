@@ -270,3 +270,262 @@ Examples:
   | viewport |
   | desktop  |
   | phone    |
+
+Scenario Outline: A message becomes read after one continuous visible second
+  Given message surfacing is active at Balanced
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  When I start reading surfaced message #8
+  And the surfacing read clock advances 999 milliseconds
+  Then the surfaced message Read checkbox is unchecked
+  And the surfacing head says 5 unread
+  And the surfacing read RPC count is 0
+  When the surfacing read clock advances 1 milliseconds
+  Then the surfaced message Read checkbox is checked
+  And the surfacing head says 4 unread
+  And the surfacing read RPC count is 1
+  And surfacing read RPC 1 marks only messages 8 read
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: A hidden document resets the continuous read interval
+  Given message surfacing is active at Balanced
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  When I start reading surfaced message #8
+  And the surfacing read clock advances 600 milliseconds
+  And the surfacing document becomes hidden
+  And the surfacing read clock advances 1500 milliseconds
+  Then the surfaced message Read checkbox is unchecked
+  And the surfacing read RPC count is 0
+  When the surfacing document becomes visible
+  And the surfacing read clock advances 999 milliseconds
+  Then the surfacing read RPC count is 0
+  When the surfacing read clock advances 1 milliseconds
+  Then the surfaced message Read checkbox is checked
+  And surfacing read RPC 1 marks only messages 8 read
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: An offscreen card does not read its message
+  Given message surfacing is active at Balanced
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  When I start reading surfaced message #8
+  And the surfacing read clock advances 600 milliseconds
+  And the surfaced card moves outside the viewport
+  And the surfacing read clock advances 1500 milliseconds
+  Then the surfacing read RPC count is 0
+  And the surfaced message Read checkbox is unchecked
+  When the surfaced card moves inside the viewport
+  And the surfacing read clock advances 1000 milliseconds
+  Then the surfaced message Read checkbox is checked
+  And surfacing read RPC 1 marks only messages 8 read
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: A slow scrub reads only the released message
+  Given message surfacing is active at Balanced
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  When I start reading surfaced message #1
+  And I slowly scrub pins from #1 through #4 to #8
+  And the surfacing read clock advances 999 milliseconds
+  Then the surfacing read RPC count is 0
+  When the surfacing read clock advances 1 milliseconds
+  Then the surfaced message Read checkbox is checked
+  And the surfacing read RPC count is 1
+  And surfacing read RPC 1 marks only messages 8 read
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: Explicitly marking an open message unread survives the automatic timer
+  Given message surfacing is active at Balanced
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  When I start reading surfaced message #8
+  And the surfacing read clock advances 1000 milliseconds
+  Then the surfaced message Read checkbox is checked
+  When I uncheck the surfaced message Read checkbox
+  And the surfacing read clock advances 1500 milliseconds
+  Then the surfaced message Read checkbox is unchecked
+  And the surfacing head says 5 unread
+  And the surfacing read RPC count is 2
+  And surfacing read RPC 2 marks only messages 8 unread
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: Bulk read uses only the effective level and leaves the axis at zero
+  Given message surfacing is active at Balanced
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  When I set the surfacing level to Key
+  Then the surfacing head says 3 unread
+  And the surfacing axis offers Mark 3 read
+  When I mark 3 surfaced messages read
+  Then surfacing read RPC 1 marks only messages 2,5,8 read
+  And the surfacing head says All read ✓
+  And the surfacing axis offers no bulk read
+  When I set the surfacing level to Balanced
+  Then the surfacing head says 2 unread
+  And the surfacing axis offers Mark 2 read
+  When I set the surfacing level to All
+  Then the surfacing head says 3 unread
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: The head and u shortcut advance to the next unread pin and wrap
+  Given message surfacing is active at Balanced
+  And surfacing read tracking starts with 1,4,8 read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  Then the surfacing head says 2 unread
+  When I open the next unread surfaced message from the head
+  Then the surfaced card shows #2 and announces its category and position
+  When I press surfacing read shortcut u
+  Then the surfaced card shows #5 and announces its category and position
+  When I press surfacing read shortcut u
+  Then the surfaced card shows #2 and announces its category and position
+  And the surfacing read RPC count is 0
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: The m shortcut toggles persisted read state in both directions
+  Given message surfacing is active at Balanced
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  When I start reading surfaced message #8
+  And I press surfacing read shortcut m
+  Then the surfaced message Read checkbox is checked
+  And surfacing read RPC 1 marks only messages 8 read
+  When I press surfacing read shortcut m
+  And the surfacing read clock advances 1500 milliseconds
+  Then the surfaced message Read checkbox is unchecked
+  And the surfacing read RPC count is 2
+  And surfacing read RPC 2 marks only messages 8 unread
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: Final hides every message and has zero unread at its effective level
+  Given message surfacing is active at Balanced
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  When I set the surfacing level to Final
+  Then Final shows 6 hidden messages and keeps the strip
+  And the surfacing head says All read ✓
+  And the surfacing axis offers no bulk read
+  When the surfacing read clock advances 1500 milliseconds
+  Then the surfacing read RPC count is 0
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: Final hides a live pending message without reading it
+  Given message surfacing is active at Balanced
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a live turn
+  When I set the surfacing level to Final
+  And a new folded surfacing message awaits its verdict
+  Then Final shows 6 hidden messages and keeps the strip
+  And the surfacing head says All read ✓
+  And the surfacing axis offers no bulk read
+  When the surfacing read clock advances 1500 milliseconds
+  Then the surfacing read RPC count is 0
+  And Final shows 6 hidden messages and keeps the strip
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: A failed read save stays unread and permits an explicit retry
+  Given message surfacing is active at Balanced
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  And surfacing read writes fail
+  When I start reading surfaced message #8
+  And the surfacing read clock advances 1000 milliseconds
+  Then the surfaced message reports a read save failure
+  And the surfacing head says 5 unread
+  When the surfacing read clock advances 1500 milliseconds
+  Then the surfacing read RPC count is 1
+  When surfacing read writes recover
+  And I check the surfaced message Read checkbox
+  Then the surfaced message Read checkbox is checked
+  And the surfacing head says 4 unread
+  And the surfacing read RPC count is 2
+  And surfacing read RPC 2 marks only messages 8 read
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: Mixed read states and the zero state preserve the final theme
+  Given message surfacing is active at Balanced
+  And surfacing read tracking starts with 1,4,8 read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  And the surfacing capture uses the <theme> theme
+  Then the surfacing head says 2 unread
+  And the surfaced message Read checkbox is checked
+  And the messages region visually matches <mixedbaseline> at <threshold> percent
+  When I mark 2 surfaced messages read
+  Then the surfacing head says All read ✓
+  And the surfacing axis offers no bulk read
+  And the messages region visually matches <zerobaseline> at <threshold> percent
+
+Examples:
+  | viewport | theme | mixedbaseline                       | zerobaseline                      | threshold |
+  | desktop  | dark  | surfacing-read-mixed-dark-desktop    | surfacing-read-zero-dark-desktop   | 98        |
+  | phone    | dark  | surfacing-read-mixed-dark-phone      | surfacing-read-zero-dark-phone     | 98        |
+  | desktop  | light | surfacing-read-mixed-light-desktop   | surfacing-read-zero-light-desktop  | 98        |
+  | phone    | light | surfacing-read-mixed-light-phone     | surfacing-read-zero-light-phone    | 98        |

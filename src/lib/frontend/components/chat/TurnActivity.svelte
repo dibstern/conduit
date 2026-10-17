@@ -6,6 +6,7 @@
 	import type { CategorySet } from "../../../contracts/category-set.js";
 	import type { MessageSurfacingStatus } from "../../../contracts/message-surfacing.js";
 	import { messageSurfacing, sessionSurfaceLevel, setSessionSurfaceLevel, touchSurfaceSession, makeSurfaceDefault } from "../../stores/message-surfacing.svelte.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { surfaceTurn, surfaceTime, type SurfaceLevel, type SurfacePart, type SurfacePin } from "../../utils/surface-turn.js";
 	import SurfacingCard, { type SurfacingRegions } from "./SurfacingCard.svelte";
 	import { MARK_GLYPHS, SurfacingFeedback } from "../../stores/surfacing-feedback.svelte.js";
@@ -43,7 +44,7 @@
 	import TurnEconomics from "./TurnEconomics.svelte";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, numbered = false, latestTurn = true, surfacing, surfacingRegions = {}, onSurfacingShortcut, hasRecap = false }: {
+	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, numbered = false, latestTurn = true, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, hasRecap = false }: {
 		turn: Turn;
 		segment: Segment;
 		final: boolean;
@@ -61,6 +62,7 @@
 		surfacingRegions?: SurfacingRegions;
 		hasRecap?: boolean;
 		onSurfacingShortcut?: (key: string) => boolean | undefined;
+		onMessagesRead?: (partIds: readonly string[], read: boolean) => Promise<void>;
 	} = $props();
 
 	let expanded = $state(false);
@@ -116,6 +118,10 @@
 	const level = $derived(override ?? surfacingConfig.status.defaultLevel);
 	let picked = $state<string | null>(null);
 	let folded = $state<boolean | null>(null);
+	let readSaving = $state(false);
+	let readError = $state("");
+	let autoReadAttempt = $state<string | null>(null);
+	let readCard: string | null = null;
 	let digits = "";
 	const feedback = new SurfacingFeedback(() => sessionId, () => surfacingConfig.categorySet, (place) => {
 		void tick().then(() => {
@@ -132,6 +138,32 @@
 	$effect(() => {
 		if (sessionId && surfacingActive) untrack(() => touchSurfaceSession(sessionId));
 	});
+	const readTarget = $derived(surface.card?.part.uuid ?? null);
+	$effect(() => {
+		const target = readTarget;
+		untrack(() => {
+			if (target === readCard) return;
+			readCard = target;
+			autoReadAttempt = null;
+			readError = "";
+		});
+	});
+	async function writeRead(partIds: readonly string[], read: boolean) {
+		if (readSaving || !partIds.length || (!sessionId && !onMessagesRead)) return;
+		readSaving = true;
+		readError = "";
+		try {
+			if (onMessagesRead) await onMessagesRead(partIds, read);
+			else if (sessionId) await rpc("SetMessagesRead", { sessionId, partIds: [...partIds], read });
+		} catch {
+			readError = "Couldn't save read state. Try again.";
+		} finally { readSaving = false; }
+	}
+	function readMessage(pin: SurfacePin, read: boolean) {
+		// An explicit Unread must survive while this card stays open.
+		autoReadAttempt = pin.part.uuid;
+		if (pin.part.partId) void writeRead([pin.part.partId], read);
+	}
 
 	function pick(pin: SurfacePin) {
 		picked = pin.part.uuid;
@@ -153,7 +185,7 @@
 	function surfaceCommand(event: KeyboardEvent) {
 		const target = event.target;
 		if (!event.defaultPrevented && event.key === "Escape" && feedback.pending) { event.preventDefault(); feedback.cancel(); return; }
-		if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable)) return;
+		if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || (target instanceof HTMLInputElement && target.type !== "checkbox") || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable)) return;
 		if (/^\d$/.test(event.key)) { event.preventDefault(); digits = (digits + event.key).slice(-8); return; }
 		const key = event.key;
 		if (key === "Enter" && !digits) return;
@@ -171,6 +203,7 @@
 			if (target) { if (target.belowLevel) selectLevel("all"); revealMessage(target.part); }
 		} else if (key === "a") revealMessage(surface.openAsk);
 		else if (key === "u") revealMessage(surface.nextUnread?.part ?? null);
+		else if (key === "m" && surface.card?.read !== undefined) readMessage(surface.card, !surface.card.read);
 		else if (key === "Escape") foldMessage();
 		digits = "";
 	}
@@ -317,6 +350,8 @@
 			</div>
 			{#if surfacingActive}
 				<SurfacingCard view={surface} {live} {level} overridden={override !== undefined} regions={{ ...surfacingRegions, cardHead: markHead, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
+					{readSaving} {readError} canAutoRead={autoReadAttempt !== readTarget} onread={readMessage} onautoread={(pin) => readMessage(pin, true)}
+					markReadInAxis={surfacingConfig.status.recap.model === "off"} onmarkread={() => { void writeRead(surface.unreadPartIds, true); }}
 					startTime={surfaceTime((segment.activity[0]?.createdAt ?? turn.user?.createdAt ?? 0) - (turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0))}
 					endTime={surfaceTime(duration ?? 0)} onpick={pick} onlevel={selectLevel}
 					ondefault={async () => { if (sessionId) await makeSurfaceDefault(sessionId, level); }}

@@ -16,6 +16,7 @@ import {
 	GOAL_CHECK_METADATA_MIGRATION,
 	LEGACY_FORKS_MIGRATION,
 	MESSAGE_PART_METADATA_MIGRATION,
+	MESSAGE_PART_READ_MIGRATION,
 	MESSAGE_PART_SURFACING_MIGRATION,
 	MESSAGE_PART_VERSIONS_MIGRATION,
 	MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION,
@@ -1270,6 +1271,9 @@ export const effectMigrationEntries = {
 	),
 	"0066_surfacing_marks": executeSqlStatements(
 		readMigrationSql(SURFACING_MARKS_MIGRATION),
+	),
+	"0067_message_part_read": executeSqlStatements(
+		readMigrationSql(MESSAGE_PART_READ_MIGRATION),
 	),
 } satisfies Record<
 	string,

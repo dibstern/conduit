@@ -117,6 +117,7 @@ describe("Bound project provenance", () => {
 			"0064_message_part_surfacing",
 			"0065_sessions_settled_shelf_index",
 			"0066_surfacing_marks",
+			"0067_message_part_read",
 		]);
 	});
 

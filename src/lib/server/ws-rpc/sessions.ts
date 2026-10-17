@@ -37,6 +37,7 @@ import {
 	ConfigTag,
 	LoggerTag,
 } from "../../domain/relay/Services/services.js";
+import { setRead } from "../../domain/relay/Services/session-attention.js";
 import { forkSession } from "../../domain/relay/Services/session-command.js";
 import { SessionGitServiceTag } from "../../domain/relay/Services/session-git-service.js";
 import {
@@ -523,6 +524,11 @@ export const sessionsHandlers = {
 				),
 			),
 		),
+	SetMessagesRead: (request) =>
+		setRead(request.partIds, request.read, request.sessionId).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchAll(mapRpcFailure("SetMessagesRead")),
+		),
 	CreateSession: (request) =>
 		Effect.gen(function* () {
 			if (request.worktreeBase !== undefined && !request.newWorktree)
@@ -928,6 +934,7 @@ export const sessionsHandlers = {
 	| "GetContinuationHandoff"
 	| "MarkSessionUnread"
 	| "MarkSessionRead"
+	| "SetMessagesRead"
 	| "MarkSessionSeen"
 	| "CreateSession"
 	| "ViewSession"

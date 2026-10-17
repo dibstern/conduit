@@ -124,6 +124,7 @@ export interface AssistantMessage {
 	surfacingSetVersion?: number;
 	surfacingModel?: string;
 	surfacingMark?: SurfacingMark | null;
+	surfacingRead?: boolean;
 	needsRender?: boolean;
 	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
 	createdAt?: number;

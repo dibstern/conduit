@@ -1,9 +1,10 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 import type { SurfacingMark } from "../../../src/lib/contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/message-surfacing.js";
-import type {
-	HistoryMessagePartSchema,
-	HistoryMessageSchema,
+import {
+	type HistoryMessagePartSchema,
+	type HistoryMessageSchema,
+	WsRpcError,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { detailRowsOf } from "../../../test/helpers/detail-rows.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
@@ -29,6 +30,8 @@ const SESSION = "sess-surfacing";
 const START = PINNED_CLOCK_MS - 90_000;
 const PENDING = "surfacing-agent/surfacing-pending";
 const fixtures = new WeakMap<Page, History[]>();
+const readFixtures = new WeakMap<Page, ReadonlySet<number>>();
+const failingReadWrites = new WeakSet<Page>();
 const levels = {
 	Final: "final",
 	Key: "key",
@@ -229,6 +232,35 @@ async function pick(page: Page, ordinal: string): Promise<void> {
 	await expect(card(page)).toHaveAttribute("data-ordinal", ordinal);
 }
 
+function readRequests(page: Page) {
+	return requireRpcControl(page)
+		.getRequests()
+		.filter((request) => request.tag === "SetMessagesRead");
+}
+
+function trackReads(page: Page): void {
+	const read = readFixtures.get(page);
+	if (!read) return;
+	requireRpcControl(page).setStubs({
+		SetMessagesRead: ({ sessionId, partIds, read }) => {
+			expect(sessionId).toBe(SESSION);
+			if (failingReadWrites.has(page))
+				throw new WsRpcError({ message: "Read state is unavailable" });
+			const selected = new Set(partIds);
+			publish(
+				page,
+				(fixtures.get(page) ?? []).map((message) => ({
+					...message,
+					parts: message.parts?.map((part) =>
+						selected.has(part.id) ? { ...part, surfacingRead: read } : part,
+					),
+				})),
+			);
+			return { ok: true };
+		},
+	});
+}
+
 export const surfacingCardHandlers: StepHandler[] = [
 	{
 		name: "opt into surfacing before app startup",
@@ -258,7 +290,26 @@ export const surfacingCardHandlers: StepHandler[] = [
 			/^the surfacing session has an? (live|settled|short|hand-back|older|empty|dense) turn$/,
 		run: async ({ world, match }) => {
 			const kind = match[1] as FixtureKind;
-			publish(world.page, history(kind));
+			const read = readFixtures.get(world.page);
+			if (read) {
+				await world.page.clock.install({ time: PINNED_CLOCK_MS });
+				await world.page.clock.pauseAt(PINNED_CLOCK_MS + 1_000);
+			}
+			trackReads(world.page);
+			publish(
+				world.page,
+				history(kind).map((message) => ({
+					...message,
+					parts: message.parts?.map((part) =>
+						read && part.type === "text"
+							? {
+									...part,
+									surfacingRead: read.has(part.surfacingOrdinal ?? -1),
+								}
+							: part,
+					),
+				})),
+			);
 			setSessionRowStatus(
 				world.page,
 				SESSION,
@@ -438,6 +489,241 @@ export const surfacingCardHandlers: StepHandler[] = [
 				element.style.width = `${width}px`;
 			}, Number(match[1]));
 			await expect(lane).toHaveAttribute("data-lane-width", match[1] ?? "");
+		},
+	},
+	{
+		name: "enable deterministic message read fixtures",
+		match:
+			/^surfacing read tracking starts with (none|[\d,]+) read and summaries off$/,
+		run: ({ world, match }) => {
+			readFixtures.set(
+				world.page,
+				new Set(match[1] === "none" ? [] : match[1]?.split(",").map(Number)),
+			);
+			const settings = mockMessageSurfacing.get(world.page);
+			if (!settings) throw new Error("Configure message surfacing first");
+			mockMessageSurfacing.set(world.page, {
+				...settings,
+				recap: { ...settings.recap, model: "off" },
+			});
+		},
+	},
+	{
+		name: "start a fresh continuous read interval",
+		match: /^I start reading surfaced message #(\d+)$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			await card(page).scrollIntoViewIfNeeded();
+			await expect(card(page)).toBeInViewport();
+			await page.clock.runFor(32);
+			await pick(page, match[1] === "1" ? "2" : "1");
+			await pick(page, match[1] ?? "");
+		},
+	},
+	{
+		name: "advance the continuous read clock",
+		match: /^the surfacing read clock advances (\d+) milliseconds$/,
+		run: async ({ world, match }) => {
+			await world.page.clock.runFor(Number(match[1]));
+		},
+	},
+	{
+		name: "assert read state changes use the RPC boundary",
+		match: /^the surfacing read RPC count is (\d+)$/,
+		run: async ({ world, match }) => {
+			await expect
+				.poll(() => readRequests(world.page).length)
+				.toBe(Number(match[1]));
+		},
+	},
+	{
+		name: "assert exact read RPC targets",
+		match:
+			/^surfacing read RPC (\d+) marks only messages ([\d,]+) (read|unread)$/,
+		run: async ({ world, match }) => {
+			await expect
+				.poll(() => readRequests(world.page)[Number(match[1]) - 1]?.payload)
+				.toEqual({
+					_tag: "SetMessagesRead",
+					sessionId: SESSION,
+					partIds: match[2]
+						?.split(",")
+						.map((ordinal) => `surfacing-part-${ordinal}`),
+					read: match[3] === "read",
+				});
+		},
+	},
+	{
+		name: "assert card checkbox reflects persisted read state",
+		match: /^the surfaced message Read checkbox is (checked|unchecked)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.getByTestId("surfacing-read-toggle")).toBeChecked(
+				{ checked: match[1] === "checked" },
+			);
+		},
+	},
+	{
+		name: "toggle card read state explicitly",
+		match: /^I (check|uncheck) the surfaced message Read checkbox$/,
+		run: async ({ world, match }) => {
+			const checkbox = world.page.getByTestId("surfacing-read-toggle");
+			await expect(checkbox).toBeChecked({ checked: match[1] !== "check" });
+			await checkbox.click();
+		},
+	},
+	{
+		name: "assert head unread count at the effective level",
+		match: /^the surfacing head says (\d+ unread|All read ✓)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.getByTestId("surfacing-head-unread")).toHaveText(
+				match[1] ?? "",
+			);
+		},
+	},
+	{
+		name: "change document visibility without relying on browser focus",
+		match: /^the surfacing document becomes (hidden|visible)$/,
+		run: async ({ world, match }) => {
+			await world.page.evaluate((visibility) => {
+				Object.defineProperty(document, "visibilityState", {
+					configurable: true,
+					value: visibility,
+				});
+				Object.defineProperty(document, "hidden", {
+					configurable: true,
+					value: visibility === "hidden",
+				});
+				document.dispatchEvent(new Event("visibilitychange"));
+			}, match[1]);
+		},
+	},
+	{
+		name: "move the real card outside and inside the viewport",
+		match: /^the surfaced card moves (outside|inside) the viewport$/,
+		run: async ({ world, match }) => {
+			await card(world.page).evaluate((element, outside) => {
+				element.style.transform = outside ? "translateY(-200vh)" : "";
+			}, match[1] === "outside");
+			await world.page.clock.runFor(32);
+			if (match[1] === "outside")
+				await expect(card(world.page)).not.toBeInViewport();
+			else await expect(card(world.page)).toBeInViewport();
+		},
+	},
+	{
+		name: "scrub slowly without reading intermediate messages",
+		match: /^I slowly scrub pins from #(\d+) through #(\d+) to #(\d+)$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			const lane = await panel(page)
+				.getByTestId("surfacing-pins")
+				.boundingBox();
+			const scrub = await panel(page)
+				.getByTestId("surfacing-scrub")
+				.boundingBox();
+			if (!lane || !scrub) throw new Error("Missing scrub bounds");
+			const xOf = async (ordinal: string) =>
+				scrub.x +
+				(scrub.width *
+					Number(await pin(page, ordinal).getAttribute("data-x"))) /
+					100;
+			await page.mouse.move(
+				await xOf(match[1] ?? ""),
+				lane.y + lane.height / 2,
+			);
+			await page.mouse.down();
+			for (const ordinal of [match[2], match[3]]) {
+				await page.mouse.move(
+					await xOf(ordinal ?? ""),
+					lane.y + lane.height / 2,
+					{ steps: 8 },
+				);
+				await expect(card(page)).toHaveAttribute("data-ordinal", ordinal ?? "");
+				await page.clock.runFor(1_200);
+				expect(readRequests(page)).toHaveLength(0);
+			}
+			await page.mouse.up();
+		},
+	},
+	{
+		name: "mark all messages at the effective level read",
+		match: /^I mark (\d+) surfaced messages read$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.getByTestId("surfacing-mark-read")
+				.filter({ hasText: `Mark ${match[1]} read` })
+				.click();
+			// The button unmounts; keep the pointer off whatever slides under it.
+			await world.page.mouse.move(0, 0);
+		},
+	},
+	{
+		name: "assert axis bulk read count and zero state",
+		match: /^the surfacing axis offers (?:Mark (\d+) read|no bulk read)$/,
+		run: async ({ world, match }) => {
+			const button = world.page.getByTestId("surfacing-mark-read");
+			if (match[1] === undefined) await expect(button).toHaveCount(0);
+			else {
+				await expect(button).toHaveText(`✓ Mark ${match[1]} read`);
+				await expect(button).toBeEnabled();
+			}
+		},
+	},
+	{
+		name: "jump to the next unread message from the head",
+		match: /^I open the next unread surfaced message from the head$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("surfacing-head-unread").click();
+			// reveal() waits a frame, and read fixtures pause the clock.
+			await world.page.clock.runFor(32);
+		},
+	},
+	{
+		name: "use focused read state shortcuts",
+		match: /^I press surfacing read shortcut (u|m)$/,
+		run: async ({ world, match }) => {
+			await (match[1] === "m"
+				? world.page.getByTestId("surfacing-read-toggle")
+				: card(world.page)
+			).focus();
+			await world.page.keyboard.press(match[1] ?? "");
+			await world.page.clock.runFor(32);
+		},
+	},
+	{
+		name: "fail or recover persisted message read writes",
+		match: /^surfacing read writes (fail|recover)$/,
+		run: ({ world, match }) => {
+			if (match[1] === "fail") failingReadWrites.add(world.page);
+			else failingReadWrites.delete(world.page);
+		},
+	},
+	{
+		name: "assert failed read writes do not report success",
+		match: /^the surfaced message reports a read save failure$/,
+		run: async ({ world }) => {
+			await expect(panel(world.page).getByRole("alert")).toContainText(
+				"Couldn't save read state",
+			);
+			await expect(
+				world.page.getByTestId("surfacing-read-toggle"),
+			).not.toBeChecked();
+			expect(
+				fixtures
+					.get(world.page)
+					?.flatMap((message) => message.parts ?? [])
+					.find((part) => part.id === "surfacing-part-8")?.surfacingRead,
+			).toBe(false);
+		},
+	},
+	{
+		name: "set the surfacing capture theme",
+		match: /^the surfacing capture uses the (dark|light) theme$/,
+		run: async ({ world, match }) => {
+			await world.page.clock.resume();
+			await world.page.evaluate((light) => {
+				document.documentElement.classList.toggle("light-theme", light);
+			}, match[1] === "light");
 		},
 	},
 	{
@@ -714,6 +1000,9 @@ export const surfacingCardHandlers: StepHandler[] = [
 										id: "surfacing-pending",
 										type: "text",
 										text: "I am inspecting the final dependency.",
+										...(readFixtures.has(world.page)
+											? { surfacingRead: false }
+											: {}),
 										time: {
 											start: PINNED_CLOCK_MS - 12_000,
 											end: PINNED_CLOCK_MS - 11_000,

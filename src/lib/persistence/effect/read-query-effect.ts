@@ -928,6 +928,26 @@ function groupMessagesWithPartsAndTurnModels(
 
 export const makeReadQueryEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+	// Read state is an annotation beside the replay-owned rows; only surfaced
+	// text parts carry it.
+	const withPartReadState = (parts: readonly MessagePartRow[]) => {
+		const surfaced = parts.flatMap((part) =>
+			part.surfacing_ordinal == null ? [] : [part.id],
+		);
+		if (surfaced.length === 0) return Effect.succeed(parts);
+		return sql<{ part_id: string }>`
+			SELECT part_id FROM message_part_read_state
+			WHERE part_id IN (SELECT value FROM json_each(${JSON.stringify(surfaced)}))`.pipe(
+			Effect.map((rows) => {
+				const read = new Set(rows.map((row) => row.part_id));
+				return parts.map((part) =>
+					part.surfacing_ordinal == null
+						? part
+						: { ...part, surfacing_read: read.has(part.id) },
+				);
+			}),
+		);
+	};
 	// The provider may reconcile streamed timestamps while a rewind is pending.
 	// Visibility follows the transcript's current (created_at, id) ordering.
 	const pendingRewindHides = (table: "messages" | "m" = "messages") => sql`
@@ -983,7 +1003,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	// never-cut tools come back whole. Only results whose stored JSON is over
 	// the budget are decoded, and parts' rest_payload blobs stay behind.
 	// `source` is the FROM clause over `message_parts mp`.
-	const previewParts = (source: Fragment) => sql<MessagePartRow>`
+	const previewParts = (source: Fragment) =>
+		sql<MessagePartRow>`
 		SELECT id, message_id, type, text, tool_name, call_id, input, metadata,
 			duration, status, sort_order, created_at, updated_at, version,
 			surfacing_ordinal, surfacing_probabilities, surfacing_set_version, surfacing_model,
@@ -1001,7 +1022,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				THEN ${toolOutput} END AS output
 			${source}
 		)
-		ORDER BY message_id, sort_order`;
+		ORDER BY message_id, sort_order`.pipe(Effect.flatMap(withPartReadState));
 
 	const readToolDetails = (
 		sessionId: string,
@@ -1483,7 +1504,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				JOIN target_messages tm ON mp.message_id = tm.id
 				ORDER BY mp.message_id, mp.sort_order`;
 
-			return groupMessagesWithPartsAndTurnModels(messages, parts);
+			return groupMessagesWithPartsAndTurnModels(
+				messages,
+				yield* withPartReadState(parts),
+			);
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ReadQueryEffectError
@@ -1814,7 +1838,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							WHERE mp.message_id IN ${sql.in(page.map((message) => message.id))}
 							ORDER BY mp.message_id, mp.sort_order`;
 						messages.push(
-							...groupMessagesWithPartsAndTurnModels(fullPage, parts),
+							...groupMessagesWithPartsAndTurnModels(
+								fullPage,
+								yield* withPartReadState(parts),
+							),
 						);
 					}
 					if (!forward) messages.reverse();
