@@ -135,6 +135,7 @@ export interface MessagePartRow {
 	surfacing_probabilities?: string | null;
 	surfacing_set_version?: number | null;
 	surfacing_model?: string | null;
+	surfacing_mark?: string | null;
 	rest_payload?: string | null;
 	/** Set when a previewing read cut `result`: the whole output's UTF-8 size. */
 	result_bytes?: number | null;

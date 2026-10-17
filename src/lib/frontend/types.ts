@@ -5,6 +5,7 @@
 // frontend code can import everything from "./types.js".
 // Types also used locally in this file are imported separately.
 
+import type { SurfacingMark } from "../contracts/category-set.js";
 import type { ProjectSetupState } from "../contracts/project-setup.js";
 import type { InputCut, Utf8Bytes } from "../contracts/tool-wire.js";
 import type {
@@ -122,6 +123,7 @@ export interface AssistantMessage {
 	surfacingProbabilities?: Record<string, number> | null;
 	surfacingSetVersion?: number;
 	surfacingModel?: string;
+	surfacingMark?: SurfacingMark | null;
 	needsRender?: boolean;
 	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
 	createdAt?: number;

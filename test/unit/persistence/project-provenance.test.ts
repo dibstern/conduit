@@ -116,6 +116,7 @@ describe("Bound project provenance", () => {
 			"0063_goal_check_metadata",
 			"0064_message_part_surfacing",
 			"0065_sessions_settled_shelf_index",
+			"0066_surfacing_marks",
 		]);
 	});
 

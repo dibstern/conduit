@@ -175,8 +175,26 @@ export type SurfacingLevel = typeof SurfacingLevelSchema.Type;
 export const SurfacingMarkSchema = Schema.Struct({
 	level: SurfacingLevelSchema,
 	category: Schema.optional(Schema.String),
+	reason: Schema.optional(Schema.String),
+	direction: Schema.optional(Schema.Literal("raise", "lower", "retype")),
 });
 export type SurfacingMark = typeof SurfacingMarkSchema.Type;
+
+export const SurfacingFeedbackEntrySchema = Schema.Struct({
+	projectId: Schema.String,
+	sessionId: Schema.String,
+	partId: Schema.String,
+	messageId: Schema.String,
+	turnId: Schema.NullOr(Schema.String),
+	ordinal: Schema.NullOr(Schema.Number),
+	text: Schema.String,
+	probabilities: Schema.NullOr(
+		Schema.Record({ key: Schema.String, value: Schema.Number }),
+	),
+	mark: SurfacingMarkSchema,
+	createdAt: Schema.Number,
+});
+export type SurfacingFeedbackEntry = typeof SurfacingFeedbackEntrySchema.Type;
 
 /** No provider calls or stored levels: every consumer scores against today's set. */
 export function surfacingLevel(

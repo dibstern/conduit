@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import type { SurfacingMark } from "../../../src/lib/contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/message-surfacing.js";
 import type {
 	HistoryMessagePartSchema,
@@ -204,6 +205,22 @@ function publish(page: Page, messages: History[]): void {
 	requireRpcControl(page).setDetailRows(
 		SESSION,
 		messages.flatMap(detailRowsOf),
+	);
+}
+
+export function setSurfacingFixtureMark(
+	page: Page,
+	partId: string,
+	mark: SurfacingMark | null,
+): void {
+	publish(
+		page,
+		(fixtures.get(page) ?? []).map((message) => ({
+			...message,
+			parts: message.parts?.map((part) =>
+				part.id === partId ? { ...part, surfacingMark: mark } : part,
+			),
+		})),
 	);
 }
 
@@ -977,6 +994,14 @@ export const surfacingCardHandlers: StepHandler[] = [
 					key,
 				);
 				expect(prevented, `Focused turn must consume ${key}`).toBe(true);
+				if (
+					(key === "+" || key === "−") &&
+					(await page.getByTestId("surfacing-mark-why").count()) > 0
+				) {
+					await page.keyboard.press("Escape");
+					await expect(page.getByTestId("surfacing-mark-why")).toHaveCount(0);
+					await expect(card(page)).toBeFocused();
+				}
 			}
 			await page.keyboard.press("Escape");
 			await expect(card(page)).toHaveCount(0);

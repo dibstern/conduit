@@ -10,7 +10,7 @@ import type { ActivityPart } from "./turns.js";
 export type SurfaceLevel = MessageSurfacingPreferences["defaultLevel"];
 export type SurfacePart = AssistantMessage & {
 	/** Annotation owners supply these; surfacing never writes them. */
-	surfacingMark?: SurfacingMark;
+	surfacingMark?: SurfacingMark | null;
 	surfacingRead?: boolean;
 };
 
@@ -53,11 +53,12 @@ export function surfaceTurn(input: {
 		const pending =
 			input.live &&
 			part === newest &&
-			part.surfacingProbabilities === undefined;
+			part.surfacingProbabilities === undefined &&
+			!message.surfacingMark;
 		const result = surfacingLevel(
 			{ probabilities: part.surfacingProbabilities ?? null },
 			input.categorySet,
-			message.surfacingMark,
+			message.surfacingMark ?? undefined,
 		);
 		const category = input.categorySet.categories.find(
 			({ id }) => id === result.category,
@@ -102,7 +103,7 @@ export function surfaceTurn(input: {
 				...surfacingLevel(
 					{ probabilities: part.surfacingProbabilities ?? null },
 					input.categorySet,
-					message.surfacingMark,
+					message.surfacingMark ?? undefined,
 				),
 			},
 		];
@@ -120,7 +121,9 @@ export function surfaceTurn(input: {
 	const picked = messages.find(
 		({ part }) =>
 			part.uuid === input.picked &&
-			(input.live || part.surfacingProbabilities !== undefined),
+			(input.live ||
+				part.surfacingProbabilities !== undefined ||
+				!!part.surfacingMark),
 	);
 	const short =
 		turnMessages.filter(({ level }) => level !== "hidden").length < 4;

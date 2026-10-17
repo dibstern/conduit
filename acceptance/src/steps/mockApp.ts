@@ -40,6 +40,7 @@ import {
 	serveModelCatalog,
 	setSessionRowStatus,
 } from "./shared.js";
+import { surfacingMarkStubs } from "./surfacingMarks.js";
 
 const mockClaudeSettings = new WeakMap<Page, ClaudeSettingsOverrides>();
 /** GetAgents replies wait on this until the provider lookup answers. */
@@ -641,6 +642,7 @@ export const mockAppHandlers: StepHandler[] = [
 					],
 				},
 				stubs: {
+					...surfacingMarkStubs(page),
 					GetMessageSurfacing: () =>
 						mockMessageSurfacing.get(page) ?? {
 							...DEFAULT_MESSAGE_SURFACING_SETTINGS,

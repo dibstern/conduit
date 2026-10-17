@@ -8,6 +8,7 @@ import {
 } from "../../contracts/message-surfacing.js";
 import { rpc } from "../transport/ws-rpc-client.js";
 import type { SurfaceLevel } from "../utils/surface-turn.js";
+import { loadSurfacingFeedback } from "./surfacing-feedback.svelte.js";
 
 const STORAGE_KEY = "surfacing-level-by-session";
 const LIMIT = 100;
@@ -60,6 +61,7 @@ export async function loadMessageSurfacing(): Promise<void> {
 		if (version !== loadVersion) return;
 		messageSurfacing.categorySet = categorySet;
 		messageSurfacing.status = status;
+		if (status.active) void loadSurfacingFeedback();
 	} catch {
 		if (version === loadVersion)
 			messageSurfacing.status = { ...messageSurfacing.status, active: false };
