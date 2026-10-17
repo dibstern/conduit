@@ -7,9 +7,9 @@
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { failureLine } from "../../transport/rpc-errors.js";
 	import SettingsPicker from "../ui/SettingsPicker.svelte";
-	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
 
+	let open = $state(false);
 	let logLevel = $state("");
 	let saving = $state(false);
 	let error = $state<string | null>(null);
@@ -38,7 +38,10 @@
 	}
 </script>
 
-<SettingsGroup id="server-logs" title="Logs" testId="server-logs-group">
+<div id="server-logs" data-testid="server-logs-group">
+	<SettingsRow label="Logs" summary={logLevel || undefined} expanded={open} onclick={() => (open = !open)} />
+	{#if open}
+	<div class="border-t border-settings-separator">
 	<SettingsRow
 		label="Log level"
 		labelFor="server-log-level"
@@ -58,6 +61,8 @@
 		{/snippet}
 	</SettingsRow>
 	{#if error}
-		<p id="server-log-level-error" role="alert" class="px-3 py-2 text-sm text-error">{error}</p>
+		<p id="server-log-level-error" role="alert" class="px-[14px] py-2 text-[12px] text-error">{error}</p>
 	{/if}
-</SettingsGroup>
+	</div>
+	{/if}
+</div>

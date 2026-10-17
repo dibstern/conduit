@@ -24,7 +24,6 @@
 <SettingsGroup id="settings-composer" title="Composer">
 	<SettingsRow
 		label="Controls"
-		description="Icons puts model, effort and approvals in the composer as icon buttons. Words lists them as text under the field."
 	>
 		{#snippet control()}
 			<SegmentedControl
@@ -38,7 +37,7 @@
 	<SettingsRow
 		label="Context warning"
 		labelFor="settings-composer-context-warning"
-		description="Warn when context is this full. Shows the Compact bar and turns the context % amber. Never hides both."
+		description="When the composer starts warning about context"
 	>
 		{#snippet control()}
 			<SettingsPicker

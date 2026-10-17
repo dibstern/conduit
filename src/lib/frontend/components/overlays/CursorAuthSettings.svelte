@@ -29,11 +29,10 @@
 	});
 </script>
 
-<SettingsGroup testId="cursor-accounts-list">
-	<div class="bg-[rgba(var(--overlay-rgb),0.015)] px-3 py-2 text-[10.5px] font-semibold uppercase tracking-[0.07em] text-text-muted"><h4>{copy.title}</h4></div>
-	<div class="flex flex-col gap-2 border-t border-border-subtle px-3 py-3 text-xs" data-testid={account ? `instance-row-${account.id}` : "cursor-auth-account"} data-driver="cursor">
+<SettingsGroup title={copy.title} testId="cursor-accounts-list">
+	<div class="flex flex-col gap-2 px-[14px] py-[10px] text-[12px] leading-[1.4]" data-testid={account ? `instance-row-${account.id}` : "cursor-auth-account"} data-driver="cursor">
 		{#if account}
-			<div class="flex min-w-0 items-center gap-2 text-text">
+			<div class="flex min-w-0 items-center gap-2 text-[13.5px] text-text max-md:text-[15px]">
 				<AccountDot instanceId={account.id} size={9} />
 				<span class="truncate">{account.name}</span>
 				{#if account.isDefault}<Badge variant="quiet" size="xs" shape="pill" data-testid="default-account-marker">default</Badge>{/if}
@@ -61,24 +60,24 @@
 				<div class="flex flex-col items-start gap-2" data-testid="cursor-login-prompt">
 					<p class="text-text-muted">{copy.pending}</p>
 					{#if loginUrl}
-						<Button variant="primary" size="sm" href={loginUrl} target="_blank" rel="noopener noreferrer" data-testid="cursor-login-link">{copy.openLogin}</Button>
+						<Button touchTarget variant="primary" size="sm" href={loginUrl} target="_blank" rel="noopener noreferrer" data-testid="cursor-login-link">{copy.openLogin}</Button>
 						<p class="max-w-full break-all font-mono text-[11px] text-text-muted" data-testid="cursor-login-url">{loginUrl}</p>
 					{:else}<p class="text-text-muted">Waiting for the login link…</p>{/if}
 					{#if auth?.login.deadlineAtMs !== undefined}<p data-testid="cursor-login-deadline" class="text-text-muted">Complete login by <time datetime={new Date(auth.login.deadlineAtMs).toISOString()}>{new Date(auth.login.deadlineAtMs).toLocaleTimeString()}</time></p>{/if}
-					<Button variant="secondary" size="sm" disabled={cursorAuth.busy} data-testid="cursor-login-cancel" onclick={() => void changeCursorAuth("CancelCursorLogin")}>{copy.cancel}</Button>
+					<Button touchTarget variant="secondary" size="sm" disabled={cursorAuth.busy} data-testid="cursor-login-cancel" onclick={() => void changeCursorAuth("CancelCursorLogin")}>{copy.cancel}</Button>
 				</div>
 			{:else}
 				{#if auth?.login.state === "cancelled"}<p data-testid="cursor-login-result" class="text-text-muted">Login cancelled.</p>
 				{:else if auth?.login.state === "timed-out"}<p role="alert" data-testid="cursor-login-result" class="text-warning">Login timed out. Start again to get a new link.</p>
 				{:else if auth?.login.state === "error"}<p role="alert" data-testid="cursor-login-result" class="text-error">{auth.login.error ?? "Login failed. Try again."}</p>{/if}
 				<div class="flex flex-wrap gap-2">
-					<Button variant="secondary" size="sm" disabled={cursorAuth.busy} data-testid="cursor-login-start" onclick={() => void changeCursorAuth("StartCursorLogin")}>{copy.login}</Button>
-					{#if auth?.source === "sdk-login"}<Button variant="danger-outline" size="sm" disabled={cursorAuth.busy} data-testid="cursor-logout" onclick={() => void changeCursorAuth("LogoutCursor")}>{copy.logout}</Button>{/if}
-					<Button variant="ghost-accent" size="sm" disabled={cursorAuth.busy} data-testid="cursor-auth-refresh" onclick={() => void refreshCursorAuth()}>Refresh status</Button>
+					<Button touchTarget variant="secondary" size="sm" disabled={cursorAuth.busy} data-testid="cursor-login-start" onclick={() => void changeCursorAuth("StartCursorLogin")}>{copy.login}</Button>
+					{#if auth?.source === "sdk-login"}<Button touchTarget variant="danger-outline" size="sm" disabled={cursorAuth.busy} data-testid="cursor-logout" onclick={() => void changeCursorAuth("LogoutCursor")}>{copy.logout}</Button>{/if}
+					<Button touchTarget variant="ghost-accent" size="sm" disabled={cursorAuth.busy} data-testid="cursor-auth-refresh" onclick={() => void refreshCursorAuth()}>Refresh status</Button>
 				</div>
 			{/if}
 		{:else if !auth && cursorAuth.error}
-			<Button variant="secondary" size="sm" disabled={cursorAuth.busy} data-testid="cursor-auth-refresh" onclick={() => void refreshCursorAuth()}>Refresh status</Button>
+			<Button touchTarget variant="secondary" size="sm" disabled={cursorAuth.busy} data-testid="cursor-auth-refresh" onclick={() => void refreshCursorAuth()}>Refresh status</Button>
 		{/if}
 	</div>
 </SettingsGroup>

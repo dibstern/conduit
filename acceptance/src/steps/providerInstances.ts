@@ -725,6 +725,9 @@ export const providerInstancesHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const page = world.page;
 			const section = page.locator("#usage-settings");
+			// Phone hides the handles until Edit order is tapped.
+			if (match[2] === "touch")
+				await section.getByTestId("usage-settings-reorder").click();
 			const handle = section.getByRole("button", {
 				name: `Reorder ${match[1]}`,
 			});

@@ -101,6 +101,7 @@
     Workflow,
     Radar,
     Gauge,
+    Server,
     Timer,
   } from '@lucide/svelte';
   import ClaudeMark from './marks/ClaudeMark.svelte';
@@ -219,6 +220,7 @@
     'workflow': Workflow,
     'radar': Radar,
     'gauge': Gauge,
+    'server': Server,
     'timer': Timer,
 
     // Harness brand marks (not lucide).

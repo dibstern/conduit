@@ -5,6 +5,7 @@
 <script lang="ts">
 	import { onMount, tick } from "svelte";
 	import { loadServerStatus } from "../../stores/server-status.svelte.js";
+	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import ServerStatusSettings from "./ServerStatusSettings.svelte";
 	import InstancesSettingsTab from "./InstancesSettingsTab.svelte";
 	import ServerSecuritySettings from "./ServerSecuritySettings.svelte";
@@ -31,12 +32,14 @@
 	}
 </script>
 
-<div bind:this={sectionEl} class="flex flex-col gap-[7px]" data-testid="server-settings">
+<div bind:this={sectionEl} class="flex flex-col" data-testid="server-settings">
 	<ServerStatusSettings {openForm} onToggleForm={toggleForm} {onClose} />
-	<InstancesSettingsTab {openForm} onToggleForm={toggleForm} {onOpenUsage} />
+	<ServerAccessSettings />
 	<ServerSecuritySettings {openForm} onToggleForm={toggleForm} />
 	<ServerPowerSettings {openForm} onToggleForm={toggleForm} />
-	<ServerAccessSettings />
-	<ServerLogsSettings />
-	<ServerStartupSettings />
+	<SettingsGroup title="Advanced">
+		<ServerStartupSettings />
+		<ServerLogsSettings />
+	</SettingsGroup>
+	<InstancesSettingsTab {openForm} onToggleForm={toggleForm} {onOpenUsage} />
 </div>

@@ -36,27 +36,29 @@
 		: never;
 </script>
 
-<div class="flex flex-col gap-[6px] px-3 py-2" data-testid="claude-setting-{key}">
-	{#if row.label}<SettingsRow {...row} label={row.label} class="p-0" />{/if}
-	{#if below}
-		<div class="flex flex-col gap-[6px]">{@render below()}</div>
-	{/if}
-	{#if provenance}
-		<div
-			class="flex items-center justify-between gap-3 text-[11px] text-text-muted"
-			data-testid="claude-setting-{key}-provenance"
-		>
-			<span>
-				{provenance.beforeSource ?? ""}{#if provenance.sourceLabel}<span class="text-text-secondary" title={provenance.sourcePath}>{provenance.sourceLabel}</span>{/if}{provenance.afterSource ?? (provenance.sourceLabel ? "" : provenance.text)}
-			</span>
-			{#if provenance.canReset}
-				<TextButton
-					class="shrink-0"
-					data-testid="claude-setting-{key}-reset"
-					onclick={() => void onreset?.()}
+<div data-testid="claude-setting-{key}">
+	{#if row.label}<SettingsRow {...row} label={row.label} />{/if}
+	{#if below || provenance}
+		<div class="flex flex-col gap-[6px] px-[14px] pb-[10px] text-[12px] leading-[1.4] {row.label ? '' : 'pt-[12px]'}">
+			{#if below}{@render below()}{/if}
+			{#if provenance}
+				<div
+					class="flex items-center justify-between gap-[12px] text-text-muted"
+					data-testid="claude-setting-{key}-provenance"
 				>
-					Reset
-				</TextButton>
+					<span class="min-w-0 break-words">
+						{provenance.beforeSource ?? ""}{#if provenance.sourceLabel}<span class="text-text-secondary" title={provenance.sourcePath}>{provenance.sourceLabel}</span>{/if}{provenance.afterSource ?? (provenance.sourceLabel ? "" : provenance.text)}
+					</span>
+					{#if provenance.canReset}
+						<TextButton
+							class="shrink-0 max-md:min-h-[44px] max-md:min-w-[44px]"
+							data-testid="claude-setting-{key}-reset"
+							onclick={() => void onreset?.()}
+						>
+							Reset
+						</TextButton>
+					{/if}
+				</div>
 			{/if}
 		</div>
 	{/if}

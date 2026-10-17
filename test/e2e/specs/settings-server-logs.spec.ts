@@ -100,7 +100,12 @@ async function openServer(page: Page): Promise<void> {
 		await page.getByTestId("overflow-settings").click();
 	}
 	await page.getByTestId("settings-tab-server").click();
-	await expect(page.getByTestId("server-logs-group")).toBeVisible();
+	const logs = page.getByTestId("server-logs-group");
+	await expect(logs).toBeVisible();
+	await logs.getByRole("button", { name: /^Logs\b/ }).click();
+	await expect(
+		logs.getByRole("button", { name: /^Log level\b/ }),
+	).toBeVisible();
 }
 
 test("Log level updates daemon status and survives reopening Settings", async ({

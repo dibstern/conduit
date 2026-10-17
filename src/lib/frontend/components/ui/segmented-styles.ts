@@ -97,16 +97,14 @@ export const SEGMENTED_VARIANTS = {
 		unselected: "text-text-muted hover:text-text disabled:opacity-50",
 	},
 	/**
-	 * overlays/SettingsPanel's left section list (frame H): a vertical Tabs
-	 * whose selected row takes the alt fill. Full-width rows, so the whole
-	 * line is the hit target. On a phone the list is a whole screen you drill
-	 * in from, so rows grow to a 44px thumb target and a step larger type.
+	 * Final settings rail. On phones, Tabs groups the navigation rows into
+	 * cards and selection pushes a page.
 	 */
 	sections: {
-		list: "flex flex-col gap-[2px]",
-		item: "w-full text-left px-[8px] py-[6px] rounded-[7px] text-[11.5px] leading-[15px] max-md:flex max-md:items-center max-md:min-h-[44px] max-md:text-[13px] cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text disabled:opacity-50",
-		selected: "bg-bg-alt text-text",
-		unselected: "text-text-secondary hover:text-text",
+		list: "flex flex-col",
+		item: "group flex w-full min-h-[32px] items-center gap-[9px] rounded-[8px] px-[10px] text-left text-[13px] leading-[18px] max-md:min-h-[48px] max-md:gap-[12px] max-md:rounded-none max-md:px-[14px] max-md:text-[15px] cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text disabled:opacity-50",
+		selected: "bg-selection text-text font-medium max-md:bg-settings-card",
+		unselected: "text-text-secondary hover:text-text max-md:text-text",
 	},
 } as const satisfies Record<string, SegmentedRecipe>;
 

@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { serverStatus } from "../../stores/server-status.svelte.js";
-	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
 
 	// Read-only on purpose: changing port or host from a browser can strand that browser.
@@ -14,20 +13,18 @@
 	let open = $state(false);
 </script>
 
-<SettingsGroup
-	id="server-startup"
-	title="Set when conduit starts"
-	summary="Port · host · HTTPS · more"
-	collapsible
-	bind:open
-	testId="server-startup-settings"
->
-	<p class="px-3 py-2 text-[11px] text-text-muted">Change these from the terminal, then restart.</p>
-	{#each rows as row (row.id)}
-		<div data-testid="server-startup-{row.id}">
-			<SettingsRow label={row.label} description={row.flag}>
-				{#snippet control()}<span class="text-[11px] text-text-muted">{row.value}</span>{/snippet}
-			</SettingsRow>
+<div id="server-startup" data-testid="server-startup-settings">
+	<SettingsRow label="Set when conduit starts" summary="Port · host · HTTPS · more" expanded={open} onclick={() => (open = !open)} />
+	{#if open}
+		<div class="divide-y divide-settings-separator border-t border-settings-separator">
+			<p class="px-[14px] py-2 text-[12px] text-text-muted">Change these from the terminal, then restart.</p>
+			{#each rows as row (row.id)}
+				<div data-testid="server-startup-{row.id}">
+					<SettingsRow label={row.label} description={row.flag}>
+						{#snippet control()}<span class="text-[13px] text-text-secondary">{row.value}</span>{/snippet}
+					</SettingsRow>
+				</div>
+			{/each}
 		</div>
-	{/each}
-</SettingsGroup>
+	{/if}
+</div>

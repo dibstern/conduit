@@ -184,7 +184,7 @@
 	{#each defaultRows as row (row.harness)}
 		{@const pick = row.state.pick}
 		{@const value = pick ? `${pick.providerId}/${pick.modelId}` : ""}
-		<div class="px-3 py-2">
+		<div>
 			{#snippet controls()}
 				<div class="flex flex-wrap items-center gap-1.5 max-w-full">
 					<SettingsPicker
@@ -221,40 +221,41 @@
 					{/if}
 				</div>
 			{/snippet}
-			<SettingsRow label={row.label} labelFor="settings-harness-default-{row.harness}-model" control={controls} class="p-0" />
+			<SettingsRow label={row.label} labelFor="settings-harness-default-{row.harness}-model" control={controls} />
 			{#if row.state.status !== "ok"}
-				<p class="mt-1 text-[11px] text-text-muted" data-testid="settings-harness-default-{row.harness}-status" data-status={row.state.status}>{defaultProblem(row.state, row.harness, row.label)}</p>
+				<p class="px-[14px] pb-[10px] text-[12px] leading-[1.4] text-text-muted" data-testid="settings-harness-default-{row.harness}-status" data-status={row.state.status}>{defaultProblem(row.state, row.harness, row.label)}</p>
 			{/if}
 		</div>
 	{/each}
 </SettingsGroup>
 
-{#if modelCount > 0 || discoveryState.agents.length > 0}
-<TextInput
-	type="search"
-	size="sm"
-	aria-label="Filter models and agents"
-	data-testid="settings-models-filter"
-	placeholder="Filter {modelCount} models"
-	bind:value={filter}
-/>
-{/if}
-<div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-	<p>Hidden models stay out of the model picker.</p>
-	{#if modelCount > 0}
-		<p class="text-text-muted" data-testid="settings-models-summary">{shownModelCount} of {modelCount} shown</p>
+<div class="mt-[16px] flex flex-col gap-[8px]">
+	{#if modelCount > 0 || discoveryState.agents.length > 0}
+		<TextInput
+			type="search"
+			aria-label="Filter models and agents"
+			data-testid="settings-models-filter"
+			placeholder="Filter {modelCount} models"
+			bind:value={filter}
+		/>
 	{/if}
+	<div class="flex flex-wrap items-center justify-between gap-x-[12px] gap-y-[4px] text-[12px] leading-[1.4] text-text-muted">
+		<p>Hidden models stay out of the model picker.</p>
+		{#if modelCount > 0}
+			<p data-testid="settings-models-summary">{shownModelCount} of {modelCount} shown</p>
+		{/if}
+	</div>
+	<p class="text-[12px] leading-[1.4] text-text-muted">New models and agents appear automatically.</p>
 </div>
-<p class="text-text-muted">New models and agents appear automatically.</p>
 
 <!-- Models -->
 {#if modelProviders.length === 0}
-	<p class="text-text-dimmer">{modelsFetchPending ? "Loading models…" : "No models available"}</p>
+	<p class="mx-[4px] text-[12px] text-text-muted">{modelsFetchPending ? "Loading models…" : "No models available"}</p>
 {/if}
 {#if noMatches}
 	<div class="flex flex-wrap items-center gap-2" data-testid="settings-models-no-match">
 		<span>No models match ‘{filter}’.</span>
-		<TextButton onclick={() => (filter = "")}>Clear</TextButton>
+		<TextButton class="max-md:min-h-[44px] max-md:min-w-[44px]" onclick={() => (filter = "")}>Clear</TextButton>
 	</div>
 {/if}
 {#each providerGroups as { provider, models } (provider.id)}
@@ -268,7 +269,7 @@
 		testId="settings-models-group-{provider.id}"
 	>
 		{#snippet actions()}
-			<TextButton onclick={() => toggleProviderAll(provider.id, allShown)}>
+			<TextButton class="max-md:min-h-[44px] max-md:min-w-[44px]" onclick={() => toggleProviderAll(provider.id, allShown)}>
 				{allShown ? "Hide all" : "Show all"}
 			</TextButton>
 		{/snippet}
@@ -284,7 +285,7 @@
 
 <!-- Agents (current provider scope only) -->
 {#if agentScopeId && filteredAgents.length > 0}
-	<h3 class="mt-2 text-[12px] font-semibold text-text">Agents</h3>
+	<h3 class="mx-[4px] mt-[16px] text-[12px] font-medium text-text-muted max-md:text-[13px]">Agents</h3>
 	<SettingsGroup
 		title="{discoveryState.agentProviderScope?.name} agents"
 		summary="{shownAgentCount} of {discoveryState.agents.length} shown"
@@ -293,7 +294,7 @@
 		testId="settings-agents-group"
 	>
 		{#snippet actions()}
-			<TextButton onclick={() => toggleAgentsAll(shownAgentCount === discoveryState.agents.length)}>
+			<TextButton class="max-md:min-h-[44px] max-md:min-w-[44px]" onclick={() => toggleAgentsAll(shownAgentCount === discoveryState.agents.length)}>
 				{shownAgentCount === discoveryState.agents.length ? "Hide all" : "Show all"}
 			</TextButton>
 		{/snippet}
