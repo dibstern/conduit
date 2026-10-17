@@ -56,6 +56,7 @@ import {
 
 /** Days of inactivity before automatic settlement when no value is persisted. */
 export const DEFAULT_AUTO_SETTLE_AFTER_DAYS = 3;
+export const DEFAULT_AUTO_ARCHIVE_AFTER_DAYS = 30;
 
 export const CURRENT_CONFIG_VERSION = 1;
 
@@ -167,6 +168,10 @@ const DaemonConfigFields = {
 	debug: Schema.Boolean,
 	keepAwake: Schema.Boolean,
 	autoSettleAfterDays: Schema.optionalWith(
+		Schema.NullOr(Schema.Number.pipe(Schema.int(), Schema.between(1, 90))),
+		{ exact: true },
+	),
+	autoArchiveAfterDays: Schema.optionalWith(
 		Schema.NullOr(Schema.Number.pipe(Schema.int(), Schema.between(1, 90))),
 		{ exact: true },
 	),
@@ -363,6 +368,7 @@ export function defaultDaemonConfig(): DaemonConfig {
 		debug: false,
 		keepAwake: false,
 		autoSettleAfterDays: DEFAULT_AUTO_SETTLE_AFTER_DAYS,
+		autoArchiveAfterDays: DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
 		worktreeCleanup: DEFAULT_WORKTREE_CLEANUP,
 		projects: [],
 		instances: [
@@ -482,6 +488,7 @@ function readDaemonConfigResult(
 					(raw["configVersion"] !== CURRENT_CONFIG_VERSION ||
 						raw["claudeConfigDir"] !== undefined ||
 						raw["autoSettleAfterDays"] !== config.autoSettleAfterDays ||
+						raw["autoArchiveAfterDays"] !== config.autoArchiveAfterDays ||
 						!isDeepStrictEqual(raw["instances"], config.instances) ||
 						!isDeepStrictEqual(
 							raw["accountDefaults"],
@@ -507,6 +514,10 @@ function normalizeDaemonConfig(decoded: DaemonConfig): DaemonConfig {
 			decoded.autoSettleAfterDays === undefined
 				? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 				: decoded.autoSettleAfterDays,
+		autoArchiveAfterDays:
+			decoded.autoArchiveAfterDays === undefined
+				? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS
+				: decoded.autoArchiveAfterDays,
 	};
 }
 

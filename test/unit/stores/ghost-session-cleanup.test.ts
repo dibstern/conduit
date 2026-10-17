@@ -7,7 +7,7 @@ import {
 } from "./session-fixtures.js";
 // Verifies that clearSessionChatState is wired to:
 // 1. shell feed removal
-// 2. shell snapshot omission and its chat cleanup
+// 2. shell snapshot omission preserves chat until deletion
 // 3. Search query results never trigger cleanup
 // 4. Active-session teardown
 
@@ -118,7 +118,7 @@ describe("clearSessionChatState wired to the shell feed", () => {
 });
 
 describe("shell snapshot omission", () => {
-	it("removes membership and evicts cached chat state", () => {
+	it("removes membership and preserves cached chat state", () => {
 		// Pre-populate sessions map with sessions A, B, C
 		seedSessions([
 			...sessionState.sessions.values(),
@@ -168,8 +168,8 @@ describe("shell snapshot omission", () => {
 			],
 		});
 
-		expect(sessionActivity.has("session-B")).toBe(false);
-		expect(sessionMessages.has("session-B")).toBe(false);
+		expect(sessionActivity.has("session-B")).toBe(true);
+		expect(sessionMessages.has("session-B")).toBe(true);
 		expect(sessionState.sessions.has("session-B")).toBe(false);
 		expect(
 			sessionState.rootSessions.some((session) => session.id === "session-B"),
@@ -214,7 +214,7 @@ describe("shell snapshot omission", () => {
 		]);
 	});
 
-	it("an authoritative snapshot triggers cleanup", () => {
+	it("snapshot omission does not establish deletion", () => {
 		// Pre-populate
 		seedSessions([
 			...sessionState.sessions.values(),
@@ -248,8 +248,8 @@ describe("shell snapshot omission", () => {
 			],
 		});
 
-		expect(sessionActivity.has("session-B")).toBe(false);
-		expect(sessionMessages.has("session-B")).toBe(false);
+		expect(sessionActivity.has("session-B")).toBe(true);
+		expect(sessionMessages.has("session-B")).toBe(true);
 	});
 });
 

@@ -74,6 +74,7 @@ import {
 	RoutedWsRpcWebSocketHandlerTag,
 	type RpcWebSocketHandlerShape,
 } from "../server/ws-rpc-handler.js";
+import { archiveIdleSessions } from "../session/auto-archive-sweep.js";
 import { settleIdleSessions } from "../session/auto-settle-sweep.js";
 import type { ConnectionHealth, ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
@@ -300,6 +301,10 @@ export interface ProjectRelay {
 		idleWindowMs: number,
 		now: number,
 	): Effect.Effect<number, SqlError | SessionManagerError>;
+	archiveIdleSessions(
+		idleWindowMs: number,
+		now: number,
+	): Effect.Effect<number, SqlError | SessionManagerError>;
 	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
 	sseStream: SSEStreamPort;
@@ -368,6 +373,8 @@ export interface RelayStackConfig {
 }
 
 export interface RelayStack {
+	archiveIdleSessions: ProjectRelay["archiveIdleSessions"];
+	settleIdleSessions: ProjectRelay["settleIdleSessions"];
 	server: EffectRelayServer;
 	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
@@ -551,6 +558,27 @@ export async function createProjectRelay(
 							settled: true,
 							automatic: true,
 							...(mergedHead !== undefined ? { mergedHead } : {}),
+						}),
+				},
+				idleWindowMs,
+				now,
+			).pipe(
+				Effect.provideService(SqlClient.SqlClient, startup.sql),
+				Effect.provideService(
+					PersistenceProjectTag,
+					startup.persistenceProject,
+				),
+			),
+		archiveIdleSessions: (idleWindowMs, now) =>
+			archiveIdleSessions(
+				{
+					hasLiveBackgroundWork: startup.activity.background.hasLiveWork,
+					setArchived: (id) =>
+						startup.sessionManagerService.setSessionArchived(id, {
+							archived: true,
+							automatic: true,
+							idleWindowMs,
+							now,
 						}),
 				},
 				idleWindowMs,
@@ -936,6 +964,8 @@ export async function createRelayStack(
 	return {
 		server,
 		effectRuntime: relay.effectRuntime,
+		archiveIdleSessions: relay.archiveIdleSessions,
+		settleIdleSessions: relay.settleIdleSessions,
 		wsHandler: relay.wsHandler,
 		rpcWsHandler: relay.rpcWsHandler,
 		sseStream: relay.sseStream,

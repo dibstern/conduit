@@ -296,7 +296,7 @@ it("a project switch forgets the family, and the next project's family applies",
 	expect(sessionState.familySessions.map((row) => row.id)).toEqual(["other"]);
 });
 
-it("forgets chat without changing the route when a subscription snapshot omits a session", () => {
+it("preserves chat and route when a subscription snapshot omits a session", () => {
 	applySessionChange({
 		_tag: "snapshot",
 		sequence: 10,
@@ -316,8 +316,8 @@ it("forgets chat without changing the route when a subscription snapshot omits a
 	applySessionChange({ _tag: "snapshot", sequence: 11, rows: [] });
 
 	expect(sessionState.sessions.has("gone")).toBe(false);
-	expect(sessionActivity.has("gone")).toBe(false);
-	expect(sessionMessages.has("gone")).toBe(false);
+	expect(sessionActivity.has("gone")).toBe(true);
+	expect(sessionMessages.has("gone")).toBe(true);
 	expect(sessionState.currentId).toBe("gone");
 });
 

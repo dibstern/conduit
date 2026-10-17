@@ -104,6 +104,7 @@ export {
 	type SetHiddenEntriesResponse,
 	SetLogLevel,
 	SetPinRejected,
+	SetSessionArchived,
 	SetSessionPinned,
 	SetSessionSettled,
 	SnoozeSession,

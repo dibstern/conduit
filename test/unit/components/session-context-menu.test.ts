@@ -107,24 +107,26 @@ describe("session triage menu", () => {
 	it("puts Settle and Pin above Rename, with a divider", async () => {
 		openMenu({ id: "a", title: "Alpha" });
 		await screen.findByTestId("session-ctx-rename");
-		const firstFour = [
+		const firstFive = [
 			...screen
 				.getByRole("menu")
 				.querySelectorAll('[role="menuitem"], [role="menuitemcheckbox"]'),
-		].slice(0, 4);
-		expect(firstFour.map((item) => item.getAttribute("data-testid"))).toEqual([
+		].slice(0, 5);
+		expect(firstFive.map((item) => item.getAttribute("data-testid"))).toEqual([
 			"session-ctx-settle",
+			"session-ctx-archive",
 			"session-ctx-auto-settle",
 			"session-ctx-snooze",
 			"session-ctx-pin",
 		]);
 		for (const [index, label] of [
 			"Settle",
+			"Archive",
 			"Auto-settle when idle",
 			"Snooze…",
 			"Pin to top",
 		].entries()) {
-			expect(firstFour[index]?.textContent).toContain(label);
+			expect(firstFive[index]?.textContent).toContain(label);
 		}
 		expect(screen.getAllByRole("separator").length).toBeGreaterThan(0);
 		expect(screen.getByTestId("session-ctx-rename")).toBeTruthy();

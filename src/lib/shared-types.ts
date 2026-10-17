@@ -350,6 +350,7 @@ export const SessionInfoSchema = Schema.Struct({
 	/** The send whose turn ended at `lastTurnEndVersion`, when known. */
 	lastTurnEndInputId: Schema.optional(Schema.String),
 	settledAt: Schema.optional(Schema.Number),
+	archivedAt: Schema.optional(Schema.Number),
 	settledAutomatically: Schema.optional(Schema.Boolean),
 	autoSettleDisabled: Schema.optional(Schema.Boolean),
 	pinnedAt: Schema.optional(Schema.Number),

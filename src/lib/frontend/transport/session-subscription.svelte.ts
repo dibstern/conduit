@@ -166,7 +166,7 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 			followSessionRetry(change.item.id, change.item.retrying);
 		followSessionResumes(change.item, previous);
 	}
-	// A root that gained a parent only leaves the list; one that is gone, or a
+	// An archived root or one that gained a parent only leaves the list; one that is gone, or a
 	// child that is, comes marked deleted, live or on catch-up.
 	if (change._tag === "remove" && change.deleted === true) {
 		deleteTurn(change.id);
@@ -176,8 +176,8 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 	if (change._tag === "snapshot") {
 		if (applied.floor !== undefined)
 			rebaseTurns([...applied.rows.keys(), ...next.rows.keys()]);
-		for (const id of applied.rows.keys())
-			if (!next.rows.has(id)) forgetSession(id);
+		// Snapshot omissions can be archives. Only an explicit deletion may clear
+		// chat state; the independent family subscription still owns open sessions.
 		for (const row of next.rows.values()) {
 			applyTurnRow(row);
 			hydrateSessionGoal(row);

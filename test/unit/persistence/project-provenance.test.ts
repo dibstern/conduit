@@ -113,6 +113,7 @@ describe("Bound project provenance", () => {
 			"0060_daemon_store_imports",
 			"0061_sessions_lineage",
 			"0062_legacy_forks",
+			"0063_sessions_archived",
 		]);
 	});
 

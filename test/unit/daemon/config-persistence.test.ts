@@ -44,6 +44,7 @@ function makeSampleConfig(overrides?: Partial<DaemonConfig>): DaemonConfig {
 		debug: false,
 		keepAwake: false,
 		autoSettleAfterDays: 3,
+		autoArchiveAfterDays: 30,
 		projects: [],
 		...overrides,
 	};

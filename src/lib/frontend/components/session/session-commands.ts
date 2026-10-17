@@ -26,6 +26,7 @@ export type SessionCommand = {
 	icon?:
 		| "undo"
 		| "check"
+		| "archive"
 		| "moon"
 		| "star-off"
 		| "star"
@@ -173,6 +174,19 @@ async function pin(session: SessionInfo, pinned: boolean) {
 	}
 }
 
+async function archive(session: SessionInfo, archived: boolean) {
+	const input = rpcInput(session);
+	if (!input) return;
+	try {
+		await rpc("SetSessionArchived", { ...input, archived });
+		await refreshIfForeign(session);
+	} catch (error) {
+		toastFailure(
+			archived ? "Couldn't archive session" : "Couldn't unarchive session",
+		)(error);
+	}
+}
+
 async function autoSettle(session: SessionInfo, disabled: boolean) {
 	const input = rpcInput(session);
 	if (!input) return;
@@ -307,6 +321,7 @@ function commitTomorrow(session: SessionInfo) {
 
 export const sessionCommandActions = {
 	settle,
+	archive,
 	remove,
 	pin,
 	autoSettle,
@@ -369,14 +384,25 @@ export function getSessionCommands(
 ): SessionCommandEntry[] {
 	const actions = getSessionActionState(session, now);
 	const items: SessionCommandEntry[] = [];
-	items.push(getSettleCommand(session, now), {
-		testId: "session-ctx-auto-settle",
-		label: "Auto-settle when idle",
-		checked: session.autoSettleDisabled !== true,
-		run: () => {
-			void autoSettle(session, session.autoSettleDisabled !== true);
+	items.push(
+		getSettleCommand(session, now),
+		{
+			testId: "session-ctx-archive",
+			label: session.archivedAt != null ? "Unarchive" : "Archive",
+			icon: "archive",
+			run: () => {
+				void archive(session, session.archivedAt == null);
+			},
 		},
-	});
+		{
+			testId: "session-ctx-auto-settle",
+			label: "Auto-settle when idle",
+			checked: session.autoSettleDisabled !== true,
+			run: () => {
+				void autoSettle(session, session.autoSettleDisabled !== true);
+			},
+		},
+	);
 	if (actions.snoozeVisible) {
 		items.push({
 			testId: "session-ctx-snooze",

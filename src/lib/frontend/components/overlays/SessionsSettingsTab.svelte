@@ -17,7 +17,7 @@
 	import { DEFAULT_WORKTREE_CLEANUP, type WorktreeCleanup, type WorktreeCleanupReport } from "../../../contracts/worktree.js";
 	import Button from "../ui/Button.svelte";
 	import Disclosure from "../ui/Disclosure.svelte";
-	let state = $state({ autoSettleDays: 3 as number | null, autoSettleSaving: false, sessionModeSaving: false, groupingSaving: false, cleanup: DEFAULT_WORKTREE_CLEANUP as WorktreeCleanup, cleanupSaving: false, cleanupOpen: false, cleanupDetailsOpen: false, cleanupRun: { status: "idle" } as { status: "idle" | "running" | "failed" } | { status: "done"; report: WorktreeCleanupReport } });
+	let state = $state({ autoSettleDays: 3 as number | null, autoSettleSaving: false, autoArchiveDays: 30 as number | null, autoArchiveSaving: false, sessionModeSaving: false, groupingSaving: false, cleanup: DEFAULT_WORKTREE_CLEANUP as WorktreeCleanup, cleanupSaving: false, cleanupOpen: false, cleanupDetailsOpen: false, cleanupRun: { status: "idle" } as { status: "idle" | "running" | "failed" } | { status: "done"; report: WorktreeCleanupReport } });
 
 	const idlePresets = [7, 14, 30, 90];
 	const outcomes = [
@@ -79,6 +79,13 @@
 		if (route.page === "chat" && route.sessionId && !getCurrentSlug()) return;
 		let current = true;
 		const groupingReadRevision = untrack(() => projectState.defaultGroupingRevision);
+		void rpc("GetAutoArchiveSetting", {})
+			.then(({ autoArchiveAfterDays: days }) => {
+				if (current && !state.autoArchiveSaving) state.autoArchiveDays = days;
+			})
+			.catch((error) => {
+				if (current) toastFailure("Couldn't load auto-archive setting")(error);
+			});
 		void rpc("GetAutoSettleSetting", {})
 			.then(({ autoSettleAfterDays: days }) => {
 				if (current && !state.autoSettleSaving) state.autoSettleDays = days;
@@ -176,6 +183,35 @@
 						.finally(() => {
 							state.autoSettleSaving = false;
 						});
+				}}
+			>
+				<option value="1">1 day</option>
+				<option value="2">2 days</option>
+				<option value="3">3 days</option>
+				<option value="7">1 week</option>
+				<option value="14">2 weeks</option>
+				<option value="30">30 days</option>
+				<option value="90">90 days</option>
+				<option value="never">Never</option>
+			</Select>
+		{/snippet}
+	</SettingsRow>
+	<SettingsRow
+		label="Archive settled sessions after"
+		labelFor="settings-auto-archive-select"
+		description="Hides them from the sidebar. Search still finds them."
+	>
+		{#snippet control()}
+			<Select id="settings-auto-archive-select" data-testid="settings-auto-archive-select"
+				value={state.autoArchiveDays === null ? "never" : String(state.autoArchiveDays)}
+				disabled={state.autoArchiveSaving}
+				onchange={(event) => {
+					const value = event.currentTarget.value;
+					state.autoArchiveSaving = true;
+					void rpc("SetAutoArchiveSetting", { autoArchiveAfterDays: value === "never" ? null : Number(value) })
+						.then(({ autoArchiveAfterDays: days }) => { state.autoArchiveDays = days; })
+						.catch(toastFailure("Couldn't save auto-archive setting"))
+						.finally(() => { state.autoArchiveSaving = false; });
 				}}
 			>
 				<option value="1">1 day</option>

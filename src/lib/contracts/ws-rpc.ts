@@ -1447,6 +1447,28 @@ const UsageLimitsSettingResponseSchema = Schema.Struct({
 	usageLimits: UsageLimitsSettingSchema,
 });
 
+const AutoArchiveSettingResponseSchema = Schema.Struct({
+	autoArchiveAfterDays: Schema.NullOr(Schema.Number),
+});
+
+export class GetAutoArchiveSetting extends Schema.TaggedRequest<GetAutoArchiveSetting>()(
+	"GetAutoArchiveSetting",
+	{
+		failure: WsRpcError,
+		success: AutoArchiveSettingResponseSchema,
+		payload: {},
+	},
+) {}
+
+export class SetAutoArchiveSetting extends Schema.TaggedRequest<SetAutoArchiveSetting>()(
+	"SetAutoArchiveSetting",
+	{
+		failure: WsRpcError,
+		success: AutoArchiveSettingResponseSchema,
+		payload: { autoArchiveAfterDays: Schema.NullOr(Schema.Number) },
+	},
+) {}
+
 export class GetUsageLimitsSetting extends Schema.TaggedRequest<GetUsageLimitsSetting>()(
 	"GetUsageLimitsSetting",
 	{
@@ -2001,6 +2023,19 @@ export class SetSessionPinned extends Schema.TaggedRequest<SetSessionPinned>()(
 		payload: {
 			sessionId: NonEmptyString,
 			pinned: Schema.Boolean,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class SetSessionArchived extends Schema.TaggedRequest<SetSessionArchived>()(
+	"SetSessionArchived",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			sessionId: NonEmptyString,
+			archived: Schema.Boolean,
 			originId: Schema.optional(NonEmptyString),
 		},
 	},
@@ -2991,6 +3026,7 @@ const wsRpcRequests = [
 	MarkSessionRead,
 	MarkSessionSeen,
 	SetSessionSettled,
+	SetSessionArchived,
 	SetSessionPinned,
 	SetSessionAutoSettle,
 	SnoozeSession,
@@ -3101,6 +3137,8 @@ const wsRpcRequests = [
 	SetDefault,
 	GetAutoSettleSetting,
 	SetAutoSettleSetting,
+	GetAutoArchiveSetting,
+	SetAutoArchiveSetting,
 	GetWorktreeCleanupSetting,
 	SetWorktreeCleanupSetting,
 	CleanUpWorktreesNow,

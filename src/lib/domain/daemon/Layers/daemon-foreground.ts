@@ -20,6 +20,7 @@ import {
 } from "../../../contracts/provider-instance.js";
 import {
 	type DaemonConfig,
+	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	defaultDaemonConfig,
 	loadDaemonConfigStartupResult,
@@ -151,6 +152,10 @@ const buildInitialRuntimeConfig = (
 			persisted?.autoSettleAfterDays === undefined
 				? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 				: persisted.autoSettleAfterDays,
+		autoArchiveAfterDays:
+			persisted?.autoArchiveAfterDays === undefined
+				? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS
+				: persisted.autoArchiveAfterDays,
 		...(persisted?.worktreeCleanup !== undefined && {
 			worktreeCleanup: persisted.worktreeCleanup,
 		}),

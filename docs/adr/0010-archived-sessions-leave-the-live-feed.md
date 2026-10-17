@@ -42,5 +42,7 @@ They are left out of search, and sending to one is rejected.
 - Auto-archive needs a daemon-side sweep. It must be idempotent, record why
   the session was archived (manual or automatic), and never race a send that
   restores the session.
-- Open for the archive ticket: whether subagent children archive with their
-  parent.
+- Subagent children follow their root. Archive state lives on the top-level
+  session, and archiving it hides the whole family. So the sweep treats any
+  descendant's recent activity, running turn, open approval or queued input as
+  activity on the root.

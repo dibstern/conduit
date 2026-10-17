@@ -30,6 +30,7 @@ import { RateLimiterLive } from "./rate-limiter-layer.js";
 const sessionManagerDepsLive = Layer.mergeAll(
 	makeSessionManagerStateLive(),
 	DaemonEventBusLive,
+	SessionEventBusLive,
 	RelayStatusSnapshotLive,
 );
 

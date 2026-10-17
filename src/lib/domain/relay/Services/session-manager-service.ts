@@ -9,6 +9,7 @@ import {
 	HashMap,
 	Layer,
 	Option,
+	PubSub,
 	Ref,
 } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../account-directory.js";
@@ -54,6 +55,7 @@ import type {
 import type { SessionInfo } from "../../../types.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import {
+	DaemonEvent,
 	DaemonEventBusTag,
 	publishSessionCreated,
 	publishSessionDeleted,
@@ -107,6 +109,7 @@ import {
 	markSessionSeen,
 	markSessionUnread,
 	renameSession,
+	setSessionArchived,
 	setSessionAutoSettleDisabled,
 	setSessionPinned,
 	setSessionSettled,
@@ -189,6 +192,16 @@ export interface SetSessionSettledOptions {
 	readonly automatic?: boolean;
 	readonly mergedHead?: string;
 }
+
+export type SetSessionArchivedOptions =
+	| { readonly archived: false; readonly cause?: "manual" | "send" }
+	| { readonly archived: true; readonly automatic?: false }
+	| {
+			readonly archived: true;
+			readonly automatic: true;
+			readonly idleWindowMs: number;
+			readonly now: number;
+	  };
 
 /**
  * Initialize session state from the provider and return the most recent session,
@@ -667,6 +680,13 @@ export interface SessionManagerService {
 		sessionId: string,
 		options: SetSessionSettledOptions,
 	): Effect.Effect<boolean, SessionManagerError>;
+	setSessionArchived(
+		sessionId: string,
+		options: SetSessionArchivedOptions,
+	): Effect.Effect<boolean, SessionManagerError>;
+	restoreSessionForSend(
+		sessionId: string,
+	): Effect.Effect<void, SessionManagerError>;
 	setSessionAutoSettleDisabled(
 		sessionId: string,
 		disabled: boolean,
@@ -1024,9 +1044,11 @@ export const SessionManagerServiceLive: Layer.Layer<
 				| SqlClient.SqlClient
 				| ConfigTag
 				| LoggerTag
+				| SessionActivityTag
 			>,
 		): Effect.Effect<A, E> => {
 			const provided = effect.pipe(
+				Effect.provideService(SessionActivityTag, activity),
 				Effect.provideService(AccountDirectory, accounts),
 				Effect.provideService(OpenCodeAPITag, api),
 				Effect.provideService(ReadQueryEffectTag, readQuery),
@@ -1171,6 +1193,40 @@ export const SessionManagerServiceLive: Layer.Layer<
 								: Effect.void,
 						),
 					),
+			setSessionArchived: (sessionId, options) =>
+				triageLock.withPermits(1)(
+					withSessionCommandServices(setSessionArchived(sessionId, options)),
+				),
+			restoreSessionForSend: (sessionId) =>
+				triageLock.withPermits(1)(
+					Effect.gen(function* () {
+						// A sweep must see either the old state or the fully restored state.
+						let changed = false;
+						for (const operation of [
+							setSessionArchived(sessionId, { archived: false, cause: "send" }),
+							unsnoozeSession(sessionId),
+							setSessionSettled(sessionId, { settled: false }),
+						]) {
+							const restored = yield* withSessionCommandServices(
+								operation,
+							).pipe(
+								Effect.catchAll((error) =>
+									Effect.sync(() =>
+										log.warn(
+											`Failed to restore ${sessionId} on send: ${String(error)}`,
+										),
+									).pipe(Effect.as(false)),
+								),
+							);
+							changed ||= restored;
+						}
+						if (changed)
+							yield* PubSub.publish(
+								eventBus,
+								DaemonEvent.DaemonSessionsChanged(),
+							);
+					}),
+				),
 			setSessionAutoSettleDisabled: (sessionId, disabled) =>
 				triageLock.withPermits(1)(
 					withSessionCommandServices(

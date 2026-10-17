@@ -42,6 +42,7 @@ import {
 	SESSION_PROJECT_SCOPE_MIGRATION,
 	SESSION_SIDEBAR_MIGRATION,
 	SESSION_SIDEBAR_TOMBSTONES_MIGRATION,
+	SESSIONS_ARCHIVED_MIGRATION,
 	SESSIONS_AUTO_SETTLE_MIGRATION,
 	SESSIONS_CLAUDE_WORKTREE_STATE_MIGRATION,
 	SESSIONS_FORKED_FROM_MIGRATION,
@@ -337,6 +338,9 @@ const expectedTableColumns = {
 		"seen_version",
 		"pending_rewind_message_id",
 		"forked_from",
+		"archived_at",
+		"archived_automatically",
+		"unarchived_at",
 	],
 	tool_content: ["tool_id", "session_id", "content", "created_at"],
 	turns: [
@@ -489,6 +493,9 @@ const appendedSessionColumns = [
 	"pending_rewind_message_id",
 	"project_id",
 	"forked_from",
+	"archived_at",
+	"archived_automatically",
+	"unarchived_at",
 ] as const;
 
 function sameStrings(
@@ -1228,6 +1235,11 @@ export const effectMigrationEntries = {
 			WHERE id IN (SELECT value FROM json_each(${JSON.stringify(changed.map(({ id }) => id))}))`;
 		yield* refreshSidebar([...affected], version);
 	}),
+	"0063_sessions_archived": runAddColumnMigrationIfMissing(
+		"sessions",
+		"archived_at",
+		readMigrationSql(SESSIONS_ARCHIVED_MIGRATION),
+	),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>
