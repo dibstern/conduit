@@ -65,6 +65,7 @@ test("Claude Attribution collapses, expands and saves an edited part", async ({
 					{
 						id: "settings-attribution",
 						title: "Claude Attribution",
+						accountId: "personal",
 						status: "idle",
 						projectSlug: "e2e-replay",
 					},

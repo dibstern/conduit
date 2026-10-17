@@ -98,7 +98,7 @@ test("desktop hint acceptance uses the existing workspace move", async ({
 				.filter(({ tag }) => tag === "MoveSessionWorkspace")
 				.map(({ payload }) => payload),
 		)
-		.toMatchObject([{ projectSlug, sessionId: session.id, path: hintPath }]);
+		.toMatchObject([{ sessionId: session.id, path: hintPath }]);
 	// The shell row removes the hint and updates the recorded workspace.
 	rpc.upsertShellRow({
 		...session,
@@ -138,7 +138,7 @@ test("desktop dismissal targets the current hint and follows shell row updates",
 				.filter(({ tag }) => tag === "DismissWorkspaceHint")
 				.map(({ payload }) => payload),
 		)
-		.toMatchObject([{ projectSlug, sessionId: session.id, path: changedPath }]);
+		.toMatchObject([{ sessionId: session.id, path: changedPath }]);
 	rpc.upsertShellRow({ ...session, workspaceHint: undefined });
 	await expect(page.getByTestId("workspace-hint")).toHaveCount(0);
 	await expect(page.getByTestId("workspace-hint-move")).toHaveCount(0);
@@ -173,7 +173,7 @@ test("phone hint is an accessible icon with both actions in the checkout menu", 
 				.filter(({ tag }) => tag === "MoveSessionWorkspace")
 				.map(({ payload }) => payload),
 		)
-		.toMatchObject([{ projectSlug, sessionId: session.id, path: hintPath }]);
+		.toMatchObject([{ sessionId: session.id, path: hintPath }]);
 	await checkout.click();
 	await menu.getByTestId("workspace-hint-dismiss").click();
 	await expect
@@ -183,7 +183,7 @@ test("phone hint is an accessible icon with both actions in the checkout menu", 
 				.filter(({ tag }) => tag === "DismissWorkspaceHint")
 				.map(({ payload }) => payload),
 		)
-		.toMatchObject([{ projectSlug, sessionId: session.id, path: hintPath }]);
+		.toMatchObject([{ sessionId: session.id, path: hintPath }]);
 	rpc.upsertShellRow({ ...session, workspaceHint: undefined });
 	await expect(hint).toHaveCount(0);
 	await testInfo.attach("workspace-hint-rpc", {
