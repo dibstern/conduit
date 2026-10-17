@@ -146,6 +146,7 @@ describe("Persistence Effect", () => {
 					"command_receipts",
 					"daemon_store_imports",
 					"events",
+					"message_part_read_state",
 					"message_part_tombstones",
 					"message_parts",
 					"message_tombstones",
@@ -333,6 +334,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 64, name: "message_part_surfacing" },
 				{ migration_id: 65, name: "sessions_settled_shelf_index" },
 				{ migration_id: 66, name: "surfacing_marks" },
+				{ migration_id: 67, name: "message_part_read" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

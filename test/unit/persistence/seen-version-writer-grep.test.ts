@@ -27,6 +27,23 @@ function sourceFiles(dir: string): string[] {
 }
 
 describe("seen_version single writer", () => {
+	it("confines per-message read writes to SessionAttention", () => {
+		const write =
+			/(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+message_part_read_state\b/gi;
+		const outside = sourceFiles(SRC_ROOT)
+			.filter((file) => relative(REPO_ROOT, file) !== SESSION_ATTENTION)
+			.flatMap((file) =>
+				[...readFileSync(file, "utf8").matchAll(write)].map((match) => ({
+					path: relative(REPO_ROOT, file),
+					source: match[0],
+				})),
+			);
+		expect(outside).toEqual([]);
+		expect(
+			readFileSync(join(REPO_ROOT, SESSION_ATTENTION), "utf8").match(write)
+				?.length ?? 0,
+		).toBeGreaterThan(0);
+	});
 	it("confines seen_version writes to SessionAttention", () => {
 		const outside = sourceFiles(SRC_ROOT)
 			.map((file) => ({ file, path: relative(REPO_ROOT, file) }))

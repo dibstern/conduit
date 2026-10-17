@@ -58,7 +58,7 @@ import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-s
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { OpenCodeSessionCreationGateTag } from "./opencode-runtime-ingress-service.js";
 import { ConfigTag, LoggerTag } from "./services.js";
-import { markSeen } from "./session-attention.js";
+import { inheritRead, markSeen } from "./session-attention.js";
 import { setPermissionMode } from "./session-overrides-state.js";
 import { loadServerSessionPick, sessionPickEvents } from "./session-pick.js";
 import { SessionWorkspaceTag } from "./session-workspace.js";
@@ -1005,6 +1005,9 @@ const forkSessionInWorkspace = (
 					: created;
 				if (history.length) yield* project(stored);
 				yield* inheritSurfacingMarks(parentSessionId, id).pipe(
+					Effect.provideService(SqlClient.SqlClient, sql.value),
+				);
+				yield* inheritRead(parentSessionId, id).pipe(
 					Effect.provideService(SqlClient.SqlClient, sql.value),
 				);
 				yield* fork.saveProviderState(

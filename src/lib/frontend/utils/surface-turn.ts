@@ -115,9 +115,13 @@ export function surfaceTurn(input: {
 			.length,
 		all: messages.filter((message) => rank[message.level] >= rank.all).length,
 	};
-	const visible = messages.filter(
-		(message) => message.pending || rank[message.level] >= rank[input.level],
-	);
+	const visible =
+		input.level === "final"
+			? []
+			: messages.filter(
+					(message) =>
+						message.pending || rank[message.level] >= rank[input.level],
+				);
 	const picked = messages.find(
 		({ part }) =>
 			part.uuid === input.picked &&
@@ -184,6 +188,15 @@ export function surfaceTurn(input: {
 				: "",
 		openAsk: ask ?? null,
 		unreadCount: unread.length,
+		// The recap and its bulk action cover the whole turn, including hand-backs.
+		unreadPartIds: turnMessages.flatMap(({ part, level }) =>
+			part.surfacingRead === false &&
+			part.partId &&
+			(rank[level] >= rank[input.level] ||
+				visible.some((pin) => pin.pending && pin.part === part))
+				? [part.partId]
+				: [],
+		),
 		hasReadState: messages.some(({ read }) => read !== undefined),
 		nextUnread:
 			unread.find((message) => message.step > (target?.step ?? -1)) ??

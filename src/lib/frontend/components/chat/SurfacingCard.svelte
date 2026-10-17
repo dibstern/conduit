@@ -15,14 +15,16 @@
 </script>
 
 <script lang="ts">
+	import { untrack } from "svelte";
 	import { surfacePinRows, SURFACE_LABELS, SURFACE_LEVELS, type SurfaceLevel, type SurfacePinGroup } from "../../utils/surface-turn.js";
 	import Button from "../ui/Button.svelte";
+	import Checkbox from "../ui/Checkbox.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import SegmentedControl from "../ui/SegmentedControl.svelte";
 	import { MARK_GLYPHS } from "../../stores/surfacing-feedback.svelte.js";
 
-	let { view, live, level, overridden, endTime, startTime, regions = {}, strip, onpick, onlevel, ondefault, onreset, onfold, onfollow, oncommand, onjump, onhover }: {
+	let { view, live, level, overridden, endTime, startTime, regions = {}, strip, onpick, onlevel, ondefault, onreset, onfold, onfollow, oncommand, onjump, onhover, onread, onautoread, onmarkread, readSaving = false, readError = "", canAutoRead = true, markReadInAxis = false }: {
 		view: SurfaceTurn;
 		live: boolean;
 		level: SurfaceLevel;
@@ -40,6 +42,13 @@
 		oncommand: (event: KeyboardEvent) => void;
 		onjump: (x: number) => void;
 		onhover: (x: number | null) => void;
+		onread?: (pin: SurfacePin, read: boolean) => void;
+		onautoread?: (pin: SurfacePin) => void;
+		onmarkread?: () => void;
+		readSaving?: boolean;
+		readError?: string;
+		canAutoRead?: boolean;
+		markReadInAxis?: boolean;
 	} = $props();
 	let scrubEl: HTMLDivElement;
 	let laneWidth = $state(0);
@@ -48,6 +57,10 @@
 	const groups = $derived(surfacePinRows(view, laneWidth, viewportWidth < 768));
 	const currentGroup = $derived(groups.find((group) => group.members.some((pin) => pin.part.uuid === view.card?.part.uuid)));
 	let lastGroupTap: { source: string; picked: string } | null = null;
+	let cardEl = $state<HTMLElement>();
+	let onScreen = $state(false);
+	let visible = $state(false);
+	let scrubbing = $state(false);
 	let menuOpen = $state(false);
 	let saving = $state(false);
 	let error = $state("");
@@ -59,6 +72,36 @@
 		...(value === "balanced" ? { shortLabel: "Bal" } : {}),
 		...(value === "final" ? {} : { detail: String(view.counts[value]) }),
 	})));
+	// With summaries off, the axis carries the turn's bulk read in place of the start time.
+	const markCount = $derived(markReadInAxis && onmarkread ? view.unreadPartIds.length : 0);
+	// Track scalar values: the live strip's clock must not restart the read timer.
+	const readTarget = $derived(view.card?.read === false ? view.card.part.uuid : null);
+	const readText = $derived(view.card?.part.rawText ?? "");
+	$effect(() => {
+		const changed = () => { visible = document.visibilityState === "visible"; };
+		changed();
+		document.addEventListener("visibilitychange", changed);
+		return () => document.removeEventListener("visibilitychange", changed);
+	});
+	$effect(() => {
+		if (!cardEl) { onScreen = false; return; }
+		const observer = new IntersectionObserver((entries) => {
+			const entry = entries.at(-1);
+			onScreen = !!entry?.isIntersecting && entry.intersectionRect.width > 0 && entry.intersectionRect.height > 0;
+		});
+		observer.observe(cardEl);
+		return () => observer.disconnect();
+	});
+	$effect(() => {
+		const target = readTarget;
+		void readText;
+		if (!target || !visible || !onScreen || scrubbing || readSaving || !canAutoRead || !onautoread) return;
+		const timer = setTimeout(() => {
+			const card = untrack(() => view.card);
+			if (card?.part.uuid === target && document.visibilityState === "visible" && onScreen && !scrubbing) onautoread?.(card);
+		}, 1000);
+		return () => clearTimeout(timer);
+	});
 
 	function xAt(clientX: number): number {
 		const box = scrubEl.getBoundingClientRect();
@@ -75,6 +118,7 @@
 	}
 	function pointerDown(event: PointerEvent) {
 		if (event.button !== 0 || !event.isPrimary) return;
+		scrubbing = true;
 		const target = (event.target as HTMLElement).closest<HTMLElement>("[data-surface-part]");
 		const pin = view.pins.find(({ part }) => part.uuid === target?.dataset["surfacePart"]);
 		drag = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, ...(pin ? { pin } : {}) };
@@ -108,6 +152,7 @@
 		}
 		suppressClick = true;
 		drag = null;
+		scrubbing = false;
 		if (scrubEl.hasPointerCapture(event.pointerId)) scrubEl.releasePointerCapture(event.pointerId);
 	}
 	async function makeDefault() {
@@ -128,12 +173,13 @@
 {#if view.card}
 	{@const card = view.card}
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-	<section class="surfacing-msg-card" style:--surface-colour={card.colour} data-testid="surfacing-msg-card" data-part={card.part.uuid} data-ordinal={card.number} aria-label={card.name} tabindex="-1" onkeydown={oncommand}>
+	<section bind:this={cardEl} class="surfacing-msg-card" style:--surface-colour={card.colour} data-testid="surfacing-msg-card" data-part={card.part.uuid} data-ordinal={card.number} aria-label={card.name} tabindex="-1" onkeydown={oncommand}>
 		<div class="card-head" data-surfacing-region="card-head">
 			<span class="type-label"><span>{card.glyph}</span> {card.label}</span>
 			{#if view.openAsk?.uuid === card.part.uuid}<span class="needs-reply">Needs reply</span>{/if}
 			{@render regions.cardHead?.(card)}
 			<span class="card-at">{card.number === undefined ? "Waiting for Jev" : `#${card.number}`}<span class="desktop-time">{` · ${card.time}`}</span>{` · ${view.cardIndex + 1}/${view.pins.length}`}</span>
+			{#if card.read !== undefined && onread}<label class="read-toggle"><Checkbox data-testid="surfacing-read-toggle" bind:checked={() => card.read === true, (read) => onread?.(card, read)} onchange={(event) => { event.currentTarget.checked = card.read === true; }} disabled={readSaving} class="size-[15px] rounded-[4px]" />Read</label>{/if}
 		</div>
 		{#if view.cardNote}<div class="card-note">{view.cardNote}</div>{/if}
 		<div class="card-body md-content">{@html card.part.html}</div>
@@ -149,7 +195,7 @@
 	</section>
 {/if}
 
-<div class="surfacing-scrub select-none" data-testid="surfacing-scrub" data-surfacing-region="strip-overlay" bind:this={scrubEl} role="slider" tabindex="0" aria-label="Surfaced messages" aria-valuemin={0} aria-valuemax={Math.max(0, view.pins.length - 1)} aria-valuenow={Math.max(0, view.cardIndex)} aria-valuetext={view.sliderText} onkeydown={oncommand} onpointerdown={pointerDown} onpointermove={pointerMove} onpointerup={pointerUp} onpointercancel={() => { drag = null; suppressClick = true; }} onpointerleave={() => onhover(null)}>
+<div class="surfacing-scrub select-none" data-testid="surfacing-scrub" data-surfacing-region="strip-overlay" bind:this={scrubEl} role="slider" tabindex="0" aria-label="Surfaced messages" aria-valuemin={0} aria-valuemax={Math.max(0, view.pins.length - 1)} aria-valuenow={Math.max(0, view.cardIndex)} aria-valuetext={view.sliderText} onkeydown={oncommand} onpointerdown={pointerDown} onpointermove={pointerMove} onpointerup={pointerUp} onpointercancel={() => { drag = null; scrubbing = false; suppressClick = true; }} onpointerleave={() => onhover(null)}>
 	<div class="pin-lane" class:empty={view.pins.length === 0} data-testid="surfacing-pins" bind:clientWidth={laneWidth} data-layout-ready={laneWidth > 0} data-lane-width={laneWidth}>
 		{#if regions.stripOverlay}
 			{@render regions.stripOverlay(view, onpick)}
@@ -158,8 +204,10 @@
 			{@const pin = group.members.find((member) => member.part.uuid === view.card?.part.uuid) ?? group.leader}
 			{@const current = view.card?.part.uuid === pin.part.uuid}
 			{@const cited = group.members.some((member) => member.part.uuid === citedPart)}
+			{@const seen = group.members.every((member) => member.read === true) && !group.members.some((member) => member.part.uuid === view.openAsk?.uuid)}
+			{@const unread = group.members.some((member) => member.read === false && !member.pending && member !== view.card && member.part.uuid !== view.openAsk?.uuid)}
 			<Button variant="ghost" size="content" hoverFill="none" class="absolute h-[32px] rounded-full {group.row ? 'bottom-[27px] max-md:bottom-[43px]' : 'bottom-[3px] max-md:bottom-[5px]'}" style="left:{group.left}px;width:{group.width}px;--pin-tick:{group.tick}px" data-x={group.x} data-surface-part={group.leader.part.uuid} data-testid={group.members.length > 1 ? "surfacing-group" : `surfacing-pin-${pin.number ?? `pending-${pin.part.uuid}`}`} data-row={group.row} data-group-members={group.members.map((member) => member.number ?? "pending").join(",")} data-group-leader={group.leader.number} data-cited={cited} ariaLabel={group.members.length > 1 ? `Group of ${group.members.length}, led by #${group.leader.number} ${group.leader.label}${current ? `; showing ${pin.name}` : ""}` : pin.name} aria-pressed={current} onclick={(event) => { if (event.detail === 0 || !suppressClick) pickGroup(group); }}>
-				<span class="pin-chip" class:upper={group.row === 1} class:current class:cited class:open-ask={view.openAsk?.uuid === pin.part.uuid} class:pending={pin.pending} class:below={view.belowLevel && view.card === pin} class:seen={pin.read === true} style:--surface-colour={pin.colour} data-number={pin.number} data-category={pin.category}><span class="glyph">{pin.glyph}</span>{pin.number ?? ""}{#if pin.part.surfacingMark}<sup class="mark-glyph {pin.part.surfacingMark.direction ?? 'raise'}">{MARK_GLYPHS[pin.part.surfacingMark.direction ?? "raise"]}</sup>{/if}{#if group.members.length > 1}<small>+{group.members.length - 1}</small>{/if}{#if pin.read === false}<i class="unread-dot"></i>{/if}</span>
+				<span class="pin-chip" class:upper={group.row === 1} class:current class:cited class:open-ask={view.openAsk?.uuid === pin.part.uuid} class:pending={pin.pending} class:below={view.belowLevel && view.card === pin} class:seen={seen} style:--surface-colour={pin.colour} data-number={pin.number} data-category={pin.category}><span class="glyph">{pin.glyph}</span>{pin.number ?? ""}{#if pin.part.surfacingMark}<sup class="mark-glyph {pin.part.surfacingMark.direction ?? 'raise'}">{MARK_GLYPHS[pin.part.surfacingMark.direction ?? "raise"]}</sup>{/if}{#if group.members.length > 1}<small>+{group.members.length - 1}</small>{/if}{#if unread}<i class="unread-dot"></i>{/if}</span>
 			</Button>
 		{/each}
 		{/if}
@@ -172,8 +220,8 @@
 </div>
 
 <div class="surface-axis">
-	<span class="axis-start">{startTime}</span>
-	<span class="axis-notes">{#if level === "final"}<span>Final only · {view.counts.all} hidden</span>{/if}{#if view.empty}<span>Nothing at {SURFACE_LABELS[level]} · <Button variant="ghost-accent" size="content" hoverFill="none" touchTarget class="font-mono" onclick={() => onlevel("all")}>Show All</Button></span>{/if}{#if view.notJudgedCount}<span data-testid="surfacing-not-judged">⚠ {view.notJudgedCount} not judged</span>{/if}</span>
+	{#if !markCount}<span class="axis-start">{startTime}</span>{/if}
+	<span class="axis-notes">{#if level === "final"}<span>Final only · {view.counts.all} hidden</span>{/if}{#if view.empty}<span>Nothing at {SURFACE_LABELS[level]} · <Button variant="ghost-accent" size="content" hoverFill="none" touchTarget class="font-mono" onclick={() => onlevel("all")}>Show All</Button></span>{/if}{#if view.notJudgedCount}<span data-testid="surfacing-not-judged">⚠ {view.notJudgedCount} not judged</span>{/if}{#if markCount}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="h-[22px] shrink-0 rounded-full px-[8px] font-sans text-[11.5px] font-medium bg-accent/15 text-accent" disabled={readSaving} data-testid="surfacing-mark-read" onclick={() => onmarkread?.()}>✓ Mark {markCount} read</Button>{/if}</span>
 	<span class="grow"></span>
 	<div class="contents" data-testid="surfacing-level"><SegmentedControl variant="level" label="Surfacing level" options={levelOptions} bind:value={() => level, onlevel} /></div>
 	{#if overridden}<i class="override-dot" data-testid="surfacing-level-default-dot" title="Overrides the default level"></i>{/if}
@@ -185,6 +233,7 @@
 	</Menu>
 	{#if live && !view.following}<Button variant="ghost-accent" size="content" hoverFill="none" touchTarget class="font-mono" ariaLabel="Follow latest" onclick={onfollow}>now ⇥</Button>{:else}<span class:live-end={live}>{endTime}{live ? " now" : ""}</span>{/if}
 </div>
+{#if readError}<p role="alert" class="mt-[4px] text-[12px] text-error">{readError}</p>{/if}
 <div data-surfacing-region="below-strip">{@render regions.belowStrip?.(view, (partId) => { citedPart = partId; })}</div>
 
 <style>
@@ -193,6 +242,7 @@
 	.type-label,.needs-reply { padding:2px 7px; border-radius:999px; font-size:11px; font-weight:600; background:color-mix(in srgb,var(--surface-colour) 16%,transparent); color:var(--surface-colour); }
 	.needs-reply { color:var(--color-status-ask); background:color-mix(in srgb,var(--color-status-ask) 16%,transparent); }
 	.card-at { margin-left:auto; font:11.5px var(--font-mono); color:var(--color-text-muted); white-space:nowrap; }
+	.read-toggle { display:inline-flex; align-items:center; gap:5px; min-height:32px; font-size:12px; color:var(--color-text-muted); cursor:pointer; }
 	.card-note { margin-top:6px; font-size:12px; color:var(--color-text-muted); }
 	.card-body { margin-top:7px; font-size:14px; line-height:1.6; overflow-wrap:anywhere; }
 	.card-body :global(p:last-child) { margin-bottom:0; }

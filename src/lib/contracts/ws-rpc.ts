@@ -365,6 +365,7 @@ export const HistoryMessagePartSchema = Schema.Struct({
 	id: Schema.String,
 	type: Schema.String,
 	surfacingMark: Schema.optional(Schema.NullOr(SurfacingMarkSchema)),
+	surfacingRead: Schema.optionalWith(Schema.Boolean, { exact: true }),
 	surfacingOrdinal: Schema.optionalWith(
 		TextSurfacedPayloadSchema.fields.ordinal,
 		{ exact: true },
@@ -2098,6 +2099,20 @@ export class MarkSessionRead extends Schema.TaggedRequest<MarkSessionRead>()(
 	},
 ) {}
 
+export class SetMessagesRead extends Schema.TaggedRequest<SetMessagesRead>()(
+	"SetMessagesRead",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			sessionId: NonEmptyString,
+			partIds: Schema.Array(NonEmptyString).pipe(Schema.minItems(1)),
+			read: Schema.Boolean,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class SetSessionSettled extends Schema.TaggedRequest<SetSessionSettled>()(
 	"SetSessionSettled",
 	{
@@ -3150,6 +3165,7 @@ const wsRpcRequests = [
 	OpenCodeUseWorktree,
 	MarkSessionUnread,
 	MarkSessionRead,
+	SetMessagesRead,
 	MarkSessionSeen,
 	SetSessionSettled,
 	SetSessionPinned,

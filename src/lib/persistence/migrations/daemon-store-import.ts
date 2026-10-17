@@ -92,6 +92,7 @@ const copiedTables = [
 	"turns",
 	"messages",
 	"message_parts",
+	"message_part_read_state",
 	"session_providers",
 	"pending_approvals",
 	"pending_inputs",
@@ -699,7 +700,14 @@ function collisions(
 		);
 	const identityGroups = [
 		["messages", ["messages:id", "turns:id", "message_tombstones:message_id"]],
-		["message_parts", ["message_parts:id", "message_part_tombstones:part_id"]],
+		[
+			"message_parts",
+			[
+				"message_parts:id",
+				"message_part_tombstones:part_id",
+				"message_part_read_state:part_id",
+			],
+		],
 		[
 			"command_receipts",
 			[

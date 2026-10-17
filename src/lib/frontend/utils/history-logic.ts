@@ -236,6 +236,9 @@ function convertAssistantParts(
 					...(part.surfacingMark !== undefined && {
 						surfacingMark: part.surfacingMark,
 					}),
+					...(part.surfacingRead !== undefined && {
+						surfacingRead: part.surfacingRead,
+					}),
 					...(messageId != null && part === replyPart && { messageId }),
 					...(partCreatedAt != null && { createdAt: partCreatedAt }),
 					...(partEndedAt != null && { endedAt: partEndedAt }),

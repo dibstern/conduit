@@ -225,6 +225,7 @@ function partSurfacing(
 	| "surfacingSetVersion"
 	| "surfacingModel"
 	| "surfacingMark"
+	| "surfacingRead"
 > {
 	const mark =
 		row.surfacing_mark == null
@@ -237,6 +238,7 @@ function partSurfacing(
 	if (row.surfacing_ordinal == null) return mark;
 	return {
 		...mark,
+		surfacingRead: row.surfacing_read === true,
 		surfacingOrdinal: row.surfacing_ordinal,
 		surfacingProbabilities:
 			row.surfacing_probabilities == null
