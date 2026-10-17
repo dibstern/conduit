@@ -150,6 +150,12 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 			"storybook play() guard that narrows the sheet body and footer query, not executable production code",
 	},
 	{
+		path: "src/lib/frontend/components/ui/HoldMenu.stories.ts",
+		snippetPattern: /Missing in-menu dismiss layer/,
+		reason:
+			"storybook play() guard that narrows the dismiss layer query, not executable production code",
+	},
+	{
 		path: "src/lib/frontend/components/input/input-utils.ts",
 		snippetPattern: /GIF exceeds the 5 MB encoded size limit/,
 		reason: "browser attachment validation failure surfaced to UI caller",

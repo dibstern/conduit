@@ -10,5 +10,5 @@
 
 <DropdownMenu.Group {...rest} class={className}>
 	<DropdownMenu.GroupHeading class="mt-[18px] mx-[2px] mb-[8px] text-[12.5px] font-medium text-text-dimmer">{label}</DropdownMenu.GroupHeading>
-	<div class="grid grid-cols-4 gap-[8px]">{@render children()}</div>
+	<div data-menu-grid class="grid grid-cols-4 gap-[8px]">{@render children()}</div>
 </DropdownMenu.Group>
