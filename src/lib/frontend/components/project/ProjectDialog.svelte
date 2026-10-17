@@ -412,7 +412,7 @@
 					</section>
 				{/if}
 				<Field label="Default session mode" hint="Without a project override, conduit.json takes precedence over the global default.">
-					<Select bind:value={sessionMode} disabled={saving}>
+					<Select bind:value={sessionMode} disabled={saving} touchTarget>
 						<option value="">Use global default</option>
 						<option value="local">Local</option>
 						<option value="worktree">New worktree</option>

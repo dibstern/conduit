@@ -427,15 +427,15 @@ for (const mode of [
 						.getRequests()
 						.filter(({ tag }) => tag === "DeleteSession")
 						.map(({ payload }) => ({
-							projectSlug: payload["projectSlug"],
+							sessionId: payload["sessionId"],
 							removeWorktrees: payload["removeWorktrees"],
 						})),
 				)
-				.toEqual([{ projectSlug: "second-project", removeWorktrees: false }]);
+				.toEqual([{ sessionId: "delete-session", removeWorktrees: false }]);
 			expect(
 				rpc.getRequests().find(({ tag }) => tag === "InspectSessionWorktrees")
-					?.payload["projectSlug"],
-			).toBe("second-project");
+					?.payload["sessionId"],
+			).toBe("delete-session");
 		});
 
 		test("in-use worktrees say they are kept and disable Remove", async ({

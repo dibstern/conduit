@@ -56,7 +56,10 @@ async function readState(page: Page) {
 					node
 						.querySelector("[data-testid='background-task-kind']")
 						?.textContent?.trim() ?? "",
-				opens: node.querySelector("button")?.getAttribute("aria-label") ?? null,
+				opens:
+					node
+						.querySelector("[data-testid='background-task-open']")
+						?.getAttribute("aria-label") ?? null,
 				selected: node.getAttribute("aria-current") === "true",
 			})),
 		),
