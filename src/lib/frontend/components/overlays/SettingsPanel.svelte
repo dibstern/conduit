@@ -17,6 +17,7 @@
 	import VisibilitySettingsTab from "./VisibilitySettingsTab.svelte";
 	import ServerSettingsTab from "./ServerSettingsTab.svelte";
 	import DebugSettingsTab from "./DebugSettingsTab.svelte";
+	import SurfacingSettingsTab from "./SurfacingSettingsTab.svelte";
 	import type { SettingsSection } from "../layout/chrome-actions.js";
 	import { getCachedInstances, instanceStatusColor } from "../../stores/instance.svelte.js";
 	import { orderedSettingsUsageAccounts, usageAlert, usageState } from "../../stores/usage.svelte.js";
@@ -27,6 +28,7 @@
 		{ value: "general", label: "General", testId: "settings-tab-general", icon: "settings", iconTone: "neutral" },
 		{ value: "models", label: "Models & agents", testId: "settings-tab-models", icon: "sliders-horizontal", iconTone: "purple" },
 		{ value: "claude", label: "Claude", testId: "settings-tab-claude", icon: "claude", iconTone: "clay" },
+		{ value: "surfacing", label: "Surfacing", testId: "settings-tab-surfacing", icon: "sparkle", iconTone: "purple" },
 		{ value: "usage", label: "Usage", testId: "settings-tab-usage", groupLabel: "This computer", icon: "gauge", iconTone: "amber" },
 		{ value: "server", label: "Server", testId: "settings-tab-server", icon: "server", iconTone: "green" },
 	] as const;
@@ -34,6 +36,7 @@
 	let section = $state<SettingsSection | null>("general");
 	let backEl = $state<HTMLButtonElement | HTMLAnchorElement>();
 	let contentEl = $state<HTMLDivElement>();
+	let surfacingPage = $state<{ title: string; back: () => void } | null>(null);
 	const shown = $derived(section ?? "general");
 	const listHidden = $derived(sessionViewState.compact && section !== null);
 	const sectionLabel = $derived(SETTINGS_TABS.find((tab) => tab.value === shown)?.label ?? "Settings");
@@ -55,6 +58,7 @@
 
 	async function openSection(next: SettingsSection | ""): Promise<void> {
 		if (!next) return;
+		surfacingPage = null;
 		section = next;
 		await scrollContent();
 		if (!sessionViewState.compact) return;
@@ -86,16 +90,16 @@
 					size="content"
 					icon="chevron-left"
 					iconSize={16}
-					ariaLabel="Back to settings sections"
+					ariaLabel={surfacingPage ? "Back to Surfacing" : "Back to settings sections"}
 					data-testid="settings-back-btn"
 					class="min-h-[44px] justify-self-start text-[15px]"
-					onclick={showSectionList}
-				>Settings</Button>
+					onclick={() => { if (surfacingPage) surfacingPage.back(); else void showSectionList(); }}
+				>{surfacingPage ? "Surfacing" : "Settings"}</Button>
 			{:else if sessionViewState.compact}
 				<span></span>
 			{/if}
 			<h2 id="settings-panel-title" class="min-w-0 truncate font-semibold text-text {sessionViewState.compact ? 'text-center text-[16px]' : 'flex-1 text-[15px]'}">
-				{listHidden ? sectionLabel : "Settings"}
+				{listHidden ? surfacingPage?.title ?? sectionLabel : "Settings"}
 			</h2>
 			{#if sessionViewState.compact && !listHidden}
 				<Button variant="ghost" tone="accent" hoverFill="none" size="content" class="min-h-[44px] min-w-[44px] justify-self-end text-[15px]" data-testid="settings-close-btn" ariaLabel="Close settings" onclick={() => onClose?.()}>Done</Button>
@@ -140,6 +144,7 @@
 						<div class="mb-[16px] flex flex-wrap items-baseline gap-x-[10px]">
 							<h2 class="text-[17px] font-semibold tracking-[-0.01em] text-text">{sectionLabel}</h2>
 							{#if shown === "usage"}<p class="text-[12.5px] text-text-muted">This computer's accounts</p>{/if}
+							{#if shown === "surfacing"}<p class="text-[12.5px] text-text-muted">Which mid-turn messages surface, and how</p>{/if}
 						</div>
 					{/if}
 					<div class="flex flex-col">
@@ -154,6 +159,8 @@
 						<VisibilitySettingsTab />
 					{:else if shown === "claude"}
 						<ClaudeSettingsTab />
+					{:else if shown === "surfacing"}
+						<SurfacingSettingsTab onPageChange={(page) => { surfacingPage = page; void scrollContent(); }} />
 					{:else if shown === "usage"}
 						<UsageSettingsTab />
 					{:else if shown === "server"}

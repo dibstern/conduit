@@ -141,21 +141,22 @@ export const makeMessageSurfacingSettings = (
 				);
 			});
 		const status = (): MessageSurfacingStatus => {
-			const state = Option.isSome(envKey)
-				? Option.isSome(current.invalidEnvKeyHash) &&
-					Option.isSome(envKeyHash) &&
-					current.invalidEnvKeyHash.value === envKeyHash.value
-					? "invalid"
-					: "env"
+			const source = Option.isSome(envKey)
+				? "env"
 				: Option.isSome(current.apiKey)
-					? current.keyState
+					? "stored"
 					: "none";
+			const rejected =
+				source === "env"
+					? Option.isSome(current.invalidEnvKeyHash) &&
+						Option.isSome(envKeyHash) &&
+						current.invalidEnvKeyHash.value === envKeyHash.value
+					: source === "stored" && current.keyState === "invalid";
 			return {
 				...current.settings,
 				recap: { ...current.settings.recap },
-				active:
-					current.settings.enabled && (state === "valid" || state === "env"),
-				key: { state },
+				active: current.settings.enabled && source !== "none" && !rejected,
+				key: { source, rejected },
 			};
 		};
 		const send = (key: Redacted.Redacted<string>, body: unknown) =>

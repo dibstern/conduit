@@ -30,8 +30,11 @@ export const DEFAULT_MESSAGE_SURFACING_SETTINGS: MessageSurfacingPreferences = {
 export const MessageSurfacingStatusSchema = Schema.Struct({
 	...MessageSurfacingSettingsSchema.fields,
 	active: Schema.Boolean,
+	// Where the key comes from, and whether TypeSafe has refused it. A stored
+	// key is validated before it is kept; an environment key on its first 401.
 	key: Schema.Struct({
-		state: Schema.Literal("none", "valid", "invalid", "env"),
+		source: Schema.Literal("none", "stored", "env"),
+		rejected: Schema.Boolean,
 	}),
 });
 export type MessageSurfacingStatus = typeof MessageSurfacingStatusSchema.Type;

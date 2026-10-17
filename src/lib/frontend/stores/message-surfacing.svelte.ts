@@ -42,7 +42,7 @@ export const messageSurfacing = $state<{
 	status: {
 		...DEFAULT_MESSAGE_SURFACING_SETTINGS,
 		active: false,
-		key: { state: "none" },
+		key: { source: "none", rejected: false },
 	},
 	categorySet: DEFAULT_CATEGORY_SET,
 	revision: 0,

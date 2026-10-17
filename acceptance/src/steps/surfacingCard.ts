@@ -225,12 +225,11 @@ export const surfacingCardHandlers: StepHandler[] = [
 				enabled: match[1] !== "inactive",
 				active: match[1] === "active",
 				key: {
-					state:
-						match[1] === "active"
-							? "valid"
-							: match[1] === "invalid-key"
-								? "invalid"
-								: "none",
+					source:
+						match[1] === "active" || match[1] === "invalid-key"
+							? "stored"
+							: "none",
+					rejected: match[1] === "invalid-key",
 				},
 			});
 		},

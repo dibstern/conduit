@@ -239,7 +239,10 @@ describe("message surfacing RPC security", () => {
 					.pipe(Effect.provideService(RpcCaller, caller), Effect.either);
 				expect(result).toMatchObject(
 					allowed
-						? { _tag: "Right", right: { key: { state: "valid" } } }
+						? {
+								_tag: "Right",
+								right: { key: { source: "stored", rejected: false } },
+							}
 						: {
 								_tag: "Left",
 								left: {

@@ -685,6 +685,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 				"settings-tab-general",
 				"settings-tab-models",
 				"settings-tab-claude",
+				"settings-tab-surfacing",
 				"settings-tab-usage",
 				"settings-tab-server",
 			]);

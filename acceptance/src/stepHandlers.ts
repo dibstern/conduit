@@ -39,6 +39,7 @@ import { sessionRowsHandlers } from "./steps/sessionRows.js";
 import { sessionSheetsHandlers } from "./steps/sessionSheets.js";
 import { sessionSkillsHandlers } from "./steps/sessionSkills.js";
 import { settingsGeneralHandlers } from "./steps/settingsGeneral.js";
+import { settingsSurfacingHandlers } from "./steps/settingsSurfacing.js";
 import { sideThreadsHandlers } from "./steps/sideThreads.js";
 import { surfacingCardHandlers } from "./steps/surfacingCard.js";
 import { taskDrillInHandlers } from "./steps/taskDrillIn.js";
@@ -98,6 +99,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...composerContextWarningHandlers,
 	...settingsGeneralHandlers,
 	...userAvatarHandlers,
+	...settingsSurfacingHandlers,
 	...worktreeCleanupSettingsHandlers,
 	...composerHandlers,
 	...composerEffortHandlers,

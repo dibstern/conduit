@@ -108,7 +108,7 @@
 	});
 
 	const surfacingConfig = $derived(surfacing ?? messageSurfacing);
-	const surfacingActive = $derived(surfacingConfig.status.active && surfacingConfig.status.enabled && (surfacingConfig.status.key.state === "valid" || surfacingConfig.status.key.state === "env"));
+	const surfacingActive = $derived(surfacingConfig.status.active && surfacingConfig.status.enabled && surfacingConfig.status.key.source !== "none" && !surfacingConfig.status.key.rejected);
 	const override = $derived(sessionSurfaceLevel(sessionId));
 	const level = $derived(override ?? surfacingConfig.status.defaultLevel);
 	let picked = $state<string | null>(null);

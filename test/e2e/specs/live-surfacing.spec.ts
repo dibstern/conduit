@@ -82,7 +82,7 @@ console.log("verified");
 														...DEFAULT_MESSAGE_SURFACING_SETTINGS,
 														enabled: true,
 														active: true,
-														key: { state: "valid" },
+														key: { source: "stored", rejected: false },
 													},
 									},
 								}),
