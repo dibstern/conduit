@@ -175,6 +175,9 @@ async function openCheckout(
 	});
 	rpc.setDaemonList("SubscribeInstances", instances);
 	await page.goto(`${relayBaseUrl}/s/header-session`);
+	// Phones keep the checkout in the Composer sheet.
+	if ((page.viewportSize()?.width ?? 0) < 768)
+		await page.getByTestId("composer-words-sheet-trigger").tap();
 	const trigger = page.getByTestId("composer-checkout");
 	await expect(trigger).toBeVisible();
 	const bar = page.getByTestId("session-bar");
@@ -205,16 +208,20 @@ for (const mode of [
 				git: { branch: "main", dirty: true, ahead: 0, behind: 0 },
 			});
 			await expect(trigger).toHaveAttribute("title", "conduit / main");
-			await expect(trigger.locator('[data-part="project"]')).toHaveText(
-				"conduit",
-			);
+			// Desktop Words names the branch alone; the phone sheet row keeps the project.
+			if (mode.hasTouch) {
+				await expect(trigger.locator('[data-part="project"]')).toHaveText(
+					"conduit",
+				);
+				await expect(trigger).toContainText("/");
+			} else
+				await expect(trigger.locator('[data-part="project"]')).toHaveCount(0);
 			await expect(trigger.locator('[data-part="branch"]')).toHaveText("main");
-			await expect(trigger).toContainText("/");
 			await expect(trigger.locator('[data-part="dirty"]')).toBeVisible();
 			const dot = await trigger.locator('[data-part="dirty"]').boundingBox();
 			expect(dot?.width).toBe(6);
 			expect(dot?.height).toBe(6);
-			// It badges the icon, so a truncating branch never pushes it out.
+			// It follows the branch, and a truncating branch never pushes it out.
 			const bounds = await trigger.boundingBox();
 			expect(dot?.x).toBeGreaterThanOrEqual(bounds?.x ?? 0);
 			expect((dot?.x ?? 0) + 6).toBeLessThanOrEqual(
@@ -347,7 +354,7 @@ for (const mode of [
 					`${folder} / ${stage.git.branch}`,
 				);
 				await expect(trigger.locator('[data-part="project"]')).toHaveText(
-					folder ?? "",
+					mode.hasTouch ? (folder ?? "") : [],
 				);
 				await expect(trigger.locator('[data-part="branch"]')).toHaveText(
 					stage.git.branch ?? "",
@@ -413,7 +420,10 @@ for (const mode of [
 			const trigger = await openCheckout(page, harness.relayBaseUrl, {
 				directory: "/workspace/ai-notes",
 			});
-			await expect(trigger).toHaveText("ai-notes");
+			// The phone sheet row leads with its "Checkout" label.
+			await expect(trigger).toHaveText(
+				mode.hasTouch ? /^\s*Checkout\s+ai-notes\s*$/ : "ai-notes",
+			);
 			await expect(trigger.locator('[data-icon="folder"] svg')).toBeVisible();
 			await expect(trigger.locator('[data-part="branch"]')).toHaveCount(0);
 			await trigger.click();
@@ -555,8 +565,10 @@ for (const mode of [
 				git: { branch: "docs/architecture-deepening-design", dirty: true },
 			});
 			const project = trigger.locator('[data-part="project"]');
-			await expect(project).toBeVisible();
-			expect((await project.boundingBox())?.width).toBeGreaterThan(10);
+			if (mode.hasTouch) {
+				await expect(project).toBeVisible();
+				expect((await project.boundingBox())?.width).toBeGreaterThan(10);
+			} else await expect(project).toHaveCount(0);
 			const branch = trigger.locator('[data-part="branch"]');
 			await expect(branch).toBeVisible();
 			expect((await branch.boundingBox())?.width).toBeGreaterThan(10);
@@ -754,6 +766,9 @@ for (const mode of [
 					git: { branch: "main" },
 					viewActivity: true,
 				});
+				// Close the Composer sheet openCheckout raised; it holds the page.
+				await page.keyboard.press("Escape");
+				await expect(page.getByTestId("composer-checkout")).toHaveCount(0);
 				await expect(page.getByTestId("session-bar-views-button")).toHaveCount(
 					0,
 				);

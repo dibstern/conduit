@@ -18,6 +18,7 @@
 -->
 <script lang="ts">
 	import { tokenizeSkills } from "../../../skill-recognition.js";
+	import ComposerToken from "../ui/ComposerToken.svelte";
 
 	interface Props {
 		text: string;
@@ -34,7 +35,7 @@
 	aria-hidden="true"
 	class="composer-text-metrics mirror pointer-events-none relative z-0 text-text"
 	class:opacity-0={dimmed}
->{#each segments as seg (seg.key)}{#if seg.kind === "skill"}<span class="skill-pill composer-pill">{seg.text}</span>{:else if seg.kind === "unknown"}<span class="skill-unknown">{seg.text}</span>{:else}{seg.text}{/if}{/each}</div>
+>{#each segments as seg (seg.key)}{#if seg.kind === "skill"}<ComposerToken goal={/^[/$]goal$/.test(seg.text)}>{seg.text}</ComposerToken>{:else if seg.kind === "unknown"}<span class="skill-unknown">{seg.text}</span>{:else}{seg.text}{/if}{/each}</div>
 
 <style>
 	/* A zero-width space forcing a final line box, which the row's height depends
@@ -46,49 +47,10 @@
 		content: "\200b";
 	}
 
-	/* Composer-only additions to the shared `skill-pill` utility. The pill's
-	   horizontal padding is cancelled by an equal negative margin so it takes zero
-	   net width and the transparent textarea caret stays glyph-aligned (vertical
-	   padding only extends the tint — inline boxes ignore it for line layout). No
-	   font-weight change, for the same reason. */
-	.composer-pill {
-		/* Layer 1: the shimmer light (moves on recognition). Layer 2: the soft tint.
-		   Backgrounds are auto-clipped to the box, so no overflow/inline-block needed. */
-		background:
-			linear-gradient(
-				100deg,
-				transparent 40%,
-				color-mix(in srgb, #fff 55%, transparent) 50%,
-				transparent 60%
-			)
-			no-repeat,
-			var(--color-accent-bg);
-		background-size: 250% 100%, auto;
-		background-position: 0% 0%, 0% 0%;
-		margin: 0 -4px;
-		animation: skill-shimmer 0.7s ease-out 1;
-	}
-
-	/* One-shot light sweep on recognition; settles with the light off-screen right. */
-	@keyframes skill-shimmer {
-		from {
-			background-position: 100% 0%, 0% 0%;
-		}
-		to {
-			background-position: 0% 0%, 0% 0%;
-		}
-	}
-
 	.skill-unknown {
 		color: var(--color-error);
 		text-decoration: underline;
 		text-decoration-color: currentColor;
 		text-underline-offset: 2px;
-	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.composer-pill {
-			animation: none;
-		}
 	}
 </style>

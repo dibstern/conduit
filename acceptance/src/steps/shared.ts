@@ -201,10 +201,13 @@ export async function openModelPicker(page: Page): Promise<void> {
 		// One locator, not a count-then-pick: a tier change can swap the triggers mid-step.
 		await page
 			.getByTestId(
-				/^(composer-harness-trigger|model-picker-trigger|composer-word-model)$/,
+				/^(composer-harness-trigger|model-picker-trigger|composer-word-model|composer-words-sheet-trigger)$/,
 			)
 			.first()
 			.click();
+		const sheet = page.getByTestId("composer-more-sheet");
+		if (await sheet.isVisible())
+			await page.getByTestId("composer-more-model").click();
 	}
 	await picker.waitFor({ state: "visible", timeout: 5_000 });
 	const back = page.getByTestId("picker-back");
@@ -215,7 +218,9 @@ export async function openModelPicker(page: Page): Promise<void> {
 export async function openComposerMoreSheet(page: Page): Promise<void> {
 	const sheet = page.getByTestId("composer-more-sheet");
 	if (!(await sheet.isVisible()))
-		await page.getByTestId("composer-more").click();
+		await page
+			.getByTestId(/^(model-picker-trigger|composer-words-sheet-trigger)$/)
+			.click();
 	await expect(sheet).toBeVisible();
 }
 

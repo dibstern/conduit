@@ -67,7 +67,7 @@ Scenario Outline: A met goal survives a reload and its dismissal hides both outc
   And the goal is met with the reason <reason>
   And the stored goal is replayed after a reload
   Then the session goal subtitle reads Goal met · 7 checks · 41m
-  And the met goal bar reads Goal met · <reason> · 7 checks · 41m
+  And the met goal bar reads Goal met · <condition> and ends · 7 checks · 41m
   And the composer has a normal goal border
   And the layout region visually matches <baseline> at <threshold> percent
   When I dismiss the met goal bar

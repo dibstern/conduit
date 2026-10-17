@@ -176,7 +176,7 @@ test("real daemon usage controls reach the desktop sidebar footer per account", 
 		);
 		await expect(page.locator("#input")).toBeVisible();
 		const picker = page.locator(
-			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 		);
 		await openPickerRoot(page, picker);
 		await page.getByTestId("picker-harness-claude").click();
@@ -192,7 +192,7 @@ test("real daemon usage controls reach the desktop sidebar footer per account", 
 			"five_hour",
 		);
 		await expect(page.getByTestId("usage-warning-title")).toHaveText(
-			"Personal: 5h limit 88% used.",
+			"This session's account, Personal, has used 88% of its 5-hour window.",
 		);
 		const warningScreenshot = join(artifacts, "usage-warning.png");
 		await page.locator("#input-area").screenshot({ path: warningScreenshot });
@@ -315,7 +315,7 @@ test.describe("send at an account's reset", () => {
 		await expect(row).toHaveCount(1);
 		await expect(row.getByTestId("pending-input-text")).toHaveText(prompt);
 		await expect(row.getByTestId("pending-input-state")).toHaveText("Queued");
-		const caption = `Sends at ${usageForecastTime(resetAt, Date.now())}`;
+		const caption = `sends ${usageForecastTime(resetAt, Date.now())}`;
 		await expect(row.getByTestId("pending-input-sends-at")).toHaveText(caption);
 		await expect(row.getByTestId("pending-input-edit")).toBeVisible();
 		await expect(row.getByTestId("pending-input-remove")).toBeVisible();

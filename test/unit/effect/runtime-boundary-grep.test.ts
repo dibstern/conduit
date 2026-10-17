@@ -85,7 +85,7 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 	},
 	{
 		path: "src/lib/frontend/components/session/GitIdentity.stories.ts",
-		snippetPattern: /Missing checkout (wrapper|labels)/,
+		snippetPattern: /Missing checkout (wrapper|labels|branch)/,
 		reason:
 			"storybook play() guards that narrow the checkout queries, not executable production code",
 	},
@@ -112,6 +112,13 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 		snippetPattern: /composer layers not found/,
 		reason:
 			"storybook play() guard that narrows the composer layer queries, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/input/InputArea.stories.ts",
+		snippetPattern:
+			/Claude driver traits are missing|Composer (story|stage) session is missing|Send is missing/,
+		reason:
+			"storybook fixture and play() guards that narrow story state and the send query, not executable production code",
 	},
 	{
 		path: "src/lib/frontend/components/layout/SessionBar.stories.ts",

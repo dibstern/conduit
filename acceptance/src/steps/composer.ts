@@ -19,7 +19,7 @@ async function openApprovalsMenu(page: Page): Promise<void> {
 	let button = page.getByTestId(
 		/^(permission-mode-badge|composer-word-approvals)$/,
 	);
-	if ((await page.getByTestId("composer-more").count()) > 0) {
+	if ((page.viewportSize()?.width ?? 0) < 768) {
 		const row = page.getByTestId("composer-more-mode");
 		if (await row.isVisible()) button = row;
 		else if (!(await button.isVisible())) {
@@ -95,15 +95,17 @@ export const composerHandlers: StepHandler[] = [
 				throw new Error("Mock relay controls were not initialised");
 			}
 
+			// The composer hands the provider its own spelling of $goal.
+			const sent = message.replace(/^\$goal\b/, "/goal");
 			await rpcControl.waitForRequest(
 				(request) =>
-					request.tag === "input.submit" && request.payload["text"] === message,
+					request.tag === "input.submit" && request.payload["text"] === sent,
 			);
 			// Stand in for the adapter placing the sent message (the browser keeps
 			// no copy of its own), then finish the turn the send started, as the
 			// relay's done does.
 			await relayControl.sendMessages([
-				{ type: "user_message", text: message },
+				{ type: "user_message", text: sent },
 				{ type: "done", code: 0 },
 			]);
 		},
@@ -197,13 +199,13 @@ export const composerHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert approvals chip label",
+		name: "assert approvals shield accessible label",
 		match:
-			/^the approvals chip shows (Never ask|Plan|Ask|Edits|Auto|Full access)$/,
+			/^the approvals chip shows (Never ask|Plan|Ask before edits|Auto-accept edits|Auto|Full access)$/,
 		run: async ({ world, match }) => {
-			await expect(world.page.getByTestId("permission-mode-badge")).toHaveText(
-				match[1] ?? "",
-			);
+			await expect(
+				world.page.getByTestId("permission-mode-badge"),
+			).toHaveAccessibleName(`Approvals: ${match[1]}. Open options`);
 		},
 	},
 	{
@@ -268,7 +270,7 @@ export const composerHandlers: StepHandler[] = [
 				.poll(() =>
 					button.evaluate((element, tone) => {
 						const probe = document.createElement("span");
-						probe.style.color = `var(--color-p-${tone})`;
+						probe.style.color = `var(--color-${tone === "full" ? "error" : tone === "edits" || tone === "auto" ? "status-ask" : "text-secondary"})`;
 						document.body.append(probe);
 						const expected = getComputedStyle(probe).color;
 						probe.remove();

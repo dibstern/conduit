@@ -7,10 +7,9 @@ import {
 	setSessionRowStatus,
 } from "./shared.js";
 
-// Literal values from docs/plans/2026-10-02-composer-final-designs.html.
-const BUTTON = 32;
-// Desktop controls from docs/plans/2026-10-11-composer-harness-account-final-design.html.
-const CONTROL = 26;
+// Final composer dimensions from the 2026-10-16 redesign.
+const BUTTON = 34;
+const CONTROL = 30;
 const iconsControls = {
 	harness: "composer-harness-trigger",
 	model: "model-picker-trigger",
@@ -19,12 +18,12 @@ const iconsControls = {
 } as const;
 const phoneRows = {
 	Harness: "composer-harness-trigger",
+	Account: "composer-more-account",
 	Model: "composer-more-model",
 	Effort: "composer-more-effort",
 	Mode: "composer-more-mode",
 	Checkout: "composer-checkout",
 } as const;
-const SEND_OFF = { background: "rgb(35, 35, 39)", color: "rgb(108, 108, 117)" };
 
 async function box(locator: Locator) {
 	const rect = await locator.boundingBox();
@@ -58,6 +57,46 @@ const sessionIdOf = (page: Page): string => {
 
 export const composerFinalDesignHandlers: StepHandler[] = [
 	{
+		name: "assert pinned teal goal command",
+		match: /^the built-in menu pins \$goal first in teal$/,
+		run: async ({ world }) => {
+			const menu = world.page.getByRole("listbox", {
+				name: "Built-in commands",
+			});
+			const first = menu.getByRole("option").first();
+			await expect(first.locator(".cmd-name")).toHaveText("$goal");
+			await expect(first).toHaveAttribute("data-goal", "true");
+			await expect(first.locator(".cmd-desc")).toHaveText(
+				"Keep working until something is true",
+			);
+			await expect
+				.poll(() =>
+					first.locator(".cmd-name").evaluate((element) => {
+						const probe = document.createElement("span");
+						probe.style.color = "var(--color-status-goal)";
+						element.append(probe);
+						const expected = getComputedStyle(probe).color;
+						probe.remove();
+						return getComputedStyle(element).color === expected;
+					}),
+				)
+				.toBe(true);
+		},
+	},
+	{
+		name: "assert compact context percentage",
+		match: /^the compact command reports (\d+)% context$/,
+		run: async ({ world, match }) => {
+			const compact = world.page.getByRole("option").filter({
+				has: world.page.locator(".cmd-name", { hasText: "$compact" }),
+			});
+			await expect(compact.getByTestId("command-context-percent")).toHaveText(
+				`${match[1]}%`,
+			);
+		},
+	},
+
+	{
 		name: "open phone composer sheet",
 		match: /^I open the phone composer sheet$/,
 		run: async ({ world }) => {
@@ -72,7 +111,11 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			await expect(world.page.getByTestId("composer-more-sheet")).toHaveCount(
 				0,
 			);
-			await expect(world.page.getByTestId("composer-more")).toBeFocused();
+			await expect(
+				world.page.getByTestId(
+					/^(model-picker-trigger|composer-words-sheet-trigger)$/,
+				),
+			).toBeFocused();
 		},
 	},
 	{
@@ -87,7 +130,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 	{
 		name: "tap phone composer sheet row",
 		match:
-			/^I tap the phone composer (Harness|Model|Effort|Mode|Checkout) row$/,
+			/^I tap the phone composer (Harness|Account|Model|Effort|Mode|Checkout) row$/,
 		run: async ({ world, match }) => {
 			await openComposerMoreSheet(world.page);
 			await world.page
@@ -97,15 +140,17 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert phone composer more regains focus",
-		match: /^the phone composer more button is focused$/,
+		name: "assert phone model pill regains focus",
+		match: /^the phone model pill is focused$/,
 		run: async ({ world }) => {
-			await expect(world.page.getByTestId("composer-more")).toBeFocused();
+			await expect(
+				world.page.getByTestId("model-picker-trigger"),
+			).toBeFocused();
 		},
 	},
 	{
 		name: "assert phone composer row value",
-		match: /^the phone composer (Effort|Mode) row reads (.+)$/,
+		match: /^the phone composer (Account|Effort|Mode) row reads (.+)$/,
 		run: async ({ world, match }) => {
 			const row = world.page
 				.getByTestId("composer-more-sheet")
@@ -116,76 +161,38 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert E1 phone one-line controls",
-		match: /^the phone icons line matches E1 with the default shield hidden$/,
+		name: "assert Final phone controls",
+		match: /^the phone icons controls show one model chip and the shield$/,
 		run: async ({ world }) => {
 			const layout = world.page.getByTestId("composer-layout");
-			await expect(layout).toHaveAttribute("data-rows", "1");
-			const order = await layout
-				.locator("button")
-				.evaluateAll((buttons) =>
-					buttons.map(
-						(button) => button.getAttribute("data-testid") ?? button.id,
-					),
-				);
-			expect(order).toEqual([
-				"attach-btn",
-				"model-picker-trigger",
-				"composer-more",
-				"send",
-			]);
+			await expect(layout).toHaveAttribute("data-rows", "2");
+			await expect(layout.getByTestId("model-picker-trigger")).toHaveCount(1);
+			await expect(layout.getByTestId("model-picker-trigger")).toContainText(
+				"Sonnet 5",
+			);
+			await expect(layout.getByTestId("permission-mode-badge")).toBeVisible();
+			await expect(layout.getByTestId("permission-mode-badge")).toHaveText("");
 			for (const id of [
+				"composer-more",
 				"variant-badge",
-				"permission-mode-badge",
+				"composer-harness-trigger",
 				"composer-checkout",
 			])
 				await expect(layout.getByTestId(id)).toHaveCount(0);
-			await expect(world.page.getByTestId("composer-more-sheet")).toHaveCount(
-				0,
-			);
-			const model = layout.getByTestId("model-picker-trigger");
-			await expect(model.locator(".model-label")).toHaveText("S5");
-			await expect(model.getByTestId("harness-logo")).toHaveCSS(
-				"width",
-				"13px",
-			);
-			await expect(model).toHaveCSS("height", "26px");
-			await expect(model).toHaveCSS("font-size", "11.5px");
-			await expect(layout.getByTestId("composer-more")).toHaveCSS(
-				"height",
-				"26px",
-			);
-			await expect(world.page.locator("#input-row")).toHaveCSS(
-				"min-height",
-				"42px",
-			);
+			const input = await box(world.page.locator("#input"));
+			const model = await box(layout.getByTestId("model-picker-trigger"));
+			expect(input.y + input.height).toBeLessThanOrEqual(model.y + 1);
 			await expect(world.page.locator("#input-row")).toHaveCSS(
 				"border-radius",
-				"14px",
+				"22px",
 			);
-			await expect(world.page.locator("#input")).toHaveCSS(
-				"font-size",
-				"12.5px",
-			);
-			const controls = [
-				layout.locator("#attach-btn"),
-				world.page.locator("#input"),
-				model,
-				layout.getByTestId("composer-more"),
-				layout.locator("#send"),
-			];
-			const boxes = await Promise.all(controls.map(box));
-			for (let i = 1; i < boxes.length; i++) {
-				const previous = boxes[i - 1];
-				const current = boxes[i];
-				if (!previous || !current) throw new Error("Phone control is missing");
-				expect(previous.x + previous.width).toBeLessThanOrEqual(current.x + 1);
-			}
+			await expect(world.page.locator("#input")).toHaveCSS("font-size", "15px");
 		},
 	},
 	{
 		name: "assert phone composer sheet rows and geometry",
-		match: /^the phone composer sheet matches E1$/,
+		match:
+			/^the phone composer sheet has separate Harness, Account, Model, Effort, Mode and Checkout rows$/,
 		run: async ({ world }) => {
 			const sheet = world.page.getByTestId("composer-more-sheet");
 			await expect(
@@ -204,59 +211,39 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 					);
 				})
 				.toBe(true);
-			const ids = Object.values(phoneRows);
 			expect(
 				await sheet.locator('[data-part="label"]').allTextContents(),
 			).toEqual(Object.keys(phoneRows));
-			for (const id of ids) {
+			for (const id of Object.values(phoneRows)) {
 				const row = sheet.getByTestId(id);
-				await expect(row).toHaveCSS("min-height", "50px");
-				await expect(row.locator('[data-part="label"]')).toHaveCSS(
-					"width",
-					"64px",
-				);
-				await expect(row.locator('[data-part="label"]')).toHaveCSS(
-					"font-size",
-					"11px",
-				);
-				await expect(row.locator('[data-part="chevron"] svg')).toBeVisible();
-				if (id !== "composer-checkout")
-					await expect(row.locator('[data-part="value"]')).toHaveCSS(
-						"font-weight",
-						"600",
-					);
+				await expect(row).toBeVisible();
+				expect((await box(row)).height).toBeGreaterThanOrEqual(44);
+				await expect(row.locator("svg").last()).toBeVisible();
 			}
-			const harness = sheet.getByTestId("composer-harness-trigger");
-			await expect(harness).toContainText("Claude · personal");
-			await expect(harness.getByTestId("harness-logo")).toHaveCSS(
-				"width",
-				"16px",
+			await expect(sheet.getByTestId("composer-harness-trigger")).toContainText(
+				"Claude",
 			);
+			await expect(
+				sheet
+					.getByTestId("composer-more-account")
+					.locator('[data-part="value"]'),
+			).toHaveText(/\S/);
 			await expect(sheet.getByTestId("composer-more-model")).toContainText(
 				"Sonnet 5",
 			);
-			await expect(
-				sheet.getByTestId("composer-more-model").locator("small"),
-			).toHaveText("200K · 42% used");
+			await expect(sheet.getByTestId("composer-more-model")).toContainText(
+				"200K",
+			);
 			await expect(
 				sheet
 					.getByTestId("composer-more-effort")
 					.locator('[data-part="value"]'),
-			).toHaveText("high");
-			await expect(
-				sheet.getByTestId("composer-more-effort").getByTestId("effort-meter"),
-			).toBeVisible();
+			).toHaveText(/\S/);
 			await expect(
 				sheet.getByTestId("composer-more-mode").locator('[data-part="value"]'),
-			).toHaveText("Ask");
-			await expect(sheet.getByTestId("composer-checkout")).toContainText(
-				"conduit",
-			);
+			).toHaveText("Ask before edits");
 			await expect(sheet.getByTestId("composer-checkout")).toContainText(
 				"account-chip",
-			);
-			await expect(sheet.getByTestId("composer-checkout-warning")).toHaveCount(
-				0,
 			);
 		},
 	},
@@ -285,32 +272,20 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert phone nondefault hot shield",
+		name: "assert always-visible phone shield",
 		match:
-			/^the phone hot shield is (visible|hidden) for (Never ask|Plan|Ask|Edits|Auto|Full access)$/,
+			/^the phone shield is visible for (Never ask|Plan|Ask before edits|Auto-accept edits|Auto|Full access)$/,
 		run: async ({ world, match }) => {
 			const shield = world.page
 				.getByTestId("composer-layout")
 				.getByTestId("permission-mode-badge");
-			if (match[1] === "hidden") {
-				await expect(shield).toHaveCount(0);
-				return;
-			}
 			await expect(shield).toBeVisible();
 			await expect(shield).toHaveAttribute(
 				"aria-label",
-				new RegExp(`Approvals.*${match[2]}`),
+				new RegExp(`Approvals.*${match[1]}`),
 			);
 			await expect(shield).toHaveText("");
 			await expect(shield.locator("svg")).toHaveCount(1);
-			await expect(shield.locator("svg")).toHaveAttribute("width", "13");
-			await expect(shield).toHaveAttribute("data-hot", "true");
-			await expect(shield).toHaveCSS("background-color", /(?:\/|,)\s*0\.14\)/);
-			const [shieldBox, moreBox] = await Promise.all([
-				box(shield),
-				box(world.page.getByTestId("composer-more")),
-			]);
-			expect(shieldBox.x + shieldBox.width).toBeLessThanOrEqual(moreBox.x + 1);
 		},
 	},
 	{
@@ -324,12 +299,9 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			}
 			await expect(dot).toBeVisible();
 			await expectSquare(dot, 6);
-			await expect(dot).toHaveCSS("top", "3px");
-			await expect(dot).toHaveCSS("right", "3px");
-			await expect(dot).toHaveCSS("box-shadow", /0px 0px 0px 1\.5px/);
 			const warning = await dot.evaluate((element) => {
 				const probe = document.createElement("span");
-				probe.style.color = "var(--color-warning)";
+				probe.style.color = "var(--color-status-ask)";
 				element.append(probe);
 				const colour = getComputedStyle(probe).color;
 				probe.remove();
@@ -350,7 +322,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			await expect(warning).toHaveCSS("flex-wrap", "wrap");
 			const colour = await warning.evaluate((element) => {
 				const probe = document.createElement("span");
-				probe.style.color = "var(--color-warning)";
+				probe.style.color = "var(--color-status-ask)";
 				element.append(probe);
 				const resolved = getComputedStyle(probe).color;
 				probe.remove();
@@ -417,7 +389,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			const area = world.page.locator("#input-area");
 			await expect(area.getByTestId("composer-layout")).toHaveAttribute(
 				"data-rows",
-				"1",
+				"2",
 			);
 			const context = world.page.getByTestId("new-session-context");
 			await expect(context).toBeVisible();
@@ -461,57 +433,23 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert E1 desktop split footer and control sizing",
-		match: /^the desktop icons footer matches E1 in the (wide|narrow) tier$/,
-		run: async ({ world, match }) => {
+		name: "assert Final desktop controls",
+		match: /^the desktop icons controls match Final in the (wide|narrow) tier$/,
+		run: async ({ world }) => {
 			const layout = world.page.getByTestId("composer-layout");
 			await expect(layout).toHaveAttribute("data-rows", "2");
-			const left = layout.getByTestId("composer-icons-left");
-			const controls = Object.values(iconsControls);
-			const order = await left
-				.locator("button")
-				.evaluateAll((buttons) =>
-					buttons.map((button) => button.getAttribute("data-testid")),
-				);
-			expect(order).toEqual(controls);
-			for (const id of controls) {
-				const control = left.getByTestId(id);
-				await expect(control).toHaveCSS("height", `${CONTROL}px`);
-				await expect(control).toHaveCSS("padding-left", "6px");
-				await expect(control).toHaveCSS("padding-right", "6px");
-				await expect(control).toHaveCSS("border-radius", "7px");
-				await expect(control).toHaveCSS("font-size", "11.5px");
-				await expect(control).toHaveCSS("column-gap", "5px");
-				await expect(control).toHaveCSS("flex-shrink", "0");
-			}
-			const harness = left.getByTestId("composer-harness-trigger");
-			await expect(harness.getByTestId("harness-logo")).toHaveCSS(
-				"width",
-				"13px",
+			await expect(layout.getByTestId("composer-harness-trigger")).toHaveCount(
+				0,
 			);
-			await expect(harness).toHaveAttribute("aria-label", /Claude.*personal/);
-			for (const [id, label] of [
-				["composer-harness-label", "Claude"],
-				["composer-harness-account", "personal"],
-				["composer-effort-label", "High"],
-				["composer-mode-label", "Ask"],
-			] as const) {
-				if (match[1] === "wide")
-					await expect(left.getByTestId(id)).toHaveText(label);
-				else await expect(left.getByTestId(id)).toHaveCount(0);
-			}
-			const divider = left.getByTestId("composer-control-divider");
-			await expect(divider).toHaveCSS("width", "1px");
-			await expect(divider).toHaveCSS("height", "14px");
-			await expect(divider).toHaveCSS("margin-left", "4px");
-			await expect(divider).toHaveCSS("margin-right", "4px");
-			await expect(layout.locator('[data-slot="field"]')).toHaveCSS(
-				"grid-column",
-				"1 / -1",
-			);
+			await expect(layout.getByTestId("model-picker-trigger")).toHaveCount(1);
+			await expect(
+				layout.getByTestId("model-picker-trigger").getByTestId("harness-logo"),
+			).toBeVisible();
+			await expect(layout.getByTestId("permission-mode-badge")).toHaveText("");
+			await expect(layout.getByTestId("variant-badge")).toBeVisible();
 			const input = await box(world.page.locator("#input"));
-			const footer = await box(harness);
-			expect(input.y + input.height).toBeLessThanOrEqual(footer.y);
+			const model = await box(layout.getByTestId("model-picker-trigger"));
+			expect(input.y + input.height).toBeLessThanOrEqual(model.y + 1);
 		},
 	},
 	{
@@ -545,19 +483,18 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert a thin composer folds the harness into the model control",
-		match: /^the icons model control reads (\S+) beside the harness logo$/,
-		run: async ({ world, match }) => {
-			const model = world.page.getByTestId(iconsControls.model);
-			await expect(model.getByTestId("harness-logo")).toBeVisible();
-			await expect(model.locator(".model-label")).toHaveText(match[1] ?? "");
-			await expect(model.getByTestId("picker-selected-context")).toHaveCount(0);
-			await expect(world.page.getByTestId(iconsControls.harness)).toHaveCount(
-				0,
-			);
-			await expect(
-				world.page.getByTestId("composer-control-divider"),
-			).toHaveCount(0);
+		name: "assert checkout yields before the model label",
+		match: /^the model label remains Sonnet 5 before checkout labels$/,
+		run: async ({ world }) => {
+			const model = world.page
+				.getByTestId("model-picker-trigger")
+				.locator(".model-label");
+			await expect(model).toHaveText("Sonnet 5");
+			const label = await model.evaluate((element) => ({
+				width: element.clientWidth,
+				content: element.scrollWidth,
+			}));
+			expect(label.width).toBeGreaterThanOrEqual(label.content - 1);
 		},
 	},
 	{
@@ -571,81 +508,119 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 					shown.includes(part) ? 1 : 0,
 				);
 			}
-			// The icon, its dirty mark and the chevron survive every width.
+			// The checkout icon and its dirty mark survive every width.
 			await expect(checkout.locator("[data-icon] svg")).toBeVisible();
 			await expect(checkout.locator('[data-part="dirty"]')).toBeVisible();
-			await expect(checkout.locator('[data-part="chevron"]')).toBeVisible();
 		},
 	},
 	{
-		name: "assert quiet checkout yields room before left controls",
-		match:
-			/^the icons checkout is a quiet shrinking control before send( after the combined model control)?$/,
-		run: async ({ world, match }) => {
-			const layout = world.page.getByTestId("composer-layout");
-			const right = layout.locator('[data-slot="send"]');
-			const checkout = right.getByTestId("composer-checkout");
-			await expect(checkout).toHaveCSS("height", `${CONTROL}px`);
-			await expect(checkout).toHaveCSS("border-radius", "7px");
-			await expect(checkout).toHaveCSS("padding-left", "6px");
-			await expect(checkout).toHaveCSS("padding-right", "6px");
-			await expect(checkout).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-			await expect(checkout.locator('[data-part="chevron"]')).toBeVisible();
-			await expect(checkout.locator("..")).toHaveCSS("flex-shrink", "1");
-			await expect(checkout.locator("..")).toHaveCSS("min-width", "0px");
-			const footer = [
+		name: "assert checkout pill yields room before model and send",
+		match: /^the checkout pill yields room before the model label and send$/,
+		run: async ({ world }) => {
+			const checkout = world.page.getByTestId("composer-checkout");
+			await expect(checkout).toBeVisible();
+			expect(
+				Number.parseFloat(await style(checkout, "border-radius")),
+			).toBeGreaterThanOrEqual((await box(checkout)).height / 2);
+			const fill = await style(checkout, "background-color");
+			expect(fill).not.toBe("rgba(0, 0, 0, 0)");
+			const effort = world.page.getByTestId("variant-badge");
+			const controls = [
 				world.page.locator("#attach-btn"),
-				...Object.values(iconsControls)
-					.filter((id) => !match[1] || id !== iconsControls.harness)
-					.map((id) => world.page.getByTestId(id)),
+				world.page.getByTestId("model-picker-trigger"),
+				...((await effort.count()) ? [effort] : []),
+				world.page.getByTestId("permission-mode-badge"),
 				checkout,
-				right.locator("#send"),
+				world.page.locator("#send"),
 			];
-			const boxes = await Promise.all(footer.map(box));
+			const boxes = await Promise.all(controls.map(box));
 			for (let i = 1; i < boxes.length; i++) {
 				const previous = boxes[i - 1];
 				const current = boxes[i];
 				if (!previous || !current) throw new Error("Footer control is missing");
 				expect(previous.x + previous.width).toBeLessThanOrEqual(current.x + 1);
-				expect(
-					Math.abs(
-						previous.y + previous.height / 2 - current.y - current.height / 2,
-					),
-				).toBeLessThanOrEqual(1);
 			}
-			const send = boxes.at(-1);
-			const bounds = await box(layout);
-			if (!send) throw new Error("Send is missing");
-			expect(send.x + send.width).toBeLessThanOrEqual(
-				bounds.x + bounds.width + 1,
+		},
+	},
+	{
+		name: "assert send survives all clipping ancestors",
+		match: /^send is fully inside the composer and its clipping ancestors$/,
+		run: async ({ world }) => {
+			const visibility = await world.page
+				.locator("#send")
+				.evaluate((element) => {
+					const send = element.getBoundingClientRect();
+					let left = 0,
+						top = 0,
+						right = window.innerWidth,
+						bottom = window.innerHeight;
+					const composer = document
+						.getElementById("input-row")
+						?.getBoundingClientRect();
+					if (!composer) throw new Error("Composer is missing");
+					left = Math.max(left, composer.left);
+					top = Math.max(top, composer.top);
+					right = Math.min(right, composer.right);
+					bottom = Math.min(bottom, composer.bottom);
+					for (
+						let parent = element.parentElement;
+						parent;
+						parent = parent.parentElement
+					) {
+						const css = getComputedStyle(parent);
+						const bounds = parent.getBoundingClientRect();
+						if (/hidden|clip|scroll|auto/.test(css.overflowX)) {
+							left = Math.max(left, bounds.left);
+							right = Math.min(right, bounds.right);
+						}
+						if (/hidden|clip|scroll|auto/.test(css.overflowY)) {
+							top = Math.max(top, bounds.top);
+							bottom = Math.min(bottom, bounds.bottom);
+						}
+					}
+					return (
+						send.left >= left - 0.5 &&
+						send.right <= right + 0.5 &&
+						send.top >= top - 0.5 &&
+						send.bottom <= bottom + 0.5
+					);
+				});
+			expect(visibility).toBe(true);
+		},
+	},
+	{
+		name: "assert desktop mode shield name",
+		match:
+			/^the mode shield names (Never ask|Plan|Ask before edits|Auto-accept edits|Auto|Full access)$/,
+		run: async ({ world, match }) => {
+			const mode = world.page.getByTestId("permission-mode-badge");
+			await expect(mode).toHaveText("");
+			await expect(mode).toHaveAttribute(
+				"aria-label",
+				new RegExp(`Approvals.*${match[1]}`),
 			);
 		},
 	},
 	{
-		name: "assert mode warns for every non-default desktop mode",
-		match: /^the icons mode control has hot tint (true|false)$/,
+		name: "assert mode shield safety tone",
+		match: /^the mode shield uses the (neutral|warning|danger) tone$/,
 		run: async ({ world, match }) => {
 			const mode = world.page.getByTestId("permission-mode-badge");
-			const hot = match[1] === "true";
-			if (hot) await expect(mode).toHaveAttribute("data-hot", "true");
-			else await expect(mode).not.toHaveAttribute("data-hot");
 			await expect
 				.poll(() =>
-					mode.evaluate((element, hot) => {
+					mode.evaluate((element, tone) => {
 						const probe = document.createElement("span");
-						probe.style.color = hot
-							? "var(--color-warning)"
-							: "var(--color-text-secondary)";
-						document.body.append(probe);
+						probe.style.color = `var(--color-${tone === "danger" ? "error" : tone === "warning" ? "status-ask" : "text-secondary"})`;
+						element.append(probe);
 						const expected = getComputedStyle(probe).color;
 						probe.remove();
-						return getComputedStyle(element).color === expected;
-					}, hot),
+						return (
+							getComputedStyle(element.querySelector("svg") ?? element)
+								.color === expected
+						);
+					}, match[1] ?? "neutral"),
 				)
 				.toBe(true);
-			if (hot)
-				await expect(mode).toHaveCSS("background-color", /(?:\/|,)\s*0\.14\)/);
-			else await expect(mode).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 		},
 	},
 	{
@@ -676,26 +651,22 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert placeholder shares the controls row",
-		match: /^the placeholder sits on the controls row$/,
+		name: "assert text is above the controls",
+		match: /^the placeholder sits above the controls row$/,
 		run: async ({ world }) => {
-			const input = world.page.locator("#input");
-			const send = await box(world.page.locator("#send"));
+			const input = await box(world.page.locator("#input"));
 			const model = await box(world.page.getByTestId("model-picker-trigger"));
-			const line = await input.evaluate((textarea) => {
-				const rect = textarea.getBoundingClientRect();
-				const css = getComputedStyle(textarea);
-				const lineHeight = Number.parseFloat(css.lineHeight);
-				return {
-					centre: rect.top + Number.parseFloat(css.paddingTop) + lineHeight / 2,
-					right: rect.right,
-				};
-			});
-			// The first text line stays vertically centred with send.
-			expect(
-				Math.abs(line.centre - (send.y + send.height / 2)),
-			).toBeLessThanOrEqual(2);
-			expect(line.right).toBeLessThanOrEqual(model.x + 1);
+			expect(input.y + input.height).toBeLessThanOrEqual(model.y + 1);
+		},
+	},
+	{
+		name: "assert reply placeholder at each viewport",
+		match: /^the composer placeholder matches the (phone|desktop) reply copy$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.locator("#input")).toHaveAttribute(
+				"placeholder",
+				match[1] === "phone" ? "Reply…" : "Reply to Claude…",
+			);
 		},
 	},
 	{
@@ -721,19 +692,23 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert desktop model chip",
+		name: "assert unified model chip",
 		match: /^the model chip reads (.+) with a chevron$/,
 		run: async ({ world, match }) => {
 			const trigger = world.page.getByTestId("model-picker-trigger");
 			const [model, context] = (match[1] ?? "").split(" · ");
 			await expect(trigger.locator(".model-label")).toHaveText(model ?? "");
-			await expect(trigger.getByTestId("picker-selected-context")).toHaveText(
-				context ?? "",
-			);
+			if (context)
+				await expect(trigger.getByTestId("picker-selected-context")).toHaveText(
+					context,
+				);
+			await expect(trigger.getByTestId("harness-logo")).toBeVisible();
 			await expect(trigger.getByTestId("model-chip-chevron")).toBeVisible();
-			expect(
-				Math.abs((await box(trigger)).height - CONTROL),
-			).toBeLessThanOrEqual(0.5);
+			await expect(
+				world.page
+					.getByTestId("composer-layout")
+					.getByTestId("composer-harness-trigger"),
+			).toHaveCount(0);
 		},
 	},
 	{
@@ -749,18 +724,23 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert send off state",
-		match: /^send is a (30|32) pixel square in the off colours$/,
-		run: async ({ world, match }) => {
+		name: "assert neutral circular send",
+		match: /^send is a 34 pixel neutral circle$/,
+		run: async ({ world }) => {
 			const send = world.page.locator("#send");
-			await expectSquare(send, Number(match[1]));
-			if (match[1] === "30") {
-				await expect(send).toHaveCSS("border-radius", "9px");
-				await expect(send.locator("svg")).toHaveAttribute("width", "13");
-			}
-			expect(await style(send, "background-color")).toBe(SEND_OFF.background);
-			expect(await style(send, "color")).toBe(SEND_OFF.color);
-			expect(await style(send, "opacity")).toBe("1");
+			await expectSquare(send, BUTTON);
+			expect(
+				Number.parseFloat(await style(send, "border-radius")),
+			).toBeGreaterThanOrEqual(BUTTON / 2);
+			const neutral = await send.evaluate((element) => {
+				const probe = document.createElement("span");
+				probe.style.color = "var(--color-text)";
+				element.append(probe);
+				const colour = getComputedStyle(probe).color;
+				probe.remove();
+				return colour;
+			});
+			expect(await style(send, "background-color")).toBe(neutral);
 		},
 	},
 	{
@@ -768,11 +748,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		match: /^the attach button has no border$/,
 		run: async ({ world }) => {
 			const attach = world.page.locator("#attach-btn");
-			if ((await world.page.getByTestId("composer-more").count()) > 0) {
-				await expect(attach).toHaveCSS("height", "30px");
-				await expect(attach).toHaveCSS("width", "15px");
-				await expect(attach.locator("svg")).toHaveCSS("width", "15px");
-			} else await expectSquare(attach, BUTTON);
+			await expectSquare(attach, 30);
 			expect(await style(attach, "border-top-width")).toBe("0px");
 		},
 	},
@@ -786,11 +762,13 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert stop button",
-		match:
-			/^stop is a 32 pixel square filled with the text colour around a 10 pixel square$/,
+		match: /^stop is a 34 pixel neutral circle around a 10 pixel square$/,
 		run: async ({ world }) => {
 			const stop = world.page.locator("#stop");
 			await expectSquare(stop, BUTTON);
+			expect(
+				Number.parseFloat(await style(stop, "border-radius")),
+			).toBeGreaterThanOrEqual(BUTTON / 2);
 			const textColour = await stop.evaluate((element) => {
 				const probe = document.createElement("span");
 				probe.style.color = "var(--color-text)";

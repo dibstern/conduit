@@ -101,13 +101,13 @@ test.describe("Claude session effort and context window across a relay restart",
 		await app.sendMessage("One");
 		await chat.waitForStreamingComplete();
 
+		// The effort chip opens the picker root, where context sits beside effort.
 		await effort.click();
-		await page.getByTestId("variant-option-high").click();
+		await page.getByTestId("picker-effort-option-high").click();
 		await expect(effort).toContainText("High");
-		await trigger.click();
 		await page.getByTestId("picker-context-option-200k").click();
 		await page.keyboard.press("Escape");
-		await expect(trigger).toHaveAccessibleName(/context 200k/i);
+		await expect(trigger).toHaveAttribute("data-shown-context-window", "200k");
 		await app.sendMessage("Two");
 		await chat.waitForStreamingComplete();
 
@@ -126,7 +126,7 @@ test.describe("Claude session effort and context window across a relay restart",
 			timeout: 30_000,
 		});
 		await expect(effort).toContainText("High");
-		await expect(trigger).toHaveAccessibleName(/context 200k/i);
+		await expect(trigger).toHaveAttribute("data-shown-context-window", "200k");
 
 		// The next turn must carry both choices, not the model defaults.
 		await app.sendMessage("Three");

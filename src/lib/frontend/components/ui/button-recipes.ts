@@ -22,6 +22,7 @@ export type ButtonVariant =
 	| "ghost"
 	| "ghost-accent"
 	| "danger"
+	| "danger-soft"
 	| "success-soft"
 	| "danger-outline"
 	| "accent-soft"
@@ -29,7 +30,14 @@ export type ButtonVariant =
 	| "pill"
 	| "filter"
 	| "field"
-	| "pill-warning";
+	| "pill-warning"
+	| "composer-model"
+	| "composer-checkout"
+	| "composer-word"
+	| "composer-row"
+	| "composer-summary"
+	| "ask"
+	| "goal";
 
 /**
  * Resting text colour paired with its hover step, as ONE decision. "Dim,
@@ -189,6 +197,43 @@ type VariantRecipe = {
 };
 
 export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
+	"composer-summary": {
+		chrome: "min-w-0 w-full gap-[5px] font-sans text-[12px] font-normal",
+		tone: "text-text-muted",
+		hoverFill: "hover:text-text",
+	},
+	"composer-row": {
+		chrome:
+			"min-h-[50px] w-full gap-[10px] rounded-[10px] px-[10px] text-left text-[13px] font-normal font-sans",
+		tone: "text-text",
+		hoverFill: "hover:bg-hover",
+	},
+	ask: {
+		chrome: "bg-status-ask/22",
+		tone: "text-status-ask",
+		hoverFill: "hover:bg-status-ask/30",
+	},
+	"composer-model": {
+		chrome: "min-w-0 gap-[6px] font-sans text-[13px] font-normal",
+		tone: "text-text-secondary",
+		hoverFill: "hover:bg-hover",
+	},
+	"composer-checkout": {
+		chrome: "min-w-0 bg-chip font-mono text-[11.5px] font-normal",
+		tone: "text-text-secondary",
+		hoverFill: "hover:bg-hover",
+	},
+	"composer-word": {
+		chrome:
+			"min-w-0 gap-[5px] font-sans text-[12px] font-normal underline decoration-dotted decoration-border-chip underline-offset-[4px]",
+		tone: "text-text-muted",
+		hoverFill: "hover:text-text",
+	},
+	goal: {
+		chrome: "bg-status-goal",
+		tone: "text-bg",
+		hoverFill: "hover:bg-status-goal/90",
+	},
 	primary: {
 		chrome: "bg-accent",
 		tone: "text-bg",
@@ -242,6 +287,11 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 		chrome: "bg-error",
 		tone: "text-bg",
 		hoverFill: "hover:bg-error/90",
+	},
+	"danger-soft": {
+		chrome: "bg-error/22",
+		tone: "text-error",
+		hoverFill: "hover:bg-error/30",
 	},
 	// The three below are the approve / deny / tool-action language already
 	// duplicated across QuestionCard, PermissionCard, ToolGenericCard and
@@ -361,7 +411,10 @@ export type ButtonSize =
 	| "segment"
 	| "row-action"
 	| "transcript"
-	| "content";
+	| "content"
+	| "composer-icon"
+	| "composer-action"
+	| "composer-chip";
 
 /** Shared by disclosure and navigation rows in the transcript's step log. */
 export const TRANSCRIPT_ROW_CLASSES =
@@ -496,21 +549,27 @@ export function buttonClasses({
 	// height (RewindBanner's `w-6 h-6` exit control, for one), which is the
 	// exact tax this size exists to avoid.
 	const sizeClasses =
-		size === "content"
-			? ""
-			: size === "row-action"
-				? "size-[21px] rounded-[6px]"
-				: size === "transcript"
-					? TRANSCRIPT_ROW_CLASSES
-					: size === "segment"
-						? "h-[22px] gap-[5px] rounded-none px-[8px] text-[10px] font-medium"
-						: iconOnly
-							? `${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${SHARED_SIZE_CLASSES}`
-							: size === "sm"
-								? // Literal px from the mockup's `.btn`. `min-h`, not `h`, so a
-									// taller touch target composes without a collision.
-									"min-h-[25px] px-[10px] py-[4px] text-[11.5px] gap-[5px] rounded-[7px] font-normal"
-								: `h-9 px-4 text-sm gap-2 ${SHARED_SIZE_CLASSES}`;
+		size === "composer-icon"
+			? "size-[30px] shrink-0 rounded-full"
+			: size === "composer-action"
+				? `h-[34px] shrink-0 rounded-full gap-[6px] text-[13px] font-semibold ${iconOnly ? "w-[34px]" : "px-[12px]"}`
+				: size === "composer-chip"
+					? "h-[30px] gap-[5px] rounded-full px-[9px]"
+					: size === "content"
+						? ""
+						: size === "row-action"
+							? "size-[21px] rounded-[6px]"
+							: size === "transcript"
+								? TRANSCRIPT_ROW_CLASSES
+								: size === "segment"
+									? "h-[22px] gap-[5px] rounded-none px-[8px] text-[10px] font-medium"
+									: iconOnly
+										? `${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${SHARED_SIZE_CLASSES}`
+										: size === "sm"
+											? // Literal px from the mockup's `.btn`. `min-h`, not `h`, so a
+												// taller touch target composes without a collision.
+												"min-h-[25px] px-[10px] py-[4px] text-[11.5px] gap-[5px] rounded-[7px] font-normal"
+											: `h-9 px-4 text-sm gap-2 ${SHARED_SIZE_CLASSES}`;
 
 	/**
 	 * Nearly every variant declares a `hover:bg-*`, and `:hover` keeps matching while a

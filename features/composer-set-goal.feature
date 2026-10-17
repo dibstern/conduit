@@ -1,6 +1,6 @@
 Feature: Set a Claude goal from the composer
 
-Scenario Outline: Set goal inserts the command and shows violet send controls on a phone
+Scenario Outline: Set goal inserts the command and shows teal send controls on a phone
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
@@ -16,9 +16,9 @@ Scenario Outline: Set goal inserts the command and shows violet send controls on
 
 Examples:
   | goal                                        | baseline                | threshold |
-  | /goal Make every acceptance scenario pass   | composer-set-goal-phone | 98        |
+  | $goal Make every acceptance scenario pass   | composer-set-goal-phone | 98        |
 
-Scenario Outline: Typing a goal prefix enables violet send and editing the prefix reverts it
+Scenario Outline: Typing a goal prefix enables teal send and editing the prefix reverts it
   Given the conduit app is served with the connected mockup
   And a session already exists on the Claude harness
   When I type <goal> into the composer
@@ -29,7 +29,8 @@ Scenario Outline: Typing a goal prefix enables violet send and editing the prefi
 
 Examples:
   | goal                           | message                   | baseline               | threshold |
-  | /goal Finish the accessibility | Please explain /goal first | composer-goal-reverted | 98        |
+  | $goal Finish the accessibility | Please explain $goal first | composer-goal-reverted | 98        |
+  | /goal Finish the accessibility | Please explain /goal first | composer-goal-reverted-legacy | 98 |
 
 Scenario Outline: OpenCode offers a disabled goal entry and never shows goal send controls
   Given the conduit app is served with the connected mockup

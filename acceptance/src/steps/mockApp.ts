@@ -438,7 +438,7 @@ export const mockAppHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const trigger = world.page
 				.locator(
-					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 				)
 				.first();
 			await expect(trigger).toHaveAttribute("data-shown-model", match[1] ?? "");
@@ -467,7 +467,8 @@ export const mockAppHandlers: StepHandler[] = [
 		match:
 			/^the (wide|narrow|phone) (icons|words) composer shows its stored effort without offered choices$/,
 		run: async ({ world, match }) => {
-			if (match[1] === "phone" && match[2] === "icons") {
+			// A phone composer keeps effort in its sheet's effort row.
+			if (match[1] === "phone") {
 				await expect(world.page.getByTestId("picker-row-effort")).toContainText(
 					/high/i,
 				);
@@ -489,7 +490,7 @@ export const mockAppHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const trigger = world.page
 				.locator(
-					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 				)
 				.first();
 			for (const field of [

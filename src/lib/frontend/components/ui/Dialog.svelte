@@ -189,6 +189,12 @@
 	   narrow screens and clips the content box's shadow. Undone via utilities
 	   above; kept here as the reason. */
 
+	/* A bits-ui sheet underneath locks <body> with pointer-events:none, which
+	   the dialog would inherit. The top layer already makes the page inert. */
+	dialog {
+		pointer-events: auto;
+	}
+
 	/* ::backdrop inherits the dialog's theme tokens; the scrim stays dark in
 	   both themes, unlike --overlay-rgb's contrast wash. */
 	/* A sheet being dragged sets --sheet-raised on its dialog, so the scrim

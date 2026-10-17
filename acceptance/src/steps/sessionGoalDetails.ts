@@ -301,8 +301,9 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 		match:
 			/^the composer is ready (to edit the goal|for a new goal) with its cursor at the end$/,
 		run: async ({ world, match }) => {
+			// The composer spells Claude's goal command $goal, as its command menu does.
 			const draft =
-				match[1] === "to edit the goal" ? `/goal ${CONDITION}` : "/goal ";
+				match[1] === "to edit the goal" ? `$goal ${CONDITION}` : "$goal ";
 			const input = world.page.locator("#input");
 			await expect(input).toHaveValue(draft);
 			await expect(input).toBeFocused();

@@ -16,9 +16,10 @@
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
 	import type { Immutable, SessionInfo } from "../../types.js";
-	import { usageWarning } from "../../utils/continuation.js";
+	import { usageForecastTime, usageWarning } from "../../utils/continuation.js";
 	import { openSettings } from "../layout/chrome-actions.js";
 	import Button from "../ui/Button.svelte";
+	import ComposerStrip from "../ui/ComposerStrip.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import AccountSwitch from "./AccountSwitch.svelte";
@@ -32,6 +33,7 @@
 	const severalAccounts = $derived(claudeAccounts.hasAlternative(accountId));
 	const warning = $derived(usageWarning(reading, usageState.limits.warnAt, claudeAccounts.nameOf(accountId), severalAccounts, clock.now));
 	const limited = $derived(session?.limitRecovery && !session.limitRecovery.switched);
+	const resetsAt = $derived(usageForecastTime(warning?.window.resetsAt, clock.now));
 
 	// Claude's resets_at jitters between reads; only a jump of more than ten
 	// minutes is a new window.
@@ -48,43 +50,42 @@
 			(dismissed.kind === "five_hour" && warning?.window.kind === "seven_day")
 		) dismissals.delete(key);
 	});
-</script>
-
-{#snippet dismiss()}
-	<Button variant="ghost" size="content" tone="muted" hoverFill="none" iconOnly icon="x" iconSize={12} ariaLabel="Dismiss usage warning" data-testid="usage-warning-dismiss" class="size-5 shrink-0" onclick={() => {
+	function dismissWarning() {
 		if (warning) dismissals.set(key, {
 			kind: warning.window.kind,
 			...(warning.window.resetsAt === undefined ? {} : { resetsAt: warning.window.resetsAt }),
 			below95: warning.window.utilization < 95,
 		});
-	}} />
+	}
+</script>
+
+{#snippet dismiss()}
+	<Button variant="ghost" size="composer-icon" tone="muted" iconOnly icon="x" iconSize={12} touchTarget ariaLabel="Dismiss usage warning" data-testid="usage-warning-dismiss" class="shrink-0" onclick={dismissWarning} />
 {/snippet}
 
 {#if warning && !limited && !dismissals.has(key)}
-	<div data-testid="usage-warning-strip" data-window={warning.window.kind} class="usage-warning-strip flex flex-wrap items-center gap-[7px] mb-2 rounded-2xl border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-secondary">
-		<Icon name="gauge" size={14} class="shrink-0 text-status-amber" />
-		<span class="flex-1 min-w-0"><b data-testid="usage-warning-title" class="font-semibold text-status-amber">{warning.title}</b>{#if warning.detail}{" "}<span data-testid="usage-warning-detail">{warning.detail}</span>{/if}</span>
-		{#if sessionViewState.compact}{@render dismiss()}{/if}
+	<ComposerStrip tone="ask" data-testid="usage-warning-strip" data-window={warning.window.kind} class="flex flex-wrap items-center gap-[8px]">
+		<Icon name="gauge" size={15} class="shrink-0 text-status-ask" />
+		<span class="flex-1 min-w-0">
+			<span data-testid="usage-warning-title">This session's account, <b class="font-semibold text-text">{claudeAccounts.nameOf(accountId)}</b>, has used {Math.round(warning.window.utilization)}% of its {warning.window.kind === "seven_day" ? "weekly" : "5-hour"} window.</span>
+			{#if resetsAt}<span data-testid="usage-warning-detail" class="block text-[12px] text-text-muted">Resets at {resetsAt}</span>{/if}
+		</span>
 		{#if severalAccounts && session && accountId}
 			<div class="flex gap-[6px] {sessionViewState.compact ? 'mt-[2px] w-full' : 'shrink-0'}">
 				<AccountSwitch sessionId={session.id} {projectSlug} account={accountId} limit={undefined} side="top">
 					{#snippet trigger({ props, loading })}
-						<Button {...props} variant="secondary" size="content" iconSize={12} {loading} data-testid="usage-warning-switch-account" class="gap-[5px] px-[10px] {sessionViewState.compact ? 'h-[34px] flex-1 justify-center rounded-[10px] text-[12px]' : 'h-[24px] rounded-[8px] text-[11px]'}">
+						<Button {...props} variant="ask" size="composer-chip" iconSize={12} {loading} touchTarget data-testid="usage-warning-switch-account" class={sessionViewState.compact ? 'flex-1 justify-center' : ''}>
 							Switch account{#if !sessionViewState.compact}<Icon name="chevron-down" size={12} />{/if}
 						</Button>
 					{/snippet}
 				</AccountSwitch>
+				{#if sessionViewState.compact}<Button variant="secondary" size="composer-chip" touchTarget ariaLabel="Dismiss usage warning" data-testid="usage-warning-dismiss" class="flex-1" onclick={dismissWarning}>Dismiss</Button>{/if}
 			</div>
+		{:else if sessionViewState.compact}
+			<div class="mt-[2px] flex w-full justify-end"><Button variant="secondary" size="composer-chip" touchTarget ariaLabel="Dismiss usage warning" data-testid="usage-warning-dismiss" onclick={dismissWarning}>Dismiss</Button></div>
 		{:else if !severalAccounts && !sessionViewState.compact}
-			<TextButton tone="inherit" data-testid="usage-warning-details" class="shrink-0 font-semibold text-status-amber" onclick={() => openSettings("usage")}>Details</TextButton>
+			<TextButton tone="inherit" data-testid="usage-warning-details" class="shrink-0 font-semibold text-status-ask" onclick={() => openSettings("usage")}>Details</TextButton>
 		{/if}
 		{#if !sessionViewState.compact}{@render dismiss()}{/if}
-	</div>
+	</ComposerStrip>
 {/if}
-
-<style>
-	.usage-warning-strip {
-		border-color: color-mix(in srgb, var(--color-status-amber) 38%, transparent);
-		background: color-mix(in srgb, var(--color-status-amber) 10%, transparent);
-	}
-</style>

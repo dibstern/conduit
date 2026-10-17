@@ -571,7 +571,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 		match: /^the session's usage limit names (Personal|Claude)$/,
 		run: async ({ world, match }) => {
 			await expect(world.page.getByTestId("usage-limit-title")).toHaveText(
-				`Usage limit reached · ${match[1]}`,
+				new RegExp(`^${match[1]} hit its .+ limit\\.$`),
 			);
 		},
 	},

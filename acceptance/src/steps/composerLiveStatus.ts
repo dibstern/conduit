@@ -120,8 +120,10 @@ export const composerLiveStatusHandlers: StepHandler[] = [
 			const toggle = world.page
 				.getByTestId("turn-live-head")
 				.locator(".turn-activity-toggle");
+			// A tap does not scroll the transcript; Playwright's actionability
+			// scroll would detach the reader from the live bottom.
 			if ((await toggle.getAttribute("aria-expanded")) !== "true")
-				await toggle.click();
+				await toggle.evaluate((el: HTMLElement) => el.click());
 		},
 	},
 	{
