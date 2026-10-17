@@ -60,9 +60,9 @@ test("snooze, undo, shelf, reload, search, unsnooze and a time wake", async ({
 	await expect(shelfRow).toBeVisible();
 	await toggle.click();
 	await expect(shelfRow).toHaveCount(0);
-	await page.getByPlaceholder("Search sessions...").fill(title);
+	await page.getByPlaceholder("Search").fill(title);
 	await expect(shelfRow).toBeVisible();
-	await page.getByPlaceholder("Search sessions...").press("Escape");
+	await page.getByPlaceholder("Search").press("Escape");
 	await expect(shelfRow).toHaveCount(0);
 
 	// The client clock wakes the row the moment its time passes, marked as woken.

@@ -26,6 +26,23 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
 
+export const Pinned: Story = {
+	args: { session: { ...mockSession, pinnedAt: 1 } },
+	play: async () => {
+		const menu = await within(document.body).findByRole("menu", {
+			name: "Session actions",
+		});
+		await expect(
+			within(menu).getByTestId("session-ctx-unpin"),
+		).toHaveTextContent("Unpin");
+		await expect(
+			within(menu).queryByTestId("session-ctx-pin"),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const PinnedLight: Story = { ...Pinned, globals: { theme: "light" } };
+
 export const LongHeader: Story = {
 	name: "Long title header",
 	args: {

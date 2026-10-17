@@ -63,19 +63,19 @@ test("settle, undo, search, pin and reload preserve triage and shelf preference"
 	await expect(shelf.locator(`[data-session-id="${settleId}"]`)).toBeVisible();
 	await toggle.click();
 	await expect(row).toHaveCount(0);
-	await page.getByPlaceholder("Search sessions...").fill(title);
+	await page.getByPlaceholder("Search").fill(title);
 	await expect(shelf.locator(`[data-session-id="${settleId}"]`)).toBeVisible();
 	await expect(toggle).toHaveAttribute("aria-expanded", "true");
 	expect(
 		await page.evaluate(() => localStorage.getItem("settled-shelf-open")),
 	).toBe("false");
-	await page.getByPlaceholder("Search sessions...").press("Escape");
+	await page.getByPlaceholder("Search").press("Escape");
 	await expect(toggle).toHaveAttribute("aria-expanded", "false");
 	// The cleared field stays focused, which raises the scope suggestions over
 	// the list (8db686cc); a second Escape puts them away.
 	const suggestions = page.getByTestId("session-scope-suggestions");
 	await expect(suggestions).toBeVisible();
-	await page.getByPlaceholder("Search sessions...").press("Escape");
+	await page.getByPlaceholder("Search").press("Escape");
 	await expect(suggestions).toBeHidden();
 
 	await pinRow.click({ button: "right" });

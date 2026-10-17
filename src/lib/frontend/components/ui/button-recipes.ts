@@ -27,6 +27,8 @@ export type ButtonVariant =
 	| "accent-soft"
 	| "toolbar"
 	| "pill"
+	| "filter"
+	| "field"
 	| "pill-warning";
 
 /**
@@ -217,6 +219,20 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 		tone: TONE_CLASSES.secondary,
 		hoverFill: HOVER_FILL_CLASSES.text,
 	},
+	/** A toggle chip; pressed takes the ask tint, as the Final sidebar draws it. */
+	filter: {
+		chrome:
+			"h-[24px] gap-[5px] rounded-full bg-chip px-[8px] text-[12px] font-medium aria-pressed:bg-status-ask/18 aria-pressed:text-status-ask",
+		tone: TONE_CLASSES.secondary,
+		hoverFill: "hover:bg-hover",
+	},
+	/** A menu trigger dressed as a field: SearchInput's height, fill and radius. */
+	field: {
+		chrome:
+			"h-[30px] gap-[3px] rounded-[9px] bg-chip pl-[10px] pr-[7px] text-[12.5px] font-medium",
+		tone: TONE_CLASSES.secondary,
+		hoverFill: "hover:bg-hover",
+	},
 	"ghost-accent": {
 		chrome: "",
 		tone: TONE_CLASSES.accent,
@@ -339,7 +355,7 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
  * skills | checkout | Settle): square corners, because the group owns the
  * border and radius.
  */
-export type ButtonSize = "sm" | "md" | "segment" | "content";
+export type ButtonSize = "sm" | "md" | "segment" | "row-action" | "content";
 
 export type ButtonAlign = keyof typeof ALIGN_CLASSES;
 
@@ -472,15 +488,17 @@ export function buttonClasses({
 	const sizeClasses =
 		size === "content"
 			? ""
-			: size === "segment"
-				? "h-[22px] gap-[5px] rounded-none px-[8px] text-[10px] font-medium"
-				: iconOnly
-					? `${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${SHARED_SIZE_CLASSES}`
-					: size === "sm"
-						? // Literal px from the mockup's `.btn`. `min-h`, not `h`, so a
-							// taller touch target composes without a collision.
-							"min-h-[25px] px-[10px] py-[4px] text-[11.5px] gap-[5px] rounded-[7px] font-normal"
-						: `h-9 px-4 text-sm gap-2 ${SHARED_SIZE_CLASSES}`;
+			: size === "row-action"
+				? "size-[21px] rounded-[6px]"
+				: size === "segment"
+					? "h-[22px] gap-[5px] rounded-none px-[8px] text-[10px] font-medium"
+					: iconOnly
+						? `${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${SHARED_SIZE_CLASSES}`
+						: size === "sm"
+							? // Literal px from the mockup's `.btn`. `min-h`, not `h`, so a
+								// taller touch target composes without a collision.
+								"min-h-[25px] px-[10px] py-[4px] text-[11.5px] gap-[5px] rounded-[7px] font-normal"
+							: `h-9 px-4 text-sm gap-2 ${SHARED_SIZE_CLASSES}`;
 
 	/**
 	 * Nearly every variant declares a `hover:bg-*`, and `:hover` keeps matching while a

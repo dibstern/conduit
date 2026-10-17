@@ -17,6 +17,7 @@
 	let { phone = false, height = $bindable(0) }: { phone?: boolean; height?: number } = $props();
 
 	const harnesses = ["claude", "codex", "cursor"] as const;
+	const harnessLabels = { claude: "Claude", codex: "Codex", cursor: "Cursor" } as const;
 	const windowLabels = { five_hour: "5h", seven_day: "Week", month: "Month" } as const;
 	type WindowKind = keyof typeof windowLabels;
 	const kinds: readonly WindowKind[] = ["five_hour", "seven_day", "month"];
@@ -112,54 +113,50 @@
 	}
 </script>
 
-{#snippet cell(prefix: string, reading: UsageReading, kind: WindowKind, width: number, gap: 4 | 5 = 4, layout = "")}
+{#snippet cell(prefix: string, reading: UsageReading, kind: WindowKind, layout = "")}
 	{@const window = reading.windows.find((window) => window.kind === kind)}
-	{@const display = window ? displayWindow(reading, window) : undefined}
+	{@const display = window && !reading.stale && reading.status !== "unknown" && reading.status !== "unavailable" ? displayWindow(reading, window) : undefined}
 	<span
 		data-testid="{prefix}-cell-{reading.accountId}-{kind}"
 		data-level={display?.level === "limited" ? "danger" : display?.level === "warn" ? "warning" : display?.level === "ok" ? "normal" : "unknown"}
 		class="flex min-w-0 items-center whitespace-nowrap {layout}"
 	>
-		{#if window && display}
-			<QuotaMeter
-				used={window.utilization}
-				warnAt={usageState.limits.warnAt}
-				caption={display.label}
-				variant="usage"
-				trackWidth={width}
-				{gap}
-				trackTestId="{prefix}-bar-{reading.accountId}-{kind}"
-				captionTestId="{prefix}-value-{reading.accountId}-{kind}"
-			/>
-		{:else}
-			<span data-testid="{prefix}-value-{reading.accountId}-{kind}" class="font-mono text-[10.5px] text-text-dimmer">—</span>
-		{/if}
+		<QuotaMeter
+			used={display && window ? window.utilization : "unknown"}
+			warnAt={usageState.limits.warnAt}
+			caption={display?.label ?? "—"}
+			variant="usage"
+			trackWidth={layout === "spanning-window" ? 88 : 26}
+			gap={6}
+			trackTestId="{prefix}-bar-{reading.accountId}-{kind}"
+			captionTestId="{prefix}-value-{reading.accountId}-{kind}"
+		/>
 	</span>
 {/snippet}
 
 <!-- The grid of harness groups. The desktop sidebar and the phone dock never
      show together, so they share test ids; the sheet opens over the dock. -->
 {#snippet meter(rows: readonly UsageReading[], prefix: "usage-footer" | "usage-sheet", size: "sidebar" | "phone", continues?: string)}
-	{@const rowClass = size === "sidebar" ? "account-row px-[6px] py-[3px]" : "phone-row px-[6px] py-[3px]"}
-	{@const widths = size === "sidebar" ? { pair: 26, span: 88 } : { pair: 44, span: 120 }}
-	{#each groupsOf(rows) as group (group.harness)}
-		<div data-testid="{prefix}-group-{group.harness}">
-			{#if group.harness !== continues}
-				<div class="{rowClass} grid items-center gap-[6px] rounded-[7px]">
-					<span></span>
-					<span data-testid="{prefix}-heading-{group.harness}" class="pt-[4px] font-mono text-[9px] uppercase tracking-[0.05em] text-text-dimmer">{group.harness.toUpperCase()}</span>
+	{@const rowClass = "account-row px-[6px]"}
+	{#each groupsOf(rows) as group, groupIndex (group.harness)}
+		<div data-testid="{prefix}-group-{group.harness}" class="w-full {groupIndex > 0 ? 'mt-[6px]' : ''}">
+			{#if group.harness !== continues && (size === "sidebar" || prefix === "usage-sheet")}
+				<div class="{rowClass} grid items-center gap-[6px] text-text-muted {size === 'sidebar' ? 'h-[22px] text-[11.5px]' : 'h-[28px] text-[12.5px]'}">
+					<span data-testid="{prefix}-heading-{group.harness}" class="font-semibold text-text-secondary">{harnessLabels[group.harness]}</span>
 					{#each group.columns as kind, index (kind)}
-						<span data-testid="{prefix}-column-{group.harness}-{kind}" class="pt-[4px] font-mono text-[9px] uppercase tracking-[0.05em] text-text-dimmer {group.columns.length === 1 ? 'spanning-window' : index === 1 ? 'second-window' : ''}">{windowLabels[kind].toUpperCase()}</span>
+						<span data-testid="{prefix}-column-{group.harness}-{kind}" class="{group.columns.length === 1 ? 'spanning-window' : index === 1 ? 'second-window' : ''}">{windowLabels[kind]}</span>
 					{/each}
 				</div>
 			{/if}
 			{#each group.rows as reading (reading.accountId)}
 				{@const isDefault = reading.accountId === defaultAccount}
-				<div data-testid="{prefix}-row-{reading.accountId}" data-default={isDefault} title={isDefault ? "Current account" : undefined} class="{rowClass} grid items-center gap-[6px] rounded-[7px] {isDefault ? 'bg-bg-alt' : ''}">
-					<AccountDot instanceId={reading.accountId} size={7} data-testid="{prefix}-dot-{reading.accountId}" />
-					<span data-testid="{prefix}-name-{reading.accountId}" class="min-w-0 truncate {isDefault ? 'text-text' : 'text-text-secondary'}">{getInstanceById(reading.accountId)?.name ?? reading.accountId}</span>
+				<div data-testid="{prefix}-row-{reading.accountId}" data-default={isDefault} title={isDefault ? "Current account" : undefined} class="{rowClass} grid items-center gap-[6px] rounded-[7px] {prefix === 'usage-sheet' ? 'h-[34px] text-[14px]' : size === 'phone' ? 'h-[30px] text-[13px]' : 'h-[24px] text-[12px]'} {isDefault ? 'bg-chip' : ''}">
+					<span class="flex min-w-0 items-center gap-[6px]">
+						<AccountDot instanceId={reading.accountId} size={7} data-testid="{prefix}-dot-{reading.accountId}" />
+						<span data-testid="{prefix}-name-{reading.accountId}" class="min-w-0 truncate {isDefault ? 'text-text' : 'text-text-secondary'}">{getInstanceById(reading.accountId)?.name ?? reading.accountId}</span>
+					</span>
 					{#each group.columns as kind, index (kind)}
-						{@render cell(prefix, reading, kind, group.columns.length === 1 ? widths.span : widths.pair, 4, group.columns.length === 1 ? 'spanning-window' : index === 1 ? 'second-window' : '')}
+						{@render cell(prefix, reading, kind, group.columns.length === 1 ? 'spanning-window' : index === 1 ? 'second-window' : '')}
 					{/each}
 				</div>
 			{/each}
@@ -167,30 +164,30 @@
 	{/each}
 {/snippet}
 
-<!-- The dock, and the top of the sheet: folded onto the dock, the sheet shows
-     exactly this in exactly the same place, so it reads as one panel. -->
+<!-- The dock and sheet share account contents; sheet chrome is owned separately. -->
 {#snippet peek(prefix: "usage-footer" | "usage-sheet")}
 	{@const morePrefix = prefix === "usage-footer" ? "usage-phone" : "usage-sheet"}
-	{#if prefix === "usage-footer"}<span aria-hidden="true" class="mx-auto mt-[2px] mb-[3px] h-[4px] w-[32px] rounded-full bg-border-chip"></span>{/if}
+	{#if prefix === "usage-footer"}<span aria-hidden="true" class="mx-auto mt-[-4px] mb-[8px] h-[5px] w-[36px] rounded-full bg-border-chip"></span>{/if}
 	{@render meter(docked, prefix, "phone")}
 	{#if folded.length > 0}
 		<!-- Its height is the distance the sheet's rest slides up to close the gap it leaves. -->
-		<span data-testid="{morePrefix}-more" aria-hidden={prefix === "usage-sheet" || undefined} class="flex h-[19px] items-center gap-[4px] pt-[4px] pr-[6px] pl-[19px] font-mono text-[10px] text-text-dimmer {prefix === 'usage-sheet' ? 'sheet-fades' : ''}">
+		<span data-testid="{morePrefix}-more" aria-hidden={prefix === "usage-sheet" || undefined} class="flex h-[28px] items-center gap-[6px] px-[6px] text-[12.5px] text-text-muted {prefix === 'usage-sheet' ? 'sheet-fades' : ''}">
+			<span data-testid="{morePrefix}-more-count">+{folded.length} more</span>
 			{#each folded as reading (reading.accountId)}
 				<AccountDot instanceId={reading.accountId} size={6} data-testid="{morePrefix}-folded-{reading.accountId}" />
 			{/each}
-			<span data-testid="{morePrefix}-more-count" class="ml-[3px] flex-1">+{folded.length} more</span>
-			<Icon name="chevron-up" size={12} />
+			<span class="ml-auto"><Icon name="chevron-right" size={13} /></span>
 		</span>
 	{/if}
 {/snippet}
 
-{#snippet singleLine(columnPrefix: string, abbreviateWeek: boolean)}
+{#snippet singleLine(columnPrefix: string)}
 	{#if single}
+		<span data-testid="usage-footer-harness" class="mr-auto font-semibold text-text-secondary">{harnessLabels[single.harness]}</span>
 		{#each kinds.filter((kind) => single.windows.some((window) => window.kind === kind)) as kind, index (kind)}
 			<span class="flex min-w-0 items-center gap-[5px] {index === 1 ? 'second-window' : ''}">
-				<span data-testid="{columnPrefix}-{kind}" class="text-text-muted">{abbreviateWeek && kind === "seven_day" ? "Wk" : windowLabels[kind]}</span>
-				{@render cell("usage-footer", single, kind, kind === "seven_day" ? (abbreviateWeek ? 32 : 36) : 40, 5)}
+				<span data-testid="{columnPrefix}-{kind}" class="text-text-muted">{windowLabels[kind]}</span>
+				{@render cell("usage-footer", single, kind)}
 			</span>
 		{/each}
 	{/if}
@@ -203,11 +200,11 @@
 		data-testid="usage-footer-phone"
 		bind:clientHeight={height}
 		style:display={accounts.length > 1 || single ? undefined : "none"}
-		class="usage-phone-dock shrink-0 border-t border-border-subtle bg-bg px-[4px] pt-[5px] text-[10.5px] {accounts.length > 1 ? 'rounded-t-[14px]' : ''}"
+		class="usage-phone-dock shrink-0 rounded-t-[18px] border-t border-border-subtle bg-sidebar-bg px-[12px] pt-[12px] text-[13px]"
 	>
 		{#if single}
-			<TextButton tone="inherit" data-testid="usage-phone-single" aria-label="Open Usage settings" onclick={() => openSettings("usage")} class="flex w-full items-center gap-[10px] whitespace-nowrap px-[10px] py-[6px] text-left">
-				{@render singleLine("usage-phone-column", true)}
+			<TextButton tone="inherit" data-testid="usage-phone-single" aria-label="Open Usage settings" onclick={() => openSettings("usage")} class="flex min-h-[44px] w-full items-center gap-[8px] whitespace-nowrap px-[6px] text-left text-[11.5px]">
+				{@render singleLine("usage-phone-column")}
 			</TextButton>
 		{:else if accounts.length > 1}
 			<TextButton
@@ -241,22 +238,22 @@
 				{@render peek("usage-sheet")}
 				<div class={folded.length > 0 ? "sheet-rest" : undefined}>
 					{@render meter(folded, "usage-sheet", "phone", continuedHarness)}
-					<div class="mx-[6px] mt-[10px] flex items-center justify-between border-t border-border-subtle pt-[8px] font-mono text-text-dimmer">
+					<div class="mx-[6px] mt-[10px] flex items-center justify-between border-t border-border-subtle pt-[8px] text-[12.5px] text-text-muted">
 						<span>{accounts.length} accounts</span>
-						<TextButton tone="accent" data-testid="usage-sheet-settings" onclick={() => { sheetOpen = false; openSettings("usage"); }}>Usage settings ›</TextButton>
+						<TextButton tone="accent" data-testid="usage-sheet-settings" onclick={() => { sheetOpen = false; openSettings("usage"); }} class="min-h-[44px] font-medium">Usage settings ›</TextButton>
 					</div>
 				</div>
 			</SheetChrome>
 		</div>
 	</Dialog>
 {:else if single}
-	<TextButton tone="inherit" data-testid="usage-footer-meter" aria-label="Open Usage settings" onclick={() => openSettings("usage")} class="shrink-0 border-t border-border-subtle p-[10px] text-left text-[10.5px]">
-		<div data-testid="usage-footer-single" class="flex items-center gap-[10px] whitespace-nowrap">
-			{@render singleLine(`usage-footer-column-${single.harness}`, false)}
+	<TextButton tone="inherit" data-testid="usage-footer-meter" aria-label="Open Usage settings" onclick={() => openSettings("usage")} class="shrink-0 border-t border-border-subtle px-[8px] pt-[8px] pb-[10px] text-left text-[11.5px]">
+		<div data-testid="usage-footer-single" class="flex h-[26px] items-center gap-[8px] whitespace-nowrap px-[6px] text-[11.5px]">
+			{@render singleLine(`usage-footer-column-${single.harness}`)}
 		</div>
 	</TextButton>
 {:else if accounts.length > 1}
-	<TextButton tone="inherit" data-testid="usage-footer-meter" aria-label="Open Usage settings" onclick={() => openSettings("usage")} class="flex shrink-0 flex-col border-t border-border-subtle px-[4px] pt-[5px] pb-[7px] text-left text-[10.5px]">
+	<TextButton tone="inherit" data-testid="usage-footer-meter" aria-label="Open Usage settings" onclick={() => openSettings("usage")} class="flex shrink-0 flex-col border-t border-border-subtle px-[8px] pt-[8px] pb-[10px] text-left text-[12px]">
 		{@render meter(accounts, "usage-footer", "sidebar")}
 	</TextButton>
 {/if}
@@ -265,15 +262,11 @@
 	/* The page runs under the home indicator (viewport-fit=cover), so the dock
 	   pads past it to the bottom edge. */
 	.usage-phone-dock {
-		padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+		padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
 	}
 
 	.account-row {
-		grid-template-columns: 7px minmax(0, 1fr) 60px 58px;
-	}
-
-	.phone-row {
-		grid-template-columns: 7px minmax(0, 1fr) 84px 84px;
+		grid-template-columns: minmax(0, 1fr) 66px 62px;
 	}
 
 	.spanning-window {
@@ -290,19 +283,19 @@
 	}
 
 	.sheet-rest {
-		translate: 0 calc(var(--sheet-raised, 1) * -19px);
+		translate: 0 calc(var(--sheet-raised, 1) * -28px);
 		transition: translate var(--sheet-transition, 0s);
 	}
 
 	@container sidebar (width < 210px) {
 		.account-row {
-			grid-template-columns: 7px minmax(0, 1fr) 60px;
+			grid-template-columns: minmax(0, 1fr) 66px;
 		}
 		.second-window {
 			display: none;
 		}
 		.spanning-window {
-			grid-column: 3 / -1;
+			grid-column: 2 / -1;
 		}
 	}
 </style>

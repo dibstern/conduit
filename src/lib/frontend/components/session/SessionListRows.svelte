@@ -20,6 +20,7 @@
 	import Button from "../ui/Button.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import SessionStatusGlyph from "../ui/SessionStatusGlyph.svelte";
 
 	let { arrangement, isEmpty, emptyMessage, statusFilter, searching, filteredLength, snoozedShelfOpen, settledShelfOpen, pagerPending, unavailableProjectLabels, selectMode, selectedSessionIds, menuOpenId, renamingSessionId, getProjectLabel, getProjectAccent, oncontextmenu, ontoggleselection, onrenamestart, onrenameend }: {
 		arrangement: SessionProjection;
@@ -48,6 +49,8 @@
 	// Until the user scrolls, paging is background fill (a list kept short by a
 	// collapsed shelf pages to the end on load) and nobody is waiting for it.
 	let scrolled = $state(false);
+	let settledExpanded = $state(false);
+	let snoozedExpanded = $state(false);
 
 	function handleSwitchSession(session: SessionInfo) {
 		touch(session, "sidebar-pick");
@@ -108,7 +111,7 @@
 	{/snippet}
 
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-	<div id="session-list-scroller" class="flex-1 overflow-y-auto px-2 py-0.5" role="region" aria-label="Sessions" tabindex="0" onscroll={(event) => { heldSessionId = null; scrolled = event.currentTarget.scrollTop > 0; }}>
+	<div id="session-list-scroller" class="flex-1 overflow-y-auto px-[6px] pb-[8px]" role="region" aria-label="Sessions" tabindex="0" onscroll={(event) => { heldSessionId = null; scrolled = event.currentTarget.scrollTop > 0; }}>
 		{#if isEmpty && !sessionState.settled}
 			<!-- First load: session-shaped rows breathe in a top-to-bottom wave. -->
 			<div class="flex flex-col gap-px pt-1" aria-hidden="true" data-testid="session-list-skeleton">
@@ -122,67 +125,79 @@
 				{/each}
 			</div>
 		{:else if isEmpty}
-			<div class="session-empty py-6 px-3.5 text-center text-xs text-text-dimmer font-sans" data-testid={statusFilter !== null && (!searching || filteredLength > 0) ? "session-filter-empty" : undefined}>
+			<div class="session-empty px-[10px] py-[14px] text-[12.5px] text-text-dimmer font-sans" data-testid={statusFilter !== null && (!searching || filteredLength > 0) ? "session-filter-empty" : undefined}>
 				{emptyMessage}
-				{#if statusFilter !== null && (!searching || filteredLength > 0)}
+				{#if statusFilter !== null && statusFilter !== "needs-you" && (!searching || filteredLength > 0)}
 					<div class="mt-2"><Button variant="ghost" size="content" tone="accent" class="min-h-[44px] md:min-h-8 px-3" data-testid="session-filter-clear" onclick={() => setSessionStatusFilter(null)}>Clear filter</Button></div>
 				{/if}
 			</div>
 		{:else}
 			{#if arrangement.pinned.length > 0}
-				<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-sans"><span>Pinned</span>{" "}<span class="ml-auto font-medium">{arrangement.pinned.length}</span></div>
+				<div class="session-group-label flex items-center gap-[6px] pt-[12px] pb-[4px] px-[10px] text-[12px] font-medium text-text-dimmer font-sans"><span>Pinned</span>{" "}<span class="font-mono text-[11px] font-normal">{arrangement.pinned.length}</span></div>
 				{#each arrangement.pinned as s (s.id)}{@render sessionRow(s)}{/each}
 			{/if}
 			{#each arrangement.sections as section (section.key)}
-					<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-sans">
-						<span>{section.label}</span>{" "}<span class="ml-auto font-medium">{section.sessions.length}</span>
+					<div class="session-group-label flex items-center gap-[6px] pt-[12px] pb-[4px] px-[10px] text-[12px] font-medium text-text-dimmer font-sans">
+						<span>{section.label}</span>{" "}<span class="font-mono text-[11px] font-normal">{section.sessions.length}</span>
 					</div>
 					{#each section.sessions as s (s.id)}
 						{@render sessionRow(s)}
 					{/each}
 			{/each}
-			{#if arrangement.snoozed.length > 0}
-				<TextButton
-					tone="dimmer"
-					class="session-group-label flex items-center gap-1 min-h-[44px] md:min-h-0 pt-1.5 pb-0.5 px-3 text-xs font-semibold tracking-[0.3px] font-sans"
-					data-testid="snoozed-shelf-toggle"
-					aria-expanded={snoozedShelfOpen}
-					aria-controls="snoozed-shelf-rows"
-					onclick={() => { if (!searching) setSnoozedShelfOpen(!uiState.snoozedShelfOpen); }}
-				>
-					<Icon name={snoozedShelfOpen ? "chevron-down" : "chevron-right"} size={12} />
-						<span class="uppercase">Snoozed</span>{" "}<span class="ml-auto font-medium">{arrangement.snoozed.length}</span>
-				</TextButton>
-				<div id="snoozed-shelf-rows">
-					{#if snoozedShelfOpen}
-						{#each arrangement.snoozed as s (s.id)}
-							{@render sessionRow(s)}
-						{/each}
-					{/if}
-				</div>
-			{/if}
 			{#if arrangement.settled.length > 0}
 				<TextButton
 					tone="dimmer"
-					class="session-group-label flex items-center gap-1 min-h-[44px] md:min-h-0 pt-1.5 pb-0.5 px-3 text-xs font-semibold tracking-[0.3px] font-sans"
+					class="session-group-label mt-[6px] flex w-full items-center gap-[6px] min-h-[44px] md:min-h-[30px] rounded-[8px] px-[8px] text-[12.5px] font-medium font-sans"
 					data-testid="settled-shelf-toggle"
 					aria-expanded={settledShelfOpen}
 					aria-controls="settled-shelf-rows"
-					onclick={() => { if (!searching) setSettledShelfOpen(!uiState.settledShelfOpen); }}
+					onclick={() => { if (searching) return; settledExpanded = false; setSettledShelfOpen(!uiState.settledShelfOpen); }}
 				>
 					<Icon name={settledShelfOpen ? "chevron-down" : "chevron-right"} size={12} />
-						<!-- No count: settled sessions grow without bound and load in pages,
-						     so any number here would undercount. -->
-						<span class="uppercase">Settled</span>
+					<!-- No count: settled sessions grow without bound and load in pages,
+					     so any number here would undercount. -->
+					<SessionStatusGlyph settled />
+					<span>Settled</span>
 				</TextButton>
 				<div id="settled-shelf-rows">
 					{#if settledShelfOpen}
-						{#each arrangement.settled as s (s.id)}
+						{#each searching || selectMode || settledExpanded ? arrangement.settled : arrangement.settled.slice(0, 2) as s (s.id)}
 							{@render sessionRow(s)}
 						{/each}
+						{#if !searching && !selectMode && !settledExpanded && arrangement.settled.length > 2}
+							<TextButton tone="dimmer" class="min-h-[44px] md:min-h-[30px] px-[34px] text-[12px]" data-testid="settled-shelf-more" onclick={() => { settledExpanded = true; }}>+ {arrangement.settled.length - 2} more</TextButton>
+						{/if}
 					{/if}
 				</div>
 			{/if}
+			{#if arrangement.snoozed.length > 0}
+				<TextButton
+					tone="dimmer"
+					class="session-group-label mt-[6px] flex w-full items-center gap-[6px] min-h-[44px] md:min-h-[30px] rounded-[8px] px-[8px] text-[12.5px] font-medium font-sans"
+					data-testid="snoozed-shelf-toggle"
+					aria-expanded={snoozedShelfOpen}
+					aria-controls="snoozed-shelf-rows"
+					onclick={() => { if (searching) return; snoozedExpanded = false; setSnoozedShelfOpen(!uiState.snoozedShelfOpen); }}
+				>
+					<Icon name={snoozedShelfOpen ? "chevron-down" : "chevron-right"} size={12} />
+					<SessionStatusGlyph snoozed />
+					<span>Snoozed</span>{" "}<span class="font-mono text-[11px] font-normal">{arrangement.snoozed.length}</span>
+				</TextButton>
+				<div id="snoozed-shelf-rows">
+					{#if snoozedShelfOpen}
+						{#each searching || selectMode || snoozedExpanded ? arrangement.snoozed : arrangement.snoozed.slice(0, 2) as s (s.id)}
+							{@render sessionRow(s)}
+						{/each}
+						{#if !searching && !selectMode && !snoozedExpanded && arrangement.snoozed.length > 2}
+							<TextButton tone="dimmer" class="min-h-[44px] md:min-h-[30px] px-[34px] text-[12px]" data-testid="snoozed-shelf-more" onclick={() => { snoozedExpanded = true; }}>+ {arrangement.snoozed.length - 2} more</TextButton>
+						{/if}
+					{/if}
+				</div>
+			{/if}
+		{/if}
+
+		{#if !isEmpty && statusFilter === "needs-you"}
+			<div class="px-[10px] py-[14px] text-[12.5px] text-text-dimmer" data-testid="session-needs-you-end">That's everything waiting on you.</div>
 		{/if}
 
 		<!-- Paging sentinel. Inside the scroll region so the observer's root

@@ -1,66 +1,244 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
-import { DEFAULT_USAGE_LIMITS } from "../../../contracts/limit-recovery.js";
-import { instanceState } from "../../stores/instance.svelte.js";
-import { applyUsageReadings, usageState } from "../../stores/usage.svelte.js";
-import UsageFooterMeter from "./UsageFooterMeter.svelte";
+import {
+	DEFAULT_USAGE_LIMITS,
+	type UsageLimitsSetting,
+	type UsageReading,
+} from "../../../contracts/limit-recovery.js";
+import { applyInstanceListResponse } from "../../stores/instance.svelte.js";
+import { sessionState } from "../../stores/session.svelte.js";
+import {
+	applyUsageLimitsSetting,
+	applyUsageReadings,
+} from "../../stores/usage.svelte.js";
+import { mockClaudeAccount, mockSession } from "../../stories/mocks.js";
+import { applySessionChange } from "../../transport/session-subscription.svelte.js";
+import UsageFooterMeterFrame from "./__fixtures__/UsageFooterMeterFrame.svelte";
+
+const accounts = ["personal", "work", "lab", "stale", "codex"] as const;
+const readings: UsageReading[] = accounts.map((accountId, index) => ({
+	accountId,
+	harness: accountId === "codex" ? "codex" : "claude",
+	status: accountId === "lab" ? "limited" : "available",
+	windows: [
+		{
+			kind: "five_hour",
+			utilization: [42, 91, 100, 47, 30][index] ?? 0,
+			resetsAt: new Date(2026, 0, 1, 3, 40).toISOString(),
+		},
+		{ kind: "seven_day", utilization: [18, 64, 71, 52, 64][index] ?? 0 },
+	],
+	readAt: 1,
+	stale: accountId === "stale",
+}));
+
+function seed(
+	rows: readonly UsageReading[] = readings,
+	warnAt: UsageLimitsSetting["warnAt"] = 80,
+) {
+	applyInstanceListResponse({
+		instances: rows.map((reading) => ({
+			...mockClaudeAccount,
+			id: reading.accountId,
+			name: reading.accountId,
+			usageEligible: true,
+		})),
+	});
+	applyUsageLimitsSetting({
+		...DEFAULT_USAGE_LIMITS,
+		order: [...accounts],
+		warnAt,
+	});
+	applyUsageReadings(rows);
+	applySessionChange({
+		_tag: "snapshot",
+		rows: [{ ...mockSession, accountId: "personal" }],
+		sequence: 1,
+	});
+	applySessionChange({ _tag: "synchronized" });
+	sessionState.currentId = mockSession.id;
+}
 
 const meta = {
 	title: "Layout/UsageFooterMeter",
-	component: UsageFooterMeter,
-	tags: ["autodocs", "viewport-capture"],
-	parameters: { docs: { story: { inline: false } } },
-	args: { phone: true },
+	component: UsageFooterMeterFrame,
+	tags: ["autodocs"],
+	parameters: {
+		layout: "fullscreen",
+		docs: { story: { inline: false, height: "640px" } },
+	},
 	beforeEach: () => {
-		const instances = instanceState.instances;
-		const readings = usageState.readings;
-		const limits = usageState.limits;
-		usageState.limits = DEFAULT_USAGE_LIMITS;
-		instanceState.instances = ["Personal", "Work", "Side projects"].map(
-			(name, i) => ({
-				id: `sheet-account-${i}`,
-				name,
-				driver: "claude",
-				usageEligible: true,
-				isDefault: i === 0,
-				port: 0,
-				managed: false,
-				status: "healthy",
-				restartCount: 0,
-				createdAt: 0,
-			}),
-		);
-		applyUsageReadings(
-			[20, 45, 62].map((utilization, i) => ({
-				accountId: `sheet-account-${i}`,
-				harness: "claude",
-				status: "available",
-				stale: false,
-				readAt: 1_790_000_000_000,
-				windows: [
-					{ kind: "five_hour", utilization },
-					{ kind: "seven_day", utilization: utilization + 8 },
-				],
-			})),
-		);
+		seed();
 		return () => {
-			instanceState.instances = instances;
-			applyUsageReadings(readings);
-			usageState.limits = limits;
+			applyUsageReadings([]);
+			applyUsageLimitsSetting(DEFAULT_USAGE_LIMITS);
+			sessionState.currentId = null;
 		};
 	},
-} satisfies Meta<typeof UsageFooterMeter>;
+} satisfies Meta<typeof UsageFooterMeterFrame>;
+
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Sheet: Story = {
+/** Current, normal, warning, limited, stale and a second harness in one meter. */
+export const States: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByTestId("usage-footer-heading-claude"),
+		).toHaveTextContent("Claude");
+		await expect(
+			canvas.getByTestId("usage-footer-column-claude-seven_day"),
+		).toHaveTextContent("Week");
+		await expect(
+			canvas.getByTestId("usage-footer-row-personal"),
+		).toHaveAttribute("data-default", "true");
+		await expect(
+			canvas.getByTestId("usage-footer-cell-work-five_hour"),
+		).toHaveAttribute("data-level", "warning");
+		await expect(
+			canvas.getByTestId("usage-footer-value-lab-five_hour"),
+		).toHaveTextContent("3:40");
+		await expect(
+			canvas.getByTestId("usage-footer-cell-lab-seven_day"),
+		).toHaveAttribute("data-level", "normal");
+		await expect(
+			canvas.getByTestId("usage-footer-value-stale-five_hour"),
+		).toHaveTextContent("—");
+		await expect(
+			canvas.getByTestId("usage-footer-bar-stale-five_hour"),
+		).toBeEmptyDOMElement();
+	},
+};
+
+export const SingleAccount: Story = {
+	beforeEach: () => {
+		seed(readings.slice(0, 1));
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("usage-footer-harness")).toHaveTextContent(
+			"Claude",
+		);
+		await expect(
+			canvas.getByTestId("usage-footer-value-personal-five_hour"),
+		).toHaveTextContent("42%");
+		await expect(
+			canvas.getByTestId("usage-footer-value-personal-seven_day"),
+		).toHaveTextContent("18%");
+	},
+};
+
+export const SingleWarning: Story = {
+	beforeEach: () => {
+		seed(readings.filter((reading) => reading.accountId === "work"));
+	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByTestId("usage-footer-cell-work-five_hour"),
+		).toHaveAttribute("data-level", "warning");
+	},
+};
+
+export const SingleLimited: Story = {
+	beforeEach: () => {
+		seed(readings.filter((reading) => reading.accountId === "lab"));
+	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByTestId("usage-footer-value-lab-five_hour"),
+		).toHaveTextContent("3:40");
+	},
+};
+
+export const SingleStale: Story = {
+	beforeEach: () => {
+		seed(readings.filter((reading) => reading.accountId === "stale"));
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByTestId("usage-footer-value-stale-five_hour"),
+		).toHaveTextContent("—");
+		await expect(
+			canvas.getByTestId("usage-footer-bar-stale-five_hour"),
+		).toBeEmptyDOMElement();
+	},
+};
+
+export const MinimumWidth: Story = {
+	args: { width: 180 },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByTestId("usage-footer-value-personal-five_hour"),
+		).toBeVisible();
+		await expect(
+			canvas.getByTestId("usage-footer-cell-personal-seven_day"),
+		).not.toBeVisible();
+	},
+};
+
+export const WarningsOff: Story = {
+	beforeEach: () => {
+		seed(readings, "off");
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByTestId("usage-footer-cell-work-five_hour"),
+		).toHaveAttribute("data-level", "normal");
+		await expect(
+			canvas.getByTestId("usage-footer-cell-lab-five_hour"),
+		).toHaveAttribute("data-level", "danger");
+	},
+};
+
+export const PhoneDock: Story = {
+	args: { phone: true, width: 393 },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.queryByTestId("usage-footer-heading-claude"),
+		).not.toBeInTheDocument();
+		await expect(canvas.getByTestId("usage-footer-row-personal")).toBeVisible();
+		await expect(canvas.getByTestId("usage-footer-row-work")).toBeVisible();
+		await expect(canvas.getByTestId("usage-footer-row-lab")).toBeVisible();
+		await expect(
+			canvas.getByTestId("usage-phone-more-count"),
+		).toHaveTextContent("+2 more");
+	},
+};
+
+export const PhoneSingleAccount: Story = {
+	...SingleAccount,
+	args: { phone: true, width: 393 },
+};
+
+export const PhoneSheet: Story = {
+	...PhoneDock,
+	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => {
 		const body = within(canvasElement.ownerDocument.body);
 		await userEvent.click(body.getByTestId("usage-phone-dock"));
 		await expect(
 			await body.findByRole("dialog", { name: "Usage" }),
 		).toBeVisible();
-		await expect(body.getByTestId("usage-sheet")).toBeVisible();
+		await expect(body.getByTestId("usage-sheet-row-stale")).toBeVisible();
+		await expect(
+			body.getByTestId("usage-sheet-heading-codex"),
+		).toHaveTextContent("Codex");
+		await expect(body.getByTestId("usage-sheet-row-personal")).toHaveAttribute(
+			"data-default",
+			"true",
+		);
+		await expect(
+			body.getByTestId("usage-sheet-value-lab-five_hour"),
+		).toHaveTextContent("3:40");
 	},
 };
-export const SheetLight: Story = { ...Sheet, globals: { theme: "light" } };
+
+export const PhoneSheetLight: Story = {
+	...PhoneSheet,
+	globals: { theme: "light" },
+};

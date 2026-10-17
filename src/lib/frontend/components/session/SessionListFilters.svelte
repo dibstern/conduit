@@ -24,21 +24,9 @@
 		{ value: "unread", label: "Unread" },
 	];
 
-	// Literal px: the 12px root would shrink rem steps below the design's sizes.
-	// touchTarget restores a 44px hit area on phones without growing the chip.
-	const CHIP_CLASSES =
-		"shrink-0 gap-[6px] rounded-full border px-[11px] py-[8px] md:px-[9px] md:py-[5px] text-[12.5px] md:text-[11.5px] leading-none font-sans";
-
-	// A selected chip takes the design's brand tint (.chip.brand), the only
-	// coloured chip it draws; a neutral selected state vanished on dark.
-	function filterSurfaceClass(coloured: boolean): string {
-		return coloured
-			? "border-accent/55 bg-accent/14 text-accent"
-			: "border-border text-text-secondary";
-	}
 </script>
 
-	<div id="session-search" class="shrink-0 px-[12px] md:px-[10px] pt-[4px]">
+	<div id="session-search" class="shrink-0 px-[10px] md:pb-[8px]">
 		<SessionSearchField
 			value={localSearchValue}
 			oninput={onsearchinput}
@@ -46,17 +34,16 @@
 			{onaddproject}
 		/>
 	</div>
-	<div class="flex shrink-0 items-center gap-1 px-[12px] md:px-[10px]">
+	<div class="flex shrink-0 items-center gap-[5px] px-[10px] pb-[4px]">
 			<!-- Vertical padding lives here, not on the row: it is the room the
 			     chips' 44px hit areas need inside this scroll container. -->
-			<div class="flex min-w-0 flex-1 items-center gap-[6px] pt-[9px] pb-[7px] md:pt-[8px] md:pb-[4px] overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+			<div class="flex min-w-0 flex-1 items-center gap-[5px] py-[10px] md:py-0 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
 				{#if grouping !== "status"}
 					<Button
-						variant="ghost"
+						variant="filter"
 						size="content"
-						tone="inherit"
 						touchTarget
-						class="{CHIP_CLASSES} {filterSurfaceClass(true)}"
+						aria-pressed="true"
 						data-testid="session-group-chip"
 						onclick={() => setSessionGrouping("status")}
 					>
@@ -66,23 +53,20 @@
 				{#each filterChips as chip (chip.value)}
 					{@const active = statusFilter === chip.value}
 					{@const count = live.filter((session) => sessionMatchesStatus(session, chip.value)).length}
-					{@const needsAttention = chip.value === "needs-you" && count > 0}
 					<Button
-						variant="ghost"
+						variant="filter"
 						size="content"
-						tone="inherit"
 						touchTarget
-						class="{CHIP_CLASSES} {filterSurfaceClass(needsAttention || active)}"
+
 						aria-pressed={active}
 						data-testid={`session-filter-chip-${chip.value}`}
 						onclick={() => setSessionStatusFilter(active ? null : chip.value)}
 					>
-						{chip.label} <b class="font-semibold text-text">{count}</b>
-						{#if active}<span aria-hidden="true" class="text-text-dimmer">✕</span>{/if}
+						{chip.label} <span class="font-mono text-[11px] font-normal {active ? 'text-status-ask' : 'text-text-dimmer'}">{count}</span>
 					</Button>
 				{/each}
 			</div>
-			{#if !sessionViewState.compact}<SessionGroupMenu />{/if}
+			<SessionGroupMenu compact={sessionViewState.compact} />
 	</div>
 	{#if searchSummary}
 		<!-- Outside the search-input block: the count belongs to the results, and

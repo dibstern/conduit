@@ -22,14 +22,14 @@ test("status filter and grouping survive reload and follow browser history", asy
 	const runningCount = Number(
 		await page
 			.getByTestId("session-filter-chip-running")
-			.locator("b")
+			.locator("span")
 			.innerText(),
 	);
 	const filter = runningCount < originalCount ? "running" : "unread";
 	const filteredCount = Number(
 		await page
 			.getByTestId(`session-filter-chip-${filter}`)
-			.locator("b")
+			.locator("span")
 			.innerText(),
 	);
 	expect(filteredCount).toBeLessThan(originalCount);
@@ -43,9 +43,10 @@ test("status filter and grouping survive reload and follow browser history", asy
 	await expect(page).toHaveURL(/status=needs-you/);
 	await expect(rows).toHaveCount(0);
 	await expect(page.getByTestId("session-filter-empty")).toContainText(
-		"Nothing needs you",
+		"That's everything waiting on you.",
 	);
-	await page.getByTestId("session-filter-clear").click();
+	await expect(page.getByTestId("session-filter-clear")).toHaveCount(0);
+	await page.getByTestId("session-filter-chip-needs-you").click();
 	await expect(rows).toHaveCount(originalCount);
 	await expect(page).not.toHaveURL(/status=/);
 

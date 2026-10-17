@@ -46,7 +46,7 @@
 					ariaLabel={`${unpinSelected ? "Unpin" : "Pin"} ${pinCount} ${pinCount === 1 ? "session" : "sessions"}`}
 					class={selectVerbClass}
 					onclick={() => { void onpin(); }}
-				><Icon name={unpinSelected ? "star-off" : "star"} size={17} /> {unpinSelected ? "Unpin" : "Pin"}</Button>
+				><Icon name={unpinSelected ? "pin-off" : "pin"} size={17} /> {unpinSelected ? "Unpin" : "Pin"}</Button>
 				<Button
 					variant="ghost" size="content" tone="inherit" hoverFill="none" disabledStyle="none"
 					disabled={selectionCount === 0 || bulkPending}

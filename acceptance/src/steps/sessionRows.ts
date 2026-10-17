@@ -230,7 +230,10 @@ export const sessionRowsHandlers: StepHandler[] = [
 			});
 			await expect(
 				row.locator(".session-item-context > span").last(),
-			).toHaveText(`${match[2]} · ${match[3]}`);
+			).toHaveText(match[2] ?? "");
+			await expect(row.locator(".session-item-context > code")).toHaveText(
+				match[3] ?? "",
+			);
 			await expect(row).toHaveAccessibleName(
 				new RegExp((match[3] ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
 			);
@@ -248,6 +251,7 @@ export const sessionRowsHandlers: StepHandler[] = [
 			await expect(
 				row.locator(".session-item-context > span").last(),
 			).toHaveText(match[2] ?? "");
+			await expect(row.locator(".session-item-context > code")).toHaveCount(0);
 		},
 	},
 	{

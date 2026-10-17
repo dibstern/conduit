@@ -199,8 +199,9 @@ test.describe("OpenCode Side Thread status", () => {
 			);
 			await expect(parentRow).toBeVisible();
 			await expect(parentRow).not.toHaveAccessibleName(/^Working/);
-			await expect(parentRow.locator(".session-status-glyph")).toHaveClass(
-				/text-session-idle/,
+			await expect(parentRow.locator(".session-status-glyph")).toHaveAttribute(
+				"data-state",
+				"idle",
 			);
 			await expect(
 				page.locator(`#session-list [data-session-id="${sideId}"]`),
@@ -217,8 +218,9 @@ test.describe("OpenCode Side Thread status", () => {
 			await expect(page).toHaveURL(new RegExp(`/s/${parentId}(?:\\?|$)`));
 			// The parent's shell row is its only busy signal (conduit-test-ni8.35):
 			// opening it must not show a running turn while the side thread works.
-			await expect(parentRow.locator(".session-status-glyph")).toHaveClass(
-				/text-session-idle/,
+			await expect(parentRow.locator(".session-status-glyph")).toHaveAttribute(
+				"data-state",
+				"idle",
 			);
 			await expect(chat.stopBtn).toBeHidden();
 			await expect(chat.userMessages.filter({ hasText: question })).toHaveCount(

@@ -14,8 +14,8 @@
   (that one is a Button).
 -->
 <script module lang="ts">
-	type BadgeVariant = "neutral" | "quiet" | "accent" | "accent-solid" | "tag";
-	type BadgeSize = "xs" | "sm" | "count";
+	type BadgeVariant = "neutral" | "quiet" | "accent" | "accent-solid" | "ask" | "tag";
+	type BadgeSize = "xs" | "sm" | "count" | "status";
 	type BadgeShape = "rounded" | "pill";
 
 	const VARIANT_CLASSES: Record<BadgeVariant, string> = {
@@ -26,6 +26,7 @@
 		quiet: "bg-bg-alt text-text-muted border border-border",
 		accent: "bg-accent-bg text-accent",
 		"accent-solid": "bg-accent text-bg",
+		ask: "bg-status-ask/18 text-status-ask",
 		// The tag tint is theme-aware on purpose: the two SettingsPanel chips
 		// used bg-white/[0.08], which is white-on-white in the light theme.
 		// An arbitrary rgba() belongs here, inside the design system, rather
@@ -39,6 +40,7 @@
 	// box guarantees that. 18px is literal rather than h-6 because the bubble
 	// is a circle paired with rounded-[9px], and the pair must not drift apart.
 	const SIZE_CLASSES: Record<BadgeSize, string> = {
+		status: "h-[20px] px-[7px] text-[11.5px] font-semibold leading-none",
 		xs: "px-[6px] py-[1px] text-[10px] font-medium",
 		sm: "px-2 py-0.5 text-sm font-medium",
 		// font-semibold rather than the others' font-medium: this is a 10px

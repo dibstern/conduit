@@ -35,6 +35,8 @@
 		checking: "text-text-dimmer",
 		unknown: "text-text-muted",
 	} as const;
+	const USAGE_FILL_CLASSES = { normal: "bg-text-secondary", high: "bg-status-ask", full: "bg-status-red" } as const;
+	const USAGE_CAPTION_CLASSES = { normal: "text-text-secondary", high: "text-status-ask", full: "text-status-red", checking: "text-text-dimmer", unknown: "text-text-dimmer" } as const;
 
 	function defaultCaption(used: QuotaUsed): string {
 		if (used === "checking") return "checking…";
@@ -69,7 +71,7 @@
 		variant?: "headroom" | "usage";
 		/** Compact footer tracks have literal widths from the approved design. */
 		trackWidth?: number;
-		gap?: 4 | 5 | 8;
+		gap?: 4 | 5 | 6 | 8;
 		trackTestId?: string;
 		captionTestId?: string;
 		/** Layout only (margin, alignment). */
@@ -82,13 +84,13 @@
 
 <span data-testid="quota-meter" data-state={level} class="inline-flex shrink-0 items-center {variant === 'usage' ? 'max-w-full' : ''} {gap === 8 ? 'gap-[8px]' : ''} {className}" style:gap={gap === 8 ? undefined : `${gap}px`}>
 	{#if track}
-		<span data-testid={trackTestId} aria-hidden="true" class="block h-[4px] overflow-hidden rounded-full bg-border-chip {TRACK_WIDTH_CLASSES[size]} {trackWidth === undefined ? '' : 'custom-track'} {variant === 'usage' ? 'usage-track' : ''} {level === 'checking' ? 'opacity-50' : ''}" style:--quota-track-width={trackWidth === undefined ? undefined : `${trackWidth}px`}>
+		<span data-testid={trackTestId} aria-hidden="true" class="block h-[4px] overflow-hidden rounded-full {variant === 'usage' ? 'bg-text-dimmer/32' : 'bg-border-chip'} {TRACK_WIDTH_CLASSES[size]} {trackWidth === undefined ? '' : 'custom-track'} {variant === 'usage' ? 'usage-track' : ''} {level === 'checking' ? 'opacity-50' : ''}" style:--quota-track-width={trackWidth === undefined ? undefined : `${trackWidth}px`}>
 			{#if level === "normal" || level === "high" || level === "full"}
-				<span class="block h-full {FILL_CLASSES[level]}" style:width="{share}%"></span>
+				<span class="block h-full {variant === 'usage' ? USAGE_FILL_CLASSES[level] : FILL_CLASSES[level]}" style:width="{share}%"></span>
 			{/if}
 		</span>
 	{/if}
-	<span data-testid={captionTestId} class="whitespace-nowrap font-mono text-[10.5px] {variant === 'usage' && level === 'high' && warnAt !== 'off' ? 'text-fill-amber' : CAPTION_CLASSES[level]}">{caption ?? defaultCaption(used)}</span>
+	<span data-testid={captionTestId} class="whitespace-nowrap font-mono {variant === 'usage' ? 'text-[11px]' : 'text-[10.5px]'} {variant === 'usage' ? USAGE_CAPTION_CLASSES[level === 'high' && warnAt === 'off' ? 'normal' : level] : CAPTION_CLASSES[level]}">{caption ?? defaultCaption(used)}</span>
 </span>
 
 <style>

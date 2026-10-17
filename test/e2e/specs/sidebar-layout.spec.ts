@@ -371,19 +371,19 @@ test.describe("Sidebar Layout — Desktop", () => {
 		await expect(page.locator("#sidebar-footer")).toHaveCount(0);
 		await new SidebarPage(page).createNewSession();
 		await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(2);
-		await expect(rows.first()).toHaveCSS("margin-bottom", "1px");
+		await expect(rows.first()).toHaveCSS("margin-bottom", "0px");
 
 		for (const shelf of ["snoozed", "settled"]) {
 			const toggle = page.getByTestId(`${shelf}-shelf-toggle`);
 			if (await toggle.count()) await toggle.click();
 		}
 		const headings = page.locator(
-			"#session-list-scroller > .session-group-label",
+			"#session-list-scroller > div.session-group-label",
 		);
 		expect(await headings.count()).toBeGreaterThan(0);
 		for (const heading of await headings.all()) {
 			const label = (await heading.locator("span").first().innerText()).trim();
-			expect(label).toBe(label.toUpperCase());
+			expect(label).not.toBe(label.toUpperCase());
 			const renderedRows = await heading.evaluate((element) => {
 				let count = 0;
 				let sibling = element.nextElementSibling;
@@ -402,12 +402,12 @@ test.describe("Sidebar Layout — Desktop", () => {
 
 		// The status column is never blank, idle rows included.
 		for (const row of await rows.all()) {
-			await expect(row.locator(".session-status-glyph svg")).toBeVisible();
+			await expect(row.locator(".session-status-glyph")).toBeVisible();
 		}
-		const square = rows.first().locator(".project-square");
-		await expect(square).toHaveText(/^[A-Z]{2}$/);
-		await expect(square).toHaveCSS("width", "16px");
-		await expect(square).toHaveCSS("height", "16px");
+		const square = rows.first().locator(".project-mark");
+		await expect(square).toHaveText("");
+		await expect(square).toHaveCSS("width", "7px");
+		await expect(square).toHaveCSS("height", "7px");
 		await expect(square).toHaveClass(/bg-project-1/);
 		expect(
 			await square.evaluate(
@@ -1047,11 +1047,16 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await measure("#sidebar");
 		await page.getByRole("button", { name: "Clear project scope" }).click();
 		await page.getByTestId("session-filter-chip-needs-you").click();
-		await expect(page.getByTestId("session-filter-clear")).toBeVisible();
+		await expect(page.getByTestId("session-filter-empty")).toHaveText(
+			"That's everything waiting on you.",
+		);
+		await expect(page.getByTestId("session-filter-clear")).toHaveCount(0);
 		await measure("#sidebar");
-		await page.getByTestId("session-filter-clear").click();
+		await page.getByTestId("session-filter-chip-needs-you").click();
 		await page.getByTestId("list-bar-overflow").click();
-		await expect(page.getByTestId("list-overflow-select")).toBeVisible();
+		await expect(page.getByTestId("list-overflow-settings")).toBeVisible();
+		await expect(page.getByTestId("list-overflow-select")).toHaveCount(0);
+		await expect(page.getByTestId("list-overflow-resume")).toHaveCount(0);
 		await measure("[role=menu]");
 		await page.keyboard.press("Escape");
 		await page.getByTestId("session-scope-chip").click();
@@ -1064,8 +1069,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await measure('role=dialog[name="Add project"]');
 		await page.keyboard.press("Escape");
 		await expect(addProject).toHaveCount(0);
-		await page.getByTestId("list-bar-overflow").click();
-		await page.getByTestId("list-overflow-select").click();
+		await page.getByTestId("list-bar-select").click();
 		await expect(
 			page
 				.locator("#session-list .session-list-header")
@@ -1124,6 +1128,22 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(page.getByTestId("list-bar-title")).toHaveText(
 			/^Sessions\s*\d+$/,
 		);
+		await expect(page.getByTestId("list-bar-title")).toHaveCSS(
+			"font-size",
+			"22px",
+		);
+		await expect(page.getByTestId("list-bar-title")).toHaveCSS(
+			"font-weight",
+			"700",
+		);
+		await expect(page.getByTestId("list-bar-select")).toBeVisible();
+		const compose = page.locator("#sidebar-header #new-session-btn");
+		await expect(compose).toBeVisible();
+		await expect(page.locator("#sidebar-nav #new-session-btn")).toHaveCount(0);
+		await expect(compose.locator(".lucide-square-pen")).toHaveCount(1);
+		await expect(
+			page.locator("#sidebar-header").getByTestId("session-group-button"),
+		).toHaveCount(0);
 		await expect(page.locator("#sidebar").getByText(/^sessions$/i)).toHaveCount(
 			0,
 		);
