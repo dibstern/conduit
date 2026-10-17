@@ -230,6 +230,7 @@ export const catalogFromProviderList = (
 			readonly id: string;
 			readonly name: string;
 			readonly variants?: readonly string[] | undefined;
+			readonly parameters?: ModelInfo["parameters"];
 			readonly contextWindowOptions?: readonly ListedOption[] | undefined;
 			readonly routingOptions?: readonly ListedOption[] | undefined;
 		}[];
@@ -243,6 +244,7 @@ export const catalogFromProviderList = (
 			variants: Object.fromEntries(
 				(model.variants ?? []).map((effort) => [effort, {}]),
 			),
+			...(model.parameters ? { parameters: model.parameters } : {}),
 			...(model.contextWindowOptions
 				? { contextWindowOptions: copyOptions(model.contextWindowOptions) }
 				: {}),
