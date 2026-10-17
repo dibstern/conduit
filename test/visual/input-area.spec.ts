@@ -14,12 +14,15 @@ async function navigateToStory(
 }
 
 test.describe("InputArea", () => {
-	test("renders textarea with placeholder", async ({ page }) => {
+	test("renders textarea with placeholder", async ({ page }, testInfo) => {
 		await navigateToStory(page, "input-inputarea--empty");
 		const textarea = page.locator("#input");
 		await expect(textarea).toBeVisible();
-		// The placeholder names the session's harness.
-		await expect(textarea).toHaveAttribute("placeholder", "Ask OpenCode…");
+		// The placeholder names the session's harness; phone drops the name.
+		await expect(textarea).toHaveAttribute(
+			"placeholder",
+			testInfo.project.name === "mobile" ? "Reply…" : "Reply to OpenCode…",
+		);
 	});
 
 	test("shows send button", async ({ page }) => {
@@ -124,7 +127,7 @@ test.describe("Context warning", () => {
 			const warning = page.getByTestId("composer-context-warning");
 			await expect(warning).toBeVisible();
 			await expect(warning).toContainText(
-				`Context ${percent}% full. Older turns compact soon.`,
+				`Context ${percent}% full. Compact soon to keep replies sharp.`,
 			);
 			await expect(
 				warning.getByTestId("composer-context-compact"),

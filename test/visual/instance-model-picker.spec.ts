@@ -11,22 +11,23 @@ function storyUrl(storyId: string): string {
 	return `/iframe.html?id=${storyId}&viewMode=story`;
 }
 
-const isPhone = (page: Page) => (page.viewportSize()?.width ?? 1440) < 768;
-
 /**
- * Phones keep the effort menu; the desktop effort control opens the model
- * picker on its effort row (conduit-test-bn6x.8). Returns whichever opened.
+ * The desktop effort control opens the model picker on its effort row
+ * (conduit-test-bn6x.8). Phones have no separate effort control beside the
+ * picker: below a 480px composer, effort lives inside the picker sheet, and
+ * ModelVariant's phone micro label is covered by the Model/ModelVariant stories.
  */
 async function openEffortMenu(page: Page): Promise<Locator> {
-	const badge = page.getByTestId("variant-badge");
-	if (isPhone(page)) {
-		await badge.press("Shift+F10");
-		return page.getByTestId("variant-dropdown");
-	}
-	await badge.click();
+	await page.getByTestId("variant-badge").click();
 	await expect(page.getByTestId("picker-row-effort")).toBeVisible();
 	return page.getByTestId("model-picker");
 }
+
+const skipOnPhone = () =>
+	test.skip(
+		({ viewport }) => (viewport?.width ?? 1440) < 768,
+		"Phone effort lives inside the picker sheet; no separate control",
+	);
 
 test.describe("InstanceModelPicker", () => {
 	test("displays current model name", async ({ page }) => {
@@ -187,36 +188,29 @@ test.describe("InstanceModelPicker", () => {
 	});
 });
 
-test.describe("ModelVariant", () => {
-	test("shows variant badge when model has variants", async ({ page }) => {
-		await page.goto(storyUrl("model-instancemodelpicker--with-variants"), {
-			waitUntil: "domcontentloaded",
-		});
-		await expect(page.locator('[data-testid="variant-badge"]')).toBeVisible();
+// The Closed story keeps the picker shut with Sonnet on "high" effort.
+const closedStory = storyUrl("model-instancemodelpicker--closed");
 
-		const badge = page.locator('[data-testid="variant-badge"]');
-		await expect(badge).toBeVisible();
-		// The WithVariants story sets currentVariant to "high"
-		await expect(badge).toHaveText(/high/i);
+test.describe("ModelVariant", () => {
+	skipOnPhone();
+
+	test("shows variant badge when model has variants", async ({ page }) => {
+		await page.goto(closedStory, { waitUntil: "domcontentloaded" });
+		await expect(page.getByTestId("variant-badge")).toHaveAccessibleName(
+			/Effort: High/i,
+		);
 	});
 
 	test("opens the effort menu from the badge", async ({ page }) => {
-		await page.goto(storyUrl("model-instancemodelpicker--with-variants"), {
-			waitUntil: "domcontentloaded",
-		});
+		await page.goto(closedStory, { waitUntil: "domcontentloaded" });
 		await expect(page.getByTestId("variant-badge")).toBeVisible();
-		await expect(page.getByTestId("variant-dropdown")).toBeHidden();
 		await expect(page.getByTestId("model-picker")).toBeHidden();
 
 		await expect(await openEffortMenu(page)).toBeVisible();
 	});
 
 	test("closes the effort menu on Escape", async ({ page }) => {
-		await page.goto(storyUrl("model-instancemodelpicker--with-variants"), {
-			waitUntil: "domcontentloaded",
-		});
-		await expect(page.getByTestId("variant-badge")).toBeVisible();
-
+		await page.goto(closedStory, { waitUntil: "domcontentloaded" });
 		const menu = await openEffortMenu(page);
 		await expect(menu).toBeVisible();
 
@@ -225,82 +219,32 @@ test.describe("ModelVariant", () => {
 	});
 
 	test("marks the current variant", async ({ page }) => {
-		await page.goto(storyUrl("model-instancemodelpicker--with-variants"), {
-			waitUntil: "domcontentloaded",
-		});
-		await expect(page.getByTestId("variant-badge")).toBeVisible();
-
+		await page.goto(closedStory, { waitUntil: "domcontentloaded" });
 		await expect(await openEffortMenu(page)).toBeVisible();
 
-		// The current variant is "high".
-		if (!isPhone(page)) {
-			await expect(
-				page.getByTestId("picker-effort-option-high"),
-			).toHaveAttribute("data-state", "checked");
-			await expect(
-				page.getByTestId("picker-effort-option-low"),
-			).not.toHaveAttribute("data-state", "checked");
-			return;
-		}
-		// Since conduit-test-de3.35.4 the check is ui/MenuRadioItem's
-		// `data-menu-radio-check` icon, not a literal ✓ glyph.
-		const highOption = page.getByTestId("variant-option-high");
-		await expect(highOption).toBeVisible();
-		await expect(highOption.locator("[data-menu-radio-check]")).toBeVisible();
-		const lowOption = page.getByTestId("variant-option-low");
-		await expect(lowOption).toBeVisible();
-		await expect(lowOption.locator("[data-menu-radio-check]")).toHaveCount(0);
+		await expect(page.getByTestId("picker-effort-option-high")).toHaveAttribute(
+			"aria-checked",
+			"true",
+		);
+		await expect(
+			page.getByTestId("picker-effort-option-low"),
+		).not.toHaveAttribute("aria-checked", "true");
 	});
 });
 
 test.describe("InstanceModelPicker + ModelVariant coordination", () => {
-	test("opening model dropdown closes variant dropdown", async ({ page }) => {
-		test.skip(
-			!isPhone(page),
-			"Desktop effort opens the model picker itself; there is no second menu",
-		);
-		await page.goto(storyUrl("model-instancemodelpicker--with-variants"), {
-			waitUntil: "domcontentloaded",
-		});
-		await expect(page.getByTestId("variant-badge")).toBeVisible();
+	skipOnPhone();
 
-		await expect(await openEffortMenu(page)).toBeVisible();
-
-		await page.getByTestId("model-picker-trigger").click();
-		await expect(page.getByTestId("model-picker")).toBeVisible();
-		await expect(page.getByTestId("variant-dropdown")).toBeHidden();
-	});
-
-	test("effort menu respects desktop dismissal and phone sheet modality", async ({
+	test("the effort control moves an open picker to its effort row", async ({
 		page,
 	}) => {
-		await page.goto(storyUrl("model-instancemodelpicker--with-variants"), {
-			waitUntil: "domcontentloaded",
-		});
-		await expect(page.getByTestId("variant-badge")).toBeVisible();
-
-		// Open the model dropdown first
+		await page.goto(closedStory, { waitUntil: "domcontentloaded" });
 		await page.getByTestId("model-picker-trigger").click();
 		await expect(page.getByTestId("model-picker")).toBeVisible();
 
-		if (!isPhone(page)) {
-			// The open picker moves to its effort row rather than closing.
-			await page.getByTestId("variant-badge").click();
-			await expect(page.getByTestId("picker-row-effort")).toBeVisible();
-			await page.mouse.click(5, 5);
-			await expect(page.getByTestId("model-picker")).toBeHidden();
-			return;
-		}
-
-		await expect(page.locator("dialog:modal")).toBeVisible();
-		const badge = page.getByTestId("variant-badge");
-		await badge.focus();
-		await expect(badge).not.toBeFocused();
-		await expect(page.getByTestId("variant-dropdown")).toBeHidden();
-		await page.keyboard.press("Escape");
-		await expect(page.getByTestId("model-picker")).toBeHidden();
-
-		await expect(await openEffortMenu(page)).toBeVisible();
+		await page.getByTestId("variant-badge").click();
+		await expect(page.getByTestId("picker-row-effort")).toBeVisible();
+		await page.mouse.click(5, 5);
 		await expect(page.getByTestId("model-picker")).toBeHidden();
 	});
 });
