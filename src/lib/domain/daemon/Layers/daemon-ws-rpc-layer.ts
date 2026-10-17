@@ -103,6 +103,7 @@ import { RelayCacheTag } from "../Services/relay-cache.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
 import type { SessionDirectory } from "../Services/session-directory.js";
 import { Usage } from "../Services/usage.js";
+import type { UserAvatar } from "../Services/user-avatar.js";
 import { KeepAwakeTag } from "./keep-awake-layer.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
 import {
@@ -128,6 +129,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| DaemonConfigRefTag
 			| DaemonEventBusTag
 			| ConfigPersistenceTag
+			| UserAvatar
 			| RelayCacheTag
 			| AccountDirectory
 			| InstanceManagerStateTag
@@ -213,6 +215,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| DaemonEventBusTag
 				| SessionActivityTag
 				| ConfigPersistenceTag
+				| UserAvatar
 				| RelayCacheTag
 				| AccountDirectory
 				| InstanceManagerStateTag
@@ -719,6 +722,8 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			GetAutoSettleSetting: (request) =>
 				run(wsRpcHandlers.GetAutoSettleSetting(request)),
+			GetAvatar: (request) => run(wsRpcHandlers.GetAvatar(request)),
+			SetAvatar: (request) => run(wsRpcHandlers.SetAvatar(request)),
 			GetMessageSurfacing: () => messageSurfacing.get,
 			UpdateMessageSurfacing: (request) =>
 				Effect.gen(function* () {

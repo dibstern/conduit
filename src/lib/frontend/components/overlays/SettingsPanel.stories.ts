@@ -240,7 +240,7 @@ export const Composer: Story = {
 			body
 				.getAllByRole("heading", { level: 3 })
 				.map((heading) => heading.textContent),
-		).toEqual(["Appearance", "Composer", "Notifications", "Sessions"]);
+		).toEqual(["You", "Appearance", "Composer", "Notifications", "Sessions"]);
 		await expect(
 			body.getByRole("button", { name: /^Advanced.*Debug off$/ }),
 		).toHaveAttribute("aria-expanded", "false");

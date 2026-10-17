@@ -9,6 +9,7 @@
 import { Context, Effect, Layer, Ref } from "effect";
 import type { CursorUsageBinding } from "../../../contracts/account.js";
 import type { UsageLimitsSetting } from "../../../contracts/limit-recovery.js";
+import type { AvatarChoice } from "../../../contracts/user-avatar.js";
 import {
 	DEFAULT_WORKTREE_CLEANUP,
 	type WorktreeCleanup,
@@ -25,6 +26,7 @@ export interface DaemonRuntimeConfig {
 	readonly tailscaleServeCleanupPending?: boolean;
 	readonly tailscaleServe?: DaemonStatus["tailscaleServe"];
 	readonly keepAwake: boolean;
+	readonly avatar?: AvatarChoice;
 	readonly autoSettleAfterDays?: number | null;
 	readonly worktreeCleanup?: WorktreeCleanup;
 	readonly usageLimits?: UsageLimitsSetting;
@@ -82,6 +84,7 @@ export const makeDaemonConfigFromOptions = (options: {
 	tailscaleServeEnabled?: boolean;
 	tailscaleServeCleanupPending?: boolean;
 	keepAwake?: boolean;
+	avatar?: AvatarChoice;
 	autoSettleAfterDays?: number | null;
 	worktreeCleanup?: WorktreeCleanup;
 	usageLimits?: UsageLimitsSetting;
@@ -101,6 +104,7 @@ export const makeDaemonConfigFromOptions = (options: {
 	tailscaleServeEnabled: options.tailscaleServeEnabled ?? false,
 	tailscaleServeCleanupPending: options.tailscaleServeCleanupPending ?? false,
 	keepAwake: options.keepAwake ?? false,
+	...(options.avatar !== undefined && { avatar: options.avatar }),
 	autoSettleAfterDays:
 		options.autoSettleAfterDays === undefined
 			? DEFAULT_AUTO_SETTLE_AFTER_DAYS

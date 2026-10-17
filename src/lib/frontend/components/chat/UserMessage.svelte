@@ -21,6 +21,9 @@
 	import TextButton from "../ui/TextButton.svelte";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import MessageTime from "./MessageTime.svelte";
+	import UserAvatar from "../ui/UserAvatar.svelte";
+	import Button from "../ui/Button.svelte";
+	import AvatarPicker from "../overlays/AvatarPicker.svelte";
 
 	let {
 		message,
@@ -41,7 +44,9 @@
 </script>
 
 <div class="msg-user mx-auto mb-[26px] grid max-w-[820px] grid-cols-[20px_minmax(0,1fr)] gap-x-[8px] px-[14px] md:grid-cols-[28px_minmax(0,1fr)] md:gap-x-[14px] md:px-[32px]" data-uuid={message.uuid}>
-	<span aria-hidden="true" class="grid size-[20px] place-items-center self-start rounded-full bg-linear-to-br from-accent to-status-snoozed text-[11px] font-semibold text-white md:size-[28px] md:text-[13px]">Y</span>
+	<AvatarPicker>
+		{#snippet trigger({ props })}<Button {...props} variant="ghost" hoverFill="none" size="content" touchTarget ariaLabel="Change your avatar" class="self-start rounded-full"><UserAvatar size={sessionViewState.compact ? 20 : 28} /></Button>{/snippet}
+	</AvatarPicker>
 	<div class="min-w-0 max-md:contents">
 		<div data-testid="user-message-header" class="mb-[2px] flex min-h-[28px] flex-wrap items-center gap-x-[8px] gap-y-[4px]">
 			<span class="text-[13.5px] font-semibold">You</span>

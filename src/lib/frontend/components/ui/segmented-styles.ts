@@ -68,6 +68,12 @@ export const SEGMENTED_VARIANTS = {
 		selected: "bg-settings-segment text-text shadow-settings-segment",
 		unselected: "text-text-secondary hover:text-text",
 	},
+	avatar: {
+		list: "flex w-full rounded-[10px] bg-chip p-[3px]",
+		item: "flex min-h-[28px] max-md:min-h-[44px] flex-1 items-center justify-center rounded-[8px] px-[6px] text-[13px] font-medium cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text",
+		selected: "bg-settings-segment text-text shadow-settings-segment",
+		unselected: "text-text-secondary hover:text-text",
+	},
 	/** Full-width session view band, with literal 44px phone targets. */
 	switcher: {
 		list: "flex w-full min-w-0 gap-1 rounded-lg bg-bg-alt p-0.5",

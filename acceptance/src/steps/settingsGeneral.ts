@@ -17,13 +17,19 @@ export const settingsGeneralHandlers: StepHandler[] = [
 	{
 		name: "assert General headings in order",
 		match:
-			/^the General headings are Appearance, Composer, Notifications and Sessions in order$/,
+			/^the General headings are You, Appearance, Composer, Notifications and Sessions in order$/,
 		run: async ({ world }) => {
 			await expect(
 				world.page
 					.locator("#settings-panel")
 					.getByRole("heading", { level: 3 }),
-			).toHaveText(["Appearance", "Composer", "Notifications", "Sessions"]);
+			).toHaveText([
+				"You",
+				"Appearance",
+				"Composer",
+				"Notifications",
+				"Sessions",
+			]);
 		},
 	},
 	{

@@ -47,6 +47,7 @@ import { usageFooterMeterHandlers } from "./steps/usageFooterMeter.js";
 import { usageLimitStripHandlers } from "./steps/usageLimitStrip.js";
 import { usageSettingsHandlers } from "./steps/usageSettings.js";
 import { usageWarningStripHandlers } from "./steps/usageWarningStrip.js";
+import { userAvatarHandlers } from "./steps/userAvatar.js";
 import { visualHandlers } from "./steps/visual.js";
 import { worktreeCleanupSettingsHandlers } from "./steps/worktreeCleanupSettings.js";
 
@@ -96,6 +97,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...composerWordsHandlers,
 	...composerContextWarningHandlers,
 	...settingsGeneralHandlers,
+	...userAvatarHandlers,
 	...worktreeCleanupSettingsHandlers,
 	...composerHandlers,
 	...composerEffortHandlers,

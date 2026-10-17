@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { Deferred, Effect, Layer, Ref } from "effect";
 import type { AccountsState } from "../../src/lib/account-directory.js";
+import { AccountPictureNone } from "../../src/lib/domain/daemon/Layers/account-picture-layer.js";
 import { CategorySetLive } from "../../src/lib/domain/daemon/Layers/category-set-layer.js";
 import { ShutdownSignalTag } from "../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { DaemonWsRpcHandlersLive } from "../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
@@ -8,6 +9,7 @@ import { KeepAwakeTag } from "../../src/lib/domain/daemon/Layers/keep-awake-laye
 import { OpenCodeInstancesLive } from "../../src/lib/domain/daemon/Layers/opencode-instances-layer.js";
 import { PortScannerTag } from "../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
 import { TailscaleCliTag } from "../../src/lib/domain/daemon/Layers/tailscale-serve-layer.js";
+import { UserAvatarLive } from "../../src/lib/domain/daemon/Layers/user-avatar-layer.js";
 import type { AccountDirectory } from "../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	ConfigPersistenceNoopLive,
@@ -183,6 +185,15 @@ export const makeDaemonRpcTestLayer = (
 		),
 	);
 	return DaemonWsRpcHandlersLive.pipe(
-		Layer.provideMerge(DaemonHandleLive.pipe(Layer.provideMerge(dependencies))),
+		Layer.provideMerge(
+			DaemonHandleLive.pipe(
+				Layer.provideMerge(
+					UserAvatarLive.pipe(
+						Layer.provide(AccountPictureNone),
+						Layer.provideMerge(dependencies),
+					),
+				),
+			),
+		),
 	);
 };

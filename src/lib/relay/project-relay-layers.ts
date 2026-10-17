@@ -22,6 +22,7 @@ import {
 	getConfigDir,
 	loadDaemonConfigResult,
 } from "../daemon/config-persistence.js";
+import { AccountPictureLive } from "../domain/daemon/Layers/account-picture-layer.js";
 import {
 	ConfigPersistenceLive,
 	ConfigSnapshotTag,
@@ -29,6 +30,7 @@ import {
 } from "../domain/daemon/Layers/config-persistence-layer.js";
 import { makeStandaloneOpenCodeInstancesLive } from "../domain/daemon/Layers/opencode-instances-layer.js";
 import { makeConfiguredCursorUsage } from "../domain/daemon/Layers/usage-layer.js";
+import { UserAvatarLive } from "../domain/daemon/Layers/user-avatar-layer.js";
 import { makeWorktreeLive } from "../domain/daemon/Layers/worktree-layer.js";
 import {
 	AccountDirectory,
@@ -283,7 +285,7 @@ export function createProjectRelayLayers({
 	// Imperative edge objects are provided as ports and merged into one Layer tree.
 
 	const configLayer = makeProjectRelayConfigLive({ ...config, claudeSdk });
-	const daemonConfigLayer: Layer.Layer<
+	const daemonSettingsLayer: Layer.Layer<
 		DaemonConfigRefTag | ConfigPersistenceTag | AccountDirectory,
 		DaemonConfigLoadError
 	> = Layer.unwrapEffect(
@@ -341,6 +343,7 @@ export function createProjectRelayLayers({
 							const { cursorUsageBinding: _binding, ...unchanged } = persisted;
 							return {
 								...unchanged,
+								...(current.avatar !== undefined && { avatar: current.avatar }),
 								autoSettleAfterDays:
 									current.autoSettleAfterDays === undefined
 										? DEFAULT_AUTO_SETTLE_AFTER_DAYS
@@ -369,6 +372,10 @@ export function createProjectRelayLayers({
 		Layer.merge(
 			Layer.succeedContext(config.daemonConfigContext ?? Context.empty()),
 		),
+	);
+	const daemonConfigLayer = UserAvatarLive.pipe(
+		Layer.provide(AccountPictureLive),
+		Layer.provideMerge(daemonSettingsLayer),
 	);
 	const activityLayer = Layer.effect(
 		SessionActivityTag,

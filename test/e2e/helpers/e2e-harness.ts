@@ -254,10 +254,13 @@ export async function createReplayHarness(
 		configDir,
 	);
 	const claudeInstanceId = options.claudeReplay?.instanceId;
-	if (claudeInstanceId !== undefined)
-		await saveDaemonConfig(
-			{
-				...defaultDaemonConfig(),
+	// The user has already answered the avatar question, so the first-run
+	// dialog stays shut over the specs that are not about it.
+	await saveDaemonConfig(
+		{
+			...defaultDaemonConfig(),
+			avatar: { kind: "initial" },
+			...(claudeInstanceId !== undefined && {
 				instances: [
 					{
 						id: claudeInstanceId,
@@ -267,9 +270,10 @@ export async function createReplayHarness(
 						driver: "claude",
 					},
 				],
-			},
-			configDir,
-		);
+			}),
+		},
+		configDir,
+	);
 	if (claudeReplayer) {
 		// Capability discovery would otherwise spawn the real Claude CLI.
 		__setProbeOverrideForTesting(async () => ({

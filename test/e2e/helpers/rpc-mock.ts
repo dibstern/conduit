@@ -4,6 +4,7 @@ import { Effect, Exit, Schema, Scope, Stream } from "effect";
 import { DEFAULT_CATEGORY_SET } from "../../../src/lib/contracts/category-set.js";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/message-surfacing.js";
+import type { Avatar } from "../../../src/lib/contracts/user-avatar.js";
 import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import {
 	type Alert,
@@ -122,6 +123,11 @@ export class RpcMockControl {
 	familyRows: readonly unknown[] | null = null;
 	private familySequence = 0;
 	catalog: MockCatalog = {};
+	avatar: Avatar = {
+		choice: { kind: "initial" },
+		name: "David",
+		macPicture: null,
+	};
 	private shellSequence = 0;
 	private readonly projectSettings = new Map<string, ProjectSetting>();
 	private projectSettingsSequence = 0;
@@ -554,7 +560,15 @@ const pendingShellRows = new WeakMap<Page, readonly unknown[]>();
 const pendingFamilyRows = new WeakMap<Page, readonly unknown[]>();
 const pendingProjectSlugs = new WeakMap<Page, string>();
 const pendingCatalogs = new WeakMap<Page, MockCatalog>();
+const pendingAvatars = new WeakMap<Page, Avatar>();
 const pendingProjectSettings = new WeakMap<Page, ProjectSetting[]>();
+
+/** Seed before navigation, or change what a reconnect reads from the daemon. */
+export function setMockAvatar(page: Page, avatar: Avatar): void {
+	pendingAvatars.set(page, avatar);
+	const control = controls.get(page);
+	if (control) control.avatar = avatar;
+}
 
 export function setMockRpcProjectSlug(page: Page, slug: string): void {
 	const control = controls.get(page);
@@ -868,6 +882,11 @@ export async function mockWsRpc(
 			login: { state: "idle" },
 		}),
 		GetStatus: () => MOCK_SERVER_STATUS,
+		GetAvatar: () => control.avatar,
+		SetAvatar: ({ choice }) => {
+			control.avatar = { ...control.avatar, choice };
+			return control.avatar;
+		},
 		GetDefaultGroupingMode: () => ({ mode: "repository" }),
 		GetWorktreeCleanupSetting: () => ({
 			worktreeCleanup: DEFAULT_WORKTREE_CLEANUP,
@@ -885,6 +904,8 @@ export async function mockWsRpc(
 	};
 	control.projectSlug = pendingProjectSlugs.get(page) ?? control.projectSlug;
 	control.catalog = pendingCatalogs.get(page) ?? control.catalog;
+	control.avatar = pendingAvatars.get(page) ?? control.avatar;
+	pendingAvatars.delete(page);
 	subscribeMockDetail(page, (sessionId, envelope) => {
 		if (control.hasStream("SubscribeSessionDetail", sessionId))
 			control.sendChunk("SubscribeSessionDetail", [envelope], sessionId);

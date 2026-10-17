@@ -11,6 +11,7 @@
 	import UsageSettingsTab from "./UsageSettingsTab.svelte";
 	import NotificationsSettingsTab from "./NotificationsSettingsTab.svelte";
 	import AppearanceSettingsTab from "./AppearanceSettingsTab.svelte";
+	import AvatarSettings from "./AvatarSettings.svelte";
 	import ComposerSettingsTab from "./ComposerSettingsTab.svelte";
 	import SessionsSettingsTab from "./SessionsSettingsTab.svelte";
 	import VisibilitySettingsTab from "./VisibilitySettingsTab.svelte";
@@ -107,6 +108,7 @@
 			<!-- Manual activation on phone keeps arrow keys from pushing a page. -->
 			{#if !listHidden}
 				<div class="shrink-0 overflow-y-auto {sessionViewState.compact ? 'flex-1 px-[14px] pt-[4px] pb-[20px]' : 'w-[172px] px-[8px] py-[10px] border-r border-settings-separator bg-settings-rail'}">
+					{#if sessionViewState.compact}<AvatarSettings root />{/if}
 					<Tabs
 						value={sessionViewState.compact ? "" : shown}
 						variant="sections"
@@ -142,6 +144,7 @@
 					{/if}
 					<div class="flex flex-col">
 					{#if shown === "general"}
+						<AvatarSettings />
 						<AppearanceSettingsTab />
 						<ComposerSettingsTab />
 						<NotificationsSettingsTab />

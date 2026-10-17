@@ -105,6 +105,7 @@ import {
 	SessionDirectory,
 } from "../Services/session-directory.js";
 import { WorktreeCleanupQueueLive } from "../Services/worktree-cleanup-service.js";
+import { AccountPictureLive } from "./account-picture-layer.js";
 import { AutoSettleLive } from "./auto-settle-layer.js";
 import { CategorySetLive } from "./category-set-layer.js";
 import {
@@ -144,6 +145,7 @@ import {
 import { EnsureCertsLive, TlsCertLive, TlsCertTag } from "./tls-cert-layer.js";
 import { makeDaemonTracingLive } from "./tracing.js";
 import { UsageLive } from "./usage-layer.js";
+import { UserAvatarLive } from "./user-avatar-layer.js";
 import {
 	VersionCheckerLive,
 	VersionCheckerTag,
@@ -800,9 +802,13 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const withConfigPersistence = ConfigPersistenceLive.pipe(
 		Layer.provideMerge(effectSnapshotLayer),
 	);
+	const withAvatar = UserAvatarLive.pipe(
+		Layer.provide(AccountPictureLive),
+		Layer.provideMerge(withConfigPersistence),
+	);
 	const withManagedOpenCodeServers = ManagedOpenCodeLifecycleLive(
 		configDir,
-	).pipe(Layer.provideMerge(withConfigPersistence));
+	).pipe(Layer.provideMerge(withAvatar));
 
 	const withOpenCodeInstances = OpenCodeInstancesLive.pipe(
 		Layer.provideMerge(withManagedOpenCodeServers),

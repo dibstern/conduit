@@ -43,6 +43,8 @@
 	} from "../../stores/ws-notifications.js";
 	import { onProjectAttached } from "../../stores/ws-listeners.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
+	import { avatarState, loadAvatar } from "../../stores/avatar.svelte.js";
+	import AvatarFirstRun from "../overlays/AvatarFirstRun.svelte";
 	import { attachedProjectState, getCurrentRoute, getCurrentSlug, getCurrentSearchParams, routerState } from "../../stores/router.svelte.js";
 	import { clearMessages, draftSendIn } from "../../stores/chat.svelte.js";
 	import { terminalState, destroyAll, viewPtys } from "../../stores/terminal.svelte.js";
@@ -463,6 +465,9 @@
 	$effect(() => {
 		if (connected) { void fetchCurrentVersion(); void loadMessageSurfacing(); }
 	});
+	$effect(() => {
+		if (connected) untrack(() => { void loadAvatar(); });
+	});
 
 	// iOS fires pagehide every time a standalone PWA is backgrounded, not only
 	// on unload, and `persisted` is how the two are told apart. Disposing on a
@@ -580,6 +585,8 @@
 		return () => window.removeEventListener("debug:toggle", onDebugToggle);
 	});
 </script>
+
+<AvatarFirstRun open={connected && avatarState.loaded && avatarState.current.choice === null} />
 
 <div id="layout" class={layoutClass}>
 	<!--

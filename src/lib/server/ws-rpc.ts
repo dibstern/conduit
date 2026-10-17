@@ -236,6 +236,8 @@ export type DaemonRpcName =
 	| "UpdateInstance"
 	| "SetDefault"
 	| "GetAutoSettleSetting"
+	| "GetAvatar"
+	| "SetAvatar"
 	| "SetAutoSettleSetting"
 	| "GetWorktreeCleanupSetting"
 	| "SetWorktreeCleanupSetting"

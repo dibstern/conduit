@@ -327,51 +327,51 @@ export class ProcessHarness {
 			chmodSync(executable, 0o755);
 			if (realOpenCode)
 				symlinkSync(realOpenCode, join(this.root, "bin", "opencode-real"));
-			const config: DaemonConfig = {
-				pid: 0,
-				port: 0,
-				pinHash: null,
-				tls: false,
-				debug: false,
-				keepAwake: false,
-				projects: foregroundCli
-					? [
-							{
-								path: this.projectDir,
-								folders: [this.projectDir],
-								slug: "process-test",
-								addedAt: Date.now(),
-							},
-						]
-					: [],
-				...(managedOpenCode
-					? {
-							instances: [
-								{
-									id: managedOpenCodeId,
-									name: "Managed test",
-									port: 0,
-									managed: true,
-									driver: "opencode",
-									env: {
-										OPENCODE_SERVER_USERNAME: "test-user",
-										CONDUIT_TEST_OPENCODE_IGNORE_SIGTERM: String(
-											ignoreOpenCodeSigterm,
-										),
-										CONDUIT_TEST_OPENCODE_PAUSE_SUPERVISOR: String(
-											pauseOpenCodeSupervisor,
-										),
-									},
-								},
-							],
-						}
-					: {}),
-			};
-			writeFileSync(
-				join(this.configDir, "daemon.json"),
-				JSON.stringify(config),
-			);
 		}
+		// The user has already answered the avatar question, so the first-run
+		// dialog stays shut over the specs that are not about it.
+		const config: DaemonConfig = {
+			avatar: { kind: "initial" },
+			pid: 0,
+			port: 0,
+			pinHash: null,
+			tls: false,
+			debug: false,
+			keepAwake: false,
+			projects: foregroundCli
+				? [
+						{
+							path: this.projectDir,
+							folders: [this.projectDir],
+							slug: "process-test",
+							addedAt: Date.now(),
+						},
+					]
+				: [],
+			...(managedOpenCode
+				? {
+						instances: [
+							{
+								id: managedOpenCodeId,
+								name: "Managed test",
+								port: 0,
+								managed: true,
+								driver: "opencode",
+								env: {
+									OPENCODE_SERVER_USERNAME: "test-user",
+									CONDUIT_TEST_OPENCODE_IGNORE_SIGTERM: String(
+										ignoreOpenCodeSigterm,
+									),
+									CONDUIT_TEST_OPENCODE_PAUSE_SUPERVISOR: String(
+										pauseOpenCodeSupervisor,
+									),
+								},
+							},
+						],
+					}
+				: {}),
+		};
+		writeFileSync(join(this.configDir, "daemon.json"), JSON.stringify(config));
 		writeFileSync(
 			join(this.root, "runner-identity-fixture.mjs"),
 			`import childProcess from "node:child_process";
