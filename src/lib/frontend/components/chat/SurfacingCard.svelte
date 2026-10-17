@@ -9,12 +9,13 @@
 		cardHead?: Snippet<[SurfacePin]>;
 		cardFoot?: Snippet<[SurfacePin]>;
 		why?: Snippet<[SurfacePin]>;
-		belowStrip?: Snippet<[SurfaceTurn]>;
+		/** Report the citation's part UUID while its footnote is hovered or focused. */
+		belowStrip?: Snippet<[SurfaceTurn, (partId: string | null) => void]>;
 	}
 </script>
 
 <script lang="ts">
-	import { SURFACE_LABELS, SURFACE_LEVELS, type SurfaceLevel } from "../../utils/surface-turn.js";
+	import { surfacePinRows, SURFACE_LABELS, SURFACE_LEVELS, type SurfaceLevel, type SurfacePinGroup } from "../../utils/surface-turn.js";
 	import Button from "../ui/Button.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
@@ -40,6 +41,12 @@
 		onhover: (x: number | null) => void;
 	} = $props();
 	let scrubEl: HTMLDivElement;
+	let laneWidth = $state(0);
+	let viewportWidth = $state(1024);
+	let citedPart = $state<string | null>(null);
+	const groups = $derived(surfacePinRows(view, laneWidth, viewportWidth < 768));
+	const currentGroup = $derived(groups.find((group) => group.members.some((pin) => pin.part.uuid === view.card?.part.uuid)));
+	let lastGroupTap: { source: string; picked: string } | null = null;
 	let menuOpen = $state(false);
 	let saving = $state(false);
 	let error = $state("");
@@ -55,6 +62,15 @@
 	function xAt(clientX: number): number {
 		const box = scrubEl.getBoundingClientRect();
 		return Math.max(0, Math.min(100, (clientX - box.left) / box.width * 100));
+	}
+	function pickGroup(group: SurfacePinGroup) {
+		if (group.members.length === 1) { lastGroupTap = null; onpick(group.leader); return; }
+		const previous = lastGroupTap;
+		const index = previous?.source === group.leader.part.uuid && previous.picked === view.card?.part.uuid
+			? group.members.findIndex((pin) => pin.part.uuid === previous.picked) : -1;
+		const target = index >= 0 ? group.members[(index + 1) % group.members.length] ?? group.leader : group.leader;
+		lastGroupTap = { source: group.leader.part.uuid, picked: target.part.uuid };
+		onpick(target);
 	}
 	function pointerDown(event: PointerEvent) {
 		if (event.button !== 0 || !event.isPrimary) return;
@@ -72,6 +88,7 @@
 		}
 		if (Math.abs(event.clientX - drag.x) >= 4 && Math.abs(event.clientX - drag.x) > Math.abs(event.clientY - drag.y)) drag.moved = true;
 		if (drag.moved) {
+			lastGroupTap = null;
 			const nearest = view.nearestPin(xAt(event.clientX));
 			if (nearest) onpick(nearest);
 		}
@@ -81,7 +98,10 @@
 		if (drag.moved) {
 			const nearest = view.nearestPin(xAt(event.clientX));
 			if (nearest) onpick(nearest);
-		} else if (drag.pin) onpick(drag.pin);
+		} else if (drag.pin) {
+			const group = groups.find((item) => item.leader.part.uuid === drag?.pin?.part.uuid);
+			if (group) pickGroup(group);
+		}
 		else {
 			onjump(xAt(event.clientX));
 		}
@@ -97,6 +117,8 @@
 		finally { saving = false; }
 	}
 </script>
+
+<svelte:window bind:innerWidth={viewportWidth} />
 
 {#snippet stepButton(label: string, glyph: string, onclick: () => void, disabled = false)}
 	<Button variant="ghost" size="content" tone="muted" touchTarget {disabled} class="size-[26px] max-md:size-[30px] rounded-full text-[14px]" ariaLabel={label} {onclick}>{glyph}</Button>
@@ -127,21 +149,24 @@
 {/if}
 
 <div class="surfacing-scrub select-none" data-testid="surfacing-scrub" data-surfacing-region="strip-overlay" bind:this={scrubEl} role="slider" tabindex="0" aria-label="Surfaced messages" aria-valuemin={0} aria-valuemax={Math.max(0, view.pins.length - 1)} aria-valuenow={Math.max(0, view.cardIndex)} aria-valuetext={view.sliderText} onkeydown={oncommand} onpointerdown={pointerDown} onpointermove={pointerMove} onpointerup={pointerUp} onpointercancel={() => { drag = null; suppressClick = true; }} onpointerleave={() => onhover(null)}>
-	<div class="pin-lane" class:empty={view.pins.length === 0} data-testid="surfacing-pins">
+	<div class="pin-lane" class:empty={view.pins.length === 0} data-testid="surfacing-pins" bind:clientWidth={laneWidth} data-layout-ready={laneWidth > 0} data-lane-width={laneWidth}>
 		{#if regions.stripOverlay}
 			{@render regions.stripOverlay(view, onpick)}
 		{:else}
-		{#each view.pins as pin (pin.part.uuid)}
-			<Button variant="ghost" size="content" hoverFill="none" class="absolute bottom-0 -translate-x-1/2 h-[44px] min-w-[32px] max-md:min-w-[44px] rounded-full" style="left:{pin.x}%" data-x={pin.x} data-surface-part={pin.part.uuid} data-testid="surfacing-pin-{pin.number ?? `pending-${pin.part.uuid}`}" ariaLabel={pin.name} aria-pressed={view.card?.part.uuid === pin.part.uuid} onclick={(event) => { if (event.detail === 0 || !suppressClick) onpick(pin); }}>
-				<span class="pin-chip" class:current={view.card?.part.uuid === pin.part.uuid} class:open-ask={view.openAsk?.uuid === pin.part.uuid} class:pending={pin.pending} class:below={view.belowLevel && view.card === pin} class:seen={pin.read === true} style:--surface-colour={pin.colour}><span class="glyph">{pin.glyph}</span>{pin.number ?? ""}{#if pin.read === false}<i class="unread-dot"></i>{/if}</span>
+		{#each groups as group (group.leader.part.uuid)}
+			{@const pin = group.members.find((member) => member.part.uuid === view.card?.part.uuid) ?? group.leader}
+			{@const current = view.card?.part.uuid === pin.part.uuid}
+			{@const cited = group.members.some((member) => member.part.uuid === citedPart)}
+			<Button variant="ghost" size="content" hoverFill="none" class="absolute h-[32px] rounded-full {group.row ? 'bottom-[27px] max-md:bottom-[43px]' : 'bottom-[3px] max-md:bottom-[5px]'}" style="left:{group.left}px;width:{group.width}px;--pin-tick:{group.tick}px" data-x={group.x} data-surface-part={group.leader.part.uuid} data-testid={group.members.length > 1 ? "surfacing-group" : `surfacing-pin-${pin.number ?? `pending-${pin.part.uuid}`}`} data-row={group.row} data-group-members={group.members.map((member) => member.number ?? "pending").join(",")} data-group-leader={group.leader.number} data-cited={cited} ariaLabel={group.members.length > 1 ? `Group of ${group.members.length}, led by #${group.leader.number} ${group.leader.label}${current ? `; showing ${pin.name}` : ""}` : pin.name} aria-pressed={current} onclick={(event) => { if (event.detail === 0 || !suppressClick) pickGroup(group); }}>
+				<span class="pin-chip" class:upper={group.row === 1} class:current class:cited class:open-ask={view.openAsk?.uuid === pin.part.uuid} class:pending={pin.pending} class:below={view.belowLevel && view.card === pin} class:seen={pin.read === true} style:--surface-colour={pin.colour} data-number={pin.number} data-category={pin.category}><span class="glyph">{pin.glyph}</span>{pin.number ?? ""}{#if group.members.length > 1}<small>+{group.members.length - 1}</small>{/if}{#if pin.read === false}<i class="unread-dot"></i>{/if}</span>
 			</Button>
 		{/each}
 		{/if}
-		{#if view.card}<i class="card-caret" style:left="clamp(14px, {view.card.x}%, calc(100% - 14px))"></i>{/if}
+		{#if view.card}<i class="card-caret" style:left="clamp(14px, {currentGroup?.x ?? view.card.x}%, calc(100% - 14px))"></i>{/if}
 	</div>
 	<div class="surface-strip">
 		{@render strip()}
-		{#if view.card || live}<i class="surface-thumb" style:left="{view.card?.x ?? 100}%"></i>{/if}
+		{#if view.card || live}<i class="surface-thumb" style:left="{currentGroup?.x ?? view.card?.x ?? 100}%"></i>{/if}
 	</div>
 </div>
 
@@ -159,7 +184,7 @@
 	</Menu>
 	{#if live && !view.following}<Button variant="ghost-accent" size="content" hoverFill="none" touchTarget class="font-mono" ariaLabel="Follow latest" onclick={onfollow}>now ⇥</Button>{:else}<span class:live-end={live}>{endTime}{live ? " now" : ""}</span>{/if}
 </div>
-<div data-surfacing-region="below-strip">{@render regions.belowStrip?.(view)}</div>
+<div data-surfacing-region="below-strip">{@render regions.belowStrip?.(view, (partId) => { citedPart = partId; })}</div>
 
 <style>
 	.surfacing-msg-card { margin-top:9px; padding:10px 12px 8px; border-radius:12px; background:var(--color-bg); outline:none; }
@@ -174,13 +199,17 @@
 	.grow { flex:1; }
 	.surfacing-scrub { position:relative; touch-action:pan-y; outline:none; }
 	.surfacing-scrub:focus-visible { outline:1px solid var(--color-accent); border-radius:6px; }
-	.pin-lane { position:relative; height:64px; }
+	/* Ticks paint behind every pill, so an upper row's long tick never strikes through a lower pill. */
+	.pin-lane { position:relative; height:64px; isolation:isolate; }
 	.pin-lane.empty { height:8px; }
-	.pin-chip { position:relative; display:inline-flex; align-items:center; gap:3px; height:20px; padding:0 6px; border-radius:999px; background:var(--color-chip); font:500 11px var(--font-mono); color:var(--color-text); white-space:nowrap; }
-	.pin-chip::after { content:""; position:absolute; top:100%; left:50%; width:1px; height:17px; background:var(--color-border); }
+	.pin-chip { position:relative; display:inline-flex; align-items:center; justify-content:center; gap:3px; flex:none; min-width:100%; box-sizing:border-box; height:20px; padding:0 6px; border-radius:999px; background:var(--color-chip); font:500 11px var(--font-mono); color:var(--color-text); white-space:nowrap; }
+	.pin-chip::after { content:""; position:absolute; top:100%; left:var(--pin-tick,50%); width:1px; height:13px; background:var(--color-border); pointer-events:none; z-index:-1; }
+	.pin-chip.upper::after { height:37px; }
+	.pin-chip small { margin-left:1px; font-size:10px; color:var(--color-text-muted); }
 	.glyph { color:var(--surface-colour); }
 	.current { background:var(--surface-colour); color:var(--color-bg); }
-	.current .glyph { color:inherit; }
+	.current .glyph,.current small { color:inherit; }
+	.cited { translate:0 -4px; box-shadow:0 0 0 1.5px var(--color-accent),0 4px 10px rgba(var(--shadow-rgb),.2); color:var(--color-text); }
 	.seen:not(.current) { background:color-mix(in srgb,var(--color-chip) 55%,transparent); color:var(--color-text-muted); }
 	.seen:not(.current) .glyph { opacity:.7; }
 	.open-ask:not(.current) { background:color-mix(in srgb,var(--color-status-ask) 14%,var(--color-turn-bg)); box-shadow:inset 0 0 0 1.5px var(--color-status-ask); color:var(--color-status-ask); }
@@ -206,5 +235,6 @@
 		.axis-notes { display:flex; flex-wrap:wrap; gap:6px 8px; flex-basis:100%; }
 		.axis-notes:empty { display:none; }
 		.pin-chip { font-size:12px; height:24px; padding:0 7px; }
+		.pin-chip.upper::after { height:51px; }
 	}
 </style>

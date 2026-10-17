@@ -22,6 +22,7 @@ type FixtureKind =
 	| "short"
 	| "hand-back"
 	| "older"
+	| "dense"
 	| "empty";
 const SESSION = "sess-surfacing";
 const START = PINNED_CLOCK_MS - 90_000;
@@ -90,21 +91,33 @@ function tool(id: string, at: number, name = "Read"): Part {
 
 function history(kind: FixtureKind): History[] {
 	const ordinals =
-		kind === "short"
-			? [1, 2]
-			: kind === "empty"
-				? [3, 6, 7]
-				: [1, 2, 3, 4, 5, 6, 7, 8];
+		kind === "dense"
+			? Array.from({ length: 56 }, (_, index) => index + 1)
+			: kind === "short"
+				? [1, 2]
+				: kind === "empty"
+					? [3, 6, 7]
+					: [1, 2, 3, 4, 5, 6, 7, 8];
 	const parts: Part[] = [];
 	for (const ordinal of ordinals) {
-		const at = START + ordinal * 8_000;
+		const at = START + ordinal * (kind === "dense" ? 1_300 : 8_000);
+		const category =
+			ordinal === 24
+				? "ask"
+				: ordinal === 8 || ordinal === 40
+					? "blocked"
+					: "finding";
 		parts.push({
 			id: `surfacing-part-${ordinal}`,
 			type: "text",
-			text: texts[ordinal - 1] ?? "",
+			text:
+				kind === "dense"
+					? `Dense message #${ordinal}.`
+					: (texts[ordinal - 1] ?? ""),
 			time: { start: at, end: at + 1_000 },
 			surfacingOrdinal: ordinal,
-			surfacingProbabilities: verdicts[ordinal - 1] ?? null,
+			surfacingProbabilities:
+				kind === "dense" ? { [category]: 1 } : (verdicts[ordinal - 1] ?? null),
 			surfacingSetVersion: 1,
 			surfacingModel: "jev-test",
 		});
@@ -170,6 +183,18 @@ function card(page: Page): Locator {
 function pin(page: Page, ordinal: string): Locator {
 	return page.getByTestId(`surfacing-pin-${ordinal}`);
 }
+async function pinNumbers(scope: Locator): Promise<string[]> {
+	return scope
+		.locator("[data-group-members]")
+		.evaluateAll((elements) =>
+			elements
+				.flatMap(
+					(element) =>
+						element.getAttribute("data-group-members")?.split(",") ?? [],
+				)
+				.sort((a, b) => Number(a) - Number(b)),
+		);
+}
 function control(page: Page, name: string): Locator {
 	return panel(page).getByRole("button", { name, exact: true });
 }
@@ -213,7 +238,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 	{
 		name: "open projected surfacing fixture",
 		match:
-			/^the surfacing session has an? (live|settled|short|hand-back|older|empty) turn$/,
+			/^the surfacing session has an? (live|settled|short|hand-back|older|empty|dense) turn$/,
 		run: async ({ world, match }) => {
 			const kind = match[1] as FixtureKind;
 			publish(world.page, history(kind));
@@ -231,6 +256,171 @@ export const surfacingCardHandlers: StepHandler[] = [
 			await expect(world.page.locator("#messages")).toContainText(
 				"Review the session routing.",
 			);
+		},
+	},
+	{
+		name: "assert dense pin rows and group geometry",
+		match:
+			/^dense surfaced messages occupy two non-overlapping rows with labelled groups$/,
+		run: async ({ world }) => {
+			const lane = panel(world.page).getByTestId("surfacing-pins");
+			await expect(lane).toHaveAttribute("data-layout-ready", "true");
+			await expect(lane.getByTestId("surfacing-group").first()).toBeVisible();
+			const chips = await lane.locator("button").evaluateAll((buttons) =>
+				buttons.map((button) => {
+					const chip = button.querySelector(".pin-chip");
+					if (!chip) throw new Error("Missing chip");
+					const box = chip.getBoundingClientRect();
+					return {
+						row: button.getAttribute("data-row"),
+						left: box.left,
+						right: box.right,
+						top: box.top,
+						name: button.getAttribute("aria-label"),
+						members: button.getAttribute("data-group-members"),
+					};
+				}),
+			);
+			expect(new Set(chips.map(({ row }) => row))).toEqual(new Set(["0", "1"]));
+			const box = await lane.boundingBox();
+			if (!box) throw new Error("Missing lane");
+			for (const row of ["0", "1"]) {
+				const ordered = chips
+					.filter((chip) => chip.row === row)
+					.sort((a, b) => a.left - b.left);
+				for (const [index, chip] of ordered.entries()) {
+					expect(chip.left).toBeGreaterThanOrEqual(box.x - 1);
+					expect(chip.right).toBeLessThanOrEqual(box.x + box.width + 1);
+					if (index > 0)
+						expect(
+							chip.left - (ordered[index - 1]?.right ?? 0),
+						).toBeGreaterThanOrEqual(9);
+					if ((chip.members?.split(",").length ?? 0) > 1)
+						expect(chip.name).toMatch(/^Group of \d+, led by #\d+ \w+/);
+				}
+			}
+			const first = chips.find(({ row }) => row === "0"),
+				upper = chips.find(({ row }) => row === "1");
+			expect((first?.top ?? 0) - (upper?.top ?? 0)).toBe(
+				(world.page.viewportSize()?.width ?? 1024) < 768 ? 38 : 24,
+			);
+			const members = chips.flatMap(
+				({ members }) => members?.split(",").map(Number) ?? [],
+			);
+			expect(members.sort((a, b) => a - b)).toEqual(
+				Array.from({ length: 56 }, (_, index) => index + 1),
+			);
+		},
+	},
+	{
+		name: "assert open Ask and Blocked group leaders",
+		match:
+			/^the open Ask stays separate and a Blocked message leads its group$/,
+		run: async ({ world }) => {
+			await expect(pin(world.page, "24")).toHaveAttribute(
+				"data-group-members",
+				"24",
+			);
+			await expect(pin(world.page, "24")).toHaveAccessibleName(/^#24 Ask/);
+			const group = panel(world.page)
+				.getByRole("button", { name: /^Group of \d+, led by #(8|40) Blocked/ })
+				.first();
+			await expect(group).toHaveAccessibleName(
+				/^Group of \d+, led by #(8|40) Blocked/,
+			);
+		},
+	},
+	{
+		name: "tap and cycle the group's members",
+		match:
+			/^tapping a group cycles through its own members from the leader and wraps$/,
+		run: async ({ world }) => {
+			const group = panel(world.page).getByTestId("surfacing-group").first();
+			const members =
+				(await group.getAttribute("data-group-members"))?.split(",") ?? [];
+			expect(members.length).toBeGreaterThan(1);
+			const leader = await group.getAttribute("data-group-leader");
+			const leaderIndex = members.indexOf(leader ?? "");
+			expect(leaderIndex).toBeGreaterThanOrEqual(0);
+			for (let offset = 0; offset <= members.length; offset++) {
+				const ordinal = members[(leaderIndex + offset) % members.length];
+				await group.click();
+				await expect(card(world.page)).toHaveAttribute(
+					"data-ordinal",
+					ordinal ?? "",
+				);
+				await expect(group).toHaveAttribute("aria-pressed", "true");
+				await expect(group.locator(".pin-chip.current")).toHaveAttribute(
+					"data-number",
+					ordinal ?? "",
+				);
+			}
+		},
+	},
+	{
+		name: "scrub and step every grouped member",
+		match:
+			/^scrubbing and stepping reach every member and fill its group pill$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const group = panel(page).getByTestId("surfacing-group").first();
+			const members =
+				(await group.getAttribute("data-group-members"))?.split(",") ?? [];
+			expect(members.length).toBeGreaterThan(1);
+			const lane = panel(page).getByTestId("surfacing-pins");
+			const box = await lane.boundingBox();
+			if (!box) throw new Error("Missing lane");
+			const strip = panel(page).locator("[data-step-id]").first();
+			const stripBox = await strip.boundingBox();
+			if (!stripBox) throw new Error("Missing strip");
+			for (const ordinal of members) {
+				const step = panel(page).locator(
+					`[data-step-id="surfacing-agent/surfacing-part-${ordinal}"]`,
+				);
+				const target = await step.boundingBox();
+				if (!target) throw new Error(`Missing step #${ordinal}`);
+				await page.mouse.move(
+					target.x + target.width / 2 > box.x + box.width / 2
+						? box.x + 1
+						: box.x + box.width - 1,
+					stripBox.y + stripBox.height / 2,
+				);
+				await page.mouse.down();
+				await page.mouse.move(
+					target.x + target.width / 2,
+					stripBox.y + stripBox.height / 2,
+					{ steps: 4 },
+				);
+				await page.mouse.up();
+				await expect(card(page)).toHaveAttribute("data-ordinal", ordinal);
+				await expect(group).toHaveAttribute("aria-pressed", "true");
+				await expect(group.locator(".pin-chip.current")).toHaveAttribute(
+					"data-number",
+					ordinal,
+				);
+			}
+			// Park the pointer so the strip's hover tooltip does not linger.
+			await page.mouse.move(0, 0);
+			await panel(page).getByTestId("surfacing-scrub").focus();
+			await page.keyboard.press("Home");
+			for (let ordinal = 1; ordinal <= 56; ordinal++) {
+				await expect(card(page)).toHaveAttribute(
+					"data-ordinal",
+					String(ordinal),
+				);
+				if (ordinal < 56) await page.keyboard.press("ArrowRight");
+			}
+		},
+	},
+	{
+		name: "resize the pin lane into overflow",
+		match: /^the pin lane narrows to (\d+) pixels$/,
+		run: async ({ world, match }) => {
+			const lane = panel(world.page).getByTestId("surfacing-pins");
+			await lane.evaluate((element, width) => {
+				element.style.width = `${width}px`;
+			}, Number(match[1]));
+			await expect(lane).toHaveAttribute("data-lane-width", match[1] ?? "");
 		},
 	},
 	{
@@ -277,10 +467,19 @@ export const surfacingCardHandlers: StepHandler[] = [
 				const step = panel(page).locator(`[data-step-id="${partId}"]`);
 				const stepBox = await step.boundingBox();
 				if (!stepBox) throw new Error(`Missing strip step for #${ordinal}`);
-				const pinBox = await button.boundingBox();
-				if (!pinBox) throw new Error(`Missing pin bounds for #${ordinal}`);
+				const chip = await button.locator(".pin-chip").evaluate((node) => ({
+					left: node.getBoundingClientRect().x,
+					right: node.getBoundingClientRect().right,
+					tick: Number.parseFloat(getComputedStyle(node, "::after").left),
+				}));
+				// The stem stays 9px inside a pill pushed off the lane edge, as in the spec.
+				const stepX = Math.min(
+					Math.max(stepBox.x + stepBox.width / 2, chip.left + 9),
+					chip.right - 9,
+				);
 				expect(
-					Math.abs(pinBox.x + pinBox.width / 2 - stepBox.x - stepBox.width / 2),
+					Math.abs(chip.left + chip.tick - stepX),
+					`stem of #${ordinal}`,
 				).toBeLessThanOrEqual(1.5);
 			}
 		},
@@ -364,21 +563,9 @@ export const surfacingCardHandlers: StepHandler[] = [
 		match:
 			/^the surfacing pins are (\d+(?:,\d+)*) and level counts are Key (\d+), Balanced (\d+), All (\d+)$/,
 		run: async ({ world, match }) => {
-			await expect(
-				panel(world.page).locator('[data-testid^="surfacing-pin-"]'),
-			).toHaveCount((match[1] ?? "").split(",").length);
-			const shown = await panel(world.page)
-				.locator('[data-testid^="surfacing-pin-"]')
-				.evaluateAll((elements) =>
-					elements
-						.map((element) =>
-							element
-								.getAttribute("data-testid")
-								?.replace("surfacing-pin-", ""),
-						)
-						.sort((a, b) => Number(a) - Number(b)),
-				);
-			expect(shown.join(",")).toBe(match[1]);
+			await expect
+				.poll(() => pinNumbers(panel(world.page)))
+				.toEqual((match[1] ?? "").split(","));
 			for (const [label, count] of [
 				["Key", match[2]],
 				["Balanced", match[3]],
@@ -664,7 +851,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			await expect(card(world.page)).toHaveCount(0);
 			await expect(
-				panel(world.page).locator('[data-testid^="surfacing-pin-"]'),
+				panel(world.page).locator("[data-group-members]"),
 			).toHaveCount(0);
 			await expect(panel(world.page)).toContainText(
 				`Final only · ${match[1]} hidden`,
@@ -704,16 +891,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 				[1, ["5", "8"]],
 			] as const) {
 				const block = panels.nth(index);
-				const actual = await block
-					.locator('[data-testid^="surfacing-pin-"]')
-					.evaluateAll((elements) =>
-						elements.map((element) =>
-							element
-								.getAttribute("data-testid")
-								?.replace("surfacing-pin-", ""),
-						),
-					);
-				expect(actual).toEqual(expected);
+				await expect.poll(() => pinNumbers(block)).toEqual(expected);
 				for (const ordinal of expected)
 					await expect(
 						block.locator(
