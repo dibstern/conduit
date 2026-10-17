@@ -231,6 +231,8 @@ function baseProjects() {
 // The names deliberately differ from driver names: support is a wire fact,
 // not a frontend assumption about a provider. Both built-in drivers support
 // multi-folder sessions today; the unsupported state models a future adapter.
+// Each is its driver's default account, as the daemon reports: picking a
+// harness selects that driver's default.
 const capabilityInstances = [
 	{
 		id: "claude",
@@ -241,6 +243,7 @@ const capabilityInstances = [
 		status: "healthy",
 		restartCount: 0,
 		createdAt: 0,
+		isDefault: true,
 		capabilities: { supportsMultiFolder: true, supportsWorktree: true },
 	},
 	{
@@ -252,6 +255,7 @@ const capabilityInstances = [
 		status: "healthy",
 		restartCount: 0,
 		createdAt: 0,
+		isDefault: true,
 		capabilities: { supportsMultiFolder: false, supportsWorktree: false },
 	},
 ];
@@ -319,6 +323,39 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 		baseURL,
 		"/new?project=myapp",
 	);
+	// A draft sends only once it holds a model pick: Claude's default.
+	control.rpc.setProjectSetting({
+		_tag: "providerModels",
+		accountId: "claude",
+		providers: [
+			{
+				id: "claude",
+				name: "Claude",
+				configured: true,
+				models: [
+					{ id: "claude-sonnet-4-5", name: "Sonnet 4.5", provider: "claude" },
+				],
+			},
+		],
+	});
+	control.rpc.setProjectSetting({
+		_tag: "harnessDefaults",
+		claude: {
+			status: "ok",
+			pick: {
+				providerId: "claude",
+				modelId: "claude-sonnet-4-5",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+	});
+	control.rpc.setProjectSetting({
+		_tag: "defaultModel",
+		model: "claude-sonnet-4-5",
+		provider: "claude",
+		variant: "",
+	});
 	sendMockDaemonList(page, "SubscribeInstances", {
 		instances: capabilityInstances,
 	});
@@ -381,10 +418,12 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 			.filter((request) => request.tag === "CreateSession"),
 	).toEqual([]);
 
-	// Missing capabilities must not block sending into a multi-folder draft.
+	// An account without capabilities falls back to its driver's, so it
+	// neither blocks a multi-folder draft nor marks worktrees unsupported.
 	sendMockDaemonList(page, "SubscribeInstances", {
-		instances: [],
-		providerCapabilities: {},
+		instances: capabilityInstances.map(
+			({ capabilities: _capabilities, ...instance }) => instance,
+		),
 	});
 	sendMockDaemonList(page, "SubscribeProjects", {
 		projects: baseProjects().map((project) =>
@@ -400,11 +439,8 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 		page.getByRole("button", { name: "Send", exact: true }),
 	).toBeEnabled();
 	await startChip.click();
-	await expect(
-		startMenu.getByRole("menuitem", {
-			name: "New worktree Not supported by This provider",
-		}),
-	).toHaveAttribute("aria-disabled", "true");
+	await expect(startMenu).toContainText("New worktree");
+	await expect(startMenu).not.toContainText("Not supported by");
 	await page.keyboard.press("Escape");
 	await page.screenshot({
 		path: testInfo.outputPath("unknown-provider-start.png"),

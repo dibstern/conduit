@@ -76,7 +76,7 @@ const isHistoryMessage = (value: unknown): value is HistoryMessage =>
 // Recorded fixtures keep the old raw tool state; the wire now tags it (y7eo.6).
 const tagged = (value: unknown): boolean =>
 	typeof value === "object" && value !== null && "_tag" in value;
-const toWire = (message: HistoryMessage): HistoryMessage => ({
+export const toWire = (message: HistoryMessage): HistoryMessage => ({
 	...message,
 	...(message.parts && {
 		parts: message.parts.map((part) => {
