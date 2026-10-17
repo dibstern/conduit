@@ -1,7 +1,11 @@
 import { expect, type Page } from "@playwright/test";
 import { STEER_BLOCKERS } from "../../../src/lib/contracts/stored-event.js";
 import type { StepHandler } from "../runtime.js";
-import { requireRelayControl, requireRpcControl } from "./shared.js";
+import {
+	requireRelayControl,
+	requireRpcControl,
+	setSessionRowStatus,
+} from "./shared.js";
 
 /** The input id the mock gave each queued text, per page. */
 const queuedIds = new WeakMap<Page, Map<string, string>>();
@@ -15,6 +19,79 @@ const sessionIdOf = (page: Page): string => {
 const rows = (page: Page) => page.getByTestId("pending-input-row");
 
 export const pendingInputTrayHandlers: StepHandler[] = [
+	{
+		name: "assert row Run now action",
+		match: /^pending-input row ([0-9]+) offers (a disabled )?Run now$/,
+		run: async ({ world, match }) => {
+			const action = rows(world.page)
+				.nth(Number(match[1]) - 1)
+				.getByRole("button", { name: "Run now", exact: true });
+			await expect(action).toBeVisible();
+			if (match[2]) await expect(action).toBeDisabled();
+			else await expect(action).toBeEnabled();
+		},
+	},
+	{
+		name: "run a queued row now",
+		match: /^I run pending-input row ([0-9]+) now$/,
+		run: async ({ world, match }) => {
+			requireRpcControl(world.page).setStubs({
+				"input.sendNow": () => ({ ok: true }),
+			});
+			await rows(world.page)
+				.nth(Number(match[1]) - 1)
+				.getByRole("button", { name: "Run now", exact: true })
+				.click();
+		},
+	},
+	{
+		name: "assert interrupt and run request",
+		match: /^the relay is asked to interrupt and run (.+)$/,
+		run: async ({ world, match }) => {
+			const inputId = queuedIds.get(world.page)?.get(match[1] ?? "");
+			if (!inputId) throw new Error(`Nothing was queued as ${match[1]}`);
+			await requireRpcControl(world.page).waitForRequest(
+				(request) =>
+					request.tag === "input.sendNow" &&
+					request.payload["sessionId"] === sessionIdOf(world.page) &&
+					request.payload["inputId"] === inputId &&
+					request.payload["interrupt"] === true,
+			);
+		},
+	},
+	{
+		name: "publish interrupted turn and next queued message",
+		match: /^the relay interrupts the turn and starts queued message (.+)$/,
+		run: ({ world, match }) => {
+			const text = match[1] ?? "";
+			const inputId = queuedIds.get(world.page)?.get(text);
+			if (!inputId) throw new Error(`Nothing was queued as ${text}`);
+			const sessionId = sessionIdOf(world.page);
+			const relay = requireRelayControl(world.page);
+			setSessionRowStatus(world.page, sessionId, "idle");
+			relay.sendMessage({
+				type: "user_message",
+				sessionId,
+				messageId: inputId,
+				text,
+			});
+			relay.sendMessage({
+				type: "mock_pending_input_removed",
+				sessionId,
+				inputId,
+			});
+			setSessionRowStatus(world.page, sessionId, "busy");
+		},
+	},
+	{
+		name: "assert next user turn without steering",
+		match: /^the last user turn is (.+) without a Steered label$/,
+		run: async ({ world, match }) => {
+			const message = world.page.locator("#messages .msg-user").last();
+			await expect(message).toContainText(match[1] ?? "");
+			await expect(message.getByTestId("user-message-steered")).toHaveCount(0);
+		},
+	},
 	{
 		name: "queue or steer a pending input",
 		match: /^the mock relay (queues|steers) (.+?)(?: with ([0-9]+) images?)?$/,

@@ -60,7 +60,7 @@ export interface InboxView {
 	readonly provider: string | undefined;
 	/** Queued inputs, oldest first. */
 	readonly queued: readonly InboxInput[];
-	/** Oldest queued command whose interrupt request is still awaiting handoff. */
+	/** Oldest queued input whose interrupt request is still awaiting handoff. */
 	readonly interruptRequested?: InboxInput | undefined;
 	/** An input was handed off as a steer and has not started yet. */
 	readonly steering: boolean;
@@ -97,7 +97,11 @@ export type InboxCommand =
 			readonly request: InputRequest;
 	  }
 	| { readonly _tag: "Cancel"; readonly inputId: string }
-	| { readonly _tag: "SendNow"; readonly inputId: string }
+	| {
+			readonly _tag: "SendNow";
+			readonly inputId: string;
+			readonly interrupt?: boolean;
+	  }
 	| { readonly _tag: "Drain" };
 
 export type InboxEvent =
@@ -160,6 +164,23 @@ function steerBlocker(
 	return undefined;
 }
 
+/** Reserve the next turn before stopping the current one. */
+const interruptForInput = (
+	sessionId: string,
+	input: InboxInput,
+	events: readonly InboxEvent[],
+): InboxDecision => ({
+	_tag: "Accepted",
+	events: [
+		...events,
+		{
+			type: "input.interrupt_requested",
+			data: { sessionId, inputId: input.inputId },
+		},
+	],
+	interrupt: true,
+});
+
 /** Hand `input` off into the running turn, or refuse with the reason. */
 const steer = (
 	sessionId: string,
@@ -170,17 +191,7 @@ const steer = (
 	const reason = steerBlocker(view, input.request);
 	if (reason) return { _tag: "Rejected", reason };
 	if (input.request.text.trimStart().startsWith("/"))
-		return {
-			_tag: "Accepted",
-			events: [
-				...events,
-				{
-					type: "input.interrupt_requested",
-					data: { sessionId, inputId: input.inputId },
-				},
-			],
-			interrupt: true,
-		};
+		return interruptForInput(sessionId, input, events);
 	return {
 		_tag: "Accepted",
 		events: [
@@ -224,7 +235,7 @@ export function decideInbox(
 			if (!idle && command.delivery === "steer")
 				return steer(sessionId, view, { inputId, request }, [admitted]);
 			if (!idle) return { _tag: "Accepted", events: [admitted] };
-			// An interrupt's command precedes the queue and bypasses its Stop pause.
+			// An interrupted input precedes the queue and bypasses its Stop pause.
 			const next =
 				view.interruptRequested && !view.limited
 					? view.interruptRequested
@@ -252,6 +263,11 @@ export function decideInbox(
 				(queued) => queued.inputId === command.inputId,
 			);
 			if (!input) return ALREADY_STARTED;
+			// Like a queued command's Run now, an open prompt must be answered first.
+			if (!idle && command.interrupt)
+				return view.promptOpen
+					? { _tag: "Rejected", reason: "prompt_open" }
+					: interruptForInput(sessionId, input, []);
 			// A busy session takes it as a steer; refused, it keeps its place.
 			if (!idle) return steer(sessionId, view, input, []);
 			// Paused or not, an idle session hands this input off.
@@ -328,9 +344,9 @@ export interface SessionInbox {
 		target: SessionInboxTarget,
 	) => Effect.Effect<SessionInboxOutcome, SessionInboxError>;
 	/** Hand a queued input off now: a steer on a busy session, else the next
-	 *  turn. Commands interrupt first and run next, including after Stop. */
+	 *  turn. With interrupt, stop the running turn and send this input next. */
 	readonly sendNow: (
-		target: SessionInboxTarget,
+		target: SessionInboxTarget & { readonly interrupt?: boolean },
 	) => Effect.Effect<SessionInboxOutcome, SessionInboxError>;
 	/** The provider has declined this input and can no longer deliver it. */
 	readonly steerDeclined: (
@@ -654,36 +670,53 @@ export const SessionInboxLive = Layer.scoped(
 							Effect.catchAllCause((cause) =>
 								Effect.sync(() =>
 									log.warn(
-										`session=${target.sessionId} inbox interrupt failed; command remains queued: ${cause}`,
+										`session=${target.sessionId} inbox interrupt failed; input remains queued: ${cause}`,
 									),
 								),
 							),
 						)
 				: Effect.void;
 
+		// Input ids are unique across sessions. Only coalesce requests while the
+		// original Run now is active; ordinary Stop and steering keep their policy.
+		const runNowInFlight = new Set<string>();
 		const act =
-			(command: "Cancel" | "SendNow") => (target: SessionInboxTarget) =>
-				serialised(target.sessionId)(
-					Effect.gen(function* () {
-						const view = yield* readView(target.sessionId);
-						const decision = decideInbox(target.sessionId, view, {
-							_tag: command,
-							inputId: target.inputId,
-						});
-						yield* commit(target.sessionId, decision, {
-							clientId: target.clientId,
-						});
-						return decision;
-					}),
-				).pipe(
-					// A turn end triggers a drain that needs the released permit.
-					Effect.tap((decision) => interrupt(target, decision)),
-					Effect.map((decision) =>
-						decision._tag === "Rejected"
-							? decision.reason
-							: ("accepted" as const),
-					),
-				);
+			(command: "Cancel" | "SendNow") =>
+			(target: SessionInboxTarget & { readonly interrupt?: boolean }) =>
+				Effect.suspend(() => {
+					const runNow = command === "SendNow" && target.interrupt;
+					if (runNow && runNowInFlight.has(target.inputId))
+						return Effect.succeed("accepted" as const);
+					if (runNow) runNowInFlight.add(target.inputId);
+					return serialised(target.sessionId)(
+						Effect.gen(function* () {
+							const view = yield* readView(target.sessionId);
+							const decision = decideInbox(target.sessionId, view, {
+								_tag: command,
+								inputId: target.inputId,
+								...(runNow ? { interrupt: true } : {}),
+							});
+							yield* commit(target.sessionId, decision, {
+								clientId: target.clientId,
+							});
+							return decision;
+						}),
+					).pipe(
+						// Run now uses the same bounded Stop fence as manual Stop/Send.
+						// Further abort hardening belongs to conduit-test-aoqb.18.
+						Effect.tap((decision) => interrupt(target, decision)),
+						Effect.map((decision) =>
+							decision._tag === "Rejected"
+								? decision.reason
+								: ("accepted" as const),
+						),
+						Effect.ensuring(
+							Effect.sync(() => {
+								if (runNow) runNowInFlight.delete(target.inputId);
+							}),
+						),
+					);
+				});
 
 		const scheduleReset = (sessionId: string, view: InboxView) =>
 			Effect.gen(function* () {

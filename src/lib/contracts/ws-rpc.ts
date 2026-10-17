@@ -2913,7 +2913,8 @@ export class CancelInput extends Schema.TaggedRequest<CancelInput>()(
 	},
 ) {}
 
-/** Hand a queued input off now; Resume calls it on the oldest row. */
+/** Hand a queued input off now; interrupt starts a new turn instead of steering.
+ *  Resume calls it on the oldest row without interrupt. */
 export class SendInputNow extends Schema.TaggedRequest<SendInputNow>()(
 	"input.sendNow",
 	{
@@ -2922,6 +2923,7 @@ export class SendInputNow extends Schema.TaggedRequest<SendInputNow>()(
 		payload: {
 			sessionId: NonEmptyString,
 			inputId: NonEmptyString,
+			interrupt: Schema.optional(Schema.Boolean),
 			originId: Schema.optional(NonEmptyString),
 		},
 	},

@@ -360,7 +360,8 @@ test("stop and run: Run now sends the command ahead of the queued message and dr
 	const command = page
 		.getByTestId("pending-input-row")
 		.filter({ hasText: "/goal clear" });
-	await expect(command.getByTestId("pending-input-steer")).toHaveText(
+	await expect(command.getByTestId("pending-input-steer")).toHaveCount(0);
+	await expect(command.getByTestId("pending-input-run-now")).toHaveText(
 		"Run now",
 	);
 	await command.getByRole("button", { name: "Run now", exact: true }).click();
