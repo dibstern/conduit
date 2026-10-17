@@ -181,7 +181,6 @@ for (const viewport of [
 				.toEqual([
 					{
 						_tag: "RecreateSessionWorktree",
-						projectSlug,
 						sessionId: session.id,
 					},
 				]);
@@ -255,7 +254,7 @@ for (const viewport of [
 						.filter(({ tag }) => tag === recovery.tag)
 						.map(({ payload }) => payload),
 				)
-				.toEqual([{ _tag: recovery.tag, projectSlug, sessionId: session.id }]);
+				.toEqual([{ _tag: recovery.tag, sessionId: session.id }]);
 			await expect(menu).not.toBeVisible();
 			const recreated = recovery.tag === "RecreateSessionWorktree";
 			rpc.upsertShellRow({

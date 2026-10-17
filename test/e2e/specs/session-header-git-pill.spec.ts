@@ -432,6 +432,7 @@ for (const mode of [
 			const other = "/workspace/conduit-two";
 			const moves: string[] = [];
 			const trigger = await openCheckout(page, harness.relayBaseUrl, {
+				provider: "claude",
 				git: { branch: "main" },
 				sessionGit: {
 					branch: "feature/one",
@@ -479,7 +480,7 @@ for (const mode of [
 				harness,
 			}) => {
 				const trigger = await openCheckout(page, harness.relayBaseUrl, {
-					provider: supportsWorktree === true ? "claude" : "opencode",
+					provider: supportsWorktree === false ? "opencode" : "claude",
 					supportsWorktree,
 					git: { branch: "main" },
 				});
@@ -497,6 +498,7 @@ for (const mode of [
 			const directory = "/workspace/conduit-alias/packages/app";
 			const canonicalDirectory = "/real/conduit/packages/app";
 			const trigger = await openCheckout(page, harness.relayBaseUrl, {
+				provider: "claude",
 				directory,
 				canonicalDirectory,
 				git: { branch: "main" },
@@ -525,6 +527,7 @@ for (const mode of [
 		}) => {
 			const path = "/workspace/removed";
 			const trigger = await openCheckout(page, harness.relayBaseUrl, {
+				provider: "claude",
 				git: { branch: "main" },
 				worktrees: [{ path, branch: "feature/removed", main: false }],
 				moveError: new WorkspaceMoveError({ path, reason: "missing" }),
@@ -717,15 +720,13 @@ for (const mode of [
 				skills: true,
 			});
 			const group = page.locator(".session-bar-segments");
-			await expect(group.locator(":scope > *")).toHaveCount(
-				mode.hasTouch ? 1 : 2,
-			);
+			await expect(group.locator(":scope > *")).toHaveCount(2);
 			const borders = await group
 				.locator(":scope > *")
 				.evaluateAll((segments) =>
 					segments.map((segment) => getComputedStyle(segment).borderLeftWidth),
 				);
-			expect(borders).toEqual(mode.hasTouch ? ["0px"] : ["0px", "1px"]);
+			expect(borders).toEqual(["0px", "1px"]);
 			const pulse = page.getByTestId("session-skills-chip-pulse");
 			await expect(pulse).toBeVisible();
 			const clipping = await pulse.evaluate((element) => {

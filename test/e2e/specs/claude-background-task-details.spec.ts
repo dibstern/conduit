@@ -512,6 +512,8 @@ test.describe("Claude ended stream task liveness", () => {
 				}
 			};
 			expect(siblingStatus()).toBe("busy");
+			// Live polls may already have persisted agent A's prompt, which ends in
+			// "A done." too; only the final transcript carries the reply itself.
 			const finalHistoryCount = () => {
 				const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
 				try {
@@ -520,7 +522,7 @@ test.describe("Claude ended stream task liveness", () => {
 							.prepare(
 								"SELECT COUNT(*) AS n FROM events WHERE session_id = ? AND instr(data, ?) > 0",
 							)
-							.get(childId, "A done.")?.["n"],
+							.get(childId, '"A done."')?.["n"],
 					);
 				} finally {
 					db.close();

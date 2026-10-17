@@ -59,6 +59,7 @@ for (const [viewportName, viewport] of [
 					driver: "claude",
 					port: 0,
 					managed: false,
+					usageEligible: true,
 					status: "healthy",
 					restartCount: 0,
 					createdAt: now,
@@ -69,6 +70,7 @@ for (const [viewportName, viewport] of [
 					driver: "claude",
 					port: 0,
 					managed: false,
+					usageEligible: true,
 					status: "unhealthy",
 					restartCount: 0,
 					createdAt: now,
@@ -330,7 +332,9 @@ for (const [viewportName, viewport] of [
 							scroller.scrollHeight - 1,
 					};
 				});
-			expect(anchorOffset).toBeGreaterThanOrEqual(0);
+			// scrollIntoView lands on a whole pixel, so a fractional layout above
+			// the anchor leaves it up to 1px under the top edge.
+			expect(anchorOffset).toBeGreaterThanOrEqual(-1);
 			if (!atScrollEnd) expect(anchorOffset).toBeLessThanOrEqual(15);
 			await page.getByTestId("settings-close-btn").click();
 			await expect(panel).toBeHidden();
