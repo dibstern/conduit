@@ -403,6 +403,10 @@ export type ProjectSessionAvailability =
 
 export interface DaemonSessionQueryResult {
 	readonly sessions: ReadonlyArray<SessionInfo>;
+	readonly settledCounts?: ReadonlyArray<{
+		readonly projectSlug: string;
+		readonly count: number;
+	}>;
 	readonly availability: ReadonlyArray<ProjectSessionAvailability>;
 	readonly hasMore: boolean;
 	readonly nextCursor: DaemonSessionCursor | null;

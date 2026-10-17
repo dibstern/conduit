@@ -146,15 +146,11 @@ test("row rename keeps the draft through updates and offers a title that lands m
 	const input = row.getByRole("textbox", { name: "Session name" });
 	await input.fill("My half-typed dra");
 
-	// Marking it unread moves the row from Idle to "Done, unread", which
-	// rebuilds the row mid-typing.
+	// Marking it unread rebuilds the row mid-typing; within Idle it moves
+	// ahead of the read rows.
 	await rowIn(other).focus();
 	await other.keyboard.press("u");
-	await expect(
-		page.locator("#session-list-scroller > .session-group-label", {
-			hasText: /^Done, unread/i,
-		}),
-	).toBeVisible();
+	await expect(row).toHaveAttribute("aria-label", /^Done, unread/);
 	await expect(input).toHaveValue("My half-typed dra");
 	await expect(input).toBeFocused();
 	await input.press("End");

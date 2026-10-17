@@ -30,8 +30,8 @@ test("settle, undo, search, pin and reload preserve triage and shelf preference"
 	await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(2);
 	const settleId = await rows.nth(1).getAttribute("data-session-id");
 	const pinId = await rows.first().getAttribute("data-session-id");
-	const row = page.locator(`[data-session-id="${settleId}"]`);
-	const pinRow = page.locator(`[data-session-id="${pinId}"]`);
+	const row = page.locator(`#session-list [data-session-id="${settleId}"]`);
+	const pinRow = page.locator(`#session-list [data-session-id="${pinId}"]`);
 	const title = (await row.locator(".session-title-inner").innerText()).trim();
 	const originalSection = await sectionBefore(row);
 	const toggle = page.getByTestId("settled-shelf-toggle");
@@ -40,7 +40,7 @@ test("settle, undo, search, pin and reload preserve triage and shelf preference"
 	await row.click({ button: "right" });
 	await page.getByTestId("session-ctx-settle").click();
 	await expect(toggle).toHaveAttribute("aria-expanded", "false");
-	await expect(toggle).toHaveText(/^\s*Settled\s*$/);
+	await expect(toggle).toHaveText(/^\s*Settled\s+1\s*$/);
 	await expect(row).toHaveCount(0);
 	// Other live regions exist ("Connected", the composer); only one may speak
 	// about the settle.

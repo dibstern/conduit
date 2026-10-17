@@ -80,26 +80,45 @@ const readProjectSessions = (
 			makeReadQueryEffect,
 		).pipe(Layer.provideMerge(database));
 
-		const sessions = yield* Effect.gen(function* () {
+		const result = yield* Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const readQuery = yield* ReadQueryEffectTag;
 			const rows = yield* makeSessionRows({
 				slug: projectSlug,
 				folders: project.folders,
 				gitCache,
 				refreshGit: true,
 			});
-			return yield* rows.list({
-				...(options.roots !== undefined ? { roots: options.roots } : {}),
-				...(options.limit !== undefined ? { limit: options.limit } : {}),
-				...(options.search !== undefined ? { titleQuery: options.search } : {}),
-				...(options.cursor !== undefined ? { before: options.cursor } : {}),
-			});
+			return yield* sql.withTransaction(
+				Effect.gen(function* () {
+					const filters = {
+						...(options.roots !== undefined ? { roots: options.roots } : {}),
+						...(options.search !== undefined
+							? { titleQuery: options.search }
+							: {}),
+					};
+					const settledCount = yield* readQuery.countSettledSessions(
+						{ projectIds: [projectSlug] },
+						filters,
+					);
+					const sessions = yield* rows.list({
+						...filters,
+						...(options.limit !== undefined ? { limit: options.limit } : {}),
+						...(options.cursor !== undefined ? { before: options.cursor } : {}),
+					});
+					return { sessions, settledCount };
+				}),
+			);
 		}).pipe(Effect.provide(readQueryLayer));
-		return sessions.map(
-			(session): ProjectSessionCandidate => ({
-				sortKey: { updatedAt: session.updatedAt, id: session.id },
-				session,
-			}),
-		);
+		return {
+			settledCount: result.settledCount,
+			sessions: result.sessions.map(
+				(session): ProjectSessionCandidate => ({
+					sortKey: { updatedAt: session.updatedAt, id: session.id },
+					session,
+				}),
+			),
+		};
 	});
 
 /** Check recovery work without acquiring the project's relay or starting providers. */
@@ -218,6 +237,7 @@ export const listDaemonSessions = (
 					if (reason !== undefined) {
 						return {
 							sessions: [],
+							settledCount: 0,
 							availability: {
 								projectSlug: project.slug,
 								available: false as const,
@@ -230,7 +250,7 @@ export const listDaemonSessions = (
 					);
 					if (Exit.isSuccess(exit)) {
 						return {
-							sessions: exit.value,
+							...exit.value,
 							availability: {
 								projectSlug: project.slug,
 								available: true as const,
@@ -239,6 +259,7 @@ export const listDaemonSessions = (
 					}
 					return {
 						sessions: [],
+						settledCount: 0,
 						availability: {
 							projectSlug: project.slug,
 							available: false as const,
@@ -268,6 +289,16 @@ export const listDaemonSessions = (
 
 		return {
 			sessions: page.map((candidate) => candidate.session),
+			settledCounts: projectResults.flatMap((result) =>
+				result.availability.available
+					? [
+							{
+								projectSlug: result.availability.projectSlug,
+								count: result.settledCount,
+							},
+						]
+					: [],
+			),
 			availability: projectResults.map((result) => result.availability),
 			hasMore,
 			nextCursor,

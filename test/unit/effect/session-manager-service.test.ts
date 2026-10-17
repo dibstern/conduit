@@ -180,6 +180,7 @@ function makeReadQueryEffect(
 		listSessions: vi.fn(() => Effect.succeed(rows)),
 		listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 		getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
+		countSettledSessions: () => Effect.succeed(0),
 		listSessionInfos: vi.fn((_scope, options) => {
 			const pending = pendingApprovalCountsByType(pendingApprovalCounts);
 			const selected = options?.roots

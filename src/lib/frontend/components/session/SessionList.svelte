@@ -96,6 +96,7 @@
 	const statusFilter = $derived(getSessionStatusFilter());
 	const grouping = $derived(getSessionGrouping());
 	const matching = $derived(filtered.filter((session) => statusFilter === null || sessionMatchesStatus(session, statusFilter)));
+	const settledCount = $derived(sessionList.settledCount);
 	const arrangement = $derived(projectSessionList(
 		matching,
 		grouping,
@@ -108,7 +109,7 @@
 	// Chips count only live rows: settled and snoozed sets grow without bound.
 	const live = $derived(filtered.filter((session) => session.settledAt == null && !isSessionSnoozed(session, sessionState.now)));
 
-	const isEmpty = $derived(matching.length === 0);
+	const isEmpty = $derived(matching.length === 0 && settledCount.count === 0);
 	const searching = $derived(sessionState.searchQuery.trim().length > 0);
 	const settledShelfOpen = $derived(searching || uiState.settledShelfOpen);
 	const snoozedShelfOpen = $derived(searching || uiState.snoozedShelfOpen);
@@ -496,7 +497,7 @@
 			Pick sessions to act on, then choose an action below.
 		</div>
 	{/if}
-	<SessionListRows {arrangement} {isEmpty} {emptyMessage} {statusFilter} {searching} filteredLength={filtered.length} {snoozedShelfOpen} {settledShelfOpen} {pagerPending} {unavailableProjectLabels} {selectMode} {selectedSessionIds} menuOpenId={ctxMenuSession?.id} {renamingSessionId} {getProjectLabel} {getProjectAccent} oncontextmenu={handleContextMenu} ontoggleselection={handleToggleSelection} onrenamestart={handleCtxRename} onrenameend={handleRenameEnd} />
+	<SessionListRows {arrangement} {settledCount} {isEmpty} {emptyMessage} {statusFilter} {searching} filteredLength={filtered.length} {snoozedShelfOpen} {settledShelfOpen} {pagerPending} {unavailableProjectLabels} {selectMode} {selectedSessionIds} menuOpenId={ctxMenuSession?.id} {renamingSessionId} {getProjectLabel} {getProjectAccent} oncontextmenu={handleContextMenu} ontoggleselection={handleToggleSelection} onrenamestart={handleCtxRename} onrenameend={handleRenameEnd} />
 	{#if selectMode}
 		<SessionListBulkBar settleCount={settleEligible.length} snoozeCount={snoozeEligible.length} pinCount={pinEligible.length} {selectionCount} {unpinSelected} {bulkPending} onsettle={() => { void handleBulkChange("settle"); }} onsnooze={handleOpenBulkSnooze} onpin={() => { void handleBulkChange("pin"); }} ondelete={handleBulkDelete} />
 	{/if}

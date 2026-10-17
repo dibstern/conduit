@@ -249,6 +249,62 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "seed one current account and one folded provider account",
+		match:
+			/^the usage footer has a Claude account and a hidden (Claude|Codex|Cursor) account named (.+)$/,
+		run: ({ world, match }) => {
+			const harness =
+				match[1] === "Codex"
+					? "codex"
+					: match[1] === "Cursor"
+						? "cursor"
+						: "claude";
+			setAccounts(world.page, [
+				["claude", "Personal"],
+				[
+					"hidden",
+					match[2] ?? "",
+					harness === "claude" ? "claude" : "opencode",
+				],
+			]);
+			requireRpcControl(world.page).setUsageReadings([
+				singleReading("normal"),
+				reading(
+					"hidden",
+					harness,
+					harness === "cursor"
+						? [{ kind: "month", utilization: 30 }]
+						: [
+								{ kind: "five_hour", utilization: 30 },
+								{ kind: "seven_day", utilization: 64 },
+							],
+				),
+			]);
+		},
+	},
+	{
+		name: "assert a single folded account is labelled by its provider",
+		match:
+			/^the phone usage footer labels the hidden account "\+1 (Claude|Codex|Cursor) account"$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.getByTestId("usage-phone-more-count")).toHaveText(
+				`+1 ${match[1]} account`,
+			);
+			await expect(
+				world.page.getByTestId("usage-phone-folded-hidden"),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "assert the folded account remains named in the usage sheet",
+		match: /^the usage sheet shows the hidden account named (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.getByTestId("usage-sheet-name-hidden"),
+			).toHaveText(match[1] ?? "");
+		},
+	},
+	{
 		name: "assert the footer occupies the bottom of the sidebar",
 		match: /^the usage footer is pinned below the session list$/,
 		run: async ({ world }) => {

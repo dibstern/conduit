@@ -659,6 +659,60 @@ function projectSidebar(version = 0) {
 }
 
 describe("ReadQueryEffect.listSessions", () => {
+	it.effect(
+		"counts the full settled shelf with project, root, and literal title filters",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				for (const id of [
+					"settled",
+					"literal",
+					"pinned",
+					"active",
+					"other",
+					"deleted",
+				])
+					yield* seedSession(id, {
+						title: id === "literal" ? "Alpha %_done\\now" : "Alpha ordinary",
+					});
+				yield* seedSession("child", { parentId: "settled" });
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`UPDATE sessions SET settled_at = 10 WHERE id != 'active'`;
+				yield* sql`UPDATE sessions SET pinned_at = 11 WHERE id = 'pinned'`;
+				yield* sql`UPDATE sessions SET project_id = 'other-project' WHERE id = 'other'`;
+				yield* sql`DELETE FROM sessions WHERE id = 'deleted'`;
+				const readQuery = yield* makeReadQueryEffect;
+				expect(
+					yield* readQuery.countSettledSessions(scope, { roots: true }),
+				).toBe(2);
+				expect(yield* readQuery.countSettledSessions(scope)).toBe(3);
+				expect(
+					yield* readQuery.countSettledSessions(scope, {
+						roots: true,
+						titleQuery: "ALPHA",
+					}),
+				).toBe(2);
+				expect(
+					yield* readQuery.countSettledSessions(scope, {
+						roots: true,
+						titleQuery: "%_done\\",
+					}),
+				).toBe(1);
+				expect(
+					yield* readQuery.countSettledSessions(scope, {
+						roots: true,
+						titleQuery: "missing",
+					}),
+				).toBe(0);
+				expect(
+					yield* readQuery.countSettledSessions(
+						{ projectIds: ["other-project"] },
+						{ roots: true },
+					),
+				).toBe(1);
+			}).pipe(Effect.provide(testLayer)),
+	);
+
 	it.effect("applies deterministic keyset paging, roots, and limits", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator();

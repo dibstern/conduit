@@ -22,8 +22,9 @@
 	import Icon from "../ui/Icon.svelte";
 	import SessionStatusGlyph from "../ui/SessionStatusGlyph.svelte";
 
-	let { arrangement, isEmpty, emptyMessage, statusFilter, searching, filteredLength, snoozedShelfOpen, settledShelfOpen, pagerPending, unavailableProjectLabels, selectMode, selectedSessionIds, menuOpenId, renamingSessionId, getProjectLabel, getProjectAccent, oncontextmenu, ontoggleselection, onrenamestart, onrenameend }: {
+	let { arrangement, settledCount, isEmpty, emptyMessage, statusFilter, searching, filteredLength, snoozedShelfOpen, settledShelfOpen, pagerPending, unavailableProjectLabels, selectMode, selectedSessionIds, menuOpenId, renamingSessionId, getProjectLabel, getProjectAccent, oncontextmenu, ontoggleselection, onrenamestart, onrenameend }: {
 		arrangement: SessionProjection;
+		settledCount: { count: number; exact: boolean };
 		isEmpty: boolean;
 		emptyMessage: string;
 		statusFilter: SessionStatusFilter | null;
@@ -50,6 +51,8 @@
 	// collapsed shelf pages to the end on load) and nobody is waiting for it.
 	let scrolled = $state(false);
 	let settledExpanded = $state(false);
+	// "More" counts from the shelf's true total, not just the rows paged in so far.
+	const settledMore = $derived(Math.max(settledCount.count - Math.min(arrangement.settled.length, 2), 0));
 	let snoozedExpanded = $state(false);
 
 	function handleSwitchSession(session: SessionInfo) {
@@ -144,7 +147,7 @@
 						{@render sessionRow(s)}
 					{/each}
 			{/each}
-			{#if arrangement.settled.length > 0}
+			{#if settledCount.count > 0}
 				<TextButton
 					tone="dimmer"
 					class="session-group-label mt-[6px] flex w-full items-center gap-[6px] min-h-[44px] md:min-h-[30px] rounded-[8px] px-[8px] text-[12.5px] font-medium font-sans"
@@ -154,18 +157,16 @@
 					onclick={() => { if (searching) return; settledExpanded = false; setSettledShelfOpen(!uiState.settledShelfOpen); }}
 				>
 					<Icon name={settledShelfOpen ? "chevron-down" : "chevron-right"} size={12} />
-					<!-- No count: settled sessions grow without bound and load in pages,
-					     so any number here would undercount. -->
 					<SessionStatusGlyph settled />
-					<span>Settled</span>
+					<span>Settled</span>{" "}<span class="font-mono text-[11px] font-normal">{settledCount.count}{settledCount.exact ? "" : "+"}</span>
 				</TextButton>
 				<div id="settled-shelf-rows">
 					{#if settledShelfOpen}
 						{#each searching || selectMode || settledExpanded ? arrangement.settled : arrangement.settled.slice(0, 2) as s (s.id)}
 							{@render sessionRow(s)}
 						{/each}
-						{#if !searching && !selectMode && !settledExpanded && arrangement.settled.length > 2}
-							<TextButton tone="dimmer" class="min-h-[44px] md:min-h-[30px] px-[34px] text-[12px]" data-testid="settled-shelf-more" onclick={() => { settledExpanded = true; }}>+ {arrangement.settled.length - 2} more</TextButton>
+						{#if !searching && !selectMode && !settledExpanded && settledMore > 0}
+							<TextButton tone="dimmer" class="min-h-[44px] md:min-h-[30px] px-[34px] text-[12px]" data-testid="settled-shelf-more" onclick={() => { settledExpanded = true; }}>+ {settledMore} more</TextButton>
 						{/if}
 					{/if}
 				</div>

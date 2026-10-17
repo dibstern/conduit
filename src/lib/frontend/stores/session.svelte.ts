@@ -53,7 +53,7 @@ import {
 import { markSessionDeleted, selection } from "./selection.svelte.js";
 import { restoreServerUpdateBanner } from "./server-status.svelte.js";
 import type { SessionGrouping, SessionStatusFilter } from "./session-scope.js";
-import { getSessionScope } from "./session-scope.js";
+import { getSessionScope, getSessionStatusFilter } from "./session-scope.js";
 import { clearTodoState } from "./todo.svelte.js";
 import { applyTurnRow, deleteTurn, rebaseTurns } from "./turn.svelte.js";
 import { showToast, updateContextPercent } from "./ui.svelte.js";
@@ -144,11 +144,13 @@ const clientSession = $state({
 	} | null,
 	searchQuery: "",
 	daemonSessions: [] as SessionInfo[],
+	daemonSettledCounts: undefined as ListDaemonSessionsResponse["settledCounts"],
 	daemonUnavailableProjects: [] as string[],
 	daemonCursor: null as ListDaemonSessionsResponse["nextCursor"],
 	daemonHasMore: false,
 	daemonLoading: false,
 	searchResults: null as SessionInfo[] | null,
+	searchSettledCounts: undefined as ListDaemonSessionsResponse["settledCounts"],
 	searchCursor: null as ListDaemonSessionsResponse["nextCursor"],
 	searchHasMore: false,
 	searchLoading: false,
@@ -477,10 +479,12 @@ export function projectSessionList(
 		return {
 			...shelves,
 			sections: [
-				{ key: "needs-you", label: "Needs you", sessions: groups.needsYou },
 				{ key: "running", label: "Running", sessions: groups.running },
-				{ key: "unread", label: "Done, unread", sessions: groups.doneUnread },
-				{ key: "idle", label: "Idle", sessions: groups.idle },
+				{
+					key: "idle",
+					label: "Idle",
+					sessions: [...groups.needsYou, ...groups.doneUnread, ...groups.idle],
+				},
 			].filter((section) => section.sessions.length > 0),
 		};
 	}
@@ -636,6 +640,7 @@ export function applyListDaemonSessionsResponse(
 ): void {
 	daemonBrowseToken += 1;
 	clientSession.daemonSessions = [...response.sessions];
+	clientSession.daemonSettledCounts = response.settledCounts;
 	clientSession.daemonCursor = response.nextCursor;
 	clientSession.daemonHasMore = response.hasMore;
 	clientSession.daemonLoading = false;
@@ -683,6 +688,7 @@ export async function loadMoreDaemonSessions(): Promise<void> {
 			...incoming,
 		];
 		clientSession.daemonCursor = response.nextCursor;
+		clientSession.daemonSettledCounts = response.settledCounts;
 		clientSession.daemonHasMore = response.hasMore;
 		clientSession.daemonUnavailableProjects = response.availability
 			.filter((entry) => !entry.available)
@@ -741,6 +747,7 @@ export function clearSessionSearch(): void {
 	daemonSearchToken += 1;
 	activeSearch = null;
 	clientSession.searchResults = null;
+	clientSession.searchSettledCounts = undefined;
 	clientSession.searchCursor = null;
 	clientSession.searchHasMore = false;
 	clientSession.searchLoading = false;
@@ -786,6 +793,7 @@ export function applySearchResultsResponse(
 		];
 	}
 	clientSession.searchCursor = response.nextCursor;
+	clientSession.searchSettledCounts = response.settledCounts;
 	clientSession.searchHasMore = response.hasMore;
 }
 
@@ -882,20 +890,63 @@ function lastChangedAt(session: Immutable<SessionInfo>): number {
 	return typeof at === "number" ? at : at ? Date.parse(at) : 0;
 }
 
+function projectMatchesScope(slug: string, scope: string | null): boolean {
+	const groupKey = getScopeGroupKey(scope);
+	return (
+		scope === null ||
+		(groupKey === null
+			? slug === scope
+			: getProjectGroup(slug)?.key === groupKey)
+	);
+}
+
+/** Browse keeps local counts live; search totals use the server's title matching. */
+export function getSettledSessionCount(): { count: number; exact: boolean } {
+	const scope = getSessionScope();
+	const currentSlug = getCurrentSlug();
+	const searching = sessionState.searchResults !== null;
+	const status = getSessionStatusFilter();
+	const matches = (row: SessionInfo) =>
+		!row.parentID &&
+		!row.sideThread &&
+		row.pinnedAt == null &&
+		row.settledAt != null &&
+		projectMatchesScope(row.projectSlug, scope) &&
+		(status === null || sessionMatchesStatus(withReadMark(row), status));
+	const totals = searching
+		? clientSession.searchSettledCounts
+		: clientSession.daemonSettledCounts;
+	// A chip filters attention in the browser. Until its pages arrive, report a
+	// lower bound rather than treating the unfiltered shelf total as a match count.
+	const queryReady = searching || sessionState.searchQuery.trim().length === 0;
+	if (status === null && queryReady && totals !== undefined) {
+		return {
+			count:
+				(searching ? 0 : sessionState.rootSessions.filter(matches).length) +
+				totals
+					.filter(
+						(entry) =>
+							(searching || entry.projectSlug !== currentSlug) &&
+							projectMatchesScope(entry.projectSlug, scope),
+					)
+					.reduce((sum, entry) => sum + entry.count, 0),
+			exact: true,
+		};
+	}
+	return {
+		count: getFilteredSessions().filter(matches).length,
+		exact:
+			queryReady &&
+			(searching ? !sessionState.searchHasMore : !sessionState.daemonHasMore),
+	};
+}
+
 /** The sidebar and its search show root sessions only. */
 export function getFilteredSessions(): SessionInfo[] {
 	const scope = getSessionScope();
-	const groupKey = getScopeGroupKey(scope);
 	const currentSlug = getCurrentSlug();
-	const inScope = (session: SessionInfo) => {
-		const slug = session.projectSlug;
-		return (
-			scope === null ||
-			(groupKey === null
-				? slug === scope
-				: getProjectGroup(slug)?.key === groupKey)
-		);
-	};
+	const inScope = (session: SessionInfo) =>
+		projectMatchesScope(session.projectSlug, scope);
 	let sessions: SessionInfo[];
 	if (sessionState.searchResults !== null) {
 		const searchSlug = currentSlug;
@@ -1031,6 +1082,7 @@ export function clearSessionState(): void {
 	resetSessionFamily();
 	readMarks.clear();
 	clientSession.daemonSessions = [];
+	clientSession.daemonSettledCounts = undefined;
 	clientSession.daemonUnavailableProjects = [];
 	clientSession.daemonCursor = null;
 	clientSession.daemonHasMore = false;

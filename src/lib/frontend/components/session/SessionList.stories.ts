@@ -283,6 +283,49 @@ export const WithItems: Story = {
 	},
 };
 
+export const IdleGrouping: Story = {
+	name: "Idle combines attention states",
+	beforeEach: () => {
+		seedSessions([
+			...(
+				[
+					"needs-approval",
+					"needs-reply",
+					"error",
+					"done-unread",
+					"idle",
+					"working",
+					"monitoring",
+				] as const
+			).map((attention) => ({
+				id: attention,
+				title: attention,
+				projectSlug: "conduit",
+				accountId: null,
+				attention,
+			})),
+		]);
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const labels = [...canvasElement.querySelectorAll(".session-group-label")];
+		await expect(labels.map((label) => label.textContent?.trim())).toEqual([
+			"Running 2",
+			"Idle 5",
+		]);
+		await expect(canvas.getByLabelText(/^Needs approval,/)).toBeVisible();
+		await expect(canvas.getByLabelText(/^Needs reply,/)).toBeVisible();
+		await expect(canvas.getByLabelText(/^Failed,/)).toBeVisible();
+		await expect(canvas.getByLabelText(/^Done, unread,/)).toBeVisible();
+		await userEvent.click(canvas.getByTestId("session-filter-chip-needs-you"));
+		await expect(canvasElement.querySelectorAll(".session-item")).toHaveLength(
+			3,
+		);
+		await expect(canvas.getByText("Idle", { exact: true })).toBeVisible();
+		await userEvent.click(canvas.getByTestId("session-filter-chip-needs-you"));
+	},
+};
+
 export const FilteredToNeedsYou: Story = {
 	name: "Filtered to needs you",
 	beforeEach: () => {
@@ -410,6 +453,25 @@ export const ShelvesWithMore: Story = {
 		await expect(canvas.getByTestId("settled-shelf-more")).toBeVisible();
 		// The capture shows the shelves at rest, not the toggle's focus ring.
 		settled.blur();
+	},
+};
+
+export const SettledCountBeforeRows: Story = {
+	name: "Settled count before its page loads",
+	beforeEach: () => {
+		seedSessions([]);
+		applyListDaemonSessionsResponse({
+			sessions: [],
+			settledCounts: [{ projectSlug: "acme", count: 14 }],
+			availability: [{ projectSlug: "acme", available: true }],
+			hasMore: true,
+			nextCursor: null,
+		});
+	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByTestId("settled-shelf-toggle"),
+		).toHaveTextContent("Settled 14");
 	},
 };
 

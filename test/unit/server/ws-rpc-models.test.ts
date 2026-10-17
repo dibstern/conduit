@@ -82,6 +82,7 @@ const makeReadQuery = (
 	getStrandedChildren: () => Effect.succeed([]),
 	listSessions: () => Effect.succeed([]),
 	listSessionInfos: () => Effect.succeed([]),
+	countSettledSessions: () => Effect.succeed(0),
 	listSessionGitRefreshTargets: () => Effect.succeed([]),
 	getSessionSkillMessages: () => Effect.succeed([]),
 	getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
