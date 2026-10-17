@@ -162,13 +162,14 @@ export async function createSession(
 	relayPort: number,
 	providerId: "claude" | "opencode",
 	instanceId?: string,
+	projectSlug = "e2e-replay",
 ): Promise<string> {
 	const { sessionId } = await Effect.runPromise(
 		Effect.scoped(
 			Effect.gen(function* () {
 				const client = yield* RpcClient.make(WsRpcGroup);
 				const modelCatalog = yield* client.GetModels({
-					projectSlug: "e2e-replay",
+					projectSlug,
 					instanceId:
 						instanceId === undefined
 							? providerId === "opencode"
@@ -182,7 +183,7 @@ export async function createSession(
 					);
 				return yield* client.CreateSession({
 					permissionMode: "ask",
-					projectSlug: "e2e-replay",
+					projectSlug,
 					originId: `e2e-${providerId}-replay`,
 					providerId,
 					model: {
