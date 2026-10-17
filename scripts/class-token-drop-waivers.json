@@ -731,5 +731,48 @@
 	"src/lib/frontend/components/ui/button-recipes.ts :: hover:text-text-secondary": {
 		"renamedTo": "hover:text-text",
 		"reason": "conduit-test-aoqb.1: the Final palette has one --text2 step, so text-secondary and text-muted are the same colour and a muted-to-secondary hover changed nothing. muted-soft now brightens to full text, the one step above."
-	}
+	},
+	"src/lib/frontend/components/input/InputArea.svelte :: overscroll-contain,w-[36px]": {
+		"movedTo": "src/lib/frontend/components/ui/SheetChrome.svelte",
+		"requires": "<SheetChrome",
+		"reason": "conduit-test-voxy.4: SheetChrome owns body scrolling and the shared handle."
+	},
+	"src/lib/frontend/components/input/InputArea.svelte :: px-[16px]": "conduit-test-voxy.4: The existing 16px side padding remains on SheetChrome bodyClass=\"px-[16px]\". The checker only recognizes class attributes, not bodyClass.",
+	"src/lib/frontend/components/input/InputArea.svelte :: h-[4px],max-h-[85dvh],mb-[10px],pt-[8px],rounded-t-[18px]": "conduit-test-voxy.4: SheetChrome replaces the old handle with 36x5px and 22px corners. The existing 85dvh cap remains via maxHeight=\"85dvh\", and the bottom inset is preserved via bottomPadding and safeAreaMode.",
+	"src/lib/frontend/components/layout/UsageFooterMeter.svelte :: pb-[calc(16px+env(safe-area-inset-bottom))]": "conduit-test-voxy.4: The existing 16px plus safe-area inset moves into SheetChrome via bottomPadding={16}. SheetChrome owns the Final corners, handle and surface; dock contents and controls remain unchanged.",
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: bg-border-chip,mx-auto": {
+		"movedTo": "src/lib/frontend/components/ui/SheetChrome.svelte",
+		"requires": "<SheetChrome",
+		"reason": "conduit-test-voxy.4: The shared sheet owns the handle colour and alignment."
+	},
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: h-1,mb-2.5,w-9": "conduit-test-voxy.4: The old rem handle becomes the shared literal 36x5px handle with its canonical spacing; body content is unchanged.",
+	"src/lib/frontend/components/overlays/HandoffDialog.svelte :: bg-border-chip,mx-auto,rounded-full,w-[36px]": {
+		"movedTo": "src/lib/frontend/components/ui/SheetChrome.svelte",
+		"requires": "<SheetChrome",
+		"reason": "conduit-test-voxy.4: The shared sheet owns the handle."
+	},
+	"src/lib/frontend/components/overlays/HandoffDialog.svelte :: h-[4px],mb-[8px]": "conduit-test-voxy.4: SheetChrome uses the approved 5px handle and canonical spacing in place of the 4px bar.",
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: phone.current": "conduit-test-voxy.4: This is an expression identifier, not CSS. The existing compact branch now reads sessionViewState.compact instead of a duplicate MediaQuery.",
+	"src/lib/frontend/components/overlays/UsageSettingsTab.svelte :: phone.current": "conduit-test-voxy.4: This is an expression identifier, not CSS. The existing compact branch now reads sessionViewState.compact instead of a duplicate MediaQuery.",
+	"src/lib/frontend/components/ui/Menu.svelte :: mb-[6px],mt-[8px],mx-auto,rounded-full": {
+		"movedTo": "src/lib/frontend/components/ui/SheetChrome.svelte",
+		"requires": "<SheetChrome",
+		"reason": "conduit-test-voxy.4: The shared sheet owns the handle."
+	},
+	"src/lib/frontend/components/ui/Menu.svelte :: bg-border,h-[4px],w-[38px]": "conduit-test-voxy.4: SheetChrome replaces the old handle with the Final 36x5px bar in the strong line token, bg-border-chip.",
+	"src/lib/frontend/components/ui/Modal.svelte :: mx-auto,rounded-full": {
+		"movedTo": "src/lib/frontend/components/ui/SheetChrome.svelte",
+		"requires": "<SheetChrome",
+		"reason": "conduit-test-voxy.4: The shared sheet owns the handle."
+	},
+	"src/lib/frontend/components/ui/Modal.svelte :: bg-border,h-1,mb-2,mt-2,w-[38px]": "conduit-test-voxy.4: SheetChrome owns the Final 36x5px handle in bg-border-chip with 8px above and 6px below; the old rem spacing and 38px width are intentionally removed.",
+	"src/lib/frontend/components/ui/SettingsRow.svelte :: bg-white,h-[18px],left-[2px],pointer-events-none,rounded-full,top-[2px],transition-colors,translate-x-[14px],w-[32px]": {
+		"movedTo": "src/lib/frontend/components/ui/Switch.svelte",
+		"requires": "<Switch",
+		"reason": "conduit-test-voxy.4: The small presentational Switch owns the track and thumb."
+	},
+	"src/lib/frontend/components/ui/SettingsRow.svelte :: bg-accent,bg-border,h-[14px],w-[14px],transition-[translate],props.checked": "conduit-test-voxy.4: Switch now owns the green on / dimmed grey off appearance. Its small white thumb uses size-[14px] and transition-transform; props.checked was an interpolation identifier, not CSS.",
+	"src/lib/frontend/components/ui/__fixtures__/PopoverDemo.svelte :: w-56": "conduit-test-voxy.4: The responsive Popover demo uses min-w-56 so the shared sheet body can fill the viewport.",
+	"src/lib/frontend/components/input/InputArea.svelte :: pb-[max(20px,env(safe-area-inset-bottom))]": "conduit-test-voxy.4: The existing max(20px, safe-area) inset moves into SheetChrome via bottomPadding={20} and safeAreaMode=\"max\".",
+	"src/lib/frontend/components/ui/SettingsRow.svelte :: bg-success,h-[18px],translate-x-[14px],w-[32px]": "conduit-test-voxy.4 moves the settings toggle into the shared ui/Switch. Switch owns the green on track and takes the Final small size from the spec's .f-switch.sm: a 38x22 track with an 18px knob and 16px travel, in place of the old 32x18 track."
 }

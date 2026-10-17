@@ -4,7 +4,7 @@
 
 <script lang="ts">
 	import { tick, untrack } from "svelte";
-	import { MediaQuery } from "svelte/reactivity";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import Dialog from "../ui/Dialog.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -31,20 +31,19 @@
 		{ value: "usage", label: "Usage", testId: "settings-tab-usage", groupLabel: "This computer" },
 		{ value: "server", label: "Server", testId: "settings-tab-server" },
 	] as const;
-	const phone = new MediaQuery("(max-width: 767px)");
 	/** `null` only on phone, where it means the section list is the screen. */
 	let section = $state<SettingsSection | null>("general");
 	let backEl = $state<HTMLButtonElement | HTMLAnchorElement>();
 	let contentEl = $state<HTMLDivElement>();
 	const shown = $derived(section ?? "general");
-	const listHidden = $derived(phone.current && section !== null);
+	const listHidden = $derived(sessionViewState.compact && section !== null);
 	const sectionLabel = $derived(SETTINGS_TABS.find((tab) => tab.value === section)?.label ?? "Settings");
 	const alert = $derived(usageAlert(orderedSettingsUsageAccounts(), usageState.limits.warnAt));
 	const unhealthyInstance = $derived(getCachedInstances().find((instance) => instance.status === "unhealthy"));
 
 	$effect(() => {
 		if (!visible) return;
-		section = initialTab ?? (untrack(() => phone.current) ? null : "general");
+		section = initialTab ?? (untrack(() => sessionViewState.compact) ? null : "general");
 		void scrollContent(initialAnchor);
 	});
 
@@ -59,7 +58,7 @@
 		if (!next) return;
 		section = next;
 		await scrollContent();
-		if (!phone.current) return;
+		if (!sessionViewState.compact) return;
 		backEl?.focus();
 	}
 
@@ -72,10 +71,10 @@
 
 </script>
 
-<Dialog open={visible} onclose={() => onClose?.()} labelledBy="settings-panel-title" backdrop="subtle" placement={phone.current && section === "usage" ? "sheet" : "center"}>
+<Dialog open={visible} onclose={() => onClose?.()} labelledBy="settings-panel-title" backdrop="subtle" placement={sessionViewState.compact && section === "usage" ? "sheet" : "center"}>
 	<div
 		id="settings-panel"
-		class:usage-phone={phone.current && shown === "usage" && section !== null}
+		class:usage-phone={sessionViewState.compact && shown === "usage" && section !== null}
 		class="bg-bg border border-border rounded-xl shadow-2xl w-[calc(100vw-2rem)] md:w-[min(720px,calc(100vw-2rem))] h-[80vh] md:h-[min(600px,80vh)] flex flex-col overflow-hidden font-sans leading-[1.35]"
 	>
 		<div class="shrink-0 flex items-center gap-[6px] px-[14px] py-[10px] border-b border-border-subtle">
@@ -121,12 +120,12 @@
 			     control returns. Manual activation there, so arrowing through the
 			     list does not drill in on every keypress. -->
 			{#if !listHidden}
-				<div class="shrink-0 overflow-y-auto px-[8px] py-[12px] {phone.current ? 'flex-1' : 'w-[150px] border-r border-border-subtle'}">
+				<div class="shrink-0 overflow-y-auto px-[8px] py-[12px] {sessionViewState.compact ? 'flex-1' : 'w-[150px] border-r border-border-subtle'}">
 					<Tabs
-						value={phone.current ? "" : shown}
+						value={sessionViewState.compact ? "" : shown}
 						variant="sections"
 						orientation="vertical"
-						activationMode={phone.current ? "manual" : "automatic"}
+						activationMode={sessionViewState.compact ? "manual" : "automatic"}
 						label="Settings sections"
 						options={SETTINGS_TABS}
 						onValueChange={openSection}
@@ -138,7 +137,7 @@
 								<span data-testid="settings-server-dot" class="mr-[6px] inline-block h-[6px] w-[6px] shrink-0 rounded-full {instanceStatusColor(unhealthyInstance.status)}"></span>
 							{/if}
 							<span class="flex-1">{option.label}</span>
-							{#if phone.current}
+							{#if sessionViewState.compact}
 								<Icon name="chevron-right" size={14} class="text-text-dimmer" />
 							{/if}
 						{/snippet}
@@ -146,7 +145,7 @@
 				</div>
 			{/if}
 
-			{#if !phone.current || section !== null}
+			{#if !sessionViewState.compact || section !== null}
 				<div bind:this={contentEl} class="settings-content flex-1 min-w-0 overflow-y-auto px-[18px] py-[14px] flex flex-col gap-[7px] text-[11.5px] text-text-secondary">
 					{#if shown === "general"}
 						<NotificationsSettingsTab />

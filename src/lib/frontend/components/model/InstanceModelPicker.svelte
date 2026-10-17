@@ -1,6 +1,7 @@
 <!-- Harness tabs and model options: a phone sheet or a desktop drop-up. -->
 
 <script lang="ts">
+	import SheetChrome from "../ui/SheetChrome.svelte";
 	import { onDestroy, tick, untrack, type Snippet } from "svelte";
 	import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 	import Icon from "../ui/Icon.svelte";
@@ -508,23 +509,22 @@
 </script>
 
 {#snippet pickerSurface(sheet: boolean)}
+	<!-- The id names the whole visible picker: the sheet on phones, the card on desktop. -->
+	<SheetChrome active={sheet} id="model-picker" data-testid="model-picker" maxHeight="85dvh" bottomPadding={30} safeAreaMode="max" bodyClass="flex flex-col">
 	<Surface
-		variant={sheet ? "plain" : "card"}
+		variant={sheet ? "bare" : "card"}
 		{@attach !sheet && keepOnscreen}
 		radius="none"
-		elevation={sheet ? "modal" : "menu-lg"}
-		id="model-picker"
-		data-testid="model-picker"
+		elevation={sheet ? "none" : "menu-lg"}
+		id={sheet ? undefined : "model-picker"}
+		data-testid={sheet ? undefined : "model-picker"}
 		data-phone={sheet ? "true" : undefined}
 		role={sheet ? undefined : "dialog"}
 		aria-labelledby={sheet ? undefined : titleId}
 		class="model-dropdown flex flex-col overflow-hidden font-sans {sheet
-			? 'w-full max-h-[85dvh] rounded-t-[22px] border-t border-border px-[16px] pt-2 pb-[max(30px,env(safe-area-inset-bottom))]'
+			? 'w-full min-h-0 px-[16px]'
 			: 'absolute bottom-[calc(100%+8px)] right-0 w-[404px] max-w-[90vw] max-h-[min(70vh,480px)] rounded-[12px] px-[12px] pt-[9px] pb-[4px] z-[var(--z-popover)]'}"
 	>
-		{#if sheet}
-			<div class="mx-auto mb-2.5 h-1 w-9 shrink-0 rounded-full bg-border-chip" aria-hidden="true"></div>
-		{/if}
 		<div class="mb-[2px] flex shrink-0 items-center gap-[6px]">
 			{#if view !== "root"}
 				<Button
@@ -874,6 +874,7 @@
 			{/if}
 		</div>
 	</Surface>
+	</SheetChrome>
 {/snippet}
 
 <div

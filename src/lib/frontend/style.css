@@ -211,6 +211,7 @@
 	--shadow-panel: 0 4px 16px rgba(var(--shadow-rgb), 0.3);
 	--shadow-modal: 0 8px 32px rgba(var(--shadow-rgb), 0.4);
 	--shadow-dropdown: 0 8px 32px rgba(var(--shadow-rgb), 0.3);
+	--shadow-knob: 0 1px 3px rgba(var(--shadow-rgb), 0.25);
 
 	/* Radius
 	   Panel/card corner used across setup + settings surfaces. */

@@ -17,6 +17,7 @@
 	} from "./floating-styles.js";
 	import { menuDensityContextKey, type MenuDensityContext } from "./menu-context.js";
 	import { getDialogTarget } from "./dialog-context.js";
+	import SheetChrome from "./SheetChrome.svelte";
 
 	const SCRIM_ACTIVATION_DELAY_MS = 50;
 
@@ -39,6 +40,7 @@
 		class?: string | undefined;
 		trigger: TriggerSnippet;
 		children: Snippet;
+		footer?: Snippet | undefined;
 	} & Omit<
 		DropdownMenuContentProps,
 		| "align"
@@ -72,6 +74,7 @@
 		class: className,
 		trigger,
 		children,
+		footer,
 		...rest
 	}: MenuOwnProps = $props();
 	setContext<MenuDensityContext>(menuDensityContextKey, () =>
@@ -222,10 +225,7 @@
 		loop: true,
 		preventOverflowTextSelection: false,
 		...(ariaLabel === undefined ? {} : { "aria-label": ariaLabel }),
-		class: [
-			"fixed inset-x-0 bottom-0 z-[var(--z-sheet)] max-h-[90vh] w-full overflow-y-auto overscroll-contain rounded-t-[18px] border-t border-border bg-bg-surface pb-[calc(12px+env(safe-area-inset-bottom))] shadow-modal focus-visible:outline-hidden",
-			className,
-		].filter(Boolean).join(" "),
+		class: "fixed inset-x-0 bottom-0 z-[var(--z-sheet)] w-full focus-visible:outline-hidden",
 	});
 </script>
 
@@ -241,14 +241,14 @@
 			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="fixed inset-0 z-[var(--z-sheet)] bg-backdrop" class:pointer-events-none={!scrimInteractive} style:opacity={1 - scrimFade.progress} style:transition={scrimFade.settling ? "opacity 220ms linear" : undefined} use:exemptFromBackgroundInert></div>{/if}
 			<DropdownMenu.ContentStatic {...sheetContentProps}>
 				{#snippet child({ props })}
-					<!-- A long sheet scrolls on short phones, and every item is tabindex -1 (roving
-					     focus), so the sheet itself must be focusable or axe's
-					     scrollable-region-focusable fails. Bits intercepts Tab inside the menu, so
-					     this adds no stray tab stop. Svelte cannot see role="menu" through the spread. -->
+					<!-- Keep the bits-ui focus target on the menu shell. SheetChrome gives the
+					     scrolling body a keyboard target too; Bits intercepts Tab inside the menu.
+					     Svelte cannot see role="menu" through the spread. -->
 					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 					<div {...props} id={contentId} tabindex={0} bind:this={contentNode} onclickcapture={swallowOpeningClick} onpointerdowncapture={(event: PointerEvent) => { openingClickDeadline = 0; (props["onpointerdowncapture"] as ((event: PointerEvent) => void) | undefined)?.(event); }} use:exemptFromBackgroundInert use:dragToDismiss={{ ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
-						<div class="mx-auto mt-[8px] mb-[6px] h-[4px] w-[38px] shrink-0 rounded-full bg-border" aria-hidden="true"></div>
-						{@render children()}
+						<SheetChrome {footer} class={className} menuBody>
+							{@render children()}
+						</SheetChrome>
 					</div>
 				{/snippet}
 			</DropdownMenu.ContentStatic>
@@ -263,6 +263,7 @@
 						use:exemptFromBackgroundInert
 					>
 						{@render children()}
+						{#if footer}<div class="mt-[12px] border-t border-border-subtle">{@render footer()}</div>{/if}
 					</div>
 				</div>
 			{/snippet}

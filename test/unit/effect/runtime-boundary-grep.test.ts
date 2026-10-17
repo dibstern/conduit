@@ -132,6 +132,24 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 			"storybook play() guard that narrows the icon query, not executable production code",
 	},
 	{
+		path: "src/lib/frontend/components/model/InstanceModelPicker.stories.ts",
+		snippetPattern: /The picker sheet handle is missing/,
+		reason:
+			"storybook play() guard that narrows the sheet handle query, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/ui/Menu.stories.ts",
+		snippetPattern: /The shared sheet chrome is missing/,
+		reason:
+			"storybook play() guard that narrows the sheet chrome query, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/ui/PhoneSheet.stories.ts",
+		snippetPattern: /Sheet body or footer is missing/,
+		reason:
+			"storybook play() guard that narrows the sheet body and footer query, not executable production code",
+	},
+	{
 		path: "src/lib/frontend/components/input/input-utils.ts",
 		snippetPattern: /GIF exceeds the 5 MB encoded size limit/,
 		reason: "browser attachment validation failure surfaced to UI caller",

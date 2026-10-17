@@ -88,6 +88,18 @@ export const BottomSheet: Story = {
 	parameters: { viewport: { defaultViewport: "mobile1" } },
 };
 
+export const BottomSheetLight: Story = {
+	...BottomSheet,
+	globals: { theme: "light" },
+};
+export const BottomSheetWithFooter: Story = {
+	args: { initiallyOpen: true, placement: "sheet", withFooter: true },
+};
+export const BottomSheetWithFooterLight: Story = {
+	...BottomSheetWithFooter,
+	globals: { theme: "light" },
+};
+
 export const Headerless: Story = {
 	args: {
 		initiallyOpen: true,

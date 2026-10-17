@@ -270,6 +270,15 @@ export const Open: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const picker = await openPicker(canvasElement);
+		if (sessionViewState.compact) {
+			await expect(picker.closest("[data-sheet-chrome]")).not.toBeNull();
+			const handle = picker
+				.closest("[data-sheet-chrome]")
+				?.querySelector("[data-sheet-handle]");
+			if (!handle) throw new Error("The picker sheet handle is missing");
+			await expect(handle.getBoundingClientRect().width).toBe(36);
+			await expect(handle.getBoundingClientRect().height).toBe(5);
+		}
 		await expect(
 			within(picker).getByTestId("picker-row-context"),
 		).toBeVisible();
