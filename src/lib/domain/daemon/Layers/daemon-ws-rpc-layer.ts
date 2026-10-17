@@ -28,6 +28,7 @@ import {
 import { getRecent } from "../../../daemon/recent-projects.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { getLogLevel } from "../../../logger.js";
+import type { PersistenceStore } from "../../../persistence/effect/live.js";
 import { makeCursorAuth } from "../../../provider/cursor/cursor-auth.js";
 import {
 	loadRelaySettings,
@@ -83,7 +84,7 @@ import {
 	updateInstance,
 } from "../Services/instance-manager-service.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
-import { optionalPersistenceStoreContext } from "../Services/project-read-database.js";
+import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	allProjects,
 	broadcastProjectList,
@@ -117,6 +118,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const baseContext = yield* Effect.context<
 			| ProjectRegistryTag
 			| SessionDirectory
+			| PersistenceStore
 			| ProjectSaveLockTag
 			| DaemonConfigRefTag
 			| DaemonEventBusTag
@@ -134,7 +136,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		>();
 		const activity = yield* SessionActivityTag;
 		const context = Context.add(baseContext, SessionActivityTag, activity).pipe(
-			Context.merge(yield* optionalPersistenceStoreContext),
+			Context.merge(yield* persistenceStoreContext),
 		);
 		const bus = yield* DaemonEventBusTag;
 		const cache = yield* RelayCacheTag;
@@ -198,6 +200,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				E,
 				| ProjectRegistryTag
 				| SessionDirectory
+				| PersistenceStore
 				| ProjectSaveLockTag
 				| DaemonConfigRefTag
 				| DaemonEventBusTag
@@ -297,6 +300,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| InstanceManagerStateTag
 				| ProjectRegistryTag
 				| SessionDirectory
+				| PersistenceStore
 				| DaemonConfigRefTag
 			>,
 		) =>
@@ -744,6 +748,12 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(wsRpcHandlers.GetUsageLimitsSetting(request)),
 			SetUsageLimitsSetting: (request) =>
 				run(wsRpcHandlers.SetUsageLimitsSetting(request)),
+			SetCursorUsageKeychain: (request) =>
+				run(
+					wsRpcHandlers
+						.SetCursorUsageKeychain(request)
+						.pipe(Effect.provideService(Usage, usage)),
+				),
 			ScanNow: (request) =>
 				run(
 					Effect.gen(function* () {
@@ -778,9 +788,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						Effect.mapError(
 							(error) =>
 								new WsRpcError({
-									...(error._tag === "AmbiguousSession"
-										? { code: "ambiguous-session" as const }
-										: {}),
 									message: error.message,
 								}),
 						),
@@ -809,7 +816,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 								"Declared worktree moves require a Conduit-managed OpenCode instance",
 						});
 					const target = yield* resolveDaemonOpenCodeSession(
-						configDir,
 						request.instanceId,
 						request.providerSessionId,
 					);

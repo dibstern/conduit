@@ -554,6 +554,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			id: AccountIdSchema.make("current-opencode"),
 			name: "Current OpenCode",
 			driver: "opencode" as const,
+			usageEligible: false as const,
 			url: "http://test.invalid:4096",
 		};
 		const namedClient = makeStubClient();

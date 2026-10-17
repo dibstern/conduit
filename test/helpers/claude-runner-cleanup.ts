@@ -13,8 +13,8 @@ export function testRunnerAlive(pid: number): boolean {
 	try {
 		process.kill(pid, 0);
 		return true;
-	} catch {
-		return false;
+	} catch (cause) {
+		return isRecord(cause) && cause["code"] === "EPERM";
 	}
 }
 
@@ -44,6 +44,9 @@ function registrations(
 			value["pid"] > 0
 		)
 			entries.push({
+				...(typeof value["driverKind"] === "string"
+					? { driverKind: value["driverKind"] }
+					: {}),
 				socketPath,
 				runnerId: value["runnerId"],
 				sessionId: value["sessionId"],
@@ -77,7 +80,7 @@ function requestShutdown(
 		socket.once("close", finish);
 		socket.once("connect", () =>
 			socket.write(
-				`${JSON.stringify({ type: "hello", protocolVersion: RUNNER_PROTOCOL_VERSION, buildId: entry.buildId, config: { workspaceRoot: projectDir } })}\n`,
+				`${JSON.stringify({ type: "hello", protocolVersion: RUNNER_PROTOCOL_VERSION, buildId: entry.buildId, driverKind: entry.driverKind, config: { workspaceRoot: projectDir } })}\n`,
 			),
 		);
 		socket.on("data", (chunk: Buffer) => {

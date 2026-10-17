@@ -3,6 +3,11 @@ import { ClaudeConfigDirSchema } from "./claude-config-dir.js";
 
 export const AccountIdSchema = Schema.String.pipe(Schema.brand("AccountId"));
 export type AccountId = typeof AccountIdSchema.Type;
+export const CursorUsageBindingSchema = Schema.Struct({
+	accountId: Schema.String,
+	subjectHash: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+});
+export type CursorUsageBinding = typeof CursorUsageBindingSchema.Type;
 export const MANAGED_OPENCODE_ACCOUNT_ID = AccountIdSchema.make("opencode");
 
 export const ClaudeAccountSchema = Schema.Struct({
@@ -22,6 +27,7 @@ export const OpenCodeAccountSchema = Schema.Struct({
 	driver: Schema.Literal("opencode"),
 	id: Schema.suspend(() => AccountIdSchema),
 	name: Schema.String,
+	usageEligible: Schema.Literal(false),
 	url: Schema.optional(Schema.String),
 	port: Schema.optional(Schema.Number),
 	managed: Schema.optional(Schema.Boolean),
@@ -40,7 +46,7 @@ export const CursorAccountSchema = Schema.Struct({
 	env: Schema.optional(
 		Schema.Record({ key: Schema.String, value: Schema.String }),
 	),
-	usageEligible: Schema.Literal(false),
+	usageEligible: Schema.Boolean,
 });
 export type CursorAccount = typeof CursorAccountSchema.Type;
 

@@ -142,6 +142,141 @@ test("background task stop shows the server refusal and keeps the task", async (
 	await attachScreen(page, testInfo);
 });
 
+for (const ending of [
+	"stop tasks",
+	"tasks finish",
+	"navigate",
+	"timeout",
+	"unsupported driver",
+] as const) {
+	test(`turn stop background-tasks follow-up: ${ending}`, async ({
+		page,
+		harness,
+	}, testInfo) => {
+		const { rpc } = await openChat(page, harness.relayBaseUrl, {
+			CancelSession: () => ({ ok: true }),
+			StopBackgroundTask: () => ({ ok: true }),
+		});
+		const sessionId = "sess-mockup-001";
+		rpc.setDaemonList("SubscribeInstances", {
+			instances: [
+				{
+					id: "stop-account",
+					name: "Stop account",
+					driver: ending === "unsupported driver" ? "opencode" : "claude",
+					isDefault: true,
+					port: 0,
+					managed: false,
+					status: "healthy",
+					restartCount: 0,
+					createdAt: 1,
+				},
+			],
+		});
+		const tasks = ["watch-tests", "watch-build"].map((id) => ({
+			id,
+			type: "local_bash",
+			description: id,
+			firstSeenAt: Date.now(),
+		}));
+		const row = {
+			id: sessionId,
+			projectSlug: "myapp",
+			accountId: "stop-account",
+			title: "Stop follow-up",
+			status: "busy",
+			updatedAt: Date.now(),
+			backgroundTasks: tasks,
+		};
+		rpc.upsertShellRow(row);
+		await expect(
+			page.getByTestId("composer-task-dots").locator("i"),
+		).toHaveCount(2);
+		await page.locator("#stop").click();
+		const cancel = await rpc.waitForRequest(
+			({ tag }) => tag === "CancelSession",
+		);
+		expect(cancel.payload).toEqual({
+			_tag: "CancelSession",
+			sessionId,
+			commandId: expect.any(String),
+		});
+		const offer = page
+			.getByTestId("toast")
+			.filter({ hasText: "Turn stopped." });
+		if (ending === "unsupported driver") {
+			// A later wire round trip ensures the stop reply was processed.
+			rpc.upsertShellRow({ ...row, status: "idle" });
+			await expect(page.locator("#stop")).toBeHidden();
+			await expect(offer).toHaveCount(0);
+		} else {
+			await expect(offer).toContainText("Turn stopped. 2 tasks still running");
+			await expect(
+				offer.getByRole("button", { name: "Stop them" }),
+			).toBeVisible();
+			// Cancel alone must not hide working while the server still says busy.
+			await expect(page.locator("#stop")).toBeVisible();
+			rpc.upsertShellRow({ ...row, status: "idle" });
+			await expect(page.locator("#stop")).toBeHidden();
+			if (ending === "stop tasks") {
+				await offer.getByRole("button", { name: "Stop them" }).click();
+				await rpc.waitForRequest(
+					({ tag, payload }) =>
+						tag === "StopBackgroundTask" && payload["taskId"] === "watch-tests",
+				);
+				expect(
+					rpc
+						.getRequests()
+						.filter(({ tag }) => tag === "StopBackgroundTask")
+						.map(({ payload }) => payload),
+				).toEqual([
+					{ _tag: "StopBackgroundTask", sessionId, taskId: "watch-build" },
+					{ _tag: "StopBackgroundTask", sessionId, taskId: "watch-tests" },
+				]);
+				// Requests alone do not remove tasks; the server owns their rows.
+				await expect(
+					page.getByTestId("composer-task-dots").locator("i"),
+				).toHaveCount(2);
+				rpc.upsertShellRow({ ...row, status: "idle", backgroundTasks: [] });
+			} else if (ending === "tasks finish") {
+				rpc.upsertShellRow({
+					...row,
+					status: "idle",
+					backgroundTasks: tasks.slice(0, 1),
+				});
+				await expect(offer).toContainText("Turn stopped. 1 task still running");
+				rpc.upsertShellRow({ ...row, status: "idle", backgroundTasks: [] });
+			} else if (ending === "navigate") {
+				rpc.upsertShellRow({
+					...row,
+					id: "another-session",
+					title: "Another session",
+					status: "idle",
+					backgroundTasks: [],
+				});
+				await page
+					.getByRole("link", { name: /Another session/ })
+					.getByText("Another session", { exact: true })
+					.click();
+				await expect(page).toHaveURL(/\/s\/another-session$/);
+			}
+			await expect(offer).toHaveCount(0, {
+				timeout: ending === "timeout" ? 8_000 : 3_000,
+			});
+		}
+		if (ending !== "stop tasks")
+			expect(
+				rpc.getRequests().filter(({ tag }) => tag === "StopBackgroundTask"),
+			).toEqual([]);
+		const path = testInfo.outputPath("stop-background-tasks.png");
+		await page.screenshot({ path });
+		await testInfo.attach("stop-background-tasks", {
+			path,
+			contentType: "image/png",
+		});
+	});
+}
+
 test.describe("rewind confirmation", () => {
 	let browserCode: string;
 	test.beforeAll(async () => {

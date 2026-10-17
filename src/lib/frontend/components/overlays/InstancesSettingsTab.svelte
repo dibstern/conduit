@@ -40,6 +40,7 @@
 		formPort: "",
 		formUrl: "",
 		formEnv: "",
+		initialFormEnv: "",
 		formEnvOpen: false,
 		formSaving: false,
 		defaultSaving: false,
@@ -127,6 +128,7 @@
 		state.formPort = "";
 		state.formUrl = "";
 		state.formEnv = "";
+		state.initialFormEnv = "";
 		state.formEnvOpen = false;
 		state.formSaving = false;
 	}
@@ -159,6 +161,7 @@
 					.map(([k, v]) => `${k}=${v}`)
 					.join("\n")
 			: "";
+		state.initialFormEnv = state.formEnv;
 		onToggleForm(`instance-edit:${inst.id}`);
 	}
 	/** Parse `KEY=VALUE` lines into an env record; blank/`#` lines are ignored. */
@@ -192,7 +195,8 @@
 			showToast("URL is required", { variant: "warn" });
 			return;
 		}
-		const env = formTraits?.runsOpenCodeServer && state.formManaged ? parseEnv(state.formEnv) : undefined;
+		const env = (formTraits?.runsOpenCodeServer && state.formManaged) || formPresentation.environment ? parseEnv(state.formEnv) : undefined;
+		const configEnv = formPresentation.environment && state.formEnv !== state.initialFormEnv ? { env: env ?? {} } : {};
 		const configDir = state.formConfigDir.trim() || undefined;
 		const url = !state.formManaged && port === undefined ? endpoint || undefined : undefined;
 		state.formSaving = true;
@@ -202,7 +206,7 @@
 						instanceId: editingInstanceId,
 						name,
 						...(usesConfigDirectory
-							? { configDir: configDir ?? "" }
+							? { configDir: configDir ?? "", ...configEnv }
 							: state.formManaged ? { ...(port !== undefined ? { port } : {}), env: env ?? {} } : {}),
 					})
 				: rpc("AddInstance", {
@@ -212,6 +216,7 @@
 							? {
 									managed: false,
 									...(configDir !== undefined ? { configDir } : {}),
+									...configEnv,
 								}
 							: {
 									managed: state.formManaged,
@@ -329,11 +334,13 @@
 		</div>
 		{#if formTraits?.accountKind === "config-directory"}
 			<p class="text-[11px] text-text-muted">Folder changes apply on the next turn. Leave the folder empty to use the login Conduit was launched with.</p>
-		{:else if state.formManaged}
+		{/if}
+		{#if formPresentation.environment || (formTraits?.runsOpenCodeServer && state.formManaged)}
 			<SettingsGroup title="Environment variables" summary="KEY=VALUE per line" collapsible bind:open={state.formEnvOpen}>
 				<label for="instance-form-env" class="block p-3">
 					<span class="sr-only">Environment variables</span>
-					<Textarea id="instance-form-env" data-testid="instance-form-env" rows={2} class="resize-y font-mono" placeholder="ANTHROPIC_API_KEY=sk-ant-..." bind:value={state.formEnv} disabled={state.formSaving} />
+					<Textarea id="instance-form-env" data-testid="instance-form-env" rows={2} class="resize-y font-mono" placeholder={formPresentation.environment?.placeholder ?? "ANTHROPIC_API_KEY=sk-ant-..."} bind:value={state.formEnv} disabled={state.formSaving} />
+					{#if formPresentation.environment}<p class="mt-2 text-[11px] leading-[1.5] text-text-dimmer">{formPresentation.environment.hint}</p>{/if}
 				</label>
 			</SettingsGroup>
 		{/if}

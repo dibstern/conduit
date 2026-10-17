@@ -37,7 +37,7 @@ import {
 } from "../../helpers/process-harness.js";
 
 function snapshot(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath(), {
+	const db = new Database(harness.daemonStorePath(), {
 		readonly: true,
 	});
 	try {

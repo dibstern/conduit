@@ -15,6 +15,7 @@ import {
 	normalizeAccountConfig,
 	resolve as resolveAccount,
 } from "../account-directory.js";
+import { CursorUsageBindingSchema } from "../contracts/account.js";
 import {
 	AccountUnroutable,
 	UsageLimitsSettingSchema,
@@ -171,6 +172,9 @@ const DaemonConfigFields = {
 	),
 	worktreeCleanup: Schema.optionalWith(WorktreeCleanupSchema, { exact: true }),
 	usageLimits: Schema.optionalWith(UsageLimitsSettingSchema, { exact: true }),
+	cursorUsageBinding: Schema.optionalWith(CursorUsageBindingSchema, {
+		exact: true,
+	}),
 	keepAwakeCommand: Schema.optionalWith(Schema.String, { exact: true }),
 	keepAwakeArgs: Schema.optionalWith(
 		Schema.mutable(Schema.Array(Schema.String)),

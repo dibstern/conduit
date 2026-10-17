@@ -87,6 +87,7 @@
 		return (inp?.["command"] as string | undefined) ?? null;
 	}
 	const bashCommand = $derived(commandOf(message));
+	const movedToBackground = $derived(message.metadata?.['movedToBackground'] === true);
 	const cursorDetail = $derived(typeof message.metadata?.['cursorToolType'] === "string" && (message.metadata['fileChange'] || message.metadata['plan'] || message.metadata['computerUse'] || message.metadata['media'] || message.metadata['output'] !== undefined || ensureCanonical(message.name, message.input).tool === "Unknown"));
 
 	// Description preview (prefer input subtitle, then first line of result, then status)
@@ -127,6 +128,7 @@
 		{descText}
 	</span>
 	{#if typeof message.metadata?.['cursorToolType'] === "string" && message.metadata['truncated'] === true}<span class="text-xs text-text-muted">Truncated</span>{/if}
+	{#if movedToBackground}<span class="text-xs text-text-muted">Moved to background</span>{/if}
 
 	{#if toolSummary.tags}
 		{#each toolSummary.tags as tag}

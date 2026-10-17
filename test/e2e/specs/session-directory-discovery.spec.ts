@@ -139,9 +139,6 @@ test("settings, commands and skill documents follow a workspace change and sessi
 				};
 			},
 		},
-		handlers: {
-			GetInstances: () => instances,
-		},
 	});
 	await mockRelayWebSocket(page, {
 		initMessages: [

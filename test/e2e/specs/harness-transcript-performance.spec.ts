@@ -187,7 +187,7 @@ test("one streamed part renders markdown once in a 292-text-part message", async
 }, testInfo) => {
 	test.setTimeout(120_000);
 	await harness.terminate();
-	await seed(harness.projectStorePath(), [
+	await seed(harness.daemonStorePath(), [
 		{ id: STREAM_SESSION, parts: TEXT_PARTS, textOnly: true },
 	]);
 	await harness.restart({ keepPort: true });
@@ -283,7 +283,7 @@ test("snapshot installation scales below 8x for 4x as many parts", async ({
 		textOnly: false,
 	}));
 	await harness.terminate();
-	await seed(harness.projectStorePath(), sessions);
+	await seed(harness.daemonStorePath(), sessions);
 	await harness.restart({ keepPort: true });
 	await page.addInitScript(() =>
 		Reflect.set(window, "__conduitMeasureTranscriptApply", true),

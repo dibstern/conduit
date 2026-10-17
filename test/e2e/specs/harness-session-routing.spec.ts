@@ -149,16 +149,16 @@ test("session RPCs use the owner even when the page attaches to another project"
 		);
 		steps.replyInB = true;
 		const countPrompt = (slug: string): number => {
-			const db = new DatabaseSync(harness.projectStorePath(slug), {
+			const db = new DatabaseSync(harness.daemonStorePath(), {
 				readOnly: true,
 			});
 			try {
 				return Number(
 					db
 						.prepare(
-							"SELECT count(*) AS count FROM messages WHERE role = 'user' AND session_id = ?",
+							"SELECT count(*) AS count FROM messages m JOIN sessions s ON s.id = m.session_id WHERE m.role = 'user' AND m.session_id = ? AND s.project_id = ?",
 						)
-						.get(b.sessionId)?.["count"],
+						.get(b.sessionId, slug)?.["count"],
 				);
 			} finally {
 				db.close();

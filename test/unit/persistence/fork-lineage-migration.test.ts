@@ -20,6 +20,7 @@ import {
 	loadDaemonConfigResult,
 } from "../../../src/lib/daemon/config-persistence.js";
 import { serializeRecent } from "../../../src/lib/daemon/recent-projects.js";
+import { makeDaemonSharedStoreLayer } from "../../../src/lib/domain/daemon/Layers/daemon-shared-store-layer.js";
 import {
 	effectMigrationEntries,
 	makeEffectSqlMigrator,
@@ -35,10 +36,20 @@ const migrateWithConfig = (dir: string) =>
 		loaded.left._tag === "NotFound"
 			? Effect.succeed(defaultDaemonConfig())
 			: loaded;
-		return yield* migrateForkLineage(dir, config);
+		if (
+			existsSync(join(dir, "projects")) ||
+			existsSync(join(dir, "events.db"))
+		) {
+			return yield* Effect.void.pipe(
+				Effect.provide(makeDaemonSharedStoreLayer(dir, config)),
+			);
+		}
+		return yield* Effect.flatMap(SqlClient.SqlClient, (sql) =>
+			migrateForkLineage(dir, config, sql),
+		).pipe(Effect.provide(makePersistenceEffectLayer(":memory:", true)));
 	});
 
-function makePersistenceEffectLayer(filename: string, lineage = false) {
+function makePersistenceEffectLayer(filename: string, lineage = true) {
 	const sqlite = SqliteNode.layer({ filename }).pipe(
 		Layer.provide(Reactivity.layer),
 	);
@@ -64,7 +75,8 @@ it.each([
 ])("imports sidecar lineage and keeps Forks top-level, legacy containment: %s", async (contained) => {
 	const dir = mkdtempSync(join(tmpdir(), "fork-migration-lineage-"));
 	const project = join(dir, "project");
-	const filename = join(projectStorageDir(dir, "project"), "events.db");
+	const legacyFilename = join(projectStorageDir(dir, "project"), "events.db");
+	const filename = join(dir, "events.db");
 	const sidecar = join(dir, "fork-metadata.json");
 	try {
 		mkdirSync(project, { recursive: true });
@@ -91,7 +103,7 @@ it.each([
 				yield* refreshSidebar(["parent", "child"], 0);
 				// The importer runs before project migrations during an upgrade.
 				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 60`;
-			}).pipe(Effect.provide(makePersistenceEffectLayer(filename, true))),
+			}).pipe(Effect.provide(makePersistenceEffectLayer(legacyFilename, true))),
 		);
 		await Effect.runPromise(migrateWithConfig(dir));
 		const snapshot = () =>
@@ -129,7 +141,7 @@ it.each([
 					expect(
 						yield* sql`SELECT root_id, version FROM sessions WHERE id = 'agent'`,
 					).toEqual([
-						{ root_id: "child", version: contained ? child?.version : 0 },
+						{ root_id: "child", version: contained ? child?.version : 1 },
 					]);
 					return {
 						sessions: yield* sql`SELECT * FROM sessions ORDER BY id`,
@@ -209,7 +221,8 @@ it.each([
 it("repairs an archived boundary whose event is present but timestamp is missing", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "fork-migration-repair-"));
 	const project = join(dir, "project");
-	const filename = join(projectStorageDir(dir, "project"), "events.db");
+	const legacyFilename = join(projectStorageDir(dir, "project"), "events.db");
+	const filename = join(dir, "events.db");
 	const archive = join(dir, "fork-metadata-unresolved.json");
 	try {
 		mkdirSync(project, { recursive: true });
@@ -230,18 +243,20 @@ it("repairs an archived boundary whose event is present but timestamp is missing
 				yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at) VALUES ('parent', 'opencode', 1, 1), ('child', 'opencode', 1, 1)`;
 				yield* sql`UPDATE sessions SET parent_id = 'parent', fork_point_event = 'boundary' WHERE id = 'child'`;
 				yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at) VALUES ('boundary', 'parent', 'assistant', 200, 200)`;
-			}).pipe(Effect.provide(makePersistenceEffectLayer(filename))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(legacyFilename, false)),
+			),
 		);
 		await Effect.runPromise(migrateWithConfig(dir));
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				expect(
-					yield* sql`SELECT parent_id, fork_point_event, fork_point_timestamp,
+					yield* sql`SELECT forked_from, fork_point_event, fork_point_timestamp,
 				fork_point_message_id FROM sessions WHERE id = 'child'`,
 				).toEqual([
 					{
-						parent_id: "parent",
+						forked_from: "parent",
 						fork_point_event: "boundary",
 						fork_point_timestamp: 200,
 						fork_point_message_id: "boundary",
@@ -388,11 +403,11 @@ it("imports all known projects before deleting the sidecar, without appending hi
 			await Effect.runPromise(migrateWithConfig(dir));
 			expect(
 				prepared.mock.calls.filter(([query]) =>
-					/SELECT id, parent_id, fork_point_event FROM sessions\s+WHERE id IN/.test(
+					/SELECT id, parent_id, fork_point_event.* FROM sessions\s+WHERE id IN/.test(
 						query,
 					),
 				),
-			).toHaveLength(2);
+			).toHaveLength(1);
 		} finally {
 			prepared.mockRestore();
 		}
@@ -401,11 +416,11 @@ it("imports all known projects before deleting the sidecar, without appending hi
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
 					expect(
-						yield* sql`SELECT parent_id, fork_point_event, fork_point_timestamp,
+						yield* sql`SELECT forked_from, fork_point_event, fork_point_timestamp,
 					fork_point_message_id FROM sessions WHERE id = ${`child-${i}`}`,
 					).toEqual([
 						{
-							parent_id: `parent-${i}`,
+							forked_from: `parent-${i}`,
 							fork_point_event: `message-${i}`,
 							fork_point_timestamp: 100,
 							fork_point_message_id: `message-${i}`,
@@ -416,9 +431,7 @@ it("imports all known projects before deleting the sidecar, without appending hi
 					]);
 				}).pipe(
 					Effect.provide(
-						makePersistenceEffectLayer(
-							join(projectStorageDir(dir, String(i)), "events.db"),
-						),
+						makePersistenceEffectLayer(join(dir, "events.db"), true),
 					),
 				),
 			);
@@ -427,7 +440,11 @@ it("imports all known projects before deleting the sidecar, without appending hi
 		const clean = vi.spyOn(Database.prototype, "prepare");
 		try {
 			await Effect.runPromise(migrateWithConfig(dir));
-			expect(clean).not.toHaveBeenCalled();
+			expect(
+				clean.mock.calls.filter(([query]) =>
+					query.includes("WHERE id IN (SELECT value FROM json_each"),
+				),
+			).toEqual([]);
 		} finally {
 			clean.mockRestore();
 		}
@@ -469,7 +486,8 @@ for (const kind of [
 it("retrying an incomplete import does not advance an already imported session", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "fork-migration-retry-"));
 	const project = join(dir, "project");
-	const filename = join(projectStorageDir(dir, "project"), "events.db");
+	const legacyFilename = join(projectStorageDir(dir, "project"), "events.db");
+	const filename = join(dir, "events.db");
 	try {
 		mkdirSync(project, { recursive: true });
 		mkdirSync(projectStorageDir(dir, "project"), { recursive: true });
@@ -497,7 +515,9 @@ it("retrying an incomplete import does not advance an already imported session",
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at) VALUES ('parent', 'claude', 1, 1), ('child', 'claude', 1, 1)`;
-			}).pipe(Effect.provide(makePersistenceEffectLayer(filename))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(legacyFilename, false)),
+			),
 		);
 		await Effect.runPromise(migrateWithConfig(dir));
 		const snapshot = () =>
@@ -510,7 +530,8 @@ it("retrying an incomplete import does not advance an already imported session",
 		const first = await snapshot();
 		await Effect.runPromise(migrateWithConfig(dir));
 		expect(await snapshot()).toEqual(first);
-		expect(existsSync(join(dir, "fork-metadata.json"))).toBe(true);
+		expect(existsSync(join(dir, "fork-metadata.json"))).toBe(false);
+		expect(existsSync(join(dir, "fork-metadata-unresolved.json"))).toBe(true);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -537,7 +558,8 @@ it("retires unmatched lineage to a startup archive instead of keeping the active
 it("retries archived lineage when an unavailable project returns and merges live entries", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "fork-migration-returning-"));
 	const project = join(dir, "project");
-	const filename = join(projectStorageDir(dir, "project"), "events.db");
+	const legacyFilename = join(projectStorageDir(dir, "project"), "events.db");
+	const filename = join(dir, "events.db");
 	const sidecar = join(dir, "fork-metadata.json");
 	const archive = join(dir, "fork-metadata-unresolved.json");
 	try {
@@ -562,7 +584,9 @@ it("retries archived lineage when an unavailable project returns and merges live
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at) VALUES ('parent', 'opencode', 1, 1), ('child', 'opencode', 1, 1)`;
 				yield* sql`INSERT INTO messages (id, session_id, role, text, created_at, updated_at) VALUES ('point', 'parent', 'assistant', 'answer', 100, 100)`;
-			}).pipe(Effect.provide(makePersistenceEffectLayer(filename))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(legacyFilename, false)),
+			),
 		);
 		await Effect.runPromise(migrateWithConfig(dir));
 		expect(existsSync(sidecar)).toBe(false);
@@ -573,10 +597,10 @@ it("retries archived lineage when an unavailable project returns and merges live
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				expect(
-					yield* sql`SELECT parent_id, fork_point_event, fork_point_timestamp, fork_point_message_id FROM sessions WHERE id = 'child'`,
+					yield* sql`SELECT forked_from, fork_point_event, fork_point_timestamp, fork_point_message_id FROM sessions WHERE id = 'child'`,
 				).toEqual([
 					{
-						parent_id: "parent",
+						forked_from: "parent",
 						fork_point_event: "point",
 						fork_point_timestamp: 100,
 						fork_point_message_id: "point",
@@ -591,8 +615,8 @@ it("retries archived lineage when an unavailable project returns and merges live
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				expect(
-					yield* sql`SELECT parent_id, fork_point_event FROM sessions WHERE id = 'later'`,
-				).toEqual([{ parent_id: "parent", fork_point_event: "point" }]);
+					yield* sql`SELECT forked_from, fork_point_event FROM sessions WHERE id = 'later'`,
+				).toEqual([{ forked_from: "parent", fork_point_event: "point" }]);
 			}).pipe(Effect.provide(makePersistenceEffectLayer(filename))),
 		);
 	} finally {

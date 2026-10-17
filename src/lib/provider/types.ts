@@ -11,6 +11,7 @@ import type {
 	SessionGoalChangedPayload,
 	SessionHandoffDeliveredPayload,
 } from "../contracts/stored-event.js";
+import type { ModelInfo as WireModelInfo } from "../contracts/ws-rpc.js";
 import type { NativeThread } from "../persistence/effect/provider-state-effect.js";
 import type {
 	ProviderPermissionUpdate,
@@ -182,6 +183,7 @@ export interface ModelInfo {
 	readonly resolvedModel?: string;
 	readonly limit?: { context?: number; output?: number };
 	readonly variants?: Record<string, Record<string, unknown>>;
+	readonly parameters?: WireModelInfo["parameters"];
 	/** Full request ids for catalog entries grouped by routing scope. */
 	readonly routingOptions?: readonly ContextWindowOption[];
 	/**

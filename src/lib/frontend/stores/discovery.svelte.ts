@@ -125,6 +125,7 @@ const providersFromGetModelsResponse = (
 					}
 				: {}),
 			...(model.variants ? { variants: [...model.variants] } : {}),
+			...(model.parameters ? { parameters: model.parameters } : {}),
 			...(model.contextWindowOptions
 				? {
 						contextWindowOptions:

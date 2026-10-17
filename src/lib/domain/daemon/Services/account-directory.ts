@@ -18,6 +18,7 @@ import type { AccountUnroutable } from "../../../contracts/limit-recovery.js";
 import type { KnownProviderDriverKind } from "../../../contracts/provider-instance.js";
 import { loadAccountsState } from "../../../daemon/config-persistence.js";
 import type { ClaudeConfigDir } from "../../../provider/claude/claude-sdk-env.js";
+import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import type { DaemonInstanceConfig } from "./daemon-state.js";
 
 export class AccountDirectory extends Context.Tag("AccountDirectory")<
@@ -44,12 +45,38 @@ export function makeAccountDirectory(
 	read: Effect.Effect<AccountsState>,
 	commit?: AccountDirectory["Type"]["apply"],
 ): AccountDirectory["Type"] {
+	// Cursor's Keychain binding is read from the caller's context, so a reader
+	// running outside the daemon's request context must provide DaemonConfigRefTag
+	// or bound accounts look ineligible.
+	const eligible = Effect.gen(function* () {
+		const state = yield* read;
+		const config = yield* Effect.serviceOption(DaemonConfigRefTag);
+		const binding =
+			config._tag === "Some"
+				? (yield* Ref.get(config.value)).cursorUsageBinding
+				: undefined;
+		return {
+			...state,
+			accounts: state.accounts.map((account) =>
+				account.driver === "cursor"
+					? {
+							...account,
+							usageEligible: Boolean(
+								account.env?.["CURSOR_AUTH_TOKEN"]?.trim() ||
+									process.env["CURSOR_AUTH_TOKEN"]?.trim() ||
+									binding?.accountId === account.id,
+							),
+						}
+					: account,
+			),
+		};
+	});
 	return {
-		snapshot: read,
-		list: Effect.map(read, list),
+		snapshot: eligible,
+		list: Effect.map(eligible, list),
 		defaultFor: (driver) =>
-			Effect.map(read, (state) => defaultFor(state, driver)),
-		resolve: (ref) => Effect.flatMap(read, (state) => resolve(state, ref)),
+			Effect.map(eligible, (state) => defaultFor(state, driver)),
+		resolve: (ref) => Effect.flatMap(eligible, (state) => resolve(state, ref)),
 		apply:
 			commit ??
 			((change) =>

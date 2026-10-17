@@ -62,6 +62,7 @@ const providerFromCatalog = (
 				name: model.name,
 				provider: driver,
 				...(efforts.length > 0 ? { variants: [...efforts] } : {}),
+				...(model.parameters ? { parameters: model.parameters } : {}),
 				...(model.limit ? { limit: { ...model.limit } } : {}),
 				...(model.contextWindowOptions?.length
 					? {

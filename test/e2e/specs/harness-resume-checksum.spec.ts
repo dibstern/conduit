@@ -199,7 +199,7 @@ test("a resume is checked against the server, and the server wins", async ({
 		"The wire is the same on every device; desktop shows the sidebar beside the transcript.",
 	);
 	test.setTimeout(300_000);
-	const store = harness.projectStorePath();
+	const store = harness.daemonStorePath();
 	const counter = () => {
 		const db = new DatabaseSync(store, { readOnly: true });
 		try {

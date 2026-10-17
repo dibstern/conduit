@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect";
 import type { Account } from "../../contracts/account.js";
+import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import { ProviderInstanceFailure } from "../errors.js";
 import type { RunnerDriverPieces } from "../runner/runner-provider-instance.js";
 import type { ModelInfo, ProviderCapabilities } from "../types.js";
@@ -71,6 +72,25 @@ export function cursorModelInfo(model: CursorModel): ModelInfo {
 							},
 						]),
 					),
+					parameters: {
+						rows: (model.parameters ?? []).map((parameter) => ({
+							id: parameter.id,
+							label: parameter.displayName || parameter.id,
+							values: parameter.values.map(({ value, displayName }) => ({
+								value,
+								label:
+									displayName?.replace(/[\u200b-\u200d\ufeff]/g, "").trim() ||
+									value,
+							})),
+						})),
+						combinations: variants.map(({ key, variant }) => ({
+							variant: key,
+							values: Object.fromEntries(
+								variant.params.map(({ id, value }) => [id, value]),
+							),
+							...(variant === defaultVariant ? { isDefault: true } : {}),
+						})),
+					},
 				}
 			: {}),
 	};
@@ -186,7 +206,8 @@ export const discoverCursorEffect = (
 			supportsPermissions: false,
 			supportsQuestions: true,
 			supportsAttachments: false,
-			supportsFork: false,
+			supportsFork:
+				PROVIDER_DRIVERS.cursor.forkStrategy === "transcript-digest",
 			supportsRevert: false,
 			commands: workspaceRoot
 				? yield* discoverCursorSkillsEffect(workspaceRoot)
