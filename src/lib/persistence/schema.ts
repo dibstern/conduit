@@ -96,6 +96,7 @@ export const MESSAGE_PART_SURFACING_MIGRATION =
 	"0063_message_part_surfacing.sql";
 export const SESSIONS_SETTLED_SHELF_INDEX_MIGRATION =
 	"0064_sessions_settled_shelf_index.sql";
+export const SURFACING_MARKS_MIGRATION = "0065_surfacing_marks.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

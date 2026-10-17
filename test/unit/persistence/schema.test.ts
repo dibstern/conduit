@@ -35,6 +35,7 @@ describe("Schema Migration", () => {
 				('other', 'beta', 'Other', 'claude', NULL, 10, NULL, 1, 1)`;
 				expect(yield* makeEffectSqlMigrator()).toEqual([
 					[65, "sessions_settled_shelf_index"],
+					[66, "surfacing_marks"],
 				]);
 				for (const [filter, count] of [
 					["", 2],
@@ -84,6 +85,7 @@ describe("Schema Migration", () => {
 					[63, "goal_check_metadata"],
 					[64, "message_part_surfacing"],
 					[65, "sessions_settled_shelf_index"],
+					[66, "surfacing_marks"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -138,6 +140,7 @@ describe("Schema Migration", () => {
 				"session_sidebar_horizon",
 				"sessions",
 				"store_identity",
+				"surfacing_marks",
 				"tool_content",
 				"turns",
 			]);

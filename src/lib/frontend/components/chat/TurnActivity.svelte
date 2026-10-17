@@ -2,12 +2,15 @@
      Skills, task status and the bill stay in the step log or duration hover.
      Resting on the turn prefetches tool details; a strip tap opens its log row. -->
 <script lang="ts">
-	import { tick, untrack } from "svelte";
+	import { onDestroy, tick, untrack } from "svelte";
 	import type { CategorySet } from "../../../contracts/category-set.js";
 	import type { MessageSurfacingStatus } from "../../../contracts/message-surfacing.js";
 	import { messageSurfacing, sessionSurfaceLevel, setSessionSurfaceLevel, touchSurfaceSession, makeSurfaceDefault } from "../../stores/message-surfacing.svelte.js";
 	import { surfaceTurn, surfaceTime, type SurfaceLevel, type SurfacePart, type SurfacePin } from "../../utils/surface-turn.js";
 	import SurfacingCard, { type SurfacingRegions } from "./SurfacingCard.svelte";
+	import { MARK_GLYPHS, SurfacingFeedback } from "../../stores/surfacing-feedback.svelte.js";
+	import SurfacingMarkActions from "./SurfacingMarkActions.svelte";
+	import SurfacingMarkWhy from "./SurfacingMarkWhy.svelte";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { reveal, revealedPart } from "../../stores/reveal.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
@@ -114,8 +117,15 @@
 	let picked = $state<string | null>(null);
 	let folded = $state<boolean | null>(null);
 	let digits = "";
+	const feedback = new SurfacingFeedback(() => sessionId, () => surfacingConfig.categorySet, (place) => {
+		void tick().then(() => {
+			const target = place === "card" ? panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-msg-card"]') : panelEl?.querySelector<HTMLElement>(`[data-testid="${place}"] button`);
+			target?.focus({ preventScroll: true });
+		});
+	}, pick, (uuid) => { const part = segment.activity.find((part) => part.uuid === uuid); return part?.type === "assistant" ? part : undefined; });
+	onDestroy(() => feedback.dispose());
 	const surface = $derived(surfaceTurn({
-		parts: segment.activity, turnParts: turn.segments.flatMap((block) => block.activity),
+		parts: segment.activity.map((part) => part.type === "assistant" ? feedback.annotate(part) : part), turnParts: turn.segments.flatMap((block) => block.activity.map((part) => part.type === "assistant" ? feedback.annotate(part) : part)),
 		positions: stripLayout(segment, turn, final, now), categorySet: surfacingConfig.categorySet,
 		level, live, latestTurn, latestBlock: final, hasRecap, picked, folded, start: turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0,
 	}));
@@ -142,6 +152,7 @@
 	}
 	function surfaceCommand(event: KeyboardEvent) {
 		const target = event.target;
+		if (!event.defaultPrevented && event.key === "Escape" && feedback.pending) { event.preventDefault(); feedback.cancel(); return; }
 		if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable)) return;
 		if (/^\d$/.test(event.key)) { event.preventDefault(); digits = (digits + event.key).slice(-8); return; }
 		const key = event.key;
@@ -150,6 +161,7 @@
 		// Plain session shortcuts bubble to SessionBar; focused-turn keys own them first.
 		event.preventDefault();
 		if (onSurfacingShortcut?.(key)) return;
+		if (feedback.command(key, surface.card)) return;
 		if (key === "ArrowLeft" && surface.previous) pick(surface.previous);
 		else if (key === "ArrowRight" && surface.next) pick(surface.next);
 		else if (key === "Home" && surface.first) pick(surface.first);
@@ -234,6 +246,33 @@
 	}
 </script>
 
+{#snippet markLabel(pin: SurfacePin)}
+	{#if pin.part.surfacingMark}
+		{@const mark = pin.part.surfacingMark}
+		<span class="max-w-full break-words text-[12px] font-medium" style:color={mark.direction === "raise" ? "var(--color-success)" : mark.direction === "retype" ? "var(--color-accent)" : "var(--color-text-secondary)"} data-testid="surfacing-mark-label">{MARK_GLYPHS[mark.direction ?? "raise"]} you{mark.reason ? ` · ${mark.reason}` : ""}</span>
+	{/if}
+{/snippet}
+
+{#snippet markHead(pin: SurfacePin)}
+	{@render surfacingRegions.cardHead?.(pin)}
+	{@render markLabel(pin)}
+{/snippet}
+{#snippet markFoot(pin: SurfacePin)}
+	{@render surfacingRegions.cardFoot?.(pin)}
+	<SurfacingMarkActions {pin} {feedback} canSave={!!sessionId} />
+{/snippet}
+{#snippet markWhy(pin: SurfacePin)}
+	{@render surfacingRegions.why?.(pin)}
+	<SurfacingMarkWhy {pin} {feedback} categorySet={surfacingConfig.categorySet} />
+{/snippet}
+{#snippet markBelow(view: ReturnType<typeof surfaceTurn>, cite: (partId: string | null) => void)}
+	{@render surfacingRegions.belowStrip?.(view, cite)}
+	{#if feedback.toast}
+		<div role="status" class="mark-toast" data-testid="surfacing-mark-toast"><span>{feedback.toast.text}</span><Button variant="ghost" size="content" tone="inherit" class="rounded-full px-[10px] h-[24px] max-md:h-[32px] bg-inverse-text/12 font-semibold" data-testid="surfacing-toast-undo" disabled={feedback.saving} onclick={() => feedback.undo()}>Undo</Button></div>
+	{/if}
+	{#if feedback.error && !feedback.pending}<p role="alert" class="mt-[6px] text-[12px] text-error">{feedback.error}</p>{/if}
+{/snippet}
+
 <div bind:this={panelEl} role={surfacingActive ? "group" : undefined} aria-label={surfacingActive ? "Turn activity" : undefined} onkeydown={surfacingActive ? surfaceCommand : undefined} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
 	<AssistantHeader message={segment.reply[0]} {sessionId} {forkMessageId} {model} {providerId} createdAt={segment.reply.length > 0 ? undefined : segment.activity[0]?.createdAt} />
 	<div class="md:ml-[42px]">
@@ -277,7 +316,7 @@
 				{#if onsummarize}<span class="hidden md:contents"><Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] shrink-0" onclick={onsummarize}>✦ Summarize</Button></span>{/if}
 			</div>
 			{#if surfacingActive}
-				<SurfacingCard view={surface} {live} {level} overridden={override !== undefined} regions={surfacingRegions}
+				<SurfacingCard view={surface} {live} {level} overridden={override !== undefined} regions={{ ...surfacingRegions, cardHead: markHead, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
 					startTime={surfaceTime((segment.activity[0]?.createdAt ?? turn.user?.createdAt ?? 0) - (turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0))}
 					endTime={surfaceTime(duration ?? 0)} onpick={pick} onlevel={selectLevel}
 					ondefault={async () => { if (sessionId) await makeSurfaceDefault(sessionId, level); }}
@@ -310,6 +349,20 @@
 					{@const latestLiveStep = live && i === segment.activity.length - 1}
 					<div data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
 						<ActivityRow {part} {liveTasks} {taskListedAt} live={latestLiveStep} duration={durations?.[i]} highlight={part.uuid === focusUuid} messageNumber={part.type === "assistant" ? surfacingActive ? part.surfacingOrdinal : messageNumber(i) : undefined} />
+						{#if surfacingActive && expanded && part.type === "assistant"}
+							{@const pin = surface.messages.find((message) => message.part.uuid === part.uuid)}
+							{#if pin}
+								{@const place = `surfacing-step-mark-${pin.number ?? pin.part.uuid}`}
+								<div data-testid={place} class="mb-[8px] ml-[20px]">
+									<div class="flex flex-wrap items-center gap-[4px]">
+										<Button variant="ghost" size="content" tone="muted" class="h-[26px] max-md:h-[32px] px-[6px] rounded-full text-[12px]" ariaLabel={`Open message #${pin.number ?? "?"}`} data-testid="surfacing-step-open-{pin.number}" onclick={() => { if (level === "final") selectLevel("all"); pick(pin); }}>#{pin.number ?? "?"} ↗</Button>
+										{@render markLabel(pin)}
+										<SurfacingMarkActions {pin} {feedback} {place} canSave={!!sessionId} />
+									</div>
+									<SurfacingMarkWhy {pin} {feedback} {place} categorySet={surfacingConfig.categorySet} />
+								</div>
+							{/if}
+						{/if}
 					</div>
 				{/each}
 				<div class="flex flex-wrap items-center gap-[10px] py-[8px] text-[12px] text-text-muted">
@@ -343,4 +396,5 @@
 
 <style>
 	.surface-head-chips { display:contents; }
+	.mark-toast { display:flex; align-items:center; gap:10px; width:fit-content; max-width:100%; min-height:34px; margin:10px auto 2px; padding:4px 5px 4px 14px; border-radius:999px; background:var(--color-inverse-bg); color:var(--color-inverse-text); font-size:13px; box-shadow:0 8px 24px rgb(0 0 0 / .22); }
 </style>

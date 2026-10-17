@@ -28,7 +28,7 @@ import {
 import { getRecent } from "../../../daemon/recent-projects.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { getLogLevel } from "../../../logger.js";
-import type { PersistenceStore } from "../../../persistence/effect/live.js";
+import { PersistenceStore } from "../../../persistence/effect/live.js";
 import { makeCursorAuth } from "../../../provider/cursor/cursor-auth.js";
 import {
 	loadRelaySettings,
@@ -50,6 +50,7 @@ import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { getVersion } from "../../../version.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
+import { readSurfacingFeedback } from "../../relay/Services/surfacing-feedback.js";
 import { AuthManagerTag } from "../../server/Layers/auth-middleware.js";
 import type { AccountDirectory } from "../Services/account-directory.js";
 import { CategorySet } from "../Services/category-set.js";
@@ -758,6 +759,12 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					})),
 				),
 			GetCategorySet: () => categorySet.current(),
+			GetSurfacingFeedback: () =>
+				run(
+					Effect.flatMap(PersistenceStore, (store) =>
+						readSurfacingFeedback().pipe(Effect.provide(store)),
+					),
+				),
 			ReplaceCategorySet: ({ expectedVersion, nextSet }) =>
 				categorySet.replace(expectedVersion, nextSet),
 			SetDefaultGroupingMode: ({ mode }) =>

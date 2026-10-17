@@ -3,6 +3,7 @@
 // Pure conversion with no I/O.
 
 import { Option, Schema } from "effect";
+import { SurfacingMarkSchema } from "../contracts/category-set.js";
 import { ProjectSetupStateSchema } from "../contracts/project-setup.js";
 import { TextSurfacedPayloadSchema } from "../contracts/stored-event.js";
 import {
@@ -223,9 +224,19 @@ function partSurfacing(
 	| "surfacingProbabilities"
 	| "surfacingSetVersion"
 	| "surfacingModel"
+	| "surfacingMark"
 > {
-	if (row.surfacing_ordinal == null) return {};
+	const mark =
+		row.surfacing_mark == null
+			? {}
+			: {
+					surfacingMark: Schema.decodeUnknownSync(
+						Schema.parseJson(SurfacingMarkSchema),
+					)(row.surfacing_mark),
+				};
+	if (row.surfacing_ordinal == null) return mark;
 	return {
+		...mark,
 		surfacingOrdinal: row.surfacing_ordinal,
 		surfacingProbabilities:
 			row.surfacing_probabilities == null

@@ -970,6 +970,13 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				THEN json_extract(mp.result, '$') ELSE mp.result END
 			ELSE mp.result END`;
 
+	// User annotations outlive projector-owned parts. Join them only when reading.
+	const surfacingMark = sql`(SELECT json_patch('{}', json_object(
+		'level', sm.level, 'category', sm.category, 'reason', sm.reason, 'direction', sm.direction
+	)) FROM surfacing_marks sm
+		WHERE sm.session_id = (SELECT session_id FROM messages WHERE id = mp.message_id)
+			AND sm.part_id = mp.id AND sm.message_id = mp.message_id) AS surfacing_mark`;
+
 	// Parts as the browser opens them, by the rule tool-wire-projection.ts
 	// owns: a tool output over the budget comes back as the JSON of its first
 	// PREVIEW_CODE_POINTS code points with `result_bytes` its whole UTF-8 size;
@@ -980,13 +987,14 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		SELECT id, message_id, type, text, tool_name, call_id, input, metadata,
 			duration, status, sort_order, created_at, updated_at, version,
 			surfacing_ordinal, surfacing_probabilities, surfacing_set_version, surfacing_model,
+			surfacing_mark,
 			CASE WHEN length(output) > ${PREVIEW_CODE_POINTS}
 				THEN json_quote(substr(output, 1, ${PREVIEW_CODE_POINTS}))
 				ELSE result END AS result,
 			CASE WHEN length(output) > ${PREVIEW_CODE_POINTS}
 				THEN length(CAST(output AS BLOB)) END AS result_bytes
 		FROM (
-			SELECT mp.*,
+			SELECT mp.*, ${surfacingMark},
 				CASE WHEN mp.type = 'tool'
 					AND mp.tool_name NOT IN ${sql.in(NEVER_CUT_TOOL_NAMES)}
 					AND length(mp.result) > ${PREVIEW_CODE_POINTS}
@@ -1471,7 +1479,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					WHERE session_id = ${sessionId}
 					ORDER BY created_at ASC, id ASC
 				)
-				SELECT mp.* FROM message_parts mp
+				SELECT mp.*, ${surfacingMark} FROM message_parts mp
 				JOIN target_messages tm ON mp.message_id = tm.id
 				ORDER BY mp.message_id, mp.sort_order`;
 
@@ -1802,9 +1810,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							page.length === 0
 								? []
 								: yield* sql<MessagePartRow>`
-							SELECT * FROM message_parts
-							WHERE message_id IN ${sql.in(page.map((message) => message.id))}
-							ORDER BY message_id, sort_order`;
+							SELECT mp.*, ${surfacingMark} FROM message_parts mp
+							WHERE mp.message_id IN ${sql.in(page.map((message) => message.id))}
+							ORDER BY mp.message_id, mp.sort_order`;
 						messages.push(
 							...groupMessagesWithPartsAndTurnModels(fullPage, parts),
 						);

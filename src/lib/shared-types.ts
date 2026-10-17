@@ -1,6 +1,7 @@
 // Types shared between server and frontend.
 // Imported by src/lib/types.ts (server) and frontend code.
 
+import type { SurfacingMark } from "./contracts/category-set.js";
 import {
 	LimitRecoverySchema,
 	SessionResumeSchema,
@@ -460,6 +461,7 @@ export interface PtyInfo {
  */
 export interface HistoryMessagePart {
 	id: string;
+	surfacingMark?: SurfacingMark | null | undefined;
 	surfacingOrdinal?: number;
 	surfacingProbabilities?: Record<string, number> | null;
 	surfacingSetVersion?: number;

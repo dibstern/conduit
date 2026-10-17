@@ -50,6 +50,7 @@ import {
 } from "../../domain/relay/Services/session-workspace.js";
 import { dismissWorkspaceHint } from "../../domain/relay/Services/session-workspace-hint.js";
 import { prepareSessionWorktreeDeletion } from "../../domain/relay/Services/session-worktree-deletion.js";
+import { makeSurfacingFeedback } from "../../domain/relay/Services/surfacing-feedback.js";
 import { formatErrorDetail } from "../../errors.js";
 import {
 	listLocalBranches,
@@ -124,6 +125,21 @@ const readAutoSettleOutlook = (sessionId: string) =>
 	});
 
 export const sessionsHandlers = {
+	SetSurfacingMark: ({ sessionId, partId, mark }) =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const { projectId } = yield* PersistenceProjectTag;
+			const [owned] = yield* sql<{
+				id: string;
+			}>`SELECT mp.id FROM message_parts mp JOIN messages m ON m.id = mp.message_id JOIN sessions s ON s.id = m.session_id WHERE mp.id = ${partId} AND m.session_id = ${sessionId} AND s.project_id = ${projectId}`;
+			if (!owned)
+				return yield* new WsRpcError({
+					message: "Part does not belong to this session",
+				});
+			const feedback = yield* makeSurfacingFeedback;
+			yield* feedback.set(partId, mark);
+			return { ok: true as const };
+		}).pipe(Effect.catchAll(mapRpcFailure("SetSurfacingMark"))),
 	ListBranches: (_request) =>
 		Effect.flatMap(ConfigTag, (config) =>
 			listLocalBranches(config.projectDir),
@@ -898,6 +914,7 @@ export const sessionsHandlers = {
 	| "ContinueSessionInMainFolder"
 	| "DismissWorkspaceHint"
 	| "SetSessionSettled"
+	| "SetSurfacingMark"
 	| "SetSessionPinned"
 	| "GetSessionAutoSettleOutlook"
 	| "SetSessionAutoSettle"

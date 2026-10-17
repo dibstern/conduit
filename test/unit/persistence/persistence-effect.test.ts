@@ -172,6 +172,7 @@ describe("Persistence Effect", () => {
 					"session_sidebar_horizon",
 					"sessions",
 					"store_identity",
+					"surfacing_marks",
 					"tool_content",
 					"turns",
 				],
@@ -331,6 +332,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 63, name: "goal_check_metadata" },
 				{ migration_id: 64, name: "message_part_surfacing" },
 				{ migration_id: 65, name: "sessions_settled_shelf_index" },
+				{ migration_id: 66, name: "surfacing_marks" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

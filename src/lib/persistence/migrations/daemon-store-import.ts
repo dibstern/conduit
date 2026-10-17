@@ -112,6 +112,7 @@ const copiedTables = [
 	"projection_failures",
 	"session_git_published",
 	"session_pick_backfill",
+	"surfacing_marks",
 ] as const;
 const singletonTables = [
 	"projector_cursors",

@@ -31,6 +31,7 @@ export const daemonOnlyHandlers = {
 	GetDefaultGroupingMode: (_request) =>
 		daemonRequired("GetDefaultGroupingMode"),
 	GetCategorySet: (_request) => daemonRequired("GetCategorySet"),
+	GetSurfacingFeedback: (_request) => daemonRequired("GetSurfacingFeedback"),
 	ReplaceCategorySet: (_request) => daemonRequired("ReplaceCategorySet"),
 } satisfies Pick<
 	WsRpcHandlerMap,
@@ -55,5 +56,6 @@ export const daemonOnlyHandlers = {
 	| "SetDefaultGroupingMode"
 	| "GetDefaultGroupingMode"
 	| "GetCategorySet"
+	| "GetSurfacingFeedback"
 	| "ReplaceCategorySet"
 >;

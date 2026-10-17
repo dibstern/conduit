@@ -66,6 +66,7 @@ import {
 	SESSIONS_WORKSPACE_MIGRATION,
 	STARTUP_RESTORE_INDEXES_MIGRATION,
 	STORE_IDENTITY_MIGRATION,
+	SURFACING_MARKS_MIGRATION,
 	TOOL_CALL_INDEX_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
@@ -1266,6 +1267,9 @@ export const effectMigrationEntries = {
 	}),
 	"0065_sessions_settled_shelf_index": executeSqlStatements(
 		readMigrationSql(SESSIONS_SETTLED_SHELF_INDEX_MIGRATION),
+	),
+	"0066_surfacing_marks": executeSqlStatements(
+		readMigrationSql(SURFACING_MARKS_MIGRATION),
 	),
 } satisfies Record<
 	string,

@@ -19,6 +19,8 @@ import {
 	CategorySetContentsSchema,
 	CategorySetRejected,
 	CategorySetSchema,
+	SurfacingFeedbackEntrySchema,
+	SurfacingMarkSchema,
 } from "./category-set.js";
 import {
 	WorktreeBranchRenameError,
@@ -361,6 +363,7 @@ export const PtyInfoSchema = Schema.Struct({
 export const HistoryMessagePartSchema = Schema.Struct({
 	id: Schema.String,
 	type: Schema.String,
+	surfacingMark: Schema.optional(Schema.NullOr(SurfacingMarkSchema)),
 	surfacingOrdinal: Schema.optionalWith(
 		TextSurfacedPayloadSchema.fields.ordinal,
 		{ exact: true },
@@ -1769,6 +1772,28 @@ export class GetCategorySet extends Schema.TaggedRequest<GetCategorySet>()(
 	},
 ) {}
 
+export class SetSurfacingMark extends Schema.TaggedRequest<SetSurfacingMark>()(
+	"SetSurfacingMark",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({ ok: Schema.Literal(true) }),
+		payload: {
+			sessionId: NonEmptyString,
+			partId: NonEmptyString,
+			mark: Schema.NullOr(SurfacingMarkSchema),
+		},
+	},
+) {}
+
+export class GetSurfacingFeedback extends Schema.TaggedRequest<GetSurfacingFeedback>()(
+	"GetSurfacingFeedback",
+	{
+		failure: WsRpcError,
+		success: Schema.Array(SurfacingFeedbackEntrySchema),
+		payload: {},
+	},
+) {}
+
 export class ReplaceCategorySet extends Schema.TaggedRequest<ReplaceCategorySet>()(
 	"ReplaceCategorySet",
 	{
@@ -3031,6 +3056,8 @@ const wsRpcRequests = [
 	SetDefaultGroupingMode,
 	GetDefaultGroupingMode,
 	GetCategorySet,
+	SetSurfacingMark,
+	GetSurfacingFeedback,
 	ReplaceCategorySet,
 	SetHiddenEntries,
 	GetClaudeSettings,

@@ -20,6 +20,7 @@
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import SegmentedControl from "../ui/SegmentedControl.svelte";
+	import { MARK_GLYPHS } from "../../stores/surfacing-feedback.svelte.js";
 
 	let { view, live, level, overridden, endTime, startTime, regions = {}, strip, onpick, onlevel, ondefault, onreset, onfold, onfollow, oncommand, onjump, onhover }: {
 		view: SurfaceTurn;
@@ -158,7 +159,7 @@
 			{@const current = view.card?.part.uuid === pin.part.uuid}
 			{@const cited = group.members.some((member) => member.part.uuid === citedPart)}
 			<Button variant="ghost" size="content" hoverFill="none" class="absolute h-[32px] rounded-full {group.row ? 'bottom-[27px] max-md:bottom-[43px]' : 'bottom-[3px] max-md:bottom-[5px]'}" style="left:{group.left}px;width:{group.width}px;--pin-tick:{group.tick}px" data-x={group.x} data-surface-part={group.leader.part.uuid} data-testid={group.members.length > 1 ? "surfacing-group" : `surfacing-pin-${pin.number ?? `pending-${pin.part.uuid}`}`} data-row={group.row} data-group-members={group.members.map((member) => member.number ?? "pending").join(",")} data-group-leader={group.leader.number} data-cited={cited} ariaLabel={group.members.length > 1 ? `Group of ${group.members.length}, led by #${group.leader.number} ${group.leader.label}${current ? `; showing ${pin.name}` : ""}` : pin.name} aria-pressed={current} onclick={(event) => { if (event.detail === 0 || !suppressClick) pickGroup(group); }}>
-				<span class="pin-chip" class:upper={group.row === 1} class:current class:cited class:open-ask={view.openAsk?.uuid === pin.part.uuid} class:pending={pin.pending} class:below={view.belowLevel && view.card === pin} class:seen={pin.read === true} style:--surface-colour={pin.colour} data-number={pin.number} data-category={pin.category}><span class="glyph">{pin.glyph}</span>{pin.number ?? ""}{#if group.members.length > 1}<small>+{group.members.length - 1}</small>{/if}{#if pin.read === false}<i class="unread-dot"></i>{/if}</span>
+				<span class="pin-chip" class:upper={group.row === 1} class:current class:cited class:open-ask={view.openAsk?.uuid === pin.part.uuid} class:pending={pin.pending} class:below={view.belowLevel && view.card === pin} class:seen={pin.read === true} style:--surface-colour={pin.colour} data-number={pin.number} data-category={pin.category}><span class="glyph">{pin.glyph}</span>{pin.number ?? ""}{#if pin.part.surfacingMark}<sup class="mark-glyph {pin.part.surfacingMark.direction ?? 'raise'}">{MARK_GLYPHS[pin.part.surfacingMark.direction ?? "raise"]}</sup>{/if}{#if group.members.length > 1}<small>+{group.members.length - 1}</small>{/if}{#if pin.read === false}<i class="unread-dot"></i>{/if}</span>
 			</Button>
 		{/each}
 		{/if}
@@ -207,6 +208,8 @@
 	.pin-chip.upper::after { height:37px; }
 	.pin-chip small { margin-left:1px; font-size:10px; color:var(--color-text-muted); }
 	.glyph { color:var(--surface-colour); }
+	.mark-glyph { align-self:flex-start; margin:3px 0 0 1px; font-size:9px; line-height:1; }
+	.mark-glyph.raise { color:var(--color-success); } .mark-glyph.lower { color:var(--color-text-muted); } .mark-glyph.retype { color:var(--color-accent); }
 	.current { background:var(--surface-colour); color:var(--color-bg); }
 	.current .glyph,.current small { color:inherit; }
 	.cited { translate:0 -4px; box-shadow:0 0 0 1.5px var(--color-accent),0 4px 10px rgba(var(--shadow-rgb),.2); color:var(--color-text); }
