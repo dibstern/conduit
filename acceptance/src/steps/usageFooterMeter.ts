@@ -272,6 +272,9 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		match: /^the single usage footer shows 5h (\S+) and Week (\S+)$/,
 		run: async ({ world, match }) => {
 			await expect(world.page.getByTestId("usage-footer-single")).toBeVisible();
+			await expect(world.page.getByTestId("usage-footer-harness")).toHaveText(
+				"Claude",
+			);
 			await expect(
 				world.page.getByTestId("usage-footer-column-claude-five_hour"),
 			).toHaveText("5h");
@@ -305,11 +308,11 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 			const level = match[3] ?? "normal";
 			const fillToken =
 				level === "danger"
-					? "--color-fill-red"
+					? "--color-status-red"
 					: level === "warning"
-						? "--color-fill-amber"
+						? "--color-status-ask"
 						: "--color-text-secondary";
-			const valueToken = level === "danger" ? "--color-error" : fillToken;
+			const valueToken = fillToken;
 			const cell = world.page.getByTestId(`usage-footer-cell-${key}`);
 			const bar = world.page.getByTestId(`usage-footer-bar-${key}`);
 			await expect(cell).toHaveAttribute("data-level", level);
@@ -336,14 +339,14 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert the single footer's compact bar widths",
-		match: /^the single usage footer bars are 40px and 36px wide$/,
+		match: /^the single usage footer bars are 26px and 26px wide$/,
 		run: async ({ world }) => {
 			await expect(
 				world.page.getByTestId("usage-footer-bar-claude-five_hour"),
-			).toHaveCSS("width", "40px");
+			).toHaveCSS("width", "26px");
 			await expect(
 				world.page.getByTestId("usage-footer-bar-claude-seven_day"),
-			).toHaveCSS("width", "36px");
+			).toHaveCSS("width", "26px");
 		},
 	},
 	{
@@ -365,13 +368,13 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert harness group order and headings",
-		match: /^the usage footer groups read CLAUDE, CODEX, CURSOR in that order$/,
+		match: /^the usage footer groups read Claude, Codex, Cursor in that order$/,
 		run: async ({ world }) => {
 			await expect(
 				world.page
 					.getByTestId("usage-footer-meter")
 					.locator('[data-testid^="usage-footer-heading-"]'),
-			).toHaveText(["CLAUDE", "CODEX", "CURSOR"]);
+			).toHaveText(["Claude", "Codex", "Cursor"]);
 		},
 	},
 	{
@@ -400,7 +403,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 			await expect(row).toHaveAttribute("title", "Current account");
 			await expect(row).toHaveCSS(
 				"background-color",
-				await themeColour(world.page, "--color-bg-alt"),
+				await themeColour(world.page, "--color-chip"),
 			);
 			await expect(
 				world.page.getByTestId(`usage-footer-name-${match[1]}`),
@@ -439,24 +442,24 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert two-window harness headings",
-		match: /^the (Claude|Codex) usage footer headings read 5H and WEEK$/,
+		match: /^the (Claude|Codex) usage footer headings read 5h and Week$/,
 		run: async ({ world, match }) => {
 			const harness = (match[1] ?? "").toLowerCase();
 			await expect(
 				world.page.getByTestId(`usage-footer-column-${harness}-five_hour`),
-			).toHaveText("5H");
+			).toHaveText("5h");
 			await expect(
 				world.page.getByTestId(`usage-footer-column-${harness}-seven_day`),
-			).toHaveText("WEEK");
+			).toHaveText("Week");
 		},
 	},
 	{
 		name: "assert the monthly harness heading",
-		match: /^the Cursor usage footer heading reads MONTH$/,
+		match: /^the Cursor usage footer heading reads Month$/,
 		run: async ({ world }) => {
 			await expect(
 				world.page.getByTestId("usage-footer-column-cursor-month"),
-			).toHaveText("MONTH");
+			).toHaveText("Month");
 		},
 	},
 	{
@@ -674,7 +677,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 			await expect(row).toHaveAttribute("title", "Current account");
 			await expect(row).toHaveCSS(
 				"background-color",
-				await themeColour(world.page, "--color-bg-alt"),
+				await themeColour(world.page, "--color-chip"),
 			);
 			await expect(
 				world.page.getByTestId(`${prefix}-name-${match[2]}`),
@@ -789,7 +792,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 	{
 		name: "the usage sheet folds into the dock rather than off screen",
 		match:
-			/^the usage sheet dragged down past the phone usage dock lands on it with the shared sheet chrome$/,
+			/^the usage sheet dragged down past the phone usage dock lands at its top$/,
 		run: async ({ world }) => {
 			const sheet = world.page.getByTestId("usage-sheet");
 			// A drag moves the sheet from where it rests, so let the opening glide finish first.
@@ -804,6 +807,14 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 				.boundingBox();
 			const viewport = world.page.viewportSize();
 			if (!box || !dock || !viewport) throw new Error("Missing usage sheet");
+			await expect(world.page.getByTestId("usage-footer-row-claude")).toHaveCSS(
+				"height",
+				"30px",
+			);
+			await expect(world.page.getByTestId("usage-sheet-row-claude")).toHaveCSS(
+				"height",
+				"34px",
+			);
 			const startY = box.y + 10;
 			const finger = await touchFinger(
 				world.page,
@@ -816,44 +827,34 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 				await expect
 					.poll(async () => (await sheet.boundingBox())?.y)
 					.toBeCloseTo(dock.y, 0);
-				// The shared handle places the sheet's rows 4px below the dock's.
-				// All row sizes and horizontal positions still match as the scrim fades.
+				// The sheet has taller meter rows than the dock. Its outer top still
+				// reaches the dock before release, and the backdrop clears there.
 				await expect
 					.poll(() =>
 						world.page.evaluate(() => {
-							const dockParts = [
-								...document.querySelectorAll(
-									'[data-testid="usage-footer-phone"] [data-testid^="usage-footer-row-"], [data-testid="usage-phone-more"]',
-								),
-							];
-							const misses = dockParts.map((part) => {
-								const twin = document.querySelector(
-									`[data-testid="${part.getAttribute("data-testid")?.replace(/^usage-(footer|phone)-/, "usage-sheet-")}"]`,
-								);
-								if (!twin) return Number.POSITIVE_INFINITY;
-								const a = part.getBoundingClientRect();
-								const b = twin.getBoundingClientRect();
-								return Math.max(
-									Math.abs(a.x - b.x),
-									Math.abs(a.y + 4 - b.y),
-									Math.abs(a.width - b.width),
-									Math.abs(a.height - b.height),
-								);
-							});
 							const dialog = document.querySelector("dialog[open]");
-							return {
-								parts: dockParts.length,
-								miss: Math.round(Math.max(...misses)),
-								scrim: dialog
-									? getComputedStyle(dialog, "::backdrop").opacity
-									: "",
-							};
+							return dialog
+								? getComputedStyle(dialog, "::backdrop").opacity
+								: "";
 						}),
 					)
-					.toEqual({ parts: 2, miss: 0, scrim: "0" });
+					.toBe("0");
+				await expect(
+					sheet.locator('[data-testid^="usage-sheet-row-"]'),
+				).toHaveCount(6);
 			} finally {
 				await finger.lift();
 			}
+		},
+	},
+	{
+		name: "the phone usage dock wears the sidebar surface",
+		match: /^the phone usage dock uses the sidebar surface$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("usage-footer-phone")).toHaveCSS(
+				"background-color",
+				await themeColour(world.page, "--color-sidebar-bg"),
+			);
 		},
 	},
 	{
@@ -925,16 +926,19 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert the single phone account uses the inline design",
-		match: /^the single phone usage footer shows 5h (\S+) and Wk (\S+)$/,
+		match: /^the single phone usage footer shows 5h (\S+) and Week (\S+)$/,
 		run: async ({ world, match }) => {
 			await expect(world.page.getByTestId("usage-phone-single")).toBeVisible();
+			await expect(world.page.getByTestId("usage-footer-harness")).toHaveText(
+				"Claude",
+			);
 			await expect(world.page.getByTestId("usage-phone-dock")).toHaveCount(0);
 			await expect(
 				world.page.getByTestId("usage-phone-column-five_hour"),
 			).toHaveText("5h");
 			await expect(
 				world.page.getByTestId("usage-phone-column-seven_day"),
-			).toHaveText("Wk");
+			).toHaveText("Week");
 			await expect(
 				world.page.getByTestId("usage-footer-value-claude-five_hour"),
 			).toHaveText(match[1] ?? "");
@@ -943,10 +947,10 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 			).toHaveText(match[2] ?? "");
 			await expect(
 				world.page.getByTestId("usage-footer-bar-claude-five_hour"),
-			).toHaveCSS("width", "40px");
+			).toHaveCSS("width", "26px");
 			await expect(
 				world.page.getByTestId("usage-footer-bar-claude-seven_day"),
-			).toHaveCSS("width", "32px");
+			).toHaveCSS("width", "26px");
 		},
 	},
 	{
@@ -997,7 +1001,9 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 								textBounds.length > 0 &&
 								textBounds.every(
 									(box) =>
-										box.top >= listBounds.top && box.bottom <= button.top,
+										box.top >= listBounds.top &&
+										box.bottom <= Math.min(listBounds.bottom, bounds.top) &&
+										(box.bottom <= button.top || box.top >= button.bottom),
 								),
 						};
 					});

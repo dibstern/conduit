@@ -118,7 +118,7 @@ describe("session triage menu", () => {
 				.querySelector(".lucide-zap"),
 		).toBeNull();
 		expect(
-			screen.getByTestId("session-ctx-pin").querySelector(".lucide-star"),
+			screen.getByTestId("session-ctx-pin").querySelector(".lucide-pin"),
 		).toBeTruthy();
 	});
 

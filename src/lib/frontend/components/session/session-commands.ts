@@ -30,8 +30,8 @@ export type SessionCommand = {
 		| "undo"
 		| "check"
 		| "moon"
-		| "star-off"
-		| "star"
+		| "pin-off"
+		| "pin"
 		| "circle"
 		| "circle-dot"
 		| "circle-check"
@@ -349,7 +349,7 @@ export function getPinCommand(session: SessionInfo): SessionCommand {
 		label: pinned ? "Unpin" : "Pin to top",
 		shortLabel: pinned ? "Unpin" : "Pin",
 		section: "triage",
-		icon: pinned ? "star-off" : "star",
+		icon: pinned ? "pin-off" : "pin",
 		keys: sessionCommandKeys.pin,
 		emphasis: pinned ? "primary" : undefined,
 		run: () => {

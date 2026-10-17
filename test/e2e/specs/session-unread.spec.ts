@@ -89,7 +89,7 @@ const dot = (page: Page, sessionId: string) =>
 	row(page, sessionId).getByTestId("session-unread-dot");
 
 const unreadCount = (page: Page) =>
-	page.getByTestId("session-filter-chip-unread").locator("b");
+	page.getByTestId("session-filter-chip-unread").locator("span");
 
 async function expectDot(windows: Windows, sessionId: string, shown: boolean) {
 	for (const page of [windows.A, windows.B])

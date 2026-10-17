@@ -1,6 +1,20 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
+import { featureFlags } from "../../stores/feature-flags.svelte.js";
+import { instanceState } from "../../stores/instance.svelte.js";
+import { projectState } from "../../stores/project.svelte.js";
+import {
+	attachedProjectState,
+	routerState,
+} from "../../stores/router.svelte.js";
+import {
+	clearSessionState,
+	sessionState,
+} from "../../stores/session.svelte.js";
+import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
+import { applyUsageReadings } from "../../stores/usage.svelte.js";
+import { mockClaudeAccount } from "../../stories/mocks.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import Sidebar from "./Sidebar.svelte";
 
@@ -10,23 +24,193 @@ const meta = {
 	tags: ["autodocs"],
 	parameters: { layout: "fullscreen" },
 	beforeEach: () => {
-		// Reset state for each story
 		uiState.sidebarCollapsed = false;
+		uiState.sidebarWidth = 300;
+		uiState.selectMode = false;
+		uiState.settledShelfOpen = false;
+		uiState.snoozedShelfOpen = false;
+		sessionViewState.compact = false;
+		featureFlags.debug = false;
+		instanceState.instances = [];
+		applyUsageReadings([]);
+		clearSessionState();
+		routerState.path = "/";
+		routerState.search = "";
+		attachedProjectState.slug = "conduit";
+		projectState.projects = [
+			{ slug: "conduit", title: "conduit", folders: ["/src/conduit"] },
+		];
 		// An unsettled list draws the loading skeleton; these stories show the
 		// empty sidebar the server confirmed.
 		applySessionChange({ _tag: "snapshot", rows: [], sequence: Date.now() });
 		applySessionChange({ _tag: "synchronized" });
+		return () => {
+			uiState.selectMode = false;
+			sessionViewState.compact = false;
+			featureFlags.debug = false;
+		};
 	},
 } satisfies Meta<typeof Sidebar>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+function seedFinalSidebar(phone = false, singleAccount = false) {
+	sessionViewState.compact = phone;
+	uiState.sidebarWidth = phone ? 393 : 260;
+	const now = Date.now();
+	applySessionChange({
+		_tag: "snapshot",
+		rows: [
+			{
+				id: "pinned",
+				title: "Fix token refresh race",
+				attention: "needs-approval" as const,
+				pinnedAt: now,
+			},
+			{
+				id: "typed",
+				title: "Typed session list",
+				attention: "working" as const,
+			},
+			{
+				id: "webkit",
+				title: "Webkit e2e flake",
+				attention: "working" as const,
+			},
+			{
+				id: "release",
+				title: "Release notes for 0.42",
+				attention: "needs-reply" as const,
+			},
+			{
+				id: "composer",
+				title: "Composer polish",
+				attention: "done-unread" as const,
+				updatedAt: now - 7_200_000,
+			},
+			{
+				id: "docs",
+				title: "Docs sweep",
+				attention: "idle" as const,
+				updatedAt: now - 259_200_000,
+			},
+			{
+				id: "settled",
+				title: "Fix flaky login test",
+				attention: "idle" as const,
+				settledAt: now - 3_600_000,
+			},
+			{
+				id: "snoozed",
+				title: "Review Codex adapter",
+				attention: "idle" as const,
+				snoozedAt: now,
+				snoozedUntil: now + 3_600_000,
+			},
+		].map((session) => ({
+			accountId: "personal",
+			projectSlug: "conduit",
+			status: "idle" as const,
+			...session,
+		})),
+		sequence: now + 1,
+	});
+	applySessionChange({ _tag: "synchronized" });
+	sessionState.currentId = "typed";
+	const accounts = singleAccount
+		? ["personal"]
+		: ["personal", "work", "lab", "codex"];
+	instanceState.instances = accounts.map((id) => ({
+		...mockClaudeAccount,
+		id,
+		name: id,
+		usageEligible: true,
+	}));
+	applyUsageReadings(
+		accounts.map((accountId, i) => ({
+			accountId,
+			harness: accountId === "codex" ? ("codex" as const) : ("claude" as const),
+			status:
+				accountId === "lab" ? ("limited" as const) : ("available" as const),
+			windows: [
+				{
+					kind: "five_hour" as const,
+					utilization: [42, 91, 100, 12][i] ?? 0,
+					resetsAt: new Date(now + 3_600_000).toISOString(),
+				},
+				{ kind: "seven_day" as const, utilization: [18, 64, 71, 30][i] ?? 0 },
+			],
+			readAt: now,
+			stale: false,
+		})),
+	);
+}
+
+export const Final: Story = {
+	beforeEach: () => seedFinalSidebar(),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByText("Fix token refresh race")).toBeVisible();
+		await expect(canvas.getByTestId("usage-footer-row-work")).toBeVisible();
+		await expect(canvas.getByTestId("settled-shelf-toggle")).toBeVisible();
+	},
+};
+
+export const FinalLight: Story = { ...Final, globals: { theme: "light" } };
+
+export const FinalPhone: Story = {
+	...Final,
+	args: { listScreen: true },
+	beforeEach: () => {
+		seedFinalSidebar(true);
+		// Phone-tall, so the list scrolls under a pinned usage dock as in the app.
+		const root = document.getElementById("storybook-root");
+		root?.setAttribute("style", "height:100vh");
+		return () => root?.removeAttribute("style");
+	},
+};
+export const FinalPhoneLight: Story = {
+	...FinalPhone,
+	globals: { theme: "light" },
+};
+
+export const NeedsYouSingleAccount: Story = {
+	beforeEach: () => {
+		seedFinalSidebar(false, true);
+		routerState.search = "?status=needs-you";
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByText("Approve")).toBeVisible();
+		await expect(canvas.getByText("Reply")).toBeVisible();
+		await expect(canvas.getByTestId("usage-footer-single")).toBeVisible();
+		await expect(canvas.getByTestId("session-needs-you-end")).toHaveTextContent(
+			"That's everything waiting on you.",
+		);
+		await expect(
+			canvas.queryByTestId("session-filter-clear"),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const NeedsYouSingleAccountLight: Story = {
+	...NeedsYouSingleAccount,
+	globals: { theme: "light" },
+};
+
 export const Default: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		const compose = canvas.getByRole("button", { name: "New session" });
+		await expect(compose).toBeVisible();
+		await expect(compose.querySelector(".lucide-square-pen")).not.toBeNull();
+		await expect(canvas.getByTestId("list-bar-count")).toHaveTextContent("0");
 		await expect(
-			canvas.getAllByRole("button", { name: "New session" })[0],
+			canvas.getByRole("button", { name: "Select sessions" }),
+		).toBeVisible();
+		await expect(
+			canvas.getByRole("button", { name: "Close sidebar" }),
 		).toBeVisible();
 		await expect(
 			canvas.queryByRole("button", { name: "File browser" }),
@@ -37,4 +221,93 @@ export const Default: Story = {
 export const Hover: Story = {
 	...Default,
 	parameters: { pseudo: { hover: true } },
+};
+
+export const HoverLight: Story = { ...Hover, globals: { theme: "light" } };
+
+export const Phone: Story = {
+	args: { listScreen: true },
+	beforeEach: () => {
+		sessionViewState.compact = true;
+		uiState.sidebarWidth = 393;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const title = canvas.getByTestId("list-bar-title");
+		await expect(title).toHaveStyle({ fontSize: "22px", fontWeight: "700" });
+		await expect(canvas.getByTestId("list-bar-select")).toBeVisible();
+		await expect(canvas.getByTestId("list-bar-overflow")).toBeVisible();
+		await expect(
+			canvas.queryByRole("button", { name: "Close sidebar" }),
+		).toBeNull();
+		const compose = canvas.getByRole("button", { name: "New session" });
+		await expect(compose.closest("#sidebar-header")).not.toBeNull();
+		await expect(
+			canvasElement.querySelector("#sidebar-nav #new-session-btn"),
+		).toBeNull();
+		const originalUrl = window.location.href;
+		const originalState: unknown = window.history.state;
+		try {
+			await userEvent.click(compose);
+			await expect(routerState.path).toBe("/new");
+			await expect(new URLSearchParams(routerState.search).get("project")).toBe(
+				"conduit",
+			);
+		} finally {
+			window.history.replaceState(originalState, "", originalUrl);
+			routerState.path = "/";
+			routerState.search = "";
+		}
+	},
+};
+
+export const PhoneLight: Story = { ...Phone, globals: { theme: "light" } };
+
+export const PhoneOverflow: Story = {
+	...Phone,
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		sessionViewState.compact = true;
+		uiState.sidebarWidth = 393;
+		featureFlags.debug = true;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("list-bar-overflow"));
+		const menu = within(document.body).getByRole("menu", {
+			name: "More actions",
+		});
+		await expect(
+			within(menu).getByRole("menuitem", { name: "Settings" }),
+		).toBeVisible();
+		await expect(
+			within(menu).getByRole("menuitem", { name: "Debug panel" }),
+		).toBeVisible();
+		await expect(within(menu).getAllByRole("menuitem")).toHaveLength(2);
+	},
+};
+
+export const PhoneOverflowLight: Story = {
+	...PhoneOverflow,
+	globals: { theme: "light" },
+};
+
+export const PhoneSelect: Story = {
+	...Phone,
+	beforeEach: () => seedFinalSidebar(true, true),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByText("Typed session list")).toBeVisible();
+		await userEvent.click(canvas.getByTestId("list-bar-select"));
+		await expect(canvas.getByText("0 selected")).toBeVisible();
+		await expect(canvas.getByTestId("select-bar-delete")).toBeDisabled();
+		await expect(
+			canvas.getByRole("button", { name: "New session" }),
+		).toBeVisible();
+	},
+};
+
+export const PhoneSelectLight: Story = {
+	...PhoneSelect,
+	globals: { theme: "light" },
 };

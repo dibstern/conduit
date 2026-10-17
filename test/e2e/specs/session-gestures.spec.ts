@@ -136,33 +136,31 @@ test("desktop: hover and Tab reach the row's commands, and the menu returns focu
 	await expect(row.locator(".session-item-meta")).toBeHidden();
 	await expect(row.getByTestId("session-act-snooze")).toBeVisible();
 	await expect(row.getByTestId("session-act-pin")).toBeVisible();
-	// ● leads the strip and teaches u; on an unread row it flips to ○, Mark read.
-	const markUnread = row.getByTestId("session-act-mark-unread");
-	await expect(markUnread).toHaveAttribute("title", "Mark unread (u)");
-	await markUnread.click();
+	// Mark unread stays in the menu; the hover strip is settle, snooze, pin, more.
+	await expect(row.getByTestId("session-act-mark-unread")).toHaveCount(0);
+	await row.locator(".session-more-btn").click();
+	await page.getByTestId("session-ctx-mark-unread").click();
 	await expect(row.getByTestId("session-unread-dot")).toBeVisible();
 	await expect(
 		page.getByRole("status").filter({ hasText: "Marked unread" }),
 	).toHaveCount(1);
-	await expect(row.getByTestId("session-act-mark-read")).toHaveAttribute(
-		"title",
-		"Mark read (u)",
-	);
+	// The pointer was left on the menu item, off the row.
+	await row.hover();
+	await row.locator(".session-more-btn").click();
+	await expect(page.getByTestId("session-ctx-mark-read")).toBeVisible();
+	await page.keyboard.press("Escape");
 	await page.getByTestId("toast-action").first().click();
 	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
 	await row.hover();
-	await expect(markUnread).toBeVisible();
 	await row.getByTestId("session-act-settle").click();
 	await expect(row).toHaveCount(0);
 	await expect(settled).toHaveCount(1);
 	await page.getByTestId("toast-action").first().click();
 	await expect(row).toBeVisible();
 
-	// Keyboard: ● then the settle twin are the first stops after the row link.
+	// Keyboard: Settle is the first stop after the row link.
 	await page.mouse.move(0, 0);
 	await row.focus();
-	await page.keyboard.press("Tab");
-	await expect(markUnread).toBeFocused();
 	await page.keyboard.press("Tab");
 	await expect(row.getByTestId("session-act-settle")).toBeFocused();
 	await page.keyboard.press("Enter");

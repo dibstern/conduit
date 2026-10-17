@@ -115,8 +115,8 @@
 	const visibleRowIds = $derived([
 		...arrangement.pinned.map((session) => session.id),
 		...arrangement.sections.flatMap((section) => section.sessions.map((session) => session.id)),
-		...(snoozedShelfOpen ? arrangement.snoozed.map((session) => session.id) : []),
 		...(settledShelfOpen ? arrangement.settled.map((session) => session.id) : []),
+		...(snoozedShelfOpen ? arrangement.snoozed.map((session) => session.id) : []),
 	]);
 	const selectCandidates = $derived.by(() => {
 		const shown = new Set(visibleRowIds);
@@ -136,8 +136,9 @@
 	]));
 	const emptyMessage = $derived.by(() => {
 		if (searching && filtered.length === 0) return "No matching sessions";
+		if (statusFilter === "needs-you") return "That's everything waiting on you.";
 		if (statusFilter !== null) {
-			const label = statusFilter === "needs-you" ? "needs you" : statusFilter;
+			const label = statusFilter;
 			return `Nothing ${label}${scope === null ? "" : ` in ${scopeLabel}`}`;
 		}
 		if (scope !== null) return `No sessions in ${scopeLabel}`;

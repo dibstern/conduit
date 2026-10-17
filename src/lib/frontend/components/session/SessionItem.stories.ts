@@ -93,7 +93,7 @@ export const Failed: Story = {
 	},
 };
 
-// A completed unread session shows Done and leads the row name with the spoken state.
+// A completed unread session uses the unread glyph and a compact age.
 export const DoneUnread: Story = {
 	args: {
 		session: mockSessionDoneUnread,
@@ -101,7 +101,7 @@ export const DoneUnread: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await expect(canvas.getByText("Done")).toBeVisible();
+		await expect(canvas.getByTestId("session-unread-dot")).toBeVisible();
 		await expect(canvas.getByLabelText(/^Done, unread,/)).toHaveAccessibleName(
 			/^Done, unread,/,
 		);
@@ -119,7 +119,7 @@ export const Idle: Story = {
 			/^Plan documentation cleanup,/,
 		);
 		await expect(row.querySelector(".session-item-status")).toBeNull();
-		await expect(row.querySelector(".session-status-glyph svg")).not.toBeNull();
+		await expect(row.querySelector(".session-status-glyph")).not.toBeNull();
 	},
 };
 
@@ -140,7 +140,7 @@ export const WithBranch: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		await expect(
-			within(canvasElement).getByText("Conduit · feature/workspace"),
+			within(canvasElement).getByText("feature/workspace"),
 		).toBeVisible();
 	},
 };
@@ -158,9 +158,7 @@ export const RepositoryWithProjectQualifier: Story = {
 		branch: "main",
 	},
 	play: async ({ canvasElement }) => {
-		await expect(
-			within(canvasElement).getByText("myapp · Main checkout · main"),
-		).toBeVisible();
+		await expect(within(canvasElement).getByText("main")).toBeVisible();
 	},
 };
 
@@ -180,25 +178,25 @@ export const RepositoryWithoutProjectQualifier: Story = {
 	},
 };
 
-// A pinned row appends the star glyph after its title.
+// A pinned row appends the pin glyph after its title.
 export const Pinned: Story = {
 	args: {
-		session: mockSession,
+		session: { ...mockSession, pinnedAt: 1 },
 		active: false,
 		pinned: true,
 	},
 };
 
-// A pinned fork keeps star and fork glyphs in their declared order.
+// A pinned fork keeps pin and fork glyphs in their declared order.
 export const PinnedAndForked: Story = {
 	args: {
-		session: mockForkSession,
+		session: { ...mockForkSession, pinnedAt: 1 },
 		active: false,
 		pinned: true,
 	},
 };
 
-// A settled shelf row collapses context and uses its verbatim settled time.
+// A settled shelf row keeps its context and uses its settled time.
 export const Settled: Story = {
 	args: {
 		session: mockSession,

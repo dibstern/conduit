@@ -4,7 +4,6 @@
 <script module lang="ts">
 	import type { SessionAttention } from "../../types.js";
 
-	type AttentionEmphasis = "strong" | "normal" | "dim";
 	type Density = "comfortable" | "dense";
 
 	// One word per actionable tier; idle keeps only a quiet glyph and says
@@ -18,110 +17,59 @@
 			word: string;
 			spoken: string;
 			colour: string;
-			/** The status word's chrome: a filled pill when the row is blocked on
-			 *  you, bare coloured text otherwise. */
-			pill: string;
 			/** Blocking states get a line icon; the rest share the dither grid. */
 			glyph: { icon: "triangle-alert" | "message-square" | "octagon-alert" } | { dither: "working" | "monitoring" | "done" | "idle" };
-			emphasis: AttentionEmphasis;
 		}
 	> = {
 		"needs-approval": {
 			word: "Approve",
 			spoken: "Needs approval",
 			colour: "text-status-ask",
-			pill: "rounded-full px-[10px] py-[5px] font-semibold text-on-fill bg-fill-amber",
 			glyph: { icon: "triangle-alert" },
-			emphasis: "strong",
 		},
 		"needs-reply": {
 			word: "Reply",
 			spoken: "Needs reply",
 			colour: "text-status-ask",
-			pill: "rounded-full px-[10px] py-[5px] font-semibold text-on-fill bg-fill-amber",
 			glyph: { icon: "message-square" },
-			emphasis: "strong",
 		},
 		error: {
 			word: "Failed",
 			spoken: "Failed",
 			colour: "text-error",
-			pill: "px-[2px] font-medium text-error",
 			glyph: { icon: "octagon-alert" },
-			emphasis: "strong",
 		},
 		working: {
-			// No word on purpose: the twinkling glyph on the left already says working,
+			// The spinner already says working,
 			// and the right column shows elapsed time instead, which is the only
 			// thing that changes while a turn runs. `word` is therefore the
 			// pill's text and its presence is what decides pill-vs-time.
 			word: "",
 			spoken: "Working",
 			colour: "text-session-working",
-			pill: "",
 			glyph: { dither: "working" },
-			emphasis: "normal",
 		},
 		monitoring: {
 			// A word, not elapsed time, because the wait has no expected end.
 			word: "Monitoring",
 			spoken: "Monitoring",
 			colour: "text-session-monitoring",
-			pill: "px-[2px] font-medium text-session-monitoring",
 			glyph: { dither: "monitoring" },
-			emphasis: "normal",
 		},
 		"done-unread": {
-			word: "Done",
+			word: "",
 			spoken: "Done, unread",
 			colour: "text-session-done",
-			pill: "px-[2px] font-medium text-session-done",
 			glyph: { dither: "done" },
-			emphasis: "strong",
 		},
 		idle: {
 			word: "",
 			spoken: "",
 			colour: "text-session-idle",
-			pill: "",
 			glyph: { dither: "idle" },
-			emphasis: "dim",
 		},
 	};
 
-	const EMPHASIS_CLASSES: Record<
-		AttentionEmphasis,
-		{ title: string; row: string }
-	> = {
-		strong: { title: "text-text font-semibold", row: "" },
-		normal: { title: "text-text-secondary font-normal", row: "" },
-		dim: {
-			title: "text-text-secondary font-normal",
-			row: "opacity-[0.62]",
-		},
-	};
-
-	// 52px is the touch row, dropping to 46px at `md` because a pointer is more
-	// precise than a thumb. It is the width breakpoint rather than
-	// `(pointer: fine)` on purpose: the visual suite's mobile leg is a 393px
-	// viewport with no touch emulation, so a pointer query would resolve `fine`
-	// on both legs and the 52px row would never be captured. Width is also what
-	// the rest of the app already means by "phone".
-	const DENSITY_CLASSES: Record<Density, { row: string; settled: string }> = {
-		// Every number here is the height the row actually renders, not a floor
-		// it never reaches: the padding is tuned so the two-line content clears
-		// it and the declared min-height is what wins. Watch the rem scaling --
-		// the app's root font-size is 12px, so `py-1.5` is 4.5px, not 6px.
-		// Settled rows keep a 44px phone target and their compact desktop heights.
-		comfortable: {
-			row: "min-h-[52px] md:min-h-[46px] py-1.5 md:py-1 px-[7px]",
-			settled: "min-h-[44px] md:min-h-[40px] py-1 px-[7px]",
-		},
-		dense: {
-			row: "min-h-[44px] py-1 px-[7px]",
-			settled: "min-h-[44px] md:min-h-[38px] py-[3px] px-[7px]",
-		},
-	};
 </script>
 
 <script lang="ts">
@@ -129,10 +77,12 @@
 	import { sessionAttention } from "../../stores/session.svelte.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import Icon from "../ui/Icon.svelte";
-	import DitherGlyph from "../ui/DitherGlyph.svelte";
+	import SessionRow from "../ui/SessionRow.svelte";
+	import SessionStatusGlyph from "../ui/SessionStatusGlyph.svelte";
+	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
 	import SessionRenameInput from "./SessionRenameInput.svelte";
-	import ProjectSquare from "./ProjectSquare.svelte";
+	import ProjectMark from "../ui/ProjectMark.svelte";
 	import { isSessionWoken } from "../../stores/session.svelte.js";
 	import { getWokenSessionText } from "../../utils/session-lifecycle.js";
 	import { getSessionActionState, getSwipeStage, LONG_PRESS_DELAY_MS, MOVEMENT_SLOP_PX } from "../../utils/swipe.js";
@@ -257,7 +207,8 @@
 	const swipeAllowed = $derived(canSwipe(swipeDirection));
 	const canMarkRead = $derived(!settled && !actions.settled && !snoozed && !actions.snoozed && onmarkread != null);
 	const shelfRow = $derived(settled || snoozed);
-	const timeText = $derived(snoozedUntilText ?? settledAt ?? formatTimeAgo(session.updatedAt));
+	const timeText = $derived((snoozedUntilText ?? settledAt ?? formatTimeAgo(session.updatedAt, new Date(now)))
+		.replace(/ ago$/, "").replace("Yesterday", "1d").replace("just now", "now"));
 	const woken = $derived(isSessionWoken(session, now) && !snoozed);
 	const wokeReason = $derived(session.wokenAt != null ? (session.wokeBecause ?? "time") : "time");
 	const wokeText = $derived(getWokenSessionText(session));
@@ -277,32 +228,10 @@
 	// row is filed under, and two answers on one screen is worse than either.
 	const attention = $derived(sessionAttention(session));
 	const status = $derived(ATTENTION_DISPLAY[attention]);
-	// Approve and Reply are filled pills that read as buttons, so swapping them
-	// for the hover commands looks like the button vanishing under the cursor.
-	const statusHidesOnHover = $derived(
-		attention !== "needs-approval" && attention !== "needs-reply",
-	);
-	const emphasis = $derived(EMPHASIS_CLASSES[status.emphasis]);
-	const densityClass = $derived(
-		shelfRow ? DENSITY_CLASSES[density].settled : DENSITY_CLASSES[density].row,
-	);
-	// The open row is never faded or greyed, whatever its tier: it is the one
-	// row you have to find at a glance. Its weight still follows the tier, so
-	// being open never reads as unread.
-	const titleClass = $derived.by(() => {
-		if (shelfRow)
-			return `text-base font-normal ${active ? "text-text" : "text-text-secondary"}`;
-		return `text-lg ${active && status.emphasis !== "strong" ? "text-text font-normal" : emphasis.title}`;
-	});
-	// A picked row reads at full strength whatever its status, so the selection
-	// is legible from the list itself and not only from the header count.
+	const titleClass = $derived(attention === "idle" || shelfRow
+		? "font-normal text-text-secondary"
+		: "font-medium text-text");
 	const picked = $derived(selectMode && selected);
-	const rowOpacityClass = $derived.by(() => {
-		if (active || picked) return "";
-		if (shelfRow) return "opacity-50";
-		if (woken) return "";
-		return emphasis.row;
-	});
 	const selectionControlClass = $derived.by(() => {
 		if (active) return selected ? "text-accent" : "text-text-muted";
 		return selected ? "text-accent" : "text-text-muted";
@@ -314,7 +243,8 @@
 	// repeated here.
 	const ariaLabel = $derived(
 		[
-			status.spoken,
+			settled ? "Settled" : snoozed ? "Snoozed" : status.spoken,
+			pinned ? "Pinned" : "",
 			displayTitle,
 			contextText,
 			timeText,
@@ -322,25 +252,6 @@
 		]
 			.filter((part) => part)
 			.join(", "),
-	);
-
-	// The leading column holds either the 20px status glyph or, in select mode,
-	// the selection control, which is 44px wide because it is a touch target and
-	// not a glyph. It widens rather than letting the control overflow into the
-	// title. The middle column floors at 0, not a fixed width: the trailing column
-	// (time, or the hover commands) must always fit, so in a narrow sidebar the title
-	// ellipsizes rather than pushing the commands past the clipped edge.
-	const itemClass = $derived(
-		`session-item group grid ${
-			selectMode
-				? "grid-cols-[44px_minmax(0,1fr)_auto]"
-				: "grid-cols-[20px_minmax(0,1fr)_auto]"
-		} gap-x-[9px] items-center ${densityClass} ${rowOpacityClass} mb-px rounded-panel cursor-pointer relative focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent` +
-			(picked
-				? " bg-selection text-text"
-				: active
-				? " active bg-bg-alt text-text"
-				: " text-text-secondary hover:bg-sidebar-hover hover:text-text"),
 	);
 
 	function handleClick(e: MouseEvent) {
@@ -584,11 +495,15 @@
 		</Button>
 		{/if}
 	{/if}
-<a
-	bind:this={rowEl}
+<SessionRow
+	bind:element={rowEl}
 	href={href || undefined}
-	class="{itemClass} no-underline select-none {offset !== 0 && !active ? 'bg-sidebar-bg' : ''} {dragging ? 'transition-none' : 'transition-[color,background-color,transform] duration-150 motion-reduce:transition-none'}"
-	style="touch-action: pan-y; -webkit-touch-callout: none; transform: translateX({offset}px); {picked ? 'box-shadow: inset 3px 0 0 var(--color-accent);' : active ? 'box-shadow: inset 3px 0 0 var(--color-accent), inset 3px 0 12px rgb(from var(--color-accent) r g b / 0.1);' : ''}"
+	{active}
+	selected={picked}
+	{selectMode}
+	{density}
+	{dragging}
+	{offset}
 	data-session-id={session.id}
 	aria-label={ariaLabel}
 	onclick={handleClick}
@@ -629,21 +544,14 @@
 			role="checkbox"
 			aria-checked={selected}
 			ariaLabel="Select {displayTitle}"
-			class="col-start-1 row-start-1 row-span-2 self-stretch shrink-0 w-[44px] min-h-[44px] md:min-h-0 rounded duration-100 {selectionControlClass}"
+			class="col-start-1 row-start-1 {contextText ? 'row-span-2' : ''} self-stretch shrink-0 w-[44px] min-h-[44px] md:min-h-0 rounded duration-100 {selectionControlClass}"
 			onclick={handleSelectionToggle}
 		>
 			<Icon name={selected ? "circle-check" : "circle"} size={18} />
 		</Button>
 	{:else}
-		<span
-			class="session-status-glyph col-start-1 row-start-1 row-span-2 grid place-items-center size-[20px] justify-self-center {status.colour}"
-			aria-hidden="true"
-		>
-			{#if "dither" in status.glyph}
-				<DitherGlyph state={status.glyph.dither} size={shelfRow ? 12 : 16} />
-			{:else}
-				<Icon name={status.glyph.icon} size={shelfRow ? 11 : 14} />
-			{/if}
+		<span class="col-start-1 row-start-1 self-center">
+			<SessionStatusGlyph {attention} {settled} {snoozed} />
 		</span>
 	{/if}
 
@@ -653,12 +561,6 @@
 		class="session-item-title col-start-2 row-start-1 flex items-center gap-1.5 overflow-hidden font-sans {titleClass}"
 		ondblclick={handleDblClick}
 	>
-		{#if shelfRow && contextText && !isRenaming}
-			<span class="inline-flex items-center gap-[6px] text-sm text-text-dimmer shrink-0 {branch ? 'max-w-[45%] min-w-0' : ''}">
-				{#if projectLabel}<ProjectSquare label={projectLabel} accent={projectAccent} />{/if}
-				<span class="overflow-hidden text-ellipsis min-w-0">{contextText}</span>
-			</span>
-		{/if}
 		{#if isRenaming}
 			<SessionRenameInput
 				{session}
@@ -686,24 +588,22 @@
 					></span
 				>
 			{/key}
-			{#if sessionAttention(session) === "done-unread"}
-				<span data-testid="session-unread-dot" class="size-[7px] shrink-0 rounded-full bg-accent" aria-hidden="true"></span>
-			{/if}
 		{/if}
 		{#if pinned}
 			<span class="shrink-0 text-status-pinned" title="Pinned session">
-				<Icon name="star" size={11} />
+				<Icon name="pin" size={11} />
 			</span>
 		{/if}
 
 	</span>
 
-	{#if contextText && !shelfRow}
+	{#if contextText}
 		<span
-			class="session-item-context col-start-2 row-start-2 flex items-center gap-1.5 mt-0.5 text-sm text-text-dimmer overflow-hidden whitespace-nowrap font-sans"
+			class="session-item-context col-start-2 col-span-2 row-start-2 flex items-center gap-[5px] text-[12.5px] md:text-[11.5px] leading-[17px] text-text-dimmer overflow-hidden whitespace-nowrap font-sans"
 		>
-			{#if projectLabel}<ProjectSquare label={projectLabel} accent={projectAccent} />{/if}
-			<span class="overflow-hidden text-ellipsis min-w-0">{contextText}</span>
+			{#if projectLabel}<ProjectMark accent={projectAccent} />{/if}
+			<span class="shrink-0">{projectLabel}</span>
+			{#if branch}<code class="min-w-0 truncate font-mono text-[11px]">{branch}</code>{/if}
 		</span>
 	{/if}
 
@@ -711,24 +611,19 @@
 	     while you type. Shelf rows only show a time here, so they give the
 	     space to the field, as they do with the project label. -->
 	{#if !shelfRow || !isRenaming}
-		<!-- One row, not a stack: a 36px control stacked under a pill is 56px of
-		     content inside a row that promises 46px, and the row would silently
-		     grow past its own density contract. -->
+
 		<div
-			class="col-start-3 row-start-1 row-span-2 self-stretch flex items-center gap-1.5 shrink-0 text-base text-text-dimmer tabular-nums whitespace-nowrap font-sans"
+			class="col-start-3 row-start-1 flex items-center gap-[5px] shrink-0 text-[11px] text-text-dimmer tabular-nums whitespace-nowrap font-mono"
 		>
-			<!-- The pill when the tier has a word, the time otherwise, and never
-			     both: two answers in one corner is the ambiguity this row is being
-			     rebuilt to remove. Read from the tier table, not from the
-			     emphasis, which only describes the title's weight. -->
 			<!-- Status word. Hidden from the accessible name because aria-label above
 			     already leads with it; announcing it twice per row is noise. -->
 			{#if status.word && !shelfRow}
-				<span
-					class="session-item-status inline-flex items-center text-[11.5px] leading-none whitespace-nowrap font-sans {status.pill} {statusHidesOnHover && !isRenaming ? `md:group-hover:hidden md:group-focus-within:hidden ${menuOpen ? 'md:hidden' : ''}` : ''}"
-					aria-hidden="true"
-				>
-					{status.word}
+				<span class="{isRenaming ? '' : 'md:group-hover:hidden md:group-focus-within:hidden'} {menuOpen && !isRenaming ? 'md:hidden' : ''}" aria-hidden="true">
+					{#if attention === "needs-approval" || attention === "needs-reply"}
+						<Badge variant="ask" size="status" shape="pill" class="session-item-status font-sans">{status.word}</Badge>
+					{:else}
+						<span class="session-item-status font-sans {status.colour}">{status.word}</span>
+					{/if}
 				</span>
 			{:else}
 				<span class="session-item-meta {isRenaming ? '' : 'md:group-hover:hidden md:group-focus-within:hidden'} {menuOpen && !isRenaming ? 'md:hidden' : ''}" title={settled && session.settledAutomatically ? "Settled automatically" : undefined}>{settled && session.settledAutomatically ? `Auto · ${timeText}` : timeText}</span>
@@ -736,78 +631,62 @@
 			{#if woken}
 				<span
 					data-testid="session-woke-pill"
-					class="inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-xs font-medium {wokeColour}"
+					class="inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 font-sans text-xs font-medium {wokeColour}"
 				>{wokeText}</span>
 			{/if}
 
 			<!-- Desktop commands replace the time on hover and keyboard focus. -->
 			{#if !selectMode && oncontextmenuProp && !isRenaming}
-				<span class="hidden md:group-hover:inline-flex md:group-focus-within:inline-flex {menuOpen ? 'md:inline-flex' : ''} items-center gap-0.5" data-testid="session-row-actions">
-					<!-- The shortcuts need ~200px of row. Below that only the ellipsis
-					     stays, and its menu carries every one of these commands. -->
-					<span class="contents @max-[260px]:hidden">
-					{#if canMarkRead}
-						<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
-							class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
-							data-testid={session.unread ? "session-act-mark-read" : "session-act-mark-unread"}
-							ariaLabel="Mark {session.unread ? 'read' : 'unread'} {displayTitle}"
-							title="Mark {session.unread ? 'read' : 'unread'} (u)"
-							onclick={(event) => { event.preventDefault(); event.stopPropagation(); onmarkread?.(session.id); }}
-						><Icon name={session.unread ? "circle" : "circle-dot"} size={16} /></Button>
-					{/if}
-				<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
-					class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
-					data-testid={settled || actions.settled ? "session-act-unsettle" : "session-act-settle"}
-					ariaLabel="{settled || actions.settled ? 'Un-settle' : 'Settle'} {displayTitle}"
-					title={actions.settleDisabledReason ?? (settled || actions.settled ? "Un-settle (s)" : "Settle (s)")}
-					disabled={actions.settleDisabledReason != null}
-					onclick={(event) => { event.preventDefault(); event.stopPropagation(); onsettle?.(session.id, !(settled || actions.settled)); }}
-				><Icon name={settled || actions.settled ? "undo" : "check"} size={16} /></Button>
-				{#if actions.snoozeVisible}
-					{#if snoozed || actions.snoozed}
-						<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
-							class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
-							data-testid="session-act-unsnooze" ariaLabel="Unsnooze {displayTitle}" title="Unsnooze (z)"
-							onclick={(event) => { event.preventDefault(); event.stopPropagation(); onunsnooze?.(session.id); }}
-						><Icon name="undo" size={16} /></Button>
-					{:else}
-						<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
-							class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
-							data-testid="session-act-snooze" ariaLabel="Snooze {displayTitle}"
-							title={actions.snoozeDisabledReason ?? "Snooze (z)"} disabled={actions.snoozeDisabledReason != null}
-							onclick={(event) => { event.preventDefault(); event.stopPropagation(); onsnooze?.(session.id); }}
-						><Icon name="moon" size={16} /></Button>
-					{/if}
-				{/if}
-				<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
-					class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
-					data-testid={actions.pinned ? "session-act-unpin" : "session-act-pin"}
-					ariaLabel="{actions.pinned ? 'Unpin' : 'Pin'} {displayTitle}" title={actions.pinned ? "Unpin (p)" : "Pin (p)"}
-					onclick={(event) => { event.preventDefault(); event.stopPropagation(); onpin?.(session.id, !actions.pinned); }}
-					><Icon name={actions.pinned ? "star-off" : "star"} size={16} /></Button>
+				<span class="hidden md:group-hover:inline-flex md:group-focus-within:inline-flex {menuOpen ? 'md:inline-flex' : ''} items-center" data-testid="session-row-actions">
+					<!-- Below 210px only the ellipsis stays, and its menu carries every one of these commands. -->
+					<span class="contents @max-[210px]:hidden">
+						<Button variant="ghost" size="row-action" tone="secondary" hoverFill="sidebar"
+							data-testid={settled || actions.settled ? "session-act-unsettle" : "session-act-settle"}
+							ariaLabel="{settled || actions.settled ? 'Un-settle' : 'Settle'} {displayTitle}"
+							title={actions.settleDisabledReason ?? (settled || actions.settled ? "Un-settle (s)" : "Settle (s)")}
+							disabled={actions.settleDisabledReason != null}
+							onclick={(event) => { event.preventDefault(); event.stopPropagation(); onsettle?.(session.id, !(settled || actions.settled)); }}
+						><Icon name={settled || actions.settled ? "undo" : "check"} size={13} /></Button>
+						{#if actions.snoozeVisible}
+							{#if snoozed || actions.snoozed}
+								<Button variant="ghost" size="row-action" tone="secondary" hoverFill="sidebar"
+									data-testid="session-act-unsnooze" ariaLabel="Unsnooze {displayTitle}" title="Unsnooze (z)"
+									onclick={(event) => { event.preventDefault(); event.stopPropagation(); onunsnooze?.(session.id); }}
+								><Icon name="undo" size={13} /></Button>
+							{:else}
+								<Button variant="ghost" size="row-action" tone="secondary" hoverFill="sidebar"
+									data-testid="session-act-snooze" ariaLabel="Snooze {displayTitle}"
+									title={actions.snoozeDisabledReason ?? "Snooze (z)"} disabled={actions.snoozeDisabledReason != null}
+									onclick={(event) => { event.preventDefault(); event.stopPropagation(); onsnooze?.(session.id); }}
+								><Icon name="moon" size={13} /></Button>
+							{/if}
+						{/if}
+						<Button variant="ghost" size="row-action" tone="secondary" hoverFill="sidebar"
+							data-testid={actions.pinned ? "session-act-unpin" : "session-act-pin"}
+							ariaLabel="{actions.pinned ? 'Unpin' : 'Pin'} {displayTitle}" title={actions.pinned ? "Unpin (p)" : "Pin (p)"}
+							onclick={(event) => { event.preventDefault(); event.stopPropagation(); onpin?.(session.id, !actions.pinned); }}
+						><Icon name={actions.pinned ? "pin-off" : "pin"} size={13} /></Button>
 					</span>
 					<Button
-					bind:element={moreBtnEl}
-					variant="ghost"
-					size="content"
-					tone="inherit"
-					hoverFill="none"
-					class="session-more-btn shrink-0 size-[27px] rounded-[7px] duration-100 {active
-						? 'text-text-muted group-hover:text-text-secondary hover:text-text hover:bg-bg-alt'
-						: 'text-text-dimmer/50 group-hover:text-text-dimmer hover:text-text hover:bg-bg-alt'}"
-					title="More options"
-					ariaLabel="More options for {displayTitle}"
-					aria-haspopup="menu"
-					aria-expanded={menuOpen}
-					onclick={handleMoreClick}
-				>
-					<Icon name="ellipsis" size={16} />
-				</Button>
+						bind:element={moreBtnEl}
+						variant="ghost"
+						size="row-action"
+						tone="secondary"
+						hoverFill="sidebar"
+						class="session-more-btn shrink-0"
+						title="More options"
+						ariaLabel="More options for {displayTitle}"
+						aria-haspopup="menu"
+						aria-expanded={menuOpen}
+						onclick={handleMoreClick}
+					>
+						<Icon name="ellipsis" size={13} />
+					</Button>
 				</span>
 			{/if}
 		</div>
 	{/if}
-</a>
+</SessionRow>
 {#if gleaming}
 	<div class="session-row-sheen motion-reduce:hidden" aria-hidden="true"></div>
 {/if}

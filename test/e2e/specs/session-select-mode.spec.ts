@@ -260,8 +260,8 @@ test("All selects only visible search results; Done makes no change", async ({
 	await rows.first().getByRole("checkbox").click();
 	await rows.last().getByRole("checkbox").click();
 	await expect(page.getByText("2 selected")).toBeVisible();
-	await page.getByPlaceholder("Search sessions...").fill(title);
-	await expect(page.getByPlaceholder("Search sessions...")).toHaveValue(title);
+	await page.getByPlaceholder("Search").fill(title);
+	await expect(page.getByPlaceholder("Search")).toHaveValue(title);
 	await expect(page.getByText("1 selected")).toBeVisible();
 	const visible = await page
 		.locator("#session-list .session-item [role=checkbox]")
@@ -278,7 +278,7 @@ test("All selects only visible search results; Done makes no change", async ({
 	await expect(page.getByText(`${visible} selected`)).toBeVisible();
 	await page.getByRole("button", { name: "Done" }).click();
 	await expect(page.getByTestId("select-bar")).toHaveCount(0);
-	await page.getByPlaceholder("Search sessions...").fill("");
+	await page.getByPlaceholder("Search").fill("");
 	await expect
 		.poll(() =>
 			rows.evaluateAll((elements) =>
@@ -316,7 +316,7 @@ test("keyboard enters, toggles a checkbox, and Escape leaves", async ({
 	await expect(page.getByTestId("select-bar")).toHaveCount(0);
 });
 
-test("phone overflow and long-press sheet enter select mode", async ({
+test("phone header and long-press sheet enter select mode", async ({
 	page,
 	relayUrl,
 }) => {
@@ -325,8 +325,7 @@ test("phone overflow and long-press sheet enter select mode", async ({
 	await page.goto(new URL("/", page.url()).toString());
 	const row = page.locator("#session-list .session-item").first();
 	await expect(row).toBeVisible();
-	await page.getByTestId("list-bar-overflow").click();
-	await page.getByTestId("list-overflow-select").click();
+	await page.getByTestId("list-bar-select").click();
 	await expect(page.getByTestId("select-bar")).toBeVisible();
 	await expect(page.getByTestId("select-bar")).toBeInViewport();
 	for (const action of ["settle", "snooze", "pin", "delete"]) {

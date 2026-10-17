@@ -96,7 +96,7 @@ describe("SessionList daemon sessions", () => {
 			const row = container.querySelector(`[data-session-id="${origin}"]`);
 			expect(
 				row?.querySelector(".session-item-context")?.textContent,
-			).toContain(`Another project · feature/${origin}`);
+			).toContain(`Another project feature/${origin}`);
 		}
 		for (const id of ["local", "local-fallback"]) {
 			const row = container.querySelector(`[data-session-id="${id}"]`);

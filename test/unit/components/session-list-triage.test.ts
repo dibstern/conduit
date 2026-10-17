@@ -170,7 +170,7 @@ describe("session triage list", () => {
 		);
 	});
 
-	it("keeps snoozed rows in a counted shelf above Settled", async () => {
+	it("keeps snoozed rows in a counted shelf after Settled", async () => {
 		const until = new Date(2099, 9, 12, 9).getTime();
 		addSnoozedRow(until);
 		render(SessionList);
@@ -182,7 +182,7 @@ describe("session triage list", () => {
 		expect(
 			toggle.compareDocumentPosition(
 				screen.getByTestId("settled-shelf-toggle"),
-			) & Node.DOCUMENT_POSITION_FOLLOWING,
+			) & Node.DOCUMENT_POSITION_PRECEDING,
 		).toBeTruthy();
 		await fireEvent.click(toggle);
 		expect(localStorage.getItem("snoozed-shelf-open")).toBe("true");
@@ -280,7 +280,7 @@ describe("session triage list", () => {
 		expect(localStorage.getItem("settled-shelf-open")).toBe("true");
 		const row = screen.getByText("Finished work").closest("a");
 		expect(row?.querySelector(".session-item-meta")?.textContent).toBe(
-			formatTimeAgo(Date.now() - 120_000),
+			formatTimeAgo(Date.now() - 120_000).replace(/ ago$/, ""),
 		);
 		await fireEvent.click(toggle);
 		expect(localStorage.getItem("settled-shelf-open")).toBe("false");

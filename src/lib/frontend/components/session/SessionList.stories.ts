@@ -330,6 +330,89 @@ export const FilterMatchesNothing: Story = {
 	},
 };
 
+export const NeedsYouEmpty: Story = {
+	name: "Needs you, everything handled",
+	beforeEach: () => {
+		seedSessions([
+			{
+				id: "quiet",
+				accountId: null,
+				title: "Docs sweep",
+				attention: "idle",
+				projectSlug: "conduit",
+			},
+		]);
+		routerState.search = "?status=needs-you";
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("session-filter-empty")).toHaveTextContent(
+			"That's everything waiting on you.",
+		);
+		await expect(
+			canvas.queryByTestId("session-filter-clear"),
+		).not.toBeInTheDocument();
+		await userEvent.click(canvas.getByTestId("session-filter-chip-needs-you"));
+		await expect(canvas.getByText("Docs sweep")).toBeVisible();
+		await userEvent.click(canvas.getByTestId("session-filter-chip-needs-you"));
+	},
+};
+
+export const ShelvesWithMore: Story = {
+	name: "Shelves with more",
+	beforeEach: () => {
+		sessionState.now = SNOOZE_STORY_NOW;
+		uiState.settledShelfOpen = true;
+		uiState.snoozedShelfOpen = true;
+		seedSessions([
+			...Array.from({ length: 14 }, (_, i) => ({
+				id: `settled-${i}`,
+				accountId: null,
+				projectSlug: "conduit",
+				title: `Settled task ${i + 1}`,
+				attention: "idle" as const,
+				settledAt: SNOOZE_STORY_NOW - (i + 1) * 3_600_000,
+				git: { branch: `fix/task-${i + 1}` },
+			})),
+			...Array.from({ length: 4 }, (_, i) => ({
+				id: `snoozed-${i}`,
+				accountId: null,
+				projectSlug: "conduit",
+				title: `Snoozed task ${i + 1}`,
+				attention: "idle" as const,
+				snoozedAt: SNOOZE_STORY_NOW,
+				snoozedUntil: SNOOZE_STORY_NOW + 3_600_000,
+			})),
+		]);
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const settled = canvas.getByTestId("settled-shelf-toggle");
+		const snoozed = canvas.getByTestId("snoozed-shelf-toggle");
+		await expect(
+			settled.compareDocumentPosition(snoozed) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		await expect(canvas.getByTestId("settled-shelf-more")).toHaveTextContent(
+			"+ 12 more",
+		);
+		await expect(canvas.getByTestId("snoozed-shelf-more")).toHaveTextContent(
+			"+ 2 more",
+		);
+		await userEvent.click(canvas.getByTestId("settled-shelf-more"));
+		await expect(
+			within(
+				canvasElement.querySelector("#settled-shelf-rows") as HTMLElement,
+			).getAllByText(/^Settled task/),
+		).toHaveLength(14);
+		await userEvent.click(settled);
+		await userEvent.click(settled);
+		await expect(canvas.getByTestId("settled-shelf-more")).toBeVisible();
+		// The capture shows the shelves at rest, not the toggle's focus ring.
+		settled.blur();
+	},
+};
+
 export const GroupedByProject: Story = {
 	name: "Grouped by project",
 	beforeEach: () => {
@@ -385,9 +468,7 @@ export const SearchFocused: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.keyboard("/");
-		await expect(
-			canvas.getByPlaceholderText("Search sessions..."),
-		).toHaveFocus();
+		await expect(canvas.getByPlaceholderText("Search")).toHaveFocus();
 	},
 };
 

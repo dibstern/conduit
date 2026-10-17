@@ -178,7 +178,9 @@ describe("Button colour axes", () => {
 	// variant-prefixed, so they never compete with the resting colour.
 	const restingText = (classes: string[]) =>
 		classes.filter((c) =>
-			/^text-(?!xs$|sm$|base$|lg$|left$|center$|right$)/.test(c),
+			/^text-(?!xs$|sm$|base$|lg$|left$|center$|right$|\[\d+(?:\.\d+)?px\]$)/.test(
+				c,
+			),
 		);
 	const hoverFill = (classes: string[]) =>
 		classes.filter((c) => c.startsWith("hover:bg-"));
