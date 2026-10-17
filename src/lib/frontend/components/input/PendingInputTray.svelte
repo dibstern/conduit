@@ -2,7 +2,7 @@
      session-detail stream reports them. The browser keeps no queue of its own:
      a row appears when the server admits a send and leaves when the adapter
      places it in the transcript or someone removes it. Hidden when there are
-     none. Remove, Edit, Steer and Resume are server commands; their effect
+     none. Remove, Edit, Steer, Run now and Resume are server commands; their effect
      comes back through the stream, on every client. Whether Steer shows, and
      whether it is enabled, is the server's call too (the inbox arm). -->
 <script lang="ts">
@@ -43,7 +43,7 @@
 		limitRecovery?: LimitRecovery | undefined;
 		sessionId?: string | undefined;
 		projectSlug?: string | undefined;
-		/** Steer on queued rows: hidden when undefined, disabled while a prompt is open. */
+		/** Steer on queued rows: hidden when undefined; Steer and Run now are disabled while a prompt is open. */
 		steer?: "ready" | "prompt_open" | undefined;
 		/** Takes back a queued input that Edit removed. */
 		onEdit: (text: string, images: readonly string[]) => void;
@@ -60,13 +60,17 @@
 	async function act(
 		tag: "input.cancel" | "input.sendNow",
 		input: PendingInput,
+		interrupt = false,
 	): Promise<boolean> {
 		if (!queueSessionId) return false;
 		try {
 			const payload = { sessionId: queueSessionId, inputId: input.inputId };
 			const response = await (tag === "input.cancel"
 				? rpc("input.cancel", payload)
-				: rpc("input.sendNow", payload));
+				: rpc("input.sendNow", {
+						...payload,
+						...(interrupt ? { interrupt: true } : {}),
+					}));
 			if (response.ok) return true;
 			if (response.reason === "already_started")
 				showToast("That message already started", { variant: "warn" });
@@ -127,17 +131,30 @@
 					{#if input.state === "queued"}
 						{#if sendsAt !== undefined || limited}
 							<Button variant="ghost" size="composer-chip" touchTarget data-testid="pending-input-send-now" class="shrink-0" onclick={() => act("input.sendNow", input)}>Send now</Button>
-						{:else if steer}
+						{:else}
+							{#if steer && !command}
+								<Tooltip side="top" align="end" customAnchor={`#${CSS.escape(`${trayId}-row-${index}`)}`}>
+									{#snippet trigger({ props })}<Button
+										{...props}
+										variant="ghost" size="composer-chip" touchTarget
+										data-testid="pending-input-steer"
+										class="shrink-0"
+										disabled={steer === "prompt_open"}
+										onclick={() => act("input.sendNow", input)}
+										>Steer</Button>{/snippet}
+									{steer === "prompt_open" ? "Answer the open prompt before steering" : "Send it into the running turn"}
+								</Tooltip>
+							{/if}
 							<Tooltip side="top" align="end" customAnchor={`#${CSS.escape(`${trayId}-row-${index}`)}`}>
 								{#snippet trigger({ props })}<Button
 									{...props}
 									variant="ghost" size="composer-chip" touchTarget
-									data-testid="pending-input-steer"
+									data-testid="pending-input-run-now"
 									class="shrink-0"
 									disabled={steer === "prompt_open"}
-									onclick={() => act("input.sendNow", input)}
-									>{command ? "Run now" : "Steer"}</Button>{/snippet}
-								{steer === "prompt_open" ? "Answer the open prompt before steering" : command ? "Stop the running turn and run this next" : "Send it into the running turn"}
+									onclick={() => act("input.sendNow", input, true)}
+									>Run now</Button>{/snippet}
+								{steer === "prompt_open" ? "Answer the open prompt before running this" : paused ? "Run this now, ahead of the queue" : "Stop the running turn and run this next"}
 							</Tooltip>
 						{/if}
 						<Button variant="ghost" size="composer-icon" iconOnly icon="pencil" iconSize={13} touchTarget ariaLabel="Edit queued message" data-testid="pending-input-edit" class="shrink-0" onclick={() => edit(input)} />

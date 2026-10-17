@@ -619,6 +619,9 @@ export const WordsWorkingDesktop: Story = {
 		await expect(canvas.getByTestId("pending-input-steer")).toHaveTextContent(
 			"Steer",
 		);
+		await expect(canvas.getByTestId("pending-input-run-now")).toHaveTextContent(
+			"Run now",
+		);
 		await expect(
 			canvas.getByTestId("composer-next-turn-note"),
 		).toHaveTextContent("next turn");
@@ -1769,6 +1772,9 @@ export const WorkingQueued: Story = {
 		await expect(canvas.getByTestId("pending-input-steer")).toHaveTextContent(
 			"Steer",
 		);
+		await expect(canvas.getByTestId("pending-input-run-now")).toHaveTextContent(
+			"Run now",
+		);
 		await expect(canvas.getByTestId("composer-next-turn-note")).toBeVisible();
 		await expect(
 			canvas.getByRole("button", { name: "Stop generating" }),
@@ -1792,6 +1798,7 @@ export const PausedQueued: Story = {
 			"Paused · you stopped the turn",
 		);
 		await expect(canvas.getByTestId("pending-input-resume")).toBeVisible();
+		await expect(canvas.getByTestId("pending-input-run-now")).toBeVisible();
 		await expect(canvas.getByTestId("pending-input-edit")).toBeVisible();
 		await expect(canvas.getByTestId("pending-input-remove")).toBeVisible();
 	},

@@ -206,6 +206,7 @@ export const conversationHandlers = {
 				clientId: request.originId ?? "rpc",
 				sessionId: request.sessionId,
 				inputId: request.inputId,
+				...(request.interrupt ? { interrupt: true } : {}),
 			}),
 		),
 	SyncInputDraft: (request) =>
