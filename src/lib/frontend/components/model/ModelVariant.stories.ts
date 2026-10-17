@@ -185,6 +185,21 @@ export const ComposerWordsLight: Story = {
 	globals: { theme: "light" },
 };
 
+export const ComposerWordsDefault: Story = {
+	args: { variant: "words" },
+	play: async ({ canvasElement }) => {
+		const button = within(canvasElement).getByTestId("composer-word-effort");
+		await expect(button).toHaveTextContent("default");
+		await userEvent.click(button);
+		await expect(composerPickerState.request?.section).toBe("effort");
+	},
+};
+
+export const ComposerWordsDefaultLight: Story = {
+	...ComposerWordsDefault,
+	globals: { theme: "light" },
+};
+
 export const DropdownOpen: Story = {
 	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => {

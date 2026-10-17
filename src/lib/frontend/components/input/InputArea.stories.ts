@@ -297,7 +297,7 @@ export const OverflowingInsert: Story = {
 	},
 };
 
-function setupWords(phone: boolean) {
+function setupWords(canvasElement: HTMLElement, phone: boolean) {
 	const width = Object.getOwnPropertyDescriptor(window, "innerWidth");
 	const path = routerState.path;
 	const sessions = [...sessionState.sessions.values()];
@@ -306,8 +306,7 @@ function setupWords(phone: boolean) {
 	const traits = instanceState.providerTraits;
 	const compact = sessionViewState.compact;
 	const composerWidth = sessionViewState.composerWidth;
-	const root = document.getElementById("storybook-root");
-	const style = root?.getAttribute("style");
+	const style = canvasElement.getAttribute("style");
 	// The app dials its RPC socket at startup. Left to the picker's first read,
 	// the dial flips the composer to "Connecting" and takes the picker away.
 	void runTransportEffect(
@@ -318,7 +317,7 @@ function setupWords(phone: boolean) {
 		value: phone ? 393 : 1440,
 	});
 	window.dispatchEvent(new Event("resize"));
-	root?.setAttribute(
+	canvasElement.setAttribute(
 		"style",
 		`display:flex;flex-direction:column;justify-content:flex-end;min-height:100vh;max-width:${phone ? "393px" : "none"}`,
 	);
@@ -421,15 +420,15 @@ function setupWords(phone: boolean) {
 		if (width) Object.defineProperty(window, "innerWidth", width);
 		else Reflect.deleteProperty(window, "innerWidth");
 		window.dispatchEvent(new Event("resize"));
-		if (style != null) root?.setAttribute("style", style);
-		else root?.removeAttribute("style");
+		if (style != null) canvasElement.setAttribute("style", style);
+		else canvasElement.removeAttribute("style");
 	};
 }
 
 export const WordsDesktop: Story = {
 	tags: ["autodocs"],
 	globals: { theme: "dark" },
-	beforeEach: () => setupWords(false),
+	beforeEach: ({ canvasElement }) => setupWords(canvasElement, false),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const body = within(canvasElement.ownerDocument.body);
@@ -470,6 +469,17 @@ export const WordsDesktop: Story = {
 				expect(body.queryByTestId("composer-more-sheet")).toBeNull(),
 			);
 			await expect(trigger).toHaveFocus();
+			const summary = trigger.querySelector<HTMLElement>(
+				'[data-part="summary"]',
+			);
+			if (!summary) throw new Error("Words summary focus target is missing");
+			await expect(getComputedStyle(summary).outlineStyle).toBe("solid");
+			await expect(
+				Number.parseFloat(getComputedStyle(summary).borderRadius),
+			).toBeGreaterThan(0);
+			await expect(summary.getBoundingClientRect().width).toBeLessThan(
+				trigger.getBoundingClientRect().width,
+			);
 			return;
 		}
 		// The row shows "Connecting" until the fake socket opens.
@@ -537,7 +547,7 @@ export const WordsPhone: Story = {
 	...WordsDesktop,
 	tags: ["autodocs"],
 	parameters: { phone: true },
-	beforeEach: () => setupWords(true),
+	beforeEach: ({ canvasElement }) => setupWords(canvasElement, true),
 };
 
 export const WordsPhoneLight: Story = {
@@ -549,8 +559,8 @@ export const WordsPhoneLight: Story = {
 export const ComposerSheet: Story = {
 	tags: ["viewport-capture"],
 	parameters: { phone: true },
-	beforeEach: () => {
-		const cleanup = setupWords(true);
+	beforeEach: ({ canvasElement }) => {
+		const cleanup = setupWords(canvasElement, true);
 		setComposerPreferences({ controls: "icons" });
 		return cleanup;
 	},
@@ -594,7 +604,8 @@ function startTurn() {
 
 export const WordsWorkingDesktop: Story = {
 	...WordsDesktop,
-	beforeEach: () => setupComposerStage("working", false, "words"),
+	beforeEach: ({ canvasElement }) =>
+		setupComposerStage(canvasElement, "working", false, "words"),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(canvas.getByTestId("composer-layout")).toHaveAttribute(
@@ -619,7 +630,8 @@ export const WordsWorkingDesktopLight: Story = {
 };
 export const WordsWorkingPhone: Story = {
 	...WordsPhone,
-	beforeEach: () => setupComposerStage("working", true, "words"),
+	beforeEach: ({ canvasElement }) =>
+		setupComposerStage(canvasElement, "working", true, "words"),
 };
 export const WordsWorkingPhoneLight: Story = {
 	...WordsWorkingPhone,
@@ -1085,8 +1097,8 @@ function narrowComposer(
 	return {
 		tags: ["autodocs"],
 		globals: { theme: "dark" },
-		beforeEach: () => {
-			const cleanup = setupWords(false);
+		beforeEach: ({ canvasElement }) => {
+			const cleanup = setupWords(canvasElement, false);
 			setComposerPreferences({ controls: "icons" });
 			const readings = usageState.readings;
 			const limits = usageState.limits;
@@ -1297,8 +1309,8 @@ export const NarrowLimited395Light: Story = {
 };
 
 export const FinalIconsDesktop: Story = {
-	beforeEach: () => {
-		const cleanup = setupWords(false);
+	beforeEach: ({ canvasElement }) => {
+		const cleanup = setupWords(canvasElement, false);
 		setComposerPreferences({ controls: "icons" });
 		return cleanup;
 	},
@@ -1310,8 +1322,8 @@ export const FinalIconsDesktopLight: Story = {
 export const FinalIconsPhone: Story = {
 	...FinalIconsDesktop,
 	parameters: { phone: true },
-	beforeEach: () => {
-		const cleanup = setupWords(true);
+	beforeEach: ({ canvasElement }) => {
+		const cleanup = setupWords(canvasElement, true);
 		setComposerPreferences({ controls: "icons" });
 		return cleanup;
 	},
@@ -1321,35 +1333,37 @@ export const FinalIconsPhoneLight: Story = {
 	globals: { theme: "light" },
 };
 
+function setupDollarMenu(canvasElement: HTMLElement, phone = false) {
+	const cleanup = setupWords(canvasElement, phone);
+	setComposerPreferences({ controls: "icons" });
+	getOrCreateSessionMessages(testId).contextPercent = 86;
+	handleCommandList({
+		commands: [
+			{
+				name: "compact",
+				description: "Summarize to free context",
+				builtin: true,
+			},
+			{ name: "clear", description: "Clear the conversation", builtin: true },
+			{
+				name: "cost",
+				description: "Token use and cost for this session",
+				builtin: true,
+			},
+			{ name: "help", description: "Show help", builtin: true },
+			{ name: "init", description: "Initialize the project", builtin: true },
+			{ name: "memory", description: "Manage memory", builtin: true },
+			{ name: "model", description: "Choose a model", builtin: true },
+			{ name: "review", description: "Review a pull request" },
+		],
+	});
+	return cleanup;
+}
+
 export const DollarMenu: Story = {
 	...FinalIconsDesktop,
 	tags: ["viewport-capture"],
-	beforeEach: () => {
-		const cleanup = setupWords(false);
-		setComposerPreferences({ controls: "icons" });
-		getOrCreateSessionMessages(testId).contextPercent = 86;
-		handleCommandList({
-			commands: [
-				{
-					name: "compact",
-					description: "Summarize to free context",
-					builtin: true,
-				},
-				{ name: "clear", description: "Clear the conversation", builtin: true },
-				{
-					name: "cost",
-					description: "Token use and cost for this session",
-					builtin: true,
-				},
-				{ name: "help", description: "Show help", builtin: true },
-				{ name: "init", description: "Initialize the project", builtin: true },
-				{ name: "memory", description: "Manage memory", builtin: true },
-				{ name: "model", description: "Choose a model", builtin: true },
-				{ name: "review", description: "Review a pull request" },
-			],
-		});
-		return cleanup;
-	},
+	beforeEach: ({ canvasElement }) => setupDollarMenu(canvasElement),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.type(canvas.getByRole("textbox", { name: "Message" }), "$");
@@ -1363,10 +1377,32 @@ export const DollarMenu: Story = {
 			within(menu).getByTestId("command-context-percent"),
 		).toHaveTextContent("86%");
 		await expect(within(menu).queryByText("$review")).toBeNull();
+		const composer = canvasElement.querySelector("#input-row");
+		if (!composer) throw new Error("Composer is missing");
+		await waitFor(() => {
+			const menuRect = menu.getBoundingClientRect();
+			const composerRect = composer.getBoundingClientRect();
+			expect(Math.abs(menuRect.left - composerRect.left)).toBeLessThanOrEqual(
+				1,
+			);
+			expect(Math.abs(menuRect.width - composerRect.width)).toBeLessThanOrEqual(
+				1,
+			);
+		});
 	},
 };
 export const DollarMenuLight: Story = {
 	...DollarMenu,
+	globals: { theme: "light" },
+};
+
+export const DollarMenuPhone: Story = {
+	...DollarMenu,
+	parameters: { phone: true },
+	beforeEach: ({ canvasElement }) => setupDollarMenu(canvasElement, true),
+};
+export const DollarMenuPhoneLight: Story = {
+	...DollarMenuPhone,
 	globals: { theme: "light" },
 };
 
@@ -1416,6 +1452,7 @@ export const ModeMenuOpenLight: Story = {
 };
 
 function setupComposerStage(
+	canvasElement: HTMLElement,
 	stage: "usage" | "limited" | "waiting" | "working" | "paused" | "context",
 	phone = false,
 	controls: "icons" | "words" = "icons",
@@ -1433,10 +1470,10 @@ function setupComposerStage(
 		`conduit:context-warning-dismissed:${testId}`,
 	].map((key) => [key, localStorage.getItem(key)] as const);
 	for (const [key] of dismissalKeys) localStorage.removeItem(key);
-	const cleanup = setupWords(phone);
+	const cleanup = setupWords(canvasElement, phone);
 	setComposerPreferences({ controls, contextWarning: 80 });
-	const now = new Date("2026-10-17T13:00:00+11:00").getTime();
-	const reset = new Date("2026-10-17T15:40:00+11:00").getTime();
+	const now = new Date(2026, 9, 17, 13).getTime();
+	const reset = new Date(2026, 9, 17, 15, 40).getTime();
 	Date.now = () => now;
 	const limited = stage === "limited" || stage === "waiting";
 	instanceState.instances = [
@@ -1452,6 +1489,17 @@ function setupComposerStage(
 			isDefault: false,
 			usageEligible: true,
 		},
+		...(stage === "usage"
+			? [
+					{
+						...mockClaudeAccount,
+						id: "lab",
+						name: "lab",
+						isDefault: false,
+						usageEligible: true,
+					},
+				]
+			: []),
 	];
 	usageState.limits = {
 		...limits,
@@ -1484,6 +1532,18 @@ function setupComposerStage(
 			readAt: now,
 			stale: false,
 		},
+		...(stage === "usage"
+			? [
+					{
+						accountId: "lab",
+						harness: "claude" as const,
+						status: "limited" as const,
+						windows: [],
+						readAt: now,
+						stale: false,
+					},
+				]
+			: []),
 	];
 	const session = sessionState.sessions.get(testId);
 	if (!session) throw new Error("Composer stage session is missing");
@@ -1565,7 +1625,7 @@ function setupComposerStage(
 export const UsageWarningDesktop: Story = {
 	tags: ["viewport-capture"],
 	globals: { theme: "dark" },
-	beforeEach: () => setupComposerStage("usage"),
+	beforeEach: ({ canvasElement }) => setupComposerStage(canvasElement, "usage"),
 	play: async ({ canvasElement }) => {
 		const strip = within(canvasElement).getByTestId("usage-warning-strip");
 		await expect(strip).toHaveTextContent(
@@ -1574,6 +1634,9 @@ export const UsageWarningDesktop: Story = {
 		await expect(
 			within(strip).getByTestId("usage-warning-switch-account"),
 		).toBeVisible();
+		await expect(
+			within(strip).getByTestId("usage-warning-detail"),
+		).toHaveTextContent("Resets at 4:10 pm");
 	},
 };
 export const UsageWarningDesktopLight: Story = {
@@ -1586,7 +1649,8 @@ export const UsageWarningPhone: Story = {
 	...UsageWarningDesktop,
 	tags: ["viewport-capture"],
 	parameters: { phone: true },
-	beforeEach: () => setupComposerStage("usage", true),
+	beforeEach: ({ canvasElement }) =>
+		setupComposerStage(canvasElement, "usage", true),
 	play: async ({ canvasElement }) => {
 		const strip = within(canvasElement).getByTestId("usage-warning-strip");
 		await expect(strip).toHaveTextContent(
@@ -1595,6 +1659,9 @@ export const UsageWarningPhone: Story = {
 		await expect(
 			within(strip).getByRole("button", { name: "Dismiss usage warning" }),
 		).toHaveTextContent("Dismiss");
+		await expect(
+			within(strip).getByTestId("usage-warning-switch-account"),
+		).toHaveTextContent("Switch to personal");
 	},
 };
 export const UsageWarningPhoneLight: Story = {
@@ -1606,11 +1673,15 @@ export const UsageWarningPhoneLight: Story = {
 export const Limited: Story = {
 	tags: ["viewport-capture"],
 	globals: { theme: "dark" },
-	beforeEach: () => setupComposerStage("limited"),
+	beforeEach: ({ canvasElement }) =>
+		setupComposerStage(canvasElement, "limited"),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(canvas.getByTestId("usage-limit-strip")).toHaveTextContent(
 			"lab hit its 5-hour limit.",
+		);
+		await expect(canvas.getByTestId("usage-limit-detail")).toHaveTextContent(
+			"Resets at 3:40 pm.",
 		);
 		await userEvent.type(
 			canvas.getByRole("textbox", { name: "Message" }),
@@ -1635,7 +1706,8 @@ export const LimitedLight: Story = {
 export const WaitingForReset: Story = {
 	tags: ["viewport-capture"],
 	globals: { theme: "dark" },
-	beforeEach: () => setupComposerStage("waiting"),
+	beforeEach: ({ canvasElement }) =>
+		setupComposerStage(canvasElement, "waiting"),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(canvas.getByTestId("pending-input-waiting")).toHaveTextContent(
@@ -1646,6 +1718,22 @@ export const WaitingForReset: Story = {
 		).toHaveTextContent("sends");
 		await expect(canvas.getByTestId("pending-input-send-now")).toBeVisible();
 		await expect(canvas.queryByTestId("usage-limit-strip")).toBeNull();
+		const cancel = canvas.getByTestId("usage-limit-cancel-resume");
+		const actions = cancel.parentElement;
+		if (!actions) throw new Error("Waiting tray actions are missing");
+		await expect(getComputedStyle(cancel).flexGrow).toBe("0");
+		const header = canvas.getByTestId("pending-input-waiting");
+		const headerRect = header.getBoundingClientRect();
+		await expect(cancel.getBoundingClientRect().width).toBeLessThan(
+			headerRect.width * 0.7,
+		);
+		await expect(
+			Math.abs(
+				actions.getBoundingClientRect().right -
+					headerRect.right +
+					Number.parseFloat(getComputedStyle(header).paddingRight),
+			),
+		).toBeLessThanOrEqual(1);
 	},
 };
 export const WaitingForResetLight: Story = {
@@ -1654,10 +1742,22 @@ export const WaitingForResetLight: Story = {
 	globals: { theme: "light" },
 };
 
+export const WaitingForResetPhone: Story = {
+	...WaitingForReset,
+	parameters: { phone: true },
+	beforeEach: ({ canvasElement }) =>
+		setupComposerStage(canvasElement, "waiting", true),
+};
+export const WaitingForResetPhoneLight: Story = {
+	...WaitingForResetPhone,
+	globals: { theme: "light" },
+};
+
 export const WorkingQueued: Story = {
 	tags: ["viewport-capture"],
 	globals: { theme: "dark" },
-	beforeEach: () => setupComposerStage("working"),
+	beforeEach: ({ canvasElement }) =>
+		setupComposerStage(canvasElement, "working"),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(canvas.getByTestId("pending-input-state")).toHaveTextContent(
@@ -1684,7 +1784,8 @@ export const WorkingQueuedLight: Story = {
 export const PausedQueued: Story = {
 	tags: ["viewport-capture"],
 	globals: { theme: "dark" },
-	beforeEach: () => setupComposerStage("paused"),
+	beforeEach: ({ canvasElement }) =>
+		setupComposerStage(canvasElement, "paused"),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(canvas.getByTestId("pending-input-paused")).toHaveTextContent(
@@ -1704,7 +1805,8 @@ export const PausedQueuedLight: Story = {
 export const ContextWarning: Story = {
 	tags: ["viewport-capture"],
 	globals: { theme: "dark" },
-	beforeEach: () => setupComposerStage("context"),
+	beforeEach: ({ canvasElement }) =>
+		setupComposerStage(canvasElement, "context"),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(
@@ -1725,7 +1827,8 @@ export const LimitedPhone: Story = {
 	...Limited,
 	tags: ["viewport-capture"],
 	parameters: { phone: true },
-	beforeEach: () => setupComposerStage("limited", true),
+	beforeEach: ({ canvasElement }) =>
+		setupComposerStage(canvasElement, "limited", true),
 };
 export const LimitedPhoneLight: Story = {
 	...LimitedPhone,

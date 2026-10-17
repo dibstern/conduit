@@ -1,14 +1,15 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
 	import type { HTMLAttributes } from "svelte/elements";
-	let { words = false, goal = "none", children, class: className = "", ...rest }: {
+	let { words = false, compact = false, goal = "none", children, class: className = "", ...rest }: {
 		words?: boolean;
+		compact?: boolean;
 		goal?: "solid" | "dashed" | "none";
 		children: Snippet;
 	} & Omit<HTMLAttributes<HTMLDivElement>, "children"> = $props();
 </script>
 
-<div {...rest} data-words={words} data-goal={goal} class="composer-frame {className}">
+<div {...rest} data-words={words} data-compact={compact} data-goal={goal} class="composer-frame {className}">
 	{@render children()}
 </div>
 
@@ -32,6 +33,8 @@
 	.composer-frame :global(.composer-text-metrics) { font-size: 15px; line-height: 24px; padding: 2px 0 10px; }
 	[data-words="true"] :global(.composer-text-metrics) { padding: 0 4px; }
 	[data-words="true"] :global(#image-preview) { padding-inline: 8px; }
+	.composer-frame[data-compact="true"][data-words="false"] { padding: 10px 8px 8px 14px; }
+	[data-compact="true"][data-words="false"] :global(.composer-text-metrics) { padding-bottom: 8px; }
 	@media (max-width: 767px) {
 		.composer-frame[data-words="false"] { padding: 10px 8px 8px 14px; }
 		[data-words="false"] :global(.composer-text-metrics) { padding-bottom: 8px; }

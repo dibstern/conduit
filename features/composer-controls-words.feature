@@ -142,7 +142,7 @@ Scenario Outline: desktop renders Words below the composer border
   And approvals are ask
   When I open settings to the General section
   And I choose Words for composer controls
-  Then the composer words row shows Sonnet 5, 200K, DEF and ask
+  Then the composer words row shows Sonnet 5, 200K, default and ask
   And the composer icon controls are absent
   And the words row is below the composer border
   And the composer region visually matches <baseline> at <threshold> percent

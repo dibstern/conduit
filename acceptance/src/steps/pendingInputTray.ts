@@ -182,6 +182,20 @@ export const pendingInputTrayHandlers: StepHandler[] = [
 			await expect(world.page.getByRole("tooltip")).toHaveText(match[2] ?? "", {
 				timeout: 3000,
 			});
+			await expect
+				.poll(async () => {
+					const tooltip = await world.page.getByRole("tooltip").boundingBox();
+					const text = await rows(world.page)
+						.nth(Number(match[1]) - 1)
+						.getByTestId("pending-input-text")
+						.boundingBox();
+					return (
+						tooltip !== null &&
+						text !== null &&
+						tooltip.y + tooltip.height <= text.y
+					);
+				})
+				.toBe(true);
 		},
 	},
 	{
@@ -238,6 +252,22 @@ export const pendingInputTrayHandlers: StepHandler[] = [
 			await expect(world.page.getByTestId("composer-steer-refused")).toHaveText(
 				`Not steered. ${match[1] ?? ""}`,
 			);
+			await expect(
+				world.page.getByTestId("composer-steer-refused"),
+			).toHaveAttribute("data-composer-tab");
+			await expect
+				.poll(async () => {
+					const notice = await world.page
+						.getByTestId("composer-steer-refused")
+						.boundingBox();
+					const composer = await world.page.locator("#input-row").boundingBox();
+					return (
+						notice !== null &&
+						composer !== null &&
+						Math.abs(notice.y + notice.height - composer.y) <= 1
+					);
+				})
+				.toBe(true);
 		},
 	},
 	{

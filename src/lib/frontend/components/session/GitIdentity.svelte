@@ -388,8 +388,8 @@
 <style>
 	/* The cap sits on the grid wrapper, the flex item: on the button it left the wrapper sized to the full label, with dead space after the pill. */
 	.git-pill { max-width: 100%; flex-shrink: 1; }
-	/* Checkout yields its label space before the model. Send has its own grid track. */
-	.git-pill.git-control { position: relative; flex: 0 1000000 220px; min-width: 30px; max-width: 220px; justify-content: end; }
+	/* A stable slot measures available room in block, grid and flex parents. Checkout still yields before the model. */
+	.git-pill.git-control { position: relative; width: 100%; flex: 0 1000000 220px; min-width: 30px; max-width: 220px; justify-content: end; }
 	/* Content-sized, so it sits beside the context %. As an icon it still asks for its full width, or it could never grow back. */
 	.git-pill.git-word { position: relative; flex: 0 1 auto; min-width: 12px; justify-content: end; }
 	/* 100ch in the pill's font turns ch floors into px. It extends left from the pill, so it never adds scroll. */

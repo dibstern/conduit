@@ -430,6 +430,7 @@ Examples:
 
 Scenario Outline: the dollar menu pins goal and reports compact context
   Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
   And the mock relay reports context 86 percent
@@ -439,8 +440,10 @@ Scenario Outline: the dollar menu pins goal and reports compact context
   And the command menu offers $compact
   And the compact command reports 86% context
   And the command menu does not offer $review
-  And the composer region visually matches <baseline> at <threshold> percent
+  And the command menu spans the composer width
+  And the screen region visually matches <baseline> at <threshold> percent
 
 Examples:
-  | baseline                     | threshold |
-  | composer-final-dollar-menu  | 98        |
+  | viewport | baseline                   | threshold |
+  | desktop  | composer-final-dollar-menu | 98        |
+  | phone    | composer-final-dollar-menu | 98        |

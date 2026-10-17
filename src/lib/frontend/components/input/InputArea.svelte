@@ -1163,24 +1163,6 @@
 	</div>
 {/if}
 
-<!-- Command Menu (above input when "/" or "$" is typed) -->
-{#if commandMenuVisible}
-	<div id="command-menu-wrap" class="relative w-full max-w-[760px] mx-auto px-4">
-		<CommandMenu
-			bind:this={commandMenuRef}
-			bind:activeIndex={commandMenuActiveIndex}
-			listboxId={commandListboxId}
-			query={commandQuery}
-			visible={commandMenuVisible}
-			commands={[...menuCommands]}
-			contextPercent={currentChat().contextPercent}
-			trigger={commandMatch?.trigger ?? "/"}
-			onSelect={handleCommandSelect}
-			onClose={handleCommandClose}
-		/>
-	</div>
-{/if}
-
 {#snippet phoneMore(rows: Snippet, trigger: Snippet<[{ props: Record<string, unknown>; attention?: boolean }]>, checkout?: Snippet, warning?: Snippet, attention = false)}
 	{#snippet phoneTrigger({ props }: { props: Record<string, unknown> })}{@render trigger({ props, attention })}{/snippet}
 	<Popover bind:open={composerMoreOpen} presentation="auto" title="Composer" side="top" trigger={phoneTrigger} data-testid="composer-more-sheet" class="px-[16px]">
@@ -1226,9 +1208,27 @@
 <div
 	id="input-area"
 	{@attach publishComposerClearance}
+	data-compact={sessionViewState.compact}
 	class="shrink-0 px-[32px] pt-[8px] pb-[calc(env(safe-area-inset-bottom,0px)+22px)] has-[textarea:focus]:pb-[22px] max-md:px-[12px] max-md:pt-[6px] max-md:pb-[calc(env(safe-area-inset-bottom,0px)+8px)] max-md:has-[textarea:focus]:pb-[8px]"
 >
 	<div id="input-wrapper" bind:this={composerWrapperEl} bind:clientWidth={sessionViewState.composerWidth} class="max-w-[760px] mx-auto relative">
+		<!-- The listbox shares the composer's measured edges, including phone gutters. -->
+		{#if commandMenuVisible}
+			<div id="command-menu-wrap" class="relative w-full">
+				<CommandMenu
+					bind:this={commandMenuRef}
+					bind:activeIndex={commandMenuActiveIndex}
+					listboxId={commandListboxId}
+					query={commandQuery}
+					visible={commandMenuVisible}
+					commands={[...menuCommands]}
+					contextPercent={currentChat().contextPercent}
+					trigger={commandMatch?.trigger ?? "/"}
+					onSelect={handleCommandSelect}
+					onClose={handleCommandClose}
+				/>
+			</div>
+		{/if}
 		<!-- Subagent context bar (above input area) -->
 		<SubagentBackBar bind:this={subagentBackBarRef} />
 		{#if readOnlySubagent}
@@ -1299,14 +1299,14 @@
 		/>
 
 		{#if visibleRefusal}
-			<div data-testid="composer-steer-refused" role="status" class="flex items-center gap-[7px] mb-2 rounded-2xl border border-border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-secondary">
+			<ComposerStrip tone="ask" data-testid="composer-steer-refused" role="status" class="flex items-center gap-[8px]">
 				<Icon name="info" size={14} class="shrink-0 text-status-amber" />
 				<span class="flex-1 min-w-0"><b class="font-semibold text-status-amber">Not steered.</b> {STEER_REFUSALS[visibleRefusal.reason]}</span>
 				<Button variant="ghost" size="content" tone="muted" hoverFill="none" iconOnly icon="x" iconSize={12} ariaLabel="Dismiss" class="size-5 shrink-0" onclick={() => { steerRefusal = null; dismissedRefusal = turnControl.refusal; }} />
-			</div>
+			</ComposerStrip>
 		{/if}
 
-		<ComposerFrame id="input-row" words={composerPreferences.controls === "words"} goal={goal.border}>
+		<ComposerFrame id="input-row" compact={sessionViewState.compact} words={composerPreferences.controls === "words"} goal={goal.border}>
 			{#if pendingImages.length > 0}
 				<PastePreview images={pendingImages} onRemove={removePendingImage} />
 			{/if}
@@ -1604,6 +1604,8 @@
 </div>
 
 <style>
+	#input-area[data-compact="true"] { padding: 6px 12px calc(env(safe-area-inset-bottom, 0px) + 8px); }
+	#input-area[data-compact="true"]:has(:global(textarea:focus)) { padding-bottom: 8px; }
 	.composer-task-dot {
 		width: 5px;
 		height: 5px;

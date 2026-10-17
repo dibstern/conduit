@@ -14,7 +14,7 @@
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
-	import { formatSnoozeTime } from "../../utils/format.js";
+	import { usageForecastTime } from "../../utils/continuation.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import ComposerStrip from "../ui/ComposerStrip.svelte";
@@ -38,7 +38,9 @@
 	const canSwitch = $derived(
 		accountId !== undefined && claudeAccounts.hasAlternative(accountId),
 	);
-	const geometry = $derived(sessionViewState.compact ? "flex-1 justify-center" : "");
+	// Phone strips stack full-width actions; the tray keeps them trailing at natural width.
+	const stretch = $derived(sessionViewState.compact && presentation === "strip");
+	const geometry = $derived(stretch ? "flex-1 justify-center" : "");
 	const limitWindow = $derived(
 		limitRecovery.rateLimitType.startsWith("seven_day")
 			? "weekly limit"
@@ -47,7 +49,7 @@
 				: "usage limit",
 	);
 	const scheduledAt = $derived(limitRecovery.continued ? undefined : limitRecovery.scheduledAt);
-	const resumesAt = $derived(scheduledAt === undefined ? "" : formatSnoozeTime(scheduledAt * 1000));
+	const resumesAt = $derived(scheduledAt === undefined ? "" : usageForecastTime(scheduledAt * 1000, clock.now));
 	// Worked out on read from the local clock, so it ticks without the server.
 	const countdown = $derived.by(() => {
 		if (scheduledAt === undefined) return "";
@@ -61,7 +63,7 @@
 	const detail = $derived.by(() => {
 		if (limitRecovery.resetsAt === undefined)
 			return "Reset time unavailable";
-		return `Resets at ${formatSnoozeTime(limitRecovery.resetsAt * 1000)}.`;
+		return `Resets at ${usageForecastTime(limitRecovery.resetsAt * 1000, clock.now)}.`;
 	});
 
 	// Each action is one RPC on the session's own account. A refusal leaves the
@@ -114,7 +116,7 @@
 				iconSize={12}
 				{loading}
 				data-testid="usage-limit-switch-account"
-				class="{primary ? 'font-semibold' : ''} {sessionViewState.compact ? 'justify-center' : ''} {geometry}"
+				class="{primary ? 'font-semibold' : ''} {geometry}"
 			>
 				Switch account{#if !sessionViewState.compact}<Icon name="chevron-down" size={12} />{/if}
 			</Button>
@@ -131,7 +133,7 @@
 			{#if presentation === "strip"}<span data-testid="usage-limit-detail" class="text-text-dimmer">{detail}</span>{/if}
 		</span>
 		{#if !limitRecovery.continued}
-			<div class="flex flex-wrap gap-[6px] {sessionViewState.compact ? 'mt-[6px] w-full' : 'shrink-0'}">
+			<div class="flex flex-wrap gap-[6px] {stretch ? 'mt-[6px] w-full' : 'ml-auto shrink-0'}">
 				{#if canSwitch && accountId}
 					{@render switchAccount(true, accountId)}
 				{/if}
@@ -148,7 +150,7 @@
 			<b data-testid="usage-limit-title" class="font-semibold text-text">{presentation === "tray" ? `Waiting for ${account}'s limit to reset` : sessionViewState.compact ? `Resumes ${resumesAt}` : `Resumes on ${account} at ${resumesAt}`}</b><br />
 			<span data-testid="usage-limit-detail" class="text-text-dimmer">{sessionViewState.compact ? `${account} · ${countdown}` : countdown}{limitRecovery.auto ? " · auto-resume is on" : ""}</span>
 		</span>
-		<div class="flex flex-wrap gap-[6px] {sessionViewState.compact ? 'mt-[6px] w-full' : 'shrink-0'}">
+		<div class="flex flex-wrap gap-[6px] {stretch ? 'mt-[6px] w-full' : 'ml-auto shrink-0'}">
 			{#if canSwitch && accountId}
 				{@render switchAccount(false, accountId)}
 			{/if}
@@ -171,3 +173,4 @@
 	{@render recovery()}
 </ComposerStrip>
 {/if}
+

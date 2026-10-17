@@ -934,6 +934,18 @@
 {/snippet}
 
 {#snippet modelTrigger({ props, attention = false }: { props: Record<string, unknown>; attention?: boolean })}
+	{#snippet summary()}
+		{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={variant === "words" ? 15 : 18} surface="box" />{/if}
+		<span class="model-label min-w-0 truncate">{displayName}</span>
+		{#if phone && attention}<span data-testid="composer-more-attention" class="size-[6px] shrink-0 rounded-full bg-status-ask" aria-hidden="true"></span>{/if}
+		{#if contextLabel}<span data-testid="picker-selected-context" class="shrink-0 font-mono text-[11.5px] text-text-muted">{contextLabel}</span>{/if}
+		{#if variant === "words"}
+			{@const effortWord = parameters ? parameterEffortWord : effort.current === "medium" ? "med" : effort.current}
+			{#if effortWord}<span aria-hidden="true">·</span><span class="shrink-0">{effortWord}</span>{/if}
+			<span aria-hidden="true">·</span>{@render phoneMode?.()}
+		{/if}
+		<span data-testid="model-chip-chevron" class="inline-flex shrink-0 text-text-muted"><Icon name="chevron-down" size={12} /></span>
+	{/snippet}
 	<Button
 		{...props}
 		bind:element={triggerEl}
@@ -960,16 +972,11 @@
 			else togglePicker(event);
 		}}
 	>
-		{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={variant === "words" ? 15 : 18} surface="box" />{/if}
-		<span class="model-label min-w-0 truncate">{displayName}</span>
-		{#if phone && attention}<span data-testid="composer-more-attention" class="size-[6px] shrink-0 rounded-full bg-status-ask" aria-hidden="true"></span>{/if}
-		{#if contextLabel}<span data-testid="picker-selected-context" class="shrink-0 font-mono text-[11.5px] text-text-muted">{contextLabel}</span>{/if}
 		{#if variant === "words"}
-			{@const effortWord = parameters ? parameterEffortWord : effort.current === "medium" ? "med" : effort.current}
-			{#if effortWord}<span aria-hidden="true">·</span><span class="shrink-0">{effortWord}</span>{/if}
-			<span aria-hidden="true">·</span>{@render phoneMode?.()}
+			<span data-part="summary" class="inline-flex min-w-0 items-center gap-[5px] rounded-[6px] group-focus-visible/composer-summary:outline-2 group-focus-visible/composer-summary:outline-offset-[3px] group-focus-visible/composer-summary:outline-text">{@render summary()}</span>
+		{:else}
+			{@render summary()}
 		{/if}
-		<span data-testid="model-chip-chevron" class="inline-flex shrink-0 text-text-muted"><Icon name="chevron-down" size={12} /></span>
 		{#if variant === "words" && contextPercent > 0}<span data-testid="composer-word-context-usage" data-warning={contextWarning ? "true" : undefined} class="ml-auto shrink-0 pl-[8px]" class:text-status-ask={contextWarning}>{Math.round(contextPercent)}%</span>{/if}
 	</Button>
 {/snippet}
