@@ -873,6 +873,9 @@ export const QuickStartExpanded: Story = {
 			guides.getByText(/opencode config set provider anthropic/),
 		).toBeVisible();
 		await expect(row).toHaveAttribute("aria-expanded", "true");
+		// Show the opened guide. Without this, focusing a row this close to the
+		// phone fold scrolls by 0 or 1px depending on sub-pixel layout.
+		row.scrollIntoView({ block: "start" });
 	},
 };
 
