@@ -8,6 +8,7 @@
 </script>
 
 <script lang="ts">
+	import SheetChrome from "../ui/SheetChrome.svelte";
 	import { Schema } from "effect";
 	import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
 	import { WorktreeCreationError } from "../../../contracts/worktree.js";
@@ -20,7 +21,6 @@
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import Dialog from "../ui/Dialog.svelte";
-	import Surface from "../ui/Surface.svelte";
 	import Textarea from "../ui/Textarea.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TwoRowComposerLayout from "../ui/TwoRowComposerLayout.svelte";
@@ -1303,18 +1303,20 @@
 	</Button>
 	{#if composerMoreOpen}
 		<Dialog open onclose={() => { composerMoreOpen = false; }} placement="sheet" labelledBy={composerMoreTitleId} returnFocus={() => composerMoreEl ?? null}>
-			<Surface
-				variant="plain" radius="none"
+			<SheetChrome
 				data-testid="composer-more-sheet"
-				class="max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-[18px] border-t border-border px-[16px] pt-[8px] pb-[max(20px,env(safe-area-inset-bottom))] font-sans"
+				maxHeight="85dvh"
+				bottomPadding={20}
+				safeAreaMode="max"
+				class="font-sans"
+				bodyClass="px-[16px]"
 			>
-				<div class="mx-auto mb-[10px] h-[4px] w-[36px] rounded-[2px] bg-border-chip" aria-hidden="true"></div>
 				<h2 id={composerMoreTitleId} class="mb-[2px] text-[11.5px] font-semibold text-text">Composer</h2>
 				{@render rows()}
 				<PermissionModeSelector variant="row" />
 				{@render checkout?.()}
 				{@render warning?.()}
-			</Surface>
+			</SheetChrome>
 		</Dialog>
 	{/if}
 {/snippet}

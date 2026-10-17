@@ -3,9 +3,13 @@
 	import {
 		Popover as BitsPopover,
 		type PopoverContentProps,
+		type PopoverContentStaticProps,
 		type PopoverPortalProps,
 	} from "bits-ui";
-	import type { Snippet } from "svelte";
+	import { type Snippet, untrack } from "svelte";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
+	import { dragToDismiss } from "../../actions/drag-to-dismiss.js";
+	import SheetChrome from "./SheetChrome.svelte";
 	import {
 		exemptFromBackgroundInert,
 		registerOpenSurface,
@@ -23,6 +27,8 @@
 	type PopoverOwnProps = {
 		open?: boolean | undefined;
 		onopenchange?: ((open: boolean) => void) | undefined;
+		presentation?: "popover" | "sheet" | "auto";
+		footer?: Snippet | undefined;
 		side?: PopoverSide | undefined;
 		align?: PopoverAlign | undefined;
 		sideOffset?: number | undefined;
@@ -54,6 +60,8 @@
 	let {
 		open = $bindable(false),
 		onopenchange,
+		presentation = "popover",
+		footer,
 		title,
 		ariaLabel,
 		side,
@@ -67,6 +75,13 @@
 		...rest
 	}: PopoverOwnProps = $props();
 	const dialogTarget = getDialogTarget();
+	let autoSheet = $state(sessionViewState.compact);
+	// Keep open forms mounted when the layout crosses the compact breakpoint.
+	$effect.pre(() => {
+		if (open) autoSheet = untrack(() => sessionViewState.compact);
+	});
+	const sheet = $derived(presentation === "sheet" || (presentation === "auto" && autoSheet));
+	let scrimFade = $state({ progress: 0, settling: false });
 
 	const uid = $props.id();
 	const titleId = `${uid}-title`;
@@ -84,6 +99,9 @@
 	$effect(() => {
 		if (open) return registerOpenSurface(() => handleOpenChange(false));
 		return undefined;
+	});
+	$effect(() => {
+		if (!open || !sheet) scrimFade = { progress: 0, settling: false };
 	});
 
 	const portalProps: PopoverPortalProps = $derived.by(() => {
@@ -114,6 +132,14 @@
 				: { "aria-label": resolvedAriaLabel }),
 		class: contentClass,
 	});
+	const sheetContentProps: Omit<PopoverContentStaticProps, "child" | "children"> = $derived({
+		...rest,
+		preventScroll: true,
+		preventOverflowTextSelection: false,
+		role: "dialog",
+		...(resolvedTitle ? { "aria-labelledby": titleId } : { "aria-label": resolvedAriaLabel }),
+		class: "fixed inset-x-0 bottom-0 z-[var(--z-sheet)] w-full outline-hidden",
+	});
 
 	if (import.meta.env.DEV) {
 		$effect(() => {
@@ -126,6 +152,13 @@
 	}
 </script>
 
+{#snippet content()}
+	{#if resolvedTitle}
+		<h2 id={titleId} class={`${FLOATING_ITEM_PADDING_CLASSES} text-sm font-semibold text-text`}>{resolvedTitle}</h2>
+	{/if}
+	{@render children()}
+{/snippet}
+
 <BitsPopover.Root bind:open onOpenChange={handleOpenChange}>
 	<BitsPopover.Trigger>
 		{#snippet child({ props })}
@@ -134,22 +167,26 @@
 	</BitsPopover.Trigger>
 
 	<BitsPopover.Portal {...portalProps}>
+		{#if sheet}
+			{#if open}<div aria-hidden="true" data-testid="popover-sheet-scrim" class="fixed inset-0 z-[var(--z-sheet)] bg-backdrop" style:opacity={1 - scrimFade.progress} style:transition={scrimFade.settling ? "opacity 220ms linear" : undefined} use:exemptFromBackgroundInert></div>{/if}
+			<BitsPopover.ContentStatic {...sheetContentProps}>
+				{#snippet child({ props })}
+					<div {...props} use:exemptFromBackgroundInert use:dragToDismiss={{ ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
+						<SheetChrome {footer} bodyClass={className ?? ""}>{@render content()}</SheetChrome>
+					</div>
+				{/snippet}
+			</BitsPopover.ContentStatic>
+		{:else}
 		<BitsPopover.Content {...contentProps}>
 			{#snippet child({ props, wrapperProps })}
 				<div {...wrapperProps}>
 					<div {...props} use:exemptFromBackgroundInert>
-						{#if resolvedTitle}
-							<h2
-								id={titleId}
-								class={`${FLOATING_ITEM_PADDING_CLASSES} text-sm font-semibold text-text`}
-							>
-								{resolvedTitle}
-							</h2>
-						{/if}
-						{@render children()}
+						{@render content()}
+						{#if footer}<div class="mt-[12px] border-t border-border-subtle">{@render footer()}</div>{/if}
 					</div>
 				</div>
 			{/snippet}
 		</BitsPopover.Content>
+		{/if}
 	</BitsPopover.Portal>
 </BitsPopover.Root>

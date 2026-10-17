@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SheetChrome from "../ui/SheetChrome.svelte";
 	import { flushSync } from "svelte";
 	import type { UsageReading, UsageWindow } from "../../../contracts/limit-recovery.js";
 	import { DISMISS_FRACTION, dragToDismiss, FLICK_PX_PER_MS, placeSheet } from "../../actions/drag-to-dismiss.js";
@@ -10,7 +11,6 @@
 	import Dialog from "../ui/Dialog.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import QuotaMeter from "../ui/QuotaMeter.svelte";
-	import Surface from "../ui/Surface.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import { openSettings } from "./chrome-actions.js";
 
@@ -171,7 +171,7 @@
      exactly this in exactly the same place, so it reads as one panel. -->
 {#snippet peek(prefix: "usage-footer" | "usage-sheet")}
 	{@const morePrefix = prefix === "usage-footer" ? "usage-phone" : "usage-sheet"}
-	<span aria-hidden="true" class="mx-auto mt-[2px] mb-[3px] h-[4px] w-[32px] rounded-full bg-border-chip"></span>
+	{#if prefix === "usage-footer"}<span aria-hidden="true" class="mx-auto mt-[2px] mb-[3px] h-[4px] w-[32px] rounded-full bg-border-chip"></span>{/if}
 	{@render meter(docked, prefix, "phone")}
 	{#if folded.length > 0}
 		<!-- Its height is the distance the sheet's rest slides up to close the gap it leaves. -->
@@ -237,9 +237,7 @@
 	</div>
 	<Dialog open={sheetOpen} onclose={() => { sheetOpen = false; }} placement="sheet" ariaLabel="Usage" returnFocus={() => document.querySelector<HTMLElement>('[data-testid="usage-phone-dock"]')}>
 		<div bind:this={sheet} use:dragToDismiss={{ ondismiss: () => { sheetOpen = false; }, dismissOffset: dockOffset }}>
-			<!-- The dock's own box, so the sheet reads as the dock pulled taller. No
-			     shadow: one would vanish when the folded sheet closes. -->
-			<Surface variant="bare" radius="none" data-testid="usage-sheet" class="flex w-full flex-col rounded-t-[14px] border-t border-border-subtle bg-bg px-[4px] pt-[5px] pb-[calc(16px+env(safe-area-inset-bottom))] text-[10.5px]">
+			<SheetChrome data-testid="usage-sheet" bottomPadding={16} class="text-[10.5px]" bodyClass="px-[4px]">
 				{@render peek("usage-sheet")}
 				<div class={folded.length > 0 ? "sheet-rest" : undefined}>
 					{@render meter(folded, "usage-sheet", "phone", continuedHarness)}
@@ -248,7 +246,7 @@
 						<TextButton tone="accent" data-testid="usage-sheet-settings" onclick={() => { sheetOpen = false; openSettings("usage"); }}>Usage settings ›</TextButton>
 					</div>
 				</div>
-			</Surface>
+			</SheetChrome>
 		</div>
 	</Dialog>
 {:else if single}

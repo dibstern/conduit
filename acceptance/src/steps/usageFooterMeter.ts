@@ -789,7 +789,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 	{
 		name: "the usage sheet folds into the dock rather than off screen",
 		match:
-			/^the usage sheet dragged down past the phone usage dock lands on it row for row$/,
+			/^the usage sheet dragged down past the phone usage dock lands on it with the shared sheet chrome$/,
 		run: async ({ world }) => {
 			const sheet = world.page.getByTestId("usage-sheet");
 			// A drag moves the sheet from where it rests, so let the opening glide finish first.
@@ -816,8 +816,8 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 				await expect
 					.poll(async () => (await sheet.boundingBox())?.y)
 					.toBeCloseTo(dock.y, 0);
-				// Resting on the dock, the sheet's top is the dock, pixel for pixel, and
-				// its scrim is gone, so closing there changes nothing on screen.
+				// The shared handle places the sheet's rows 4px below the dock's.
+				// All row sizes and horizontal positions still match as the scrim fades.
 				await expect
 					.poll(() =>
 						world.page.evaluate(() => {
@@ -835,7 +835,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 								const b = twin.getBoundingClientRect();
 								return Math.max(
 									Math.abs(a.x - b.x),
-									Math.abs(a.y - b.y),
+									Math.abs(a.y + 4 - b.y),
 									Math.abs(a.width - b.width),
 									Math.abs(a.height - b.height),
 								);
@@ -857,16 +857,19 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "the usage sheet wears the dock's background",
-		match: /^the usage sheet has the phone usage dock's background$/,
+		name: "the usage sheet uses the shared sheet surface",
+		match: /^the usage sheet uses the shared sheet surface$/,
 		run: async ({ world }) => {
-			const background = (testId: string) =>
-				world.page
-					.getByTestId(testId)
-					.evaluate((node) => getComputedStyle(node).backgroundColor);
-			expect(await background("usage-sheet")).toBe(
-				await background("usage-footer-phone"),
+			const sheet = world.page.getByTestId("usage-sheet");
+			await expect(sheet).toHaveCSS(
+				"background-color",
+				await themeColour(world.page, "--color-bg-surface"),
 			);
+			await expect(sheet).toHaveCSS("border-top-left-radius", "22px");
+			await expect(sheet).toHaveCSS("border-top-right-radius", "22px");
+			const handle = sheet.locator("[data-sheet-handle]");
+			await expect(handle).toHaveCSS("width", "36px");
+			await expect(handle).toHaveCSS("height", "5px");
 		},
 	},
 	{

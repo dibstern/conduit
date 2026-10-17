@@ -41,3 +41,6 @@ export const Disabled: Story = {
 export const DisabledChecked: Story = {
 	args: { checked: true, disabled: true, onchange: meta.args.onchange },
 };
+
+export const DefaultLight: Story = { globals: { theme: "light" } };
+export const CheckedLight: Story = { ...Checked, globals: { theme: "light" } };

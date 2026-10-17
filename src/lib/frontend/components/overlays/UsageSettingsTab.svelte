@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { MediaQuery } from "svelte/reactivity";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import type { UsageLimitsSetting, UsageReading, UsageWindow } from "../../../contracts/limit-recovery.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
@@ -19,7 +19,6 @@
 	import UsageForecast from "./UsageForecast.svelte";
 	import UsageLimitsSettings from "./UsageLimitsSettings.svelte";
 
-	const phone = new MediaQuery("(max-width: 767px)");
 	const warnOptions = [70, 80, 90, "off"] as const;
 	const project = $derived(projectState.projects.find((item) => item.slug === getCurrentSlug()));
 	const refreshSlug = $derived(project?.slug ?? projectState.projects[0]?.slug);
@@ -195,8 +194,8 @@
 {/snippet}
 
 <section id="usage-settings" data-testid="usage-settings" class="min-w-0" aria-label="Claude plan usage">
-	{#if !phone.current}<h3 class="text-[14px] font-semibold text-text">Claude plan usage</h3>{/if}
-	<div data-testid="usage-settings-subheader" class="mb-[12px] text-[11px] text-text-dimmer {phone.current ? '' : 'mt-[2px]'}">
+	{#if !sessionViewState.compact}<h3 class="text-[14px] font-semibold text-text">Claude plan usage</h3>{/if}
+	<div data-testid="usage-settings-subheader" class="mb-[12px] text-[11px] text-text-dimmer {sessionViewState.compact ? '' : 'mt-[2px]'}">
 		{#if !several && !hasPlanData(single)}Claude{:else}
 		{several ? `${accounts.length} accounts` : single?.planLabel ?? claudeAccounts.nameOf(undefined)} · updated {updatedLabel} ·
 		<TextButton tone="dimmer" underline="always" data-testid="usage-settings-refresh" disabled={refreshing || !refreshSlug} aria-busy={refreshing} onclick={refresh}>{several ? "Refresh all" : "Refresh"}</TextButton>
@@ -259,7 +258,7 @@
 		<SegmentedControl
 			variant="joined"
 			label="Warn me at"
-			options={warnOptions.map((warnAt) => ({ value: String(warnAt), label: warnAt === "off" ? "off" : phone.current ? String(warnAt) : `${warnAt}%`, testId: `usage-settings-warn-${warnAt}`, disabled: setting === null }))}
+			options={warnOptions.map((warnAt) => ({ value: String(warnAt), label: warnAt === "off" ? "off" : sessionViewState.compact ? String(warnAt) : `${warnAt}%`, testId: `usage-settings-warn-${warnAt}`, disabled: setting === null }))}
 			bind:value={() => String(setting?.warnAt ?? 80), (next) => {
 				const warnAt = warnOptions.find((option) => String(option) === next);
 				if (setting && warnAt !== undefined) void save({ ...setting, warnAt });

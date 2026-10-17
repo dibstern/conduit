@@ -506,6 +506,27 @@ export const WordsPhoneLight: Story = {
 	globals: { theme: "light" },
 };
 
+export const ComposerSheet: Story = {
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		const cleanup = setupWords(true);
+		setComposerPreferences({ controls: "icons" });
+		return cleanup;
+	},
+	play: async ({ canvasElement }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		await userEvent.click(await body.findByTestId("composer-more"));
+		const sheet = await body.findByTestId("composer-more-sheet");
+		await waitFor(() => expect(sheet).toBeVisible());
+		await expect(body.getByRole("dialog", { name: "Composer" })).toBeVisible();
+	},
+};
+export const ComposerSheetLight: Story = {
+	...ComposerSheet,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
+};
+
 // The composer clock times the prompt that started the turn.
 function startTurn() {
 	const chat = getOrCreateSessionMessages(testId);

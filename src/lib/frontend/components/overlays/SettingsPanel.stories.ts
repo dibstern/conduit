@@ -20,6 +20,7 @@ import {
 } from "../../stores/instance.svelte.js";
 import { routerState } from "../../stores/router.svelte.js";
 import { serverStatus } from "../../stores/server-status.svelte.js";
+import { sessionViewState } from "../../stores/session-view.svelte.js";
 import {
 	applyUsageLimitsSetting,
 	applyUsageReadings,
@@ -126,7 +127,14 @@ const meta = {
 		visible: true,
 		onClose: fn(),
 	},
-	beforeEach: resetState,
+	beforeEach: () => {
+		const compact = sessionViewState.compact;
+		sessionViewState.compact = window.innerWidth < 768;
+		resetState();
+		return () => {
+			sessionViewState.compact = compact;
+		};
+	},
 } satisfies Meta<typeof SettingsPanel>;
 
 export default meta;
@@ -492,6 +500,7 @@ export const Usage: Story = {
 	args: { initialTab: "usage" },
 };
 
+export const UsageLight: Story = { ...Usage, globals: { theme: "light" } };
 export const Server: Story = {
 	args: { initialTab: "server" },
 	beforeEach: () => {
