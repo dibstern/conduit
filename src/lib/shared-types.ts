@@ -21,6 +21,7 @@ export type {
 
 import { SessionGoalChangedPayloadSchema } from "./contracts/stored-event.js";
 import type { ToolInput, ToolText } from "./contracts/tool-wire.js";
+import type { ModelInfo as WireModelInfo } from "./contracts/ws-rpc.js";
 // SDK-derived type aliases — single source of truth for Part/Tool enums.
 // Imported for local use; re-exported below for downstream consumers.
 import type { PartType, ToolStatus } from "./instance/sdk-types.js";
@@ -183,6 +184,7 @@ export interface ModelInfo {
 	cost?: { input?: number; output?: number };
 	limit?: { context?: number; output?: number };
 	variants?: string[];
+	parameters?: WireModelInfo["parameters"];
 	contextWindowOptions?: ContextWindowOption[];
 	/** Geo routing scopes for grouped Bedrock models; value is the full model id to send. */
 	routingOptions?: ContextWindowOption[];

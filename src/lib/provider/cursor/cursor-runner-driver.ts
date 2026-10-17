@@ -72,6 +72,25 @@ export function cursorModelInfo(model: CursorModel): ModelInfo {
 							},
 						]),
 					),
+					parameters: {
+						rows: (model.parameters ?? []).map((parameter) => ({
+							id: parameter.id,
+							label: parameter.displayName || parameter.id,
+							values: parameter.values.map(({ value, displayName }) => ({
+								value,
+								label:
+									displayName?.replace(/[\u200b-\u200d\ufeff]/g, "").trim() ||
+									value,
+							})),
+						})),
+						combinations: variants.map(({ key, variant }) => ({
+							variant: key,
+							values: Object.fromEntries(
+								variant.params.map(({ id, value }) => [id, value]),
+							),
+							...(variant === defaultVariant ? { isDefault: true } : {}),
+						})),
+					},
 				}
 			: {}),
 	};

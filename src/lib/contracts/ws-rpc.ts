@@ -177,6 +177,26 @@ export const ModelInfoSchema = Schema.Struct({
 		}),
 	),
 	variants: Schema.optional(Schema.Array(Schema.String)),
+	parameters: Schema.optional(
+		Schema.Struct({
+			rows: Schema.Array(
+				Schema.Struct({
+					id: Schema.String,
+					label: Schema.String,
+					values: Schema.Array(
+						Schema.Struct({ value: Schema.String, label: Schema.String }),
+					),
+				}),
+			),
+			combinations: Schema.Array(
+				Schema.Struct({
+					variant: Schema.String,
+					values: Schema.Record({ key: Schema.String, value: Schema.String }),
+					isDefault: Schema.optional(Schema.Boolean),
+				}),
+			),
+		}),
+	),
 	contextWindowOptions: Schema.optional(
 		Schema.Array(ContextWindowOptionSchema),
 	),
