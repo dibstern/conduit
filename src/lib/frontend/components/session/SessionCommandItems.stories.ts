@@ -27,29 +27,3 @@ export const Menu: Story = {
 		);
 	},
 };
-
-export const Sheet: Story = {
-	args: { presentation: "sheet" },
-	parameters: { viewport: { defaultViewport: "mobile1" } },
-	play: async () => {
-		const menu = await within(document.body).findByRole("menu", {
-			name: "Session commands",
-		});
-		for (const id of [
-			"command-demo-settle",
-			"command-demo-auto",
-			"command-demo-snooze",
-			"command-demo-delete",
-		]) {
-			const target = within(menu).getByTestId(id);
-			await expect(target).toBeVisible();
-			// Phone sheets are touch targets: every command stays at least 44px tall.
-			await expect(
-				target.getBoundingClientRect().height,
-			).toBeGreaterThanOrEqual(44);
-		}
-		await expect(
-			within(menu).getByRole("group", { name: "Triage" }),
-		).toBeVisible();
-	},
-};

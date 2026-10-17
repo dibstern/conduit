@@ -9,6 +9,85 @@ const sheetSelector =
 
 export const sessionSheetsHandlers: StepHandler[] = [
 	{
+		name: "clear session sheet branch",
+		match: /^the session sheet branch is unknown$/,
+		run: async ({ world }) => {
+			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
+			if (!sessionId) throw new Error("No session is open");
+			setSessionRowStatus(world.page, sessionId, "idle", {
+				title: "Session without a branch",
+				git: undefined,
+			});
+		},
+	},
+	{
+		name: "assert unknown branch sheet header",
+		match: /^the session sheet header identifies the session without a branch$/,
+		run: async ({ world }) => {
+			const header = world.page
+				.locator(sheetSelector)
+				.getByTestId("session-sheet-header");
+			await expect(header).toContainText("Session without a branch");
+			await expect(header.getByTestId("session-sheet-branch")).toHaveCount(0);
+			await expect(header.getByTestId("session-sheet-close")).toBeVisible();
+		},
+	},
+	{
+		name: "assert phone view cards",
+		match: /^the session sheet shows four view cards$/,
+		run: async ({ world }) => {
+			const sheet = world.page.locator(sheetSelector);
+			const cards = sheet.locator("[data-view-card]");
+			await expect(cards).toHaveCount(4);
+			const boxes = await cards.evaluateAll((nodes) =>
+				nodes.map((node) => {
+					const { top, width, height } = node.getBoundingClientRect();
+					return { top, width, height };
+				}),
+			);
+			expect(new Set(boxes.map((box) => box.top)).size).toBe(1);
+			for (const box of boxes) {
+				expect(box.width).toBeGreaterThanOrEqual(44);
+				expect(box.height).toBeGreaterThanOrEqual(44);
+			}
+			await expect(sheet.getByTestId("overflow-view-chat")).toHaveAttribute(
+				"aria-checked",
+				"true",
+			);
+			await expect(sheet.getByTestId("overflow-view-diff")).toHaveAttribute(
+				"aria-disabled",
+				"true",
+			);
+			await expect(sheet.locator(".shortcut-hint")).toHaveCount(0);
+		},
+	},
+	{
+		name: "close phone session sheet",
+		match: /^I close the session sheet with its close button$/,
+		run: async ({ world }) => {
+			await world.page
+				.locator(sheetSelector)
+				.getByTestId("session-sheet-close")
+				.click();
+		},
+	},
+	{
+		name: "assert phone session sheet closed",
+		match: /^no session sheet is open$/,
+		run: async ({ world }) => {
+			await expect(world.page.locator(sheetSelector)).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert overflow trigger focus",
+		match: /^the session overflow trigger has focus$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("session-bar-island-overflow"),
+			).toBeFocused();
+		},
+	},
+	{
 		name: "set session sheet theme",
 		match: /^the session sheet theme is (light|dark)$/,
 		run: async ({ world, match }) => {
@@ -95,6 +174,7 @@ export const sessionSheetsHandlers: StepHandler[] = [
 		match: /^the session sheet has the shared grids and (4|5) Session tiles$/,
 		run: async ({ world, match }) => {
 			const sheet = world.page.locator(sheetSelector);
+			await expect(sheet.getByTestId("session-sheet-header")).toBeVisible();
 			const triage = sheet.getByRole("group", { name: "Triage", exact: true });
 			const session = sheet.getByRole("group", {
 				name: "Session",
@@ -106,6 +186,7 @@ export const sessionSheetsHandlers: StepHandler[] = [
 			await expect(session).toBeVisible();
 			const tiles = session.locator("[data-menu-tile]");
 			await expect(tiles).toHaveCount(Number(match[1]));
+			await expect(tiles.first()).toHaveCSS("height", "72px");
 			const tops = await tiles.evaluateAll((nodes) =>
 				nodes.map((node) => node.getBoundingClientRect().top),
 			);
@@ -173,6 +254,10 @@ export const sessionSheetsHandlers: StepHandler[] = [
 			const footer = sheet.locator("[data-sheet-footer]");
 			if (match[1] === "absent") {
 				await expect(footer).toHaveCount(0);
+				await expect(sheet.locator("[data-sheet-body]")).toHaveCSS(
+					"padding-bottom",
+					"22px",
+				);
 				return;
 			}
 			await expect(footer).toBeVisible();

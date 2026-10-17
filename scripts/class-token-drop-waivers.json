@@ -1,4 +1,10 @@
 {
+	"src/lib/frontend/components/session/SessionContextMenu.svelte :: font-mono,grid,inline-flex,items-center,items-start,min-w-0,place-items-center,status.colour,text-text-secondary": {
+		"movedTo": "src/lib/frontend/components/session/SessionSheetBody.svelte",
+		"requires": "<SessionSheetBody",
+		"reason": "conduit-test-voxy.7 moves the phone session header into the body shared by overflow, chevron and long-press sheets. Desktop header styling stays in SessionContextMenu."
+	},
+	"src/lib/frontend/components/session/SessionContextMenu.svelte :: bg-bg,border,flex-1,flex-wrap,gap-1,gap-1.5,gap-3,leading-snug,mt-0.5,pb-[11px],pt-[8px],px-1.5,px-4,py-0.5,rounded,size-[20px],text-[11.5px],text-[15px]": "conduit-test-voxy.7 follows the Final session-menu header: 17px title, 13px metadata, 10px grid gaps, 18px attention glyph, one unwrapped meta line whose branch chip truncates, and no rule under the header. Literal padding replaces rem spacing, and the branch uses a filled chip without an outline. The grid reserves a 32px close circle with a 44px touch area.",
 	"src/lib/frontend/components/ui/LabelledGridGroup.svelte :: text-text-dimmer": "conduit-test-voxy.6: the phone sheet group labels (Triage, Session) move from text-dimmer to text-muted. The spec's --text3 measures 3.43:1 on the sheet and fails the gated SessionBar a11y check (WCAG AA needs 4.5:1 at 12.5px).",
 	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: h-[4px],h-full,whitespace-nowrap": {
 		"movedTo": "src/lib/frontend/components/ui/QuotaMeter.svelte",
@@ -899,5 +905,6 @@
 	"src/lib/frontend/components/input/InputArea.svelte :: pl-[4px]": "conduit-test-aoqb.6 review: the Words context percentage follows a literal middle-dot separator like the spec's `feat/typed-session-list ● · 38%`, so the dot supplies the spacing through the row gap and the left padding goes.",
 	"src/lib/frontend/components/input/UsageLimitStrip.svelte :: gap-[5px],px-[10px]": "conduit-test-aoqb.6 review: Button has no class merging, so call-site gap and padding fought the composer-chip size recipe in stylesheet order. The composer-chip size now owns the 5px gap and 9px sides for every strip chip.",
 	"src/lib/frontend/components/input/UsageWarningStrip.svelte :: gap-[5px],justify-center": "conduit-test-aoqb.6 review: the composer-chip size recipe owns the 5px gap, and phone centring stays on the compact branch (flex-1 justify-center); the always-on justify-center duplicated it.",
-	"src/lib/frontend/components/input/UsageLimitStrip.svelte :: min-w-0": "conduit-test-aoqb.6: the limit copy keeps a readable minimum width (min-w-[min(100%,16em)]) so the recovery actions wrap below it instead of squeezing it to a sliver."
+	"src/lib/frontend/components/input/UsageLimitStrip.svelte :: min-w-0": "conduit-test-aoqb.6: the limit copy keeps a readable minimum width (min-w-[min(100%,16em)]) so the recovery actions wrap below it instead of squeezing it to a sliver.",
+	"src/lib/frontend/components/ui/Tile.svelte :: text-[13px]": "Still 13px by default. The label size now reads --tile-font, so a 5-column grid (LabelledGridGroup columns=5) can set 12px labels as the spec's .sm-five does."
 }

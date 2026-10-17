@@ -1,19 +1,44 @@
 <script lang="ts">
+	import type { Snippet } from "svelte";
+	import type { SessionInfo } from "../../types.js";
+	import { isSessionSnoozed, sessionAttention } from "../../stores/session.svelte.js";
+	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
 	import { dismissToast, showToast, uiState } from "../../stores/ui.svelte.js";
+	import DitherGlyph from "../ui/DitherGlyph.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import LabelledGridGroup from "../ui/LabelledGridGroup.svelte";
+	import MenuCloseItem from "../ui/MenuCloseItem.svelte";
+	import ProjectMark from "../ui/ProjectMark.svelte";
 	import SheetNotice from "../ui/SheetNotice.svelte";
 	import SwitchRow from "../ui/SwitchRow.svelte";
 	import Tile from "../ui/Tile.svelte";
+	import { ATTENTION_DISPLAY } from "./SessionItem.svelte";
 	import type { SessionCommand, SessionCommandEntry } from "./session-commands.js";
 
-	let { commands, onselect }: {
+	let { commands, onselect, header, views, now = Date.now() }: {
 		commands: readonly SessionCommandEntry[];
 		onselect: (run: SessionCommand["run"]) => void;
+		header: {
+			session: SessionInfo;
+			projectLabel?: string | undefined;
+			projectAccent?: number | undefined;
+			branch?: string | undefined;
+		};
+		views?: Snippet;
+		now?: number;
 	} = $props();
 	const triage = $derived(commands.filter((item) => item.section === "triage" && item.checked === undefined));
 	const switches = $derived(commands.filter((item) => item.checked !== undefined));
 	const session = $derived(commands.filter((item) => item.section === "manage" || item.section === "danger"));
 	const toastHost = Symbol("session-sheet");
+	const status = $derived(ATTENTION_DISPLAY[sessionAttention(header.session)]);
+	const activity = $derived.by(() => {
+		const { pinnedAt, settledAt, snoozedUntil, updatedAt } = header.session;
+		if (pinnedAt == null && settledAt != null) return `settled ${formatTimeAgo(settledAt, new Date(now))}`;
+		if (pinnedAt == null && isSessionSnoozed(header.session, now))
+			return snoozedUntil == null ? "snoozed" : `until ${formatSnoozeTime(snoozedUntil, now)}`;
+		return formatTimeAgo(updatedAt, new Date(now));
+	});
 	$effect(() => {
 		uiState.sheetToastHost = toastHost;
 		return () => { if (uiState.sheetToastHost === toastHost) uiState.sheetToastHost = null; };
@@ -35,6 +60,19 @@
 {/snippet}
 
 <div class="px-[16px]" data-session-sheet-body>
+	<div data-testid="session-sheet-header" class="grid grid-cols-[22px_minmax(0,1fr)_32px] items-start gap-[10px] px-[2px] pt-[3px] font-sans">
+		<span class="mt-[3px] grid size-[18px] place-items-center {status.colour}" aria-hidden="true">{#if "dither" in status.glyph}<DitherGlyph state={status.glyph.dither} />{:else}<Icon name={status.glyph.icon} size={18} />{/if}</span>
+		<div class="min-w-0">
+			<div class="line-clamp-2 break-words text-[17px] font-semibold leading-[1.3] tracking-[-0.01em] text-text">{header.session.title || "New Session"}</div>
+			<div class="mt-[4px] flex items-center gap-[7px] whitespace-nowrap text-[13px] text-text-muted">
+				{#if header.projectLabel}<span class="inline-flex max-w-1/2 shrink-0 items-center gap-[7px]"><ProjectMark size={8} accent={header.projectAccent ?? 1} /><span class="truncate">{header.projectLabel}</span></span>{/if}
+				{#if header.branch}<code data-testid="session-sheet-branch" class="min-w-0 max-w-full truncate rounded-[6px] bg-chip px-[6px] py-[1px] font-mono text-[10.58px] text-text-secondary">{header.branch}</code>{/if}
+				<span data-testid="session-sheet-activity" class="shrink-0">{activity}</span>
+			</div>
+		</div>
+		<MenuCloseItem label="Close session sheet" data-testid="session-sheet-close" />
+	</div>
+	{#if views}<div class="mt-[18px]">{@render views()}</div>{/if}
 	<LabelledGridGroup label="Triage">
 		{#each triage as item (item.testId)}{@render tile(item)}{/each}
 	</LabelledGridGroup>
