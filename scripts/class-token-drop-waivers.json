@@ -1,4 +1,5 @@
 {
+	"src/lib/frontend/components/ui/LabelledGridGroup.svelte :: text-text-dimmer": "conduit-test-voxy.6: the phone sheet group labels (Triage, Session) move from text-dimmer to text-muted. The spec's --text3 measures 3.43:1 on the sheet and fails the gated SessionBar a11y check (WCAG AA needs 4.5:1 at 12.5px).",
 	"src/lib/frontend/components/overlays/ClaudeSettingsTab.svelte :: max-w-full": {
 		"movedTo": "src/lib/frontend/components/ui/SettingsPicker.svelte",
 		"requires": "<SettingsPicker",

@@ -49,7 +49,6 @@
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
-	import MenuSeparator from "../ui/MenuSeparator.svelte";
 	import Tooltip from "../ui/Tooltip.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import SessionContextMenu from "../session/SessionContextMenu.svelte";
@@ -67,6 +66,7 @@
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { chromeMenuActions } from "./chrome-actions.js";
+	import SessionSheetFooter from "../session/SessionSheetFooter.svelte";
 	import { activeSessionView, sessionViews, viewShortcutHint } from "./session-views.js";
 
 	let { getGoalDetails = (input) => rpc("GetGoalDetails", input) }: { getGoalDetails?: ((input: Parameters<typeof rpc<"GetGoalDetails">>[1]) => Promise<GoalDetails>) | undefined } = $props();
@@ -305,14 +305,6 @@
 	</MenuRadioGroup>
 {/snippet}
 
-{#snippet globalActionItems()}
-	{#each globalActions as action (action.id)}
-		<MenuItem title={action.label} icon={sessionViewState.compact ? action.icon : undefined} data-testid={`overflow-${action.id}`} onselect={() => selectOverflow(action.run)}>
-			{action.label}
-		</MenuItem>
-	{/each}
-{/snippet}
-
 {#snippet overflowMenu()}
 	<Menu
 		bind:open={overflowOpen}
@@ -336,12 +328,13 @@
 			}
 		}}
 		data-testid={sessionViewState.compact ? "session-bar-island-menu" : "session-bar-overflow-menu"}
+		footer={sessionViewState.compact ? overflowFooter : undefined}
 	>
 		{#snippet trigger({ props })}
 			<Button
 				{...props}
 				id="session-bar-more"
-				variant="ghost"
+				variant={sessionViewState.compact && overflowOpen ? "accent-soft" : "ghost"}
 				size="content"
 				icon="ellipsis"
 				iconSize={17}
@@ -364,20 +357,23 @@
 			<MenuGroup label="Views">
 				{@render viewItems("overflow-view")}
 			</MenuGroup>
-			<MenuSeparator />
 			{#if session}
-				<MenuGroup label="Session">
-					<SessionCommandItems {commands} presentation="sheet" onselect={selectOverflow} />
-				</MenuGroup>
+				<SessionCommandItems {commands} presentation="sheet" onselect={selectOverflow} />
 			{/if}
-		{/if}
-		{#if sessionViewState.compact}<MenuSeparator />{/if}
-		{#if sessionViewState.compact}
-			<MenuGroup label="More actions">{@render globalActionItems()}</MenuGroup>
 		{:else}
-			<div role="group" aria-label="More actions">{@render globalActionItems()}</div>
+			<div role="group" aria-label="More actions">
+				{#each globalActions as action (action.id)}
+					<MenuItem title={action.label} data-testid={`overflow-${action.id}`} onselect={() => selectOverflow(action.run)}>
+						{action.label}
+					</MenuItem>
+				{/each}
+			</div>
 		{/if}
 	</Menu>
+{/snippet}
+
+{#snippet overflowFooter()}
+	<SessionSheetFooter extras={globalActions.map((action) => ({ ...action, testId: `overflow-${action.id}` }))} onselect={selectOverflow} />
 {/snippet}
 
 <!-- One border for the session controls. -->
@@ -631,7 +627,7 @@
 			now={sessionState.now}
 			host={{ rename: () => { renaming = true; } }}
 			onclose={() => { titleMenuOpen = false; }}
-			extras={globalActions.map((action) => ({ testId: `session-title-${action.id}`, label: action.label, icon: action.icon, run: action.run }))}
+			extras={globalActions.map((action) => ({ ...action, testId: `session-title-${action.id}` }))}
 		/>
 	{/if}
 

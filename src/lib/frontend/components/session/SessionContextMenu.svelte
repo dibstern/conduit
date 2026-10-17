@@ -9,6 +9,7 @@
 	import ProjectSquare from "./ProjectSquare.svelte";
 	import { ATTENTION_DISPLAY } from "./SessionItem.svelte";
 	import SessionCommandItems from "./SessionCommandItems.svelte";
+	import SessionSheetFooter from "./SessionSheetFooter.svelte";
 	import { getSessionCommands, type SessionCommand, type SessionCommandHost } from "./session-commands.js";
 
 	let {
@@ -32,7 +33,7 @@
 		host: SessionCommandHost;
 		now?: number;
 		onclose: () => void;
-		/** Non-session actions appended after a divider, drawn as command rows. */
+		/** Non-session actions: desktop rows or the phone sheet footer. */
 		extras?: readonly Omit<SessionCommand, "section">[];
 	} = $props();
 	// Captured once: dialogs opened from a command call focusTarget after this menu
@@ -119,8 +120,13 @@
 		align="end"
 		class="min-w-[180px]"
 		data-testid={presentation === "sheet" ? "session-action-sheet" : "session-ctx-menu"}
+		footer={presentation === "sheet" && extras.length > 0 ? sheetFooter : undefined}
 	>
 		{#snippet trigger()}{/snippet}
 		{@render header(presentation === "sheet")}
 		<SessionCommandItems {commands} {presentation} onselect={select} />
 	</Menu>
+
+{#snippet sheetFooter()}
+	<SessionSheetFooter {extras} onselect={select} />
+{/snippet}

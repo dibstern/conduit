@@ -301,7 +301,8 @@ export interface Turn {
 	assistant?: HistoryMessage;
 }
 
-export type ToastVariant = "default" | "warn" | "error";
+/** `pinned` explains an action a pin blocks ("Unpin to snooze"). */
+export type ToastVariant = "default" | "warn" | "error" | "pinned";
 
 /**
  * One button in a toast's action row. `primary` is the filled call to action,

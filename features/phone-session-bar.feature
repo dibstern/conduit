@@ -159,3 +159,97 @@ Examples:
   | harness  | baseline                      | threshold |
   | Claude   | phone-session-bar-a1-claude   | 98        |
   | OpenCode | phone-session-bar-a1-opencode | 98        |
+
+Scenario Outline: Phone session sheets show the shared body for every session state
+  Given the viewport is a phone
+  And the session sheet theme is <theme>
+  And the conduit app is served with the long-transcript mockup
+  And the phone session sheet state is <state>
+  When I open the overflow session sheet
+  Then the session sheet has the shared grids and 4 Session tiles
+  And the session sheet displays the <state> commands
+  And the session sheet footer is overflow with Debug off
+  And the session-sheet region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | state    | theme | baseline                            | threshold |
+  | idle     | dark  | session-sheet-idle-dark             | 98        |
+  | idle     | light | session-sheet-idle-light            | 98        |
+  | unread   | dark  | session-sheet-unread-dark           | 98        |
+  | unread   | light | session-sheet-unread-light          | 98        |
+  | snoozed  | dark  | session-sheet-snoozed-dark          | 98        |
+  | snoozed  | light | session-sheet-snoozed-light         | 98        |
+  | forever  | dark  | session-sheet-forever-dark          | 98        |
+  | forever  | light | session-sheet-forever-light         | 98        |
+  | pinned   | dark  | session-sheet-pinned-dark           | 98        |
+  | pinned   | light | session-sheet-pinned-light          | 98        |
+  | settled  | dark  | session-sheet-settled-dark          | 98        |
+  | settled  | light | session-sheet-settled-light         | 98        |
+  | auto_off | dark  | session-sheet-auto-settle-off-dark  | 98        |
+  | auto_off | light | session-sheet-auto-settle-off-light | 98        |
+
+Scenario Outline: Disabled session tiles explain why and keep the sheet open
+  Given the viewport is a phone
+  And the session sheet theme is <theme>
+  And the conduit app is served with the long-transcript mockup
+  And the phone session sheet state is pinned
+  When I open the overflow session sheet
+  And I tap the unavailable Snooze tile
+  Then the session sheet stays open with the reason pill Unpin to snooze
+  And the session-sheet region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | theme | baseline                            | threshold |
+  | dark  | session-sheet-disabled-reason-dark  | 98        |
+  | light | session-sheet-disabled-reason-light | 98        |
+
+Scenario Outline: The title chevron sheet shares the body and Debug footer
+  Given the viewport is a phone
+  And the session sheet theme is <theme>
+  And the conduit app is served with the long-transcript mockup
+  And the phone session sheet state is idle
+  And I enable the desktop Debug action
+  When I open the chevron session sheet
+  Then the session sheet has the shared grids and 4 Session tiles
+  And the session sheet footer is chevron with Debug on
+  And the session-sheet region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | theme | baseline                          | threshold |
+  | dark  | session-sheet-chevron-debug-dark  | 98        |
+  | light | session-sheet-chevron-debug-light | 98        |
+
+Scenario Outline: The session list long-press sheet has five Session tiles and no footer
+  Given the viewport is a phone
+  And the session sheet theme is <theme>
+  And the conduit app is served with the long-transcript mockup
+  And the phone session sheet state is idle
+  When I open the list session sheet
+  Then the session sheet has the shared grids and 5 Session tiles
+  And the session sheet footer is absent with Debug off
+  And the session-sheet region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | theme | baseline                 | threshold |
+  | dark  | session-sheet-list-dark  | 98        |
+  | light | session-sheet-list-light | 98        |
+
+Scenario: Auto-settle changes the stored flag and keeps the sheet open
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  And the phone session sheet state is idle
+  When I open the overflow session sheet
+  And I toggle Auto-settle in the session sheet
+  Then the session sheet stays open with Auto-settle off
+  When I toggle Auto-settle in the session sheet
+  Then the session sheet stays open with Auto-settle on
+
+Scenario: A failed Auto-settle change keeps the stored flag and shows a sheet pill
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  And the phone session sheet state is idle
+  And the relay refuses the auto-settle change
+  When I open the overflow session sheet
+  And I toggle Auto-settle in the session sheet
+  Then the session sheet stays open with Auto-settle on
+  And the session sheet stays open with the reason pill Couldn't change auto-settle
