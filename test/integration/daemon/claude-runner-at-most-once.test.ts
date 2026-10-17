@@ -18,7 +18,7 @@ function sdkProof(harness: ProcessHarness) {
 }
 
 function stored(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath(), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		return {
 			commands: db

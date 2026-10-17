@@ -8,6 +8,25 @@ import {
 	vi,
 } from "vitest";
 
+vi.mock(
+	"../../../src/lib/frontend/stores/router.svelte.js",
+	async (importOriginal) => {
+		const router =
+			await importOriginal<
+				typeof import("../../../src/lib/frontend/stores/router.svelte.js")
+			>();
+		return {
+			...router,
+			navigate: (path: string) => {
+				router.routerState.path = path;
+			},
+			replaceRoute: (path: string) => {
+				router.routerState.path = path;
+			},
+		};
+	},
+);
+
 // Mock DOMPurify (browser-only) before importing the store
 vi.mock("dompurify", () => ({
 	default: {

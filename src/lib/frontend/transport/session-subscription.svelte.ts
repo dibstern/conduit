@@ -102,6 +102,10 @@ export function noteTransportDrop(): void {
 
 /** Settled reactive state. Envelope vocabulary does not travel past here. */
 export const sessionSubscription = {
+	/** Confirmed rows only; saved shell rows never place a session. */
+	get liveRows(): ReadonlyMap<string, SessionInfo> {
+		return applied.rows;
+	},
 	/** Live rows, or the device's provisional rows before the first snapshot. */
 	get rows(): ReadonlyMap<string, SessionInfo> {
 		return savedShell?.rows ?? applied.rows;

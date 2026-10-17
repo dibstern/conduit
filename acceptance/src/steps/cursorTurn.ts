@@ -39,7 +39,7 @@ export const cursorTurnHandlers: StepHandler[] = [
 							}
 						: getAgents(payload),
 			});
-			rpc.setResponse("CancelSession", { ok: true });
+			rpc.setStubs({ CancelSession: () => ({ ok: true }) });
 		},
 	},
 	{

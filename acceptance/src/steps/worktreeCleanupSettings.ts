@@ -21,10 +21,14 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 				path,
 				reason,
 			});
-			requireRpcControl(world.page).setResponse("CleanUpWorktreesNow", {
-				removed: [entry("row-opencode", "/worktrees/opencode", match[1] ?? "")],
-				kept: [entry("row-kept", match[2] ?? "", match[3] ?? "")],
-				failed: [entry("row-failed", match[4] ?? "", match[5] ?? "")],
+			requireRpcControl(world.page).setStubs({
+				CleanUpWorktreesNow: () => ({
+					removed: [
+						entry("row-opencode", "/worktrees/opencode", match[1] ?? ""),
+					],
+					kept: [entry("row-kept", match[2] ?? "", match[3] ?? "")],
+					failed: [entry("row-failed", match[4] ?? "", match[5] ?? "")],
+				}),
 			});
 		},
 	},
@@ -47,15 +51,14 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 		name: "hold cleanup until the server fails it",
 		match: /^cleaning up now waits for the server$/,
 		run: ({ world }) => {
-			requireRpcControl(world.page).setHandler(
-				"CleanUpWorktreesNow",
-				() =>
-					new Promise((_, reject) =>
+			requireRpcControl(world.page).setStubs({
+				CleanUpWorktreesNow: () =>
+					new Promise<never>((_, reject) =>
 						heldCleanups.set(world.page, () =>
 							reject(new WsRpcError({ message: "Cleanup failed" })),
 						),
 					),
-			);
+			});
 		},
 	},
 	{

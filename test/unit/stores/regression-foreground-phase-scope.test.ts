@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
 
 vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));

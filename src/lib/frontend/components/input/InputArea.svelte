@@ -64,7 +64,7 @@
 	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
 	import { findSession, isSessionSnoozed, sessionState, switchToSession } from "../../stores/session.svelte.js";
-	import { placedSessionId } from "../../stores/transcript.svelte.js";
+	import { selection } from "../../stores/selection.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { getCurrentRoute, getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { connectionState } from "../../transport/connection-status.svelte.js";
@@ -533,7 +533,7 @@
 		getAvailableInstances().find((instance) => instance.id === getEffectiveInstanceId())?.capabilities?.supportsMultiFolder === false,
 	);
 	// A session drawn from its saved page takes sends once the server places it.
-	const unplaced = $derived(placedSessionId() !== sessionState.currentId);
+	const unplaced = $derived(selection.shown.kind === "placing" || selection.shown.kind === "drawn");
 	const canSend = $derived(!readOnlySubagent && !unsupportedDraftFolders && !unplaced && (sessionState.currentId !== null || getDraftPick() !== undefined || (instanceState.loaded && !getEffectiveInstanceId())) && (inputText.trim().length > 0 || pendingImages.length > 0));
 	const sendButtonLabel = $derived(
 		sendMode === "at-reset"

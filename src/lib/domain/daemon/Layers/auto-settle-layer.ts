@@ -13,7 +13,7 @@ import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../../daemon/config-persisten
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import { hasColdAutoSettleCandidate } from "../Services/daemon-session-reader.js";
-import { optionalPersistenceStoreContext } from "../Services/project-read-database.js";
+import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	allProjects,
 	ProjectRegistryTag,
@@ -22,14 +22,14 @@ import { RelayCacheTag } from "../Services/relay-cache.js";
 
 const MILLISECONDS_PER_DAY = 86_400_000;
 
-export const AutoSettleLive = (configDir: string) =>
+export const AutoSettleLive = () =>
 	Layer.scopedDiscard(
 		Effect.gen(function* () {
 			const configRef = yield* DaemonConfigRefTag;
 			const registry = yield* ProjectRegistryTag;
 			const cache = yield* RelayCacheTag;
 			const bus = yield* DaemonEventBusTag;
-			const storeContext = yield* optionalPersistenceStoreContext;
+			const storeContext = yield* persistenceStoreContext;
 			const missingDirectories = new Set<string>();
 
 			const sweep = Effect.gen(function* () {
@@ -65,7 +65,6 @@ export const AutoSettleLive = (configDir: string) =>
 							? running.value
 							: (yield* hasColdAutoSettleCandidate(
 										project,
-										configDir,
 										now,
 										idleWindowMs,
 									).pipe(Effect.provide(storeContext)))

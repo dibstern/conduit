@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { seedSessions } from "../stores/session-fixtures.js";
 // RPC alerts notify without changing the viewed transcript.
 

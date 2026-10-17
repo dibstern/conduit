@@ -107,6 +107,7 @@ export function accountsStateFromInstances(
 		if (getProviderDriver(instance.driver)?.accountKind === "server")
 			return {
 				driver: "opencode",
+				usageEligible: false,
 				id,
 				name: instance.name,
 				...(instance.managed && instance.id !== MANAGED_OPENCODE_ACCOUNT_ID
@@ -129,7 +130,7 @@ export function accountsStateFromInstances(
 				name: instance.name,
 				...(configuredFolder === undefined ? {} : { configuredFolder }),
 				...(instance.env === undefined ? {} : { env: instance.env }),
-				usageEligible: false,
+				usageEligible: Boolean(instance.env?.["CURSOR_AUTH_TOKEN"]?.trim()),
 			};
 		return {
 			driver: "claude",
@@ -331,7 +332,17 @@ export function apply(
 		updates.configDir === undefined
 			? current.configuredFolder
 			: updates.configDir.trim() || undefined;
-	const env = updates.env ?? current.env;
+	const env =
+		updates.env === undefined
+			? current.env
+			: current.driver === "cursor" &&
+					!Object.hasOwn(updates.env, "CURSOR_AUTH_TOKEN") &&
+					current.env?.["CURSOR_AUTH_TOKEN"] !== undefined
+				? {
+						...updates.env,
+						CURSOR_AUTH_TOKEN: current.env["CURSOR_AUTH_TOKEN"],
+					}
+				: updates.env;
 	const updated = accountsStateFromInstances(
 		[
 			{

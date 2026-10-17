@@ -19,6 +19,7 @@ import {
 import {
 	clearSessionState,
 	reloadProviderSession,
+	sessionState,
 	switchToSession,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
@@ -521,6 +522,7 @@ describe("discovery catalogs over the RPC wire", () => {
 				.flatMap((group) => group.models.map((model) => model.name)),
 		).toEqual(["Replacement model"]);
 		clearSessionState();
+		sessionState.currentId = null;
 		discovery.selectInstance("two");
 		expect(
 			discovery
@@ -591,6 +593,7 @@ describe("discovery catalogs over the RPC wire", () => {
 	});
 
 	it("keeps a settings-stream model list under the project that opened the subscription", async () => {
+		sessionState.currentId = null;
 		applyInstanceListResponse({
 			instances: [
 				{

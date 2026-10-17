@@ -60,8 +60,6 @@ import {
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import {
-	indexProjectSessions,
-	makeSessionDirectoryLive,
 	makeSharedSessionDirectoryLive,
 	SessionDirectory,
 } from "../../../src/lib/domain/daemon/Services/session-directory.js";
@@ -109,14 +107,14 @@ function config(projects: readonly StoredProject[]) {
 	};
 }
 
-const sourcePath = (root: string, slug: string) =>
+const legacyProjectStorePath = (root: string, slug: string) =>
 	join(root, "projects", slug, "events.db");
 
 function sourceFiles(root: string): string[] {
 	const projects = join(root, "projects");
 	return existsSync(projects)
 		? readdirSync(projects)
-				.filter((slug) => existsSync(sourcePath(root, slug)))
+				.filter((slug) => existsSync(legacyProjectStorePath(root, slug)))
 				.map((slug) => `projects/${slug}/events.db`)
 				.sort()
 		: [];
@@ -159,7 +157,7 @@ function history(sessionId: string, provider = "opencode") {
 }
 
 async function writeHistory(root: string, slug: string, sessionId: string) {
-	const filename = sourcePath(root, slug);
+	const filename = legacyProjectStorePath(root, slug);
 	mkdirSync(dirname(filename), { recursive: true });
 	const runtime = ManagedRuntime.make(
 		makePersistenceEffectLayer(filename, slug),
@@ -254,12 +252,20 @@ describe("daemon shared-store startup", () => {
 		const beta = project(root, "beta");
 		try {
 			await writeHistory(root, "alpha", "healthy-session");
-			mkdirSync(dirname(sourcePath(root, "beta")), { recursive: true });
-			writeFileSync(sourcePath(root, "beta"), "not a SQLite database");
-			mkdirSync(dirname(sourcePath(root, "retained-corrupt")), {
+			mkdirSync(dirname(legacyProjectStorePath(root, "beta")), {
 				recursive: true,
 			});
-			writeFileSync(sourcePath(root, "retained-corrupt"), "also not SQLite");
+			writeFileSync(
+				legacyProjectStorePath(root, "beta"),
+				"not a SQLite database",
+			);
+			mkdirSync(dirname(legacyProjectStorePath(root, "retained-corrupt")), {
+				recursive: true,
+			});
+			writeFileSync(
+				legacyProjectStorePath(root, "retained-corrupt"),
+				"also not SQLite",
+			);
 			const runtime = startup(root, [alpha, beta]);
 			try {
 				const unavailable = await runtime.runPromise(DaemonStoreAvailability);
@@ -310,7 +316,7 @@ describe("daemon shared-store startup", () => {
 				expect(existsSync(join(root, "projects", "beta", "project.json"))).toBe(
 					false,
 				);
-				expect(readFileSync(sourcePath(root, "beta"), "utf8")).toBe(
+				expect(readFileSync(legacyProjectStorePath(root, "beta"), "utf8")).toBe(
 					"not a SQLite database",
 				);
 			} finally {
@@ -354,7 +360,7 @@ describe("daemon shared-store startup", () => {
 						},
 					],
 				});
-				expect(existsSync(sourcePath(root, "beta"))).toBe(false);
+				expect(existsSync(legacyProjectStorePath(root, "beta"))).toBe(false);
 				expect(readFileSync(legacy, "utf8")).toBe("corrupt legacy database");
 			} finally {
 				await runtime.dispose();
@@ -445,7 +451,7 @@ describe("daemon shared-store startup", () => {
 		try {
 			await writeHistory(root, "alpha", "original-session");
 			writeFileSync(
-				`${sourcePath(root, "alpha")}.imported-${completedAt}`,
+				`${legacyProjectStorePath(root, "alpha")}.imported-${completedAt}`,
 				"existing backup",
 			);
 			const results: importer.ProjectStoreImportResult[][] = [];
@@ -472,13 +478,13 @@ describe("daemon shared-store startup", () => {
 			} finally {
 				await first.dispose();
 			}
-			const database = new Database(sourcePath(root, "alpha"));
+			const database = new Database(legacyProjectStorePath(root, "alpha"));
 			try {
 				database.pragma("user_version = 99");
 			} finally {
 				database.close();
 			}
-			const changed = readFileSync(sourcePath(root, "alpha"));
+			const changed = readFileSync(legacyProjectStorePath(root, "alpha"));
 			const second = startup(root, [alpha]);
 			try {
 				expect(await second.runPromise(DaemonStoreAvailability)).toEqual(
@@ -491,7 +497,9 @@ describe("daemon shared-store startup", () => {
 						availability: [{ projectSlug: "alpha", available: true }],
 					},
 				);
-				expect(readFileSync(sourcePath(root, "alpha"))).toEqual(changed);
+				expect(readFileSync(legacyProjectStorePath(root, "alpha"))).toEqual(
+					changed,
+				);
 			} finally {
 				await second.dispose();
 			}
@@ -522,9 +530,9 @@ describe("daemon shared-store startup", () => {
 			await writeHistory(root, "a-retained", "retained-shared");
 			for (let index = 0; index < 8; index++)
 				await writeHistory(root, "a-retained", `retained-only-${index}`);
-			expect(statSync(sourcePath(root, "a-retained")).size).toBeGreaterThan(
-				statSync(sourcePath(root, "alpha")).size,
-			);
+			expect(
+				statSync(legacyProjectStorePath(root, "a-retained")).size,
+			).toBeGreaterThan(statSync(legacyProjectStorePath(root, "alpha")).size);
 			const imports = vi.spyOn(importer, "importRegisteredProjectStores");
 			const runtime = startup(root, [alpha]);
 			try {
@@ -580,7 +588,6 @@ describe("daemon shared-store startup", () => {
 						);
 						expect(
 							yield* resolveDaemonOpenCodeSession(
-								root,
 								"opencode",
 								"retained-shared-native",
 							),
@@ -688,8 +695,8 @@ describe("daemon shared-store startup", () => {
 				).toMatch(/beta.*(?:seeded|imported)/);
 				for (const slug of ["alpha", "beta"])
 					expect(
-						readdirSync(dirname(sourcePath(root, slug))).some((name) =>
-							name.startsWith("events.db.imported-"),
+						readdirSync(dirname(legacyProjectStorePath(root, slug))).some(
+							(name) => name.startsWith("events.db.imported-"),
 						),
 					).toBe(true);
 				const lineage = await runtime.runPromise(
@@ -730,7 +737,7 @@ describe("daemon shared-store startup", () => {
 					).toEqual([[id, slug]]);
 					expect(
 						await runtime.runPromise(
-							resolveDaemonOpenCodeSession(root, "opencode", `${id}-native`),
+							resolveDaemonOpenCodeSession("opencode", `${id}-native`),
 						),
 					).toEqual({ projectSlug: slug, sessionId: id });
 				}
@@ -760,17 +767,6 @@ describe("daemon shared-store startup", () => {
 						yield* Ref.set(registry, beforeRemoval);
 						expect(yield* directory.projectOf("child")).toEqual(
 							Option.some("beta"),
-						);
-						yield* indexProjectSessions(root, projects[1]);
-						yield* directory.record("alpha", ["child", "invented"]);
-						yield* directory.replaceProject("alpha", ["invented"]);
-						yield* directory.remove("alpha", ["parent"]);
-						yield* directory.removeProject("alpha");
-						expect(yield* directory.projectOf("parent")).toEqual(
-							Option.some("alpha"),
-						);
-						expect(yield* directory.projectOf("invented")).toEqual(
-							Option.none(),
 						);
 					}),
 				);
@@ -1000,16 +996,15 @@ describe("daemon shared-store startup", () => {
 				for (const own of projects) {
 					expect(
 						await runtime.runPromise(
-							hasProviderRecoveryCandidate(own, root, ["opencode"]),
+							hasProviderRecoveryCandidate(own, ["opencode"]),
 						),
 					).toBe(true);
 					expect(
-						await runtime.runPromise(countRunningProjectSessions(own, root)),
+						await runtime.runPromise(countRunningProjectSessions(own)),
 					).toBe(1);
 					const rows = await runtime.runPromise(
 						readColdWorktreeCleanupCandidates(
 							own,
-							root,
 							{ ...DEFAULT_WORKTREE_CLEANUP, whenMerged: true },
 							1_000_000,
 						),
@@ -1030,13 +1025,11 @@ describe("daemon shared-store startup", () => {
 				);
 				expect(
 					await runtime.runPromise(
-						hasProviderRecoveryCandidate(projects[0], root, ["opencode"]),
+						hasProviderRecoveryCandidate(projects[0], ["opencode"]),
 					),
 				).toBe(false);
 				expect(
-					await runtime.runPromise(
-						countRunningProjectSessions(projects[0], root),
-					),
+					await runtime.runPromise(countRunningProjectSessions(projects[0])),
 				).toBe(0);
 				await runtime.runPromise(
 					Effect.flatMap(
@@ -1047,7 +1040,7 @@ describe("daemon shared-store startup", () => {
 				for (const own of projects)
 					expect(
 						await runtime.runPromise(
-							hasColdAutoSettleCandidate(own, root, 1_000_000, 1000),
+							hasColdAutoSettleCandidate(own, 1_000_000, 1000),
 						),
 					).toBe(true);
 				await runtime.runPromise(
@@ -1059,7 +1052,7 @@ describe("daemon shared-store startup", () => {
 				);
 				expect(
 					await runtime.runPromise(
-						hasColdAutoSettleCandidate(projects[0], root, 1_000_000, 1000),
+						hasColdAutoSettleCandidate(projects[0], 1_000_000, 1000),
 					),
 				).toBe(false);
 				const before = daemonStoreManifest(daemonStorePath(root));
@@ -1069,22 +1062,20 @@ describe("daemon shared-store startup", () => {
 					);
 					await runtime.runPromise(
 						resolveDaemonOpenCodeSession(
-							root,
 							"opencode",
 							`${own.slug}-session-native`,
 						),
 					);
 					await runtime.runPromise(
-						hasProviderRecoveryCandidate(own, root, ["opencode"]),
+						hasProviderRecoveryCandidate(own, ["opencode"]),
 					);
-					await runtime.runPromise(countRunningProjectSessions(own, root));
+					await runtime.runPromise(countRunningProjectSessions(own));
 					await runtime.runPromise(
-						hasColdAutoSettleCandidate(own, root, 1_000_000, 1000),
+						hasColdAutoSettleCandidate(own, 1_000_000, 1000),
 					);
 					await runtime.runPromise(
 						readColdWorktreeCleanupCandidates(
 							own,
-							root,
 							{ ...DEFAULT_WORKTREE_CLEANUP, whenMerged: true },
 							1_000_000,
 						),
@@ -1102,23 +1093,15 @@ describe("daemon shared-store startup", () => {
 		}
 	});
 
-	it("keeps standalone directory and daemon readers on per-project files without an opt-in store", async () => {
-		const root = mkdtempSync(join(tmpdir(), "conduit-per-file-default-"));
+	it("imports registered and retained sources by default while hiding retained history", async () => {
+		const root = mkdtempSync(join(tmpdir(), "conduit-shared-default-"));
 		const projects = [project(root, "alpha"), project(root, "beta")];
 		try {
 			await writeHistory(root, "alpha", "parent");
 			await writeHistory(root, "beta", "child");
 			await writeHistory(root, "retained", "hidden-session");
-			const retainedBytes = readFileSync(sourcePath(root, "retained"));
 			const imports = vi.spyOn(importer, "importRegisteredProjectStores");
-			const runtime = ManagedRuntime.make(
-				Layer.mergeAll(
-					makeProjectRegistryLive(projects),
-					makeSessionDirectoryLive(root, projects),
-					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-					Layer.effect(SessionActivityTag, makeSessionActivity),
-				),
-			);
+			const runtime = startup(root, projects);
 			try {
 				expect(await runtime.runPromise(DaemonStoreAvailability)).toEqual(
 					new Map(),
@@ -1139,16 +1122,16 @@ describe("daemon shared-store startup", () => {
 						),
 					),
 				).toEqual(Option.some("beta"));
-				expect(sourceFiles(root)).toEqual([
-					"projects/alpha/events.db",
-					"projects/beta/events.db",
-					"projects/retained/events.db",
-				]);
-				expect(readFileSync(sourcePath(root, "retained"))).toEqual(
-					retainedBytes,
-				);
-				expect(imports).not.toHaveBeenCalled();
-				expect(existsSync(daemonStorePath(root))).toBe(false);
+				expect(sourceFiles(root)).toEqual([]);
+				expect(imports).toHaveBeenCalledOnce();
+				expect(existsSync(daemonStorePath(root))).toBe(true);
+				expect(
+					await runtime.runPromise(
+						Effect.flatMap(SessionDirectory, (directory) =>
+							directory.projectOf("hidden-session"),
+						),
+					),
+				).toEqual(Option.none());
 			} finally {
 				await runtime.dispose();
 			}

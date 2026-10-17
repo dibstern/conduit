@@ -823,6 +823,7 @@ export interface OpenCodeInstance {
 	/** Published directory default marker; runtime records need not store it. */
 	isDefault?: boolean;
 	usageEligible?: boolean;
+	cursorUsageSource?: "token" | "keychain" | "can_enable" | "unsupported";
 	available?: boolean;
 	unavailableReason?: string;
 	unavailableCode?: "auth_required";

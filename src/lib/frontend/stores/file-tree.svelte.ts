@@ -153,7 +153,11 @@ export function filterFiles(entries: string[], query: string): FilteredFiles {
 	};
 }
 
-export function applyGetFileTreeResponse(response: GetFileTreeResponse): void {
+export function applyGetFileTreeResponse(
+	response: GetFileTreeResponse,
+	scope = fileTreeState.scope,
+): void {
+	if (scope !== fileTreeState.scope) return;
 	fileTreeState.entries = [...response.entries];
 	fileTreeState.roots = response.roots ?? [];
 	fileTreeState.loaded = true;

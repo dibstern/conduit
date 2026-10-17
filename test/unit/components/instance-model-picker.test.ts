@@ -13,6 +13,7 @@ import {
 	selectInstance,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { applyInstanceListResponse } from "../../../src/lib/frontend/stores/instance.svelte.js";
+import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	clearSessionState,
 	sessionState,
@@ -130,6 +131,7 @@ describe("InstanceModelPicker", () => {
 		showToastSpy.mockClear();
 		clearDiscoveryState();
 		clearSessionState();
+		attachedProjectState.slug = "project-a";
 		applyInstanceListResponse({
 			instances: [
 				{

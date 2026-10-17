@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { seedSessions } from "../stores/session-fixtures.js";
 // Full tool content and input drafts arrive through RPC replies.
 

@@ -58,7 +58,7 @@ describe("Account folder changes without daemon restart", () => {
 	};
 	afterEach(async ({ task }) => {
 		if (!harness) return;
-		const db = new Database(harness.projectStorePath(), { readonly: true });
+		const db = new Database(harness.daemonStorePath(), { readonly: true });
 		let persisted: {
 			inputs: unknown[];
 			commands: unknown[];
@@ -69,22 +69,22 @@ describe("Account folder changes without daemon restart", () => {
 			persisted = {
 				inputs: db
 					.prepare(
-						"SELECT input_id, state FROM pending_inputs ORDER BY input_id",
+						"SELECT input_id, state FROM pending_inputs WHERE session_id IN (SELECT id FROM sessions WHERE project_id = 'process-test') ORDER BY input_id",
 					)
 					.all(),
 				commands: db
 					.prepare(
-						"SELECT command_id, status, json_extract(payload_json, '$.account.folder.path') AS folder FROM provider_command_outbox WHERE effect_type = 'send_turn' ORDER BY request_sequence",
+						"SELECT command_id, status, json_extract(payload_json, '$.account.folder.path') AS folder FROM provider_command_outbox WHERE project_key = 'process-test' AND effect_type = 'send_turn' ORDER BY request_sequence",
 					)
 					.all(),
 				events: db
 					.prepare(
-						"SELECT type, json_extract(data, '$.inputId') AS inputId, json_extract(data, '$.messageId') AS messageId, json_extract(data, '$.status') AS status FROM events WHERE type IN ('input.admitted', 'input.sent', 'input.started', 'turn.started', 'turn.end', 'turn.error', 'session.status') ORDER BY sequence",
+						"SELECT type, json_extract(data, '$.inputId') AS inputId, json_extract(data, '$.messageId') AS messageId, json_extract(data, '$.status') AS status FROM events WHERE project_id = 'process-test' AND type IN ('input.admitted', 'input.sent', 'input.started', 'turn.started', 'turn.end', 'turn.error', 'session.status') ORDER BY sequence",
 					)
 					.all(),
 				forkEvents: db
 					.prepare(
-						"SELECT session_id, type, data FROM events WHERE type IN ('session.created', 'session.forked') ORDER BY sequence",
+						"SELECT session_id, type, data FROM events WHERE project_id = 'process-test' AND type IN ('session.created', 'session.forked') ORDER BY sequence",
 					)
 					.all(),
 			};
@@ -538,7 +538,7 @@ describe("Account folder changes without daemon restart", () => {
 			expect(daemon.marks.filter((mark) => mark.kind === "query")).toHaveLength(
 				0,
 			);
-			const db = new Database(daemon.projectStorePath(), { readonly: true });
+			const db = new Database(daemon.daemonStorePath(), { readonly: true });
 			try {
 				expect(
 					db
@@ -612,7 +612,7 @@ describe("Account folder changes without daemon restart", () => {
 		await browser.send(sessionId, first);
 		const native = daemon.marks.find((mark) => mark.kind === "query");
 		if (native?.kind !== "query") throw new Error("Missing native receipt");
-		const db = new Database(daemon.projectStorePath());
+		const db = new Database(daemon.daemonStorePath());
 		try {
 			await vi.waitFor(() =>
 				expect(

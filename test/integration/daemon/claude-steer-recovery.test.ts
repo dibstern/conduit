@@ -18,7 +18,7 @@ import { createProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 function inbox(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath(), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		return {
 			session: db
@@ -85,7 +85,7 @@ describe("Claude pending steer recovery through the process seam", () => {
 		void browser.send(sessionId, "Alpha").catch(() => undefined);
 		await vi.waitFor(
 			() => {
-				const db = new Database(running.projectStorePath(), { readonly: true });
+				const db = new Database(running.daemonStorePath(), { readonly: true });
 				try {
 					expect(
 						db
