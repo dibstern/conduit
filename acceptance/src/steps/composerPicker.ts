@@ -307,7 +307,7 @@ export const composerPickerHandlers: StepHandler[] = [
 				);
 				await expect(tab.getByTestId("harness-logo")).toHaveCSS(
 					"width",
-					"15px",
+					"18px",
 				);
 			}
 		},
