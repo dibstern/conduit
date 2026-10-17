@@ -34,19 +34,66 @@ const meta = {
 	title: "Chat/Turn Activity",
 	component: TurnActivity,
 	parameters: { layout: "padded" },
+	args: { providerId: "claude" },
 } satisfies Meta<typeof TurnActivity>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** Sentence + strip + bill across two lines, with the failed step called out. */
+/** Counts and duration stay in the head; the bill lives in its hover and log. */
 export const Settled: Story = {
 	args: { turn: settled, segment: settledSegment, final: true },
+};
+
+export const SettledLight: Story = { ...Settled, globals: { theme: "light" } };
+
+export const Expanded: Story = {
+	...Settled,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const toggle = canvas.getByRole("button", {
+			name: /^Work(ed|ing)\b/,
+			expanded: false,
+		});
+		await userEvent.click(toggle);
+		// A synthetic click leaves a focus ring and its tooltip; the baseline is the resting state.
+		toggle.blur();
+		await expect(
+			canvasElement.querySelector(".step-log .turn-meta"),
+		).toBeVisible();
+	},
+};
+
+export const ExpandedLight: Story = {
+	...Expanded,
+	globals: { theme: "light" },
 };
 
 /** Elapsed time counts up, the strip grows, and the last three steps show as a fading ticker. */
 export const Live: Story = {
 	args: { turn: live, segment: liveSegment, final: true },
+};
+
+export const LiveLight: Story = { ...Live, globals: { theme: "light" } };
+
+/** Summary generation is supplied by its owner; the phone row has the agreed copy. */
+export const SummaryRow: Story = {
+	args: {
+		turn: live,
+		segment: liveSegment,
+		final: true,
+		onsummarize: () => undefined,
+	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByRole("button", { name: "✦ Summarize" }),
+		).toBeVisible();
+	},
+};
+
+export const SummaryRowLight: Story = {
+	...SummaryRow,
+	globals: { theme: "light" },
 };
 
 /** A short turn — few steps, so segments stay legible at minimum width. */
@@ -176,7 +223,10 @@ export const PreviewedOutputRetry: Story = {
 	args: { turn: truncated, segment: truncatedSegment, final: true },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const toggle = canvas.getByRole("button", { expanded: false });
+		const toggle = canvas.getByRole("button", {
+			name: /^Work(ed|ing)\b/,
+			expanded: false,
+		});
 		await userEvent.click(toggle);
 		toggle.blur();
 		// The strip labels its steps too, but only the log row shows the subject as text.
@@ -233,7 +283,10 @@ const [twiceSegment = EMPTY_SEGMENT] = twice.segments;
 
 async function expand(canvasElement: HTMLElement) {
 	const canvas = within(canvasElement);
-	const toggle = canvas.getByRole("button", { expanded: false });
+	const toggle = canvas.getByRole("button", {
+		name: /^Work(ed|ing)\b/,
+		expanded: false,
+	});
 	await userEvent.click(toggle);
 	// A synthetic click leaves a focus ring; the baseline is the resting state.
 	toggle.blur();
@@ -296,8 +349,12 @@ const [skilledLiveSegment = EMPTY_SEGMENT] = skilledLive.segments;
 
 async function openSkills(canvasElement: HTMLElement) {
 	const canvas = within(canvasElement);
-	// By title: below 336px the label sheds "skills" and the name is just the count.
-	const toggle = canvas.getByTitle("Which skills ran, and when");
+	const head = canvasElement.querySelector<HTMLButtonElement>(
+		".turn-activity-toggle",
+	);
+	if (head?.getAttribute("aria-expanded") === "false")
+		await userEvent.click(head);
+	const toggle = canvas.getByRole("button", { name: /skills?$/ });
 	await userEvent.click(toggle);
 	toggle.blur();
 	await expect(
@@ -305,7 +362,7 @@ async function openSkills(canvasElement: HTMLElement) {
 	).toBeVisible();
 }
 
-/** The skills count sits beside the sentence as a control of its own. */
+/** Skills keep their chapter picker in the step log. */
 export const Skills: Story = {
 	args: { turn: skilled, segment: skilledSegment, final: true },
 };

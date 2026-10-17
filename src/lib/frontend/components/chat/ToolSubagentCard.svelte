@@ -4,9 +4,12 @@
 	import type { ToolMessage } from "../../types.js";
 	import { switchToSession } from "../../stores/session.svelte.js";
 	import { subagentSessionId as findSubagentSessionId } from "../../utils/subagent-tools.js";
+	import { clock } from "../../stores/clock.svelte.js";
+	import { fmtDuration, toolVerb } from "../../utils/turns.js";
 
 	import Icon from "../ui/Icon.svelte";
 	import Button from "../ui/Button.svelte";
+	import Badge from "../ui/Badge.svelte";
 	import BlockGrid from '../ui/BlockGrid.svelte';
 
 	let { message }: {
@@ -54,12 +57,8 @@
 	const taskInput = $derived(readTaskInput(message.input));
 
 	const subagentSessionId = $derived(findSubagentSessionId(message));
-	const glowClass = $derived.by(() => {
-		if (message.status === "error") return "glow-tool-error";
-		if (message.status === "completed") return "glow-success";
-		if (message.status === "running") return "glow-tool-running";
-		return "";
-	});
+	const running = $derived(message.status === "running" || message.status === "pending");
+	const duration = $derived(message.createdAt === undefined || (!running && message.endedAt === undefined) ? undefined : Math.max(0, (message.endedAt ?? clock.now) - message.createdAt));
 
 	const agentLabel = $derived(
 		taskInput
@@ -78,27 +77,6 @@
 		}
 	}
 
-	const statusIconName = $derived.by(() => {
-		switch (message.status) {
-			case "running":
-			case "pending":
-				return "loader";
-			case "completed":
-				return "check";
-			case "error":
-				return "circle-alert";
-			default:
-				return "loader";
-		}
-	});
-
-	const statusIconClass = $derived.by(() => {
-		if (message.status === "running" || message.status === "pending")
-			return "text-text-muted";
-		if (message.status === "error") return "text-error";
-		return "text-text-dimmer";
-	});
-
 	const subtitleText = $derived.by(() => {
 		switch (message.status) {
 			case "pending":
@@ -115,67 +93,27 @@
 	});
 </script>
 
-<div class="{message.status === 'completed' ? '' : 'bg-bg-surface'} rounded-panel relative overflow-hidden {glowClass}">
-	{#if message.status === 'running'}
-		<div class="absolute inset-0 pointer-events-none" style="background: linear-gradient(90deg, transparent 0%, rgba(234,179,8,0.04) 50%, transparent 100%); animation: tool-shimmer-slide 2s ease-in-out infinite;"></div>
-	{/if}
-	<!--
-		`layout="flow"` keeps the as-found `flex items-center`, which the
-		`self-center` on the BlockGrid child depends on, and keeps the header
-		title wrapping rather than taking BASE's `whitespace-nowrap`.
-
-		`hoverFill` is unconditional where the original gated it on
-		`subagentSessionId`, because that is exactly when the button is disabled
-		and Button already drops every `hover:` step when inert
-. `disabledStyle="undimmed"` reproduces the as-found
-		`disabled:opacity-100 disabled:cursor-default` pair.
-	-->
+<div class="min-w-0">
 	<Button
 		variant="ghost"
-		size="content"
+		size="transcript"
 		layout="flow"
 		tone="inherit"
 		hoverFill="surface"
 		disabledStyle="undimmed"
-		class="subagent-header flex items-center gap-2.5 w-full py-2.5 px-3 text-xs text-text-dimmer text-left select-none"
+		align="start"
+		class="subagent-header text-text-secondary select-none"
 		onclick={navigateToSubagent}
 		disabled={!subagentSessionId}
 		title={subagentSessionId ? "Open subagent session" : undefined}
 	>
-		<!-- Status icon -->
-		{#if message.status === 'running'}
-			<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0 self-center" />
-		{:else}
-			<span class="tool-status-icon shrink-0 [&_.lucide]:w-3.5 [&_.lucide]:h-3.5 {statusIconClass}">
-				<Icon name={statusIconName} size={14} />
-			</span>
-		{/if}
-
-		<!-- Agent icon -->
-		<span class="text-accent [&_.lucide]:w-4 [&_.lucide]:h-4">
-			<Icon name="bot" size={16} />
-		</span>
-
-		<!-- Agent label + description -->
-		<div class="flex-1 min-w-0">
-			<span class="agent-title text-text-dimmer font-medium capitalize select-text">
-				{agentLabel}
-			</span>
-			{#if agentDescription}
-				<span
-					class="subagent-link block text-xs text-text-dimmer truncate max-w-full mt-0.5 select-text"
-					class:underline={!!subagentSessionId}
-					class:hover:text-accent={!!subagentSessionId}
-				>
-					{agentDescription}
-				</span>
-			{/if}
-			{#if typeof message.metadata?.['subagentModel'] === "string" || typeof message.metadata?.['subagentMode'] === "string"}
-				<span class="subagent-details block mt-0.5 text-xs text-text-muted break-words">
-					{[message.metadata?.['subagentModel'], message.metadata?.['subagentMode']].filter((value) => typeof value === "string").join(" · ")}
-				</span>
-			{/if}
-		</div>
+		<span class="tool-status-icon shrink-0 text-text-dimmer"><Icon name="git-fork" size={14} /></span>
+		<span class="shrink-0 font-semibold">{toolVerb(message, running ? "present" : "past")}</span>
+		<Badge variant="tag" size="sm" class="agent-title shrink-0 font-mono capitalize select-text">{agentLabel}</Badge>
+		<span class="subagent-link flex-1 min-w-0 truncate font-mono text-[12.5px] select-text">{agentDescription}</span>
+		{#if duration !== undefined}<time class="ml-auto shrink-0 font-mono text-[12px] text-text-dimmer">{fmtDuration(duration)}</time>{/if}
+		{#if running}<BlockGrid cols={4} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
+		{:else if message.status === "error" || message.isError}<span class="shrink-0 text-error"><Icon name="circle-alert" size={12} /></span>{/if}
 
 		<!-- Navigate arrow (only when session is available) -->
 		{#if subagentSessionId}
@@ -184,12 +122,17 @@
 			</span>
 		{/if}
 	</Button>
+	{#if typeof message.metadata?.['subagentModel'] === "string" || typeof message.metadata?.['subagentMode'] === "string"}
+		<div class="subagent-details pb-[3px] pl-[22px] text-[12px] text-text-muted break-words">
+			{[message.metadata?.['subagentModel'], message.metadata?.['subagentMode']].filter((value) => typeof value === "string").join(" · ")}
+		</div>
+	{/if}
 
-	<!-- Subtitle row -->
+	{#if message.status !== "completed"}
 	<div
-		class="tool-subtitle flex items-center gap-1.5 py-0.5 px-3 pl-4 text-xs italic text-text-dimmer"
+		class="tool-subtitle pb-[3px] pl-[22px] text-[12px] text-text-dimmer"
 	>
-		<span class="tool-connector font-mono not-italic text-border">└</span>
 		<span class="tool-subtitle-text">{subtitleText}</span>
 	</div>
+	{/if}
 </div>

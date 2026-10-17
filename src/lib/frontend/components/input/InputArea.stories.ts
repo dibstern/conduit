@@ -528,7 +528,7 @@ export const ComposerSheetLight: Story = {
 	globals: { theme: "light" },
 };
 
-// The composer clock times the prompt that started the turn.
+// Seed a working session without adding status chrome inside the composer.
 function startTurn() {
 	const chat = getOrCreateSessionMessages(testId);
 	chat.messages = [
@@ -553,6 +553,18 @@ export const Processing: Story = {
 		setHighVariant();
 		return cleanup;
 	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.queryByTestId("composer-status-header"),
+		).not.toBeInTheDocument();
+		await expect(canvasElement.querySelector("#stop")).toBeVisible();
+	},
+};
+
+export const ProcessingLight: Story = {
+	...Processing,
+	globals: { theme: "light" },
 };
 
 let goalStorySetAt = Date.now() - 41 * 60_000;
@@ -652,8 +664,8 @@ export const GoalChecking: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(
-			canvas.getByTestId("composer-status-header"),
-		).toHaveTextContent("Checking goal · check 3");
+			canvas.queryByTestId("composer-status-header"),
+		).not.toBeInTheDocument();
 		await expect(
 			canvas.queryByTestId("composer-status-elapsed"),
 		).not.toBeInTheDocument();
@@ -672,8 +684,8 @@ export const GoalNotYetWorking: Story = {
 	play: async ({ canvasElement }) => {
 		// The reason lives in the goal details; the composer stays one line.
 		await expect(
-			within(canvasElement).getByTestId("composer-status-header"),
-		).not.toHaveTextContent("35 of 38 scenarios pass");
+			within(canvasElement).queryByTestId("composer-status-header"),
+		).not.toBeInTheDocument();
 	},
 };
 

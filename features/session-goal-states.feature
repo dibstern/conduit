@@ -1,13 +1,13 @@
 Feature: Claude goal states and outcomes
 
-Scenario Outline: An idle goal check has a checking header and spinner
+Scenario Outline: An idle goal check has a checking subtitle and spinner
   Given the viewport is a phone
   And the conduit app is served with the matching-model mockup
   When Claude sets the goal <condition>
   And the goal check is running
   Then the session goal subtitle reads Checking goal · check 3
   And the session goal subtitle has a spinner
-  And the composer checks the goal at check 3 without an elapsed timer
+  And the composer status header is not visible
   And the composer has a violet goal border
   And the layout region visually matches <baseline> at <threshold> percent
 
@@ -22,7 +22,7 @@ Scenario Outline: Claude continues working after a failed goal check
   When Claude sets the goal <condition>
   And Claude reports the goal check <reason>
   Then the session goal subtitle reads <condition> · 1 check
-  And the composer status header does not include <reason>
+  And the composer does not include <reason>
   And the composer has a violet goal border
   And the layout region visually matches <baseline> at <threshold> percent
 

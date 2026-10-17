@@ -120,3 +120,8 @@ export const Hover: Story = {
 	...SingleSelect,
 	parameters: { pseudo: { hover: true } },
 };
+
+export const WithCustomInputLight: Story = {
+	...WithCustomInput,
+	globals: { theme: "light" },
+};

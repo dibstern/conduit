@@ -157,10 +157,14 @@ describe("MessageList session-view publication", () => {
 		];
 		flushSync();
 		expect(container.querySelectorAll(".turn-activity")).toHaveLength(2);
-		expect(container.querySelectorAll(".glow-tool-running")).toHaveLength(1);
+		expect(
+			container.querySelectorAll(
+				'.turn-activity [data-testid="turn-live-head"]',
+			),
+		).toHaveLength(1);
 		expect(container.textContent).toContain("Working");
 		expect(container.textContent).toContain(
-			kind === "assistant" ? "Replying" : "Reading",
+			kind === "assistant" ? "One more check" : "Reading",
 		);
 
 		slot.messages.messages = [
@@ -168,7 +172,9 @@ describe("MessageList session-view publication", () => {
 			{ type: "result", uuid: "last-result", cost: 0.02 },
 		];
 		flushSync();
-		expect(container.querySelector(".glow-tool-running")).toBeNull();
+		expect(
+			container.querySelector('.turn-activity [data-testid="turn-live-head"]'),
+		).toBeNull();
 		expect(container.textContent).not.toContain("Working");
 		if (kind === "assistant")
 			expect(container.querySelector(".result-bar")).not.toBeNull();

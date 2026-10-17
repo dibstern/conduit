@@ -7,6 +7,7 @@
 	import { escapeHtml } from "../../utils/format.js";
 	import type { DiffOp, SplitRow } from "../../types.js";
 	import Tabs from "../ui/Tabs.svelte";
+	import CodeBlockHeader from "../ui/CodeBlockHeader.svelte";
 
 	let {
 		oldText,
@@ -72,30 +73,13 @@
 	}
 </script>
 
-<div class="diff-container">
-	<!-- Filename header -->
-	{#if filename}
-		<div
-			class="diff-filename text-xs font-mono text-text-dimmer px-3 py-1.5 bg-code-bg border border-border-subtle border-b-0 rounded-t-lg"
-		>
-			{filename}
-		</div>
-	{/if}
-
-	<!-- Diff stats -->
-	<div class="diff-stats flex items-center gap-3 px-3 py-1.5 text-xs">
-		{#if stats.additions > 0}
-			<span class="text-success font-medium">+{stats.additions}</span>
-		{/if}
-		{#if stats.deletions > 0}
-			<span class="text-error font-medium">-{stats.deletions}</span>
-		{/if}
-		{#if stats.additions === 0 && stats.deletions === 0}
-			<span class="text-text-dimmer">No changes</span>
-		{/if}
+<div class="diff-container min-w-0 overflow-hidden rounded-[8px] border border-border-subtle bg-code-bg">
+	<div class="diff-filename diff-stats">
+		<CodeBlockHeader {filename} label="diff" additions={stats.additions} deletions={stats.deletions} code={newText} />
 	</div>
 
 	<!-- Toggle bar -->
+	<div class="px-[12px] py-[6px] border-b border-border-subtle">
 	<Tabs
 		bind:value={viewMode}
 		variant="pill"
@@ -105,21 +89,22 @@
 			{ value: "split", label: "Split" },
 		]}
 	/>
+	</div>
 
 	<!-- Unified view -->
 	{#if viewMode === "unified"}
 		<div
-			class={"diff-viewer font-mono text-xs leading-normal overflow-x-auto bg-code-bg border border-border-subtle" + (filename ? " rounded-b-lg" : " rounded-lg")}
+			class="diff-viewer font-mono text-[12.5px] leading-[20px] overflow-x-auto py-[8px]"
 		>
 			{#each ops as op (op.type + "-" + (op.oldLineNo ?? "") + "-" + (op.newLineNo ?? ""))}
 				<div class={lineClass(op.type)}>
 					<span
-						class="diff-gutter diff-gutter-old min-w-[40px] px-2 text-right text-text-dimmer select-none shrink-0 text-sm border-r border-border-subtle"
+						class="diff-gutter diff-gutter-old min-w-[36px] px-[8px] text-right text-text-dimmer select-none shrink-0 text-[11px] border-r border-border-subtle"
 					>
 						{op.type !== "add" ? (op.oldLineNo ?? "") : ""}
 					</span>
 					<span
-						class="diff-gutter diff-gutter-new min-w-[40px] px-2 text-right text-text-dimmer select-none shrink-0 text-sm"
+						class="diff-gutter diff-gutter-new min-w-[36px] px-[8px] text-right text-text-dimmer select-none shrink-0 text-[11px]"
 					>
 						{op.type !== "remove" ? (op.newLineNo ?? "") : ""}
 					</span>
@@ -131,15 +116,15 @@
 	{:else}
 		<!-- Split (side-by-side) view -->
 		<div
-			class={"diff-split-view overflow-x-auto bg-code-bg border border-border-subtle" + (filename ? " rounded-b-lg" : " rounded-lg")}
+			class="diff-split-view overflow-x-auto py-[8px]"
 		>
-		<table class="diff-table w-full font-mono text-xs leading-normal border-collapse">
+		<table class="diff-table w-full font-mono text-[12.5px] leading-[20px] border-collapse">
 			<tbody>
 			{#each splitRows as row, idx (row.type + "-" + idx)}
 				<tr class={splitRowClass(row.type)}>
 						<!-- Old side -->
 						<td
-							class="diff-ln text-right text-text-dimmer select-none px-2 text-sm w-[40px]"
+							class="diff-ln text-right text-text-dimmer select-none px-[8px] text-[11px] w-[36px]"
 						>
 							{row.oldLineNo ?? ""}
 						</td>
@@ -160,7 +145,7 @@
 
 						<!-- New side -->
 						<td
-							class="diff-ln text-right text-text-dimmer select-none px-2 text-sm w-[40px]"
+							class="diff-ln text-right text-text-dimmer select-none px-[8px] text-[11px] w-[36px]"
 						>
 							{row.newLineNo ?? ""}
 						</td>

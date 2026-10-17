@@ -509,9 +509,7 @@ for (const dismiss of [false, true]) {
 					await expect(
 						chat.userMessages.last().getByTestId("cut-off-tag"),
 					).toHaveText(
-						phone
-							? "⏸ Cut off · Dismiss"
-							: "⏸ Cut off by usage limit · Dismiss",
+						phone ? "Cut off · Dismiss" : "Cut off by usage limit · Dismiss",
 					);
 					await page.screenshot({ path: join(artifacts, "01-limited.png") });
 				});

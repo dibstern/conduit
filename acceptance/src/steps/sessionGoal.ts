@@ -244,43 +244,12 @@ export const sessionGoalHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert checking goal header",
-		match:
-			/^the composer checks the goal at check ([0-9]+) without an elapsed timer$/,
+		name: "assert composer omits text",
+		match: /^the composer does not include (.+)$/,
 		run: async ({ world, match }) => {
-			const header = world.page.getByTestId("composer-status-header");
-			await expect(header).toHaveText(`Checking goal · check ${match[1]}`);
-			await expect(
-				world.page.getByTestId("composer-status-elapsed"),
-			).toHaveCount(0);
-			await expect
-				.poll(() =>
-					header
-						.locator("svg.lucide-loader-circle")
-						.evaluate((el) => getComputedStyle(el).animationName),
-				)
-				.toBe("spin");
-			await expect
-				.poll(() =>
-					world.page.getByTestId("composer-status-checking").evaluate((el) => {
-						const style = getComputedStyle(el);
-						const expected = new Option().style;
-						expected.color = style.getPropertyValue("--color-status-goal");
-						return (
-							style.color === expected.color && Number(style.fontWeight) >= 600
-						);
-					}),
-				)
-				.toBe(true);
-		},
-	},
-	{
-		name: "assert composer status omits text",
-		match: /^the composer status header does not include (.+)$/,
-		run: async ({ world, match }) => {
-			const header = world.page.getByTestId("composer-status-header");
-			await expect(header).toBeVisible();
-			await expect(header).not.toContainText(match[1] ?? "");
+			await expect(world.page.locator("#input-row")).not.toContainText(
+				match[1] ?? "",
+			);
 		},
 	},
 	{

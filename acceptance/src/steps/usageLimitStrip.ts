@@ -225,8 +225,8 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert cut-off tag text and placement",
-		match: /^the cut-off tag under (.+) reads (.+)$/,
+		name: "assert cut-off chip text and header placement",
+		match: /^the cut-off chip in the header for (.+) reads (.+)$/,
 		run: async ({ world, match }) => {
 			const card = world.page
 				.locator("#messages .msg-user")
@@ -234,14 +234,11 @@ export const usageLimitStripHandlers: StepHandler[] = [
 			const tag = card.getByTestId("cut-off-tag");
 			await expect(tag).toHaveText(match[2] ?? "");
 			await expect(world.page.getByTestId("cut-off-tag")).toHaveCount(1);
-			// Right-aligned under the card: below it, ending at its right edge.
-			const [tagBox, cardBox] = await Promise.all([
-				tag.locator("button").boundingBox(),
-				card.locator(":scope > div").first().boundingBox(),
-			]);
-			if (!tagBox || !cardBox) throw new Error("No tag or card box");
-			expect(tagBox.y).toBeGreaterThan(cardBox.y + cardBox.height);
-			expect(tagBox.x + tagBox.width).toBeCloseTo(cardBox.x + cardBox.width, 0);
+			await expect(
+				card.locator(
+					'[data-testid="user-message-header"] > time ~ [data-testid="cut-off-tag"]',
+				),
+			).toHaveCount(1);
 		},
 	},
 	{

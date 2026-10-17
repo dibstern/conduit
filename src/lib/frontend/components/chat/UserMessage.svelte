@@ -1,4 +1,4 @@
-<!-- Left-aligned user message card with an accent glow. Preserves .msg-user class.
+<!-- User transcript row. Preserves .msg-user class.
      Recognised `/skill` tokens render as the same pill the composer showed while
      typing; recognition is live (from the current command list), so the pill is
      derived at render rather than snapshotted at send. Typo near-misses that the
@@ -18,7 +18,6 @@
 	import { extractDisplayText } from "../../utils/format.js";
 	import { tokenizeSkills } from "../../../skill-recognition.js";
 	import Badge from "../ui/Badge.svelte";
-	import Surface from "../ui/Surface.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import MessageTime from "./MessageTime.svelte";
@@ -41,30 +40,28 @@
 	);
 </script>
 
-<div class="msg-user max-w-[760px] mx-auto mb-3 px-5" data-uuid={message.uuid}>
-	<Surface variant="plain" padding="lg" class="relative glow-accent">
-		<div class="flex items-baseline gap-2.5 mb-2">
-			<span class="text-sm font-mono font-semibold uppercase tracking-[1.5px] text-accent">You</span>
+<div class="msg-user mx-auto mb-[26px] grid max-w-[820px] grid-cols-[20px_minmax(0,1fr)] gap-x-[8px] px-[14px] md:grid-cols-[28px_minmax(0,1fr)] md:gap-x-[14px] md:px-[32px]" data-uuid={message.uuid}>
+	<span aria-hidden="true" class="grid size-[20px] place-items-center self-start rounded-full bg-linear-to-br from-accent to-status-snoozed text-[11px] font-semibold text-white md:size-[28px] md:text-[13px]">Y</span>
+	<div class="min-w-0 max-md:contents">
+		<div data-testid="user-message-header" class="mb-[2px] flex min-h-[28px] flex-wrap items-center gap-x-[8px] gap-y-[4px]">
+			<span class="text-[13.5px] font-semibold">You</span>
 			<MessageTime createdAt={message.createdAt} />
 			{#if message.steered}
-				<Badge variant="quiet" shape="pill" data-testid="user-message-steered" title="Joined the turn that was already running">Steered</Badge>
+				<Badge variant="chip" size="label" shape="pill" data-testid="user-message-steered" title="Joined the turn that was already running">Steered</Badge>
+			{/if}
+			{#if message.modelExecution?.drifted === true && message.modelExecution.requestedModel && message.modelExecution.expectedModel && message.modelExecution.actualModel}
+				<Badge variant="chip" size="label" shape="pill" wrap data-testid="turn-model-drift">
+					Ran {getModelDisplayName(message.modelExecution.actualModel)}, not {getModelDisplayName(message.modelExecution.requestedModel)}
+				</Badge>
+			{/if}
+			{#if onDismissCutOff}
+				<Badge variant="chip" size="label" shape="pill" data-testid="cut-off-tag">
+					{sessionViewState.compact ? "Cut off" : "Cut off by usage limit"} · <TextButton tone="inherit" underline="always" touchTarget data-testid="cut-off-dismiss" onclick={onDismissCutOff}>Dismiss</TextButton>
+				</Badge>
 			{/if}
 		</div>
-		<div class="text-base leading-[1.7] break-words whitespace-pre-wrap text-text">
+		<div class="break-words whitespace-pre-wrap text-[15px] leading-[1.65] text-text max-md:col-span-2">
 			{#each segments as seg (seg.key)}{#if seg.kind === "skill"}<span class="skill-pill">{seg.text}</span>{:else}{seg.text}{/if}{/each}
 		</div>
-		{#if message.modelExecution?.drifted === true && message.modelExecution.requestedModel && message.modelExecution.expectedModel && message.modelExecution.actualModel}
-			<div
-				data-testid="turn-model-drift"
-				class="mt-3 rounded-lg border border-warning/30 bg-warning-bg px-3 py-2 text-xs leading-relaxed font-medium text-warning"
-			>
-				⚠ Ran {getModelDisplayName(message.modelExecution.actualModel)}, not {getModelDisplayName(message.modelExecution.requestedModel)}
-			</div>
-		{/if}
-	</Surface>
-	{#if onDismissCutOff}
-		<div data-testid="cut-off-tag" class="mt-1 text-right font-mono text-[10px] text-status-amber">
-			⏸ {sessionViewState.compact ? "Cut off" : "Cut off by usage limit"} · <TextButton tone="inherit" underline="always" data-testid="cut-off-dismiss" onclick={onDismissCutOff}>Dismiss</TextButton>
-		</div>
-	{/if}
+	</div>
 </div>

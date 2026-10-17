@@ -90,10 +90,10 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 			"storybook play() guards that narrow the checkout queries, not executable production code",
 	},
 	{
-		path: "src/lib/frontend/components/input/ComposerStatusHeader.stories.ts",
-		snippetPattern: /Checking spinner is missing/,
+		path: "src/lib/frontend/components/chat/MessageList.stories.ts",
+		snippetPattern: /Reply header \$\{id\} is missing|Transcript is missing/,
 		reason:
-			"storybook play() guard that narrows the spinner query, not executable production code",
+			"storybook play() guards that narrow the transcript queries, not executable production code",
 	},
 	{
 		path: "src/lib/frontend/components/input/InputArea.stories.ts",

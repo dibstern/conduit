@@ -30,7 +30,7 @@
   in the DOM; otherwise `aria-expanded` is doing the real work.
 -->
 <script module lang="ts">
-	import { HOVER_FILL_CLASSES } from "./button-recipes.js";
+	import { HOVER_FILL_CLASSES, TRANSCRIPT_ROW_CLASSES } from "./button-recipes.js";
 
 	/**
 	 * What every disclosure row is, regardless of where it lives: a full-width
@@ -73,6 +73,7 @@
 		/** SettingsPanel's instance rows: colour is inherited, because the row's
 		 *  own children (name, badges, port) each carry their own. */
 		row: "text-sm",
+		transcript: `text-text-secondary ${HOVER_FILL_CLASSES.surface}`,
 	} as const;
 
 	const DENSITY_CLASSES = {
@@ -85,6 +86,7 @@
 		row: "gap-[9px] px-[12px] py-[8px] min-h-[44px]",
 		/** SettingsGroup's collapsible header, literal px from the mockup's `.gh`. */
 		group: "gap-[8px] px-[12px] py-[8px] min-h-[38px]",
+		transcript: TRANSCRIPT_ROW_CLASSES,
 	} as const;
 </script>
 

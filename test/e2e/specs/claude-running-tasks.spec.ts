@@ -33,6 +33,17 @@ const replay: ClaudeReplayPlan = {
 	holdBefore: { turn: 1, message: 104 },
 };
 
+/** The live-task count sits in each turn's step-log footer: open the logs. */
+async function openStepLogs(page: Page) {
+	await expect(page.locator(".turn-activity-toggle").first()).toBeVisible();
+	const collapsed = page.locator(
+		'.turn-activity-toggle[aria-expanded="false"]',
+	);
+	while (await collapsed.count()) await collapsed.first().click();
+	// A hovered head opens its tooltip, which repeats the count.
+	await page.mouse.move(0, 0);
+}
+
 /** What the parent turn and the session say about live background work. */
 async function readSurfaces(page: Page, sessionId: string) {
 	const turn = page.locator(".turn-activity").first();
@@ -42,7 +53,7 @@ async function readSurfaces(page: Page, sessionId: string) {
 			text.replace(/\s+/g, " ").trim(),
 		),
 		breathing: await turn
-			.locator('[aria-label^="Activity timeline"] button.animate-pulse')
+			.locator('[aria-label^="Activity timeline"] .animate-pulse')
 			.count(),
 		sidebar: await page
 			.locator(`#session-list [data-session-id="${sessionId}"]`)
@@ -120,7 +131,7 @@ function recorder(
 test.describe("Claude running tasks", () => {
 	test.use({ claudeReplay: replay });
 
-	test("the turn head counts its live tasks and the session monitors its agents until they finish", async ({
+	test("the step log counts its live tasks and the session monitors its agents until they finish", async ({
 		page,
 		relayUrl,
 		harness,
@@ -146,6 +157,7 @@ test.describe("Claude running tasks", () => {
 				.poll(() => chat.getLastAssistantText(), { timeout: 30_000 })
 				.toContain("launched.");
 			await replayer.held();
+			await openStepLogs(page);
 
 			// The parent's result: the shell, both agents and agent A's first
 			// nested shell are live. The three launching steps still breathe.
@@ -216,6 +228,7 @@ test.describe("Claude running tasks", () => {
 			await expect(page.getByTestId("parent-session-status")).toHaveText(
 				"Monitoring",
 			);
+			await openStepLogs(page);
 			// Each of the agent's turns counts the shells it launched: one turn
 			// with both, or two with one each, as the agent's turns fell.
 			await expect
@@ -230,6 +243,7 @@ test.describe("Claude running tasks", () => {
 				.toBe(2);
 			await steps.record("child-session");
 			await gotoRelay(page, relayUrl);
+			await openStepLogs(page);
 			await expect(pill).toHaveText(/^\s*5\s+running\s*$/);
 
 			// Every task finishes: the pill goes, the strip settles, the session
@@ -251,6 +265,7 @@ test.describe("Claude running tasks", () => {
 			await expect
 				.poll(() => chat.getLastAssistantText(), { timeout: 30_000 })
 				.toContain("The top-level 40-second shell finished.");
+			await openStepLogs(page);
 			await expect(pill).toHaveCount(0);
 			const reloaded = await steps.record("reloaded");
 			expect.soft(reloaded.breathing, "launching steps breathing").toBe(0);

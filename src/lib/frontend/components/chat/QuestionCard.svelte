@@ -3,6 +3,7 @@
 
 <script lang="ts">
 	import Surface from "../ui/Surface.svelte";
+	import ChoiceLabel from "../ui/ChoiceLabel.svelte";
 	import type { QuestionRequest } from "../../types.js";
 	import Button from "../ui/Button.svelte";
 	import Checkbox from "../ui/Checkbox.svelte";
@@ -202,16 +203,16 @@
 </script>
 
 <div
-	class={inline ? '' : 'my-2 mx-auto max-w-[760px] px-4'}
+	class={inline ? '' : 'my-[8px] mx-auto max-w-[760px] px-[16px]'}
 	data-question-tool-id={request.toolId}
 >
-	<Surface variant="raised" radius="lg" class="question-card p-3">
-		<div class="question-title text-base font-medium mb-2 text-text">
+	<Surface variant="raised" radius="lg" class="question-card p-[12px]">
+		<div class="question-title text-[13px] font-semibold mb-[8px] text-text-secondary">
 			Input Required
 		</div>
 
 		{#if synthetic && !resolved}
-			<div class="question-synthetic-warning text-xs text-text-muted bg-bg-surface border border-border-subtle rounded-lg px-3 py-2 mb-3 leading-relaxed">
+			<div class="question-synthetic-warning text-[12px] text-text-muted bg-bg-surface border border-border-subtle rounded-[6px] px-[12px] py-[8px] mb-[12px] leading-[1.6]">
 				This question was asked in a terminal session. You can try answering here,
 				but if it doesn't work, answer in the terminal or send a follow-up message
 				to continue.
@@ -220,24 +221,23 @@
 
 		{#each request.questions as q, qIdx}
 			{@const inputName = `question-${instanceId}-${request.toolId}-${qIdx}`}
-			<div class="question-section mb-3 last:mb-2" data-q-idx={qIdx}>
+			<div class="question-section mb-[12px] last:mb-[8px]" data-q-idx={qIdx}>
 				<div
-					class="question-header text-xs font-semibold mb-0.5 text-accent font-mono"
+					class="question-header text-[12px] font-semibold mb-[2px] text-text-dimmer font-mono"
 				>
 					{formatQuestionHeader(q.header)}
 				</div>
-				<div class="question-text text-sm mb-2 text-text-secondary">
+				<div class="question-text text-[13px] mb-[8px] text-text-secondary">
 					{q.question}
 				</div>
 
 				{#if q.options.length > 0}
-					<div class="question-options flex flex-col gap-1.5">
+					<div class="question-options flex flex-col gap-[6px]">
 						{#each q.options as opt, optIdx}
 							{@const optId = `${inputName}-opt-${optIdx}`}
 							{#if q.multiSelect}
-								<label
-									class="question-option flex items-start gap-2 px-2.5 py-2 rounded-lg cursor-pointer text-sm bg-bg-surface border border-border-subtle transition-[background,border-color] duration-150 hover:border-border hover:bg-bg {isCheckboxChecked(qIdx, opt.label) ? 'border-accent bg-accent-bg' : ''}"
-									for={optId}
+								<ChoiceLabel
+									class="question-option" forId={optId} selected={isCheckboxChecked(qIdx, opt.label)} disabled={!!resolved}
 								>
 									<Checkbox
 										id={optId}
@@ -255,27 +255,26 @@
 												(e.target as HTMLInputElement)
 													.checked,
 											)}
-										class="mt-0.5"
+										class="mt-[2px]"
 									/>
 									<span
-										class="question-option-content flex flex-col gap-0.5"
+										class="question-option-content flex flex-col gap-[2px]"
 									>
 										<span
-											class="question-option-label text-sm font-medium text-text"
+											class="question-option-label text-[13px] font-medium text-text"
 											>{opt.label}</span
 										>
 										{#if opt.description}
 											<span
-												class="question-option-desc text-xs text-text-muted"
+												class="question-option-desc text-[12px] text-text-muted"
 												>{opt.description}</span
 											>
 										{/if}
 									</span>
-								</label>
+								</ChoiceLabel>
 							{:else}
-								<label
-									class="question-option flex items-start gap-2 px-2.5 py-2 rounded-lg cursor-pointer text-sm bg-bg-surface border border-border-subtle transition-[background,border-color] duration-150 hover:border-border hover:bg-bg {isRadioChecked(qIdx, opt.label) ? 'border-accent bg-accent-bg' : ''}"
-									for={optId}
+								<ChoiceLabel
+									class="question-option" forId={optId} selected={isRadioChecked(qIdx, opt.label)} disabled={!!resolved}
 								>
 									<Radio
 										id={optId}
@@ -291,36 +290,35 @@
 												qIdx,
 												opt.label,
 											)}
-										class="mt-0.5"
+										class="mt-[2px]"
 									/>
 									<span
-										class="question-option-content flex flex-col gap-0.5"
+										class="question-option-content flex flex-col gap-[2px]"
 									>
 										<span
-											class="question-option-label text-sm font-medium text-text"
+											class="question-option-label text-[13px] font-medium text-text"
 											>{opt.label}</span
 										>
 										{#if opt.description}
 											<span
-												class="question-option-desc text-xs text-text-muted"
+												class="question-option-desc text-[12px] text-text-muted"
 												>{opt.description}</span
 											>
 										{/if}
 									</span>
-								</label>
+								</ChoiceLabel>
 							{/if}
 						{/each}
 					</div>
 				{/if}
 
 				{#if q.custom}
-					<div class="question-custom mt-1.5">
+					<div class="question-custom mt-[6px]">
 						{#if q.options.length > 0}
 							{@const customOptId = `${inputName}-custom-radio`}
 							{#if q.multiSelect}
-								<label
-									class="question-option flex items-start gap-2 px-2.5 py-2 rounded-lg cursor-pointer text-sm bg-bg-surface border border-border-subtle transition-[background,border-color] duration-150 hover:border-border hover:bg-bg {isCheckboxChecked(qIdx, '__custom__') ? 'border-accent bg-accent-bg' : ''}"
-									for={customOptId}
+								<ChoiceLabel
+									class="question-option" forId={customOptId} selected={isCheckboxChecked(qIdx, '__custom__')} disabled={!!resolved}
 								>
 									<Checkbox
 										id={customOptId}
@@ -338,21 +336,20 @@
 												(e.target as HTMLInputElement)
 													.checked,
 											)}
-										class="mt-0.5"
+										class="mt-[2px]"
 									/>
 									<span
-										class="question-option-content flex flex-col gap-0.5"
+										class="question-option-content flex flex-col gap-[2px]"
 									>
 										<span
-											class="question-option-label text-sm font-medium text-text"
+											class="question-option-label text-[13px] font-medium text-text"
 											>Other</span
 										>
 									</span>
-								</label>
+								</ChoiceLabel>
 							{:else}
-								<label
-									class="question-option flex items-start gap-2 px-2.5 py-2 rounded-lg cursor-pointer text-sm bg-bg-surface border border-border-subtle transition-[background,border-color] duration-150 hover:border-border hover:bg-bg {isRadioChecked(qIdx, '__custom__') ? 'border-accent bg-accent-bg' : ''}"
-									for={customOptId}
+								<ChoiceLabel
+									class="question-option" forId={customOptId} selected={isRadioChecked(qIdx, '__custom__')} disabled={!!resolved}
 								>
 									<Radio
 										id={customOptId}
@@ -368,23 +365,23 @@
 												qIdx,
 												"__custom__",
 											)}
-										class="mt-0.5"
+										class="mt-[2px]"
 									/>
 									<span
-										class="question-option-content flex flex-col gap-0.5"
+										class="question-option-content flex flex-col gap-[2px]"
 									>
 										<span
-											class="question-option-label text-sm font-medium text-text"
+											class="question-option-label text-[13px] font-medium text-text"
 											>Other</span
 										>
 									</span>
-								</label>
+								</ChoiceLabel>
 							{/if}
 						{/if}
 						<TextInput
 							id={`${inputName}-custom`}
 							aria-label="Type your answer"
-							class="mt-1"
+							class="mt-[4px]"
 							placeholder="Type your answer"
 							disabled={!!resolved}
 							value={customTexts.get(qIdx) ?? ""}
@@ -402,13 +399,13 @@
 		{/each}
 
 		{#if errorMessage}
-			<div class="question-error text-xs text-error bg-error/10 border border-error/20 rounded-lg px-3 py-2 mt-2">
+			<div class="question-error text-[12px] text-error bg-error/10 border border-error/20 rounded-[6px] px-[12px] py-[8px] mt-[8px]">
 				{errorMessage}
 			</div>
 		{/if}
 
 		{#if !resolved}
-			<div class="question-actions flex gap-2 mt-2 max-sm:flex-col">
+			<div class="question-actions flex gap-[8px] mt-[8px] max-sm:flex-col">
 				<!-- No `!` overrides left. Two are gone rather than moved: a
 				     `disabled:opacity-40!` that disagreed with the primitive's 50%
 				     for no stated reason, and a `disabled:hover:bg-success/10!`
@@ -416,9 +413,9 @@
 				     Button now drops every variant hover while the button is inert
 , so the whole app gets what this file had. -->
 				<Button
-					variant="success-soft"
+					variant="secondary"
 					size="content"
-					class="question-submit-btn min-h-12 flex-1 px-4 py-2 rounded-lg text-sm font-medium font-sans"
+					class="question-submit-btn min-h-[44px] flex-1 px-[16px] py-[8px] text-[13px] font-medium font-sans"
 					disabled={!canSubmit}
 					onclick={handleSubmit}
 				>
@@ -426,9 +423,9 @@
 				</Button>
 				{#if canSkip}
 					<Button
-						variant="danger-outline"
+						variant="secondary"
 						size="content"
-						class="question-skip-btn min-h-12 flex-1 px-4 py-2 rounded-lg text-sm font-medium font-sans"
+						class="question-skip-btn min-h-[44px] flex-1 px-[16px] py-[8px] text-[13px] font-medium font-sans"
 						onclick={handleSkip}
 					>
 						Skip
@@ -436,21 +433,21 @@
 				{/if}
 			</div>
 		{:else if resolved === "submitting"}
-			<div class="question-actions flex gap-2 mt-2 max-sm:flex-col">
+			<div class="question-actions flex gap-[8px] mt-[8px] max-sm:flex-col">
 				<Button
-					variant="success-soft"
+					variant="secondary"
 					size="content"
 					layout="flow"
 					hoverFill="none"
 					disabledStyle="none"
-					class="question-submit-btn min-h-12 flex-1 px-4 py-2 rounded-lg text-sm font-medium font-sans opacity-60 cursor-not-allowed"
+					class="question-submit-btn min-h-[44px] flex-1 px-[16px] py-[8px] text-[13px] font-medium font-sans opacity-60 cursor-not-allowed"
 					disabled
 				>
 					Submitting&hellip;
 				</Button>
 			</div>
 		{:else}
-			<div class="question-resolved text-sm py-2">
+			<div class="question-resolved text-[13px] py-[8px]">
 				{#if resolved === "skipped"}
 					<span class="question-resolved-skip text-error"
 						>Skipped &#x2717;</span

@@ -1,7 +1,5 @@
-// The composer's "Working" clock and the turn activity panel's live header are
-// two views of one number: how long the model has worked on this prompt. They
-// must read the same at every tick, keep counting across a page reload, settle
-// on what they last showed, and read the same settled time after a restart.
+// The turn head owns the working clock. It keeps counting across a page reload,
+// settles on what it last showed, and retains that time after a restart.
 // Time the agent spends blocked on the user (a permission prompt) is not work,
 // and the clock stops for good when the turn really ends.
 
@@ -12,59 +10,61 @@ import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
 interface Clocks {
-	composer: string | null;
 	activity: string | null;
 }
 
-// One evaluate, so both readings come from the same rendered frame.
 const readClocks = (page: Page): Promise<Clocks> =>
 	page.evaluate(() => {
-		const composer = document
-			.querySelector('[data-testid="composer-status-elapsed"]')
-			?.textContent?.trim()
-			.replace(/^Working\s*/, "");
 		const panels = document.querySelectorAll(".turn-activity");
 		const activity = panels[panels.length - 1]
 			?.querySelector(".turn-duration")
 			?.textContent?.trim();
-		return { composer: composer ?? null, activity: activity ?? null };
+		return { activity: activity ?? null };
 	});
 
-/** `1:05` or `1:01:05` to seconds. */
-const clockSeconds = (text: string): number =>
-	text.split(":").reduce((total, part) => total * 60 + Number(part), 0);
-
-/** `Worked for 1m 5s` or `Worked for 12s` to seconds. */
+/** The duration may be a live label or part of a settled Worked head. */
 const workedSeconds = (text: string): number => {
-	const match = /(?:(\d+)m\s*)?(\d+)s/.exec(text);
+	const match = /(?:(\d+)h\s*)?(?:(\d+)m\s*)?(\d+)s/.exec(text);
 	if (!match) throw new Error(`No duration in "${text}"`);
-	return Number(match[1] ?? 0) * 60 + Number(match[2]);
+	return (
+		Number(match[1] ?? 0) * 3600 + Number(match[2] ?? 0) * 60 + Number(match[3])
+	);
 };
 
-const CLOCK = /^\d+:\d{2}(?::\d{2})?$/;
+const clockSeconds = workedSeconds;
+const CLOCK = /^(?:\d+h\s*)?(?:\d+m\s*)?\d+s$/;
 
-/** Both clocks visible, in clock format, and equal: sampled across ticks. */
-async function expectMatchingClocks(page: Page, samples: number) {
+/** Sample the live clock across ticks and prove the composer stays header-free. */
+async function sampleLiveClock(page: Page, samples: number) {
 	const readings: Clocks[] = [];
 	for (let i = 0; i < samples; i++) {
 		await expect
 			.poll(
 				async () => {
 					const clocks = await readClocks(page);
-					return clocks.composer !== null && clocks.activity !== null;
+					return clocks.activity !== null;
 				},
-				// The panel appears with the first tool, a dozen replay gaps in.
 				{ timeout: 45_000 },
 			)
 			.toBe(true);
 		const clocks = await readClocks(page);
 		readings.push(clocks);
-		expect(clocks.composer).toMatch(CLOCK);
-		expect(clocks.activity).toBe(clocks.composer);
+		expect(clocks.activity).toMatch(CLOCK);
+		await expect(page.getByTestId("composer-status-header")).toHaveCount(0);
 		await page.waitForTimeout(700);
 	}
 	return readings;
 }
+
+/** The live head shows from the send, but a turn stopped before its first step
+ *  keeps no head. Wait for a step so Stop leaves a Worked head to settle. */
+const expectLoggedStep = (page: Page) =>
+	expect(
+		page
+			.locator(".turn-activity")
+			.last()
+			.getByRole("slider", { name: /^Activity timeline — [1-9]/ }),
+	).toBeVisible({ timeout: 45_000 });
 
 test.describe("Turn working clock", () => {
 	test.use({
@@ -80,7 +80,7 @@ test.describe("Turn working clock", () => {
 		);
 	});
 
-	test("the composer and the activity panel tick together through a reload", async ({
+	test("the live turn clock keeps its time through a reload", async ({
 		page,
 		relayUrl,
 	}, testInfo) => {
@@ -90,7 +90,7 @@ test.describe("Turn working clock", () => {
 		await page.mouse.move(0, 0);
 		await app.sendMessage("Read the extra folder");
 
-		const beforeReload = await expectMatchingClocks(page, 3);
+		const beforeReload = await sampleLiveClock(page, 3);
 		await page.screenshot({ path: testInfo.outputPath("live-clocks.png") });
 
 		// A reload mid-turn must not restart either clock at 0:00.
@@ -99,9 +99,9 @@ test.describe("Turn working clock", () => {
 			timeout: 30_000,
 		});
 		await page.mouse.move(0, 0);
-		const afterReload = await expectMatchingClocks(page, 2);
-		const lastBefore = clockSeconds(beforeReload.at(-1)?.composer ?? "");
-		expect(clockSeconds(afterReload[0]?.composer ?? "")).toBeGreaterThanOrEqual(
+		const afterReload = await sampleLiveClock(page, 2);
+		const lastBefore = clockSeconds(beforeReload.at(-1)?.activity ?? "");
+		expect(clockSeconds(afterReload[0]?.activity ?? "")).toBeGreaterThanOrEqual(
 			lastBefore,
 		);
 		await page.screenshot({
@@ -117,8 +117,8 @@ test.describe("Turn working clock", () => {
 			.locator(".turn-activity-toggle")
 			.innerText();
 		// \s: the label may join words with a non-breaking space.
-		expect(worked).toMatch(/^Worked\sfor\s/);
-		const lastLive = clockSeconds(afterReload.at(-1)?.composer ?? "");
+		expect(worked).toMatch(/^Worked\s/);
+		const lastLive = clockSeconds(afterReload.at(-1)?.activity ?? "");
 		expect(workedSeconds(worked)).toBeGreaterThanOrEqual(lastLive);
 
 		writeFileSync(
@@ -143,7 +143,7 @@ test.describe("Turn working clock", () => {
 			.locator(".turn-activity-toggle");
 		// The Stop button may not have rendered when the wait above ran, so
 		// the settled header is what proves the turn ended.
-		await expect(header).toContainText("Worked for", { timeout: 60_000 });
+		await expect(header).toContainText("Worked", { timeout: 60_000 });
 		const before = workedSeconds(await header.innerText());
 
 		await harness.restart();
@@ -151,7 +151,7 @@ test.describe("Turn working clock", () => {
 		await expect(page.locator("#connect-overlay")).toBeHidden({
 			timeout: 30_000,
 		});
-		await expect(header).toContainText("Worked for");
+		await expect(header).toContainText("Worked");
 		const after = workedSeconds(await header.innerText());
 		// Live stamps come from the browser and history stamps from the server,
 		// so the floor can tip by one second, never more.
@@ -171,8 +171,8 @@ test.describe("Turn working clock", () => {
 		await app.goto(relayUrl);
 		const sentAt = Date.now();
 		await app.sendMessage("Read the extra folder");
-		// Stop once the panel is up, so there is a header to settle.
-		await expectMatchingClocks(page, 2);
+		await sampleLiveClock(page, 2);
+		await expectLoggedStep(page);
 		await chat.stopBtn.click();
 		const stoppedAt = Date.now();
 		await chat.waitForStreamingComplete();
@@ -182,7 +182,7 @@ test.describe("Turn working clock", () => {
 			.locator(".turn-activity")
 			.last()
 			.locator(".turn-activity-toggle");
-		await expect(header).toContainText("Worked for");
+		await expect(header).toContainText("Worked");
 		const settled = workedSeconds(await header.innerText());
 		expect(settled).toBeLessThanOrEqual(
 			Math.ceil((stoppedAt - sentAt) / 1000) + 1,
@@ -194,7 +194,7 @@ test.describe("Turn working clock", () => {
 		await expect(page.locator("#connect-overlay")).toBeHidden({
 			timeout: 30_000,
 		});
-		await expect(header).toContainText("Worked for");
+		await expect(header).toContainText("Worked");
 		const afterReload = workedSeconds(await header.innerText());
 		expect(Math.abs(afterReload - settled)).toBeLessThanOrEqual(1);
 		writeFileSync(
@@ -223,18 +223,18 @@ test.describe("Turn working clock", () => {
 			await page.mouse.move(0, 0);
 			const sentA = Date.now();
 			await app.sendMessage("Read the extra folder");
-			await expectMatchingClocks(page, 1);
+			await sampleLiveClock(page, 1);
 			const sentB = Date.now();
 			await app.sendMessage("Load the skill");
 
-			// B waits in the tray and starts when A finishes; the composer then times B.
-			const composer = async () =>
-				clockSeconds((await readClocks(page)).composer ?? "0:00");
-			let lastA = await composer();
+			// B waits in the tray and starts when A finishes; the turn head then times B.
+			const liveClock = async () =>
+				clockSeconds((await readClocks(page)).activity ?? "0s");
+			let lastA = await liveClock();
 			await expect
 				.poll(
 					async () => {
-						const now = await composer();
+						const now = await liveClock();
 						const dropped = now < lastA;
 						lastA = Math.max(lastA, now);
 						return dropped;
@@ -243,16 +243,17 @@ test.describe("Turn working clock", () => {
 				)
 				.toBe(true);
 			const takeover = Date.now();
-			const firstB = await composer();
+			const firstB = await liveClock();
 			// Timed from its send, B would already read the time it sat queued.
 			const queuedSeconds = (takeover - sentB) / 1000;
 			expect(queuedSeconds).toBeGreaterThan(4);
 			expect(firstB).toBeLessThanOrEqual(queuedSeconds - 3);
 
-			// Stop during B, once its panel is up.
+			// Stop during B, once it has logged a step.
 			await expect(page.locator(".turn-activity")).toHaveCount(2, {
 				timeout: 45_000,
 			});
+			await expectLoggedStep(page);
 			await chat.stopBtn.click();
 			const stoppedAt = Date.now();
 			await chat.waitForStreamingComplete();
@@ -264,8 +265,8 @@ test.describe("Turn working clock", () => {
 			const headers = page.locator(".turn-activity .turn-activity-toggle");
 			const worked = async () =>
 				(await headers.allInnerTexts()).map(workedSeconds);
-			await expect(headers.last()).toContainText("Worked for");
-			await expect(headers.first()).toContainText("Worked for");
+			await expect(headers.last()).toContainText("Worked");
+			await expect(headers.first()).toContainText("Worked");
 			const [workedA = -1, workedB = -1] = await worked();
 			expect(workedA).toBeLessThanOrEqual(
 				Math.ceil((takeover - sentA) / 1000) + 1,
@@ -277,12 +278,12 @@ test.describe("Turn working clock", () => {
 			expect(await worked()).toEqual([workedA, workedB]);
 
 			// History agrees: both turns settled, and the running one is the
-			// prompt the composer times from.
+			// prompt the live head times from.
 			await gotoRelay(page, page.url());
 			await expect(page.locator("#connect-overlay")).toBeHidden({
 				timeout: 30_000,
 			});
-			await expect(headers.last()).toContainText("Worked for");
+			await expect(headers.last()).toContainText("Worked");
 			await expect(page.getByText("no prompt to time from")).toHaveCount(0);
 			await expect(page.getByTestId("composer-status-header")).toHaveCount(0);
 			const afterReload = await worked();
@@ -324,7 +325,7 @@ test.describe("Turn working clock", () => {
 			};
 			await app.goto(relayUrl);
 			await app.sendMessage("Read the extra folder");
-			await expect(page.getByTestId("composer-status-elapsed")).toBeVisible({
+			await expect(page.getByTestId("turn-live-elapsed")).toBeVisible({
 				timeout: 30_000,
 			});
 			await app.sendMessage("Queued prompt");
@@ -365,7 +366,7 @@ test.describe("Turn working clock", () => {
 			const chat = new ChatPage(page);
 			await app.goto(relayUrl);
 			await app.sendMessage("Read the extra folder");
-			await expect(page.getByTestId("composer-status-elapsed")).toBeVisible({
+			await expect(page.getByTestId("turn-live-elapsed")).toBeVisible({
 				timeout: 30_000,
 			});
 			await app.sendMessage("Queued prompt");
@@ -427,12 +428,12 @@ test.describe("Turn working clock", () => {
 				.locator(".permission-card")
 				.getByRole("button", { name: "Allow", exact: true });
 			await expect(allow).toBeVisible({ timeout: 45_000 });
-			const composer = async () => (await readClocks(page)).composer ?? "";
-			await expect.poll(composer, { timeout: 5_000 }).toMatch(CLOCK);
+			const liveClock = async () => (await readClocks(page)).activity ?? "";
+			await expect.poll(liveClock, { timeout: 5_000 }).toMatch(CLOCK);
 			const waitStartedAt = Date.now();
-			const paused = await composer();
+			const paused = await liveClock();
 			await page.waitForTimeout(3_000);
-			expect(await composer()).toBe(paused);
+			expect(await liveClock()).toBe(paused);
 
 			// The open wait comes from the server, so a reload stays paused.
 			await gotoRelay(page, page.url());
@@ -440,15 +441,15 @@ test.describe("Turn working clock", () => {
 				timeout: 30_000,
 			});
 			await expect(allow).toBeVisible({ timeout: 30_000 });
-			await expect.poll(composer, { timeout: 5_000 }).toBe(paused);
+			await expect.poll(liveClock, { timeout: 5_000 }).toBe(paused);
 			await page.waitForTimeout(1_500);
-			expect(await composer()).toBe(paused);
+			expect(await liveClock()).toBe(paused);
 			await page.screenshot({ path: testInfo.outputPath("paused-clock.png") });
 
 			await allow.click();
 			const waitedMs = Date.now() - waitStartedAt;
 			await expect
-				.poll(async () => clockSeconds(await composer()), { timeout: 10_000 })
+				.poll(async () => clockSeconds(await liveClock()), { timeout: 10_000 })
 				.toBeGreaterThan(clockSeconds(paused));
 
 			await chat.waitForStreamingComplete();
