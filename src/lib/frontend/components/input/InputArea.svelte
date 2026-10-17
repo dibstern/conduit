@@ -2,8 +2,6 @@
 <!-- Command menu triggered by "/" prefix. -->
 
 <script module lang="ts">
-	// A composer remount must not repeat the same turn's diagnostic.
-	const reportedMissingPrompts = new Set<string>();
 	let draftId = crypto.randomUUID();
 </script>
 
@@ -22,7 +20,6 @@
 	import TextButton from "../ui/TextButton.svelte";
 	import TwoRowComposerLayout from "../ui/TwoRowComposerLayout.svelte";
 	import AttachMenu from "./AttachMenu.svelte";
-	import ComposerStatusHeader from "./ComposerStatusHeader.svelte";
 	// biome-ignore lint/style/useImportType: CommandMenu is used as a value for bind:this
 	import CommandMenu from "./CommandMenu.svelte";
 	// biome-ignore lint/style/useImportType: FileMenu is used as a value for bind:this
@@ -71,15 +68,12 @@
 	import { fade } from "svelte/transition";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { getDriverTraits, instanceState } from "../../stores/instance.svelte.js";
-	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast, uiState } from "../../stores/ui.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
 	import { composerPickerState } from "../../stores/composer-picker.svelte.js";
-	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
-	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
-	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
@@ -173,54 +167,8 @@
 		const timer = setTimeout(() => { goalNow = Date.now(); }, endedAt + 10_000 - now + 1);
 		return () => clearTimeout(timer);
 	});
-	// A queued prompt waits in the tray, so the transcript's last turn is the started one.
-	const turn = $derived(segmentTurns(currentChat().messages, isProcessing()).at(-1));
-	const paused = $derived(turn !== undefined && isPaused(turn));
 	const turnControl = $derived(readTurn(sessionState.currentId));
 	const working = $derived(turnControl.working);
-	const elapsed = $derived.by(() => {
-		if (!turn) return undefined;
-		if (paused) return workingTime(turn, Date.now());
-		if (turn.live) return workingTime(turn, clock.now);
-		if (turn.user?.turnTiming?.endedAt !== undefined) return workingTime(turn, Date.now());
-		return undefined;
-	});
-	const missingPrompt = $derived(isProcessing() && currentChat().loadLifecycle === "ready" && !turn?.user);
-	$effect(() => {
-		if (!missingPrompt) return;
-		const sessionId = sessionState.currentId;
-		if (!sessionId) return;
-		const chat = currentChat();
-		const key = JSON.stringify([sessionId, turn?.id ?? null]);
-		if (reportedMissingPrompts.has(key)) return;
-		reportedMissingPrompts.add(key);
-		const lastRow = chat.transcript?.rows.at(-1);
-		const last = chat.messages.at(-1);
-		console.error("[turn-clock] Working session has no prompt to time from", {
-			sessionId,
-			messageCount: chat.messages.length,
-			lastMessageRole: lastRow?.role ?? last?.type ?? null,
-			lastMessageId: lastRow?.id ?? (last && "messageId" in last ? last.messageId ?? last.uuid : last?.uuid) ?? null,
-		});
-	});
-	const activity = $derived.by(() => {
-		const chat = currentChat();
-		for (let i = chat.messages.length - 1; i >= 0; i--) {
-			const part = chat.messages[i];
-			if (!part) continue;
-			if (part.type === "user" || part.type === "result" || (part.type === "assistant" && !part.finalized)) return "";
-			if (part.type === "thinking" && !part.done) return "Thinking";
-			// Projected rows report every ordinary tool as completed, so the
-			// missing result is what marks the tool still in flight.
-			if (part.type === "tool" && part.result === undefined && part.status !== "error") {
-				const progress = part.metadata?.["progress"];
-				if (typeof part.metadata?.["cursorToolType"] === "string" && typeof progress === "string" && progress) return progress;
-				const summary = lookupSummarizer(part.name).summarize(ensureCanonical(part.name, part.input), {});
-				return summary.subtitle ? `${part.name} · ${summary.subtitle}` : part.name;
-			}
-		}
-		return "";
-	});
 	$effect(() => {
 		requestSessionPreWarm(readOnlySubagent ? null : sessionState.currentId);
 		return () => requestSessionPreWarm(null);
@@ -1314,17 +1262,6 @@
 			class:phone-icons={phoneIcons}
 			class="flex flex-col bg-input-bg border border-border {phoneIcons ? 'min-h-[42px] rounded-[14px] py-[5px] pl-[10px] pr-[6px]' : 'rounded-[22px] p-[10px] max-md:rounded-[20px] max-md:p-[9px]'} transition-[border-color,box-shadow] duration-200 focus-within:border-text-dimmer focus-within:shadow-[0_0_0_1px_var(--color-border)]"
 		>
-			{#if working || goal.phase === "checking"}
-				<ComposerStatusHeader
-					{elapsed}
-					{missingPrompt}
-					{activity}
-					{goal}
-					following={sessionViewState.atBottom}
-					onlive={requestTranscriptFollow}
-					class="-mx-[10px] -mt-[10px] mb-1.5 max-md:-mx-[9px] max-md:-mt-[9px]"
-				/>
-			{/if}
 			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" splitFooter={composerPreferences.controls === "icons" && sessionViewState.composerTier !== "phone"} style={phoneIcons ? "column-gap: 8px; align-items: center" : undefined}>
 				{#snippet field()}
 					<!-- Textarea row.

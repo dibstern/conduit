@@ -10,7 +10,7 @@ Scenario Outline: desktop limit strip names the account, the limit and its reset
   Then the usage limit strip sits directly above the composer
   And the usage limit strip title reads <title>
   And the usage limit strip detail reads <detail>
-  And the cut-off tag under Now run the provider tests reads ⏸ Cut off by usage limit · Dismiss
+  And the cut-off chip in the header for Now run the provider tests reads Cut off by usage limit · Dismiss
 
 Examples:
   | limit      | account | resets               | title                                | detail                          |
@@ -29,7 +29,7 @@ Scenario Outline: phone limit strip folds the account into the detail line
   Then the usage limit strip sits directly above the composer
   And the usage limit strip title reads Usage limit reached
   And the usage limit strip detail reads <detail>
-  And the cut-off tag under Now run the provider tests reads ⏸ Cut off · Dismiss
+  And the cut-off chip in the header for Now run the provider tests reads Cut off · Dismiss
 
 Examples:
   | limit     | resets               | detail                                     |

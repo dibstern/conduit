@@ -14,8 +14,8 @@
   (that one is a Button).
 -->
 <script module lang="ts">
-	type BadgeVariant = "neutral" | "quiet" | "accent" | "accent-solid" | "ask" | "tag";
-	type BadgeSize = "xs" | "sm" | "count" | "status";
+	type BadgeVariant = "neutral" | "quiet" | "accent" | "accent-solid" | "ask" | "tag" | "chip";
+	type BadgeSize = "xs" | "sm" | "count" | "status" | "label";
 	type BadgeShape = "rounded" | "pill";
 
 	const VARIANT_CLASSES: Record<BadgeVariant, string> = {
@@ -24,6 +24,7 @@
 		// SessionBar's woke/snoozed/settled state chips. The icon inside carries
 		// the colour, so the chip itself recedes.
 		quiet: "bg-bg-alt text-text-muted border border-border",
+		chip: "bg-chip text-text-secondary",
 		accent: "bg-accent-bg text-accent",
 		"accent-solid": "bg-accent text-bg",
 		ask: "bg-status-ask/18 text-status-ask",
@@ -42,6 +43,7 @@
 	const SIZE_CLASSES: Record<BadgeSize, string> = {
 		status: "h-[20px] px-[7px] text-[11.5px] font-semibold leading-none",
 		xs: "px-[6px] py-[1px] text-[10px] font-medium",
+		label: "px-[7px] py-[2px] text-[11.5px] font-normal",
 		sm: "px-2 py-0.5 text-sm font-medium",
 		// font-semibold rather than the others' font-medium: this is a 10px
 		// digit on a solid accent fill, and the extra weight is what keeps it
@@ -63,8 +65,7 @@
 	// text size's own line-height and Badge v1's leading-none shaved 5px off
 	// every tag chip -- a real tightening dressed up as a migration. Only
 	// `count` pins it, where the box height makes it moot anyway.
-	const BASE_CLASSES =
-		"inline-flex items-center gap-1 whitespace-nowrap shrink-0";
+	const BASE_CLASSES = "inline-flex items-center gap-1";
 </script>
 
 <script lang="ts">
@@ -75,6 +76,7 @@
 		variant?: BadgeVariant;
 		size?: BadgeSize;
 		shape?: BadgeShape;
+		wrap?: boolean;
 		class?: string;
 		children: Snippet;
 	} & Omit<HTMLAttributes<HTMLSpanElement>, "class">;
@@ -83,6 +85,7 @@
 		variant = "neutral",
 		size = "xs",
 		shape = "rounded",
+		wrap = false,
 		class: className,
 		children,
 		...rest
@@ -91,6 +94,7 @@
 	const badgeClass = $derived(
 		[
 			BASE_CLASSES,
+			wrap ? "min-w-0 break-words" : "whitespace-nowrap shrink-0",
 			VARIANT_CLASSES[variant],
 			SIZE_CLASSES[size],
 			SHAPE_CLASSES[shape],

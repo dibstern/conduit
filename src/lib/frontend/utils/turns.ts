@@ -667,6 +667,37 @@ export function stepWeights(
 	);
 }
 
+/**
+ * Percentage coordinates shared by the strip and overlays such as message pins.
+ * Gaps and compaction seams are included here, never added by the DOM. A small
+ * floor keeps short steps visible; dense logs scale that floor to fit the track.
+ */
+export function stripLayout(
+	segment: Segment,
+	turn: Turn,
+	final: boolean,
+	now: number,
+): { left: number; width: number }[] {
+	const count = segment.activity.length;
+	if (count === 0) return [];
+	const gap = Math.min(0.2, 20 / Math.max(1, count - 1));
+	const available = 100 - gap * (count - 1);
+	const floor = Math.min(0.35, available / count);
+	const weights = stepWeights(segment, turn, final, now).map((weight, i) =>
+		segment.activity[i]?.type === "system" ? 0 : weight,
+	);
+	const total = weights.reduce((sum, weight) => sum + weight, 0);
+	const remaining = available - floor * count;
+	let left = 0;
+	return weights.map((weight, i) => {
+		const width =
+			total === 0 ? available / count : floor + (remaining * weight) / total;
+		const position = { left, width: i === count - 1 ? 100 - left : width };
+		left += width + gap;
+		return position;
+	});
+}
+
 /** "Edited src/auth.ts · 1s" for the i-th step, for the hover caption. */
 export function stepCaption(
 	segment: Segment,

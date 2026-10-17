@@ -50,7 +50,7 @@ describe("UserMessage model drift marker", () => {
 
 		const { getByText } = render(UserMessage, { props: { message } });
 
-		expect(getByText("⚠ Ran Fable 5, not Sonnet 5")).toBeTruthy();
+		expect(getByText("Ran Fable 5, not Sonnet 5")).toBeTruthy();
 	});
 
 	it("falls back to raw ids and renders nothing for partial evidence", () => {
@@ -66,7 +66,7 @@ describe("UserMessage model drift marker", () => {
 			},
 		};
 		const raw = render(UserMessage, { props: { message: drifted } });
-		expect(raw.getByText("⚠ Ran actual-raw, not selected-raw")).toBeTruthy();
+		expect(raw.getByText("Ran actual-raw, not selected-raw")).toBeTruthy();
 		raw.unmount();
 
 		const partial: UserMessageType = {
@@ -80,6 +80,6 @@ describe("UserMessage model drift marker", () => {
 			},
 		};
 		const incomplete = render(UserMessage, { props: { message: partial } });
-		expect(incomplete.queryByText(/⚠ Ran/)).toBeNull();
+		expect(incomplete.queryByText(/^Ran /)).toBeNull();
 	});
 });

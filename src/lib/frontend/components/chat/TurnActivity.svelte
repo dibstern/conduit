@@ -1,16 +1,6 @@
-<!-- Everything the model did for one prompt, collapsed to two lines: a summary   -->
-<!-- sentence over a strip where each segment is a step (colour = kind of work,    -->
-<!-- width = how long it took), with the turn's bill on the strip's line.          -->
-<!--                                                                              -->
-<!-- Hovering a segment captions it in place of the sentence; clicking one opens   -->
-<!-- the full log at that step. While live the header counts up and the last few   -->
-<!-- steps show as a ticker, so the work is visible without expanding anything.    -->
-<!--                                                                              -->
-<!-- Skills are the turn's chapters, so their count is a control of its own: it    -->
-<!-- lists which ran and when, picks them out on the strip, and jumps to the call.  -->
-<!--                                                                              -->
-<!-- Resting on the block for 2 s tells the tool-detail module its tools are       -->
-<!-- wanted soon, so expanding one is instant; scrolling past asks for nothing.    -->
+<!-- The Final turn head keeps counts and duration above a shared activity strip.
+     Skills, task status and the bill stay in the step log or duration hover.
+     Resting on the turn prefetches tool details; a strip tap opens its log row. -->
 <script lang="ts">
 	import { tick, untrack } from "svelte";
 	import { clock } from "../../stores/clock.svelte.js";
@@ -18,14 +8,13 @@
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { shownCut, toolDetails } from "../../stores/tool-details.js";
 	import type { BackgroundTask } from "../../../shared-types.js";
-	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import Tooltip from "../ui/Tooltip.svelte";
 	import {
 		countsPhrase,
 		currentStepLabel,
 		economics,
-		fmtClock,
 		fmtDuration,
 		latestStamp,
 		liveLaunchedTasks,
@@ -43,14 +32,21 @@
 	import { partStyle } from "./activity-style.js";
 	import RunningPill from "./RunningPill.svelte";
 	import TurnEconomics from "./TurnEconomics.svelte";
+	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now() }: {
+	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, numbered = false }: {
 		turn: Turn;
 		segment: Segment;
 		final: boolean;
 		liveTasks?: readonly BackgroundTask[];
 		taskListedAt?: ReadonlyMap<string, number>;
 		taskNow?: number;
+		sessionId?: string | undefined;
+		forkMessageId?: string | undefined;
+		model?: string | undefined;
+		providerId?: string | undefined;
+		onsummarize?: (() => void) | undefined;
+		numbered?: boolean;
 	} = $props();
 
 	let expanded = $state(false);
@@ -58,6 +54,7 @@
 	let hovered = $state<number | null>(null);
 	let focusUuid = $state<string | null>(null);
 	let panelEl = $state<HTMLDivElement | undefined>();
+	let detailsOpen = $state(false);
 
 	const settledNow = Date.now();
 	const now = $derived(final && turn.live ? clock.now : settledNow);
@@ -76,6 +73,13 @@
 	const skillSteps = $derived(skillsOpen ? new Set(chapters.map((c) => c.index)) : null);
 	const TICKER_ROWS = 3;
 	const ticker = $derived(segment.activity.slice(-TICKER_ROWS));
+	const live = $derived(final && turn.live);
+	const showTicker = $derived(live && segment.reply.length === 0 && !segment.handBack);
+	const earlierCount = $derived(Math.max(0, segment.activity.length - ticker.length));
+	const previousMessages = $derived(turn.segments.slice(0, turn.segments.indexOf(segment)).reduce((count, item) => count + item.activity.filter((part) => part.type === "assistant").length + item.reply.length, 0));
+	function messageNumber(index: number): number | undefined {
+		return numbered ? previousMessages + segment.activity.slice(0, index + 1).filter((part) => part.type === "assistant").length : undefined;
+	}
 
 	$effect(() => {
 		const uuid = revealedPart.request?.uuid;
@@ -143,132 +147,86 @@
 	}
 </script>
 
-<div class="max-w-[760px] mx-auto px-5 my-1.5">
-	<div
-		bind:this={panelEl}
-		class="turn-activity rounded-panel {final && turn.live ? 'bg-bg-surface glow-tool-running' : 'border border-border-subtle'}"
-	>
-		<!-- The two summary lines are their own query container so the ledger sheds
-		     detail against its own width, not the viewport's — a sidebar narrows the
-		     transcript on a wide screen. Scoped to the summary so `container-type`'s
-		     containment never reaches the expanded log's interactive cards. -->
-		<div class="@container">
-			<div class="flex items-center gap-3 py-1.5 pl-2 pr-3 text-xs">
-				<button
-					type="button"
-					class="turn-activity-toggle flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer"
-					aria-expanded={expanded}
-					onclick={() => (expanded = !expanded)}
-				>
-					<span
-						class="shrink-0 text-text-dimmer transition-transform duration-200 [&_.lucide]:w-3.5 [&_.lucide]:h-3.5"
-						class:rotate-90={expanded}
-					>
-						<Icon name="chevron-right" size={14} />
-					</span>
-					{#if hovered !== null}
-						<span class="flex-1 truncate font-mono text-text-secondary">{stepCaption(segment, turn, final, hovered, now)}</span>
-					{:else if final && turn.live}
-						<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
-						<span class="shrink-0 font-medium text-text-secondary @max-[336px]:hidden">Working</span>
-						{#if duration !== undefined}
-							<span class="turn-duration shrink-0 font-mono text-text-dimmer">{fmtClock(duration)}</span>
-						{/if}
-						<span class="flex-1 truncate text-text-muted">— {currentStepLabel(segment)}</span>
-					{:else}
-						<!-- Duration leads, so truncation eats the step counts from the right
-						     and the one number that is always true survives. -->
-						<span class="flex-1 truncate text-text-dimmer">
-							<span class="font-medium text-text-secondary"
-								>Worked{#if duration !== undefined}&nbsp;for <span class="turn-duration">{fmtDuration(duration)}</span>{/if}</span
-							>
-							{#if phrase}· {phrase}{/if}
-						</span>
-					{/if}
-				</button>
-				{#if stats.skills > 0}
-					<Button
-						variant="ghost"
-						size="content"
-						tone={skillsOpen ? "secondary" : "muted-soft"}
-						hoverFill={skillsOpen ? "none" : "overlay"}
-						class="skills-toggle shrink-0 gap-1 -mx-1 px-1 rounded [&_.lucide]:w-3 [&_.lucide]:h-3 {skillsOpen
-							? 'bg-[rgba(var(--overlay-rgb),0.06)]'
-							: ''}"
-						aria-expanded={skillsOpen}
-						title="Which skills ran, and when"
-						onclick={() => (skillsOpen = !skillsOpen)}
-					>
-						<Icon name="sparkles" size={12} />
-						<span>{stats.skills}<span class="@max-[336px]:hidden">&nbsp;{stats.skills === 1 ? "skill" : "skills"}</span></span>
-					</Button>
-				{/if}
-				{#if stats.compactions > 0}
-					<!-- Outside the toggle so it survives the hover caption: a collapsed
-					     turn must still disclose that its context was squeezed. -->
-					<span
-						class="compaction-marker shrink-0 flex items-center gap-1 text-text-muted [&_.lucide]:w-3 [&_.lucide]:h-3"
-						title={stats.compactions === 1 ? "Context compacted once" : `Context compacted ${stats.compactions} times`}
-					>
-						<Icon name="minimize" size={12} />
-						<span class="@max-[336px]:hidden">compacted{stats.compactions > 1 ? ` ×${stats.compactions}` : ""}</span>
-					</span>
-				{/if}
-				{#if stats.failed > 0}
-					<span class="shrink-0 text-error">{stats.failed} failed</span>
-				{/if}
-			</div>
-
-			<div class="flex items-center gap-3 px-3 pb-2">
-				<div class="flex-1 min-w-0">
-					<ActivityStrip {turn} {segment} {final} {now} {running} active={hovered} emphasis={skillSteps} onhover={(i) => (hovered = i)} onjump={jumpTo} />
-				</div>
-				{#if final}
-					<RunningPill count={running.size} />
-					<TurnEconomics economics={bill} />
-				{/if}
-			</div>
-		</div>
-
-		{#if skillsOpen}
-			<ol class="skill-chapters px-1 py-1 border-t border-border-subtle" aria-label="Skills in this turn">
-				{#each chapters as chapter (chapter.index)}
-					{@const part = segment.activity[chapter.index]}
-					<li>
-						<Button
-							variant="ghost"
-							size="content"
-							align="start"
-							tone="inherit"
-							hoverFill="overlay"
-							class="gap-2 w-full py-1 px-2 rounded text-xs text-left"
-							onclick={() => jumpTo(chapter.index)}
-						>
-							<span class="shrink-0 {part ? partStyle(part).text : ''} [&_.lucide]:w-3.5 [&_.lucide]:h-3.5"><Icon name="sparkles" size={14} /></span>
-							<span class="flex-1 truncate font-mono text-text-secondary">{chapter.name || "Unnamed skill"}</span>
-							<span class="shrink-0 font-mono text-text-dimmer">{chapterTiming(chapter)}</span>
+<div bind:this={panelEl} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
+	<AssistantHeader message={segment.reply[0]} {sessionId} {forkMessageId} {model} {providerId} createdAt={segment.reply.length > 0 ? undefined : segment.activity[0]?.createdAt} />
+	<div class="md:ml-[42px]">
+		<div class="turn-head-card @container rounded-[14px] bg-turn-bg px-[12px] pt-[10px] pb-[2px] md:pb-[9px]">
+			<div data-testid={live ? "turn-live-head" : undefined} class="flex items-center gap-[6px] min-w-0">
+				<Tooltip bind:open={detailsOpen}>
+					{#snippet trigger({ props })}
+						<Button {...props} variant="ghost" size="content" tone="secondary" hoverFill="none" align="start" touchTarget
+							class="turn-activity-toggle gap-[6px] text-[13px] min-w-0" aria-expanded={expanded}
+							onclick={() => (expanded = !expanded)}>
+							{#if live}<Icon name="loader-circle" size={13} class="animate-spin shrink-0 text-accent" />
+							{:else}<Icon name={expanded ? "chevron-down" : "chevron-right"} size={14} class="shrink-0 text-text-muted" />{/if}
+							<span class="font-semibold">{live ? "Working" : "Worked"}</span>
+							{#if live && !turn.user}
+								<span class="text-[12px] text-text-muted" data-testid="turn-live-elapsed">(no prompt to time from)</span>
+							{:else if duration !== undefined}
+								<span class="turn-duration font-mono text-[12px] text-text-muted shrink-0" data-testid={live ? "turn-live-elapsed" : undefined}>{live && duration < 1000 ? "0s" : fmtDuration(duration)}</span>
+							{/if}
+							{#if phrase}<span class="truncate text-[12px] text-text-muted">· {phrase}</span>{/if}
 						</Button>
-					</li>
-				{/each}
-			</ol>
-		{/if}
-
-		{#if expanded}
-			<div class="px-1 pb-1 border-t border-border-subtle">
-				{#each segment.activity as part, i (part.uuid)}
-					<ActivityRow {part} {liveTasks} {taskListedAt} duration={durations?.[i]} highlight={part.uuid === focusUuid} />
-				{/each}
+					{/snippet}
+					<div class="max-w-[340px] flex flex-col gap-[6px] text-[12px]">
+						{#if hovered !== null}<span>{stepCaption(segment, turn, final, hovered, now)}</span>{:else if live}<span>{currentStepLabel(segment)}</span>{/if}
+						{#if phrase}<span>{phrase}</span>{/if}
+						{#if stats.compactions > 0}<span>Context compacted{stats.compactions > 1 ? ` ×${stats.compactions}` : ""}</span>{/if}
+						{#if stats.failed > 0}<span>{stats.failed} failed</span>{/if}
+						<TurnEconomics economics={bill} />
+						{#if final}<RunningPill count={running.size} />{/if}
+						<span>Click to {expanded ? "hide" : "show"} the step log</span>
+					</div>
+				</Tooltip>
+				{#if onsummarize}<span class="hidden md:contents"><Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] shrink-0" onclick={onsummarize}>✦ Summarize</Button></span>{/if}
 			</div>
-		{:else if final && turn.live && segment.reply.length === 0 && !segment.handBack}
-			<!-- The ticker folds away the moment the reply starts streaming, so the
-			     turn reaches its settled height once rather than twice. -->
-			<div class="px-1 pb-1 border-t border-border-subtle">
-				{#each ticker as part, i (part.uuid)}
-					{@const idx = segment.activity.length - ticker.length + i}
-					<div style="opacity: {(0.35 + (0.65 * (i + 1)) / ticker.length).toFixed(2)}">
-						<ActivityRow {part} {liveTasks} {taskListedAt} duration={durations?.[idx]} />
+			<div class="md:mt-[7px]">
+				<ActivityStrip {turn} {segment} {final} {now} {running} active={hovered} emphasis={skillSteps}
+					onhover={(index) => { hovered = index; detailsOpen = index !== null; }} onjump={jumpTo} />
+			</div>
+			{#if onsummarize}
+				<Button variant="ghost-accent" size="content" align="start" touchTarget class="md:hidden w-full gap-[8px] py-[8px] text-[13px]" onclick={onsummarize}>
+					<span>✦ Summarize</span><Icon name="chevron-right" size={14} class="ml-auto" />
+				</Button>
+			{/if}
+		</div>
+		{#if expanded || showTicker}
+			<div class="step-log mt-[6px]" data-testid={live ? "turn-live-activity" : undefined}>
+				{#if !expanded && earlierCount > 0}
+					<Button variant="ghost" size="content" tone="muted" hoverFill="none" align="start" touchTarget
+						class="py-[8px] text-[12px]" onclick={() => (expanded = true)}>+ {earlierCount} earlier messages</Button>
+				{/if}
+				{#each expanded ? segment.activity : ticker as part, index (part.uuid)}
+					{@const i = expanded ? index : earlierCount + index}
+					{@const latestLiveStep = live && i === segment.activity.length - 1}
+					<div data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
+						<ActivityRow {part} {liveTasks} {taskListedAt} live={latestLiveStep} duration={durations?.[i]} highlight={part.uuid === focusUuid} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} />
 					</div>
 				{/each}
+				<div class="flex flex-wrap items-center gap-[10px] py-[8px] text-[12px] text-text-muted">
+					{#if stats.skills > 0}
+						<Button variant="ghost" size="content" tone="muted-soft" hoverFill="none" touchTarget
+							class="skills-toggle gap-[5px]" aria-expanded={skillsOpen} onclick={() => (skillsOpen = !skillsOpen)}>
+							<Icon name="sparkles" size={12} />{stats.skills} {stats.skills === 1 ? "skill" : "skills"}
+						</Button>
+					{/if}
+					{#if stats.compactions > 0}<span class="compaction-marker">compacted{stats.compactions > 1 ? ` ×${stats.compactions}` : ""}</span>{/if}
+					{#if stats.failed > 0}<span class="text-error">{stats.failed} failed</span>{/if}
+					{#if final}<RunningPill count={running.size} /><TurnEconomics economics={bill} />{/if}
+				</div>
+				{#if skillsOpen}
+					<ol class="skill-chapters pb-[8px]" aria-label="Skills in this turn">
+						{#each chapters as chapter (chapter.index)}
+							{@const part = segment.activity[chapter.index]}
+							<li><Button variant="ghost" size="content" align="start" tone="inherit" hoverFill="surface" touchTarget
+								class="gap-[8px] w-full py-[8px] text-[12px] text-left" onclick={() => jumpTo(chapter.index)}>
+								<span class={part ? partStyle(part).text : ""}><Icon name="sparkles" size={14} /></span>
+								<span class="flex-1 truncate font-mono text-text-secondary">{chapter.name || "Unnamed skill"}</span>
+								<span class="shrink-0 font-mono text-text-muted">{chapterTiming(chapter)}</span>
+							</Button></li>
+						{/each}
+					</ol>
+				{/if}
 			</div>
 		{/if}
 	</div>

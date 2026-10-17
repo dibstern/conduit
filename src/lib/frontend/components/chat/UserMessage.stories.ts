@@ -19,6 +19,7 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {
 	args: { message: mockUserMessage },
 };
+export const DefaultLight: Story = { ...Default, globals: { theme: "light" } };
 
 export const ShortText: Story = {
 	args: { message: mockUserMessageShort },
@@ -26,6 +27,30 @@ export const ShortText: Story = {
 
 export const LongText: Story = {
 	args: { message: mockUserMessageLong },
+};
+export const LongTextLight: Story = {
+	...LongText,
+	globals: { theme: "light" },
+};
+
+export const NeutralStates: Story = {
+	args: {
+		message: {
+			...mockUserMessage,
+			steered: true,
+			modelExecution: {
+				requestedModel: "Opus",
+				expectedModel: "Opus",
+				actualModel: "Fable 5",
+				drifted: true,
+			},
+		},
+		onDismissCutOff: () => {},
+	},
+};
+export const NeutralStatesLight: Story = {
+	...NeutralStates,
+	globals: { theme: "light" },
 };
 
 /** `/commit` is a known command and renders as a pill; `/comit` (a typo the

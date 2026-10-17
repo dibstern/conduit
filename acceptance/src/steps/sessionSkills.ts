@@ -15,7 +15,7 @@ const navigationScrollTops = new WeakMap<Page, number>();
 
 const activityPanel = (page: Page, turn: string) =>
 	page.locator(
-		`#messages .msg-container:has([data-uuid="msg-skill-nav-user-${turn}/user"]) + div .turn-activity`,
+		`#messages .msg-container:has([data-uuid="msg-skill-nav-user-${turn}/user"]) + .turn-activity`,
 	);
 
 // e.g. "release-notes by you in turn 1; changelog-style by agent in turn 2, loading"
@@ -339,7 +339,7 @@ export const sessionSkillsHandlers: StepHandler[] = [
 			);
 			await expect(step).toContainText("paged-skill");
 			await expect(step.getByRole("button").first()).toHaveClass(
-				/bg-\[rgba\(var\(--overlay-rgb\),0\.06\)\]/,
+				/\bbg-selection\b/,
 			);
 			await expect(step).toBeInViewport({ ratio: 0.5 });
 		},

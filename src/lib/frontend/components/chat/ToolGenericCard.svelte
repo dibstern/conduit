@@ -6,6 +6,9 @@
 	import type { ToolMessage } from "../../types.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
+	import { clock } from "../../stores/clock.svelte.js";
+	import { fmtDuration, toolCommand, toolVerb } from "../../utils/turns.js";
+	import { toolStyle } from "./activity-style.js";
 
 	import Icon from "../ui/Icon.svelte";
 	import Badge from "../ui/Badge.svelte";
@@ -21,37 +24,13 @@
 	} = $props();
 
 	let expanded = $state(false);
-	const glowClass = $derived.by(() => {
-		if (message.status === "error") return "glow-tool-error";
-		if (message.status === "completed") return "glow-success";
-		if (message.status === "running") return "glow-tool-running";
-		return "";
-	});
+	const running = $derived(message.status === "running" || message.status === "pending");
+	const duration = $derived(message.createdAt === undefined || (!running && message.endedAt === undefined) ? undefined : Math.max(0, (message.endedAt ?? clock.now) - message.createdAt));
+	const icon = $derived(toolStyle(message).icon);
 
 	function handleToggle() {
 		expanded = !expanded;
 	}
-
-	const statusIconName = $derived.by(() => {
-		switch (message.status) {
-			case "running":
-			case "pending":
-				return "loader";
-			case "completed":
-				return "check";
-			case "error":
-				return "circle-alert";
-			default:
-				return "loader";
-		}
-	});
-
-	const statusIconClass = $derived.by(() => {
-		if (message.status === "running" || message.status === "pending")
-			return "text-text-muted";
-		if (message.status === "error") return "text-error";
-		return "text-text-dimmer";
-	});
 
 	const subtitleText = $derived.by(() => {
 		switch (message.status) {
@@ -80,13 +59,7 @@
 		),
 	);
 
-	// For Bash/Shell tools, extract the raw command for display in expanded view
-	function commandOf(tool: ToolMessage): string | null {
-		if (tool.name !== "Bash") return null;
-		const inp = tool.input as Record<string, unknown> | null | undefined;
-		return (inp?.["command"] as string | undefined) ?? null;
-	}
-	const bashCommand = $derived(commandOf(message));
+	const bashCommand = $derived(toolCommand(message));
 	const movedToBackground = $derived(message.metadata?.['movedToBackground'] === true);
 	const cursorDetail = $derived(typeof message.metadata?.['cursorToolType'] === "string" && (message.metadata['fileChange'] || message.metadata['plan'] || message.metadata['computerUse'] || message.metadata['media'] || message.metadata['output'] !== undefined || ensureCanonical(message.name, message.input).tool === "Unknown"));
 
@@ -104,44 +77,38 @@
 	});
 </script>
 
-<div class="{message.status === 'completed' ? '' : 'bg-bg-surface'} rounded-panel relative overflow-hidden {glowClass}">
-	{#if message.status === 'running'}
-		<div class="absolute inset-0 pointer-events-none" style="background: linear-gradient(90deg, transparent 0%, rgba(234,179,8,0.04) 50%, transparent 100%); animation: tool-shimmer-slide 2s ease-in-out infinite;"></div>
-	{/if}
+<div class="min-w-0">
 	<!-- `tool-header` is load-bearing: test/visual/tool-item.spec.ts clicks it. -->
-	<Disclosure {expanded} onToggle={handleToggle} selectable class="tool-header">
-	{#if message.status === 'running'}
-		<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0 self-center" />
-	{:else}
-		<span class="tool-status-icon shrink-0 [&_.lucide]:w-3.5 [&_.lucide]:h-3.5 {statusIconClass}">
-			<Icon name={statusIconName} size={14} />
-		</span>
-	{/if}
+	<Disclosure look="transcript" density="transcript" selectable chevron={false}
+		{expanded} onToggle={handleToggle} class="tool-header">
+	<span class="tool-status-icon shrink-0 text-text-dimmer"><Icon name={icon} size={14} /></span>
 
-	<span class="tool-name font-medium text-text-dimmer select-text">
-		{message.name}
+	<span class="tool-name shrink-0 text-[13px] font-semibold text-text-secondary select-text">
+		{toolVerb(message, running ? "present" : "past")}
 	</span>
 
 	<span
-		class="tool-desc flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-text-dimmer select-text"
+		class="tool-desc flex-1 min-w-0 truncate font-mono text-[12.5px] text-text-secondary select-text"
 	>
 		{descText}
 	</span>
-	{#if typeof message.metadata?.['cursorToolType'] === "string" && message.metadata['truncated'] === true}<span class="text-xs text-text-muted">Truncated</span>{/if}
-	{#if movedToBackground}<span class="text-xs text-text-muted">Moved to background</span>{/if}
+	{#if typeof message.metadata?.['cursorToolType'] === "string" && message.metadata['truncated'] === true}<span class="shrink-0 text-[12px] text-text-muted">Truncated</span>{/if}
+	{#if movedToBackground}<span class="shrink-0 text-[12px] text-text-muted">Moved to background</span>{/if}
 
 	{#if toolSummary.tags}
 		{#each toolSummary.tags as tag}
 			<Badge variant="tag" size="sm" class="font-mono select-text">{tag}</Badge>
 		{/each}
 	{/if}
+	{#if duration !== undefined}<time class="ml-auto shrink-0 font-mono text-[12px] text-text-dimmer">{fmtDuration(duration)}</time>{/if}
+	{#if running}<BlockGrid cols={4} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
+	{:else if message.status === "error" || message.isError}<span class="shrink-0 text-error"><Icon name="circle-alert" size={12} /></span>{/if}
 	</Disclosure>
 
 	{#if message.status !== 'completed'}
 	<div
-		class="tool-subtitle flex items-center gap-1.5 py-0.5 px-3 pl-4 text-xs italic text-text-dimmer"
+		class="tool-subtitle flex items-center gap-[6px] pb-[3px] pl-[22px] text-[12px] text-text-dimmer"
 	>
-		<span class="tool-connector font-mono not-italic text-border">└</span>
 		<span class="tool-subtitle-text">{subtitleText}</span>
 	</div>
 	{/if}
@@ -149,12 +116,12 @@
 	{#if expanded && (message.result || bashCommand || cursorDetail)}
 		<ToolFullDetail {message} {...loadDetails && { load: loadDetails }} class="mx-2.5 mt-1 mb-1">
 			{#snippet children(tool)}
-				{@const command = commandOf(tool)}
+				{@const command = toolCommand(tool)}
 				<Surface
 					variant="inset"
 					padding="md"
 					radius="md"
-					class="tool-result font-mono text-xs whitespace-pre-wrap break-all my-0.5 mx-2.5 text-text-secondary max-h-[200px] overflow-y-auto select-text {resultErrorClass}"
+					class="tool-result font-mono text-[12px] leading-[1.6] whitespace-pre-wrap break-all my-[4px] text-text-secondary max-h-[200px] overflow-y-auto select-text {resultErrorClass}"
 				>
 					{#if command}<span class="text-text-muted">$ {command}</span>{#if tool.result}{"\n\n"}{/if}{/if}{#if tool.result}{tool.result}{/if}
 				</Surface>

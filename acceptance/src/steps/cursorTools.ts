@@ -727,9 +727,8 @@ export const cursorToolsHandlers: StepHandler[] = [
 		name: "assert running Cursor progress",
 		match: /^the running Cursor turn shows progress (.+)$/,
 		run: async ({ world, match }) => {
-			await expect(
-				world.page.getByTestId("composer-status-activity"),
-			).toContainText(match[1] ?? "");
+			// The composer has no status line; the running task row names its progress.
+			await expect(row(world.page, "task")).toContainText(match[1] ?? "");
 		},
 	},
 	{

@@ -1,7 +1,7 @@
 // Tests segmentTurns, turnStats/countsPhrase, step durations and economics.
 
 import { assert, describe, expect, it } from "vitest";
-import { segmentClass } from "../../../src/lib/frontend/components/chat/activity-style.js";
+import { segmentAppearance } from "../../../src/lib/frontend/components/chat/activity-style.js";
 import type {
 	AssistantMessage,
 	ChatMessage,
@@ -1548,7 +1548,7 @@ describe("liveLaunchedTasks", () => {
 		};
 		const turn = turnOf([finished]);
 		const running = liveLaunchedTasks(turn, [{ id: "agentA" }], T);
-		expect(segmentClass(finished, running)).not.toContain("animate-pulse");
+		expect(segmentAppearance(finished, running).running).toBe(false);
 	});
 
 	it("survives a parent cycle", () => {

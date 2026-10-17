@@ -37,6 +37,7 @@
 	--color-bg-surface: #1a1a1d;
 	--color-bg-alt: #232327;
 	--color-bg-raised: #18181b;
+	--color-turn-bg: #1a1a1d;
 	--color-popover-bg: #232327;
 	--color-selection: #202024;
 	--color-hover: rgba(255, 255, 255, 0.06);
@@ -236,6 +237,7 @@
 	--color-bg-surface: #ffffff;
 	--color-bg-alt: #f1f1f3;
 	--color-bg-raised: #f7f7f8;
+	--color-turn-bg: #f4f4f6;
 	--color-popover-bg: #ffffff;
 	--color-selection: #ececef;
 	--color-hover: rgba(0, 0, 0, 0.045);
@@ -946,7 +948,7 @@ body:has(dialog:modal) {
 	}
 
 	.md-content p {
-		@apply mb-3.5 mt-0;
+		@apply mb-[14px] mt-0;
 	}
 	.md-content p:last-child {
 		@apply mb-0;
@@ -969,17 +971,17 @@ body:has(dialog:modal) {
 
 	.md-content ul {
 		list-style-type: disc;
-		@apply pl-7 my-2.5;
+		@apply pl-[22px] mt-0 mb-[14px];
 	}
 	.md-content ol {
 		list-style-type: decimal;
-		@apply pl-7 my-2.5;
+		@apply pl-[22px] mt-0 mb-[14px];
 	}
 	.md-content li {
-		@apply mb-1.5 mt-0 pl-1;
+		@apply my-[5px];
 	}
 	.md-content li::marker {
-		color: var(--color-success);
+		color: var(--color-text-dimmer);
 	}
 	.md-content ol li::marker {
 		color: var(--color-text-muted);
@@ -1004,17 +1006,17 @@ body:has(dialog:modal) {
 	}
 
 	.md-content code {
-		@apply font-mono text-[1em] rounded-[6px] px-[7px] py-[2px];
-		background: var(--color-code-bg);
+		@apply font-mono text-[13px] rounded-[5px] px-[5px] py-[2px];
+		background: var(--color-chip);
 	}
 
 	.md-content pre {
-		@apply relative rounded-xl my-3.5 overflow-hidden;
+		@apply relative rounded-[12px] mt-[4px] mb-[16px] overflow-hidden;
 		background: var(--color-code-bg);
-		border: 1px solid var(--color-border-subtle);
+		border: 1px solid var(--color-border);
 	}
 	.md-content pre code {
-		@apply block px-[18px] py-4 text-base leading-[1.55] whitespace-pre overflow-x-auto;
+		@apply block px-[14px] py-[12px] text-[12.5px] leading-[1.7] whitespace-pre overflow-x-auto;
 		background: transparent;
 		border-radius: 0;
 	}

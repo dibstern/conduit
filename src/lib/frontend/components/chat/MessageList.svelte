@@ -2,8 +2,12 @@
 <!-- Renders history messages, live chat messages, and inline permission/question cards. -->
 <!-- Preserves #messages ID for E2E. -->
 
+<script module lang="ts">
+	const reportedMissingPrompts = new Set<string>();
+</script>
+
 <script lang="ts">
-	import Button from "../ui/Button.svelte";
+	import TranscriptJump from "../ui/TranscriptJump.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import { untrack } from "svelte";
 	import type { ChatMessage } from "../../types.js";
@@ -322,9 +326,7 @@
 		}
 	}
 
-	const scrollButtonText = $derived(
-		processing ? "↓ New activity" : "↓ Latest",
-	);
+	const showJump = $derived(scrollCtrl.isDetached);
 
 	// Keep finished turns' props stable when only a later part changes.
 	function turnProjection() {
@@ -351,6 +353,27 @@
 	const projectInheritedTurns = turnProjection();
 	const projectCurrentTurns = turnProjection();
 	const turns = $derived(projectTurns(chat.messages, processing));
+	const emptyLiveTurn = $derived<Turn | undefined>(
+		processing && chat.loadLifecycle === "ready" && turns.length === 0
+			? { id: `turn-${viewedSessionId ?? instanceId}`, segments: [{ activity: [], reply: [] }], notices: [], live: true }
+			: undefined,
+	);
+	$effect(() => {
+		if (!processing || chat.loadLifecycle !== "ready" || turns.at(-1)?.user) return;
+		const sessionId = viewedSessionId;
+		if (!sessionId) return;
+		const key = JSON.stringify([sessionId, turns.at(-1)?.id ?? null]);
+		if (reportedMissingPrompts.has(key)) return;
+		reportedMissingPrompts.add(key);
+		const lastRow = chat.transcript?.rows.at(-1);
+		const last = chat.messages.at(-1);
+		console.error("[turn-clock] Working session has no prompt to time from", {
+			sessionId,
+			messageCount: chat.messages.length,
+			lastMessageRole: lastRow?.role ?? last?.type ?? null,
+			lastMessageId: lastRow?.id ?? (last && "messageId" in last ? last.messageId ?? last.uuid : last?.uuid) ?? null,
+		});
+	});
 	const localPermissions = $derived(getLocalPermissions(viewedSessionId));
 	const transcriptToolIds = $derived.by(() => {
 		const ids = new Set<string>();
@@ -381,6 +404,7 @@
 
 	// Fork context: detect if current session is a user fork
 	const activeSession = $derived(findSession(viewedSessionId ?? ""));
+	const providerId = $derived(getInstanceById(activeSession?.accountId ?? "")?.driver);
 	const forkMessageId = $derived(activeSession?.forkPointMessageId ?? activeSession?.forkMessageId ?? (primary ? sessionState.currentFork?.forkMessageId : undefined));
 	const forkPointTimestamp = $derived(activeSession?.forkPointTimestamp ?? (primary ? sessionState.currentFork?.forkPointTimestamp : undefined));
 	const isFork = $derived(!!forkMessageId || !!forkPointTimestamp);
@@ -531,6 +555,7 @@
 
 	<!-- Turn rendering snippet (shared between fork and normal paths) -->
 	{#snippet turnItem(turn: Turn)}
+		<div data-live-turn={turn.live ? "" : undefined}>
 		{#if turn.user}
 			<div class="msg-container" class:rewind-point={primary && uiState.rewindActive}>
 				<UserMessage message={turn.user} onDismissCutOff={turn.user.messageId !== undefined && turn.user.messageId === cutOffMessageId ? dismissCutOff : undefined} />
@@ -544,8 +569,11 @@
 			{#if segment.activity[0]}
 				{@render resumed(segment.activity[0].uuid)}
 			{/if}
-			{#if segment.activity.length > 0 || (i > 0 && final && turn.live)}
-				<TurnActivity {turn} {segment} {final} {liveTasks} {taskListedAt} {taskNow} />
+			{#if segment.activity.length > 0 || (final && turn.live)}
+				{@const reply = segment.reply[0]}
+				<TurnActivity {turn} {segment} {final} {liveTasks} {taskListedAt} {taskNow} {sessionId} {providerId}
+					forkMessageId={reply ? forkMessageIdAtReply(turn, reply) : undefined}
+					model={turn.user?.modelExecution?.actualModel ?? turn.user?.modelExecution?.requestedModel} />
 			{/if}
 			<!-- Notices sit between the final work and reply: they are lifted out of
 			     the activity log so a failure is never hidden behind a collapsed panel. -->
@@ -559,12 +587,14 @@
 			{#each segment.reply as reply (reply.uuid)}
 				{@render resumed(reply.uuid)}
 				<div class="msg-container" class:rewind-point={primary && uiState.rewindActive}>
-					<AssistantMessage {sessionId} message={reply} forkMessageId={forkMessageIdAtReply(turn, reply)} />
+					<AssistantMessage {sessionId} {providerId} message={reply} forkMessageId={forkMessageIdAtReply(turn, reply)}
+						hideHeader={reply === segment.reply[0] && (segment.activity.length > 0 || (final && turn.live))}
+						model={turn.user?.modelExecution?.actualModel ?? turn.user?.modelExecution?.requestedModel} />
 				</div>
 			{/each}
 			{#if segment.handBack}
-				<div class="max-w-[760px] mx-auto px-5">
-					<ToolItem message={segment.handBack} />
+				<div class="max-w-[820px] mx-auto px-[14px] md:px-[32px]">
+					<div class="md:ml-[42px]"><ToolItem message={segment.handBack} /></div>
 				</div>
 			{/if}
 		{/each}
@@ -578,15 +608,18 @@
 			<div class="msg-container">
 				<!-- Same query container as the ledger, so the bill sheds the gauge and
 				     the token counts in the same order rather than overflowing. -->
-				<div class="result-bar @container max-w-[760px] mx-auto mt-1 mb-5 px-5">
-					<RunningPill count={liveLaunchedTasks(turn, liveTasks, liveTasks.length > 0 && turn.live ? clock.now : taskNow, taskListedAt).size} />
-					<TurnEconomics economics={bill} showDuration />
+				<div class="max-w-[820px] mx-auto px-[14px] md:px-[32px]">
+					<div class="result-bar @container md:ml-[42px] -mt-[18px] mb-[26px]">
+						<RunningPill count={liveLaunchedTasks(turn, liveTasks, liveTasks.length > 0 && turn.live ? clock.now : taskNow, taskListedAt).size} />
+						<TurnEconomics economics={bill} showDuration />
+					</div>
 				</div>
 			</div>
 		{/if}
 		{#if turn.id === newestEndedTurnId}
 			<div data-turn-end aria-hidden="true"></div>
 		{/if}
+		</div>
 	{/snippet}
 
 	{#snippet resumed(key: string)}
@@ -646,6 +679,9 @@
 			<UserMessage message={firstSend} />
 		</div>
 	{/if}
+	{#if emptyLiveTurn}
+		{@render turnItem(emptyLiveTurn)}
+	{/if}
 
 	<!-- Cold open: turn-shaped placeholders fill the pane, bottom-anchored where
 	     the newest messages land; extra turns clip off the top. -->
@@ -681,20 +717,17 @@
 		</div>
 	{/each}
 
-	<!-- Scroll-to-bottom button -->
-	<Button
-		variant="ghost"
-		size="content"
-		layout="flow"
-		tone="inherit"
-		hoverFill="surface"
-		id={primary ? "scroll-btn" : `${messagesId}-scroll-btn`}
-		class="sticky bottom-3 left-1/2 -translate-x-1/2 bg-bg-alt border border-border rounded-full px-4 py-1.5 text-xs text-text-secondary z-5 font-sans {scrollCtrl.isDetached ? '' : 'hidden'}"
-		title="Scroll to bottom"
-		onclick={() => scrollCtrl.requestFollow()}
-	>
-		{scrollButtonText}
-	</Button>
+	<!-- Zero-height rail keeps the floating action out of transcript geometry. -->
+	<div class="sticky bottom-[10px] h-0 flex justify-center z-5" hidden={!showJump}>
+		<TranscriptJump
+			id={primary ? "scroll-btn" : `${messagesId}-scroll-btn`}
+			data-testid={processing ? "jump-to-live" : "jump-to-latest"}
+			live={processing}
+			class="-translate-y-full"
+			title={processing ? "Jump to live" : "Scroll to bottom"}
+			onclick={() => scrollCtrl.requestFollow()}
+		/>
+	</div>
 </div>
 
 <style>

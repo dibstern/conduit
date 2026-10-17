@@ -58,12 +58,47 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"all three render the default tab strip: one asserts tablist/tab/aria-selected in play(), and one asserts the selected tab has no inline `style` attribute -- the underline it draws from `border-b-2` alone must be identical to the one the inline style used to draw, so byte equality is the proof that the dead-class fix was zero-diff",
 
 	// Verified legitimate (conduit-test-6owk). ToolItem is a pure dispatcher
-	// that passes each message unchanged to its selected card, and the pair uses
-	// the same fixture in both stories. Its other pairs differ by one row since
-	// the 13px root (conduit-test-aoqb.1) made the wrapper's my-1 a fractional
-	// 3.25px, which shifts the screenshot clip; this pair happens to round alike.
+	// that passes each message unchanged to its selected card, and each pair uses
+	// the same fixture in both stories. Since conduit-test-aoqb.2 the wrapper's
+	// margin is a whole 3px rather than a fractional my-1, so every such pair
+	// meets in one frame; the dispatch itself is what the ToolItem stories prove.
 	"chat-toolitem--subagent-completed | chat-toolsubagentcard--default":
 		"Both stories use mockToolSubagentCompleted, which ToolItem dispatches to ToolSubagentCard.",
+	"chat-toolitem--subagent-running | chat-toolsubagentcard--running":
+		"same running subagent fixture, dispatched to ToolSubagentCard",
+	"chat-toolgenericcard--default | chat-toolitem--completed":
+		"same completed tool fixture, dispatched to ToolGenericCard",
+	"chat-toolgenericcard--error-state | chat-toolitem--error-state":
+		"same errored tool fixture, dispatched to ToolGenericCard",
+	"chat-toolgenericcard--final | chat-toolitem--final":
+		"same Final-style fixture, dispatched to ToolGenericCard",
+	"chat-toolgenericcard--final-light | chat-toolitem--final-light":
+		"the light pair of Final, identical for the same reason",
+	"chat-toolgenericcard--pending | chat-toolitem--pending":
+		"same pending tool fixture, dispatched to ToolGenericCard",
+	"chat-toolgenericcard--running | chat-toolitem--running":
+		"same running tool fixture, dispatched to ToolGenericCard",
+	"chat-toolgenericcard--with-tags | chat-toolitem--read-with-offset-limit":
+		"same Read-with-offset fixture, dispatched to ToolGenericCard",
+	"chat-toolitem--question-answered | chat-toolquestioncard--default":
+		"same answered question fixture, dispatched to ToolQuestionCard",
+	"chat-toolitem--question-pending | chat-toolquestioncard--waiting-without-question-data":
+		"same pending question without data, dispatched to ToolQuestionCard",
+	"chat-toolitem--question-running | chat-toolquestioncard--active":
+		"same running question fixture, dispatched to ToolQuestionCard",
+	"chat-toolitem--question-skipped | chat-toolquestioncard--skipped":
+		"same skipped question fixture, dispatched to ToolQuestionCard",
+
+	// Verified legitimate (conduit-test-aoqb.2). For these the identical bytes
+	// are the assertion.
+	"chat-messagelist--follow-live | chat-messagelist--live-turn-visible":
+		"FollowLive scrolls away and clicks Jump to live, so it must land on exactly the live frame LiveTurnVisible opens on; the detach and the pill are asserted in play()",
+	"chat-messagelist--follow-live-light | chat-messagelist--live-turn-visible-light":
+		"the light pair of FollowLive and LiveTurnVisible, identical for the same reason",
+	"input-inputarea--goal-checking | input-inputarea--goal-not-yet-idle":
+		"the goal check now reports in the session subtitle, not the composer, so an idle composer with a goal looks the same while checking; GoalChecking asserts the absent status header and the goal border in play()",
+	"input-inputarea--goal-checking-light | input-inputarea--goal-not-yet-idle-light":
+		"the light pair of GoalChecking and GoalNotYetIdle, identical for the same reason",
 
 	// Verified legitimate (conduit-test-dfvd composer redesign).
 	"input-attachmenu--open | input-attachmenu--open-code":

@@ -355,7 +355,17 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
  * skills | checkout | Settle): square corners, because the group owns the
  * border and radius.
  */
-export type ButtonSize = "sm" | "md" | "segment" | "row-action" | "content";
+export type ButtonSize =
+	| "sm"
+	| "md"
+	| "segment"
+	| "row-action"
+	| "transcript"
+	| "content";
+
+/** Shared by disclosure and navigation rows in the transcript's step log. */
+export const TRANSCRIPT_ROW_CLASSES =
+	"flex items-center gap-[8px] w-full min-w-0 min-h-[44px] md:min-h-[28px] py-[3px] px-0 text-[13px] text-left";
 
 export type ButtonAlign = keyof typeof ALIGN_CLASSES;
 
@@ -490,15 +500,17 @@ export function buttonClasses({
 			? ""
 			: size === "row-action"
 				? "size-[21px] rounded-[6px]"
-				: size === "segment"
-					? "h-[22px] gap-[5px] rounded-none px-[8px] text-[10px] font-medium"
-					: iconOnly
-						? `${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${SHARED_SIZE_CLASSES}`
-						: size === "sm"
-							? // Literal px from the mockup's `.btn`. `min-h`, not `h`, so a
-								// taller touch target composes without a collision.
-								"min-h-[25px] px-[10px] py-[4px] text-[11.5px] gap-[5px] rounded-[7px] font-normal"
-							: `h-9 px-4 text-sm gap-2 ${SHARED_SIZE_CLASSES}`;
+				: size === "transcript"
+					? TRANSCRIPT_ROW_CLASSES
+					: size === "segment"
+						? "h-[22px] gap-[5px] rounded-none px-[8px] text-[10px] font-medium"
+						: iconOnly
+							? `${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${SHARED_SIZE_CLASSES}`
+							: size === "sm"
+								? // Literal px from the mockup's `.btn`. `min-h`, not `h`, so a
+									// taller touch target composes without a collision.
+									"min-h-[25px] px-[10px] py-[4px] text-[11.5px] gap-[5px] rounded-[7px] font-normal"
+								: `h-9 px-4 text-sm gap-2 ${SHARED_SIZE_CLASSES}`;
 
 	/**
 	 * Nearly every variant declares a `hover:bg-*`, and `:hover` keeps matching while a

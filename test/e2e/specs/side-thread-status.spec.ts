@@ -536,10 +536,9 @@ test.describe("OpenCode child family idle", () => {
 					.some((envelope) => envelope._tag === "synchronized"),
 			)
 			.toBe(true);
+		// The turn already has its result, so it has no live head: Stop is what
+		// shows the held child still working.
 		await expect(chat.stopBtn).toBeVisible();
-		await expect(page.getByTestId("composer-status-header")).toContainText(
-			"Working",
-		);
 
 		// Only idle crosses this gate. No completion or text is released.
 		const familyBeforeIdle = family.length;

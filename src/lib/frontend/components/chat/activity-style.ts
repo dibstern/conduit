@@ -13,44 +13,52 @@ export interface PartStyle {
 	icon: string;
 	/** Foreground class, for the row icon. */
 	text: string;
-	/** Background class, for the strip segment. */
-	bg: string;
+	/** Semantic paint chosen by the timeline primitive. */
+	tone:
+		| "muted"
+		| "secondary"
+		| "thinking"
+		| "success"
+		| "agent"
+		| "error"
+		| "compaction"
+		| "live";
 }
 
 const CATEGORY_STYLE: Record<ToolCategory, PartStyle> = {
-	explore: { icon: "search", text: "text-text-muted", bg: "bg-text-muted" },
+	explore: { icon: "search", text: "text-text-muted", tone: "muted" },
 	edit: {
 		icon: "pencil",
 		text: "text-text-secondary",
-		bg: "bg-text-secondary",
+		tone: "secondary",
 	},
-	shell: { icon: "terminal", text: "text-text", bg: "bg-text-secondary" },
-	fetch: { icon: "external-link", text: "text-success", bg: "bg-success" },
+	shell: { icon: "terminal", text: "text-text", tone: "secondary" },
+	fetch: { icon: "external-link", text: "text-success", tone: "success" },
 	task: {
 		icon: "git-fork",
 		text: "text-harness-claude",
-		bg: "bg-harness-claude",
+		tone: "agent",
 	},
-	other: { icon: "settings-2", text: "text-text-muted", bg: "bg-text-muted" },
+	other: { icon: "settings-2", text: "text-text-muted", tone: "muted" },
 };
 
 const THINKING_STYLE: PartStyle = {
 	icon: "brain",
 	text: "text-thinking",
-	bg: "bg-thinking",
+	tone: "thinking",
 };
 
 const TEXT_STYLE: PartStyle = {
 	icon: "message-square",
 	text: "text-text-secondary",
-	bg: "bg-text-dimmer",
+	tone: "muted",
 };
 
 /** Full contrast, so the seam reads as a cut through the strip rather than work. */
 const COMPACTION_STYLE: PartStyle = {
 	icon: "minimize",
 	text: "text-text-muted",
-	bg: "bg-text",
+	tone: "compaction",
 };
 
 /** Tools whose own icon reads better than their category's. */
@@ -86,20 +94,21 @@ export function partStyle(part: ActivityPart): PartStyle {
  * Failures always read as failures, whatever kind of work they were. A step
  * breathes while it runs, and while a background task it launched is live.
  */
-export function segmentClass(
+export function segmentAppearance(
 	part: ActivityPart,
 	running: ReadonlySet<string>,
-): string {
+): { tone: PartStyle["tone"]; running: boolean } {
 	if (part.type === "tool") {
-		if (part.status === "error" || part.isError) return "bg-error";
+		if (part.status === "error" || part.isError)
+			return { tone: "error", running: false };
 		const taskId = part.metadata?.["providerTaskId"];
 		if (
 			typeof taskId === "string" && part.metadata?.["backgrounded"] === true
 				? running.has(taskId)
 				: part.status === "running" || part.status === "pending"
 		) {
-			return `${toolStyle(part).bg} animate-pulse`;
+			return { tone: "live", running: true };
 		}
 	}
-	return partStyle(part).bg;
+	return { tone: partStyle(part).tone, running: false };
 }
