@@ -54,6 +54,7 @@ import {
 	attachedProjectState,
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
+import { selection } from "../../../src/lib/frontend/stores/selection.svelte.js";
 import {
 	clearSessionState,
 	followFork,
@@ -100,7 +101,7 @@ describe("the server half holds only rows the server sent", () => {
 			"complete",
 		);
 		sessionState.currentId = "ses_child";
-		followFork({
+		followFork(selection.scope, {
 			projectSlug: "p",
 			sessionId: "ses_child",
 			forkedFrom: "ses_parent",

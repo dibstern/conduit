@@ -26,7 +26,6 @@ import {
 	rootBackgroundTasks,
 	sessionState,
 	setSearchQuery,
-	switchToSession,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	applySessionChange,
@@ -404,27 +403,6 @@ it("keeps the family list owned by the family feed", () => {
 	expect(sessionState.familySessions).toEqual([original]);
 	applySessionRemoved("root");
 	expect(sessionState.familySessions).toEqual([original]);
-});
-
-describe("switchToSession route shim", () => {
-	it("preserves the list query for the same session route", () => {
-		routerState.path = "/s/current";
-		routerState.search = "?group=project";
-		switchToSession("current", "project-a");
-		expect(routerState.search).toBe("?group=project");
-	});
-	it("replaces a superseded session route", () => {
-		const replaceState = vi.fn();
-		vi.stubGlobal("window", { history: { replaceState, pushState: vi.fn() } });
-		try {
-			routerState.path = "/s/old";
-			switchToSession("replacement", "project-a", undefined, { replace: true });
-			expect(routerState.path).toBe("/s/replacement");
-			expect(replaceState).toHaveBeenCalledTimes(1);
-		} finally {
-			vi.unstubAllGlobals();
-		}
-	});
 });
 
 // groupSessionsByDate (pure function)

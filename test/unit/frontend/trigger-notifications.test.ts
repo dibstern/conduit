@@ -33,6 +33,10 @@ vi.mock("../../../src/lib/frontend/utils/notif-settings.js", () => ({
 	saveNotifSettings: vi.fn(),
 }));
 
+vi.mock("../../../src/lib/frontend/stores/selection.svelte.js", () => ({
+	selection: { open: vi.fn() },
+}));
+
 // localStorage mock (needed by ws-notifications module init)
 
 function createLocalStorageMock(initial?: Record<string, string>) {

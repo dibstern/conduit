@@ -3,7 +3,8 @@
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import type { SessionProjection } from "../../stores/session.svelte.js";
-	import { isSessionSnoozed, isSessionWoken, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { isSessionSnoozed, isSessionWoken, sessionState } from "../../stores/session.svelte.js";
+	import { selection } from "../../stores/selection.svelte.js";
 	import { getSessionHref } from "../../stores/router.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
@@ -56,7 +57,7 @@
 			rpc("UnsnoozeSession", { sessionId: session.id, originId: getBrowserClientId() })
 				.catch(toastFailure("Couldn't clear the wake"));
 		}
-		if (session.id !== sessionState.currentId) switchToSession(session.id, session.projectSlug);
+		if (session.id !== sessionState.currentId) selection.open(session.id);
 	}
 </script>
 

@@ -22,9 +22,6 @@ vi.mock(
 		return {
 			...actual,
 			rootBackgroundTasks: () => navigation.tasks,
-			switchToSession: (id: string) => {
-				actual.sessionState.currentId = id;
-			},
 		};
 	},
 );

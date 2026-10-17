@@ -29,7 +29,7 @@
 	} from "../../utils/turns.js";
 	import { isSubagentToolName, subagentSessionId } from "../../utils/subagent-tools.js";
 	import { clock } from "../../stores/clock.svelte.js";
-	import { switchToSession } from "../../stores/session.svelte.js";
+	import { selection } from "../../stores/selection.svelte.js";
 	import { openTask } from "../session/background-tasks.svelte.js";
 	import type { BackgroundTask } from "../../../shared-types.js";
 	import { partStyle } from "./activity-style.js";
@@ -77,7 +77,7 @@
 
 	function openChildSession(description: string) {
 		if (!childSession) return;
-		if (!launch || typeof taskId !== "string") return switchToSession(childSession);
+		if (!launch || typeof taskId !== "string") return selection.open(childSession);
 		// Transcript step uuids read "<message id>/<part id>".
 		const [messageId = part.uuid, partId] = part.uuid.split(/\/(.*)/s);
 		openTask({ id: taskId, sessionId: childSession, description }, { messageId, partId });

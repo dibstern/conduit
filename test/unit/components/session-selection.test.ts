@@ -2,7 +2,9 @@
 import { ManagedRuntime, Stream } from "effect";
 import { flushSync, tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getSessionCommands } from "../../../src/lib/frontend/components/session/session-commands.js";
 import type { SavedTranscript } from "../../../src/lib/frontend/stores/saved-transcripts.js";
+import { initSWMessageListener } from "../../../src/lib/frontend/stores/ws-notifications.js";
 import { makeWsRpcClientsLayer } from "../../../src/lib/frontend/transport/shared-client.js";
 import { makeRpcWire } from "../../helpers/rpc-wire.js";
 import type { StubTable } from "../../helpers/stub-ws-rpc.js";
@@ -98,6 +100,7 @@ import * as module from "../../../src/lib/frontend/stores/selection.svelte.js";
 
 let stop: (() => void) | undefined;
 let stopCatalogs: (() => void) | undefined;
+const serviceWorker = new EventTarget();
 const calls = (tag: string) =>
 	wire.requests.filter((request) => request.tag === tag);
 const settle = async () => {
@@ -270,6 +273,112 @@ afterEach(async () => {
 });
 
 describe("session selection at the browser RPC wire", () => {
+	it.each([
+		"A",
+		"B",
+	])("a notification naming project %s opens its session through selection", async (slug) => {
+		Object.defineProperty(navigator, "serviceWorker", {
+			configurable: true,
+			value: serviceWorker,
+		});
+		initSWMessageListener();
+		attachedProjectState.slug = "A";
+		seedSessions([
+			{ id: `notification-${slug}`, title: "Notification", projectSlug: slug },
+		]);
+		table.AttachProject = () => ({ projectSlug: slug, sessionSlug: null });
+		start();
+		serviceWorker.dispatchEvent(
+			new MessageEvent("message", {
+				data: {
+					type: "navigate_to_session",
+					sessionId: `notification-${slug}`,
+					slug,
+					url: `/p/${slug}/s/notification-${slug}?legacy=1`,
+				},
+			}),
+		);
+		expect(routerState.path).toBe(`/s/notification-${slug}`);
+		expect(module.selection.shown).toEqual({
+			kind: "placed",
+			project: slug,
+			sessionId: `notification-${slug}`,
+		});
+		await vi.waitFor(() => expect(calls("ViewSession")).toHaveLength(1));
+		expect(calls("ViewSession")[0]?.payload).toEqual({
+			_tag: "ViewSession",
+			sessionId: `notification-${slug}`,
+			originId: expect.any(String),
+		});
+		expect(calls("ResolveSession")).toHaveLength(0);
+	});
+	it.each([
+		false,
+		true,
+	])("a fork reply follows only the scope at press, moved away: %s", async (moved) => {
+		const parent = {
+			id: `fork-parent-${moved}`,
+			title: "Parent",
+			projectSlug: "A",
+			accountId: null,
+			status: "idle" as const,
+		};
+		const other = {
+			id: `fork-other-${moved}`,
+			title: "Other",
+			projectSlug: "A",
+		};
+		seedSessions([parent, other]);
+		attachedProjectState.slug = "A";
+		module.selection.open(parent.id);
+		const pending = deferred<{
+			projectSlug: string;
+			sessionId: string;
+			forkedFrom: string;
+		}>();
+		table.ForkSession = () => pending.promise;
+		start();
+		const command = getSessionCommands(
+			parent,
+			Date.now(),
+			{ rename() {} },
+			"center",
+		).find((item) => "testId" in item && item.testId === "session-ctx-fork");
+		if (!command || !("run" in command))
+			throw new Error("missing fork command");
+		command.run();
+		await vi.waitFor(() => expect(calls("ForkSession")).toHaveLength(1));
+		expect(calls("ForkSession")[0]?.payload).toEqual({
+			_tag: "ForkSession",
+			sessionId: parent.id,
+			originId: expect.any(String),
+		});
+		if (moved) module.selection.open(other.id);
+		await settle();
+		const viewsBeforeReply = calls("ViewSession").length;
+		pending.resolve({
+			projectSlug: "ignored-response-project",
+			sessionId: `fork-reply-${moved}`,
+			forkedFrom: parent.id,
+		});
+		await settle();
+		expect(routerState.path).toBe(
+			`/s/${moved ? other.id : `fork-reply-${moved}`}`,
+		);
+		expect(module.selection.shown).toEqual({
+			kind: "placed",
+			project: "A",
+			sessionId: moved ? other.id : `fork-reply-${moved}`,
+		});
+		if (moved) expect(calls("ViewSession")).toHaveLength(viewsBeforeReply);
+		else {
+			await vi.waitFor(() =>
+				expect(calls("ViewSession")).toHaveLength(viewsBeforeReply + 1),
+			);
+			expect(sessionState.currentFork?.forkedFrom).toBe(parent.id);
+		}
+		expect(calls("ResolveSession")).toHaveLength(0);
+	});
 	it("follow without a captured scope neither places a session nor moves the route", () => {
 		replaceRoute("/?");
 		module.selection.follow(null, "follow-no-scope", "push");

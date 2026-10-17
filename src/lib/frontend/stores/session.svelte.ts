@@ -793,7 +793,10 @@ export function applySearchResultsResponse(
  * This tab forked: select the fork and keep its lineage until the family row
  * arrives. Only the forking tab announces it.
  */
-export function followFork(response: ForkSessionResponse): void {
+export function followFork(
+	from: typeof selection.scope,
+	response: ForkSessionResponse,
+): void {
 	clientSession.announcedFork = {
 		sessionId: response.sessionId,
 		forkedFrom: response.forkedFrom,
@@ -805,8 +808,7 @@ export function followFork(response: ForkSessionResponse): void {
 	showToast(
 		`Forked from "${findSession(response.forkedFrom)?.title || "session"}"`,
 	);
-	if (sessionState.currentId !== response.sessionId)
-		switchToSession(response.sessionId, response.projectSlug);
+	selection.follow(from, response.sessionId, "push");
 }
 
 // Components should wrap these in $derived() for reactive caching.
@@ -970,17 +972,6 @@ export function groupSessionsByDate(
 /** Set the sidebar's immediate local filter while the server query debounces. */
 export function setSearchQuery(query: string): void {
 	clientSession.searchQuery = query;
-}
-
-/** Expand-step shim: callers still use the old signature until i633.7. */
-export function switchToSession(
-	sessionId: string,
-	_projectSlug?: string,
-	_view?: typeof rpc<"ViewSession">,
-	options?: { replace?: boolean },
-): void {
-	if (options?.replace) replaceRoute(`/s/${sessionId}`);
-	else selection.open(sessionId);
 }
 
 /** Per-session UI state follows what selection shows, including leaving it. */

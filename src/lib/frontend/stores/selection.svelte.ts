@@ -19,6 +19,7 @@ import { viewInputDraft } from "./input-draft.js";
 import { getDraftProject, projectState } from "./project-state.svelte.js";
 import {
 	attachedProjectState,
+	DRAFT_PROJECT_PARAM,
 	getCurrentRoute,
 	getCurrentSearchParams,
 	getCurrentSessionId,
@@ -114,8 +115,8 @@ export const selection = {
 	openDraft(project: string | null): void {
 		const route = getCurrentRoute();
 		const params = getCurrentSearchParams();
-		if (project) params.set("project", project);
-		else params.delete("project");
+		if (project) params.set(DRAFT_PROJECT_PARAM, project);
+		else params.delete(DRAFT_PROJECT_PARAM);
 		const path = `/new${params.size ? `?${params}` : ""}`;
 		if (route.page === "chat" && route.draft) replaceRoute(path);
 		else navigate(path);

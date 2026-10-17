@@ -2,7 +2,7 @@
 	import { onMount, tick } from "svelte";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
-	import { switchToSession } from "../../stores/session.svelte.js";
+	import { selection } from "../../stores/selection.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { failureLine } from "../../transport/rpc-errors.js";
 	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
@@ -144,7 +144,7 @@
 		close();
 		// Viewing a shelf session needs no unsnooze or
 		// unsettle mutation, so preserve its shelf state when navigating.
-		switchToSession(result.id, result.projectSlug);
+		selection.open(result.id);
 	}
 
 	function handleInputKeydown(event: KeyboardEvent): void {

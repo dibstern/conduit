@@ -6,7 +6,7 @@
 	import { getAvailableInstances, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
 	import { getInstanceById } from "../../stores/instance.svelte.js";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
-	import { DRAFT_PROJECT_PARAM, getCurrentSearchParams, replaceRoute } from "../../stores/router.svelte.js";
+	import { selection } from "../../stores/selection.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
@@ -105,9 +105,7 @@
 		newWorktree = false;
 		worktreeBase = null;
 		modeChosen = false;
-		const params = getCurrentSearchParams();
-		params.set(DRAFT_PROJECT_PARAM, next);
-		replaceRoute(`/new?${params}`);
+		selection.openDraft(next);
 	}
 
 	async function openWorktrees() {

@@ -1364,7 +1364,7 @@ test("an inbox-queued reply clears guessed working and renders the queued messag
 test("ForkSession response selects the fork and restores its draft", async ({
 	page,
 	harness,
-}) => {
+}, testInfo) => {
 	const { rpc } = await setup(page);
 	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
@@ -1375,6 +1375,108 @@ test("ForkSession response selects the fork and restores its draft", async ({
 	await rpc.waitForRequest((request) => request.tag === "ForkSession");
 	await expect(page).toHaveURL(new RegExp(`/s/${forked}$`));
 	await expect(page.locator("#input")).toHaveValue(`Draft for ${forked}`);
+	await page.goBack();
+	await expect(page).toHaveURL(new RegExp(`/s/${seed}$`));
+	await expect(page.locator("#input")).toHaveValue("Seed draft");
+	await testInfo.attach("fork-back-to-parent", {
+		body: await page.screenshot(),
+		contentType: "image/png",
+	});
+});
+
+test("a fork reply after opening another session leaves its route and composer alone", async ({
+	page,
+	harness,
+}, testInfo) => {
+	let completeFork!: (reply: {
+		projectSlug: string;
+		sessionId: string;
+		forkedFrom: string;
+	}) => void;
+	const { rpc } = await setup(page, {
+		ForkSession: () =>
+			new Promise((resolve) => {
+				completeFork = resolve;
+			}),
+	});
+	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await expect(page.locator("#input")).toHaveValue("Seed draft");
+	const item = page.locator(`[data-session-id="${seed}"]`);
+	await item.hover();
+	await item.locator(".session-more-btn").click();
+	await page.getByTestId("session-ctx-fork").click();
+	await rpc.waitForRequest((request) => request.tag === "ForkSession");
+	await page
+		.locator(`[data-session-id="${survivor}"]`)
+		.click({ position: { x: 48, y: 12 } });
+	await expect(page.locator("#input")).toHaveValue(`Draft for ${survivor}`);
+	await page.locator("#input").fill("Keep the other session open");
+	completeFork({ projectSlug, sessionId: forked, forkedFrom: seed });
+	await expect(
+		page.getByRole("status").filter({ hasText: 'Forked from "Current"' }),
+	).toBeVisible();
+	await expect(page).toHaveURL(new RegExp(`/s/${survivor}$`));
+	await expect(page.locator("#input")).toHaveValue(
+		"Keep the other session open",
+	);
+	expect(
+		rpc
+			.getRequests()
+			.filter(
+				(request) =>
+					request.tag === "ViewSession" &&
+					request.payload["sessionId"] === forked,
+			),
+	).toEqual([]);
+	await testInfo.attach("late-fork-keeps-selection", {
+		body: await page.screenshot(),
+		contentType: "image/png",
+	});
+});
+
+test("New session pushes from a session and replaces an existing draft entry", async ({
+	page,
+	harness,
+}, testInfo) => {
+	const { rpc } = await setup(page);
+	await page.goto(`${harness.relayBaseUrl}/s/${seed}?keep=draft-history`);
+	await expect(page.locator("#input")).toHaveValue("Seed draft");
+	await page.locator("#new-session-btn").click();
+	await expect(page).toHaveURL(
+		`${harness.relayBaseUrl}/new?keep=draft-history&project=${projectSlug}`,
+	);
+	await expect(page.getByTestId("draft-project-chip")).toContainText(
+		projectSlug,
+	);
+	await page.goBack();
+	await expect(page).toHaveURL(
+		`${harness.relayBaseUrl}/s/${seed}?keep=draft-history`,
+	);
+	await page.goForward();
+	// An unpinned draft is a valid link; New pins the project's default.
+	await page.evaluate(() => {
+		window.history.replaceState(null, "", "/new?keep=draft-history");
+		window.dispatchEvent(new PopStateEvent("popstate"));
+	});
+	await expect(page.getByTestId("draft-project-chip")).toContainText(
+		projectSlug,
+	);
+	await page.locator("#new-session-btn").click();
+	await expect(page).toHaveURL(
+		`${harness.relayBaseUrl}/new?keep=draft-history&project=${projectSlug}`,
+	);
+	await page.goBack();
+	await expect(page).toHaveURL(
+		`${harness.relayBaseUrl}/s/${seed}?keep=draft-history`,
+	);
+	await expect(page.locator("#input")).toHaveValue("Seed draft");
+	expect(
+		rpc.getRequests().filter((request) => request.tag === "CreateSession"),
+	).toEqual([]);
+	await testInfo.attach("draft-back-to-session", {
+		body: await page.screenshot(),
+		contentType: "image/png",
+	});
 });
 
 test("deleting the viewed session selects the next sidebar row and replaces history", async ({

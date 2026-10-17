@@ -111,6 +111,7 @@ vi.mock("../../../src/lib/frontend/stores/selection.svelte.js", async () => {
 	return {
 		watchSelection: vi.fn(() => () => {}),
 		selection: {
+			open: vi.fn(),
 			get shown() {
 				const route = getCurrentRoute();
 				return route.page === "chat" && route.sessionId
@@ -128,8 +129,6 @@ vi.mock("../../../src/lib/frontend/stores/ws-listeners.js", () => ({
 	}),
 }));
 vi.mock("../../../src/lib/frontend/stores/ws-notifications.js", () => ({
-	onNavigateToSession: vi.fn(),
-	clearNavigateToSession: vi.fn(),
 	initSWMessageListener: vi.fn(),
 	reconcilePushActive: vi.fn(async () => {}),
 }));
@@ -190,7 +189,6 @@ vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
 	clearSessionState: vi.fn(),
 	findSession: vi.fn(),
 	loadDaemonSessions: vi.fn(async () => {}),
-	switchToSession: vi.fn(),
 }));
 
 vi.mock("../../../src/lib/frontend/stores/session-list.svelte.js", () => ({
