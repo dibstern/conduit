@@ -35,8 +35,6 @@
 		SIDEBAR_MAX_WIDTH,
 	} from "../../stores/ui.svelte.js";
 	import {
-		onNavigateToSession,
-		clearNavigateToSession,
 		initSWMessageListener,
 		reconcilePushActive,
 	} from "../../stores/ws-notifications.js";
@@ -45,7 +43,7 @@
 	import { attachedProjectState, getCurrentRoute, getCurrentSlug, getCurrentSearchParams, routerState } from "../../stores/router.svelte.js";
 	import { clearMessages, draftSendIn } from "../../stores/chat.svelte.js";
 	import { terminalState, destroyAll, viewPtys } from "../../stores/terminal.svelte.js";
-	import { clearSessionState, findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { clearSessionState, findSession, sessionState } from "../../stores/session.svelte.js";
 	import { attachSessionList, detachSessionList, drawSavedShell, onShellSynchronized } from "../../stores/session-list.svelte.js";
 	import { attachApprovals, detachApprovals } from "../../stores/approvals.js";
 	import { selection, watchSelection } from "../../stores/selection.svelte.js";
@@ -415,7 +413,6 @@
 					if (generation === attachGeneration) toastFailure("Failed to load projects")(error);
 				});
 		});
-		onNavigateToSession((sessionId) => switchToSession(sessionId));
 		initSWMessageListener();
 		return () => {
 			attachGeneration++;
@@ -423,7 +420,6 @@
 			detachApprovals();
 			unsubscribe();
 			unsubscribeShell();
-			clearNavigateToSession();
 		};
 	});
 

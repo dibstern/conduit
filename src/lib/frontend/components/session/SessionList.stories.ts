@@ -15,6 +15,7 @@ import {
 } from "../../stores/session.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { mockSessionsAllGroups } from "../../stories/mocks.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import type { SessionInfo } from "../../types.js";
 import SessionList from "./SessionList.svelte";
@@ -268,8 +269,7 @@ export const WithItems: Story = {
 		seedSessions([...mockSessionsAllGroups]);
 		const firstSession = mockSessionsAllGroups[0];
 		if (firstSession !== undefined) {
-			sessionState.currentId = firstSession.id;
-			routerState.path = `/s/${sessionState.currentId}`;
+			openSessionForSetup(firstSession.id, "conduit");
 		}
 	},
 };

@@ -13,6 +13,7 @@ import {
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import {
 	clearSessionSearch,
 	seedDaemonSessions,
@@ -38,7 +39,7 @@ describe("SessionList daemon sessions", () => {
 		seedDaemonSessions([]);
 		clearSessionSearch();
 		sessionState.searchQuery = "";
-		sessionState.currentId = "local-session";
+		openSessionForSetup("local-session", "current-project");
 		projectState.projects = [
 			{
 				slug: "current-project",

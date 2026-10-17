@@ -51,6 +51,7 @@ import {
 	getSessionIndicator,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 beforeEach(() => {
 	clearMessages();
@@ -60,7 +61,7 @@ beforeEach(() => {
 		["session-a", "session-b", "session-c"].map((id) => ({ id, title: "" })),
 	);
 	seedFamilySessions([]);
-	sessionState.currentId = "session-a";
+	openSessionForSetup("session-a", "project-a");
 	seedSessions([
 		...sessionState.sessions.values(),
 		...["session-a", "session-b", "session-c"].map((id) => ({

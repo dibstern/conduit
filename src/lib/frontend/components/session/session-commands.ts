@@ -1,5 +1,6 @@
 import { getBrowserClientId } from "../../stores/client-identity.js";
 import { getCurrentSlug } from "../../stores/router.svelte.js";
+import { selection } from "../../stores/selection.svelte.js";
 import { followFork, isSessionSnoozed } from "../../stores/session.svelte.js";
 import { refreshListedSessions } from "../../stores/session-list.svelte.js";
 import { openSnoozePicker } from "../../stores/snooze-picker.svelte.js";
@@ -283,8 +284,9 @@ async function remove(
 function fork(session: SessionInfo) {
 	const input = rpcInput(session);
 	if (!input) return;
+	const from = selection.scope;
 	void rpc("ForkSession", input)
-		.then(followFork)
+		.then((response) => followFork(from, response))
 		.catch(toastFailure("Failed to fork session"));
 }
 

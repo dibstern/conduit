@@ -61,10 +61,8 @@ import {
 	attachedProjectState,
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
-import {
-	clearSessionState,
-	switchToSession,
-} from "../../../src/lib/frontend/stores/session.svelte.js";
+import { selection } from "../../../src/lib/frontend/stores/selection.svelte.js";
+import { clearSessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	applySessionChange,
 	resetSessionSubscription,
@@ -79,7 +77,7 @@ function deferred<T>() {
 }
 
 function select(sessionId: string) {
-	switchToSession(sessionId, "project-a");
+	selection.open(sessionId);
 }
 
 beforeEach(() => {

@@ -20,6 +20,7 @@ import {
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { WsRpcError } from "../../../src/lib/frontend/transport/ws-rpc.js";
 import { rpc as callRpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import {
@@ -95,7 +96,7 @@ beforeEach(() => {
 	seedDaemonSessions([]);
 	sessionState.searchQuery = "";
 	clearSessionSearch();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 	sessionState.now = Date.now();
 });
 afterEach(() => {
@@ -647,7 +648,7 @@ describe("sidebar pick", () => {
 	});
 
 	it("reports an unread row seen up to its latest turn end, even when it is already open", async () => {
-		sessionState.currentId = "unread";
+		openSessionForSetup("unread", "current-project");
 		render(SessionList);
 		await pick("unread");
 		expect(callRpc).toHaveBeenCalledExactlyOnceWith("MarkSessionSeen", {

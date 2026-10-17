@@ -69,10 +69,11 @@ import {
 	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 beforeEach(() => {
 	clearMessages();
-	sessionState.currentId = "session-a";
+	openSessionForSetup("session-a", "project-a");
 	// Register sessions
 	seedSessions([
 		...sessionState.sessions.values(),
@@ -113,7 +114,7 @@ describe("Phase does not leak between sessions", () => {
 		const slotA = getOrCreateSessionSlot("session-a");
 		slotA.activity.phase = "streaming";
 
-		sessionState.currentId = "session-a";
+		openSessionForSetup("session-a", "project-a");
 		// currentChat() composes activity + messages for the current session
 		expect(currentChat().phase).toBe("streaming");
 	});

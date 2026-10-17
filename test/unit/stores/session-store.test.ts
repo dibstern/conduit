@@ -26,8 +26,8 @@ import {
 	rootBackgroundTasks,
 	sessionState,
 	setSearchQuery,
-	switchToSession,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import {
 	applySessionChange,
 	sessionSubscription,
@@ -79,7 +79,7 @@ function daysAgoAt(ref: Date, days: number, hour: number): Date {
 
 beforeEach(() => {
 	clearSessionState();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 	sessionState.searchQuery = "";
 	clearDiscoveryState();
 	routerState.path = "/s/old-session";
@@ -96,7 +96,7 @@ it.each([
 		id: "dotfiles-session",
 		projectSlug: "dotfiles",
 	});
-	sessionState.currentId = foreign.id;
+	openSessionForSetup(foreign.id, foreign.projectSlug);
 	if (source === "daemon") seedDaemonSessions([foreign]);
 	else seedSearchResults([foreign]);
 	expect(findSession(foreign.id)?.projectSlug).toBe("dotfiles");
@@ -311,7 +311,7 @@ it("forgets chat without changing the route when a subscription snapshot omits a
 		],
 	});
 	getOrCreateSessionSlot("gone");
-	sessionState.currentId = "gone";
+	openSessionForSetup("gone", "project-a");
 
 	applySessionChange({ _tag: "snapshot", sequence: 11, rows: [] });
 
@@ -334,7 +334,7 @@ it("keeps chat and selection when a root only leaves the list", () => {
 		},
 	});
 	getOrCreateSessionSlot("forked");
-	sessionState.currentId = "forked";
+	openSessionForSetup("forked", "project-a");
 
 	// It gained a parent: out of the sidebar, but not deleted.
 	applySessionChange({ _tag: "remove", sequence: 11, id: "forked" });
@@ -357,7 +357,7 @@ it("forgets chat and selection when the subscription removes a session", () => {
 		},
 	});
 	getOrCreateSessionSlot("gone");
-	sessionState.currentId = "gone";
+	openSessionForSetup("gone", "project-a");
 
 	applySessionChange({
 		_tag: "remove",
@@ -404,27 +404,6 @@ it("keeps the family list owned by the family feed", () => {
 	expect(sessionState.familySessions).toEqual([original]);
 	applySessionRemoved("root");
 	expect(sessionState.familySessions).toEqual([original]);
-});
-
-describe("switchToSession route shim", () => {
-	it("preserves the list query for the same session route", () => {
-		routerState.path = "/s/current";
-		routerState.search = "?group=project";
-		switchToSession("current", "project-a");
-		expect(routerState.search).toBe("?group=project");
-	});
-	it("replaces a superseded session route", () => {
-		const replaceState = vi.fn();
-		vi.stubGlobal("window", { history: { replaceState, pushState: vi.fn() } });
-		try {
-			routerState.path = "/s/old";
-			switchToSession("replacement", "project-a", undefined, { replace: true });
-			expect(routerState.path).toBe("/s/replacement");
-			expect(replaceState).toHaveBeenCalledTimes(1);
-		} finally {
-			vi.unstubAllGlobals();
-		}
-	});
 });
 
 // groupSessionsByDate (pure function)

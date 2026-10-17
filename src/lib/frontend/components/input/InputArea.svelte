@@ -63,7 +63,7 @@
 		filterFiles,
 	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
-	import { findSession, isSessionSnoozed, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { findSession, isSessionSnoozed, sessionState } from "../../stores/session.svelte.js";
 	import { selection } from "../../stores/selection.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { getCurrentRoute, getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
@@ -175,7 +175,7 @@
 	// A queued prompt waits in the tray, so the transcript's last turn is the started one.
 	const turn = $derived(segmentTurns(currentChat().messages, isProcessing()).at(-1));
 	const paused = $derived(turn !== undefined && isPaused(turn));
-	const turnControl = $derived(readTurn(sessionState.currentId));
+	const turnControl = $derived(readTurn());
 	const working = $derived(turnControl.working);
 	const elapsed = $derived.by(() => {
 		if (!turn) return undefined;
@@ -527,14 +527,7 @@
 	const HIGHLIGHT_MAX_CHARS = 20_000;
 	const plainText = $derived(inputText.length > HIGHLIGHT_MAX_CHARS);
 
-	const draftProject = $derived(projectState.projects.find((project) => project.slug === getDraftProject()));
-	const unsupportedDraftFolders = $derived(
-		!sessionState.currentId && (draftProject?.folders.length ?? 0) > 1 &&
-		getAvailableInstances().find((instance) => instance.id === getEffectiveInstanceId())?.capabilities?.supportsMultiFolder === false,
-	);
-	// A session drawn from its saved page takes sends once the server places it.
-	const unplaced = $derived(selection.shown.kind === "placing" || selection.shown.kind === "drawn");
-	const canSend = $derived(!readOnlySubagent && !unsupportedDraftFolders && !unplaced && (sessionState.currentId !== null || getDraftPick() !== undefined || (instanceState.loaded && !getEffectiveInstanceId())) && (inputText.trim().length > 0 || pendingImages.length > 0));
+	const canSend = $derived(!readOnlySubagent && turnControl.ready && (inputText.trim().length > 0 || pendingImages.length > 0));
 	const sendButtonLabel = $derived(
 		sendMode === "at-reset"
 			? `Send at ${sendAtTime}`
@@ -542,7 +535,7 @@
 				? `Send on ${switchTarget.name}`
 			: permissionsState.pendingQuestions.some((question) => question.sessionId === sessionState.currentId)
 				? "Reply"
-				: isProcessing()
+				: working
 					? "Queue message"
 					: "Send",
 	);
@@ -722,6 +715,7 @@
 
 	async function startSideThread(question: string | undefined): Promise<boolean> {
 		if (startingSideThread) return false;
+		const from = selection.scope;
 		const parentSessionId = sessionState.currentId;
 		const projectSlug = parentSessionId ? findSession(parentSessionId)?.projectSlug ?? getCurrentSlug() : null;
 		if (!parentSessionId) {
@@ -743,19 +737,31 @@
 		try {
 			const images = draftImages.map((image) => image.dataUrl);
 			const outcome = await send({
+				from,
 				sideThread: { sessionId: parentSessionId, title: question },
 				delivery: "queue",
 				inputId,
 				text: await withReferences(toProviderCommands(question, providerBuiltinNameSet), projectSlug),
 				...(images.length > 0 ? { images } : {}),
-				onCreated: (sessionId) => {
-					sideThreadAttempt = undefined;
-					if (sessionState.currentId === parentSessionId && inputText === draftText && pendingImages === draftImages) {
-						clearComposer();
-						switchToSession(sessionId, projectSlug ?? undefined);
-					}
-				},
 			});
+			if (outcome.kind === "started") {
+				sideThreadAttempt = undefined;
+				// Following may already have saved the parent's draft and restored the new session's.
+				const parentText = previousSessionId === parentSessionId ? inputText : inputDrafts.get(parentSessionId);
+				if (parentText === draftText && pendingImages === draftImages) {
+					inputDrafts.delete(parentSessionId);
+					if (previousSessionId === parentSessionId) {
+						inputText = "";
+						cursorPos = 0;
+						if (inputSyncTimer) {
+							clearTimeout(inputSyncTimer);
+							inputSyncTimer = null;
+						}
+					}
+					pendingImages = [];
+					void rpc("SyncInputDraft", { sessionId: parentSessionId, text: "", originId: getBrowserClientId() }).catch(() => undefined);
+				}
+			}
 			return outcome.kind === "started" || outcome.kind === "waiting";
 		} finally {
 			startingSideThread = false;
@@ -784,8 +790,7 @@
 	}
 
 	async function sendMessage(textOverride?: string, delivery: InputDelivery = "queue"): Promise<boolean> {
-		if (readOnlySubagent || unsupportedDraftFolders || unplaced) return false;
-		if (!sessionState.currentId && getEffectiveInstanceId() && !getDraftPick()) return false;
+		if (readOnlySubagent || !turnControl.ready) return false;
 		let text = textOverride ?? inputText.trim();
 		if (!text) return false;
 		if (textOverride === undefined) {
@@ -854,11 +859,9 @@
 				...(imageUrls ? { images: imageUrls } : {}),
 				...(draft ? {
 					draft,
-					onCreated: (sessionId: string) => {
+					onCreated: () => {
 						draftId = crypto.randomUUID();
 						storeNewSessionDraft("");
-						// Don't yank someone who opened another session during creation.
-						if (!sessionState.currentId) switchToSession(sessionId, projectSlug ?? undefined);
 					},
 				} : { sessionId: sentFromSessionId! }),
 			});

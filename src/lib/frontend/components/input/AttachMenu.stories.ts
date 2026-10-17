@@ -8,6 +8,7 @@ import {
 	selectInstance,
 } from "../../stores/discovery.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import AttachMenu from "./AttachMenu.svelte";
 
 function seedModel(provider: "claude" | "opencode"): void {
@@ -37,11 +38,11 @@ const meta = {
 	beforeEach: () => {
 		const previousSession = sessionState.currentId;
 		clearDiscoveryState();
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		seedModel("opencode");
 		return () => {
 			clearDiscoveryState();
-			sessionState.currentId = previousSession;
+			openSessionForSetup(previousSession);
 		};
 	},
 	args: {

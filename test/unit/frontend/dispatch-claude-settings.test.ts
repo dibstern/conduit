@@ -24,13 +24,13 @@ import {
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { applyInstanceListResponse } from "../../../src/lib/frontend/stores/instance.svelte.js";
 import { applyProjectSetting } from "../../../src/lib/frontend/stores/project-settings.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { GetModelsResponse } from "../../../src/lib/frontend/transport/ws-rpc.js";
 
 beforeEach(() => {
 	clearClaudeSettingsState();
 	clearDiscoveryState();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 	applyInstanceListResponse({
 		instances: (["claude", "opencode"] as const).map((driver) => ({
 			id: driver,
@@ -148,7 +148,7 @@ describe("project-settings dispatch", () => {
 		});
 		chooseModel({ modelId: "draft-choice", providerId: "openai" });
 		chooseVariant("high");
-		sessionState.currentId = "session-1";
+		openSessionForSetup("session-1", "project-a");
 		applyGetModelsResponse(
 			{
 				projectSlug: "project-a",
@@ -280,7 +280,7 @@ describe("project-settings dispatch", () => {
 	});
 
 	it("applies a defaultPermissionMode fact without changing the session mode", () => {
-		sessionState.currentId = "current-session";
+		openSessionForSetup("current-session", "project-a");
 		handlePermissionModeInfo({ mode: "acceptEdits" });
 
 		applyProjectSetting({
@@ -293,7 +293,7 @@ describe("project-settings dispatch", () => {
 	});
 
 	it("applies a defaultModel fact without changing the session variant", () => {
-		sessionState.currentId = "current-session";
+		openSessionForSetup("current-session", "project-a");
 		applyGetModelsResponse(
 			{
 				projectSlug: "project-a",

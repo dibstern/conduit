@@ -6,14 +6,14 @@ import {
 	getOrCreateSessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	enterRewindMode,
 	selectRewindMessage,
 } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 attachedProjectState.slug = "myapp";
-sessionState.currentId = "rewind-session";
+openSessionForSetup("rewind-session");
 getOrCreateSessionActivity("rewind-session");
 getOrCreateSessionMessages("rewind-session").messages = [
 	{

@@ -6,7 +6,6 @@ import {
 	phaseToProcessing,
 	resetChatState,
 } from "../../stores/chat.svelte.js";
-import { sessionState } from "../../stores/session.svelte.js";
 import {
 	mockAssistantSimple,
 	mockAssistantWithCode,
@@ -18,6 +17,7 @@ import {
 	mockToolRunning,
 	mockUserMessage,
 } from "../../stories/mocks.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import { turnFixtureMessages } from "../../stories/turn-fixtures.js";
 import type { ChatMessage } from "../../types.js";
 import MessageList from "./MessageList.svelte";
@@ -30,7 +30,7 @@ const testId = "story-msglist";
  */
 function seed(messages: ChatMessage[], processing = false) {
 	resetChatState();
-	sessionState.currentId = testId;
+	openSessionForSetup(testId, "conduit");
 	const activity = getOrCreateSessionActivity(testId);
 	getOrCreateSessionMessages(testId).messages = [...messages];
 	if (processing) phaseToProcessing(activity);

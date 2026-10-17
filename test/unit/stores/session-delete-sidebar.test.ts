@@ -47,6 +47,7 @@ import {
 	getFilteredSessions,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 
 const VICTIM = {
@@ -70,7 +71,7 @@ beforeEach(() => {
 	clearSessionState();
 	attachedProjectState.slug = "project-a";
 	routerState.search = "";
-	sessionState.currentId = "keeper";
+	openSessionForSetup("keeper", "project-a");
 	seedSessions([VICTIM, KEEPER]);
 });
 

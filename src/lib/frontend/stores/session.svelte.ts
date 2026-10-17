@@ -45,18 +45,14 @@ import {
 } from "./discovery.svelte.js";
 import { goalDetails, sessionGoals } from "./goal.svelte.js";
 import { getProjectGroup } from "./project-state.svelte.js";
-import {
-	attachedProjectState,
-	getCurrentSlug,
-	replaceRoute,
-} from "./router.svelte.js";
+import { attachedProjectState, getCurrentSlug } from "./router.svelte.js";
 import { markSessionDeleted, selection } from "./selection.svelte.js";
 import { restoreServerUpdateBanner } from "./server-status.svelte.js";
 import type { SessionGrouping, SessionStatusFilter } from "./session-scope.js";
 import { getSessionScope } from "./session-scope.js";
 import { clearTodoState } from "./todo.svelte.js";
 import { applyTurnRow, deleteTurn, rebaseTurns } from "./turn.svelte.js";
-import { showToast, updateContextPercent } from "./ui.svelte.js";
+import { showToast } from "./ui.svelte.js";
 import { projectAttachedListeners } from "./ws-listeners.js";
 
 // Re-exported so chat.svelte.ts need not import the subscription directly,
@@ -231,10 +227,6 @@ export const sessionState = {
 		return clientSession.announcedFork?.sessionId === id
 			? clientSession.announcedFork
 			: null;
-	},
-	set currentId(id: string | null) {
-		if (id) selection.open(id);
-		else replaceRoute("/");
 	},
 	get searchQuery(): string {
 		return clientSession.searchQuery;
@@ -793,7 +785,10 @@ export function applySearchResultsResponse(
  * This tab forked: select the fork and keep its lineage until the family row
  * arrives. Only the forking tab announces it.
  */
-export function followFork(response: ForkSessionResponse): void {
+export function followFork(
+	from: typeof selection.scope,
+	response: ForkSessionResponse,
+): void {
 	clientSession.announcedFork = {
 		sessionId: response.sessionId,
 		forkedFrom: response.forkedFrom,
@@ -805,8 +800,7 @@ export function followFork(response: ForkSessionResponse): void {
 	showToast(
 		`Forked from "${findSession(response.forkedFrom)?.title || "session"}"`,
 	);
-	if (sessionState.currentId !== response.sessionId)
-		switchToSession(response.sessionId, response.projectSlug);
+	selection.follow(from, response.sessionId, "push");
 }
 
 // Components should wrap these in $derived() for reactive caching.
@@ -972,17 +966,6 @@ export function setSearchQuery(query: string): void {
 	clientSession.searchQuery = query;
 }
 
-/** Expand-step shim: callers still use the old signature until i633.7. */
-export function switchToSession(
-	sessionId: string,
-	_projectSlug?: string,
-	_view?: typeof rpc<"ViewSession">,
-	options?: { replace?: boolean },
-): void {
-	if (options?.replace) replaceRoute(`/s/${sessionId}`);
-	else selection.open(sessionId);
-}
-
 /** Per-session UI state follows what selection shows, including leaving it. */
 export function followShownSession(
 	sessionId: string | null,
@@ -998,7 +981,6 @@ export function followShownSession(
 	if (clientSession.announcedFork?.sessionId !== sessionId)
 		clientSession.announcedFork = null;
 	if (previousId !== sessionId) {
-		updateContextPercent(0);
 		clearTodoState();
 	}
 }

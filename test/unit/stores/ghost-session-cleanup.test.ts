@@ -57,12 +57,13 @@ import {
 	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 beforeEach(() => {
 	sessionActivity.clear();
 	sessionMessages.clear();
 	_resetLRU();
-	sessionState.currentId = "current-session";
+	openSessionForSetup("current-session", "project-a");
 	clearSessionState();
 	sessionState.searchQuery = "";
 	clearSessionState();
@@ -73,7 +74,7 @@ afterEach(() => {
 	sessionActivity.clear();
 	sessionMessages.clear();
 	_resetLRU();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 	clearSessionState();
 });
 
@@ -255,7 +256,7 @@ describe("shell snapshot omission", () => {
 describe("active-session teardown", () => {
 	it("feed removal for the active session cleans up state", () => {
 		const activeId = "active-session";
-		sessionState.currentId = activeId;
+		openSessionForSetup(activeId, "project-a");
 		seedSessions([
 			...sessionState.sessions.values(),
 			{ id: activeId, title: "Active", status: "idle" },
@@ -279,7 +280,6 @@ it("switching families preserves the target transcript and removes old family me
 	target.messages.messages = [
 		{ type: "user", uuid: "cached", text: "Keep this transcript" },
 	];
-	sessionState.currentId = "new-child";
 	seedFamilySessions([
 		{ id: "new-root", title: "New", status: "idle" },
 		{
@@ -289,6 +289,7 @@ it("switching families preserves the target transcript and removes old family me
 			parentID: "new-root",
 		},
 	]);
+	openSessionForSetup("new-child", "project-a");
 	expect(getOrCreateSessionSlot("new-child").messages.messages).toEqual(
 		target.messages.messages,
 	);

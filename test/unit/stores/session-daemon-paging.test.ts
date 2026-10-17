@@ -35,6 +35,7 @@ import {
 	sessionState,
 	setSearchQuery,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { ListDaemonSessionsResponse } from "../../../src/lib/frontend/transport/ws-rpc.js";
 import { rpc as callRpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 
@@ -85,7 +86,7 @@ beforeEach(() => {
 	seedRootSessions([]);
 	seedFamilySessions([]);
 	seedDaemonSessions([]);
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 	sessionState.searchQuery = "";
 	clearSessionSearch();
 	routerState.path = "/";

@@ -19,6 +19,7 @@ import { viewInputDraft } from "./input-draft.js";
 import { getDraftProject, projectState } from "./project-state.svelte.js";
 import {
 	attachedProjectState,
+	DRAFT_PROJECT_PARAM,
 	getCurrentRoute,
 	getCurrentSearchParams,
 	getCurrentSessionId,
@@ -93,11 +94,16 @@ const scope = $derived<{
 			: shown.kind === "none" &&
 					getCurrentRoute().page === "chat" &&
 					attachedProjectState.slug
-				? { project: attachedProjectState.slug, sessionId: null }
+				? {
+						project: getDraftProject() ?? attachedProjectState.slug,
+						sessionId: null,
+					}
 				: null,
 );
 const wantedProject = $derived.by(() => {
 	if (shown.kind === "placed" || shown.kind === "draft") return shown.project;
+	if (shown.kind === "none" && scope && getDraftProject() !== null)
+		return scope.project;
 	const listScope = getSessionScope();
 	return getScopeGroupKey(listScope) === null ? listScope : null;
 });
@@ -109,11 +115,23 @@ export const selection = {
 	openDraft(project: string | null): void {
 		const route = getCurrentRoute();
 		const params = getCurrentSearchParams();
-		if (project) params.set("project", project);
-		else params.delete("project");
+		if (project) params.set(DRAFT_PROJECT_PARAM, project);
+		else params.delete(DRAFT_PROJECT_PARAM);
 		const path = `/new${params.size ? `?${params}` : ""}`;
 		if (route.page === "chat" && route.draft) replaceRoute(path);
 		else navigate(path);
+	},
+	follow(
+		from: typeof scope,
+		sessionId: string,
+		history: "push" | "replace",
+	): void {
+		if (!from) return;
+		placement.set(sessionId, { project: from.project });
+		if (scope?.project !== from.project || scope.sessionId !== from.sessionId)
+			return;
+		if (history === "replace") replaceRoute(`/s/${sessionId}`);
+		else navigate(`/s/${sessionId}`);
 	},
 	get shown(): Shown {
 		return shown;
