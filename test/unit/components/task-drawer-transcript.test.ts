@@ -38,6 +38,7 @@ vi.mock(
 	}),
 );
 
+import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/message-surfacing.js";
 import MessageList from "../../../src/lib/frontend/components/chat/MessageList.svelte";
 import TaskDrawer from "../../../src/lib/frontend/components/session/TaskDrawer.svelte";
 import {
@@ -47,7 +48,13 @@ import {
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import {
+	messageSurfacing,
+	sessionSurfaceLevel,
+	setSessionSurfaceLevel,
+} from "../../../src/lib/frontend/stores/message-surfacing.svelte.js";
 import { permissionsState } from "../../../src/lib/frontend/stores/permissions.svelte.js";
+import { reveal } from "../../../src/lib/frontend/stores/reveal.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	requestTranscriptFollow,
@@ -409,5 +416,186 @@ describe("Task drawer transcript", () => {
 			false,
 		);
 		expect(within(pane).queryByTestId("transcript-skeleton")).toBeNull();
+	});
+});
+
+describe("Surfacing in primary and child transcripts", () => {
+	const activeStatus = {
+		...DEFAULT_MESSAGE_SURFACING_SETTINGS,
+		enabled: true,
+		active: true,
+		key: { state: "valid" as const },
+	};
+	const scrollIntoView = vi.fn();
+
+	function seedSurfacing(id: string) {
+		getOrCreateSessionSlot(id).messages.messages = [
+			{ type: "user", uuid: `${id}-prompt`, text: "Inspect the routes" },
+			...["ask", "finding", "unjudged"].flatMap((category, index) => [
+				{
+					type: "assistant" as const,
+					uuid: `shared/${category}`,
+					messageId: "shared",
+					partId: category,
+					rawText: `${id} ${category}`,
+					html: `<p>${id} ${category}</p>`,
+					finalized: true,
+					...(category === "unjudged"
+						? {}
+						: {
+								surfacingOrdinal: index + 1,
+								surfacingProbabilities: { [category]: 1 },
+							}),
+				},
+				{
+					type: "thinking" as const,
+					uuid: `${id}-thinking-${index}`,
+					text: "Inspecting",
+					done: true,
+				},
+			]),
+		];
+	}
+
+	beforeEach(() => {
+		const storage = new Map<string, string>();
+		vi.stubGlobal("localStorage", {
+			getItem: (key: string) => storage.get(key) ?? null,
+			setItem: (key: string, value: string) => storage.set(key, value),
+		});
+		messageSurfacing.status = activeStatus;
+		setSessionSurfaceLevel(parentId, null);
+		setSessionSurfaceLevel(childId, null);
+		seedSurfacing(parentId);
+		seedSurfacing(childId);
+		vi.stubGlobal("CSS", { escape: (value: string) => value });
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			callback(0);
+			return 0;
+		});
+		Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+			configurable: true,
+			value: scrollIntoView,
+		});
+	});
+
+	afterEach(() => {
+		messageSurfacing.status = { ...activeStatus, active: false };
+		setSessionSurfaceLevel(parentId, null);
+		setSessionSurfaceLevel(childId, null);
+		Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+	});
+
+	it("changes, persists, defaults and resets the primary session's level", async () => {
+		const view = render(MessageList);
+		const level = within(view.getByTestId("surfacing-level"));
+		await fireEvent.click(level.getByRole("radio", { name: "Key" }));
+		expect(sessionSurfaceLevel(parentId)).toBe("key");
+		expect(
+			JSON.parse(localStorage.getItem("surfacing-level-by-session") ?? "{}"),
+		).toMatchObject({ [parentId]: "key" });
+		await fireEvent.keyDown(
+			view.getByRole("button", { name: "Level options" }),
+			{ key: "Enter" },
+		);
+		rpc.call.mockResolvedValueOnce({ ...activeStatus, defaultLevel: "key" });
+		await fireEvent.click(
+			await view.findByRole("menuitem", { name: "Make default" }),
+		);
+		await waitFor(() => expect(sessionSurfaceLevel(parentId)).toBeUndefined());
+		expect(rpc.call).toHaveBeenCalledWith("UpdateMessageSurfacing", {
+			defaultLevel: "key",
+		});
+		await fireEvent.click(level.getByRole("radio", { name: "Balanced" }));
+		await fireEvent.keyDown(
+			view.getByRole("button", { name: "Level options" }),
+			{ key: "Enter" },
+		);
+		await fireEvent.click(
+			await view.findByRole("menuitem", { name: "Back to default" }),
+		);
+		expect(sessionSurfaceLevel(parentId)).toBeUndefined();
+		expect(
+			level.getByRole("radio", { name: "Key" }).getAttribute("aria-checked"),
+		).toBe("true");
+		getOrCreateSessionSlot(parentId).messages.messages = getOrCreateSessionSlot(
+			parentId,
+		).messages.messages.filter(
+			(part) => part.type !== "assistant" || part.partId !== "ask",
+		);
+		await settle();
+		await fireEvent.click(view.getByRole("button", { name: "Show All" }));
+		expect(sessionSurfaceLevel(parentId)).toBe("all");
+	});
+
+	it("opens a settled message without a verdict in the step log", async () => {
+		const view = render(MessageList);
+		expect(
+			view.container.querySelector('.step-log [data-part="shared/unjudged"]'),
+		).toBeNull();
+		expect(await reveal({ messageId: "shared", partId: "unjudged" })).toBe(
+			"landed",
+		);
+		expect(
+			view.container.querySelector('.step-log [data-part="shared/unjudged"]')
+				?.textContent,
+		).toContain(`${parentId} unjudged`);
+	});
+
+	it("reveals the child's Ask and numbered messages without changing the parent card", async () => {
+		const parent = within(render(MessageList).container);
+		const { pane } = mountDrawer();
+		const child = within(pane);
+		await fireEvent.click(child.getByTestId("surfacing-ask-chip"));
+		await waitFor(() =>
+			expect(
+				child.getByTestId("surfacing-msg-card").getAttribute("data-part"),
+			).toBe("shared/ask"),
+		);
+		expect(
+			parent.getByTestId("surfacing-msg-card").getAttribute("data-part"),
+		).toBe("shared/finding");
+		const turn = child.getByTestId("surfacing-card");
+		await fireEvent.keyDown(turn, { key: "2" });
+		await fireEvent.keyDown(turn, { key: "Enter" });
+		await waitFor(() =>
+			expect(
+				child.getByTestId("surfacing-msg-card").getAttribute("data-part"),
+			).toBe("shared/finding"),
+		);
+		await fireEvent.keyDown(turn, { key: "a" });
+		await waitFor(() =>
+			expect(
+				child.getByTestId("surfacing-msg-card").getAttribute("data-part"),
+			).toBe("shared/ask"),
+		);
+		expect(
+			parent.getByTestId("surfacing-msg-card").getAttribute("data-part"),
+		).toBe("shared/finding");
+		expect(sessionState.currentId).toBe(parentId);
+	});
+
+	it("pages the explicitly viewed child's history", async () => {
+		seedTranscript(childId, "Child reply");
+		const messages = getOrCreateSessionSlot(childId).messages;
+		messages.historyHasMore = true;
+		if (!messages.transcript) throw new Error("Missing child transcript");
+		messages.transcript.hasMore = true;
+		const { pane } = mountDrawer();
+		rpc.call.mockResolvedValueOnce({
+			projectSlug: "conduit",
+			sessionId: childId,
+			messages: [textRow("older-child", "Earlier child prompt", 1, "user")],
+			hasMore: false,
+		});
+		expect(await reveal({ sessionId: childId, messageId: "older-child" })).toBe(
+			"landed",
+		);
+		expect(rpc.call).toHaveBeenCalledWith("LoadMoreHistory", {
+			sessionId: childId,
+			before: `${childId}-reply`,
+		});
+		expect(within(pane).getByText("Earlier child prompt")).toBeTruthy();
+		expect(sessionState.currentId).toBe(parentId);
 	});
 });

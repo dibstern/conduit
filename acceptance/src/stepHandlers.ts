@@ -39,6 +39,7 @@ import { sessionRowsHandlers } from "./steps/sessionRows.js";
 import { sessionSkillsHandlers } from "./steps/sessionSkills.js";
 import { settingsGeneralHandlers } from "./steps/settingsGeneral.js";
 import { sideThreadsHandlers } from "./steps/sideThreads.js";
+import { surfacingCardHandlers } from "./steps/surfacingCard.js";
 import { taskDrillInHandlers } from "./steps/taskDrillIn.js";
 import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
 import { usageFooterMeterHandlers } from "./steps/usageFooterMeter.js";
@@ -58,6 +59,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...launchingRowsHandlers,
 	...taskDrillInHandlers,
 	...sideThreadsHandlers,
+	...surfacingCardHandlers,
 	...sessionGoalDetailsHandlers,
 	...sessionGoalHandlers,
 	...sessionSkillsHandlers,

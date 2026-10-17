@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import type { MessageSurfacingStatus } from "../../../src/lib/contracts/message-surfacing.js";
 import type {
 	GetModelsResponse,
 	GetSessionSkillsResponseSchema,
@@ -9,6 +10,8 @@ import type { WsMockControl } from "../../../test/e2e/helpers/ws-mock.js";
 
 export const relayControls = new WeakMap<Page, WsMockControl>();
 export const rpcControls = new WeakMap<Page, RpcMockControl>();
+/** Explicit opt-in for the surfacing acceptance scenarios. */
+export const mockMessageSurfacing = new WeakMap<Page, MessageSurfacingStatus>();
 export const effortOptions = new WeakMap<Page, string[]>();
 /** Quota reads made while the fixture seeds a draft through the picker. */
 export const pickerFixtureQuotaReads = new WeakMap<Page, number>();

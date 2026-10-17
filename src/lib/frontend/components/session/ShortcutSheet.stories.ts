@@ -12,3 +12,9 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+
+export const Surfacing: Story = { args: { surfacingActive: true } };
+export const SurfacingLight: Story = {
+	...Surfacing,
+	globals: { theme: "light" },
+};

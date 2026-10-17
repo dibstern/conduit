@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import { Schema } from "effect";
 import type { ClaudeSettingsOverrides } from "../../../src/lib/contracts/claude-settings.js";
+import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/message-surfacing.js";
 import {
 	InstanceListResponseSchema,
 	WsRpcError,
@@ -29,6 +30,7 @@ import {
 	inheritedClaudeCommitAttribution,
 	instanceSlug,
 	mockInstances,
+	mockMessageSurfacing,
 	mockSessionSkills,
 	openSessionRoute,
 	rejectedEffortSwitches,
@@ -638,6 +640,29 @@ export const mockAppHandlers: StepHandler[] = [
 					],
 				},
 				stubs: {
+					GetMessageSurfacing: () =>
+						mockMessageSurfacing.get(page) ?? {
+							...DEFAULT_MESSAGE_SURFACING_SETTINGS,
+							active: false,
+							key: { state: "none" },
+						},
+					UpdateMessageSurfacing: (patch) => {
+						const previous = mockMessageSurfacing.get(page);
+						if (!previous)
+							throw new Error("Surfacing settings were not seeded");
+						const next = {
+							...previous,
+							enabled: patch.enabled ?? previous.enabled,
+							defaultLevel: patch.defaultLevel ?? previous.defaultLevel,
+							tuningModel: patch.tuningModel ?? previous.tuningModel,
+							recap: {
+								model: patch.recap?.model ?? previous.recap.model,
+								when: patch.recap?.when ?? previous.recap.when,
+							},
+						};
+						mockMessageSurfacing.set(page, next);
+						return next;
+					},
 					ResolveSession: async () => ({ projectSlug: "myapp" }),
 					ViewSession: async () => ({ ok: true }),
 					CreateSession: async (payload) => {

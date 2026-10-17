@@ -1,7 +1,9 @@
 import { RpcSchema } from "@effect/rpc";
 import { expect, type Page, type WebSocketRoute } from "@playwright/test";
 import { Effect, Exit, Schema, Scope, Stream } from "effect";
+import { DEFAULT_CATEGORY_SET } from "../../../src/lib/contracts/category-set.js";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
+import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/message-surfacing.js";
 import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import {
 	type Alert,
@@ -834,6 +836,12 @@ export async function mockWsRpc(
 	const control = controls.get(page) ?? new RpcMockControl(page);
 	controls.set(page, control);
 	control.stubs = {
+		GetMessageSurfacing: () => ({
+			...DEFAULT_MESSAGE_SURFACING_SETTINGS,
+			active: false,
+			key: { state: "none" },
+		}),
+		GetCategorySet: () => DEFAULT_CATEGORY_SET,
 		"input.submit": ({ sessionId }) => ({
 			ok: true,
 			sessionId,

@@ -3,6 +3,7 @@
 <!-- Preserves element IDs and class names for E2E test compatibility. -->
 
 <script lang="ts">
+	import { loadMessageSurfacing } from "../../stores/message-surfacing.svelte.js";
 	import { onDestroy, onMount, tick, untrack } from "svelte";
 	import { Effect } from "effect";
 	import { disposeRuntime, runTransportEffect } from "../../transport/runtime.js";
@@ -460,7 +461,7 @@
 	// The version is daemon-wide, so it follows the connection, not the project:
 	// a reconnect after a restart can be a new build.
 	$effect(() => {
-		if (connected) void fetchCurrentVersion();
+		if (connected) { void fetchCurrentVersion(); void loadMessageSurfacing(); }
 	});
 
 	// iOS fires pagehide every time a standalone PWA is backgrounded, not only

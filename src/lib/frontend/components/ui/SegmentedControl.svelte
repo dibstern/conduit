@@ -72,9 +72,10 @@
 			value={option.value}
 			disabled={option.disabled}
 			data-testid={option.testId}
+			aria-label={option.shortLabel || option.detail ? option.label : undefined}
 			class={segmentedItemClass(variant, value === option.value)}
 		>
-			{option.label}
+			{#if option.shortLabel}<span class="max-md:hidden">{option.label}</span><span class="md:hidden">{option.shortLabel}</span>{:else}{option.label}{/if}{#if option.detail}<small class="font-mono text-[10.5px] text-text-muted">{option.detail}</small>{/if}
 		</RadioGroup.Item>
 	{/each}
 </RadioGroup.Root>
