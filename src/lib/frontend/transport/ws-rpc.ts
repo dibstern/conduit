@@ -47,6 +47,8 @@ export {
 	type InboxCommandResponse,
 	type InputDraftEnvelope,
 	type InstanceListResponse,
+	ListArchivedSessions,
+	type ListArchivedSessionsResponse,
 	ListDaemonSessions,
 	type ListDaemonSessionsResponse,
 	ListPtys,

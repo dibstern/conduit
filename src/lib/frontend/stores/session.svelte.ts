@@ -140,6 +140,7 @@ const clientSession = $state({
 		forkPointTimestamp?: number;
 	} | null,
 	searchQuery: "",
+	searchIncludeArchived: false,
 	daemonSessions: [] as SessionInfo[],
 	daemonUnavailableProjects: [] as string[],
 	daemonCursor: null as ListDaemonSessionsResponse["nextCursor"],
@@ -231,6 +232,9 @@ export const sessionState = {
 	},
 	get searchQuery(): string {
 		return clientSession.searchQuery;
+	},
+	get searchIncludeArchived(): boolean {
+		return clientSession.searchIncludeArchived;
 	},
 	set searchQuery(query: string) {
 		setSearchQuery(query);
@@ -711,6 +715,7 @@ let activeSearch: {
 	query: string;
 	roots: boolean;
 	scope: string | null;
+	includeArchived: boolean;
 } | null = null;
 let daemonSearchToken = 0;
 
@@ -725,7 +730,12 @@ export async function searchSessions(
 		return;
 	}
 	daemonSearchToken += 1;
-	activeSearch = { query: trimmed, roots, scope: getSessionScope() };
+	activeSearch = {
+		query: trimmed,
+		roots,
+		scope: getSessionScope(),
+		includeArchived: clientSession.searchIncludeArchived,
+	};
 	clientSession.searchCursor = null;
 	clientSession.searchHasMore = false;
 	// Results are left on screen until the new page lands. Blanking them first
@@ -753,6 +763,18 @@ export function clearSessionSearch(): void {
 	clientSession.searchCursor = null;
 	clientSession.searchHasMore = false;
 	clientSession.searchLoading = false;
+	clientSession.searchIncludeArchived = false;
+}
+
+export async function setSearchIncludeArchived(value: boolean): Promise<void> {
+	clientSession.searchIncludeArchived = value;
+	if (!value && clientSession.searchResults) {
+		clientSession.searchResults = clientSession.searchResults.filter(
+			(session) => session.archivedAt == null,
+		);
+	}
+	if (activeSearch)
+		await searchSessions(activeSearch.query, activeSearch.roots);
 }
 
 async function runSearchPage(token: number, replace: boolean): Promise<void> {
@@ -767,6 +789,7 @@ async function runSearchPage(token: number, replace: boolean): Promise<void> {
 			roots: search.roots,
 			search: search.query,
 			limit: DAEMON_SESSION_PAGE_SIZE,
+			...(search.includeArchived ? { includeArchived: true } : {}),
 			...(search.scope === null ? {} : { scope: search.scope }),
 			...(cursor === null ? {} : { cursor }),
 		});
@@ -985,6 +1008,7 @@ export function groupSessionsByDate(
 /** Set the sidebar's immediate local filter while the server query debounces. */
 export function setSearchQuery(query: string): void {
 	clientSession.searchQuery = query;
+	if (!query.trim()) clearSessionSearch();
 }
 
 /** Per-session UI state follows what selection shows, including leaving it. */

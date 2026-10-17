@@ -41,6 +41,18 @@ export const Active: Story = {
 	},
 };
 
+export const ArchivedSearchResult: Story = {
+	args: {
+		session: { ...mockSessionIdle, archivedAt: Date.now() - 86_400_000 },
+		active: false,
+	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByTestId("session-archived-badge"),
+		).toHaveTextContent("Archived");
+	},
+};
+
 export const Processing: Story = {
 	args: {
 		session: mockSessionProcessing,

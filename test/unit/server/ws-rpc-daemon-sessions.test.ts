@@ -85,6 +85,13 @@ describe("WsRpcServerLayer daemon sessions", () => {
 						Layer.merge(
 							makeTestHandlerLayer(),
 							Layer.succeed(DaemonSessionQueryServiceTag, {
+								listArchived: () =>
+									Effect.succeed({
+										sessions: [],
+										availability: [],
+										hasMore: false,
+										nextCursor: null,
+									}),
 								list: listDaemonSessions,
 							}),
 						),

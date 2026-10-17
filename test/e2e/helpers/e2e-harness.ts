@@ -21,7 +21,10 @@ import {
 	defaultDaemonConfig,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
-import { listDaemonSessions } from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
+import {
+	listArchivedSessions,
+	listDaemonSessions,
+} from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
 	DaemonSessionQueryServiceError,
@@ -336,6 +339,17 @@ export async function createReplayHarness(
 							daemonReadContext,
 							DaemonSessionQueryServiceTag,
 							{
+								listArchived: (query) =>
+									Effect.tryPromise({
+										try: () =>
+											stack.effectRuntime.runtime.runPromise(
+												listArchivedSessions(query).pipe(
+													Effect.provide(daemonReadContext),
+												),
+											),
+										catch: (cause) =>
+											new DaemonSessionQueryServiceError({ cause }),
+									}),
 								list: (query) =>
 									Effect.tryPromise({
 										try: () =>

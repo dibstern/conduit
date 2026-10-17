@@ -650,6 +650,18 @@ export const ListDaemonSessionsResponseSchema = Schema.Struct({
 	nextCursor: Schema.NullOr(DaemonSessionCursorSchema),
 });
 
+export const ArchivedSessionCursorSchema = Schema.Struct({
+	archivedAt: Schema.Number,
+	id: Schema.String,
+});
+
+export const ListArchivedSessionsResponseSchema = Schema.Struct({
+	sessions: Schema.Array(SessionInfoSchema),
+	availability: Schema.Array(ProjectSessionAvailabilitySchema),
+	hasMore: Schema.Boolean,
+	nextCursor: Schema.NullOr(ArchivedSessionCursorSchema),
+});
+
 export const CreateSessionResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	sessionId: Schema.String,
@@ -1032,6 +1044,8 @@ export type ProjectSessionAvailability =
 	typeof ProjectSessionAvailabilitySchema.Type;
 export type ListDaemonSessionsResponse =
 	typeof ListDaemonSessionsResponseSchema.Type;
+export type ListArchivedSessionsResponse =
+	typeof ListArchivedSessionsResponseSchema.Type;
 export type CreateSessionResponse = typeof CreateSessionResponseSchema.Type;
 export type ViewSessionResponse = typeof ViewSessionResponseSchema.Type;
 export type SubmitInputResponse = typeof SubmitInputResponseSchema.Type;
@@ -2419,10 +2433,23 @@ export class ListDaemonSessions extends Schema.TaggedRequest<ListDaemonSessions>
 			limit: Schema.optional(Schema.Number),
 			roots: Schema.optional(Schema.Boolean),
 			search: Schema.optional(Schema.String),
+			includeArchived: Schema.optional(Schema.Boolean),
 			cursor: Schema.optional(DaemonSessionCursorSchema),
 			// A project slug or encodeGroupScope's reserved /group/<key> value.
 			scope: Schema.optional(NonEmptyString),
 			exclude: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class ListArchivedSessions extends Schema.TaggedRequest<ListArchivedSessions>()(
+	"ListArchivedSessions",
+	{
+		failure: WsRpcError,
+		success: ListArchivedSessionsResponseSchema,
+		payload: {
+			limit: Schema.optional(Schema.Number),
+			cursor: Schema.optional(ArchivedSessionCursorSchema),
 		},
 	},
 ) {}
@@ -3169,6 +3196,7 @@ const wsRpcRequests = [
 	ClosePty,
 	PtyInput,
 	ListDaemonSessions,
+	ListArchivedSessions,
 	CreateSession,
 	ViewSession,
 	PreWarmSession,

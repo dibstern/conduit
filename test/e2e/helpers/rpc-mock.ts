@@ -971,6 +971,12 @@ export async function ensureMockTranscriptRpc(
 				hasMore: false,
 				nextCursor: null,
 			}),
+			ListArchivedSessions: () => ({
+				sessions: [],
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
+			}),
 		},
 	});
 }

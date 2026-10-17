@@ -680,7 +680,7 @@ describe("ReadQueryEffect.listSessions", () => {
 			).toEqual(["z", "y"]);
 			expect(
 				(yield* readQuery.listSessions(scope, {
-					before: { updatedAt: 200, id: "y" },
+					before: { at: 200, id: "y" },
 					limit: 2,
 				})).map((row) => row.id),
 			).toEqual(["x", "a"]);
