@@ -30,7 +30,9 @@
 
 	type Common = {
 		label: string;
+		labelSuffix?: Snippet;
 		description?: string;
+		descriptionTone?: "neutral" | "success" | "warning";
 		class?: string;
 		testId?: string;
 	};
@@ -61,9 +63,9 @@
 </script>
 
 {#snippet text()}
-	<span class="block text-[13.5px] max-md:text-[15px] text-text">{props.label}</span>
+	<span class="block text-[13.5px] max-md:text-[15px] text-text">{props.label}{#if props.labelSuffix}<span class="ml-1.5 inline-flex align-middle">{@render props.labelSuffix()}</span>{/if}</span>
 	{#if props.description}
-		<span class="mt-px block text-[12px] leading-[1.4] text-text-muted">{props.description}</span>
+		<span class="mt-px block text-[12px] leading-[1.4] {props.descriptionTone === 'success' ? 'text-success' : props.descriptionTone === 'warning' ? 'text-warning' : 'text-text-muted'}">{props.description}</span>
 	{/if}
 {/snippet}
 

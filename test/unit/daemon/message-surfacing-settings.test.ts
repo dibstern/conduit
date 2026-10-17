@@ -27,6 +27,8 @@ import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 // env precedence, credential removal, file permissions, and disabling mid-call.
 // Received 401s must survive cancellation during body cleanup or while a failed
 // replacement holds the lock, and must remain invalid after restarting.
+// Key ownership must remain visible after rejection/restart so environment keys
+// stay read-only, while stored keys remain editable and missing keys have no owner.
 const directories: string[] = [];
 const directory = () => {
 	const dir = mkdtempSync("/tmp/message-surfacing-");
@@ -54,7 +56,7 @@ describe("message surfacing settings", () => {
 				expect(yield* settings.get).toEqual({
 					enabled: false,
 					active: false,
-					key: { state: "none" },
+					key: { source: "none", rejected: false },
 					defaultLevel: "balanced",
 					recap: { model: "sonnet", when: "turn-end" },
 					tuningModel: "opus",
@@ -94,7 +96,10 @@ describe("message surfacing settings", () => {
 				enabled: true,
 				apiKey: "fake-secret-canary",
 			});
-			expect(result).toMatchObject({ active: true, key: { state: "valid" } });
+			expect(result).toMatchObject({
+				active: true,
+				key: { source: "stored", rejected: false },
+			});
 			expect(JSON.stringify(result)).not.toContain("fake-secret-canary");
 			expect(transport).toHaveBeenCalledTimes(1);
 			expect(transport).toHaveBeenCalledWith(
@@ -122,7 +127,7 @@ describe("message surfacing settings", () => {
 			expect(yield* restarted.get).toMatchObject({
 				enabled: true,
 				active: false,
-				key: { state: "none" },
+				key: { source: "none", rejected: false },
 			});
 			expect(
 				readFileSync(join(dir, "credentials/typesafe"), "utf8"),
@@ -149,7 +154,7 @@ describe("message surfacing settings", () => {
 				expect(JSON.stringify(failure)).not.toContain("fake-rejected");
 				expect(yield* settings.get).toMatchObject({
 					enabled: false,
-					key: { state: "valid" },
+					key: { source: "stored", rejected: false },
 				});
 			}),
 	);
@@ -170,7 +175,7 @@ describe("message surfacing settings", () => {
 				yield* Effect.either(settings.post({ state: "test" }));
 				expect(yield* settings.get).toMatchObject({
 					active: false,
-					key: { state: "invalid" },
+					key: { source: "stored", rejected: true },
 				});
 				const restarted = yield* makeMessageSurfacingSettings(dir, {
 					env: {},
@@ -181,13 +186,13 @@ describe("message surfacing settings", () => {
 				yield* restarted.update({ enabled: true });
 				expect(yield* restarted.get).toMatchObject({
 					active: false,
-					key: { state: "invalid" },
+					key: { source: "stored", rejected: true },
 				});
 				expect(transport).toHaveBeenCalledTimes(2);
 				yield* restarted.update({ apiKey: "fake-key" });
 				expect(yield* restarted.get).toMatchObject({
 					active: true,
-					key: { state: "valid" },
+					key: { source: "stored", rejected: false },
 				});
 			}),
 	);
@@ -265,7 +270,7 @@ describe("message surfacing settings", () => {
 					expect(Exit.isInterrupted(yield* Fiber.await(request))).toBe(true);
 					expect(yield* settings.get).toMatchObject({
 						active: false,
-						key: { state: "invalid" },
+						key: { source: "stored", rejected: true },
 					});
 					const restarted = yield* makeMessageSurfacingSettings(dir, {
 						env: {},
@@ -273,7 +278,7 @@ describe("message surfacing settings", () => {
 					});
 					expect(yield* restarted.get).toMatchObject({
 						active: false,
-						key: { state: "invalid" },
+						key: { source: "stored", rejected: true },
 					});
 					yield* Effect.either(restarted.post({}));
 					expect(transport).toHaveBeenCalledTimes(3);
@@ -298,7 +303,7 @@ describe("message surfacing settings", () => {
 				});
 				expect(yield* settings.get).toMatchObject({
 					active: true,
-					key: { state: "env" },
+					key: { source: "env", rejected: false },
 				});
 				expect(
 					(yield* Effect.either(settings.update({ apiKey: null })))._tag,
@@ -307,14 +312,23 @@ describe("message surfacing settings", () => {
 					async () => new Response(null, { status: 401 }),
 				);
 				yield* Effect.either(settings.post({}));
+				expect(yield* settings.get).toMatchObject({
+					active: false,
+					key: { source: "env", rejected: true },
+				});
 				const restarted = yield* makeMessageSurfacingSettings(dir, {
 					env,
 					transport,
 				});
 				expect(yield* restarted.get).toMatchObject({
 					active: false,
-					key: { state: "invalid" },
+					key: { source: "env", rejected: true },
 				});
+				for (const apiKey of [null, "fake-replacement"]) {
+					expect(
+						(yield* Effect.either(restarted.update({ apiKey })))._tag,
+					).toBe("Left");
+				}
 				yield* Effect.either(restarted.post({}));
 				expect(transport).toHaveBeenCalledTimes(2);
 				expect(
@@ -326,7 +340,7 @@ describe("message surfacing settings", () => {
 				});
 				expect(yield* changed.get).toMatchObject({
 					active: true,
-					key: { state: "env" },
+					key: { source: "env", rejected: false },
 				});
 				const withoutEnv = yield* makeMessageSurfacingSettings(dir, {
 					env: {},
@@ -334,7 +348,7 @@ describe("message surfacing settings", () => {
 				});
 				expect(yield* withoutEnv.get).toMatchObject({
 					active: true,
-					key: { state: "valid" },
+					key: { source: "stored", rejected: false },
 				});
 			}),
 	);
@@ -397,7 +411,7 @@ describe("message surfacing settings", () => {
 				yield* request.await;
 				expect(yield* settings.get).toMatchObject({
 					enabled: false,
-					key: { state: "valid" },
+					key: { source: "stored", rejected: false },
 				});
 				yield* Effect.either(settings.post({}));
 				expect(transport).toHaveBeenCalledTimes(3);
@@ -418,7 +432,7 @@ describe("message surfacing settings", () => {
 				);
 				expect(yield* client.GetMessageSurfacing({})).toMatchObject({
 					enabled: false,
-					key: { state: "none" },
+					key: { source: "none", rejected: false },
 				});
 				expect(
 					yield* client.UpdateMessageSurfacing({
@@ -460,7 +474,7 @@ describe("message surfacing settings", () => {
 						.pipe(Effect.provideService(RpcCaller, caller));
 					expect(result).toMatchObject({
 						active: true,
-						key: { state: "valid" },
+						key: { source: "stored", rejected: false },
 					});
 					expect(JSON.stringify(result)).not.toContain("fake-secret");
 				}

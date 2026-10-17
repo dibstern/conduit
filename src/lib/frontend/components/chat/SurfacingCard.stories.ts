@@ -96,7 +96,7 @@ const config = {
 		...DEFAULT_MESSAGE_SURFACING_SETTINGS,
 		enabled: true,
 		active: true,
-		key: { state: "valid" as const },
+		key: { source: "stored" as const, rejected: false },
 	},
 	categorySet: DEFAULT_CATEGORY_SET,
 };

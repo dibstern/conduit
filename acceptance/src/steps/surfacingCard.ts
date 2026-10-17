@@ -242,12 +242,11 @@ export const surfacingCardHandlers: StepHandler[] = [
 				enabled: match[1] !== "inactive",
 				active: match[1] === "active",
 				key: {
-					state:
-						match[1] === "active"
-							? "valid"
-							: match[1] === "invalid-key"
-								? "invalid"
-								: "none",
+					source:
+						match[1] === "active" || match[1] === "invalid-key"
+							? "stored"
+							: "none",
+					rejected: match[1] === "invalid-key",
 				},
 			});
 		},
@@ -994,6 +993,15 @@ export const surfacingCardHandlers: StepHandler[] = [
 					key,
 				);
 				expect(prevented, `Focused turn must consume ${key}`).toBe(true);
+				// "a" and "u" reveal a frame later; let it land so a later Escape isn't undone by it.
+				await page.evaluate(
+					() =>
+						new Promise<void>((resolve) =>
+							requestAnimationFrame(() =>
+								requestAnimationFrame(() => resolve()),
+							),
+						),
+				);
 				if (
 					(key === "+" || key === "−") &&
 					(await page.getByTestId("surfacing-mark-why").count()) > 0

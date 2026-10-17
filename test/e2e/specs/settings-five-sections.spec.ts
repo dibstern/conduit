@@ -19,6 +19,7 @@ const sections = [
 		"Claude",
 		"[data-testid=claude-setting-defaultPermissionMode-select]",
 	],
+	["surfacing", "Surfacing", "[data-testid=surfacing-settings-general]"],
 	["usage", "Usage", "#usage-settings"],
 	["server", "Server", "#instances-settings"],
 ] as const;
@@ -167,7 +168,7 @@ for (const [viewportName, viewport] of [
 			const back = page.getByTestId("settings-back-btn");
 			await expect(panel).toBeVisible();
 			await expect(panel.locator('[data-testid^="settings-tab-"]')).toHaveCount(
-				5,
+				sections.length,
 			);
 			expect(
 				await panel

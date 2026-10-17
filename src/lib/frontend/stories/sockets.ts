@@ -24,6 +24,7 @@ type Listener = (event?: unknown) => void;
 // socket an earlier story opened, so a story's configuration must reach sockets
 // it did not create.
 const failingRequests = new Set<string>();
+const replies = new Map<string, (payload: unknown) => unknown>();
 let sessionProject: string | null = null;
 let avatar: Avatar = {
 	choice: { kind: "initial" },
@@ -33,6 +34,17 @@ let avatar: Avatar = {
 
 export function seedStoryAvatar(value: Avatar): void {
 	avatar = value;
+}
+
+/** Unary fixtures use the same socket boundary as the app. */
+export function replyRpc(
+	tag: string,
+	reply: (payload: unknown) => unknown,
+): () => void {
+	replies.set(tag, reply);
+	return () => {
+		replies.delete(tag);
+	};
 }
 
 /**
@@ -145,6 +157,22 @@ export function connectedSocket(project: string | null = null): () => void {
 						}),
 					}),
 				);
+			}
+			const reply = replies.get(request.tag ?? "");
+			if (request._tag === "Request" && reply) {
+				let exit: unknown;
+				try {
+					exit = { _tag: "Success", value: reply(request.payload ?? {}) };
+				} catch (error) {
+					exit = { _tag: "Failure", cause: { _tag: "Fail", error } };
+				}
+				this.emit(
+					"message",
+					new MessageEvent("message", {
+						data: JSON.stringify({ _tag: "Exit", requestId: request.id, exit }),
+					}),
+				);
+				return;
 			}
 			// A session that exists opens on an empty transcript, already settled.
 			if (

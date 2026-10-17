@@ -853,7 +853,7 @@ export async function mockWsRpc(
 		GetMessageSurfacing: () => ({
 			...DEFAULT_MESSAGE_SURFACING_SETTINGS,
 			active: false,
-			key: { state: "none" },
+			key: { source: "none", rejected: false },
 		}),
 		GetCategorySet: () => DEFAULT_CATEGORY_SET,
 		"input.submit": ({ sessionId }) => ({

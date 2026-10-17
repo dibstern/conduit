@@ -6,7 +6,7 @@
 
 	let { open, onclose, surfacingActive }: { open: boolean; onclose: () => void; surfacingActive?: boolean } = $props();
 
-	const active = $derived(surfacingActive ?? (messageSurfacing.status.active && messageSurfacing.status.enabled && (messageSurfacing.status.key.state === "valid" || messageSurfacing.status.key.state === "env")));
+	const active = $derived(surfacingActive ?? (messageSurfacing.status.active && messageSurfacing.status.enabled && messageSurfacing.status.key.source !== "none" && !messageSurfacing.status.key.rejected));
 	const sections = $derived([
 		{
 			title: "Session list",

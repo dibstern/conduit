@@ -647,7 +647,7 @@ export const mockAppHandlers: StepHandler[] = [
 						mockMessageSurfacing.get(page) ?? {
 							...DEFAULT_MESSAGE_SURFACING_SETTINGS,
 							active: false,
-							key: { state: "none" },
+							key: { source: "none", rejected: false },
 						},
 					UpdateMessageSurfacing: (patch) => {
 						const previous = mockMessageSurfacing.get(page);

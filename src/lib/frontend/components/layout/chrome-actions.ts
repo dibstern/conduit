@@ -29,6 +29,7 @@ export type SettingsSection =
 	| "general"
 	| "models"
 	| "claude"
+	| "surfacing"
 	| "usage"
 	| "server";
 
