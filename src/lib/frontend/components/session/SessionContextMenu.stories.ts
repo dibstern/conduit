@@ -81,6 +81,12 @@ function phoneSheet(state: Partial<SessionInfo> = {}): Story {
 				"session-action-sheet",
 			);
 			await expect(
+				within(menu).getByTestId("session-sheet-header"),
+			).toBeVisible();
+			await expect(
+				within(menu).getByTestId("session-sheet-close"),
+			).toBeVisible();
+			await expect(
 				within(menu).getByRole("group", { name: "Triage" }),
 			).toBeVisible();
 			const group = within(menu).getByRole("group", {
@@ -106,6 +112,42 @@ export const PhoneDefault: Story = phoneSheet();
 export const PhoneDefaultLight: Story = {
 	...PhoneDefault,
 	globals: { theme: "light" },
+};
+export const PhoneUnknownBranch: Story = {
+	...PhoneDefault,
+	args: { ...PhoneDefault.args, branch: "" },
+	play: async () => {
+		const menu = await within(document.body).findByTestId(
+			"session-action-sheet",
+		);
+		await expect(
+			within(menu).getByTestId("session-sheet-header"),
+		).toHaveTextContent(mockSession.title);
+		expect(within(menu).queryByTestId("session-sheet-branch")).toBeNull();
+	},
+};
+export const PhoneUnknownBranchLight: Story = {
+	...PhoneUnknownBranch,
+	globals: { theme: "light" },
+};
+export const PhoneCloseReturnsFocus: Story = {
+	...PhoneDefault,
+	play: async () => {
+		const menu = await within(document.body).findByTestId(
+			"session-action-sheet",
+		);
+		await userEvent.click(within(menu).getByTestId("session-sheet-close"));
+		await waitFor(() =>
+			expect(
+				within(document.body).queryByTestId("session-action-sheet"),
+			).not.toBeInTheDocument(),
+		);
+		await waitFor(() =>
+			expect(
+				within(document.body).getByRole("button", { name: "Session actions" }),
+			).toHaveFocus(),
+		);
+	},
 };
 export const PhoneUnread: Story = phoneSheet({ unread: true });
 export const PhoneUnreadLight: Story = {

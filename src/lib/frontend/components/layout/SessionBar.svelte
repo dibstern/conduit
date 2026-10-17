@@ -45,14 +45,11 @@
 	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuCheckboxItem from "../ui/MenuCheckboxItem.svelte";
-	import MenuGroup from "../ui/MenuGroup.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
-	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import Tooltip from "../ui/Tooltip.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import SessionContextMenu from "../session/SessionContextMenu.svelte";
-	import SessionCommandItems from "../session/SessionCommandItems.svelte";
 	import SessionRenameInput from "../session/SessionRenameInput.svelte";
 	import SessionSkillsChip from "../session/SessionSkillsChip.svelte";
 	import BackgroundTasksPanel from "../session/BackgroundTasksPanel.svelte";
@@ -67,7 +64,10 @@
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { chromeMenuActions } from "./chrome-actions.js";
 	import SessionSheetFooter from "../session/SessionSheetFooter.svelte";
-	import { activeSessionView, sessionViews, viewShortcutHint } from "./session-views.js";
+	import SessionSheetBody from "../session/SessionSheetBody.svelte";
+	import { getProjectAccent } from "../session/session-list-project.js";
+	import ViewCard from "../ui/ViewCard.svelte";
+	import { activeSessionView, sessionViews } from "./session-views.js";
 
 	let { getGoalDetails = (input) => rpc("GetGoalDetails", input) }: { getGoalDetails?: ((input: Parameters<typeof rpc<"GetGoalDetails">>[1]) => Promise<GoalDetails>) | undefined } = $props();
 
@@ -283,24 +283,10 @@
 	<Button variant="ghost" size="content" tone="inherit" hoverFill="none" tabindex={-1} ariaLabel="Close Side Threads" data-testid="side-threads-scrim" class="fixed inset-0 z-[var(--z-dropdown)] bg-[rgba(var(--overlay-rgb),0.35)]" onclick={() => { sideThreadsPanel.open = false; }} />
 {/if}
 
-{#snippet viewItems(testIdPrefix: string)}
-	<MenuRadioGroup value={activeView} aria-label="Views">
+{#snippet viewCards()}
+	<MenuRadioGroup value={activeView} aria-label="Views" class="grid grid-cols-4 gap-[8px]">
 		{#each sessionViews as view (view.id)}
-			<MenuRadioItem
-				value={view.id}
-				icon={view.icon}
-				data-testid={`${testIdPrefix}-${view.id}`}
-				disabled={view.disabled === true}
-				onselect={view.select}
-			>
-				<span class="flex items-center gap-2">
-					<span class="min-w-0 flex-1">{view.label}</span>
-					<span class="shortcut-hint ml-auto text-xs text-text-muted" aria-hidden="true">{viewShortcutHint(view)}</span>
-					{#if view.badge?.()}
-						<Badge variant="accent-solid" size="count" shape="pill">{view.badge()}</Badge>
-					{/if}
-				</span>
-			</MenuRadioItem>
+			<ViewCard value={view.id} preview={view.id} label={view.label} icon={view.icon} badge={view.badge?.()} disabled={view.disabled === true} data-testid={`overflow-view-${view.id}`} onselect={view.select} />
 		{/each}
 	</MenuRadioGroup>
 {/snippet}
@@ -334,12 +320,12 @@
 			<Button
 				{...props}
 				id="session-bar-more"
-				variant={sessionViewState.compact && overflowOpen ? "accent-soft" : "ghost"}
+				variant="ghost"
 				size="content"
 				icon="ellipsis"
 				iconSize={17}
 				touchTarget
-				class="relative shrink-0 min-h-[44px] min-w-[44px] justify-center rounded-lg"
+				class="relative shrink-0 min-h-[44px] min-w-[44px] justify-center rounded-lg {sessionViewState.compact ? 'data-[state=open]:bg-accent/16 data-[state=open]:text-accent' : ''}"
 				title="More actions"
 				ariaLabel="More actions"
 				aria-describedby={sessionViewState.compact && viewBadgeCount > 0 ? "session-bar-view-badge" : undefined}
@@ -354,11 +340,10 @@
 		{/snippet}
 
 		{#if sessionViewState.compact}
-			<MenuGroup label="Views">
-				{@render viewItems("overflow-view")}
-			</MenuGroup>
 			{#if session}
-				<SessionCommandItems {commands} presentation="sheet" onselect={selectOverflow} />
+				<SessionSheetBody {commands} now={sessionState.now} header={{ session, projectLabel: project?.title ?? getCurrentSlug() ?? undefined, projectAccent: getProjectAccent(session), branch: session.git?.branch }} views={viewCards} onselect={selectOverflow} />
+			{:else}
+				<div class="px-[16px] pt-[8px]">{@render viewCards()}</div>
 			{/if}
 		{:else}
 			<div role="group" aria-label="More actions">
@@ -622,6 +607,7 @@
 			{session}
 			anchor={titleMenuAnchor}
 			projectLabel={project?.title ?? getCurrentSlug() ?? undefined}
+			projectAccent={getProjectAccent(session)}
 			branch={session.git?.branch}
 			presentation={sessionViewState.compact ? "sheet" : "menu"}
 			now={sessionState.now}

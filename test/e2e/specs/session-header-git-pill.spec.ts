@@ -780,7 +780,7 @@ for (const mode of [
 				await overflow.tap();
 				const sheet = page.getByTestId("session-bar-island-menu");
 				await expect(sheet).toBeVisible();
-				await expect(sheet.getByText("Views", { exact: true })).toBeVisible();
+				await expect(sheet.getByTestId("session-sheet-header")).toBeVisible();
 				for (const view of ["chat", "terminal", "diff", "files"])
 					await expect(
 						sheet.getByTestId(`overflow-view-${view}`),

@@ -41,6 +41,7 @@
 		trigger: TriggerSnippet;
 		children: Snippet;
 		footer?: Snippet | undefined;
+		sheetBottomPadding?: number;
 	} & Omit<
 		DropdownMenuContentProps,
 		| "align"
@@ -75,6 +76,7 @@
 		trigger,
 		children,
 		footer,
+		sheetBottomPadding = 12,
 		...rest
 	}: MenuOwnProps = $props();
 	setContext<MenuDensityContext>(menuDensityContextKey, () =>
@@ -246,7 +248,7 @@
 					     Svelte cannot see role="menu" through the spread. -->
 					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 					<div {...props} id={contentId} tabindex={0} bind:this={contentNode} onclickcapture={swallowOpeningClick} onpointerdowncapture={(event: PointerEvent) => { openingClickDeadline = 0; (props["onpointerdowncapture"] as ((event: PointerEvent) => void) | undefined)?.(event); }} use:exemptFromBackgroundInert use:dragToDismiss={{ ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
-						<SheetChrome {footer} class={className} menuBody>
+						<SheetChrome {footer} bottomPadding={sheetBottomPadding} class={className} menuBody>
 							{@render children()}
 						</SheetChrome>
 					</div>

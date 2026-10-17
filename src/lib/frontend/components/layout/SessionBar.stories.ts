@@ -546,6 +546,36 @@ export const ViewsSheetOpen: Story = {
 		expect(within(sheet).getAllByRole("menuitemradio")).toEqual(items);
 		await expect(items[0]).toHaveAttribute("aria-checked", "true");
 		await expect(items[2]).toHaveAttribute("aria-disabled", "true");
+		expect(
+			new Set(items.map((item) => item.getBoundingClientRect().top)).size,
+		).toBe(1);
+		await expect(
+			within(sheet).getByTestId("session-sheet-header"),
+		).toBeVisible();
+		await expect(sheet.querySelector(".shortcut-hint")).toBeNull();
+	},
+};
+
+export const ViewsSheetOpenLight: Story = {
+	...ViewsSheetOpen,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
+};
+
+export const CloseSheetReturnsFocus: Story = {
+	play: async ({ canvasElement }) => {
+		const trigger = within(canvasElement).getByTestId(
+			"session-bar-island-overflow",
+		);
+		const body = within(canvasElement.ownerDocument.body);
+		await userEvent.click(trigger);
+		await userEvent.click(await body.findByTestId("session-sheet-close"));
+		await waitFor(() =>
+			expect(
+				body.queryByTestId("session-bar-island-menu"),
+			).not.toBeInTheDocument(),
+		);
+		await waitFor(() => expect(trigger).toHaveFocus());
 	},
 };
 

@@ -84,6 +84,30 @@ Scenario: Activating a view from the menu switches the view
   And the Terminal session view is selected
   And the session overflow menu is closed
 
+Scenario: Closing the session sheet returns focus to the overflow trigger
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  When I open the overflow session sheet
+  Then the session sheet shows four view cards
+  When I close the session sheet with its close button
+  Then the session overflow menu is closed
+  And the session overflow trigger has focus
+
+Scenario Outline: Every phone session sheet omits an unknown branch
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  And the session sheet branch is unknown
+  When I open the <entry> session sheet
+  Then the session sheet header identifies the session without a branch
+  When I close the session sheet with its close button
+  Then no session sheet is open
+
+Examples:
+  | entry    |
+  | overflow |
+  | chevron  |
+  | list     |
+
 # The collapse is a walk through the state machine rather than four separate
 # scenarios: the interesting claims are all about transitions, and a transition
 # needs the step before it to have actually happened.

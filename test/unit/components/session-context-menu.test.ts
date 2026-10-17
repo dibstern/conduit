@@ -161,6 +161,7 @@ describe("session triage menu", () => {
 		).toEqual(
 			presentation === "sheet"
 				? [
+						"session-sheet-close",
 						"session-ctx-settle",
 						"session-ctx-snooze",
 						"session-ctx-pin",
