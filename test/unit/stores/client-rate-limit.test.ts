@@ -1,6 +1,6 @@
 // Tests for the client-side chat RPC rate limit.
 // Verifies: immediate sends under limit, queuing at limit, drain timer,
-// and queue replacement.
+// and preserving every queued send.
 
 import {
 	afterEach,
@@ -115,7 +115,7 @@ describe("chat RPC client-side rate limiting", () => {
 			expect(lastSent()).toEqual({ type: "message", text: "queued" });
 		});
 
-		it("replaces queued message when a new one arrives", () => {
+		it("preserves both queued messages when a new one arrives", () => {
 			fillLimit();
 			sentMessages.length = 0;
 
@@ -126,15 +126,16 @@ describe("chat RPC client-side rate limiting", () => {
 			expect(showToastMock).toHaveBeenCalledTimes(2);
 
 			// Advance past window
-			clock = 10_001;
-			vi.advanceTimersByTime(10_000);
+			clock = 20_000;
+			vi.advanceTimersByTime(20_000);
 
-			// Only the corrected message should have been sent
-			expect(sentMessages).toHaveLength(1);
+			expect(
+				sentMessages.map((raw) => (JSON.parse(raw) as { text: string }).text),
+			).toEqual(["first queued", "corrected"]);
 			expect(lastSent()).toEqual({ type: "message", text: "corrected" });
 		});
 
-		it("only queues one message at a time (latest wins)", () => {
+		it("drains all queued messages in order", () => {
 			fillLimit();
 			sentMessages.length = 0;
 
@@ -142,12 +143,13 @@ describe("chat RPC client-side rate limiting", () => {
 			sendChat("b");
 			sendChat("c");
 
-			// Advance past window — only "c" should be sent
-			clock = 10_001;
-			vi.advanceTimersByTime(10_000);
+			// Advance past the window to drain all three inputs.
+			clock = 20_000;
+			vi.advanceTimersByTime(20_000);
 
-			expect(sentMessages).toHaveLength(1);
-			expect(lastSent()).toEqual({ type: "message", text: "c" });
+			expect(
+				sentMessages.map((raw) => (JSON.parse(raw) as { text: string }).text),
+			).toEqual(["a", "b", "c"]);
 		});
 	});
 
@@ -171,7 +173,7 @@ describe("chat RPC client-side rate limiting", () => {
 	// queuing works but did not assert the full send order.
 
 	describe("message order preservation (Gap 4)", () => {
-		it("sends first 5 messages in order, then drains queued 6th in sequence", () => {
+		it("sends the first five immediately, then drains the sixth and seventh in order", () => {
 			// Send 7 messages in rapid succession
 			for (let i = 1; i <= 7; i++) {
 				sendChat(`msg-${i}`);
@@ -185,18 +187,18 @@ describe("chat RPC client-side rate limiting", () => {
 			);
 			expect(firstFive).toEqual(["msg-1", "msg-2", "msg-3", "msg-4", "msg-5"]);
 
-			// Messages 6 and 7 were queued; latest-wins means only msg-7 remains
+			// Messages 6 and 7 must both reach the server.
 			// Advance past the window to drain
-			clock = 10_001;
-			vi.advanceTimersByTime(10_000);
+			clock = 20_000;
+			vi.advanceTimersByTime(20_000);
 
-			expect(sentMessages).toHaveLength(6);
+			expect(sentMessages).toHaveLength(7);
 			const sixthMessage = sentMessages[5];
 			assert.exists(sixthMessage, "expected sixth sent message");
 			const sixth = JSON.parse(sixthMessage) as { text: string };
-			expect(sixth.text).toBe("msg-7");
+			expect(sixth.text).toBe("msg-6");
 
-			// Full sequence: msg-1..5 in order, then msg-7 (latest queued)
+			// Full sequence preserves every input.
 			const allTexts = sentMessages.map(
 				(raw) => (JSON.parse(raw) as { text: string }).text,
 			);
@@ -206,6 +208,7 @@ describe("chat RPC client-side rate limiting", () => {
 				"msg-3",
 				"msg-4",
 				"msg-5",
+				"msg-6",
 				"msg-7",
 			]);
 		});

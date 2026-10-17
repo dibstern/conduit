@@ -171,7 +171,7 @@ test("the auto-settle outlook reads the same with or without a viewer", async ({
 test.describe("forked session", () => {
 	test.use({ recording: "fork-session" });
 
-	test("only root sessions settle automatically, so a fork reads off", async ({
+	test("a fork is a root session, so it settles like its source", async ({
 		page,
 		relayUrl,
 		harness,
@@ -194,18 +194,18 @@ test.describe("forked session", () => {
 			const fork = await Effect.runPromise(
 				client.ForkSession({ sessionId, originId: "e2e-auto-settle-fork" }),
 			);
-			expect(fork.parentId).toBe(sessionId);
+			expect(fork.forkedFrom).toBe(sessionId);
 			const read = (id: string) =>
 				Effect.runPromise(
 					client.GetSessionAutoSettleOutlook({ sessionId: id }),
 				);
 			expect(await read(sessionId)).not.toEqual({ kind: "off" });
-			expect(await read(fork.sessionId)).toEqual({ kind: "off" });
+			expect(await read(fork.sessionId)).not.toEqual({ kind: "off" });
 			expect(
 				await Effect.runPromise(
 					client.SetSessionAutoSettle({
 						sessionId: fork.sessionId,
-						disabled: false,
+						disabled: true,
 					}),
 				),
 			).toEqual({ kind: "off" });

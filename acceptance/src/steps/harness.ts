@@ -45,9 +45,9 @@ export const harnessHandlers: StepHandler[] = [
 	{
 		name: "register Cursor discovery",
 		match:
-			/^a Cursor account is (available with its live models|unavailable with reason (.+))$/,
+			/^a Cursor account (is available with its live models|is unavailable with reason (.+)|needs login with reason (.+))$/,
 		run: ({ world, match }) => {
-			const available = match[1] === "available with its live models";
+			const available = match[1] === "is available with its live models";
 			const instances = [
 				...(mockInstances.get(world.page) ?? []),
 				{
@@ -57,7 +57,14 @@ export const harnessHandlers: StepHandler[] = [
 					isDefault: true,
 					usageEligible: false,
 					available,
-					...(available ? {} : { unavailableReason: match[2] }),
+					...(available
+						? {}
+						: match[3]
+							? {
+									unavailableReason: match[3],
+									unavailableCode: "auth_required",
+								}
+							: { unavailableReason: match[2] }),
 					configDir: "/tmp/cursor-work",
 					port: 0,
 					managed: false,

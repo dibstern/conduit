@@ -13,19 +13,21 @@ import { autoSettleIdleWindowMs } from "../../../daemon/config-persistence.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import { hasColdAutoSettleCandidate } from "../Services/daemon-session-reader.js";
+import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	allProjects,
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
 
-export const AutoSettleLive = (configDir: string) =>
+export const AutoSettleLive = () =>
 	Layer.scopedDiscard(
 		Effect.gen(function* () {
 			const configRef = yield* DaemonConfigRefTag;
 			const registry = yield* ProjectRegistryTag;
 			const cache = yield* RelayCacheTag;
 			const bus = yield* DaemonEventBusTag;
+			const storeContext = yield* persistenceStoreContext;
 			const missingDirectories = new Set<string>();
 
 			const sweep = Effect.gen(function* () {
@@ -61,10 +63,9 @@ export const AutoSettleLive = (configDir: string) =>
 							? running.value
 							: (yield* hasColdAutoSettleCandidate(
 										project,
-										configDir,
 										now,
 										idleWindowMs,
-									))
+									).pipe(Effect.provide(storeContext)))
 								? yield* cache.get(project.slug)
 								: null;
 						if (relay?.settleIdleSessions === undefined) return;

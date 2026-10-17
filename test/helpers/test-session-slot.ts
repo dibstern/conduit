@@ -40,7 +40,6 @@ export function testActivity(sessionId?: string): SessionActivity {
 		terminalTurnIds: new Set(),
 		currentMessageId: null,
 		currentPartId: null,
-		awaitingInputId: null,
 		replayGeneration: 0,
 		doneMessageIds: new SvelteSet(),
 		seenMessageIds: new SvelteSet(),

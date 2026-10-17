@@ -545,9 +545,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const session = await create("admitted handoff");
 		await settle(session.id);
 		await enable(session, { onSettle: "any" });
-		const db = new Database(
-			join(fixture.configDir, "projects", "process-test", "events.db"),
-		);
+		const db = new Database(fixture.daemonStorePath());
 		try {
 			// Reproduce admission's durable handoff before normal turn/status events.
 			// A future retry is not dispatched by the fixture's background reactor.
@@ -555,7 +553,8 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 					(request_sequence, command_id, project_key, session_id, provider_id,
 					effect_type, payload_json, status, next_attempt_at, requested_at, updated_at)
 					VALUES (-1, 'cleanup-handoff', ?, ?, 'claude', 'send_turn', '{}', ?, ?, ?, ?)`).run(
-				fixture.projectDir,
+				// Admission keys durable commands by project slug.
+				"process-test",
 				session.id,
 				outboxStatus,
 				Date.now() + 86_400_000,
@@ -731,7 +730,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const recent = await create("recent");
 		await enable(old, { onSettle: "off", afterInactiveDays: 7 });
 		const now = Date.now();
-		const db = new Database(fixture.projectStorePath());
+		const db = new Database(fixture.daemonStorePath());
 		try {
 			db.prepare("UPDATE sessions SET last_message_at = ? WHERE id = ?").run(
 				now - 8 * 86_400_000,

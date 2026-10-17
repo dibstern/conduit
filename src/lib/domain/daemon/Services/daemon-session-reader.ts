@@ -1,18 +1,16 @@
 import { statSync } from "node:fs";
-import { Reactivity } from "@effect/experimental";
 import { SqlClient } from "@effect/sql";
-import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { Cause, Data, Effect, Either, Exit, Layer, Option } from "effect";
+import { Cause, Data, Effect, Exit, Layer, Option } from "effect";
 import {
 	type createSessionGitCache,
 	daemonSessionGitCache,
 } from "../../../git/session-git.js";
+import type { PersistenceStore } from "../../../persistence/effect/live.js";
 import {
 	makeReadQueryEffect,
 	ReadQueryEffectTag,
 	type SessionScope,
 } from "../../../persistence/effect/read-query-effect.js";
-import { projectEventsDbPath } from "../../../persistence/project-storage.js";
 import { computeProjectGroups } from "../../../project-grouping.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import { getAutoSettleOutlook } from "../../../session/auto-settle-policy.js";
@@ -25,11 +23,9 @@ import type {
 	SessionInfo,
 } from "../../../shared-types.js";
 import type { StoredProject } from "../../../types.js";
-import {
-	makePersistenceServiceLive,
-	PersistenceProjectTag,
-} from "../../persistence/Services/persistence-service.js";
 import type { AccountDirectory } from "./account-directory.js";
+import { DaemonStoreAvailability } from "./daemon-store-availability.js";
+import { projectReadDatabase } from "./project-read-database.js";
 import {
 	allProjects,
 	type ProjectRegistryTag,
@@ -51,12 +47,6 @@ class DaemonSessionReadError extends Data.TaggedError(
 	}
 }
 
-const isMissingPathError = (cause: unknown): boolean =>
-	typeof cause === "object" &&
-	cause !== null &&
-	"code" in cause &&
-	cause.code === "ENOENT";
-
 interface ProjectSessionCandidate {
 	readonly sortKey: DaemonSessionCursor;
 	readonly session: SessionInfo;
@@ -64,7 +54,6 @@ interface ProjectSessionCandidate {
 
 const readProjectSessions = (
 	project: Pick<StoredProject, "slug" | "folders">,
-	configDir: string,
 	options: DaemonSessionQueryOptions,
 	gitCache: ReturnType<typeof createSessionGitCache>,
 ) =>
@@ -83,38 +72,13 @@ const readProjectSessions = (
 				cause: `Project path is not a directory: ${projectDirectory}`,
 			});
 		}
-		const databasePath = projectEventsDbPath({ configDir, ...project });
-		const databaseStat = yield* Effect.either(
-			Effect.try({
-				try: () => statSync(databasePath),
-				catch: (cause) => cause,
-			}),
-		);
-		if (Either.isLeft(databaseStat)) {
-			if (isMissingPathError(databaseStat.left)) {
-				return [];
-			}
-			return yield* new DaemonSessionReadError({
-				projectSlug,
-				cause: databaseStat.left,
-			});
-		}
-
-		const sqliteLayer = SqliteNode.layer({
-			filename: databasePath,
-			disableWAL: true,
-		}).pipe(Layer.provide(Reactivity.layer));
-		const persistenceLayer = Layer.provideMerge(
-			Layer.fresh(makePersistenceServiceLive),
-			Layer.merge(
-				sqliteLayer,
-				Layer.succeed(PersistenceProjectTag, { projectId: projectSlug }),
-			),
-		);
+		const database = yield* projectReadDatabase(project, {
+			prepare: true,
+		});
 		const readQueryLayer = Layer.effect(
 			ReadQueryEffectTag,
 			makeReadQueryEffect,
-		).pipe(Layer.provide(persistenceLayer));
+		).pipe(Layer.provideMerge(database));
 
 		const sessions = yield* Effect.gen(function* () {
 			const rows = yield* makeSessionRows({
@@ -129,7 +93,7 @@ const readProjectSessions = (
 				...(options.search !== undefined ? { titleQuery: options.search } : {}),
 				...(options.cursor !== undefined ? { before: options.cursor } : {}),
 			});
-		}).pipe(Effect.provide(readQueryLayer), Effect.provide(sqliteLayer));
+		}).pipe(Effect.provide(readQueryLayer));
 		return sessions.map(
 			(session): ProjectSessionCandidate => ({
 				sortKey: { updatedAt: session.updatedAt, id: session.id },
@@ -141,35 +105,19 @@ const readProjectSessions = (
 /** Check recovery work without acquiring the project's relay or starting providers. */
 export const hasProviderRecoveryCandidate = (
 	project: Pick<StoredProject, "slug" | "folders">,
-	configDir: string,
 	openCodeInstanceIds: readonly string[],
 ) =>
 	Effect.gen(function* () {
-		const databasePath = projectEventsDbPath({ configDir, ...project });
-		const databaseStat = yield* Effect.either(
-			Effect.try({
-				try: () => statSync(databasePath),
-				catch: (cause) => cause,
-			}),
-		);
-		if (Either.isLeft(databaseStat)) {
-			if (isMissingPathError(databaseStat.left)) return false;
-			return yield* Effect.fail(databaseStat.left);
-		}
-		const sqliteLayer = SqliteNode.layer({
-			filename: databasePath,
-			readonly: true,
-			disableWAL: true,
-		}).pipe(Layer.provide(Reactivity.layer));
+		const database = yield* projectReadDatabase(project);
 		return yield* Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const rows = yield* sql<{ needs_recovery: number }>`SELECT EXISTS (
 				SELECT 1 FROM provider_command_outbox
-				WHERE provider_id = 'claude' AND effect_type = 'send_turn' AND status = 'running'
+				WHERE project_key = ${project.slug} AND provider_id = 'claude' AND effect_type = 'send_turn' AND status = 'running'
 			) OR EXISTS (
 				SELECT 1 FROM sessions AS session
 				JOIN session_providers AS binding ON binding.session_id = session.id
-				WHERE binding.status = 'active'
+				WHERE session.project_id = ${project.slug} AND binding.status = 'active'
 				AND binding.provider IN ${sql.in(openCodeInstanceIds)}
 				AND (session.status IN ('busy', 'retry') OR EXISTS (
 					SELECT 1 FROM pending_approvals AS approval
@@ -177,74 +125,41 @@ export const hasProviderRecoveryCandidate = (
 				))
 			) AS needs_recovery`;
 			return rows[0]?.needs_recovery === 1;
-		}).pipe(Effect.provide(sqliteLayer));
+		}).pipe(Effect.provide(database));
 	});
 
 /** Count busy/retry sessions and admitted turns awaiting their first provider event. */
 export const countRunningProjectSessions = (
 	project: Pick<StoredProject, "slug" | "folders">,
-	configDir: string,
 ) =>
 	Effect.gen(function* () {
-		const databasePath = projectEventsDbPath({ configDir, ...project });
-		const databaseStat = yield* Effect.either(
-			Effect.try({
-				try: () => statSync(databasePath),
-				catch: (cause) => cause,
-			}),
-		);
-		if (Either.isLeft(databaseStat)) {
-			if (isMissingPathError(databaseStat.left)) return 0;
-			return yield* Effect.fail(databaseStat.left);
-		}
-		const sqliteLayer = SqliteNode.layer({
-			filename: databasePath,
-			readonly: true,
-			disableWAL: true,
-		}).pipe(Layer.provide(Reactivity.layer));
+		const database = yield* projectReadDatabase(project);
 		return yield* Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const rows = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM (
-				SELECT id FROM sessions WHERE status IN ('busy', 'retry')
+				SELECT id FROM sessions WHERE project_id = ${project.slug} AND status IN ('busy', 'retry')
 				UNION
 				SELECT session_id FROM provider_command_outbox
-				WHERE effect_type = 'send_turn' AND status IN ('pending', 'running')
+				WHERE project_key = ${project.slug} AND effect_type = 'send_turn' AND status IN ('pending', 'running')
 			)`;
 			return rows[0]?.count ?? 0;
-		}).pipe(Effect.provide(sqliteLayer));
+		}).pipe(Effect.provide(database));
 	});
 
-/** Use the same read-only SQLite path as the daemon-wide session list. */
+/** Probe without acquiring the project's relay. */
 export const hasColdAutoSettleCandidate = (
 	project: Pick<StoredProject, "slug" | "folders">,
-	configDir: string,
 	now: number,
 	idleWindowMs: number,
 ) =>
 	Effect.gen(function* () {
-		const databasePath = projectEventsDbPath({ configDir, ...project });
-		const databaseStat = yield* Effect.either(
-			// Keep the raw error: the shorthand form wraps it in UnknownException,
-			// hiding the ENOENT code that marks a project with no store yet.
-			Effect.try({
-				try: () => statSync(databasePath),
-				catch: (cause) => cause,
-			}),
-		);
-		if (Either.isLeft(databaseStat)) {
-			if (isMissingPathError(databaseStat.left)) return false;
-			return yield* Effect.fail(databaseStat.left);
-		}
-		const sqliteLayer = SqliteNode.layer({
-			filename: databasePath,
-			readonly: true,
-			disableWAL: true,
-		}).pipe(Layer.provide(Reactivity.layer));
+		const database = yield* projectReadDatabase(project);
 		const facts = yield* readPersistedAutoSettleFacts(
+			project.slug,
 			now,
 			undefined,
 			project.folders[0],
-		).pipe(Effect.provide(sqliteLayer));
+		).pipe(Effect.provide(database));
 		return [...facts.values()].some(
 			(item) => getAutoSettleOutlook(item, now, idleWindowMs).kind === "due",
 		);
@@ -257,10 +172,11 @@ export const listDaemonSessions = (
 ): Effect.Effect<
 	DaemonSessionQueryResult,
 	never,
-	ProjectRegistryTag | AccountDirectory | SessionActivityTag
+	ProjectRegistryTag | AccountDirectory | SessionActivityTag | PersistenceStore
 > =>
 	Effect.gen(function* () {
 		const registered = yield* allProjects;
+		const unavailable = yield* DaemonStoreAvailability;
 		const groupKey = getScopeGroupKey(options.scope);
 		const defaultMode =
 			loadRelaySettings(configDir).defaultGroupingMode ?? "repository";
@@ -298,8 +214,19 @@ export const listDaemonSessions = (
 			projects,
 			(project) =>
 				Effect.gen(function* () {
+					const reason = unavailable.get(project.slug);
+					if (reason !== undefined) {
+						return {
+							sessions: [],
+							availability: {
+								projectSlug: project.slug,
+								available: false as const,
+								error: reason,
+							},
+						};
+					}
 					const exit = yield* Effect.exit(
-						readProjectSessions(project, configDir, projectOptions, gitCache),
+						readProjectSessions(project, projectOptions, gitCache),
 					);
 					if (Exit.isSuccess(exit)) {
 						return {
@@ -383,47 +310,20 @@ export const findOpenCodeSession = (
 
 /** Resolve a provider id within its owning instance, including cold project stores. */
 export const resolveDaemonOpenCodeSession = (
-	configDir: string,
 	instanceId: string,
 	providerSessionId: string,
 ) =>
 	Effect.gen(function* () {
 		let match: { projectSlug: string; sessionId: string } | undefined;
 		for (const project of yield* allProjects) {
-			const filename = projectEventsDbPath({ configDir, ...project });
-			const exists = yield* Effect.try({
-				try: () => statSync(filename),
-				catch: (cause) => cause,
-			}).pipe(
-				Effect.catchAll((cause) =>
-					isMissingPathError(cause)
-						? Effect.succeed(null)
-						: Effect.fail(
-								new DaemonSessionReadError({
-									projectSlug: project.slug,
-									cause,
-								}),
-							),
-				),
-			);
-			if (exists === null) continue;
+			const database = yield* projectReadDatabase(project, {
+				prepare: true,
+			});
 			const sessionId = yield* findOpenCodeSession(
 				{ projectIds: [project.slug] },
 				instanceId,
 				providerSessionId,
-			).pipe(
-				Effect.provide(
-					Layer.provideMerge(
-						Layer.fresh(makePersistenceServiceLive),
-						Layer.merge(
-							SqliteNode.layer({ filename, disableWAL: true }).pipe(
-								Layer.provide(Reactivity.layer),
-							),
-							Layer.succeed(PersistenceProjectTag, { projectId: project.slug }),
-						),
-					),
-				),
-			);
+			).pipe(Effect.provide(database));
 			if (sessionId !== undefined) {
 				if (match !== undefined)
 					return yield* Effect.fail(

@@ -94,6 +94,36 @@ export const SESSION_SUBTREE_SQL = `WITH RECURSIVE subtree(id) AS (
 )
 SELECT id FROM subtree`;
 
+function sessionPlacement(
+	event:
+		| { type: "session.created"; data: EventPayloadMap["session.created"] }
+		| { type: "session.forked"; data: EventPayloadMap["session.forked"] },
+): { parentId: string | null; forkedFrom: string | null; sideThread: boolean } {
+	if (event.type === "session.forked") {
+		return {
+			parentId: null,
+			forkedFrom: event.data.parentId,
+			sideThread: false,
+		};
+	}
+	const payload = event.data;
+	const sideThread = payload.sideThread === true;
+	const legacyFork =
+		payload.parentId !== undefined &&
+		payload.forkedFrom === undefined &&
+		payload.sideThread === undefined &&
+		(payload.forkPointEvent !== undefined ||
+			payload.forkPointTimestamp !== undefined);
+	return {
+		parentId: legacyFork ? null : (payload.parentId ?? null),
+		forkedFrom:
+			payload.forkedFrom ??
+			(sideThread || legacyFork ? payload.parentId : undefined) ??
+			null,
+		sideThread,
+	};
+}
+
 // An approval or question in a child rolls up into its root's attention, so it
 // must wake a snoozed ancestor too; otherwise the root sits on the shelf while
 // blocked on you. A child's turn ending or failing is not what was awaited.
@@ -152,6 +182,8 @@ function settleOpenSubagents(
 // answered, so a browser can tell a late end of an earlier turn from the end of
 // the one it is waiting on (conduit-test-jyr9.10). The id is NULL when the
 // ended turn has no known send.
+// Transcript turns split at each steer; messages.steered retains which inputs
+// joined a provider turn.
 function endTurn(
 	event: Pick<StoredEvent, "createdAt" | "sessionId" | "streamVersion">,
 	errorAt: number | null,
@@ -159,19 +191,27 @@ function endTurn(
 	messageId: string,
 ): SessionStatement {
 	return {
-		sql: `UPDATE sessions SET updated_at = ?, last_turn_error_at = ?,
+		sql: `WITH ended_input AS (
+			SELECT input_id, session_id, steered, rowid AS position FROM messages
+			WHERE id = COALESCE(?,
+				(SELECT COALESCE(turn_id, parent_id) FROM messages WHERE id = ?)))
+		UPDATE sessions SET updated_at = ?, last_turn_error_at = ?,
 			last_turn_end_input_id = CASE WHEN ? > COALESCE(last_turn_end_version, -1)
-				THEN (SELECT input_id FROM messages WHERE id = COALESCE(?,
-					(SELECT COALESCE(turn_id, parent_id) FROM messages WHERE id = ?)))
+				THEN (SELECT CASE WHEN ended.steered = 1 THEN
+					(SELECT starter.input_id FROM messages starter
+						WHERE starter.session_id = ended.session_id AND starter.role = 'user'
+						AND starter.steered = 0 AND starter.is_backfilled = 0
+						AND starter.rowid <= ended.position ORDER BY starter.rowid DESC LIMIT 1)
+					ELSE ended.input_id END FROM ended_input ended)
 				ELSE last_turn_end_input_id END,
 			last_turn_end_version = MAX(COALESCE(last_turn_end_version, -1), ?)
 			WHERE id = ?`,
 		params: [
+			userMessageId,
+			messageId,
 			event.createdAt,
 			errorAt,
 			event.streamVersion,
-			userMessageId,
-			messageId,
 			event.streamVersion,
 			event.sessionId,
 		],
@@ -207,16 +247,19 @@ export const sessionHandlers = {
 		},
 	],
 	"session.created": (event) => {
+		const placement = sessionPlacement(event);
 		// Use INSERT ... ON CONFLICT DO UPDATE instead of INSERT OR REPLACE
 		// to preserve user/auto-renamed titles plus nullable columns
-		// (provider_sid, parent_id, fork_point_event) that may have been set by
-		// other code paths.
+		// (provider_sid, parent_id, forked_from, fork_point_event) that may have been set by
+		// other code paths. A Fork never takes a parent, whichever creation lands
+		// last: OpenCode ingress can seed the native parentID after the Fork.
 		return [
 			{
-				sql: `INSERT INTO sessions (id, project_id, provider, provider_sid, title, status, parent_id, fork_point_event, side_thread, permission_mode, created_at, updated_at)
-					 VALUES (?, ?, ?, ?, ?, 'idle', ?, ?, ?, ?, ?, ?)
+				sql: `INSERT INTO sessions (id, project_id, provider, provider_sid, title, status, parent_id, forked_from, fork_point_event, side_thread, permission_mode, created_at, updated_at)
+					 VALUES (?, ?, ?, ?, ?, 'idle', ?, ?, ?, ?, ?, ?, ?)
 					 ON CONFLICT (id) DO UPDATE SET
-					     project_id = excluded.project_id,
+					     -- Claim an unowned row, but never move a session to another project.
+					     project_id = COALESCE(NULLIF(sessions.project_id, ''), excluded.project_id),
 					     provider = CASE
 					       WHEN EXISTS (
 					         SELECT 1 FROM session_providers
@@ -235,10 +278,17 @@ export const sessionHandlers = {
 				         OR sessions.title LIKE 'New session%'
 				         OR sessions.parent_id IS NOT NULL
 				         OR excluded.parent_id IS NOT NULL
+				         OR excluded.forked_from IS NOT NULL
 				       THEN excluded.title
 				       ELSE sessions.title
 				     END,
-				     parent_id = COALESCE(excluded.parent_id, sessions.parent_id),
+				     parent_id = CASE
+				       WHEN COALESCE(excluded.forked_from, sessions.forked_from) IS NOT NULL
+				         AND MAX(sessions.side_thread, excluded.side_thread) = 0
+				       THEN NULL
+				       ELSE COALESCE(excluded.parent_id, sessions.parent_id)
+				     END,
+				     forked_from = COALESCE(excluded.forked_from, sessions.forked_from),
 				     fork_point_event = COALESCE(excluded.fork_point_event, sessions.fork_point_event),
 				     side_thread = MAX(sessions.side_thread, excluded.side_thread),
 				     permission_mode = COALESCE(sessions.permission_mode, excluded.permission_mode),
@@ -249,9 +299,10 @@ export const sessionHandlers = {
 					event.data.provider,
 					event.data.providerSessionId ?? null,
 					event.data.title,
-					event.data.parentId ?? null,
+					placement.parentId,
+					placement.forkedFrom,
 					event.data.forkPointEvent ?? null,
-					event.data.sideThread ? 1 : 0,
+					placement.sideThread ? 1 : 0,
 					event.data.permissionMode ?? null,
 					event.createdAt,
 					event.createdAt,
@@ -412,19 +463,22 @@ export const sessionHandlers = {
 		return [{ removeSession: event.data.sessionId }];
 	},
 
-	// Lineage only. The row itself is brought into being by session.created —
-	// upstream for OpenCode forks, which is why this is an UPDATE and not an
-	// upsert: this handler has no title or provider to insert with.
+	// A legacy upstream creation can contain a Fork before this lineage event
+	// identifies it. Side Threads keep their explicit containment. The row is
+	// created by session.created; this event has no title or provider to insert.
 	"session.forked": (event) => {
+		const placement = sessionPlacement(event);
 		return [
 			{
 				sql: `UPDATE sessions SET
-					parent_id = ?,
+					parent_id = CASE WHEN side_thread = 1 THEN parent_id ELSE ? END,
+					forked_from = ?,
 					fork_point_event = COALESCE(?, fork_point_event),
 					updated_at = ?
 				 WHERE id = ?`,
 				params: [
-					event.data.parentId,
+					placement.parentId,
+					placement.forkedFrom,
 					event.data.forkPointEvent ?? null,
 					event.createdAt,
 					event.data.sessionId,
@@ -671,6 +725,7 @@ export const sessionHandlers = {
 		settleOpenSubagents(event.sessionId, event.createdAt),
 	],
 	"turn.interrupted": (event) => [
+		endTurn(event, null, null, event.data.messageId),
 		settleOpenSubagents(event.sessionId, event.createdAt),
 	],
 	"permission.asked": (event) => [
@@ -750,7 +805,7 @@ export function getSessionStatements<K extends CanonicalEventType>(
 		return statements;
 	}
 	// A fork's own boundary copy is authoritative when already projected.
-	// Claude forks reference the parent row; retain that captured fallback.
+	// Claude forks reference the Source row; retain that captured fallback.
 	return [
 		...statements,
 		{
@@ -759,7 +814,7 @@ export function getSessionStatements<K extends CanonicalEventType>(
 			 WHERE session_id = sessions.id AND id = sessions.fork_point_event),
 			fork_point_timestamp, ?,
 			(SELECT created_at FROM messages
-			 WHERE session_id = sessions.parent_id AND id = sessions.fork_point_event)
+			 WHERE session_id = sessions.forked_from AND id = sessions.fork_point_event)
 		), fork_point_message_id = COALESCE(fork_point_message_id, ?, fork_point_event)
 		WHERE id = ?`,
 			params: [

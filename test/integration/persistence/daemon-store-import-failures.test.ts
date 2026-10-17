@@ -588,20 +588,23 @@ it("C4 fork and subagent children survive exclusion of their shared parent", asy
 	expect(
 		query(
 			daemonStorePath(configDir),
-			"SELECT c.id, c.parent_id, c.project_id, p.project_id AS parent_owner FROM sessions c JOIN sessions p ON p.id = c.parent_id WHERE c.project_id = 'later' ORDER BY c.id",
+			"SELECT c.id, c.parent_id, c.forked_from, c.project_id, p.project_id AS source_owner FROM sessions c JOIN sessions p ON p.id = COALESCE(c.parent_id, c.forked_from) WHERE c.project_id = 'later' ORDER BY c.id",
 		),
 	).toEqual([
 		{
 			id: "unique_child",
 			parent_id: "ses_shared",
+			forked_from: null,
 			project_id: "later",
-			parent_owner: "first",
+			source_owner: "first",
 		},
+		// A fork is top-level and keeps its Source as lineage (ADR-0007).
 		{
 			id: "unique_fork",
-			parent_id: "ses_shared",
+			parent_id: null,
+			forked_from: "ses_shared",
 			project_id: "later",
-			parent_owner: "first",
+			source_owner: "first",
 		},
 	]);
 });

@@ -11,18 +11,21 @@ export { expect } from "@playwright/test";
 
 export const test = base.extend<{
 	harnessOptions: NonNullable<Parameters<typeof ProcessHarness.create>[0]>;
+	startHarness: boolean;
 	harness: ProcessHarness;
 }>({
 	harnessOptions: [{}, { option: true }],
+	startHarness: [true, { option: true }],
 	harness: [
-		async ({ harnessOptions }, use) => {
+		async ({ harnessOptions, startHarness }, use) => {
 			const dist =
 				harnessOptions.dist ?? process.env["CONDUIT_TEST_DIST"] ?? "dist";
-			const harness = await ProcessHarness.start({
+			const harness = ProcessHarness.create({
 				...harnessOptions,
 				dist,
 			});
 			try {
+				if (startHarness) await harness.restart();
 				await use(harness);
 			} finally {
 				let hostPid: number | undefined;

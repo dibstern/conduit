@@ -4,7 +4,6 @@ import type {
 	GetAgentsResponse,
 	GetCommandsResponse,
 	GetModelsResponse,
-	ViewSessionResponse,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import type { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 
@@ -53,8 +52,8 @@ vi.hoisted(() => {
 	});
 });
 
-import { inputSyncState } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
+	applyGetModelsResponse,
 	clearDiscoveryState,
 	discoveryState,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
@@ -64,7 +63,6 @@ import {
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	clearSessionState,
-	sessionState,
 	switchToSession,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
@@ -80,11 +78,8 @@ function deferred<T>() {
 	return { promise, resolve };
 }
 
-function select(
-	sessionId: string,
-	view = () => Promise.resolve({ ok: true as const }),
-) {
-	switchToSession(sessionId, "project-a", view);
+function select(sessionId: string) {
+	switchToSession(sessionId, "project-a");
 }
 
 beforeEach(() => {
@@ -110,79 +105,16 @@ beforeEach(() => {
 	attachedProjectState.slug = "project-a";
 });
 
-it("applies discovery RPCs only for the selection that requested them, including A-B-A", async () => {
-	const agents = deferred<GetAgentsResponse>();
-	const commands = deferred<GetCommandsResponse>();
-	const models = deferred<GetModelsResponse>();
-	vi.mocked(getAgentsRpc).mockReturnValueOnce(agents.promise);
-	vi.mocked(getCommandsRpc).mockReturnValueOnce(commands.promise);
-	vi.mocked(getModelsRpc).mockReturnValueOnce(models.promise);
-	select("A");
-	select("B");
-	vi.mocked(getAgentsRpc).mockResolvedValueOnce({
-		projectSlug: "project-a",
-		providerScope: { id: "opencode", name: "OpenCode" },
-		agents: [{ id: "new-agent", name: "New agent" }],
-	});
-	vi.mocked(getCommandsRpc).mockResolvedValueOnce({
-		projectSlug: "project-a",
-		commands: [{ name: "new-command" }],
-	});
-	vi.mocked(getModelsRpc).mockResolvedValueOnce({
-		projectSlug: "project-a",
-		instanceId: "opencode",
-		providers: [],
-		active: { model: "new-model", provider: "new-provider" },
-	});
-	select("A");
-	await Promise.resolve();
-	expect(discoveryState.agents.map((agent) => agent.id)).toEqual(["new-agent"]);
-	expect(discoveryState.commands.map((command) => command.name)).toEqual([
-		"new-command",
-	]);
-	expect(discoveryState.currentModelId).toBe("new-model");
-	agents.resolve({
-		projectSlug: "project-a",
-		providerScope: { id: "opencode", name: "OpenCode" },
-		agents: [{ id: "old-agent", name: "Old agent" }],
-	});
-	commands.resolve({
-		projectSlug: "project-a",
-		commands: [{ name: "old-command" }],
-	});
-	models.resolve({
-		projectSlug: "project-a",
-		instanceId: "opencode",
-		providers: [],
-		active: { model: "old-model", provider: "old-provider" },
-	});
-	await Promise.resolve();
-	expect(discoveryState.agents.map((agent) => agent.id)).toEqual(["new-agent"]);
-	expect(discoveryState.commands.map((command) => command.name)).toEqual([
-		"new-command",
-	]);
-	expect(discoveryState.currentModelId).toBe("new-model");
-});
-
-it("ignores a draft returned after the selection moves on", async () => {
-	const oldView = deferred<ViewSessionResponse>();
-	select("A", () => oldView.promise);
-	select("B", () => Promise.resolve({ ok: true, draft: "B draft" }));
-	await Promise.resolve();
-	oldView.resolve({ ok: true, draft: "A draft" });
-	await Promise.resolve();
-	expect(sessionState.currentId).toBe("B");
-	expect(routerState.path).toBe("/s/B");
-	expect(inputSyncState.text).toBe("B draft");
-});
-
 it("keeps B's GetModels pick when A's row changes model last", async () => {
-	vi.mocked(getModelsRpc).mockResolvedValueOnce({
-		projectSlug: "project-a",
-		instanceId: "opencode",
-		providers: [],
-		active: { model: "model-b0", provider: "provider-b" },
-	});
+	applyGetModelsResponse(
+		{
+			projectSlug: "project-a",
+			instanceId: "opencode",
+			providers: [],
+			active: { model: "model-b0", provider: "provider-b" },
+		},
+		"B",
+	);
 	select("B");
 	await Promise.resolve();
 	const refresh = deferred<GetModelsResponse>();
@@ -214,7 +146,7 @@ it("keeps B's GetModels pick when A's row changes model last", async () => {
 		item: row("A", "model-a", "provider-a"),
 	});
 	expect(discoveryState.currentModelId).toBe("model-b0");
-	expect(getModelsRpc).toHaveBeenCalledTimes(2);
+	expect(getModelsRpc).toHaveBeenCalledTimes(1);
 	expect(getModelsRpc).toHaveBeenLastCalledWith({
 		sessionId: "B",
 	});

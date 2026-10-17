@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // Verifies that each handler only touches its declared tier fields
 // (Activity or Messages). Catches silent tier leaks — e.g., a handler
 // that should only write Activity accidentally touching Messages.
@@ -38,7 +39,6 @@ function snapActivity(a: SessionActivity) {
 		doneMessageIds: [...a.doneMessageIds],
 		seenMessageIds: [...a.seenMessageIds],
 		renderTimer: a.renderTimer,
-		awaitingInputId: a.awaitingInputId,
 	};
 }
 

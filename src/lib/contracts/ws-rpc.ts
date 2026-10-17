@@ -187,6 +187,26 @@ export const ModelInfoSchema = Schema.Struct({
 		}),
 	),
 	variants: Schema.optional(Schema.Array(Schema.String)),
+	parameters: Schema.optional(
+		Schema.Struct({
+			rows: Schema.Array(
+				Schema.Struct({
+					id: Schema.String,
+					label: Schema.String,
+					values: Schema.Array(
+						Schema.Struct({ value: Schema.String, label: Schema.String }),
+					),
+				}),
+			),
+			combinations: Schema.Array(
+				Schema.Struct({
+					variant: Schema.String,
+					values: Schema.Record({ key: Schema.String, value: Schema.String }),
+					isDefault: Schema.optional(Schema.Boolean),
+				}),
+			),
+		}),
+	),
 	contextWindowOptions: Schema.optional(
 		Schema.Array(ContextWindowOptionSchema),
 	),
@@ -273,6 +293,7 @@ export const ProjectInfoSchema = Schema.Struct({
 		Schema.Record({ key: Schema.String, value: RepositoryIdentitySchema }),
 	),
 	missing: Schema.optional(Schema.Boolean),
+	unavailableReason: Schema.optional(Schema.String),
 	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),
 });
@@ -292,8 +313,12 @@ export const OpenCodeInstanceSchema = Schema.Struct({
 	driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
 	isDefault: Schema.optional(Schema.Boolean),
 	usageEligible: Schema.optional(Schema.Boolean),
+	cursorUsageSource: Schema.optional(
+		Schema.Literal("token", "keychain", "can_enable", "unsupported"),
+	),
 	available: Schema.optional(Schema.Boolean),
 	unavailableReason: Schema.optional(Schema.String),
+	unavailableCode: Schema.optional(Schema.Literal("auth_required")),
 	capabilities: Schema.optional(
 		Schema.suspend(() => ProviderSessionCapabilitiesSchema),
 	),
@@ -698,7 +723,7 @@ export const ForkSessionResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	sessionId: Schema.String,
 	/** Lineage for the forking tab until the fork's family row arrives. */
-	parentId: Schema.String,
+	forkedFrom: Schema.String,
 	forkMessageId: Schema.optional(Schema.String),
 	forkPointTimestamp: Schema.optional(Schema.Number),
 });
@@ -1046,7 +1071,7 @@ export type RpcLogLevel = typeof RpcLogLevelSchema.Type;
 
 export class WsRpcError extends Schema.TaggedError<WsRpcError>()("WsRpcError", {
 	message: Schema.String,
-	code: Schema.optional(Schema.Literal("unknown-session", "ambiguous-session")),
+	code: Schema.optional(Schema.Literal("unknown-session")),
 }) {}
 
 export class GetStatus extends Schema.TaggedRequest<GetStatus>()("GetStatus", {
@@ -1125,6 +1150,49 @@ export class RestartWithConfig extends Schema.TaggedRequest<RestartWithConfig>()
 		success: OkResponseSchema,
 		payload: {},
 	},
+) {}
+
+export const CursorAuthStateSchema = Schema.Struct({
+	source: Schema.Literal("environment", "sdk-login", "none"),
+	status: Schema.Literal("logged-in", "logged-out", "error"),
+	email: Schema.optional(Schema.String),
+	apiKeyExpiresAtMs: Schema.optional(Schema.Number),
+	expiresSoon: Schema.Boolean,
+	error: Schema.optional(Schema.String),
+	login: Schema.Struct({
+		state: Schema.Literal(
+			"idle",
+			"pending",
+			"complete",
+			"cancelled",
+			"timed-out",
+			"error",
+		),
+		url: Schema.optional(Schema.String),
+		deadlineAtMs: Schema.optional(Schema.Number),
+		error: Schema.optional(Schema.String),
+	}),
+});
+export type CursorAuthState = typeof CursorAuthStateSchema.Type;
+
+export class GetCursorAuth extends Schema.TaggedRequest<GetCursorAuth>()(
+	"GetCursorAuth",
+	{ failure: WsRpcError, success: CursorAuthStateSchema, payload: {} },
+) {}
+
+export class StartCursorLogin extends Schema.TaggedRequest<StartCursorLogin>()(
+	"StartCursorLogin",
+	{ failure: WsRpcError, success: CursorAuthStateSchema, payload: {} },
+) {}
+
+export class CancelCursorLogin extends Schema.TaggedRequest<CancelCursorLogin>()(
+	"CancelCursorLogin",
+	{ failure: WsRpcError, success: CursorAuthStateSchema, payload: {} },
+) {}
+
+export class LogoutCursor extends Schema.TaggedRequest<LogoutCursor>()(
+	"LogoutCursor",
+	{ failure: WsRpcError, success: CursorAuthStateSchema, payload: {} },
 ) {}
 
 export class GetInstances extends Schema.TaggedRequest<GetInstances>()(
@@ -1419,6 +1487,18 @@ export class SetUsageLimitsSetting extends Schema.TaggedRequest<SetUsageLimitsSe
 		failure: WsRpcError,
 		success: UsageLimitsSettingResponseSchema,
 		payload: { usageLimits: UsageLimitsSettingSchema },
+	},
+) {}
+
+export class SetCursorUsageKeychain extends Schema.TaggedRequest<SetCursorUsageKeychain>()(
+	"SetCursorUsageKeychain",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({
+			enabled: Schema.Boolean,
+			reason: Schema.optional(Schema.String),
+		}),
+		payload: { accountId: NonEmptyString, enabled: Schema.Boolean },
 	},
 ) {}
 
@@ -2871,6 +2951,10 @@ const wsRpcRequests = [
 	SetAgent,
 	RestartWithConfig,
 	GetInstances,
+	GetCursorAuth,
+	StartCursorLogin,
+	CancelCursorLogin,
+	LogoutCursor,
 	GetInstanceStatus,
 	{
 		requests: [AttachProjectForSession, AttachProject],
@@ -3135,6 +3219,7 @@ const wsRpcRequests = [
 	CleanUpWorktreesNow,
 	GetUsageLimitsSetting,
 	SetUsageLimitsSetting,
+	SetCursorUsageKeychain,
 	ScanNow,
 	DetectProxy,
 	ListPtys,

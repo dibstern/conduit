@@ -472,7 +472,12 @@ Object.assign(ClaudeDriver, { create: deps => {
 		this.rememberManagedOpenCode();
 	}
 
-	projectStorePath(slug = "process-test"): string {
+	daemonStorePath(): string {
+		return join(this.configDir, "events.db");
+	}
+
+	/** Offline source for startup-import fixtures, never a daemon runtime store. */
+	legacyProjectStorePath(slug = "process-test"): string {
 		return join(projectStorageDir(this.configDir, slug), "events.db");
 	}
 
@@ -607,11 +612,27 @@ Object.assign(ClaudeDriver, { create: deps => {
 					| "CONDUIT_TRACE_ENABLED"
 					| "CONDUIT_TRACE_FILE"
 					| "CONDUIT_TRACE_MAX_BYTES"
-					| "CONDUIT_TRACE_SQL_MIN_MS"
+					| "CONDUIT_TRACE_MIN_MS"
+					| "CONDUIT_TRACE_SESSION"
 					| "CONDUIT_CURSOR_SDK_TRACE"
 					| "CONDUIT_CURSOR_SDK_CAPTURE"
 					| "CONDUIT_TEST_CURSOR_CLOSE_DELAY_MS"
 					| "CONDUIT_TEST_CURSOR_DISPOSE_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_AUTH_STATE"
+					| "CONDUIT_TEST_CURSOR_LOGIN_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_LOGIN_URL_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_LOGIN_TIMEOUT_MS"
+					| "CURSOR_API_KEY"
+					| "CURSOR_AUTH_TOKEN"
+					| "CONDUIT_TEST_CURSOR_DASHBOARD_URL"
+					| "CONDUIT_TEST_CURSOR_KEYCHAIN"
+					| "CONDUIT_TEST_CURSOR_CATALOG_TTL_MS"
+					| "CONDUIT_TEST_CURSOR_DELTA_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_WAIT_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_CANCEL_TERMINAL_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_CANCEL_NEVER_SETTLES"
+					| "CONDUIT_TEST_CURSOR_SEND_GATE"
+					| "CONDUIT_TEST_CURSOR_STREAM_GATE"
 					| "CONDUIT_CONTENTION_METRICS"
 					| "XPC_SERVICE_NAME"
 				>

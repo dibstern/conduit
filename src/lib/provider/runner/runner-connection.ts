@@ -62,6 +62,9 @@ export const connectRunner = (options: {
 	readonly onClose: (failure: SessionFailure) => void;
 	readonly onIdleExit?: () => void;
 	readonly onCommandAccepted?: (sinkId: string) => void;
+	readonly onCommandsSettled?: (
+		commands: NonNullable<RunnerHello["sendCommands"]>,
+	) => void;
 	readonly onUpgradeState?: (state: RunnerUpgradeState) => void;
 	readonly onOutputCommitted?: (output: SessionOutput) => void;
 }) =>
@@ -133,6 +136,10 @@ export const connectRunner = (options: {
 					}
 					if (message.type === "command-accepted") {
 						options.onCommandAccepted?.(message.sinkId);
+						return;
+					}
+					if (message.type === "settled-commands-ack") {
+						options.onCommandsSettled?.(message.commands);
 						return;
 					}
 					if (message.type === "refused") {

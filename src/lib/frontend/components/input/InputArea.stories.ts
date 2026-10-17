@@ -317,7 +317,8 @@ function setupWords(phone: boolean) {
 		"style",
 		`display:flex;flex-direction:column;justify-content:flex-end;min-height:100vh;max-width:${phone ? "393px" : "none"}`,
 	);
-	routerState.path = "/";
+	// The route is the only record of the open session.
+	routerState.path = `/s/${testId}`;
 	sessionViewState.compact = phone;
 	sessionViewState.composerWidth = phone ? 393 : 760;
 	instanceState.instances = [

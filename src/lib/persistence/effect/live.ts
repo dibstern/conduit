@@ -1,13 +1,20 @@
 import { Reactivity } from "@effect/experimental";
 import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { type ConfigError, Effect, Layer, type ManagedRuntime } from "effect";
-import type { SessionDirectory } from "../../domain/daemon/Services/session-directory.js";
 import {
-	makePersistenceServiceLive,
+	type ConfigError,
+	Context,
+	Effect,
+	Layer,
+	type ManagedRuntime,
+} from "effect";
+import {
+	makePersistenceService,
 	PersistenceError,
 	PersistenceProjectTag,
-	type PersistenceServiceTag,
+	PersistenceServiceTag,
+	preparePersistenceStore,
+	stampProjectProvenance,
 } from "../../domain/persistence/Services/persistence-service.js";
 import type { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
 import { reclaimStore } from "../rewrite-store.js";
@@ -55,29 +62,32 @@ export type PersistenceEffectContext =
 
 export type PersistenceEffectError = PersistenceError | ConfigError.ConfigError;
 
+export type PersistenceStoreContext =
+	| SqlClient.SqlClient
+	| SqliteNode.SqliteClient
+	| ProjectorCursorEffectTag
+	| ProjectionRunnerEffectTag;
+
+/** A borrowed store Context. Its acquiring scope retains connection ownership. */
+export class PersistenceStore extends Context.Tag("PersistenceStore")<
+	PersistenceStore,
+	Context.Context<PersistenceStoreContext>
+>() {}
+
+export type PersistenceProjectContext = Exclude<
+	PersistenceEffectContext,
+	SqlClient.SqlClient | SqliteNode.SqliteClient | ProjectorCursorEffectTag
+>;
+
 export type PersistenceEffectRuntime = ManagedRuntime.ManagedRuntime<
 	PersistenceEffectContext,
 	PersistenceEffectError
 >;
 
-export function makePersistenceEffectLayer(
+export function makePersistenceStoreLayer(
 	filename: string,
-	projectId: string,
 	projectors: readonly EffectProjector[] = createAllEffectProjectors(),
-	// When supplied, the SAME shared bus layer used by the ingestion choke point.
-	// Wiring it here lets ClaudeEventPersistEffect publish committed writes (e.g.
-	// user messages) as a post-commit change signal. Omitted → persist stays
-	// silent (serviceOption resolves None). Must be the shared instance so all
-	// publishers and subscribers meet on one PubSub under Effect memoization.
-	sessionEventBusLayer?: Layer.Layer<SessionEventBusTag>,
-	sessionDirectoryLayer?: Layer.Layer<SessionDirectory>,
-): Layer.Layer<PersistenceEffectContext, PersistenceEffectError> {
-	if (!projectId || projectId.trim().length === 0)
-		throw new PersistenceError({
-			operation: "bindProject",
-			cause: "A store requires a non-empty project id",
-		});
-	const projectLayer = Layer.succeed(PersistenceProjectTag, { projectId });
+): Layer.Layer<PersistenceStoreContext, PersistenceEffectError> {
 	// Closing this migration connection first makes newly freed pages eligible
 	// on this boot, without replacing a file behind a persistent SQLite handle.
 	const prepareStore =
@@ -130,23 +140,10 @@ export function makePersistenceEffectLayer(
 		),
 	).pipe(Layer.provideMerge(preparedSqliteLayer));
 
-	// Each bound store must migrate and stamp its own connection, even when
-	// several stores are composed in the same Layer graph.
-	const persistenceServiceLayer = Layer.fresh(makePersistenceServiceLive).pipe(
-		Layer.provide(Layer.merge(sqliteLayer, projectLayer)),
+	// Also migrate the final connection: :memory: has no preparation connection.
+	const baseLayer = Layer.effectDiscard(preparePersistenceStore).pipe(
+		Layer.provideMerge(sqliteLayer),
 	);
-
-	const baseLayer = Layer.mergeAll(
-		sqliteLayer,
-		projectLayer,
-		persistenceServiceLayer,
-		sessionDirectoryLayer ?? Layer.empty,
-	);
-
-	const eventStoreLayer = Layer.effect(
-		EventStoreEffectTag,
-		makeEventStoreEffect,
-	).pipe(Layer.provide(baseLayer));
 
 	const cursorLayer = Layer.effect(
 		ProjectorCursorEffectTag,
@@ -157,6 +154,38 @@ export function makePersistenceEffectLayer(
 		ProjectionRunnerEffectTag,
 		makeProjectionRunnerEffect(projectors),
 	).pipe(Layer.provide(Layer.merge(cursorLayer, baseLayer)));
+
+	return Layer.mergeAll(baseLayer, cursorLayer, projectionRunnerLayer);
+}
+
+type PersistenceProjectOptions = {
+	// Use the same shared bus as ingestion so publishers meet subscribers.
+	sessionEventBusLayer?: Layer.Layer<SessionEventBusTag> | undefined;
+};
+
+export function makePersistenceProjectLayer(
+	projectId: string,
+	options: PersistenceProjectOptions = {},
+): Layer.Layer<
+	PersistenceProjectContext,
+	PersistenceError,
+	PersistenceStoreContext
+> {
+	if (!projectId || projectId.trim().length === 0)
+		throw new PersistenceError({
+			operation: "bindProject",
+			cause: "A store requires a non-empty project id",
+		});
+	const projectLayer = Layer.succeed(PersistenceProjectTag, { projectId });
+	const persistenceServiceLayer = Layer.fresh(
+		Layer.effect(PersistenceServiceTag, makePersistenceService),
+	).pipe(Layer.provide(projectLayer));
+	const baseLayer = Layer.merge(projectLayer, persistenceServiceLayer);
+	const eventStoreLayer = Layer.effect(
+		EventStoreEffectTag,
+		makeEventStoreEffect,
+	).pipe(Layer.provide(baseLayer));
+	const projectionRunnerLayer = Layer.service(ProjectionRunnerEffectTag);
 
 	const readQueryLayer = Layer.effect(
 		ReadQueryEffectTag,
@@ -178,8 +207,8 @@ export function makePersistenceEffectLayer(
 		makeClaudeEventPersistEffect,
 	).pipe(
 		Layer.provide(
-			sessionEventBusLayer
-				? Layer.merge(claudeEventPersistDeps, sessionEventBusLayer)
+			options.sessionEventBusLayer
+				? Layer.merge(claudeEventPersistDeps, options.sessionEventBusLayer)
 				: claudeEventPersistDeps,
 		),
 	);
@@ -187,10 +216,27 @@ export function makePersistenceEffectLayer(
 	return Layer.mergeAll(
 		baseLayer,
 		eventStoreLayer,
-		cursorLayer,
 		projectionRunnerLayer,
 		readQueryLayer,
 		providerStateLayer,
 		claudeEventPersistLayer,
 	);
+}
+
+export function makePersistenceEffectLayer(
+	filename: string,
+	projectId: string,
+	projectors: readonly EffectProjector[] = createAllEffectProjectors(),
+	sessionEventBusLayer?: Layer.Layer<SessionEventBusTag>,
+): Layer.Layer<PersistenceEffectContext, PersistenceEffectError> {
+	const projectLayer = makePersistenceProjectLayer(projectId, {
+		sessionEventBusLayer,
+	});
+	// Only opening a per-project file may stamp provenance. Project consumers
+	// cannot see the connection until preparation and stamping have completed.
+	const storeLayer = Layer.effectDiscard(
+		stampProjectProvenance(projectId),
+	).pipe(Layer.provideMerge(makePersistenceStoreLayer(filename, projectors)));
+	// provideMerge merges the store first, so the project's runner wins.
+	return projectLayer.pipe(Layer.provideMerge(storeLayer));
 }

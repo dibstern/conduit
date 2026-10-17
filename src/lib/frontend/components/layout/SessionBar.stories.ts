@@ -159,12 +159,6 @@ export const Default: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 
-		// The back control is the only way off this screen on a phone, so its
-		// accessible name and its wiring are both worth pinning.
-		const back = canvas.getByRole("button", { name: /Sessions/ });
-		await userEvent.click(back);
-		expect(routerState.path).toBe("/");
-
 		expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
 			"Test Session",
 		);
@@ -174,6 +168,13 @@ export const Default: Story = {
 		expect(canvas.getByTestId("session-bar-island-overflow")).toBeVisible();
 		expect(canvas.queryByTestId("session-bar-overflow")).toBeNull();
 		expect(canvas.queryByTestId("session-bar-views")).toBeNull();
+
+		// The back control is the only way off this screen on a phone, so its
+		// accessible name and its wiring are both worth pinning. It leaves the
+		// session's route, so it runs last.
+		const back = canvas.getByRole("button", { name: /Sessions/ });
+		await userEvent.click(back);
+		expect(routerState.path).toBe("/");
 	},
 };
 

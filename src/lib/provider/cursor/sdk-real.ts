@@ -1,7 +1,7 @@
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { CursorSdkFailure } from "./sdk-error.js";
+import { CursorSdkFailure, cursorSdkFailure } from "./sdk-error.js";
 import type {
 	CursorAgent,
 	CursorAgentOptions,
@@ -13,7 +13,18 @@ import type {
 
 export function createRealCursorSdkPort(): CursorSdkPort {
 	let sdk: Promise<typeof import("@cursor/sdk")> | undefined;
+	let pendingLogin: Promise<void> | undefined;
 	const load = () => (sdk ??= import("@cursor/sdk"));
+	const call = async <A>(
+		operation: string,
+		run: () => Promise<A>,
+	): Promise<A> => {
+		try {
+			return await run();
+		} catch (cause) {
+			throw cursorSdkFailure(operation, cause);
+		}
+	};
 	const stores = new WeakMap<
 		CursorStore,
 		import("@cursor/sdk").LocalAgentStore
@@ -51,11 +62,18 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 								reason: "Cursor custom tool handler is missing",
 							});
 						}
-						return [name, tool];
+						return [
+							name,
+							{
+								description: tool.description,
+								inputSchema: tool.inputSchema,
+								execute: (args, context) => tool.execute(args, context),
+							} satisfies import("@cursor/sdk").SDKCustomTool,
+						];
 					}),
 				),
 				subagentInherit: options.subagentInherit,
-				enableAgentRetries: false,
+				enableAgentRetries: true,
 			},
 		};
 	};
@@ -64,32 +82,40 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 		return {
 			id: agent.agentId,
 			async send(prompt, options, onDelta) {
-				const run = await agent.send(prompt, {
-					model: {
-						id: options.model.id,
-						...(options.model.params
-							? { params: [...options.model.params] }
-							: {}),
-					},
-					mode: options.mode,
-					onDelta: ({ update }) => onDelta(update),
-				});
+				const run = await call("agent.send", () =>
+					agent.send(prompt, {
+						model: {
+							id: options.model.id,
+							...(options.model.params
+								? { params: [...options.model.params] }
+								: {}),
+						},
+						mode: options.mode,
+						...(options.local ? { local: options.local } : {}),
+						onDelta: ({ update }) => onDelta(update),
+					}),
+				);
 				let endStream: () => void = () => {};
 				const streamEnded = new Promise<void>((resolve) => {
 					endStream = resolve;
 				});
 				let waiting: Promise<unknown> | undefined;
+				let streamFailure: CursorSdkFailure | undefined;
+				const steer = run.steer?.bind(run);
 				return {
 					id: run.id,
 					stream: (async function* () {
 						try {
 							yield* run.stream();
+						} catch (cause) {
+							streamFailure = cursorSdkFailure("run.stream", cause);
+							throw streamFailure;
 						} finally {
 							endStream();
 						}
 					})(),
 					wait() {
-						const terminal = (waiting ??= run.wait());
+						const terminal = (waiting ??= call("run.wait", () => run.wait()));
 						return Promise.race([
 							terminal,
 							streamEnded.then(async () => {
@@ -99,18 +125,27 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 									run.status !== "cancelled" &&
 									run.status !== "error"
 								) {
-									throw new CursorSdkFailure({
-										operation: "run.wait",
-										reason: "Cursor stream ended without a terminal status",
-									});
+									throw (
+										streamFailure ??
+										new CursorSdkFailure({
+											operation: "run.wait",
+											reason: "Cursor stream ended without a terminal status",
+										})
+									);
 								}
 								return terminal;
 							}),
 						]);
 					},
-					cancel: () => run.cancel(),
+					cancel: () => call("run.cancel", () => run.cancel()),
+					...(steer
+						? {
+								steer: (text: string) => call("run.steer", () => steer(text)),
+							}
+						: {}),
 				};
 			},
+			getUsage: () => call("agent.getUsage", () => agent.getUsage()),
 			close() {
 				return (closed ??= (async () => {
 					// close() releases its lease without awaiting it in 1.0.37.
@@ -176,37 +211,82 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 			}
 			return { available: true };
 		},
+		async authLogin(options) {
+			if (pendingLogin)
+				throw new CursorSdkFailure({
+					operation: "auth.login",
+					reason: "The previous Cursor login is still finishing",
+				});
+			const operation = (async () => {
+				const sdk = await load();
+				const store = new sdk.FileCredentialStore();
+				// SDK 1.0.37 aborts polling, but does not check the signal while
+				// minting/saving. Keep cancelled flows from replacing the SDK login.
+				await sdk.Cursor.auth.login({
+					...options,
+					store: {
+						load: () => store.load(),
+						clear: () => store.clear(),
+						async save(credential) {
+							const previous = await store.load();
+							options.signal.throwIfAborted();
+							await store.save(credential);
+							if (options.signal.aborted) {
+								if (previous) await store.save(previous);
+								else await store.clear();
+								options.signal.throwIfAborted();
+							}
+						},
+					},
+				});
+			})();
+			pendingLogin = operation;
+			try {
+				// The SDK persists the key. Never return it beyond this adapter.
+				await operation;
+			} catch (cause) {
+				throw cursorSdkFailure("auth.login", cause);
+			} finally {
+				pendingLogin = undefined;
+			}
+		},
 		async authStatus() {
 			try {
 				return await (await load()).Cursor.auth.status();
-			} catch {
-				throw new CursorSdkFailure({
-					operation: "auth.status",
-					reason: "Cursor auth status failed",
-				});
+			} catch (cause) {
+				throw cursorSdkFailure("auth.status", cause);
+			}
+		},
+		async authLogout() {
+			try {
+				// A cancelled mint/save must settle before logout clears the store.
+				await pendingLogin?.catch(() => {});
+				await (await load()).Cursor.auth.logout();
+			} catch (cause) {
+				throw cursorSdkFailure("auth.logout", cause);
 			}
 		},
 		async storedCredential() {
 			try {
 				const { FileCredentialStore } = await load();
 				return await new FileCredentialStore().load();
-			} catch {
-				throw new CursorSdkFailure({
-					operation: "credential.store",
-					reason: "Cursor credential store could not be read",
-				});
+			} catch (cause) {
+				throw cursorSdkFailure("credential.store", cause);
 			}
 		},
 		async modelsList(credential) {
 			try {
-				return await (await load()).Cursor.models.list({
+				const models = await (await load()).Cursor.models.list({
 					apiKey: credential.apiKey,
 				});
-			} catch {
-				throw new CursorSdkFailure({
-					operation: "models.list",
-					reason: "Cursor model list failed",
-				});
+				return models.map(({ id, displayName, parameters, variants }) => ({
+					id,
+					displayName,
+					...(parameters ? { parameters } : {}),
+					...(variants ? { variants } : {}),
+				}));
+			} catch (cause) {
+				throw cursorSdkFailure("models.list", cause);
 			}
 		},
 		async openStore(path, cwd) {
@@ -222,6 +302,41 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 			stores.set(store, localStore);
 			return store;
 		},
+		async getActiveRun(agentId, store) {
+			const localStore = stores.get(store);
+			if (!localStore)
+				throw new CursorSdkFailure({
+					operation: "store.runs.get",
+					reason: "Cursor requires an open conduit-owned store",
+				});
+			const agent = await localStore.agents.get({ agentId });
+			if (!agent?.activeRunId) return undefined;
+			return (
+				(await localStore.runs.get({ agentId, runId: agent.activeRunId })) ??
+				undefined
+			);
+		},
+		async deleteAgent(agentId, cwd, store) {
+			const localStore = stores.get(store);
+			if (!localStore)
+				throw new CursorSdkFailure({
+					operation: "agent.delete",
+					reason: "Cursor requires an open conduit-owned store",
+				});
+			const agent = await localStore.agents.get({ agentId });
+			if (!agent) return;
+			const options = { runtime: "local" as const, cwd, store: localStore };
+			const api = (await load()).Agent;
+			if (agent.activeRunId) {
+				const run = await localStore.runs.get({
+					agentId,
+					runId: agent.activeRunId,
+				});
+				if (run?.status === "queued" || run?.status === "running")
+					await api.cancelRun(run.runId, options);
+			}
+			await api.delete(agentId, options);
+		},
 		async primeSandbox(options, credential, store) {
 			const agent = await (await load()).Agent.create(
 				agentOptions(
@@ -233,7 +348,9 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 					credential,
 					store,
 				),
-			);
+			).catch((cause: unknown) => {
+				throw cursorSdkFailure("sandbox.prime", cause);
+			});
 			try {
 				// 1.0.37 initializes executors lazily. Its checked internal method
 				// primes the sandbox without sending a hidden, billable prompt.
@@ -246,12 +363,8 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 						reason: "Cursor SDK sandbox initialization API changed",
 					});
 				}
-				await agent.getExecutor().catch(() => {
-					throw new CursorSdkFailure({
-						operation: "sandbox.prime",
-						reason:
-							"Cursor sandbox initialization failed. Restart the runner after checking sandbox support.",
-					});
+				await agent.getExecutor().catch((cause: unknown) => {
+					throw cursorSdkFailure("sandbox.prime", cause);
 				});
 			} finally {
 				await wrapAgent(agent).close();
@@ -259,16 +372,20 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 		},
 		async createAgent(options, credential, store, customTools) {
 			return wrapAgent(
-				await (await load()).Agent.create(
-					agentOptions(options, credential, store, customTools),
+				await call("agent.create", async () =>
+					(await load()).Agent.create(
+						agentOptions(options, credential, store, customTools),
+					),
 				),
 			);
 		},
 		async resumeAgent(id, options, credential, store, customTools) {
 			return wrapAgent(
-				await (await load()).Agent.resume(
-					id,
-					agentOptions(options, credential, store, customTools),
+				await call("agent.resume", async () =>
+					(await load()).Agent.resume(
+						id,
+						agentOptions(options, credential, store, customTools),
+					),
 				),
 			);
 		},

@@ -12,7 +12,7 @@ export interface AutoSettleTurn {
 
 export interface AutoSettleFacts {
 	readonly exists: boolean;
-	/** A fork or side thread: only root sessions settle automatically. */
+	/** A side thread: only root sessions (Forks included) settle automatically. */
 	readonly isChild: boolean;
 	readonly settledAt: number | null;
 	readonly lastMessageAt: number | null;

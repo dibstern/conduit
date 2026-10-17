@@ -1,12 +1,9 @@
 import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Context, Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import {
-	makeSessionDirectoryLive,
-	SessionDirectory,
-} from "../../../src/lib/domain/daemon/Services/session-directory.js";
+import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
@@ -14,11 +11,14 @@ import {
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
-const sessionDirectory = makeSessionDirectoryLive("/unused", []).pipe(
-	Layer.tap((context) =>
-		Context.get(context, SessionDirectory).record("project-b", ["s1", "s"]),
-	),
-);
+const sessionDirectory = Layer.succeed(SessionDirectory, {
+	projectOf: (sessionId) =>
+		Effect.succeed(
+			sessionId === "s1" || sessionId === "s"
+				? Option.some("project-b")
+				: Option.none(),
+		),
+});
 describe("session triage RPCs", () => {
 	it.scoped("routes the triage setters by session ownership", () =>
 		Effect.gen(function* () {

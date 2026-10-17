@@ -142,14 +142,10 @@ async function setup(
 						String("sessionId" in params ? params.sessionId : undefined),
 					) ?? "ask",
 			}),
-		},
-		handlers: {
-			ListSessions: () => ({ projectSlug: "myapp", sessions: [] }),
 			GetProjects: () => ({
 				projects: [{ slug: "myapp", title: "myapp", folders: ["/tmp/myapp"] }],
 				current: "myapp",
 			}),
-			ListPtys: () => ({ projectSlug: "myapp", ptys: [] }),
 		},
 	});
 	const bound = initMessages !== unboundInit;

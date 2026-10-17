@@ -33,6 +33,7 @@
 	import { openTask } from "../session/background-tasks.svelte.js";
 	import type { BackgroundTask } from "../../../shared-types.js";
 	import { partStyle } from "./activity-style.js";
+	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import SkillDoc from "./SkillDoc.svelte";
 	import ToolFullDetail from "./ToolFullDetail.svelte";
 
@@ -89,11 +90,13 @@
 {#if part.type === "tool"}
 	{@const running = launch ? launch.state.kind === "running" : part.status === "running" || part.status === "pending"}
 	{@const failed = part.status === "error" || part.isError}
-	{@const verb = toolVerb(part, running ? "present" : "past")}
+	{@const movedToBackground = part.metadata?.['movedToBackground'] === true}
+	{@const verb = movedToBackground ? "Moved to background" : toolVerb(part, running ? "present" : "past")}
 	{@const command = toolCommand(part)}
 	{@const subject = part.name === "Skill" ? skillName(part) : toolSubject(part)}
 	{@const tag = toolTags(part)[0]}
 	{@const isSkill = part.name === "Skill"}
+	{@const cursorDetail = typeof part.metadata?.['cursorToolType'] === "string" && (part.metadata['fileChange'] || part.metadata['plan'] || part.metadata['computerUse'] || part.metadata['media'] || part.metadata['output'] !== undefined || ensureCanonical(part.name, part.input).tool === "Unknown")}
 	<!-- A compact row is still this tool's rendering, so it answers to the same
 	     .tool-item / data-tool-status hooks the expanded card used to. -->
 	<div
@@ -143,6 +146,7 @@
 				<span class="{launch?.step ? 'min-w-0 max-w-[50%]' : 'flex-1'} truncate font-mono {running ? 'text-text-secondary' : 'text-text-muted'}">
 					{subject}
 				</span>
+				{#if typeof part.metadata?.['cursorToolType'] === "string" && part.metadata['truncated'] === true}<span class="shrink-0 text-text-muted">Truncated</span>{/if}
 				{#if launch}
 					<!-- One line per task: what it is doing now, how long, and what it
 					     used. The outcome's colour carries failed vs stopped too. -->
@@ -183,9 +187,14 @@
 				</button>
 			{/if}
 		</div>
+		{#if childSession && (typeof part.metadata?.['subagentModel'] === "string" || typeof part.metadata?.['subagentMode'] === "string")}
+			<div class="subagent-details ml-7 mr-1 pb-1 text-xs text-text-muted break-words">
+				{[part.metadata?.['subagentModel'], part.metadata?.['subagentMode']].filter((value) => typeof value === "string").join(" · ")}
+			</div>
+		{/if}
 		{#if !launch && expanded && isSkill}
 			<div class="ml-7 mr-1 my-1"><SkillDoc name={subject} /></div>
-		{:else if !launch && expanded && (part.result || command)}
+		{:else if !launch && expanded && (part.result || command || cursorDetail)}
 			<ToolFullDetail message={part} class="ml-7 mr-1 mb-1">
 				{#snippet children(tool)}
 					{@const fullCommand = toolCommand(tool)}

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import {
 	applySessionChange,
 	applySessionRemoved,
@@ -85,7 +86,7 @@ describe("the server half holds only rows the server sent", () => {
 		expect(getFilteredSessions()).toEqual([]);
 	});
 
-	it("keeps a listed row unchanged while exposing announced parent lineage", () => {
+	it("keeps a listed row unchanged while announcing fork lineage without containment", () => {
 		applySessionSnapshot(
 			[
 				{
@@ -102,7 +103,7 @@ describe("the server half holds only rows the server sent", () => {
 		followFork({
 			projectSlug: "p",
 			sessionId: "ses_child",
-			parentId: "ses_parent",
+			forkedFrom: "ses_parent",
 		});
 
 		expect(sessionState.sessions.get("ses_child")).toEqual({
@@ -112,7 +113,8 @@ describe("the server half holds only rows the server sent", () => {
 			title: "Child",
 			status: "idle",
 		});
-		expect(sessionState.currentParentId).toBe("ses_parent");
+		expect(sessionState.currentParentId).toBeNull();
+		expect(sessionState.currentFork?.forkedFrom).toBe("ses_parent");
 	});
 });
 

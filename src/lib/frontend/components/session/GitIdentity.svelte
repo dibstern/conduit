@@ -7,6 +7,7 @@
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { failureLine, toastFailure } from "../../transport/rpc-errors.js";
+	import type { rpc } from "../../transport/ws-rpc-client.js";
 	import Button from "../ui/Button.svelte";
 	import Field from "../ui/Field.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -25,7 +26,7 @@
 		workspaceMissing?: WorkspaceMissing | undefined;
 		workspaceMismatch?: { readonly actualPath: string } | undefined;
 		workspaceHint?: string | undefined;
-		loadWorktrees?: (() => Promise<{ readonly worktrees: readonly WorktreeInfo[]; readonly directory?: string | undefined }>) | undefined;
+		loadWorktrees?: (() => ReturnType<typeof rpc<"ListWorktrees">>) | undefined;
 		onmove?: ((path: string) => Promise<unknown>) | undefined;
 		onrecreate?: (() => Promise<unknown>) | undefined;
 		oncontinue?: (() => Promise<unknown>) | undefined;

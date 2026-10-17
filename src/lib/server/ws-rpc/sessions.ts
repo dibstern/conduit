@@ -22,6 +22,7 @@ import { AccountDirectory } from "../../domain/daemon/Services/account-directory
 import { DaemonConfigRefTag } from "../../domain/daemon/Services/daemon-config-ref.js";
 import { Usage } from "../../domain/daemon/Services/usage.js";
 import { WorktreeServiceTag } from "../../domain/daemon/Services/worktree-service.js";
+import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import {
 	ContinuationTag,
 	previewContinuation,
@@ -98,7 +99,9 @@ const readAutoSettleOutlook = (sessionId: string) =>
 	Effect.gen(function* () {
 		const now = yield* Clock.currentTimeMillis;
 		const { projectDir } = yield* ConfigTag;
+		const { projectId } = yield* PersistenceProjectTag;
 		const facts = (yield* readPersistedAutoSettleFacts(
+			projectId,
 			now,
 			sessionId,
 			projectDir,
@@ -761,7 +764,7 @@ export const sessionsHandlers = {
 						: Effect.succeed({
 								projectSlug: config.slug,
 								sessionId: session.id,
-								parentId: session.parentId,
+								forkedFrom: session.forkedFrom,
 								...(session.forkMessageId && {
 									forkMessageId: session.forkMessageId,
 								}),

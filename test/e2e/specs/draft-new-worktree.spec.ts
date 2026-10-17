@@ -39,7 +39,7 @@ async function openDraft(
 	} = {},
 ) {
 	const provider = options.provider ?? "claude";
-	const folders = options.multiFolder
+	const folders: [string, ...string[]] = options.multiFolder
 		? options.nonGitPrimary
 			? [shared, main, api]
 			: [main, api, shared]
@@ -71,7 +71,7 @@ async function openDraft(
 						slug: "second",
 						title: "Second project",
 						instanceId: provider,
-						folders: ["/workspace/second"],
+						folders: ["/workspace/second"] as const,
 						git: { branch: "develop" },
 					},
 				]
@@ -232,10 +232,7 @@ async function openDraft(
 				providerScope: { id: instanceId ?? provider, name: "Draft provider" },
 				agents: [],
 			}),
-		},
-		handlers: {
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
-			GetInstances: () => instances,
 		},
 	});
 	await mockRelayWebSocket(page, {

@@ -39,6 +39,7 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
+import { removeRunnerSessionSends } from "../../../provider/runner/runner-send-journal.js";
 import {
 	isPickRejection,
 	ModelNotInCatalog,
@@ -62,8 +63,6 @@ import {
 	OpenCodeInstancesTag,
 } from "../../daemon/Services/opencode-instances-service.js";
 import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
-import { SessionDirectory } from "../../daemon/Services/session-directory.js";
-import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { RelayStatusSnapshotTag } from "./relay-status-snapshot.js";
 import {
@@ -77,9 +76,9 @@ import {
 	applySessionCommand,
 	createOpenCodeSession,
 	normalizeSessionTitle,
-	openCodeUpstreamAdapter,
 	type SessionCommand,
 	type SessionUpstreamAdapter,
+	sessionUpstreamAdapter,
 } from "./session-command.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 import { SessionManagerError } from "./session-manager-error.js";
@@ -309,6 +308,7 @@ export const deleteSession = (sessionId: string) =>
 		const stateRef = yield* SessionManagerStateTag;
 		const logOption = yield* Effect.serviceOption(LoggerTag);
 		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+		const configOption = yield* Effect.serviceOption(ConfigTag);
 		const instanceClientsOption =
 			yield* Effect.serviceOption(OpenCodeInstancesTag);
 		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
@@ -415,6 +415,7 @@ export const deleteSession = (sessionId: string) =>
 					return;
 				}
 
+				let runnerStopped = false;
 				if (engineOption._tag === "None") {
 					cleanupFailures.push(
 						"end_session: orchestration engine is unavailable",
@@ -441,38 +442,66 @@ export const deleteSession = (sessionId: string) =>
 								Cause.squash(endSessionExit.cause),
 							)}`,
 						);
+					} else {
+						runnerStopped = true;
 					}
 				}
 
-				if (getProviderDriver(provider)?.runsOpenCodeServer) {
-					const providerDeleteExit = yield* Effect.exit(
-						Effect.gen(function* () {
-							let deleteApi = api;
-							if (capturedInstanceId !== MANAGED_OPENCODE_ACCOUNT_ID) {
-								if (instanceClientsOption._tag === "None") {
-									return yield* Effect.fail(
-										new Error(
-											`OpenCode instance client registry is unavailable for "${capturedInstanceId}"`,
-										),
-									);
-								}
-								deleteApi =
-									yield* instanceClientsOption.value.use(capturedInstanceId);
+				const providerDeleteExit = yield* Effect.exit(
+					Effect.gen(function* () {
+						let deleteApi = api;
+						if (
+							getProviderDriver(provider)?.runsOpenCodeServer &&
+							capturedInstanceId !== MANAGED_OPENCODE_ACCOUNT_ID
+						) {
+							if (instanceClientsOption._tag === "None") {
+								return yield* Effect.fail(
+									new Error(
+										`OpenCode instance client registry is unavailable for "${capturedInstanceId}"`,
+									),
+								);
 							}
-
-							yield* openCodeUpstreamAdapter(deleteApi).sync(command);
-						}).pipe(Effect.scoped),
-					);
-					if (Exit.isFailure(providerDeleteExit)) {
-						if (Exit.isInterrupted(providerDeleteExit)) {
-							return yield* Effect.failCause(providerDeleteExit.cause);
+							deleteApi =
+								yield* instanceClientsOption.value.use(capturedInstanceId);
 						}
-						cleanupFailures.push(
-							`provider_delete: ${renderProviderCleanupDetail(
-								Cause.squash(providerDeleteExit.cause),
-							)}`,
-						);
+
+						const adapter = yield* sessionUpstreamAdapter(provider, deleteApi);
+						yield* adapter.sync(command);
+						if (
+							runnerStopped &&
+							getProviderDriver(provider)?.usesLocalSessions
+						) {
+							const config =
+								configOption._tag === "Some" ? configOption.value : undefined;
+							const configDir = config?.configDir;
+							if (config === undefined || configDir === undefined) {
+								return yield* Effect.fail(
+									new SessionManagerError({
+										operation: "deleteSession.runnerJournal",
+										cause:
+											"Runner cleanup requires the project and config directories",
+									}),
+								);
+							}
+							yield* Effect.try(() =>
+								removeRunnerSessionSends(
+									config.projectDir,
+									configDir,
+									sessionId,
+								),
+							);
+						}
+					}).pipe(Effect.scoped),
+				);
+				if (Exit.isFailure(providerDeleteExit)) {
+					if (Exit.isInterrupted(providerDeleteExit)) {
+						return yield* Effect.failCause(providerDeleteExit.cause);
 					}
+					cleanupFailures.push(
+						`provider_delete: ${renderProviderCleanupDetail(
+							Cause.squash(providerDeleteExit.cause),
+						)}`,
+					);
 				}
 			});
 
@@ -821,16 +850,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 		// a daemon fiber that lacks the project's bus, and a commit without it
 		// never reaches the sidebar's shell subscription.
 		const sessionEventBus = yield* Effect.serviceOption(SessionEventBusTag);
-		const directory = yield* Effect.serviceOption(SessionDirectory);
-		const ownershipContext = Context.make(PersistenceProjectTag, {
-			projectId: config.slug,
-		}).pipe(
-			Context.merge(
-				Option.isSome(directory)
-					? Context.make(SessionDirectory, directory.value)
-					: Context.empty(),
-			),
-		);
 		const inFlightDeletes = new Map<
 			string,
 			Deferred.Deferred<void, SessionManagerError>
@@ -858,7 +877,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 				// through the handle it hands us is what makes the announcement
 				// unskippable.
 				const commitAndSignal = yield* makeCommitAndSignal.pipe(
-					Effect.provide(ownershipContext),
 					Effect.provideService(SqlClient.SqlClient, sql),
 					Effect.provideService(EventStoreEffectTag, eventStore),
 					Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
@@ -979,7 +997,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 			options?: CreateSessionOptions,
 		) => {
 			const create = serviceCreateSession(title, options).pipe(
-				Effect.provide(ownershipContext),
 				Effect.provideService(AccountDirectory, accounts),
 				Effect.provideService(ConfigTag, config),
 				Effect.provideService(LoggerTag, log),
@@ -1010,7 +1027,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 			>,
 		): Effect.Effect<A, E> => {
 			const provided = effect.pipe(
-				Effect.provide(ownershipContext),
 				Effect.provideService(AccountDirectory, accounts),
 				Effect.provideService(OpenCodeAPITag, api),
 				Effect.provideService(ReadQueryEffectTag, readQuery),
@@ -1101,7 +1117,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 					const exit = yield* Effect.exit(
 						Effect.gen(function* () {
 							yield* deleteSession(sessionId).pipe(
-								Effect.provide(ownershipContext),
 								Effect.provideService(AccountDirectory, accounts),
 								Effect.provideService(OpenCodeAPITag, api),
 								Effect.provideService(OrchestrationEngineTag, engine),

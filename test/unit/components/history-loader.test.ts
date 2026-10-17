@@ -2,15 +2,11 @@ import { cleanup, render } from "@testing-library/svelte";
 import { flushSync } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const loadOlderTranscript = vi.hoisted(() => vi.fn(() => Promise.resolve()));
-vi.mock("../../../src/lib/frontend/stores/transcript.svelte.js", async () => {
-	const { sessionState } = await import(
-		"../../../src/lib/frontend/stores/session.svelte.js"
-	);
-	return {
-		loadOlderTranscript,
-		placedSessionId: () => sessionState.currentId,
-	};
+// Spy mode keeps the real exports: selection reads the transcript's saved
+// draw, and a factory awaiting the original deadlocks on the import cycle
+// through turn control's stop flow.
+vi.mock("../../../src/lib/frontend/stores/transcript.svelte.js", {
+	spy: true,
 });
 
 import HistoryLoader from "../../../src/lib/frontend/components/chat/HistoryLoader.svelte";
@@ -19,6 +15,13 @@ import {
 	getOrCreateSessionSlot,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	loadOlderTranscript,
+	placedSessionId,
+} from "../../../src/lib/frontend/stores/transcript.svelte.js";
+
+vi.mocked(loadOlderTranscript).mockImplementation(() => Promise.resolve());
+vi.mocked(placedSessionId).mockImplementation(() => sessionState.currentId);
 
 let observerCallback: IntersectionObserverCallback | null = null;
 const disconnect = vi.fn();

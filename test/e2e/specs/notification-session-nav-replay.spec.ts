@@ -9,6 +9,7 @@
 // events that trigger notification broadcasts for unwatched sessions.
 
 import type { OpenCodeRecording } from "../fixtures/recorded/types.js";
+import { createSession } from "../helpers/e2e-harness.js";
 import { loadOpenCodeRecording } from "../helpers/recorded-loader.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 
@@ -49,6 +50,7 @@ test.describe("Notification → session navigation (replay)", () => {
 		page,
 		relayUrl,
 		mockServer,
+		harness,
 	}) => {
 		// Capture all WS frames (received and sent) before navigating.
 		const receivedFrames: string[] = [];
@@ -80,7 +82,8 @@ test.describe("Notification → session navigation (replay)", () => {
 		// { type: "done", error, ... } relay message, which is notification-worthy.
 		// Since no browser client is viewing this session, the pipeline
 		// drops the message and publishes an alert instead.
-		const TARGET = "ses_notification_target";
+		const TARGET = await createSession(harness.relayPort, "opencode");
+		expect(page.url()).not.toContain(`/s/${TARGET}`);
 		mockServer.injectSSEEvents([
 			{
 				type: "session.error",

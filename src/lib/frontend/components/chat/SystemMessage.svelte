@@ -5,8 +5,14 @@
 	import type { SystemMessage } from "../../types.js";
 	import Icon from "../ui/Icon.svelte";
 	import Surface from "../ui/Surface.svelte";
+	import { getProviderPresentation } from "../../utils/provider-presentation.js";
+	import { cursorAuth, openCursorLogin, refreshCursorAuth } from "../../stores/cursor-auth.svelte.js";
 
-	let { message }: { message: SystemMessage } = $props();
+	let { message, driver }: { message: SystemMessage; driver?: string | undefined } = $props();
+	const auth = $derived(getProviderPresentation(driver)?.auth);
+	$effect(() => {
+		if (auth && message.errorCode === auth.errorCode) void refreshCursorAuth();
+	});
 
 	const isError = $derived(message.variant === "error" || message.setup?.status === "failed" || message.setup?.status === "timed_out");
 	const setupTitle = $derived.by(() => {
@@ -84,6 +90,9 @@
 						{/if}
 						{message.text}
 					</span>
+					{#if auth && message.errorCode === auth.errorCode}
+						<Button variant="ghost-accent" size="sm" class="ml-2" data-testid="provider-auth-login" onclick={openCursorLogin}>{cursorAuth.current && cursorAuth.current.source !== "environment" ? auth.login : auth.manage}</Button>
+					{/if}
 					{#if hasDetails}
 						<Button
 							variant="ghost"

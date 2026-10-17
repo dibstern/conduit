@@ -1,19 +1,11 @@
+// @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-	clearSessionChatState,
-	currentChat,
 	getOrCreateSessionSlot,
-	inputSyncState,
 	sessionActivity,
 	sessionMessages,
-	setMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import {
-	applyGetAgentsResponse,
-	choosePermissionMode,
-	clearDiscoveryState,
-	discoveryState,
-} from "../../../src/lib/frontend/stores/discovery.svelte.js";
+import { clearDiscoveryState } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { projectState } from "../../../src/lib/frontend/stores/project.svelte.js";
 import {
 	attachedProjectState,
@@ -33,19 +25,14 @@ import {
 	parentOf,
 	rootBackgroundTasks,
 	sessionState,
-	setCurrentSession,
 	setSearchQuery,
 	switchToSession,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { todoState } from "../../../src/lib/frontend/stores/todo.svelte.js";
-import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import {
 	applySessionChange,
 	sessionSubscription,
 } from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
-import * as sessionRpc from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
-import { createToolMessage } from "../../../src/lib/frontend/utils/tool-message-factory.js";
 import {
 	applySessionRemoved,
 	applySessionSnapshot,
@@ -309,7 +296,7 @@ it("a project switch forgets the family, and the next project's family applies",
 	expect(sessionState.familySessions.map((row) => row.id)).toEqual(["other"]);
 });
 
-it("forgets chat and selection when the subscription snapshot omits a session", () => {
+it("forgets chat without changing the route when a subscription snapshot omits a session", () => {
 	applySessionChange({
 		_tag: "snapshot",
 		sequence: 10,
@@ -331,7 +318,7 @@ it("forgets chat and selection when the subscription snapshot omits a session", 
 	expect(sessionState.sessions.has("gone")).toBe(false);
 	expect(sessionActivity.has("gone")).toBe(false);
 	expect(sessionMessages.has("gone")).toBe(false);
-	expect(sessionState.currentId).toBeNull();
+	expect(sessionState.currentId).toBe("gone");
 });
 
 it("keeps chat and selection when a root only leaves the list", () => {
@@ -419,176 +406,21 @@ it("keeps the family list owned by the family feed", () => {
 	expect(sessionState.familySessions).toEqual([original]);
 });
 
-describe("switchToSession", () => {
-	it("keeps the list query when the URL already names the session", () => {
-		const pushState = vi.fn();
-		vi.stubGlobal("window", { history: { pushState } });
-		try {
-			routerState.path = "/s/current";
-			routerState.search = "?group=project";
-			switchToSession(
-				"current",
-				"project-a",
-				vi.fn().mockResolvedValue({ ok: true }),
-			);
-			expect(routerState.search).toBe("?group=project");
-			expect(pushState).not.toHaveBeenCalled();
-		} finally {
-			vi.unstubAllGlobals();
-		}
+describe("switchToSession route shim", () => {
+	it("preserves the list query for the same session route", () => {
+		routerState.path = "/s/current";
+		routerState.search = "?group=project";
+		switchToSession("current", "project-a");
+		expect(routerState.search).toBe("?group=project");
 	});
-
-	it("ignores session discovery returned after attaching another project", async () => {
-		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
-		let finish: (
-			response: Awaited<ReturnType<typeof sessionRpc.rpc<"GetAgents">>>,
-		) => void = () => {};
-		const spy = vi.spyOn(sessionRpc, "rpc").mockImplementationOnce(
-			() =>
-				new Promise((resolve) => {
-					finish = resolve;
-				}),
-		);
-		try {
-			attachedProjectState.slug = "project-a";
-			switchToSession(
-				"session-a",
-				undefined,
-				vi.fn().mockResolvedValue({ ok: true }),
-			);
-			attachedProjectState.slug = "project-b";
-			clearSessionState();
-			applyGetAgentsResponse({
-				projectSlug: "project-b",
-				providerScope: { id: "b", name: "B" },
-				agents: [],
-				activeAgentId: "agent-b",
-			});
-			finish({
-				projectSlug: "project-a",
-				providerScope: { id: "a", name: "A" },
-				agents: [],
-				activeAgentId: "agent-a",
-			});
-			await Promise.resolve();
-			expect(discoveryState.activeAgentId).toBe("agent-b");
-		} finally {
-			spy.mockRestore();
-			vi.unstubAllGlobals();
-		}
-	});
-	it("builds the session route and addresses the RPC by session", () => {
-		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
-		try {
-			const viewSession = vi.fn().mockResolvedValue({ ok: true });
-			attachedProjectState.slug = "attached-project";
-			routerState.path = "/";
-			switchToSession("new-session", undefined, viewSession);
-			expect(routerState.path).toBe("/s/new-session");
-			expect(viewSession).toHaveBeenCalledWith("ViewSession", {
-				sessionId: "new-session",
-				originId: expect.any(String),
-			});
-		} finally {
-			vi.unstubAllGlobals();
-		}
-	});
-
-	it("views a foreign row by its session id", () => {
-		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
-		try {
-			const viewSession = vi.fn().mockResolvedValue({ ok: true });
-			switchToSession("foreign", "project-b", viewSession);
-			expect(viewSession).toHaveBeenCalledWith("ViewSession", {
-				sessionId: "foreign",
-				originId: expect.any(String),
-			});
-		} finally {
-			vi.unstubAllGlobals();
-		}
-	});
-	it("views the session through RPC after changing local state", () => {
-		const viewSession = vi.fn().mockResolvedValue({ ok: true });
-		sessionState.currentId = "old-session";
-		routerState.path = "/s/new-session";
-		attachedProjectState.slug = "project-a";
-
-		switchToSession("new-session", "project-a", viewSession);
-
-		expect(viewSession).toHaveBeenCalledWith("ViewSession", {
-			sessionId: "new-session",
-			originId: expect.any(String),
-		});
-	});
-
-	it("keeps cached target session messages visible while loading fresh history", () => {
-		const viewSession = vi.fn().mockResolvedValue({ ok: true });
-		const target = getOrCreateSessionSlot("parent-with-subagents");
-		setMessages(target.messages, [
-			createToolMessage({
-				uuid: "tool-uuid",
-				id: "task-tool-1",
-				name: "Task",
-				status: "completed",
-				metadata: { childSessionId: "claude-subagent-abc" },
-			}),
-		]);
-		sessionState.currentId = "child-subagent";
-		routerState.path = "/s/parent-with-subagents";
-		attachedProjectState.slug = "project-a";
-
-		switchToSession("parent-with-subagents", "project-a", viewSession);
-
-		const tool = currentChat().messages.find((m) => m.type === "tool");
-		expect(tool?.type).toBe("tool");
-		if (tool?.type !== "tool") throw new Error("expected tool message");
-		expect(tool.metadata?.["childSessionId"]).toBe("claude-subagent-abc");
-		expect(tool.status).toBe("completed");
-
-		clearSessionChatState("parent-with-subagents");
-		clearSessionChatState("child-subagent");
-	});
-
-	it("applies the returned draft without sending a session permission switch", async () => {
-		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
-		const sendMode = vi.spyOn(sessionRpc, "rpc");
-		try {
-			choosePermissionMode("acceptEdits");
-			switchToSession("draft-session", "project-a", () =>
-				Promise.resolve({ ok: true, draft: "saved text" }),
-			);
-			await Promise.resolve();
-			expect(inputSyncState.text).toBe("saved text");
-			expect(sessionState.currentId).toBe("draft-session");
-			expect(sendMode).not.toHaveBeenCalledWith(
-				"SwitchPermissionMode",
-				expect.anything(),
-			);
-		} finally {
-			sendMode.mockRestore();
-			vi.unstubAllGlobals();
-		}
-	});
-
-	it("replaces a superseded session URL and resets session chrome", () => {
+	it("replaces a superseded session route", () => {
 		const replaceState = vi.fn();
 		vi.stubGlobal("window", { history: { replaceState, pushState: vi.fn() } });
 		try {
-			sessionState.currentId = "old-session";
-			routerState.path = "/s/old-session";
-			uiState.contextPercent = 70;
-			todoState.items = [{ id: "one", subject: "old", status: "pending" }];
-			switchToSession(
-				"replacement",
-				"project-a",
-				() => Promise.resolve({ ok: true }),
-				{ replace: true },
-			);
-			expect(sessionState.currentId).toBe("replacement");
+			routerState.path = "/s/old";
+			switchToSession("replacement", "project-a", undefined, { replace: true });
 			expect(routerState.path).toBe("/s/replacement");
 			expect(replaceState).toHaveBeenCalledTimes(1);
-			expect(uiState.contextPercent).toBe(0);
-			expect(todoState.items).toEqual([]);
 		} finally {
 			vi.unstubAllGlobals();
 		}
@@ -802,19 +634,6 @@ describe("setSearchQuery", () => {
 		setSearchQuery("something");
 		setSearchQuery("");
 		expect(sessionState.searchQuery).toBe("");
-	});
-});
-
-describe("setCurrentSession", () => {
-	it("sets currentId", () => {
-		setCurrentSession("sess-1");
-		expect(sessionState.currentId).toBe("sess-1");
-	});
-
-	it("can set to null", () => {
-		sessionState.currentId = "something";
-		setCurrentSession(null);
-		expect(sessionState.currentId).toBeNull();
 	});
 });
 

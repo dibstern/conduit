@@ -180,7 +180,7 @@ export const mockForkSession: SessionInfo = {
 	messageCount: 2,
 	status: "idle",
 	processing: false,
-	parentID: mockSession.id,
+	forkedFrom: mockSession.id,
 	forkMessageId: "msg-assistant-002",
 };
 

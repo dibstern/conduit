@@ -12,7 +12,7 @@
 		getInstanceTraits,
 		instanceState,
 	} from "../../stores/instance.svelte.js";
-	import { startInstanceRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import type { InstanceStatus } from "../../types.js";
 	import { CONNECT_FADEOUT_MS } from "../../ui-constants.js";
 	import { openSettings } from "../layout/chrome-actions.js";
@@ -119,7 +119,7 @@
 
 	function handleStartInstance() {
 		if (sameSession && instanceId === cachedInstanceId && cachedInstanceId) {
-			void startInstanceRpc({
+			void rpc("StartInstance", {
 				instanceId: cachedInstanceId,
 			})
 				.then(applyInstanceListResponse)

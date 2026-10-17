@@ -244,6 +244,7 @@ export type DaemonRpcName =
 	| "GetDefaultGroupingMode"
 	| "GetUsageLimitsSetting"
 	| "SetUsageLimitsSetting"
+	| "SetCursorUsageKeychain"
 	| "ScanNow"
 	| "DetectProxy"
 	| "FindFolders"
@@ -322,7 +323,6 @@ export const makeRoutedWsRpcServerLayer = <
 							Effect.mapError(
 								(error) =>
 									new WsRpcError({
-										code: "ambiguous-session",
 										message: error.message,
 									}),
 							),

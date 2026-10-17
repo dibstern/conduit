@@ -48,7 +48,7 @@ function git(directory: string, ...args: string[]) {
 }
 
 function forkEvents(fixture: ProcessHarness, sessionId: string) {
-	const db = new Database(fixture.projectStorePath(), { readonly: true });
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
 		return db
 			.prepare(
@@ -126,7 +126,7 @@ describe("Forked session workspaces through the built daemon", () => {
 		const fixture = harness;
 		try {
 			evidence["events"] =
-				forkId && existsSync(fixture.projectStorePath())
+				forkId && existsSync(fixture.daemonStorePath())
 					? forkEvents(fixture, forkId)
 					: [];
 			evidence["queries"] = fixture.claudeOptions();
@@ -228,8 +228,10 @@ describe("Forked session workspaces through the built daemon", () => {
 		);
 		forkId = fork.sessionId;
 		const child = (await list()).sessions.find(({ id }) => id === forkId);
+		// A Side Thread is contained by its Source; a Fork is a Family Root.
+		expect(child?.parentID).toBe(sideThread ? parentId : undefined);
 		expect(child).toMatchObject({
-			parentID: parentId,
+			forkedFrom: parentId,
 			workspace: {
 				cause: "launch",
 				worktrees: parent?.workspace?.worktrees,
@@ -585,7 +587,7 @@ describe("Forked session workspaces through the built daemon", () => {
 		// Gives the parent the Claude transcript a fork resumes from.
 		await browser.send(parentId, "Reply with pong.");
 		await fixture.kill();
-		const db = new Database(fixture.projectStorePath());
+		const db = new Database(fixture.daemonStorePath());
 		try {
 			const head = db
 				.prepare(
@@ -706,14 +708,14 @@ describe("Forked session workspaces through the built daemon", () => {
 			inputId: randomUUID(),
 		});
 		void sendRpcRequest(socket, crashed).catch(() => undefined);
-		const readStarted = new Database(fixture.projectStorePath(), {
+		const readStarted = new Database(fixture.daemonStorePath(), {
 			readonly: true,
 		});
 		const crashedId = await vi.waitFor(
 			() => {
 				const row = readStarted
 					.prepare(
-						"SELECT session_id FROM events WHERE type = 'session.created' AND json_extract(data, '$.startInputId') = ?",
+						"SELECT session_id FROM events WHERE project_id = 'process-test' AND type = 'session.created' AND json_extract(data, '$.startInputId') = ?",
 					)
 					.get(crashed.inputId) as { session_id: string } | undefined;
 				if (!row) throw new Error("Side Thread not forked yet");

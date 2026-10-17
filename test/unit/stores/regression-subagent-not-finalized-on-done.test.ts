@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // A subagent tool completes via its own notification and can outlive the
 // parent turn. `done` used to force-complete every running tool, flipping the
 // still-running Task to "Done"; terminal finalization skips subagent tools.

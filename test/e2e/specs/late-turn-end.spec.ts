@@ -131,22 +131,64 @@ test.describe("Late turn end", () => {
 			},
 		]);
 		await expect(row).toHaveAccessibleName(/^Working/);
+		await expect
+			.poll(() =>
+				mockServer.requestBodies.some(
+					(request) =>
+						request.path.endsWith("/prompt_async") &&
+						request.body.includes("And again"),
+				),
+			)
+			.toBe(true);
+		// The recording has no second reply, so supply B's user echo and end.
+		const userMessageId = "msg_turn_b_user";
 		mockServer.injectSSEEvents([
+			{
+				type: "message.updated",
+				properties: {
+					info: {
+						id: userMessageId,
+						role: "user",
+						sessionID: id,
+						time: { created: Date.now() },
+					},
+				},
+			},
+			{
+				type: "message.updated",
+				properties: {
+					...end,
+					info: {
+						...info,
+						id: "msg_turn_b_end",
+						parentID: userMessageId,
+						sessionID: id,
+					},
+				},
+			},
 			{
 				type: "session.status",
 				properties: { sessionID: id, status: { type: "idle" } },
 			},
 		]);
-		await expect(chat.stopBtn).toBeHidden();
-
+		await expect
+			.poll(() => storedSession(harness.eventsDbPath, id).last_turn_end_version)
+			.toBeGreaterThan(lateA.last_turn_end_version ?? -1);
 		writeFileSync(
 			testInfo.outputPath("late-turn-end.json"),
 			JSON.stringify(
-				{ sessionId: id, endedA, lateA, workingAfterLateEnd },
+				{
+					sessionId: id,
+					endedA,
+					lateA,
+					endedB: storedSession(harness.eventsDbPath, id),
+					workingAfterLateEnd,
+				},
 				null,
 				2,
 			),
 		);
+		await expect(chat.stopBtn).toBeHidden();
 		// The late end names A's send, not B's.
 		expect(endedA.last_turn_end_input_id).toEqual(expect.any(String));
 		expect(lateA.last_turn_end_input_id).toBe(endedA.last_turn_end_input_id);

@@ -277,6 +277,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				accountDirectory: makeMockAccountDirectory([
 					{
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("work-oc"),
 						name: "Work OpenCode",
 					},
@@ -453,7 +454,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			expect(result).toEqual({
 				projectSlug: "test-project",
 				sessionId: "session-forked",
-				parentId: "session-1",
+				forkedFrom: "session-1",
 				forkMessageId: "message-1",
 			});
 			// OpenCode cuts before messageID, so the fork keeps message-1.
@@ -465,7 +466,8 @@ describe("WsRpcServerLayer ListSessions", () => {
 			expect(setForkEntry).not.toHaveBeenCalled();
 			const readQuery = yield* ReadQueryEffectTag;
 			expect(yield* readQuery.getSession("session-forked")).toMatchObject({
-				parent_id: "session-1",
+				parent_id: null,
+				forked_from: "session-1",
 				fork_point_event: "message-1",
 				fork_point_timestamp: null,
 				fork_point_message_id: "message-1",
@@ -810,7 +812,8 @@ describe("WsRpcServerLayer ListSessions", () => {
 				const forkRow = yield* readQuery.getSession(result.sessionId);
 				expect(forkRow).toMatchObject({
 					provider: "my-claude",
-					parent_id: "ses-parent",
+					parent_id: null,
+					forked_from: "ses-parent",
 					provider_sid: usesCanonicalHistory ? null : "sdk-fork",
 					fork_point_event: "api-first",
 					fork_point_message_id: "api-first",
@@ -841,7 +844,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 					usesCanonicalHistory ? 0 : 1,
 				);
 				expect(result).toMatchObject({
-					parentId: "ses-parent",
+					forkedFrom: "ses-parent",
 					forkMessageId: "api-first",
 					forkPointTimestamp: expect.any(Number),
 				});

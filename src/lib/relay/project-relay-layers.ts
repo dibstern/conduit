@@ -28,6 +28,7 @@ import {
 	makeConfigWriterLive,
 } from "../domain/daemon/Layers/config-persistence-layer.js";
 import { makeStandaloneOpenCodeInstancesLive } from "../domain/daemon/Layers/opencode-instances-layer.js";
+import { makeConfiguredCursorUsage } from "../domain/daemon/Layers/usage-layer.js";
 import { makeWorktreeLive } from "../domain/daemon/Layers/worktree-layer.js";
 import {
 	AccountDirectory,
@@ -48,8 +49,8 @@ import {
 	SessionActivityTag,
 } from "../domain/daemon/Services/session-activity.js";
 import {
-	makeSessionDirectoryLive,
 	SessionDirectory,
+	SessionDirectoryReadError,
 } from "../domain/daemon/Services/session-directory.js";
 import { makeUsage, Usage } from "../domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
@@ -141,7 +142,9 @@ import type { EventStoreEffectTag } from "../persistence/effect/event-store-effe
 import { EventStoreError } from "../persistence/effect/event-store-effect.js";
 import {
 	makePersistenceEffectLayer,
+	makePersistenceProjectLayer,
 	type PersistenceEffectError,
+	PersistenceStore,
 } from "../persistence/effect/live.js";
 import type { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
@@ -153,6 +156,7 @@ import {
 	type OrchestrationRuntimeLayerOptions,
 } from "../provider/orchestration-wiring.js";
 import { SqliteProviderSessionBindingReadModel } from "../provider/provider-session-binding-read-model.js";
+import { usageAccounts } from "../provider/usage-reader.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import { RpcSubscriptionScopeLive } from "../server/ws-rpc.js";
 import type { ProjectRelayConfig } from "../types.js";
@@ -334,8 +338,9 @@ export function createProjectRelayLayers({
 									Effect.succeed(defaultDaemonConfig()),
 								),
 							);
+							const { cursorUsageBinding: _binding, ...unchanged } = persisted;
 							return {
-								...persisted,
+								...unchanged,
 								autoSettleAfterDays:
 									current.autoSettleAfterDays === undefined
 										? DEFAULT_AUTO_SETTLE_AFTER_DAYS
@@ -346,6 +351,9 @@ export function createProjectRelayLayers({
 								...(current.usageLimits !== undefined && {
 									usageLimits: current.usageLimits,
 								}),
+								...(current.cursorUsageBinding
+									? { cursorUsageBinding: current.cursorUsageBinding }
+									: {}),
 							};
 						}),
 					};
@@ -430,23 +438,24 @@ export function createProjectRelayLayers({
 		? Layer.sync(Usage, () => sharedUsage)
 		: Layer.scoped(
 				Usage,
-				Effect.flatMap(AccountDirectory, (directory) =>
-					makeUsage({
-						accounts: Effect.map(directory.list, (accounts) =>
-							accounts.flatMap((account) =>
-								account.driver === "claude" && account.usageEligible
-									? [
-											{
-												id: account.id,
-												harness: PROVIDER_DRIVERS[account.driver].usageHarness,
-												folder: account.folder,
-												...(account.env ? { env: account.env } : {}),
-											},
-										]
-									: [],
-							),
-						),
+				Effect.gen(function* () {
+					const directory = yield* AccountDirectory;
+					const configRef = yield* DaemonConfigRefTag;
+					const accountList = directory.list.pipe(
+						Effect.provideService(DaemonConfigRefTag, configRef),
+					);
+					const cursor = yield* makeConfiguredCursorUsage;
+					const usage = yield* makeUsage({
+						accounts: Effect.map(accountList, usageAccounts),
+						accountHarness: (id) =>
+							Effect.map(accountList, (accounts) => {
+								const account = accounts.find((account) => account.id === id);
+								return account
+									? PROVIDER_DRIVERS[account.driver].usageHarness
+									: undefined;
+							}),
 						readers: {
+							cursor: cursor.reader,
 							claude: makeClaudeUsageReader({
 								queryFactory: claudeSdk.query,
 								cwd: config.projectDir,
@@ -455,8 +464,9 @@ export function createProjectRelayLayers({
 									: {}),
 							}),
 						},
-					}),
-				),
+					});
+					return { ...usage, setCursorKeychain: cursor.setKeychain };
+				}),
 			).pipe(Layer.provide(daemonConfigLayer));
 	const loggerLayer = ProjectRelayLoggerLive.pipe(Layer.provide(configLayer));
 	// One shared layer reference (Effect memoizes it), so orchestration wiring,
@@ -465,23 +475,47 @@ export function createProjectRelayLayers({
 	const sharedDirectory = config.daemonConfigContext
 		? Context.getOption(config.daemonConfigContext, SessionDirectory)
 		: Option.none();
+	const sharedStore = config.daemonConfigContext
+		? Context.getOption(config.daemonConfigContext, PersistenceStore)
+		: Option.none();
+	const persistenceEffectLayer = (
+		Option.isSome(sharedStore)
+			? makePersistenceProjectLayer(config.slug, {
+					sessionEventBusLayer: SessionEventBusLive,
+				}).pipe(Layer.provideMerge(Layer.succeedContext(sharedStore.value)))
+			: makePersistenceEffectLayer(
+					config.persistenceDbPath,
+					config.slug,
+					undefined,
+					SessionEventBusLive,
+				)
+	).pipe(Layer.provideMerge(activityReaders));
+	// Standalone WebSocket routing resolves only sessions owned by this relay.
 	const sessionDirectoryLayer = Option.isSome(sharedDirectory)
 		? Layer.succeedContext(
 				Context.make(SessionDirectory, sharedDirectory.value),
 			)
-		: makeSessionDirectoryLive(config.configDir ?? getConfigDir(), [
-				{
-					slug: config.slug,
-					folders: [config.projectDir, ...(config.extraFolders ?? [])],
-				},
-			]);
-	const persistenceEffectLayer = makePersistenceEffectLayer(
-		config.persistenceDbPath,
-		config.slug,
-		undefined,
-		SessionEventBusLive,
-		sessionDirectoryLayer,
-	).pipe(Layer.provideMerge(activityReaders));
+		: Layer.effect(
+				SessionDirectory,
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					return {
+						projectOf: (sessionId: string) =>
+							sql<{ readonly project_id: string | null }>`
+								SELECT project_id FROM sessions WHERE id = ${sessionId}`.pipe(
+								Effect.map((rows) =>
+									rows[0]?.project_id === config.slug
+										? Option.some(config.slug)
+										: Option.none(),
+								),
+								Effect.mapError(
+									(cause) =>
+										new SessionDirectoryReadError({ sessionId, cause }),
+								),
+							),
+					};
+				}),
+			).pipe(Layer.provide(persistenceEffectLayer));
 	const openCodeInstancesLayer = Layer.effect(
 		OpenCodeInstancesTag,
 		Effect.gen(function* () {

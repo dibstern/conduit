@@ -131,11 +131,17 @@ export function applyInstanceListResponse(
 		...(instance.usageEligible !== undefined
 			? { usageEligible: instance.usageEligible }
 			: {}),
+		...(instance.cursorUsageSource !== undefined
+			? { cursorUsageSource: instance.cursorUsageSource }
+			: {}),
 		...(instance.available !== undefined
 			? { available: instance.available }
 			: {}),
 		...(instance.unavailableReason !== undefined
 			? { unavailableReason: instance.unavailableReason }
+			: {}),
+		...(instance.unavailableCode !== undefined
+			? { unavailableCode: instance.unavailableCode }
 			: {}),
 		...(instance.capabilities != null
 			? { capabilities: instance.capabilities }

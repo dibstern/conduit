@@ -118,7 +118,7 @@ it("persists the existing session title through the daemon process harness", asy
 		const sessionId = await browser.createSession();
 		const message = "Fix the OAuth callback loop.";
 		await browser.send(sessionId, message);
-		const db = new Database(harness.projectStorePath(), { readonly: true });
+		const db = new Database(harness.daemonStorePath(), { readonly: true });
 		try {
 			const readTitle = db.prepare<[string], { title: string }>(
 				"SELECT title FROM sessions WHERE id = ?",

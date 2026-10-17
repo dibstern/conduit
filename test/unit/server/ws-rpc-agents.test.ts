@@ -176,6 +176,7 @@ describe("WsRpcServerLayer GetAgents", () => {
 										id: AccountIdSchema.make("opencode-work"),
 										name: "OpenCode work",
 										driver: "opencode",
+										usageEligible: false,
 									},
 								]),
 								config: makeMockConfig({ configDir }),

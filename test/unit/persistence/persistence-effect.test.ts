@@ -326,8 +326,10 @@ describe("Persistence Effect", () => {
 				{ migration_id: 58, name: "compact_redundant_events" },
 				{ migration_id: 59, name: "session_project_scope" },
 				{ migration_id: 60, name: "daemon_store_imports" },
-				{ migration_id: 61, name: "goal_check_metadata" },
-				{ migration_id: 62, name: "message_part_surfacing" },
+				{ migration_id: 61, name: "sessions_lineage" },
+				{ migration_id: 62, name: "legacy_forks" },
+				{ migration_id: 63, name: "goal_check_metadata" },
+				{ migration_id: 64, name: "message_part_surfacing" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

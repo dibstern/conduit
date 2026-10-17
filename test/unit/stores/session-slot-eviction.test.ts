@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // Session Slot Eviction (LRU Cap)
 // Verifies that Tier 2 (SessionMessages) is LRU-capped:
 // - When the cap is exceeded, the least-recently-used session's messages are evicted.

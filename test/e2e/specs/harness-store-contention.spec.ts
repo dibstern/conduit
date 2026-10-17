@@ -135,14 +135,13 @@ test("measures writes across three projects during six streaming turns", async (
 	const percentile = (p: number) =>
 		round(latencies[Math.ceil((p / 100) * latencies.length) - 1] ?? 0);
 	const artifact = resolve("test-results/82tn6-contention.json");
+	expect(existsSync(harness.daemonStorePath())).toBe(true);
 	mkdirSync(resolve("test-results"), { recursive: true });
 	writeFileSync(
 		artifact,
 		`${JSON.stringify(
 			{
-				storeModel: existsSync(join(harness.configDir, "events.db"))
-					? "shared"
-					: "per-project",
+				storeModel: "shared",
 				projects: 3,
 				turnsPerProject: 2,
 				fixture,

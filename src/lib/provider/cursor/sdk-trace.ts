@@ -1,9 +1,10 @@
 import { appendFileSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
-import { CursorSdkFailure } from "./sdk-error.js";
+import { CursorSdkFailure, cursorSdkFailure } from "./sdk-error.js";
 import type {
 	CursorAgent,
 	CursorAgentOptions,
+	CursorCustomTool,
 	CursorSdkPort,
 	CursorSendOptions,
 	CursorStore,
@@ -12,6 +13,19 @@ import type {
 const SECRET_FIELD =
 	/^(?:api[_-]?key|authorization|(?:access|refresh|session)[_-]?token|token|password|secret|(?:blob)?encryption[_-]?key|email)$/i;
 const PRIVATE_HOME = /\/Users\/[^/\s"\\]+|\/home\/(?!test\b)[^/\s"\\]+/g;
+const SECRET_ASSIGNMENT =
+	/\b((?:[\w-]+[_-])?(?:(?:api|access|private)[_-]?key|authorization|(?:access|refresh|session)[_-]?token|token|password|secret|(?:blob)?encryption[_-]?key|email|pin|cookie)["']?\s*[:=]\s*)(?:\[REDACTED(?::[^\]]*)?\]|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:Bearer|Basic)\s+[A-Za-z0-9._~+/-]+=*|[^\s,;}\]]+)/gi;
+
+/** Scrub transcript strings before bounding them, so truncation cannot expose a secret's tail. */
+export const redactCursorText = (value: string): string =>
+	value
+		.replace(PRIVATE_HOME, "/home/test")
+		.replace(
+			/\b((?:authorization|cookie)["']?\s*[:=]\s*)[^\r\n]*/gi,
+			"$1[REDACTED]",
+		)
+		.replace(SECRET_ASSIGNMENT, "$1[REDACTED]")
+		.replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [REDACTED]");
 
 interface CursorTraceMetadata {
 	readonly scenario: string;
@@ -32,13 +46,13 @@ export function createCursorSdkTrace(
 			collectSecrets(child);
 		}
 	};
+	const redactText = (value: string): string => {
+		let text = redactCursorText(value);
+		for (const secret of secrets) text = text.split(secret).join("[REDACTED]");
+		return text;
+	};
 	const redact = (value: unknown): unknown => {
-		if (typeof value === "string") {
-			let text = value.replace(PRIVATE_HOME, "/home/test");
-			for (const secret of secrets)
-				text = text.split(secret).join("[REDACTED]");
-			return text;
-		}
+		if (typeof value === "string") return redactText(value);
 		if (Array.isArray(value)) return value.map(redact);
 		if (value && typeof value === "object") {
 			return Object.fromEntries(
@@ -51,6 +65,7 @@ export function createCursorSdkTrace(
 		return value;
 	};
 	return {
+		redactText,
 		protect(secret: string) {
 			if (secret) secrets.add(secret);
 		},
@@ -86,10 +101,24 @@ export function teeCursorSdkPort(
 	metadata?: CursorTraceMetadata,
 ): CursorSdkPort {
 	const trace = createCursorSdkTrace(path, metadata);
+	const authRequired = (cause: unknown) =>
+		cause instanceof CursorSdkFailure && cause.authRequired
+			? { authRequired: true as const }
+			: {};
 	if (!port.replay) {
 		const apiKey = process.env["CURSOR_API_KEY"]?.trim();
 		if (apiKey) trace.protect(apiKey);
 	}
+	const failure = (kind: string, cause: unknown): CursorSdkFailure => {
+		const error = cursorSdkFailure(kind, cause);
+		const reason = trace.redactText(error.reason);
+		trace.record(`${kind}.error`, {
+			...error.sdkError,
+			message: reason,
+			...authRequired(error),
+		});
+		return new CursorSdkFailure({ ...error, reason });
+	};
 	const call = async <A>(
 		kind: string,
 		options: unknown,
@@ -109,13 +138,7 @@ export function teeCursorSdkPort(
 			trace.record(kind, result ?? null);
 			return result;
 		} catch (cause) {
-			// SDK errors may echo credentials. Keep both trace and caller safe.
-			const message =
-				cause instanceof CursorSdkFailure
-					? cause.reason
-					: `Cursor ${kind} failed`;
-			trace.record(`${kind}.error`, { message });
-			throw new CursorSdkFailure({ operation: kind, reason: message });
+			throw failure(kind, cause);
 		}
 	};
 	const stores = new WeakMap<CursorStore, CursorStore>();
@@ -133,8 +156,30 @@ export function teeCursorSdkPort(
 			autoReview: options.autoReview,
 			customTools: options.customToolNames,
 			subagentInherit: options.subagentInherit,
+			enableAgentRetries: true,
 		},
 	});
+	const recordedTools = (
+		tools: Readonly<Record<string, CursorCustomTool>> = {},
+	) =>
+		Object.fromEntries(
+			Object.entries(tools).map(([toolName, tool]) => [
+				toolName,
+				{
+					...tool,
+					async execute(args, context) {
+						trace.record("custom.start", { toolName, args, context });
+						try {
+							const result = await tool.execute(args, context);
+							trace.record("custom.result", { toolName, context, result });
+							return result;
+						} finally {
+							trace.record("custom.end", { toolName, context });
+						}
+					},
+				} satisfies CursorCustomTool,
+			]),
+		);
 	const wrapAgent = (agent: CursorAgent): CursorAgent => {
 		let closed: Promise<void> | undefined;
 		return {
@@ -146,7 +191,12 @@ export function teeCursorSdkPort(
 						trace.record("delta", update);
 						onDelta(update);
 					});
-					trace.record("run.handle", { id: run.id, agentId: agent.id });
+					trace.record("run.handle", {
+						id: run.id,
+						agentId: agent.id,
+						...(run.steer ? { steer: "function" } : {}),
+					});
+					const steer = run.steer?.bind(run);
 					return {
 						id: run.id,
 						stream: (async function* () {
@@ -156,27 +206,53 @@ export function teeCursorSdkPort(
 									yield message;
 								}
 								trace.record("stream.end", {});
-							} catch {
-								trace.record("stream.error", {
-									message: "Cursor stream failed",
-								});
-								throw new CursorSdkFailure({
-									operation: "run.stream",
-									reason: "Cursor stream failed",
-								});
+							} catch (cause) {
+								throw failure("stream", cause);
 							}
 						})(),
-						wait: () => call("wait.result", {}, () => run.wait()),
+						async wait() {
+							const result = await call("wait.result", {}, () => run.wait());
+							if (
+								result !== null &&
+								typeof result === "object" &&
+								"error" in result &&
+								result.error !== null &&
+								typeof result.error === "object" &&
+								"message" in result.error &&
+								typeof result.error.message === "string"
+							) {
+								return {
+									...result,
+									error: {
+										...result.error,
+										message: trace.redactText(result.error.message),
+									},
+								};
+							}
+							return result;
+						},
 						cancel: () => call("cancel", { runId: run.id }, () => run.cancel()),
+						...(steer
+							? {
+									async steer(text: string) {
+										trace.record("steer.call", { text });
+										try {
+											const outcome = await steer(text);
+											trace.record("steer.ack", { outcome });
+											return outcome;
+										} catch (cause) {
+											throw failure("steer", cause);
+										}
+									},
+								}
+							: {}),
 					};
-				} catch {
-					trace.record("send.error", { message: "Cursor send failed" });
-					throw new CursorSdkFailure({
-						operation: "agent.send",
-						reason: "Cursor send failed",
-					});
+				} catch (cause) {
+					throw failure("send", cause);
 				}
 			},
+			getUsage: () =>
+				call("usage", { agentId: agent.id }, () => agent.getUsage()),
 			close() {
 				return (closed ??= (async () => {
 					await call("close", { agentId: agent.id }, () => agent.close());
@@ -188,7 +264,26 @@ export function teeCursorSdkPort(
 	return {
 		...(port.replay ? { replay: true } : {}),
 		probeRuntime: () => call("runtime.probe", {}, () => port.probeRuntime()),
+		authLogin: (options) => {
+			const onAbort = () =>
+				trace.record("auth.login.abort", { aborted: options.signal.aborted });
+			options.signal.addEventListener("abort", onAbort, { once: true });
+			if (options.signal.aborted) onAbort();
+			return call(
+				"auth.login",
+				{ openBrowser: options.openBrowser, apiKeyName: options.apiKeyName },
+				() =>
+					port.authLogin({
+						...options,
+						onLoginUrl(url) {
+							trace.record("auth.loginUrl", url);
+							options.onLoginUrl(url);
+						},
+					}),
+			).finally(() => options.signal.removeEventListener("abort", onAbort));
+		},
 		authStatus: () => call("auth.status", {}, () => port.authStatus()),
+		authLogout: () => call("auth.logout", {}, () => port.authLogout()),
 		storedCredential: () =>
 			call("credential.store", {}, () => port.storedCredential()),
 		modelsList: (credential) => {
@@ -214,6 +309,14 @@ export function teeCursorSdkPort(
 			stores.set(wrapped, store);
 			return wrapped;
 		},
+		getActiveRun: (agentId, store) =>
+			call("store.active-run", { agentId }, () =>
+				port.getActiveRun(agentId, unwrapStore(store)),
+			),
+		deleteAgent: (agentId, cwd, store) =>
+			call("agent.delete", { agentId, cwd }, () =>
+				port.deleteAgent(agentId, cwd, unwrapStore(store)),
+			),
 		async primeSandbox(options, credential, store) {
 			trace.protect(credential.apiKey);
 			trace.record(
@@ -227,11 +330,18 @@ export function teeCursorSdkPort(
 			try {
 				await port.primeSandbox(options, credential, unwrapStore(store));
 				trace.record("sandbox.prime", {});
-			} catch {
+			} catch (cause) {
 				const reason =
 					"Cursor sandbox initialization failed. Restart the runner after checking sandbox support.";
-				trace.record("sandbox.prime.error", { message: reason });
-				throw new CursorSdkFailure({ operation: "sandbox.prime", reason });
+				trace.record("sandbox.prime.error", {
+					message: reason,
+					...authRequired(cause),
+				});
+				throw new CursorSdkFailure({
+					operation: "sandbox.prime",
+					reason,
+					...authRequired(cause),
+				});
 			}
 		},
 		async createAgent(options, credential, store, customTools) {
@@ -242,18 +352,12 @@ export function teeCursorSdkPort(
 					options,
 					credential,
 					unwrapStore(store),
-					customTools,
+					recordedTools(customTools),
 				);
 				trace.record("created", { agentId: agent.id });
 				return wrapAgent(agent);
-			} catch {
-				trace.record("create.error", {
-					message: "Cursor agent creation failed",
-				});
-				throw new CursorSdkFailure({
-					operation: "agent.create",
-					reason: "Cursor agent creation failed",
-				});
+			} catch (cause) {
+				throw failure("create", cause);
 			}
 		},
 		async resumeAgent(id, options, credential, store, customTools) {
@@ -268,16 +372,12 @@ export function teeCursorSdkPort(
 					options,
 					credential,
 					unwrapStore(store),
-					customTools,
+					recordedTools(customTools),
 				);
 				trace.record("resumed", { agentId: agent.id });
 				return wrapAgent(agent);
-			} catch {
-				trace.record("resume.error", { message: "Cursor agent resume failed" });
-				throw new CursorSdkFailure({
-					operation: "agent.resume",
-					reason: "Cursor agent resume failed",
-				});
+			} catch (cause) {
+				throw failure("resume", cause);
 			}
 		},
 	};

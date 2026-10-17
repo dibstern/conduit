@@ -10,11 +10,14 @@ import {
 import { DEFAULT_WORKTREE_CLEANUP } from "../../contracts/worktree.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../daemon/config-persistence.js";
+import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { ConfigPersistenceTag } from "../../domain/daemon/Services/config-persistence-service.js";
 import {
 	commitDaemonRuntimeConfig,
 	DaemonConfigRefTag,
 } from "../../domain/daemon/Services/daemon-config-ref.js";
+import { publishInstanceStatusChanged } from "../../domain/daemon/Services/daemon-pubsub.js";
+import { Usage } from "../../domain/daemon/Services/usage.js";
 import {
 	cleanUpWorktreesNow,
 	requestWorktreeCleanup,
@@ -98,6 +101,23 @@ export const settingsHandlers = {
 			yield* persistence.flush;
 			return { usageLimits };
 		}).pipe(Effect.catchAll(mapRpcFailure("SetUsageLimitsSetting"))),
+	SetCursorUsageKeychain: ({ accountId, enabled }) =>
+		Effect.gen(function* () {
+			const accounts = yield* (yield* AccountDirectory).list;
+			const account = accounts.find((account) => account.id === accountId);
+			if (account?.driver === "cursor") {
+				const usage = yield* Usage;
+				if (!usage.setCursorKeychain)
+					return {
+						enabled: false,
+						reason: "Cursor usage settings are unavailable",
+					};
+				const result = yield* usage.setCursorKeychain(accountId, enabled);
+				yield* publishInstanceStatusChanged(accountId);
+				return result;
+			}
+			return { enabled: false, reason: "Cursor account is not configured" };
+		}),
 	SetDefaultPermissionMode: (request) =>
 		setDefaultPermissionModeForRelay({
 			clientId: request.originId ?? "rpc",
@@ -205,6 +225,7 @@ export const settingsHandlers = {
 	| "CleanUpWorktreesNow"
 	| "GetUsageLimitsSetting"
 	| "SetUsageLimitsSetting"
+	| "SetCursorUsageKeychain"
 	| "SetDefaultPermissionMode"
 	| "SetDefaultSessionMode"
 	| "SetHiddenEntries"

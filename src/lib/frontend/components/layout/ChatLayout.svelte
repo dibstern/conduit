@@ -5,11 +5,9 @@
 <script lang="ts">
 	import { onDestroy, onMount, tick, untrack } from "svelte";
 	import { Effect } from "effect";
-	import { getScopeGroupKey } from "../../../session-scope.js";
 	import { disposeRuntime, runTransportEffect } from "../../transport/runtime.js";
 	import { WsRpcClients } from "../../transport/shared-client.js";
-	import { WsRpcError } from "../../transport/ws-rpc.js";
-	import { rpc, attachProjectRpc, getProjectsRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import SessionBar from "./SessionBar.svelte";
 	import ViewsRail from "./ViewsRail.svelte";
@@ -44,27 +42,21 @@
 	} from "../../stores/ws-notifications.js";
 	import { onProjectAttached } from "../../stores/ws-listeners.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
-	import { attachedProjectState, getCurrentRoute, getCurrentSessionId, getCurrentSlug, getCurrentSearchParams, replaceRoute, routerState } from "../../stores/router.svelte.js";
+	import { attachedProjectState, getCurrentRoute, getCurrentSlug, getCurrentSearchParams, routerState } from "../../stores/router.svelte.js";
 	import { clearMessages, draftSendIn } from "../../stores/chat.svelte.js";
 	import { terminalState, destroyAll, viewPtys } from "../../stores/terminal.svelte.js";
-	import { clearSessionState, findSession, sessionState, setAttachedProject, switchToSession } from "../../stores/session.svelte.js";
+	import { clearSessionState, findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { attachSessionList, detachSessionList, drawSavedShell, onShellSynchronized } from "../../stores/session-list.svelte.js";
-	import { viewFamily } from "../../stores/session-family-feed.js";
 	import { attachApprovals, detachApprovals } from "../../stores/approvals.js";
-	import { drawSavedTranscript, leaveSavedDraw, placedSessionId, placeSavedDraw, savedDraw, viewTranscript } from "../../stores/transcript.svelte.js";
-	import { openSavedTranscript } from "../../stores/saved-transcripts.js";
+	import { selection, watchSelection } from "../../stores/selection.svelte.js";
 	import { openSavedShell } from "../../stores/saved-shell.js";
-	import { applyGetAgentsResponse, applyGetCommandsResponse, followModelsRead, clearDiscoveryState, discoveryState, getEffectiveInstanceId, viewDraftModels } from "../../stores/discovery.svelte.js";
-	import { getInstanceTraits, instanceState } from "../../stores/instance.svelte.js";
-	import { todoState, clearTodoState, viewTodos } from "../../stores/todo.svelte.js";
+	import { clearDiscoveryState, watchCatalogs } from "../../stores/discovery.svelte.js";
+	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
 	import { viewProjectSettings } from "../../stores/project-settings.js";
 	import { viewAlerts } from "../../stores/alerts.js";
-	import { viewInputDraft } from "../../stores/input-draft.js";
-	import { applyGetFileTreeResponse, requestFileTree, clearFileTreeState, fileTreeState } from "../../stores/file-tree.svelte.js";
+	import { clearFileTreeState, fileTreeState } from "../../stores/file-tree.svelte.js";
 	import { applyProjectList, followDaemonLists, getDraftProject, projectState } from "../../stores/project.svelte.js";
-	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { FILES_PANE_MIN_WIDTH, isBarCollapsed, sessionViewState, setFilesOpen, setFilesPaneWidth, watchCompactViewport } from "../../stores/session-view.svelte.js";
-	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
 	import {
@@ -107,28 +99,8 @@
 	const mobileMaximized = $derived(phoneView === "terminal");
 
 	const draftSlug = $derived(getDraftProject());
-	const draftAccountId = $derived(sessionState.currentId || getCurrentSessionId() ? undefined : getEffectiveInstanceId());
-	const draftNeedsDiscovery = $derived(getInstanceTraits(draftAccountId)?.catalogSource === "discovery");
-	$effect(() => {
-		const projectSlug = draftSlug;
-		const instanceId = draftAccountId;
-		if (!projectSlug || !instanceId || !getIsConnected()) return;
-		let active = true;
-		// OpenCode draft models arrive through viewDraftModels; agents have no subscription.
-		if (draftNeedsDiscovery) {
-			const applyModels = followModelsRead();
-			void rpc("GetModels", { projectSlug, instanceId })
-				.then((response) => { if (active) applyModels(response); })
-				.catch(() => undefined);
-		}
-		void rpc("GetAgents", { projectSlug, instanceId })
-			.then((response) => { if (active) applyGetAgentsResponse(response); })
-			.catch(() => undefined);
-		void rpc("GetCommands", { projectSlug, instanceId })
-			.then((response) => { if (active) applyGetCommandsResponse(response); })
-			.catch(() => undefined);
-		return () => { active = false; };
-	});
+	onMount(watchCatalogs);
+	onMount(watchSelection);
 	// Navigation can arrive while disconnected; it must wake the socket before
 	// the placement effect's connected guard, without tracking connection state.
 	$effect(() => {
@@ -138,51 +110,12 @@
 			void runTransportEffect(Effect.flatMap(WsRpcClients, (clients) => clients.wake));
 		});
 	});
-	$effect(() => {
-		const route = getCurrentRoute();
-		// Desktop's "/" shows the same sendable draft composer as "/new".
-		const projectSlug = route.page === "chat" && !route.sessionId && !sessionState.currentId &&
-			(discoveryState.defaultsLoaded || discoveryState.hasInstanceChoice)
-			? getDraftProject() : null;
-		const instanceId = getEffectiveInstanceId();
-		const instancesLoaded = instanceState.loaded;
-		const attachedSlug = attachedProjectState.slug;
-		untrack(() => viewDraftModels(
-			projectSlug === attachedSlug && instancesLoaded ? projectSlug : null,
-			instanceId,
-		));
-	});
-	onDestroy(() => viewDraftModels(null));
-	const commandSessionId = $derived(getCurrentSessionId());
-	const commandWorkspace = $derived(JSON.stringify(commandSessionId ? findSession(commandSessionId)?.workspace ?? null : null));
-	let previousCommandContext: { sessionId: string | null; workspace: string } | undefined;
-	$effect(() => {
-		const sessionId = commandSessionId;
-		const workspace = commandWorkspace;
-		const previous = previousCommandContext;
-		previousCommandContext = { sessionId, workspace };
-		// Selection and connect fetch commands; moves and leaving a session
-		// also change which folder supplies the catalog.
-		const moved = previous?.sessionId === sessionId && previous.workspace !== workspace;
-		const leftSession = previous?.sessionId != null && sessionId === null;
-		if (!moved && !leftSession) return;
-		const projectSlug = attachedProjectState.slug;
-		if (!projectSlug) return;
-		let active = true;
-		const instanceId = sessionId ? undefined : getEffectiveInstanceId();
-		void rpc("GetCommands", { ...(sessionId ? { sessionId } : { projectSlug }), ...(instanceId ? { instanceId } : {}) }).then((response) => {
-			if (active && (sessionId || instanceId === getEffectiveInstanceId())) applyGetCommandsResponse(response);
-		}).catch(() => undefined);
-		return () => { active = false; };
-	});
 
 	const phoneListScreen = $derived.by(() => {
-		const route = getCurrentRoute();
+		const shown = selection.shown;
 		return (
 			sessionViewState.compact &&
-			route.page === "chat" &&
-			!route.sessionId &&
-			!route.draft &&
+			shown.kind === "none" &&
 			!uiState.fileViewerOpen &&
 			!mobileMaximized
 		);
@@ -426,9 +359,6 @@
 		qrVisible = false;
 	}
 
-	let requestedProject: string | null = null;
-	// Each mount attaches once: a remount keeps the previous mount's slug.
-	let attachedThisMount = false;
 	onMount(() => {
 		let attachGeneration = 0;
 		const loadPath = routerState.path;
@@ -439,15 +369,6 @@
 			lastProject = localStorage.getItem(LAST_PROJECT_STORAGE_KEY);
 		} catch { /* device storage is optional */ }
 		// A page load draws the session's saved page, if any, before any reply.
-		const loadSessionId = getCurrentSessionId();
-		const savedTranscript = loadSessionId
-			? openSavedTranscript(loadSessionId)
-			: Promise.resolve(undefined);
-		if (loadSessionId)
-			void savedTranscript.then((record) => {
-				if (record && sessionState.currentId === null && getCurrentSessionId() === loadSessionId)
-					drawSavedTranscript(record);
-			});
 		const readShell = (project: string | null | undefined) => {
 			if (attachGeneration !== 0) return;
 			if (!project) return;
@@ -457,11 +378,10 @@
 			});
 		};
 		if (loadProject) readShell(loadProject);
-		else void savedTranscript.then((transcript) => readShell(transcript?.project ?? lastProject));
+		else readShell(lastProject);
 		// A page load starts clean; only a change of project clears state.
 		let previousSlug = attachedProjectState.slug;
-		const unsubscribe = onProjectAttached((slug) => {
-			if (requestedProject === slug) requestedProject = null;
+		const hydrateProject = (slug: string) => {
 			attachGeneration++;
 			try {
 				localStorage.setItem(LAST_PROJECT_STORAGE_KEY, slug);
@@ -481,51 +401,18 @@
 			// sidebar's scroll sentinel asks for the rest.
 			attachSessionList(slug);
 			attachApprovals(slug);
-		});
+		};
+		const unsubscribe = onProjectAttached(hydrateProject);
+		if (previousSlug !== null) hydrateProject(previousSlug);
 		const unsubscribeShell = onShellSynchronized((slug) => {
 			if (slug !== previousSlug) return;
 			const generation = attachGeneration;
-			const routeSessionId = getCurrentSessionId();
-			const workspace = commandWorkspace;
-			const draftInstanceId =
-				routeSessionId == null
-					? getEffectiveInstanceId()
-					: undefined;
-			void rpc("GetAgents", {
-				...(routeSessionId != null ? { sessionId: routeSessionId } : { projectSlug: slug }),
-				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
-			})
-				.then((response) => {
-					if (
-						generation === attachGeneration &&
-						getCurrentSessionId() === routeSessionId &&
-						(routeSessionId != null || draftInstanceId === getEffectiveInstanceId())
-					) applyGetAgentsResponse(response, routeSessionId ?? undefined);
-				})
-				.catch(() => undefined);
-			const applyModels = followModelsRead(routeSessionId ?? undefined);
-			void rpc("GetModels", {
-				...(routeSessionId != null ? { sessionId: routeSessionId } : { projectSlug: slug }),
-				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
-			})
-				.then((response) => {
-					if (generation === attachGeneration && getCurrentSessionId() === routeSessionId && (routeSessionId != null || draftInstanceId === getEffectiveInstanceId())) applyModels(response);
-				})
-				.catch(() => undefined);
-			void rpc("GetCommands", {
-				...(routeSessionId != null ? { sessionId: routeSessionId } : { projectSlug: slug }),
-				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
-			})
-				.then((response) => {
-					if (generation === attachGeneration && commandSessionId === routeSessionId && commandWorkspace === workspace && (routeSessionId != null || draftInstanceId === getEffectiveInstanceId())) applyGetCommandsResponse(response);
-				})
-				.catch(() => undefined);
-			void getProjectsRpc({ projectSlug: slug })
+			void rpc("GetProjects", { projectSlug: slug })
 				.then((response) => {
 					if (generation === attachGeneration) applyProjectList(response);
 				})
-				.catch(() => {
-					if (generation === attachGeneration) showToast("Failed to load projects", { variant: "error" });
+				.catch((error) => {
+					if (generation === attachGeneration) toastFailure("Failed to load projects")(error);
 				});
 		});
 		onNavigateToSession((sessionId) => switchToSession(sessionId));
@@ -533,7 +420,6 @@
 		return () => {
 			attachGeneration++;
 			detachSessionList();
-			viewFamily("", null);
 			detachApprovals();
 			unsubscribe();
 			unsubscribeShell();
@@ -544,57 +430,6 @@
 	// Project navigation requests attachment through RPC on the existing socket.
 	// This also covers browser history and project-only links from every caller.
 	const connected = $derived(getIsConnected());
-	const fileScope = $derived.by(() => {
-		const slug = attachedProjectState.slug;
-		const sessionId = getCurrentSessionId();
-		const session = sessionId ? findSession(sessionId) : undefined;
-		const folders = projectState.projects.find((project) => project.slug === slug)?.folders ?? [];
-		const primary = folders[0] ?? "";
-		const directory = effectiveWorkingDirectory(primary, session?.workspace);
-		return JSON.stringify([slug, sessionId, directory, folders, session?.workspace]);
-	});
-	$effect(() => {
-		const scope = fileScope;
-		const slug = untrack(() => attachedProjectState.slug);
-		const sessionId = untrack(getCurrentSessionId);
-		if (!connected || !slug) return;
-		let cancelled = false;
-		untrack(() => {
-			if (fileTreeState.scope !== scope) {
-				clearFileTreeState();
-				fileTreeState.scope = scope;
-				closeFileViewer();
-			}
-			requestFileTree();
-		});
-		void rpc("GetFileTree", { ...(sessionId ? { sessionId } : { projectSlug: slug }) })
-			.then((response) => {
-				if (!cancelled) applyGetFileTreeResponse(response);
-			})
-			.catch((error: unknown) => {
-				if (!cancelled) {
-					fileTreeState.loading = false;
-					toastFailure("Failed to load file tree")(error);
-				}
-			});
-		return () => { cancelled = true; };
-	});
-	// A drawn session is viewed once the server has placed it.
-	const placedId = $derived(placedSessionId());
-	$effect(() => {
-		const project = attachedProjectState.slug ?? "";
-		const sessionId = project ? placedId : null;
-		untrack(() => {
-			viewTranscript(project, sessionId);
-			viewTodos(project, sessionId);
-			viewInputDraft(project, sessionId);
-		});
-		return () => {
-			viewTranscript(project, null);
-			viewTodos(project, null);
-			viewInputDraft(project, null);
-		};
-	});
 	// The task drawer belongs to the session it was opened from.
 	$effect(() => {
 		void sessionState.currentId;
@@ -604,12 +439,6 @@
 	});
 	$effect(() => {
 		if (sessionViewState.compact) taskDrawer.task = null;
-	});
-	// No null cleanup: moving within a family keeps its subscription.
-	$effect(() => {
-		const project = attachedProjectState.slug ?? "";
-		const sessionId = project ? placedId : null;
-		untrack(() => viewFamily(project, sessionId));
 	});
 	$effect(() => {
 		const project = attachedProjectState.slug ?? null;
@@ -632,96 +461,6 @@
 	// a reconnect after a restart can be a new build.
 	$effect(() => {
 		if (connected) void fetchCurrentVersion();
-	});
-	$effect(() => {
-		const route = getCurrentRoute();
-		// A draft attaches the project it will be created in, so models and
-		// commands match it before the first send.
-		const scope = getCurrentSearchParams().get("p");
-		const groupScope = getScopeGroupKey(scope) !== null;
-		const projectHint = route.page === "chat" && route.draft ? getDraftProject() : groupScope ? null : scope;
-		const attachedSlug = attachedProjectState.slug;
-		untrack(() => leaveSavedDraw(route.page === "chat" ? route.sessionId : undefined));
-		if (!connected || route.page !== "chat") return;
-		let cancelled = false;
-		untrack(() => {
-			const placeSession = (sessionId: string, projectSlug: string | null) => {
-				if (cancelled) return;
-				if (projectSlug === null) {
-					placeSavedDraw(sessionId, null);
-					routerState.sessionNotFound = true;
-					replaceRoute("/");
-					return;
-				}
-				if (sessionState.currentId === sessionId && savedDraw.sessionId !== sessionId) return;
-				placeSavedDraw(sessionId, projectSlug);
-				switchToSession(sessionId, projectSlug);
-			};
-			// The server picks the project on a cold load (the session's, the hint,
-			// else its default); afterwards only a project-only route switches it.
-			if (!attachedThisMount || (groupScope && attachedSlug === null) || (!route.sessionId && projectHint && (projectHint !== attachedSlug || requestedProject !== null))) {
-				requestedProject = projectHint ?? null;
-				void attachProjectRpc({
-					originId: getBrowserClientId(),
-					...(route.sessionId ? { sessionId: route.sessionId } : projectHint ? { projectSlug: projectHint } : {}),
-				})
-					.then(({ projectSlug, sessionSlug }) => {
-						if (cancelled) return;
-						requestedProject = null;
-						if (projectSlug !== null) {
-							attachedThisMount = true;
-							setAttachedProject(projectSlug);
-						}
-						if (route.sessionId) placeSession(route.sessionId, sessionSlug);
-					})
-					.catch((error) => {
-						if (cancelled) return;
-						requestedProject = null;
-						if (error instanceof WsRpcError && error.code === "unknown-session" && route.sessionId)
-							placeSession(route.sessionId, null);
-						else showToast("Failed to switch projects", { variant: "error" });
-					});
-				if (route.sessionId) return;
-			}
-			if (!route.sessionId) {
-				if (sessionState.currentId !== null) {
-					sessionState.currentId = null;
-					clearTodoState();
-					if (attachedSlug && (!projectHint || projectHint === attachedSlug)) {
-						const draftInstanceId = getEffectiveInstanceId();
-						const applyModels = followModelsRead();
-						void rpc("GetModels", { projectSlug: attachedSlug, ...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}) })
-							.then(applyModels)
-								.catch(() => undefined);
-						void rpc("GetAgents", {
-							projectSlug: attachedSlug,
-							...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
-						})
-							.then((response) => {
-								if (
-									sessionState.currentId === null &&
-									getCurrentSessionId() === null &&
-									attachedProjectState.slug === attachedSlug &&
-									draftInstanceId === getEffectiveInstanceId()
-								) applyGetAgentsResponse(response);
-							})
-							.catch(() => undefined);
-					}
-				}
-				return;
-			}
-			if (!attachedSlug) return;
-			if (route.sessionId === sessionState.currentId && savedDraw.sessionId !== route.sessionId) return;
-			const sessionId = route.sessionId;
-			void rpc("ResolveSession", { sessionId }).then(({ projectSlug }) => {
-				placeSession(sessionId, projectSlug);
-			}).catch((error) => {
-				if (cancelled) return;
-				if (error instanceof WsRpcError && error.code === "unknown-session") placeSession(sessionId, null);
-				else toastFailure("Failed to open session")(error);
-			});
-		});
-		return () => { cancelled = true; };
 	});
 
 	// iOS fires pagehide every time a standalone PWA is backgrounded, not only

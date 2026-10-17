@@ -13,6 +13,7 @@ import {
 	selectInstance,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { applyInstanceListResponse } from "../../../src/lib/frontend/stores/instance.svelte.js";
+import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	clearSessionState,
 	sessionState,
@@ -22,31 +23,39 @@ import type { ProviderInfo } from "../../../src/lib/frontend/types.js";
 import { seedRootSessions } from "../stores/session-fixtures.js";
 
 const getAgentsRpcSpy = vi.hoisted(() =>
-	vi.fn(async (_input: unknown) => ({ projectSlug: "project-a", agents: [] })),
+	vi.fn((_input: unknown) =>
+		Promise.resolve({ projectSlug: "project-a", agents: [] }),
+	),
 );
 const switchModelRpcSpy = vi.hoisted(() =>
-	vi.fn(async (input: { modelId: string; providerId: string }) => ({
-		projectSlug: "project-a",
-		model: input.modelId,
-		provider: input.providerId,
-		variant: "fast",
-		variants: ["standard", "fast"],
-	})),
+	vi.fn((input: { modelId: string; providerId: string }) =>
+		Promise.resolve({
+			projectSlug: "project-a",
+			model: input.modelId,
+			provider: input.providerId,
+			variant: "fast",
+			variants: ["standard", "fast"],
+		}),
+	),
 );
 const setDefaultModelRpcSpy = vi.hoisted(() =>
-	vi.fn(async (input: { model: string; provider: string }) => ({
-		projectSlug: "project-a",
-		model: input.model,
-		provider: input.provider,
-		variant: "",
-		variants: [],
-	})),
+	vi.fn((input: { model: string; provider: string }) =>
+		Promise.resolve({
+			projectSlug: "project-a",
+			model: input.model,
+			provider: input.provider,
+			variant: "",
+			variants: [],
+		}),
+	),
 );
 const reloadSessionSpy = vi.hoisted(() =>
-	vi.fn(async (_tag: string, input: { sessionId: string }) => ({
-		projectSlug: "project-a",
-		sessionId: input.sessionId,
-	})),
+	vi.fn((_tag: string, input: { sessionId: string }) =>
+		Promise.resolve({
+			projectSlug: "project-a",
+			sessionId: input.sessionId,
+		}),
+	),
 );
 const showToastSpy = vi.hoisted(() => vi.fn());
 const emptyComponent = vi.hoisted(
@@ -71,19 +80,23 @@ vi.mock(
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	rpc: (
 		tag:
+			| "GetModels"
+			| "GetCommands"
 			| "GetAgents"
 			| "SetDefaultModel"
 			| "SwitchModel"
 			| "ReloadProviderSession",
 		input: never,
 	) =>
-		tag === "ReloadProviderSession"
-			? reloadSessionSpy(tag, input)
-			: {
-					GetAgents: getAgentsRpcSpy,
-					SetDefaultModel: setDefaultModelRpcSpy,
-					SwitchModel: switchModelRpcSpy,
-				}[tag](input),
+		tag === "GetModels" || tag === "GetCommands"
+			? Promise.reject(new Error("Catalog not configured in this fixture"))
+			: tag === "ReloadProviderSession"
+				? reloadSessionSpy(tag, input)
+				: {
+						GetAgents: getAgentsRpcSpy,
+						SetDefaultModel: setDefaultModelRpcSpy,
+						SwitchModel: switchModelRpcSpy,
+					}[tag](input),
 }));
 vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 	showToast: showToastSpy,
@@ -118,6 +131,7 @@ describe("InstanceModelPicker", () => {
 		showToastSpy.mockClear();
 		clearDiscoveryState();
 		clearSessionState();
+		attachedProjectState.slug = "project-a";
 		applyInstanceListResponse({
 			instances: [
 				{

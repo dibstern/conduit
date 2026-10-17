@@ -170,6 +170,11 @@
 					{agentDescription}
 				</span>
 			{/if}
+			{#if typeof message.metadata?.['subagentModel'] === "string" || typeof message.metadata?.['subagentMode'] === "string"}
+				<span class="subagent-details block mt-0.5 text-xs text-text-muted break-words">
+					{[message.metadata?.['subagentModel'], message.metadata?.['subagentMode']].filter((value) => typeof value === "string").join(" · ")}
+				</span>
+			{/if}
 		</div>
 
 		<!-- Navigate arrow (only when session is available) -->

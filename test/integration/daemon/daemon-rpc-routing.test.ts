@@ -27,7 +27,7 @@ import {
 	WebSocketRoutingLive,
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
 import { clearSessionInputDraft } from "../../../src/lib/handlers/prompt.js";
-import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
+import { daemonStorePath } from "../../../src/lib/persistence/project-storage.js";
 import { makeWsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handler.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 import {
@@ -42,15 +42,13 @@ const makeProjectStore = (
 	slug: string,
 	sessionId: string,
 ): void => {
-	const storageDirectory = projectStorageDir(configDir, slug);
-	mkdirSync(storageDirectory, { recursive: true });
 	writeEventStore(
-		join(storageDirectory, "events.db"),
+		daemonStorePath(configDir),
 		Effect.flatMap(
 			SqlClient.SqlClient,
 			(sql) => sql`INSERT INTO sessions (
-				id, provider, title, status, created_at, updated_at
-			) VALUES (${sessionId}, 'opencode', ${sessionId}, 'idle', 1, 1)`,
+				id, provider, title, status, created_at, updated_at, project_id
+			) VALUES (${sessionId}, 'opencode', ${sessionId}, 'idle', 1, 1, ${slug})`,
 		),
 	);
 };

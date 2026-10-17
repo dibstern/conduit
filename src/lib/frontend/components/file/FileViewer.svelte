@@ -85,9 +85,10 @@
 		const root = visible ? uiState.fileViewerRoot : null;
 		const requestId = ++fileContentRequestId;
 		if (!path) return;
+		const scope = fileTreeState.scope;
+		if (scope === null) return;
 		const slug = getCurrentSlug();
 		const sessionId = getCurrentSessionId();
-		const scope = fileTreeState.scope;
 		if (!slug) return;
 		filePath = path;
 		content = null;

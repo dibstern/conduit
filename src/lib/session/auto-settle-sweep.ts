@@ -1,6 +1,7 @@
 import type { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Effect } from "effect";
+import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import {
 	type AutoSettleFacts,
 	getAutoSettleOutlook,
@@ -21,8 +22,13 @@ export const settleIdleSessions = <SettleError>(
 	ports: AutoSettleSweepPorts<SettleError>,
 	idleWindowMs: number,
 	now: number,
-): Effect.Effect<number, SqlError | SettleError, SqlClient.SqlClient> =>
+): Effect.Effect<
+	number,
+	SqlError | SettleError,
+	SqlClient.SqlClient | PersistenceProjectTag
+> =>
 	Effect.gen(function* () {
+		const { projectId } = yield* PersistenceProjectTag;
 		const decide = (sessionId: string, facts: AutoSettleFacts) =>
 			getAutoSettleOutlook(
 				{
@@ -35,6 +41,7 @@ export const settleIdleSessions = <SettleError>(
 			).kind === "due";
 		const candidates = [
 			...(yield* readPersistedAutoSettleFacts(
+				projectId,
 				now,
 				undefined,
 				ports.projectDir,
@@ -45,6 +52,7 @@ export const settleIdleSessions = <SettleError>(
 			// Read again at the decision point: another command may have changed the
 			// projection since discovery, or a browser/task may have arrived.
 			const facts = (yield* readPersistedAutoSettleFacts(
+				projectId,
 				now,
 				sessionId,
 				ports.projectDir,
