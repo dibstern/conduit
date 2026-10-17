@@ -71,6 +71,8 @@ test("phone: scrolling the session sheet, then tapping an item, keeps chat text 
 	page,
 	relayUrl,
 }, testInfo) => {
+	// Short enough that the tile sheet overflows and the swipe can scroll it.
+	await page.setViewportSize({ width: 375, height: 420 });
 	const app = new AppPage(page);
 	await app.goto(relayUrl);
 	await app.sendMessage("Hello, reply with just the word pong");
@@ -85,9 +87,13 @@ test("phone: scrolling the session sheet, then tapping an item, keeps chat text 
 	if (!box) throw new Error("sheet is not rendered");
 	await swipeUp(page, box.x + box.width * 0.6, box.y + box.height * 0.8, 100);
 	await expect
-		.poll(() => sheet.evaluate((node) => node.scrollTop), {
-			message: "the swipe must scroll the sheet; that cancels the press",
-		})
+		.poll(
+			() =>
+				sheet.locator("[data-sheet-body]").evaluate((node) => node.scrollTop),
+			{
+				message: "the swipe must scroll the sheet; that cancels the press",
+			},
+		)
 		.toBeGreaterThan(0);
 	await sheet.getByRole("menuitem", { name: /^Mark (un)?read$/ }).tap();
 	await expect(sheet).toHaveCount(0);

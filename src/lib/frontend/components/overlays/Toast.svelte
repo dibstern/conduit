@@ -26,6 +26,7 @@
 		default: undefined,
 		warn: { name: "triangle-alert", class: "text-warning" },
 		error: { name: "circle-x", class: "text-error" },
+		pinned: { name: "pin", class: "text-status-pinned" },
 	} as const;
 
 	const SWIPE_DISMISS_PX = 48;
@@ -80,7 +81,7 @@
 	}
 </script>
 
-{#if uiState.toasts.length > 0}
+{#if uiState.toasts.length > 0 && uiState.sheetToastHost === null}
 	<div
 		class="pointer-events-none fixed z-[var(--z-toast)] flex flex-col max-md:pointer-events-auto max-md:inset-x-0 max-md:bottom-[var(--composer-clearance,0px)] max-md:divide-y max-md:divide-border-subtle max-md:rounded-t-[18px] max-md:border-t max-md:border-border max-md:bg-bg-alt max-md:pb-[max(0px,calc(env(safe-area-inset-bottom)_-_var(--composer-clearance,0px)))] max-md:shadow-modal md:right-[14px] md:bottom-[calc(var(--composer-clearance,0px)+14px)] md:w-[310px] md:gap-2"
 	>

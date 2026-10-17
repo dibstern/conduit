@@ -12,13 +12,15 @@
 		held = false,
 		triggerProps,
 		disabled = false,
+		disabledReason,
+		ondisabledselect,
 		onselect,
 		class: className = "",
 		...rest
 	}: {
 		label: string;
 		icon: string;
-		subLine?: string;
+		subLine?: string | undefined;
 		/** The caller decides: the phone sheet passes its hold hint, the desktop popover a shortcut. */
 		tag?: string;
 		variant?: "default" | "primary" | "danger";
@@ -26,15 +28,20 @@
 		held?: boolean;
 		/** Use the same tile as a composite control's trigger, with that control's semantics. */
 		triggerProps?: Record<string, unknown>;
+		/** Keeps the tile focusable and selectable so a tap can explain why it is unavailable. */
+		disabledReason?: string | null | undefined;
+		ondisabledselect?: () => void;
 		onselect?: (event: Event) => void;
 	} & Omit<DropdownMenuItemProps, "children" | "child" | "onSelect" | "textValue"> = $props();
+	const detailId = $props.id();
+	const dimmed = $derived(disabled || !!disabledReason);
 </script>
 
 {#snippet tile(props: Record<string, unknown>)}
-	<button {...props} type="button" {disabled} data-menu-tile data-held={held || undefined} class="relative flex h-[72px] min-w-0 cursor-pointer select-none touch-manipulation flex-col items-center justify-center gap-[6px] rounded-[14px] text-center text-[13px] font-medium leading-[1.2] outline-hidden transition-transform motion-reduce:scale-100 motion-reduce:transition-none data-[disabled]:cursor-not-allowed {shape === 'wide' ? 'col-span-2' : ''} {variant === 'primary' ? 'text-accent' : variant === 'danger' ? 'text-error' : 'text-text'} {held ? 'scale-105 bg-popover-bg shadow-dropdown inset-ring-[1.5px] inset-ring-accent' : variant === 'primary' ? 'bg-accent/16' : variant === 'danger' ? 'bg-error/13' : 'bg-chip'} {held ? '' : 'data-[highlighted]:ring-[1.5px] data-[highlighted]:ring-accent'} {className}">
-	<span aria-hidden="true" class:opacity-35={disabled}><Icon name={icon} size={20} /></span>
-	<span class:opacity-35={disabled}>{label}</span>
-	{#if subLine}<small class="-mt-[4px] text-[10.5px] font-normal leading-[1.2] text-text-dimmer">{subLine}</small>{/if}
+	<button {...props} type="button" disabled={disabled && !disabledReason} aria-disabled={dimmed || undefined} aria-describedby={subLine ? detailId : undefined} data-menu-tile data-held={held || undefined} class="relative flex h-[72px] min-w-0 cursor-pointer select-none touch-manipulation flex-col items-center justify-center gap-[6px] rounded-[14px] text-center text-[13px] font-medium leading-[1.2] outline-hidden transition-transform motion-reduce:scale-100 motion-reduce:transition-none data-[disabled]:cursor-not-allowed aria-disabled:cursor-not-allowed {shape === 'wide' ? 'col-span-2' : ''} {variant === 'primary' ? 'text-accent' : variant === 'danger' ? 'text-error' : 'text-text'} {held ? 'scale-105 bg-popover-bg shadow-dropdown inset-ring-[1.5px] inset-ring-accent' : variant === 'primary' ? 'bg-accent/16' : variant === 'danger' ? 'bg-error/13' : 'bg-chip'} {held ? '' : 'data-[highlighted]:ring-[1.5px] data-[highlighted]:ring-accent'} {className}">
+	<span aria-hidden="true" class:opacity-35={dimmed}><Icon name={icon} size={20} /></span>
+	<span class:opacity-35={dimmed}>{label}</span>
+	{#if subLine}<small id={detailId} class="-mt-[4px] text-[10.5px] font-normal leading-[1.2] text-text-dimmer">{subLine}</small>{/if}
 	{#if tag}<span class="absolute top-[6px] right-[8px] font-mono text-[9.5px] font-normal text-text-dimmer">{tag}</span>{/if}
 	</button>
 {/snippet}
@@ -44,9 +51,14 @@
 {:else}
 	<DropdownMenu.Item
 		{...rest}
-		{disabled}
+		disabled={disabled && !disabledReason}
 		textValue={label}
-		{...onselect ? { onSelect: onselect } : {}}
+		onSelect={(event) => {
+			if (disabledReason) {
+				event.preventDefault();
+				ondisabledselect?.();
+			} else onselect?.(event);
+		}}
 	>
 		{#snippet child({ props })}{@render tile(props)}{/snippet}
 	</DropdownMenu.Item>

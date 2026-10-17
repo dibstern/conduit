@@ -24,6 +24,7 @@ export type SessionCommand = {
 	section: "triage" | "manage" | "danger";
 	label: string;
 	shortLabel?: string;
+	tag?: string;
 	detail?: string | null;
 	emphasis?: "primary" | undefined;
 	icon:
@@ -110,7 +111,7 @@ export function runSessionCommandShortcut(
 	event.preventDefault();
 	const origin = event.target;
 	if (command.disabledReason)
-		showToast(command.disabledReason, { variant: "warn" });
+		showToast(command.disabledReason, { variant: "pinned" });
 	else command.run(() => (origin instanceof HTMLElement ? origin : null));
 }
 

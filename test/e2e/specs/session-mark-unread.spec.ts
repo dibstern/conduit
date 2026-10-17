@@ -238,7 +238,7 @@ test.describe("phone", () => {
 		await row.click();
 		await page.getByTestId("session-bar-title-menu").click();
 		const sheet = page.getByTestId("session-action-sheet");
-		await expect(sheet.locator(".shortcut-hint").first()).toBeVisible();
+		await expect(sheet.getByRole("group", { name: "Triage" })).toBeVisible();
 		await sheet.getByTestId("session-ctx-mark-unread").click();
 		await expect(page.getByTestId("session-bar")).toHaveCount(0);
 		await expect(row.getByTestId("session-unread-dot")).toBeVisible();

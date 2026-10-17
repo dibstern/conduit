@@ -3,6 +3,7 @@
 	import MenuCheckboxItem from "../ui/MenuCheckboxItem.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
+	import SessionSheetBody from "./SessionSheetBody.svelte";
 	import { sessionCommandKeysHint, type SessionCommand, type SessionCommandEntry } from "./session-commands.js";
 
 	let {
@@ -25,6 +26,9 @@
 	{#if item.disabledReason}<span class="ml-auto text-xs text-text-dimmer">{item.disabledReason}</span>{/if}
 {/snippet}
 
+{#if presentation === "sheet"}
+	<SessionSheetBody {commands} {onselect} />
+{:else}
 {#each commands as item, index (index)}
 	{#if index > 0 && item.section !== commands[index - 1]?.section}
 		<MenuSeparator />
@@ -43,7 +47,6 @@
 		<MenuItem
 			data-testid={item.testId}
 			class={presentation === "menu" ? "min-h-[44px] md:min-h-0" : undefined}
-			icon={presentation === "sheet" ? item.icon : undefined}
 			variant="danger"
 			disabled={item.disabledReason != null}
 			onselect={() => onselect(item.run)}
@@ -54,7 +57,6 @@
 		<MenuItem
 			data-testid={item.testId}
 			class={presentation === "menu" ? "min-h-[44px] md:min-h-0" : undefined}
-			icon={presentation === "sheet" ? item.icon : undefined}
 			variant="default"
 			disabled={item.disabledReason != null}
 			onselect={() => onselect(item.run)}
@@ -63,3 +65,4 @@
 		</MenuItem>
 	{/if}
 {/each}
+{/if}

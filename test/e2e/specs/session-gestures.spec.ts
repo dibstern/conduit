@@ -69,10 +69,10 @@ async function lift(row: Locator) {
 // A real touch through the browser's input pipeline: the sheet opens while the
 // finger is down, so its release must not reach the sheet. Synthetic events
 // skip the mousedown and click a browser derives from that release.
-async function longPress(page: Page, row: Locator) {
+async function longPress(page: Page, row: Locator, across = 0.5) {
 	const box = await row.boundingBox();
 	if (!box) throw new Error("row is not rendered");
-	const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+	const point = { x: box.x + box.width * across, y: box.y + box.height / 2 };
 	const cdp = await page.context().newCDPSession(page);
 	await cdp.send("Input.dispatchTouchEvent", {
 		type: "touchStart",
@@ -355,7 +355,7 @@ test.describe("phone", () => {
 		const { row, title } = await setUp(page, relayUrl, harness);
 		// Short enough that the docked sheet rises under the first row, so the
 		// finger lifts over an item: the case the touchend guard exists for.
-		await page.setViewportSize({ width: 393, height: 680 });
+		await page.setViewportSize({ width: 393, height: 480 });
 		await page.goto(new URL("/", page.url()).toString());
 		await expect(row).toBeVisible();
 		const project = (
@@ -364,7 +364,8 @@ test.describe("phone", () => {
 			.split("·")[0]
 			?.trim();
 
-		const finger = await longPress(page, row);
+		// 40% across lands on the Snooze tile rather than a gap between tiles.
+		const finger = await longPress(page, row, 0.4);
 		const sheet = page.getByTestId("session-action-sheet");
 		await expect(sheet).toBeVisible();
 		await expect(page.getByTestId("session-ctx-menu")).toHaveCount(0);
@@ -384,7 +385,7 @@ test.describe("phone", () => {
 		expect(box).not.toBeNull();
 		expect(box?.x).toBe(0);
 		expect(box?.width).toBe(393);
-		expect((box?.y ?? 0) + (box?.height ?? 0)).toBe(680);
+		expect((box?.y ?? 0) + (box?.height ?? 0)).toBe(480);
 		await expect(page.getByTestId("session-sheet-header")).toContainText(title);
 		if (project)
 			await expect(page.getByTestId("session-sheet-header")).toContainText(
@@ -397,10 +398,10 @@ test.describe("phone", () => {
 			);
 		expect(firstFive).toEqual([
 			"session-ctx-settle",
-			"session-ctx-auto-settle",
 			"session-ctx-snooze",
 			"session-ctx-pin",
 			"session-ctx-mark-unread",
+			"session-ctx-auto-settle",
 		]);
 		await page.getByTestId("session-ctx-pin").click();
 		await expect(sheet).toHaveCount(0);

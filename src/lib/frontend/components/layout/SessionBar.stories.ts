@@ -12,6 +12,7 @@ import {
 	applyGetModelsResponse,
 	clearDiscoveryState,
 } from "../../stores/discovery.svelte.js";
+import { featureFlags } from "../../stores/feature-flags.svelte.js";
 import {
 	goalDetails,
 	handleGoalChanged,
@@ -101,6 +102,8 @@ const meta = {
 	parameters: { layout: "fullscreen", a11y: { test: "error" } },
 	args: { getGoalDetails },
 	beforeEach: () => {
+		featureFlags.debug = false;
+		uiState.toasts = [];
 		const detailsOpen = goalDetails.open;
 		const now = sessionState.now;
 		goalDetails.open = false;
@@ -171,10 +174,17 @@ export const Default: Story = {
 
 		// The back control is the only way off this screen on a phone, so its
 		// accessible name and its wiring are both worth pinning. It leaves the
-		// session's route, so it runs last.
+		// session's route, so it runs last, and the session is reopened so the
+		// capture still shows the default bar.
 		const back = canvas.getByRole("button", { name: /Sessions/ });
 		await userEvent.click(back);
 		expect(routerState.path).toBe("/");
+		routerState.path = `/s/${mockSession.id}`;
+		await waitFor(() =>
+			expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+				"Test Session",
+			),
+		);
 	},
 };
 
@@ -800,6 +810,37 @@ export const TitleChevronSheet: Story = {
 		await expect(within(menu).getByTestId("session-ctx-settle")).toBeVisible();
 		await expect(within(menu).getByTestId("session-title-share")).toBeVisible();
 	},
+};
+
+export const OverflowMenuDebug: Story = {
+	...OverflowMenuOpen,
+	// The indexer reads tags statically, so a spread does not carry them.
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		sessionViewState.compact = true;
+		sessionViewState.atBottom = true;
+		sessionViewState.barOpen = false;
+		featureFlags.debug = true;
+	},
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByTestId("session-bar-island-overflow"),
+		);
+		const menu = await within(document.body).findByTestId(
+			"session-bar-island-menu",
+		);
+		await expect(
+			within(menu).getByTestId("overflow-debug"),
+		).toHaveAccessibleName("Debug panel");
+		await expect(within(menu).getByTestId("overflow-debug")).toHaveTextContent(
+			/Debug\s*dev/,
+		);
+	},
+};
+export const OverflowMenuDebugLight: Story = {
+	...OverflowMenuDebug,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
 };
 
 /**

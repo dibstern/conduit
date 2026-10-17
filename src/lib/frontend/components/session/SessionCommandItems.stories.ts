@@ -41,7 +41,15 @@ export const Sheet: Story = {
 			"command-demo-snooze",
 			"command-demo-delete",
 		]) {
-			await expect(within(menu).getByTestId(id)).toHaveClass(/min-h-\[44px\]/);
+			const target = within(menu).getByTestId(id);
+			await expect(target).toBeVisible();
+			// Phone sheets are touch targets: every command stays at least 44px tall.
+			await expect(
+				target.getBoundingClientRect().height,
+			).toBeGreaterThanOrEqual(44);
 		}
+		await expect(
+			within(menu).getByRole("group", { name: "Triage" }),
+		).toBeVisible();
 	},
 };
