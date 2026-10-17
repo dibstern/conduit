@@ -99,7 +99,7 @@ test.describe("New session draft", () => {
 			.toBeGreaterThan(countBefore);
 	});
 
-	test("start chip shows the current checkout; worktrees come later", async ({
+	test("start chip defaults to the current checkout and offers a new worktree", async ({
 		page,
 		relayUrl,
 	}, testInfo) => {
@@ -111,7 +111,7 @@ test.describe("New session draft", () => {
 		).toHaveAttribute("aria-checked", "true");
 		await expect(
 			page.getByRole("menuitem", { name: /New worktree/ }),
-		).toHaveAttribute("aria-disabled", "true");
+		).toHaveAttribute("aria-disabled", "false");
 		await capture(page, testInfo, "desktop-start-menu");
 	});
 

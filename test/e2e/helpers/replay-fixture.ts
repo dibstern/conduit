@@ -17,6 +17,9 @@
 // built frontend from dist/frontend/, so no separate vite preview is needed.
 
 import { test as base, type Page } from "@playwright/test";
+import { Effect } from "effect";
+import type { OpenCodeInstance } from "../../../src/lib/contracts/ws-rpc.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import type { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
 import type { ClaudeReplayPlan } from "./claude-trace-replayer.js";
 import { createReplayHarness, type ReplayHarness } from "./e2e-harness.js";
@@ -68,6 +71,54 @@ export const test = base.extend<ReplayFixtures & ReplayOptions>({
 
 	mockServer: async ({ harness }, use) => {
 		await use(harness.mock);
+	},
+
+	// A standalone relay has no daemon to publish accounts, so without this the
+	// composer never holds a default pick and cannot send. Answer the browser's
+	// SubscribeInstances with the relay's own accounts, as the daemon would.
+	// Page-level RPC mocks still take precedence over this context route.
+	context: async ({ context, harness }, use) => {
+		const accounts = await harness.stack.effectRuntime.runtime.runPromise(
+			Effect.flatMap(AccountDirectory, (directory) => directory.list),
+		);
+		const instances = accounts.map(
+			(account): OpenCodeInstance => ({
+				id: account.id,
+				name: account.name,
+				driver: account.driver,
+				port: 0,
+				managed: account.driver === "opencode" && account.managed === true,
+				isDefault: account.isDefault,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 0,
+			}),
+		);
+		await context.routeWebSocket(/\/rpc/, (ws) => {
+			const server = ws.connectToServer();
+			const answered = new Set<string>();
+			ws.onMessage((data) => {
+				const frame: {
+					_tag?: unknown;
+					tag?: unknown;
+					id?: unknown;
+					requestId?: unknown;
+				} = typeof data === "string" ? JSON.parse(data) : {};
+				if (frame._tag === "Request" && frame.tag === "SubscribeInstances") {
+					const requestId = String(frame.id);
+					answered.add(requestId);
+					ws.send(
+						JSON.stringify({
+							_tag: "Chunk",
+							requestId,
+							values: [{ instances }],
+						}),
+					);
+				} else if (!answered.has(String(frame.requestId))) server.send(data);
+			});
+			server.onMessage((data) => ws.send(data));
+		});
+		await use(context);
 	},
 
 	// Override Playwright's baseURL to point at the relay
