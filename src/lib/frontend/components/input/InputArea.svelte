@@ -9,7 +9,7 @@
 
 <script lang="ts">
 	import { AccountIdSchema, getProviderDriver } from "../../../contracts/provider-instance.js";
-	import { onDestroy, tick, untrack, type Snippet } from "svelte";
+	import { tick, untrack, type Snippet } from "svelte";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -39,9 +39,8 @@
 	import PastePreview from "../chat/PastePreview.svelte";
 	import PendingInputTray from "./PendingInputTray.svelte";
 	import { openSideThreads } from "../session/side-threads.svelte.js";
-	import { stopBackgroundTasks } from "../session/background-tasks.svelte.js";
-	import { currentChat, draftSend, followSessionBusy, inputSyncState, isProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
-	import { send, turn as readTurn } from "../../stores/turn.svelte.js";
+	import { currentChat, draftSend, inputSyncState, isProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
+	import { send, stop, turn as readTurn } from "../../stores/turn.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { approvals } from "../../stores/composer-settings.svelte.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
@@ -64,16 +63,16 @@
 		filterFiles,
 	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
-	import { findSession, isSessionBusy, isSessionSnoozed, sessionState } from "../../stores/session.svelte.js";
+	import { findSession, isSessionSnoozed, sessionState } from "../../stores/session.svelte.js";
 	import { selection } from "../../stores/selection.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { getCurrentRoute, getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { fade } from "svelte/transition";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
-	import { getDriverTraits, getInstanceById, instanceState } from "../../stores/instance.svelte.js";
+	import { getDriverTraits, instanceState } from "../../stores/instance.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
-	import { dismissToast, showToast, uiState } from "../../stores/ui.svelte.js";
+	import { showToast, uiState } from "../../stores/ui.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
@@ -912,54 +911,6 @@
 		if (await sendMessage(`/goal ${facts.endedGoal.condition}`)) undoneClearKey = key;
 	}
 
-	let taskStopToast: { id: string; sessionId: string } | null = $state(null);
-	let composerDestroyed = false;
-	$effect(() => {
-		const offer = taskStopToast;
-		if (!offer) return;
-		const count = currentSession?.backgroundTasks?.length ?? 0;
-		const active = sessionState.currentId === offer.sessionId;
-		const toast = uiState.toasts.find((toast) => toast.id === offer.id);
-		untrack(() => {
-			if (!active || count === 0 || !toast) {
-				dismissToast(offer.id);
-				taskStopToast = null;
-			} else toast.title = `Turn stopped. ${count} ${count === 1 ? "task" : "tasks"} still running`;
-		});
-	});
-	onDestroy(() => {
-		composerDestroyed = true;
-		if (taskStopToast) dismissToast(taskStopToast.id);
-	});
-
-	function handleStop() {
-		const sessionId = sessionState.currentId;
-		if (!sessionId) return;
-		const accountId = currentSession?.accountId;
-		const driver = getInstanceById(accountId ?? "")?.driver;
-		const supportsTaskStop = getDriverTraits(driver)?.sessionCapabilities.supportsTaskStop;
-		const hadTasks = supportsTaskStop && (currentSession?.backgroundTasks?.length ?? 0) > 0;
-		void rpc("CancelSession", {
-			sessionId,
-			commandId: crypto.randomUUID(),
-		}).then(() => {
-			// An interrupt can end a turn the row never reported busy for, so
-			// nothing else would end it. A still-busy row ends it on idle.
-			if (!isSessionBusy(sessionId)) followSessionBusy(sessionId, false);
-			if (composerDestroyed || !hadTasks || sessionState.currentId !== sessionId) return;
-			const count = findSession(sessionId)?.backgroundTasks?.length ?? 0;
-			if (count === 0) return;
-			if (taskStopToast) dismissToast(taskStopToast.id);
-			const id = showToast(`Turn stopped. ${count} ${count === 1 ? "task" : "tasks"} still running`, {
-				duration: 6000,
-				action: { label: "Stop them", run: () => {
-					if (sessionState.currentId === sessionId) void stopBackgroundTasks(sessionId);
-				} },
-			});
-			taskStopToast = { id, sessionId };
-		}).catch(toastFailure("Failed to stop session"));
-	}
-
 	function handleSendClick(e: MouseEvent) {
 		sendComposer(steer && (e.metaKey || e.ctrlKey) ? "steer" : "queue");
 	}
@@ -998,7 +949,7 @@
 			const { action, sessionId, condition } = event.detail;
 			if (!discoveryState.currentTraits?.supportsGoalState || sessionId !== sessionState.currentId) return;
 			switch (action) {
-				case "pause": handleStop(); break;
+				case "pause": if (sessionState.currentId) void stop(sessionState.currentId); break;
 				case "resume": void sendMessage("Continue."); break;
 				case "clear": void sendMessage("/goal clear", "steer"); break;
 				case "edit": handleAttachSetGoal(condition); break;
@@ -1595,7 +1546,7 @@
 							class="shrink-0 ml-[3px] w-[32px] h-[32px] rounded-[10px] bg-text text-bg touch-manipulation hover:opacity-90 active:opacity-70"
 							title={steerPending ? "Stop generating · A pending steer still runs" : "Stop generating"}
 							ariaLabel="Stop generating"
-							onclick={handleStop}
+							onclick={() => { if (sessionState.currentId) void stop(sessionState.currentId); }}
 						><i data-testid="stop-square" class="block w-[10px] h-[10px] rounded-[2px] bg-current"></i></Button>
 					{/if}
 				{/snippet}

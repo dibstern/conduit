@@ -20,7 +20,7 @@ import {
 } from "../../helpers/process-harness.js";
 
 function persisted(fixture: ProcessHarness, sessionId: string) {
-	const db = new Database(fixture.projectStorePath(), { readonly: true });
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
 		return {
 			events: db
@@ -123,7 +123,8 @@ describe("Cursor without an installed runtime through the built daemon", () => {
 			driver: "cursor",
 			available: false,
 			unavailableReason:
-				"Cursor has no credential; set CURSOR_API_KEY or log in with the Cursor SDK",
+				"Cursor authentication required. Log in to Cursor in Settings.",
+			unavailableCode: "auth_required",
 			usageEligible: false,
 		});
 		evidence["discovery"] = cursor;
@@ -183,10 +184,7 @@ describe("Cursor without an installed runtime through the built daemon", () => {
 				yield* projector.projectBatch(events);
 			}).pipe(
 				Effect.provide(
-					makePersistenceEffectLayer(
-						fixture.projectStorePath(),
-						"process-test",
-					),
+					makePersistenceEffectLayer(fixture.daemonStorePath(), "process-test"),
 				),
 			),
 		);
@@ -221,7 +219,7 @@ describe("Cursor without an installed runtime through the built daemon", () => {
 			cursorState.events.find(({ type }) => type === "turn.error")?.data[
 				"error"
 			],
-		).toContain("Cursor requires a credential");
+		).toContain("Cursor authentication required");
 		expect(
 			cursorState.events.filter(
 				({ provider }) => provider === "opencode" || provider === "claude",

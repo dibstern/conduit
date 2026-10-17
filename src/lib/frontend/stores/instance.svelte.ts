@@ -131,6 +131,9 @@ export function applyInstanceListResponse(
 		...(instance.usageEligible !== undefined
 			? { usageEligible: instance.usageEligible }
 			: {}),
+		...(instance.cursorUsageSource !== undefined
+			? { cursorUsageSource: instance.cursorUsageSource }
+			: {}),
 		...(instance.available !== undefined
 			? { available: instance.available }
 			: {}),

@@ -214,11 +214,11 @@ process.exit(result.status ?? 1);
 			return session;
 		};
 		const state = () => {
-			const db = new Database(fixture.projectStorePath(), { readonly: true });
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
 			try {
 				const events = db
 					.prepare(
-						"SELECT sequence, session_id, data FROM events WHERE type = 'session.workspace_changed' ORDER BY sequence",
+						"SELECT sequence, session_id, data FROM events WHERE project_id = 'process-test' AND type = 'session.workspace_changed' ORDER BY sequence",
 					)
 					.all() as {
 					sequence: number;
@@ -227,7 +227,9 @@ process.exit(result.status ?? 1);
 				}[];
 				return {
 					sessions: db
-						.prepare("SELECT id, title, workspace FROM sessions ORDER BY id")
+						.prepare(
+							"SELECT id, title, workspace FROM sessions WHERE project_id = 'process-test' ORDER BY id",
+						)
 						.all(),
 					workspaceEvents: events.map(({ sequence, session_id, data }) => ({
 						sequence,
@@ -387,7 +389,7 @@ process.exit(result.status ?? 1);
 			"event-write-failure",
 		);
 		const session = await create("Append failure");
-		const db = new Database(fixture.projectStorePath());
+		const db = new Database(fixture.daemonStorePath());
 		db.exec(`CREATE TRIGGER fail_branch_rename BEFORE INSERT ON events
 			WHEN NEW.type = 'session.workspace_changed' AND json_extract(NEW.data, '$.cause') = 'branch-rename'
 			BEGIN SELECT RAISE(FAIL, 'forced canonical append failure'); END`);

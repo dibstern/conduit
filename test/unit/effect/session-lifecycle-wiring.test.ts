@@ -283,6 +283,7 @@ describe("SessionLifecycleWiringLive", () => {
 				const session = yield* service.createSession("OpenCode", {
 					account: {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},
@@ -380,6 +381,7 @@ describe("SessionLifecycleWiringLive", () => {
 				yield* service.createSession("Service Created", {
 					account: {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},

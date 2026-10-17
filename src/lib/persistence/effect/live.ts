@@ -7,9 +7,7 @@ import {
 	Effect,
 	Layer,
 	type ManagedRuntime,
-	Option,
 } from "effect";
-import { SessionDirectory } from "../../domain/daemon/Services/session-directory.js";
 import {
 	makePersistenceService,
 	PersistenceError,
@@ -32,7 +30,6 @@ import { makeEffectSqlMigrator } from "./migrations.js";
 import {
 	makeProjectionRunnerEffect,
 	ProjectionRunnerEffectTag,
-	ProjectionRunnerError,
 } from "./projection-runner-effect.js";
 import {
 	makeProjectorCursorEffect,
@@ -164,41 +161,16 @@ export function makePersistenceStoreLayer(
 type PersistenceProjectOptions = {
 	// Use the same shared bus as ingestion so publishers meet subscribers.
 	sessionEventBusLayer?: Layer.Layer<SessionEventBusTag> | undefined;
-	sessionDirectoryLayer?: Layer.Layer<SessionDirectory> | undefined;
 };
 
 export function makePersistenceProjectLayer(
 	projectId: string,
-	options: PersistenceProjectOptions & {
-		sessionDirectoryLayer: Layer.Layer<SessionDirectory>;
-	},
-): Layer.Layer<
-	PersistenceProjectContext | SessionDirectory,
-	PersistenceError,
-	PersistenceStoreContext
->;
-export function makePersistenceProjectLayer(
-	projectId: string,
-	options?: PersistenceProjectOptions,
+	options: PersistenceProjectOptions = {},
 ): Layer.Layer<
 	PersistenceProjectContext,
 	PersistenceError,
 	PersistenceStoreContext
->;
-export function makePersistenceProjectLayer(
-	projectId: string,
-	options: PersistenceProjectOptions = {},
-):
-	| Layer.Layer<
-			PersistenceProjectContext,
-			PersistenceError,
-			PersistenceStoreContext
-	  >
-	| Layer.Layer<
-			PersistenceProjectContext | SessionDirectory,
-			PersistenceError,
-			PersistenceStoreContext
-	  > {
+> {
 	if (!projectId || projectId.trim().length === 0)
 		throw new PersistenceError({
 			operation: "bindProject",
@@ -208,45 +180,12 @@ export function makePersistenceProjectLayer(
 	const persistenceServiceLayer = Layer.fresh(
 		Layer.effect(PersistenceServiceTag, makePersistenceService),
 	).pipe(Layer.provide(projectLayer));
-	const baseLayer = Layer.mergeAll(
-		projectLayer,
-		persistenceServiceLayer,
-		options.sessionDirectoryLayer ?? Layer.empty,
-	);
+	const baseLayer = Layer.merge(projectLayer, persistenceServiceLayer);
 	const eventStoreLayer = Layer.effect(
 		EventStoreEffectTag,
 		makeEventStoreEffect,
 	).pipe(Layer.provide(baseLayer));
-	const projectionRunnerLayer = Layer.effect(
-		ProjectionRunnerEffectTag,
-		Effect.gen(function* () {
-			const runner = yield* ProjectionRunnerEffectTag;
-			const sql = yield* SqlClient.SqlClient;
-			const directory = yield* Effect.serviceOption(SessionDirectory);
-			return {
-				...runner,
-				recover: () =>
-					runner.recover().pipe(
-						Effect.tap(() =>
-							Effect.gen(function* () {
-								if (Option.isNone(directory)) return;
-								const sessions = yield* sql<{ readonly id: string }>`
-							SELECT id FROM sessions WHERE project_id = ${projectId}`;
-								yield* directory.value.replaceProject(
-									projectId,
-									sessions.map(({ id }) => id),
-								);
-							}),
-						),
-						Effect.mapError((cause) =>
-							cause instanceof ProjectionRunnerError
-								? cause
-								: new ProjectionRunnerError({ operation: "recover", cause }),
-						),
-					),
-			};
-		}),
-	).pipe(Layer.provide(baseLayer));
+	const projectionRunnerLayer = Layer.service(ProjectionRunnerEffectTag);
 
 	const readQueryLayer = Layer.effect(
 		ReadQueryEffectTag,
@@ -274,7 +213,7 @@ export function makePersistenceProjectLayer(
 		),
 	);
 
-	const services = Layer.mergeAll(
+	return Layer.mergeAll(
 		baseLayer,
 		eventStoreLayer,
 		projectionRunnerLayer,
@@ -282,9 +221,6 @@ export function makePersistenceProjectLayer(
 		providerStateLayer,
 		claudeEventPersistLayer,
 	);
-	return options.sessionDirectoryLayer
-		? Layer.merge(services, options.sessionDirectoryLayer)
-		: services;
 }
 
 export function makePersistenceEffectLayer(
@@ -292,11 +228,9 @@ export function makePersistenceEffectLayer(
 	projectId: string,
 	projectors: readonly EffectProjector[] = createAllEffectProjectors(),
 	sessionEventBusLayer?: Layer.Layer<SessionEventBusTag>,
-	sessionDirectoryLayer?: Layer.Layer<SessionDirectory>,
 ): Layer.Layer<PersistenceEffectContext, PersistenceEffectError> {
 	const projectLayer = makePersistenceProjectLayer(projectId, {
 		sessionEventBusLayer,
-		sessionDirectoryLayer,
 	});
 	// Only opening a per-project file may stamp provenance. Project consumers
 	// cannot see the connection until preparation and stamping have completed.

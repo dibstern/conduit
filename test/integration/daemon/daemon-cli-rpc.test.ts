@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
-import { Effect, Layer, Queue, Stream } from "effect";
+import { Effect, Layer, Option, Queue, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { run } from "../../../src/bin/cli-core.js";
 import {
@@ -28,7 +28,7 @@ import {
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { makeDaemonRpcSocketLayer } from "../../../src/lib/daemon/daemon-rpc-server.js";
 import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
-import { makeSessionDirectoryLive } from "../../../src/lib/domain/daemon/Services/session-directory.js";
+import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { subscribeProjectSettings } from "../../../src/lib/domain/relay/Services/project-settings.js";
 import { getDefaultModel } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
@@ -108,7 +108,11 @@ describe("CLI and browser daemon RPC parity", () => {
 							config: makeMockConfig({ configDir: root }),
 						}).pipe(
 							Layer.provideMerge(RpcSubscriptionScopeLive),
-							Layer.provideMerge(makeSessionDirectoryLive(root, [])),
+							Layer.provideMerge(
+								Layer.succeed(SessionDirectory, {
+									projectOf: () => Effect.succeed(Option.none()),
+								}),
+							),
 						),
 					),
 				),

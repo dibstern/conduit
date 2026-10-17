@@ -11,7 +11,6 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import type http from "node:http";
-import { join } from "node:path";
 import {
 	Context,
 	Data,
@@ -27,10 +26,9 @@ import {
 	ProjectSaveRejected,
 	type SaveProjectInput,
 } from "../../../contracts/ws-rpc.js";
-import { PersistenceStore } from "../../../persistence/effect/live.js";
+import type { PersistenceStore } from "../../../persistence/effect/live.js";
 import {
 	daemonStorePath,
-	projectEventsDbPath,
 	projectStorageDir,
 	writeProjectStorageOwner,
 } from "../../../persistence/project-storage.js";
@@ -70,7 +68,7 @@ import {
 	updateInstance as updateEffectInstance,
 } from "../Services/instance-manager-service.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
-import { optionalPersistenceStoreContext } from "../Services/project-read-database.js";
+import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	type broadcastProjectList,
 	projectInfos as getEffectProjectInfos,
@@ -186,14 +184,14 @@ export const RelayFactoryLive = (
 	| PortScannerTag
 	| PushManagerTag
 	| OpenCodeInstancesTag
+	| PersistenceStore
 > =>
 	Layer.effect(
 		RelayFactoryTag,
 		Effect.gen(function* () {
 			const accounts = yield* AccountDirectory;
 			const sessionDirectory = yield* Effect.serviceOption(SessionDirectory);
-			const storeContext = yield* optionalPersistenceStoreContext;
-			const sharedStore = Context.getOption(storeContext, PersistenceStore);
+			const storeContext = yield* persistenceStoreContext;
 			const unavailable = yield* DaemonStoreAvailability;
 			const configRef = yield* DaemonConfigRefTag;
 			const envResolver = Option.getOrUndefined(
@@ -432,9 +430,7 @@ export const RelayFactoryLive = (
 								reason: unavailableReason,
 							});
 						}
-						const dbPath = Option.isSome(sharedStore)
-							? daemonStorePath(configDir)
-							: projectEventsDbPath({ configDir, ...project });
+						const dbPath = daemonStorePath(configDir);
 						const storageDir = projectStorageDir(configDir, project.slug);
 						yield* Effect.try({
 							try: () => {
@@ -450,17 +446,7 @@ export const RelayFactoryLive = (
 									reason: `Failed to prepare project storage at ${storageDir}`,
 									cause,
 								}),
-						}).pipe(
-							Effect.catchAll((error) =>
-								Option.isSome(sharedStore) ||
-								dbPath === join(storageDir, "events.db")
-									? Effect.fail(error)
-									: Effect.logWarning(
-											"Using legacy project history after storage setup failed",
-											{ projectSlug: project.slug, cause: error },
-										),
-							),
-						);
+						});
 
 						// Dynamic import to avoid circular dependency at module load time
 						const { createProjectRelay } = yield* Effect.tryPromise({

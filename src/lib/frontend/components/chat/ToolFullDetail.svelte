@@ -35,6 +35,7 @@
 			url: Schema.optional(Schema.String),
 		}))),
 		truncated: Schema.optional(Schema.Boolean),
+		movedToBackground: Schema.optional(Schema.Boolean),
 		exitCode: Schema.optional(Schema.Number),
 		output: Schema.optional(Schema.String),
 	}));
@@ -158,7 +159,9 @@
 		{/if}
 	</div>
 {/each}
-{#if presentation?.exitCode !== undefined}
+{#if presentation?.movedToBackground}
+	<div data-testid="tool-moved-to-background" class="mx-2.5 text-xs text-text-muted">Moved to background. The command may still be running.</div>
+{:else if presentation?.exitCode !== undefined}
 	<div data-testid="tool-exit-code" class="mx-2.5 text-xs text-text-muted">Exit code {presentation.exitCode}</div>
 {/if}
 {#if presentation?.truncated}

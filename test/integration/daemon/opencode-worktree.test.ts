@@ -61,11 +61,11 @@ function initRepo(directory: string) {
 }
 
 function moves(fixture: ProcessHarness) {
-	const db = new Database(fixture.projectStorePath(), { readonly: true });
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
 		return db
 			.prepare(
-				"SELECT session_id, data FROM events WHERE type = 'session.workspace_changed' ORDER BY sequence",
+				"SELECT session_id, data FROM events WHERE project_id = 'process-test' AND type = 'session.workspace_changed' ORDER BY sequence",
 			)
 			.all()
 			.map((row) => {
@@ -139,7 +139,7 @@ describe("OpenCode declared worktree moves", () => {
 		if (!harness) return;
 		const fixture = harness;
 		try {
-			evidence["moves"] = existsSync(fixture.projectStorePath())
+			evidence["moves"] = existsSync(fixture.daemonStorePath())
 				? moves(fixture)
 				: [];
 			evidence["errors"] =
@@ -261,7 +261,7 @@ describe("OpenCode declared worktree moves", () => {
 		expect(Object.keys(plugin.tool)).toEqual(["conduit_use_worktree"]);
 		// Seed a resumed binding whose provider id differs from Conduit's session id.
 		const providerSessionId = `opencode-${sessionId}`;
-		const db = new Database(fixture.projectStorePath());
+		const db = new Database(fixture.daemonStorePath());
 		try {
 			expect(
 				db

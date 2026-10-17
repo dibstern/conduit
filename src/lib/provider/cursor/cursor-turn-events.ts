@@ -144,6 +144,8 @@ export class CursorTurnEvents {
 			call: CursorToolCall;
 			providerToolUseId: string;
 			completed?: ProviderRuntimeEventPayloadMap["tool.completed"];
+			completedAt?: number;
+			steerDeliveredAt?: number;
 			truncated?: true;
 			stdout: string;
 			stderr: string;
@@ -186,6 +188,51 @@ export class CursorTurnEvents {
 		},
 	) {
 		this.results = new CursorToolResults(cwd);
+	}
+
+	activeShellCalls(): readonly string[] {
+		return [...this.tools.entries()].flatMap(([id, tool]) =>
+			tool.call.type === "shell" && !tool.completed ? [id] : [],
+		);
+	}
+
+	steerDelivered(callIds: readonly string[]) {
+		return Effect.gen(this, function* () {
+			// The inbox projector starts a transcript segment at the steered user
+			// message; subsequent assistant content must belong to that segment.
+			this.nextMessage = true;
+			const deliveredAt = Date.now();
+			for (const callId of callIds) {
+				const tool = this.tools.get(callId);
+				if (!tool) continue;
+				tool.steerDeliveredAt = deliveredAt;
+				// steer-shell.jsonl completes the empty successful shell 2 ms
+				// before the ack. The SDK has no explicit handoff field.
+				if (
+					tool.completed &&
+					tool.completed.result === "" &&
+					tool.completed.metadata?.["exitCode"] === 0 &&
+					!tool.stdout &&
+					!tool.stderr &&
+					Math.abs(deliveredAt - (tool.completedAt ?? 0)) <= 1000
+				) {
+					tool.metadata["movedToBackground"] = true;
+					tool.completed = {
+						...tool.completed,
+						metadata: { ...tool.completed.metadata, movedToBackground: true },
+					};
+					yield* this.push(
+						"tool.running",
+						{
+							messageId: tool.messageId,
+							partId: `${tool.messageId}:tool:${callId}`,
+							metadata: { cursorToolType: "shell", movedToBackground: true },
+						},
+						{ providerToolUseId: tool.providerToolUseId },
+					);
+				}
+			}
+		});
 	}
 
 	questionSource(callId: string): string | undefined {
@@ -551,6 +598,18 @@ export class CursorTurnEvents {
 							toolCall,
 							tool?.truncated,
 						);
+						const completedAt = Date.now();
+						if (
+							tool &&
+							toolCall.type === "shell" &&
+							completed.result === "" &&
+							completed.metadata["exitCode"] === 0 &&
+							!tool.stdout &&
+							!tool.stderr &&
+							tool.steerDeliveredAt !== undefined &&
+							Math.abs(completedAt - tool.steerDeliveredAt) <= 1000
+						)
+							completed.metadata["movedToBackground"] = true;
 						const data = {
 							messageId: toolMessageId,
 							partId: `${toolMessageId}:tool:${callId}`,
@@ -566,6 +625,7 @@ export class CursorTurnEvents {
 							duration: Date.now() - (tool?.startedAt ?? Date.now()),
 						};
 						if (tool) {
+							tool.completedAt = completedAt;
 							tool.metadata = data.metadata;
 							tool.completed = data;
 						}

@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { untrack } from "svelte";
 import { SvelteMap } from "svelte/reactivity";
 import { WorkspaceMoveError } from "../../contracts/session-workspace.js";
 import type {
@@ -6,6 +7,7 @@ import type {
 	SteerBlocker,
 } from "../../contracts/stored-event.js";
 import { WorktreeCreationError } from "../../contracts/worktree.js";
+import { stopBackgroundTasks } from "../components/session/background-tasks.svelte.js";
 import { toastFailure } from "../transport/rpc-errors.js";
 import { rpc } from "../transport/ws-rpc-client.js";
 import type { SessionInfo } from "../types.js";
@@ -21,11 +23,16 @@ import {
 	getDraftPick,
 	getEffectiveInstanceId,
 } from "./discovery.svelte.js";
-import { instanceState } from "./instance.svelte.js";
+import {
+	getDriverTraits,
+	getInstanceById,
+	instanceState,
+} from "./instance.svelte.js";
 import { permissionsState } from "./permissions.svelte.js";
 import { getDraftProject, projectState } from "./project-state.svelte.js";
 import { selection } from "./selection.svelte.js";
-import { findSession } from "./session.svelte.js";
+import { findSession, sessionState } from "./session.svelte.js";
+import { dismissToast, showToast, uiState } from "./ui.svelte.js";
 import { usageState } from "./usage.svelte.js";
 import { rateLimitChatSend } from "./ws-send.svelte.js";
 
@@ -63,6 +70,7 @@ const pendingReplies = new Map<string, Intent>();
 const settledInputs = new Set<string>();
 const refusals = new SvelteMap<string, { readonly reason: SteerBlocker }>();
 let creatingDrafts = $state(0);
+let dismissTaskStopToast: (() => void) | undefined;
 
 export function turn() {
 	const shown = selection.shown;
@@ -150,6 +158,57 @@ export function rebaseTurns(sessionIds: Iterable<string>): void {
 export function deleteTurn(sessionId: string): void {
 	rebaseTurns([sessionId]);
 	refusals.delete(sessionId);
+}
+
+export async function stop(sessionId: string): Promise<void> {
+	// Include guessed waits: their late handoff replies must stay settled too.
+	rebaseTurns([sessionId]);
+	const session = findSession(sessionId);
+	const driver = getInstanceById(session?.accountId ?? "")?.driver;
+	const hadTasks =
+		getDriverTraits(driver)?.sessionCapabilities.supportsTaskStop &&
+		(session?.backgroundTasks?.length ?? 0) > 0;
+	try {
+		await rpc("CancelSession", {
+			sessionId,
+			commandId: crypto.randomUUID(),
+		});
+		if (!hadTasks || sessionState.currentId !== sessionId) return;
+		const count = findSession(sessionId)?.backgroundTasks?.length ?? 0;
+		if (count === 0) return;
+		dismissTaskStopToast?.();
+		const id = showToast(
+			`Turn stopped. ${count} ${count === 1 ? "task" : "tasks"} still running`,
+			{
+				duration: 6000,
+				action: {
+					label: "Stop them",
+					run: () => {
+						if (sessionState.currentId === sessionId)
+							void stopBackgroundTasks(sessionId);
+					},
+				},
+			},
+		);
+		// The offer follows the shown session, independent of composer mounts.
+		dismissTaskStopToast = $effect.root(() => {
+			$effect(() => {
+				const count = findSession(sessionId)?.backgroundTasks?.length ?? 0;
+				const active = sessionState.currentId === sessionId;
+				const toast = uiState.toasts.find((toast) => toast.id === id);
+				untrack(() => {
+					if (!active || count === 0 || !toast) {
+						dismissTaskStopToast?.();
+						dismissTaskStopToast = undefined;
+					} else
+						toast.title = `Turn stopped. ${count} ${count === 1 ? "task" : "tasks"} still running`;
+				});
+			});
+			return () => dismissToast(id);
+		});
+	} catch (error) {
+		toastFailure("Failed to stop session")(error);
+	}
 }
 
 export async function send(input: SendInput): Promise<SendOutcome> {

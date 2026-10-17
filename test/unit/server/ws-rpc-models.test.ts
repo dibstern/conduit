@@ -711,6 +711,7 @@ describe("WsRpcServerLayer GetModels", () => {
 										id: AccountIdSchema.make("opencode"),
 										name: "OpenCode",
 										driver: "opencode",
+										usageEligible: false,
 									},
 									{
 										id: AccountIdSchema.make("claude"),
@@ -730,6 +731,7 @@ describe("WsRpcServerLayer GetModels", () => {
 										id: AccountIdSchema.make("opencode-work"),
 										name: "OpenCode work",
 										driver: "opencode",
+										usageEligible: false,
 									},
 								]),
 								config: makeMockConfig({ configDir }),
@@ -830,6 +832,7 @@ describe("WsRpcServerLayer GetModels", () => {
 										id: AccountIdSchema.make("opencode"),
 										name: "OpenCode",
 										driver: "opencode",
+										usageEligible: false,
 									},
 									{
 										id: AccountIdSchema.make("claude"),
@@ -849,6 +852,7 @@ describe("WsRpcServerLayer GetModels", () => {
 										id: AccountIdSchema.make("opencode-work"),
 										name: "OpenCode work",
 										driver: "opencode",
+										usageEligible: false,
 									},
 								]),
 								config: makeMockConfig({ configDir }),
