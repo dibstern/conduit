@@ -1,5 +1,27 @@
 # Conduit project model
 
+## Project
+
+A **Project** is a named, saved set of one or more Project Folders and the only
+way sessions are grouped (ADR-0011). Its first folder is the main folder, which
+no other project may use as its main folder; other folders can be shared.
+Every session belongs to one project for life. Conduit is never "in" a project:
+the slug in `/p/<slug>` names a project but is not app state.
+
+A **Project Merge** moves every session of an absorbed project into a target
+and cannot be undone. Each moved session's workspace maps the target's main
+folder to where the session ran, with origin `existing`. Folders only the
+absorbed project had join the target, and the target's settings win.
+
+A **Slug Alias** is what a merge leaves behind: the absorbed slug and main
+folder, pointing at the target. Old links redirect through it, provider
+sessions found in its folder import into the target, and session reads for a
+project include its aliases' slugs. Stored events keep their original slug.
+
+The **Scratch Project** is the hidden project behind New Session's "No
+project". Each scratch session runs in its own `<configDir>/scratch/<session
+id>/` folder. Only an unsent draft can switch between it and a real project.
+
 ## Project Provenance
 
 A stored event or durable command belongs to the project's stable slug, its
@@ -41,6 +63,9 @@ HTTP/RPC consumers start, so remote changes are reflected after restart. Identit
 discovery is best-effort and never rejects a project save or daemon startup.
 
 ## Project Group
+
+Retired by ADR-0011: Project Merge replaces it, and the cutover merges copies
+of one folder automatically. This section describes the code until that lands.
 
 A **Project Group** contains the projects sharing a grouping key under their
 effective grouping mode. The primary Project Folder alone determines the group;
