@@ -6,7 +6,7 @@
 	import { RpcLogLevelSchema, type RpcLogLevel } from "../../transport/ws-rpc.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { failureLine } from "../../transport/rpc-errors.js";
-	import Select from "../ui/Select.svelte";
+	import SettingsPicker from "../ui/SettingsPicker.svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
 
@@ -21,6 +21,7 @@
 	async function changeLogLevel(level: RpcLogLevel): Promise<void> {
 		if (!serverStatus.status || saving) return;
 		const previousLevel = serverStatus.status.logLevel;
+		logLevel = level;
 		saving = true;
 		error = null;
 		try {
@@ -44,18 +45,16 @@
 		description="Whole daemon · resets when conduit restarts"
 	>
 		{#snippet control()}
-			<Select
+			<SettingsPicker
 				id="server-log-level"
-				bind:value={logLevel}
+				label="Log level"
+				value={logLevel}
 				disabled={!serverStatus.status || saving}
 				invalid={error !== null}
 				aria-describedby={error ? "server-log-level-error" : undefined}
-				onchange={(event) => changeLogLevel(event.currentTarget.value as RpcLogLevel)}
-			>
-				{#each RpcLogLevelSchema.literals as level (level)}
-					<option value={level}>{level}</option>
-				{/each}
-			</Select>
+				onvaluechange={(level) => { const next = RpcLogLevelSchema.literals.find((option) => option === level); if (next) void changeLogLevel(next); }}
+				options={RpcLogLevelSchema.literals.map((level) => ({ value: level, label: level }))}
+			/>
 		{/snippet}
 	</SettingsRow>
 	{#if error}

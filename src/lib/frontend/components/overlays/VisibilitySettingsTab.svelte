@@ -2,7 +2,7 @@
 	import { untrack } from "svelte";
 	import type { HarnessDefaultState } from "../../transport/ws-rpc.js";
 	import { catalogFromProviderList, findCatalogModel, type Harness, offeredOptions } from "../../../provider/turn-settings.js";
-	import Select from "../ui/Select.svelte";
+	import SettingsPicker from "../ui/SettingsPicker.svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
 	import TextButton from "../ui/TextButton.svelte";
@@ -84,11 +84,9 @@
 		return `${state.pick?.modelId ?? "This model"} is no longer available.`;
 	}
 
-	async function updateDefault(harness: Harness, setting: "model" | "effort" | "contextWindow", event: Event): Promise<void> {
-		const select = event.currentTarget;
+	async function updateDefault(harness: Harness, setting: "model" | "effort" | "contextWindow", value: string): Promise<void> {
 		const projectSlug = getCurrentSlug();
-		if (!(select instanceof HTMLSelectElement) || !projectSlug || saving[harness]) return;
-		const value = select.value;
+		if (!projectSlug || saving[harness]) return;
 		const current = discoveryState.harnessDefaults[harness].pick;
 		const separator = value.indexOf("/");
 		// A new model omits effort so the server applies the one saved for it.
@@ -100,11 +98,6 @@
 		try {
 			applyHarnessDefaultSet(await rpc("SetHarnessDefault", { projectSlug, harness, ...pick }));
 		} catch (error) {
-			// Restore the server value, including when the native select changed first.
-			const current = discoveryState.harnessDefaults[harness].pick;
-			select.value = setting === "model"
-				? current ? `${current.providerId}/${current.modelId}` : ""
-				: current?.[setting] ?? "";
 			toastFailure("Failed to save default model", "warn")(error);
 		} finally {
 			saving[harness] = false;
@@ -194,46 +187,37 @@
 		<div class="px-3 py-2">
 			{#snippet controls()}
 				<div class="flex flex-wrap items-center gap-1.5 max-w-full">
-					<Select
+					<SettingsPicker
 						id="settings-harness-default-{row.harness}-model"
+						label="{row.label} model"
 						value={value}
 						invalid={Boolean(pick && !row.model)}
 						disabled={saving[row.harness]}
-						class="w-[220px] max-w-full"
+						class="max-w-[220px]"
 						data-testid="settings-harness-default-{row.harness}-model"
-						onchange={(event) => void updateDefault(row.harness, "model", event)}
-					>
-						{#if !pick}<option value="" disabled>Not set</option>{/if}
-						{#if pick && !row.model}<option {value} disabled>{pick.modelId} (unavailable)</option>{/if}
-						{#each row.providers as provider (provider.id)}
-							<optgroup label={provider.name || provider.id}>
-								{#each provider.models as model (model.id)}
-									{#if model.routingOptions?.length}
-										{#each model.routingOptions as option (option.value)}
-											<option value="{provider.id}/{option.value}">{model.name} · {option.label}</option>
-										{/each}
-									{:else}
-										<option value="{provider.id}/{model.id}">{model.name || model.id}</option>
-									{/if}
-								{/each}
-							</optgroup>
-						{/each}
-					</Select>
+						onvaluechange={(value) => void updateDefault(row.harness, "model", value)}
+						options={[
+							...(!pick ? [{ value: "", label: "Not set", disabled: true }] : !row.model ? [{ value, label: `${pick.modelId} (unavailable)`, disabled: true }] : []),
+							...row.providers.flatMap((provider) => provider.models.flatMap((model) => model.routingOptions?.length
+								? model.routingOptions.map((option) => ({ value: `${provider.id}/${option.value}`, label: `${model.name} · ${option.label}`, group: provider.name || provider.id }))
+								: [{ value: `${provider.id}/${model.id}`, label: model.name || model.id, group: provider.name || provider.id }])),
+						]}
+					/>
 					{#if pick && row.options.efforts.length > 0}
-						<Select value={pick.effort} disabled={saving[row.harness]} class="w-[100px]" aria-label="{row.label} effort"
-							data-testid="settings-harness-default-{row.harness}-effort" onchange={(event) => void updateDefault(row.harness, "effort", event)}>
-							<option value="">Default</option>
-							{#if pick.effort && !row.options.efforts.includes(pick.effort)}<option value={pick.effort} disabled>{pick.effort} (unavailable)</option>{/if}
-							{#each row.options.efforts as effort}<option value={effort}>{effort}</option>{/each}
-						</Select>
+						<SettingsPicker value={pick.effort} disabled={saving[row.harness]} label="{row.label} effort"
+							data-testid="settings-harness-default-{row.harness}-effort" onvaluechange={(value) => void updateDefault(row.harness, "effort", value)} options={[
+								{ value: "", label: "Default" },
+								...(pick.effort && !row.options.efforts.includes(pick.effort) ? [{ value: pick.effort, label: `${pick.effort} (unavailable)`, disabled: true }] : []),
+								...row.options.efforts.map((effort) => ({ value: effort, label: effort })),
+							]} />
 					{/if}
 					{#if pick && row.options.contextWindows.length > 0}
-						<Select value={pick.contextWindow} disabled={saving[row.harness]} class="w-[100px]" aria-label="{row.label} context window"
-							data-testid="settings-harness-default-{row.harness}-context" onchange={(event) => void updateDefault(row.harness, "contextWindow", event)}>
-							<option value="">Default</option>
-							{#if pick.contextWindow && !row.options.contextWindows.some((option) => option.value === pick.contextWindow)}<option value={pick.contextWindow} disabled>{pick.contextWindow} (unavailable)</option>{/if}
-							{#each row.options.contextWindows as option}<option value={option.value}>{option.label}</option>{/each}
-						</Select>
+						<SettingsPicker value={pick.contextWindow} disabled={saving[row.harness]} label="{row.label} context window"
+							data-testid="settings-harness-default-{row.harness}-context" onvaluechange={(value) => void updateDefault(row.harness, "contextWindow", value)} options={[
+								{ value: "", label: "Default" },
+								...(pick.contextWindow && !row.options.contextWindows.some((option) => option.value === pick.contextWindow) ? [{ value: pick.contextWindow, label: `${pick.contextWindow} (unavailable)`, disabled: true }] : []),
+								...row.options.contextWindows,
+							]} />
 					{/if}
 				</div>
 			{/snippet}

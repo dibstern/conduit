@@ -12,16 +12,8 @@
  * contract, which is why they are two components rather than one with a
  * `semantics` prop — see the header of ui/Tabs.svelte.
  *
- * Every recipe below started as the as-found class list of a real call site,
- * token for token, so the migration was zero-diff by construction.
- *
- * All three strips use the accent family for selection, so theme changes keep
- * their selected states consistent.
- *
- * What is NOT converged, deliberately: `pill` stays content-width with a
- * border-colour hover and `field` stays `flex-1` with none, because one is a
- * compact toolbar switch and the other fills a form row. Different containers,
- * different geometry.
+ * Settings' joined segment follows the Final design. The other recipes retain
+ * their original call-site appearance.
  */
 
 type SegmentedRecipe = {
@@ -83,27 +75,11 @@ export const SEGMENTED_VARIANTS = {
 		unselected:
 			"bg-transparent border-border text-text-dimmer hover:text-text hover:border-border-subtle",
 	},
-	/**
-	 * overlays/SettingsPanel's Claude/OpenCode driver picker. Sits inside a
-	 * bordered form card, so its options are equal-width (`flex-1`) fields
-	 * rather than content-width tabs.
-	 */
-	field: {
-		list: "flex gap-1.5",
-		item: "flex-1 px-3 py-1.5 text-xs rounded border transition-colors cursor-pointer",
-		selected: "border-accent text-text bg-accent/10",
-		unselected: "border-border text-text-muted hover:text-text",
-	},
-	/**
-	 * The settings mockup's joined segment (`.seg`): one outlined capsule split
-	 * by hairlines, the selected part tinted with the accent. Inherits its font size from
-	 * its container. Settings wears it everywhere: Server's instance Type, Composer,
-	 * and Usage's warning and forecast switches.
-	 */
+	/** Final settings segments: a chip track and raised neutral selection. */
 	joined: {
-		list: "inline-flex shrink-0 overflow-hidden rounded-[7px] border border-border",
-		item: "px-[9px] py-[4px] font-medium border-l border-border first:border-l-0 max-md:min-h-[44px] max-md:min-w-[36px] cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text disabled:opacity-50 disabled:cursor-not-allowed",
-		selected: "bg-accent-bg text-accent",
+		list: "inline-flex max-w-full shrink-0 rounded-[8px] bg-chip p-[2px]",
+		item: "flex min-h-[24px] items-center justify-center rounded-[6px] px-[10px] text-[12px] font-medium max-md:min-h-[44px] cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text disabled:opacity-50 disabled:cursor-not-allowed",
+		selected: "bg-settings-segment text-text shadow-settings-segment",
 		unselected: "text-text-secondary hover:text-text",
 	},
 	/** Full-width session view band, with literal 44px phone targets. */

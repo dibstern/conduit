@@ -70,8 +70,10 @@
 
 	--color-settings-bg: #111113;
 	--color-settings-card: #1c1c1f;
+	--color-settings-segment: #232327;
 	--color-settings-rail: #161618;
 	--color-settings-separator: rgba(255, 255, 255, 0.06);
+	--shadow-settings-segment: 0 1px 2px rgba(0, 0, 0, 0.2);
 	--shadow-composer: 0 0 0 1px #2b2b31;
 
 	--color-thinking: #a1a1aa;
@@ -263,8 +265,11 @@
 
 	--color-settings-bg: #f4f4f6;
 	--color-settings-card: #ffffff;
+	--color-settings-segment: #ffffff;
 	--color-settings-rail: #ffffff;
 	--color-settings-separator: rgba(0, 0, 0, 0.06);
+	--shadow-settings-segment:
+		0 1px 2px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
 	--shadow-composer:
 		0 0 0 1px rgba(0, 0, 0, 0.07), 0 8px 28px rgba(0, 0, 0, 0.05);
 

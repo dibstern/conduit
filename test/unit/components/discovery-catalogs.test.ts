@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/svelte";
+import { cleanup, fireEvent, render } from "@testing-library/svelte";
 import { Effect, ManagedRuntime, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import VisibilitySettingsTab from "../../../src/lib/frontend/components/overlays/VisibilitySettingsTab.svelte";
@@ -229,21 +229,20 @@ describe("discovery catalogs over the RPC wire", () => {
 			},
 		});
 		const view = render(VisibilitySettingsTab);
-		const model = view.getByTestId(
-			"settings-harness-default-claude-model",
-		) as HTMLSelectElement;
-		expect(model.selectedOptions[0]?.textContent).toBe("Claude Sonnet 4");
+		const model = view.getByTestId("settings-harness-default-claude-model");
+		expect(model.textContent).toContain("Claude Sonnet 4");
 		expect(
-			(
-				view.getByTestId(
-					"settings-harness-default-claude-effort",
-				) as HTMLSelectElement
-			).value,
+			view
+				.getByTestId("settings-harness-default-claude-effort")
+				.getAttribute("data-value"),
 		).toBe("high");
 		// Default controls must not borrow a custom account's same-id model.
-		expect(Array.from(model.options, (option) => option.text)).not.toContain(
-			"Work account model",
-		);
+		await fireEvent.click(model);
+		expect(
+			view
+				.getAllByRole("menuitemradio")
+				.map((option) => option.textContent?.trim()),
+		).toEqual(["Claude Sonnet 4"]);
 		await vi.waitFor(() => expect(modelReads).toHaveLength(1));
 	});
 

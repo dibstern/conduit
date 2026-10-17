@@ -1,8 +1,8 @@
 <script lang="ts">
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
-	import Select from "../ui/Select.svelte";
-	import { themeState, setThemeMode, type ThemeMode } from "../../stores/theme.svelte.js";
+	import SettingsPicker from "../ui/SettingsPicker.svelte";
+	import { themeState, setThemeMode } from "../../stores/theme.svelte.js";
 </script>
 
 <SettingsGroup id="settings-appearance" title="Appearance">
@@ -12,15 +12,13 @@
 		description="A fixed appearance, or follow your system"
 	>
 		{#snippet control()}
-			<Select
+			<SettingsPicker
 				id="theme-mode"
+				label="Theme"
 				value={themeState.mode}
-				onchange={(event) => setThemeMode(event.currentTarget.value as ThemeMode)}
-			>
-				<option value="light">Light</option>
-				<option value="dark">Dark</option>
-				<option value="system">System</option>
-			</Select>
+				onvaluechange={(mode) => { if (mode === "light" || mode === "dark" || mode === "system") setThemeMode(mode); }}
+				options={[{ value: "light", label: "Light" }, { value: "dark", label: "Dark" }, { value: "system", label: "System" }]}
+			/>
 		{/snippet}
 	</SettingsRow>
 </SettingsGroup>

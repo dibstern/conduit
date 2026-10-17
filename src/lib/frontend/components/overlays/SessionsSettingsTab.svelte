@@ -2,7 +2,7 @@
 	import { untrack } from "svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
-	import Select from "../ui/Select.svelte";
+	import SettingsPicker from "../ui/SettingsPicker.svelte";
 	import { Schema } from "effect";
 	import { GroupingModeSchema } from "../../../shared-types.js";
 	import { DefaultSessionModeSchema } from "../../../contracts/project-file.js";
@@ -107,8 +107,7 @@
 <SettingsGroup id="settings-sessions" title="Sessions">
 	<SettingsRow label="Default repository grouping" labelFor="settings-grouping-mode-select" description="Projects inherit this unless they choose their own mode.">
 		{#snippet control()}
-			<Select id="settings-grouping-mode-select" value={projectState.defaultGroupingMode} disabled={state.groupingSaving} onchange={(event) => {
-				const mode = event.currentTarget.value;
+			<SettingsPicker id="settings-grouping-mode-select" label="Default repository grouping" value={projectState.defaultGroupingMode} disabled={state.groupingSaving} onvaluechange={(mode) => {
 				if (!Schema.is(GroupingModeSchema)(mode)) return;
 				const groupingSaveRevision = ++projectState.defaultGroupingRevision;
 				state.groupingSaving = true;
@@ -118,11 +117,7 @@
 					})
 					.catch(toastFailure("Couldn't save grouping setting"))
 					.finally(() => { state.groupingSaving = false; });
-			}}>
-				<option value="repository">By repository</option>
-				<option value="repository+subfolder">By repository and subfolder</option>
-				<option value="off">Off</option>
-			</Select>
+			}} options={[{ value: "repository", label: "By repository" }, { value: "repository+subfolder", label: "By repository and subfolder" }, { value: "off", label: "Off" }]} />
 		{/snippet}
 	</SettingsRow>
 	<SettingsRow
@@ -131,13 +126,13 @@
 		description="Applies to new drafts. Last used repeats your previous new session. Project settings and conduit.json take precedence."
 	>
 		{#snippet control()}
-			<Select
+			<SettingsPicker
 				id="settings-default-session-mode"
+				label="Default session mode"
 				data-testid="settings-default-session-mode"
 				value={discoveryState.defaultSessionMode}
 				disabled={state.sessionModeSaving || !(getDraftProject() ?? getCurrentSlug())}
-				onchange={(event) => {
-					const mode = event.currentTarget.value;
+				onvaluechange={(mode) => {
 					const projectSlug = getDraftProject() ?? getCurrentSlug();
 					if (!projectSlug || !Schema.is(DefaultSessionModeSchema)(mode)) return;
 					state.sessionModeSaving = true;
@@ -146,11 +141,8 @@
 						.catch(toastFailure("Couldn't save default session mode"))
 						.finally(() => { state.sessionModeSaving = false; });
 				}}
-			>
-				<option value="local">Local</option>
-				<option value="worktree">New worktree</option>
-				<option value="last">Last used</option>
-			</Select>
+				options={[{ value: "local", label: "Local" }, { value: "worktree", label: "New worktree" }, { value: "last", label: "Last used" }]}
+			/>
 		{/snippet}
 	</SettingsRow>
 	<SettingsRow
@@ -159,13 +151,13 @@
 		description="Moves to the Settled shelf. Nothing is deleted."
 	>
 		{#snippet control()}
-			<Select
+			<SettingsPicker
 				id="settings-auto-settle-select"
+				label="Settle idle sessions after"
 				data-testid="settings-auto-settle-select"
 				value={state.autoSettleDays === null ? "never" : String(state.autoSettleDays)}
 				disabled={state.autoSettleSaving}
-				onchange={(event) => {
-					const value = event.currentTarget.value;
+				onvaluechange={(value) => {
 					const next = value === "never" ? null : Number(value);
 					state.autoSettleSaving = true;
 					void rpc("SetAutoSettleSetting", { autoSettleAfterDays: next })
@@ -177,16 +169,8 @@
 							state.autoSettleSaving = false;
 						});
 				}}
-			>
-				<option value="1">1 day</option>
-				<option value="2">2 days</option>
-				<option value="3">3 days</option>
-				<option value="7">1 week</option>
-				<option value="14">2 weeks</option>
-				<option value="30">30 days</option>
-				<option value="90">90 days</option>
-				<option value="never">Never</option>
-			</Select>
+				options={[{ value: "1", label: "1 day" }, { value: "2", label: "2 days" }, { value: "3", label: "3 days" }, { value: "7", label: "1 week" }, { value: "14", label: "2 weeks" }, { value: "30", label: "30 days" }, { value: "90", label: "90 days" }, { value: "never", label: "Never" }]}
+			/>
 		{/snippet}
 	</SettingsRow>
 </SettingsGroup>
@@ -197,39 +181,24 @@
 	</p>
 	<SettingsRow label="When a session settles" labelFor="settings-cleanup-on-settle" description="Merged means its branch is in the default branch.">
 		{#snippet control()}
-			<Select id="settings-cleanup-on-settle" data-testid="settings-cleanup-on-settle" value={state.cleanup.onSettle} disabled={state.cleanupSaving} onchange={(event) => {
-				const onSettle = event.currentTarget.value;
+			<SettingsPicker id="settings-cleanup-on-settle" label="When a session settles" data-testid="settings-cleanup-on-settle" value={state.cleanup.onSettle} disabled={state.cleanupSaving} onvaluechange={(onSettle) => {
 				if (onSettle === "merged" || onSettle === "any" || onSettle === "off") saveCleanup({ onSettle });
-			}}>
-				<option value="merged">Remove if merged</option>
-				<option value="any">Remove</option>
-				<option value="off">Keep</option>
-			</Select>
+			}} options={[{ value: "merged", label: "Remove if merged" }, { value: "any", label: "Remove" }, { value: "off", label: "Keep" }]} />
 		{/snippet}
 	</SettingsRow>
 	<SettingsRow label="When a session is deleted" labelFor="settings-cleanup-on-delete" description="Ask lets you choose in the delete dialog.">
 		{#snippet control()}
-			<Select id="settings-cleanup-on-delete" data-testid="settings-cleanup-on-delete" value={state.cleanup.onDelete ? "remove" : "ask"} disabled={state.cleanupSaving} onchange={(event) => saveCleanup({ onDelete: event.currentTarget.value === "remove" })}>
-				<option value="ask">Ask</option>
-				<option value="remove">Remove</option>
-			</Select>
+			<SettingsPicker id="settings-cleanup-on-delete" label="When a session is deleted" data-testid="settings-cleanup-on-delete" value={state.cleanup.onDelete ? "remove" : "ask"} disabled={state.cleanupSaving} onvaluechange={(value) => saveCleanup({ onDelete: value === "remove" })} options={[{ value: "ask", label: "Ask" }, { value: "remove", label: "Remove" }]} />
 		{/snippet}
 	</SettingsRow>
 	<SettingsRow label="Remove idle worktrees after" labelFor="settings-cleanup-idle" description="Settled or not, counted from the session's last activity.">
 		{#snippet control()}
-			<Select id="settings-cleanup-idle" data-testid="settings-cleanup-idle" value={String(state.cleanup.afterInactiveDays ?? "never")} disabled={state.cleanupSaving} onchange={(event) => {
-				const value = event.currentTarget.value;
+			<SettingsPicker id="settings-cleanup-idle" label="Remove idle worktrees after" data-testid="settings-cleanup-idle" value={String(state.cleanup.afterInactiveDays ?? "never")} disabled={state.cleanupSaving} onvaluechange={(value) => {
 				saveCleanup({ afterInactiveDays: value === "never" ? null : Number(value) });
-			}}>
-				{#if state.cleanup.afterInactiveDays !== null && !idlePresets.includes(state.cleanup.afterInactiveDays)}
-					<option value={String(state.cleanup.afterInactiveDays)}>{state.cleanup.afterInactiveDays} days</option>
-				{/if}
-				<option value="7">1 week</option>
-				<option value="14">2 weeks</option>
-				<option value="30">30 days</option>
-				<option value="90">90 days</option>
-				<option value="never">Never</option>
-			</Select>
+			}} options={[
+				...(state.cleanup.afterInactiveDays !== null && !idlePresets.includes(state.cleanup.afterInactiveDays) ? [{ value: String(state.cleanup.afterInactiveDays), label: `${state.cleanup.afterInactiveDays} days` }] : []),
+				{ value: "7", label: "1 week" }, { value: "14", label: "2 weeks" }, { value: "30", label: "30 days" }, { value: "90", label: "90 days" }, { value: "never", label: "Never" },
+			]} />
 		{/snippet}
 	</SettingsRow>
 	<SettingsRow label="Remove once merged" description="Settled or not, as soon as its branch is in the default branch." checked={state.cleanup.whenMerged} disabled={state.cleanupSaving} onchange={() => saveCleanup({ whenMerged: !state.cleanup.whenMerged })} />
@@ -237,14 +206,9 @@
 	<div>
 		<SettingsRow label="Keep worktrees with" labelFor="settings-cleanup-keep-when">
 			{#snippet control()}
-				<Select id="settings-cleanup-keep-when" data-testid="settings-cleanup-keep-when" value={state.cleanup.keepWhen} disabled={state.cleanupSaving} onchange={(event) => {
-					const keepWhen = event.currentTarget.value;
+				<SettingsPicker id="settings-cleanup-keep-when" label="Keep worktrees with" data-testid="settings-cleanup-keep-when" value={state.cleanup.keepWhen} disabled={state.cleanupSaving} onvaluechange={(keepWhen) => {
 					if (keepWhen === "any-local-files" || keepWhen === "uncommitted-changes" || keepWhen === "tracked-changes") saveCleanup({ keepWhen });
-				}}>
-					<option value="any-local-files">Any local files</option>
-					<option value="uncommitted-changes">Uncommitted changes</option>
-					<option value="tracked-changes">Changes to tracked files</option>
-				</Select>
+				}} options={[{ value: "any-local-files", label: "Any local files" }, { value: "uncommitted-changes", label: "Uncommitted changes" }, { value: "tracked-changes", label: "Changes to tracked files" }]} />
 			{/snippet}
 		</SettingsRow>
 		<p class="-mt-1 px-3 pb-2 text-[11px] leading-[1.35] {keepNote.warning ? 'text-warning' : 'text-text-muted'}" data-testid={keepNote.warning ? "settings-cleanup-keep-warning" : "settings-cleanup-keep-note"}>{keepNote.text}</p>

@@ -18,11 +18,28 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** SettingsPanel's driver picker, its only consumer. */
+/** Final settings driver picker. */
 export const Default: Story = {};
 
 export const SecondSelected: Story = {
 	args: { value: "claude" },
+};
+
+export const Settings: Story = {
+	args: {
+		variant: "joined",
+		value: "icons",
+		label: "Controls",
+		options: [
+			{ value: "icons", label: "Icons" },
+			{ value: "words", label: "Words" },
+			{ value: "disabled", label: "Unavailable", disabled: true },
+		],
+	},
+};
+export const SettingsLight: Story = {
+	...Settings,
+	globals: { theme: "light" },
 };
 
 export const Picker: Story = {

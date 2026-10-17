@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
+import { chooseSettingsOption } from "../../../test/e2e/helpers/settings.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRpcControl } from "./shared.js";
 
@@ -85,9 +86,13 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 		name: "choose what keeps a worktree",
 		match: /^I keep worktrees with (.+)$/,
 		run: async ({ world, match }) => {
-			await cleanupGroup(world.page)
-				.getByRole("combobox", { name: "Keep worktrees with" })
-				.selectOption({ label: match[1] ?? "" });
+			await chooseSettingsOption(
+				world.page,
+				cleanupGroup(world.page).getByRole("button", {
+					name: "Keep worktrees with",
+				}),
+				{ label: match[1] ?? "" },
+			);
 		},
 	},
 	{
@@ -106,19 +111,23 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 		name: "assert the delete rule",
 		match: /^deleting a session is set to "([^"]+)"$/,
 		run: async ({ world, match }) => {
-			const select = cleanupGroup(world.page).getByRole("combobox", {
+			const select = cleanupGroup(world.page).getByRole("button", {
 				name: "When a session is deleted",
 			});
-			await expect(select.locator("option:checked")).toHaveText(match[1] ?? "");
+			await expect(select).toHaveText(match[1] ?? "");
 		},
 	},
 	{
 		name: "choose the delete rule",
 		match: /^I set deleting a session to "([^"]+)"$/,
 		run: async ({ world, match }) => {
-			await cleanupGroup(world.page)
-				.getByRole("combobox", { name: "When a session is deleted" })
-				.selectOption({ label: match[1] ?? "" });
+			await chooseSettingsOption(
+				world.page,
+				cleanupGroup(world.page).getByRole("button", {
+					name: "When a session is deleted",
+				}),
+				{ label: match[1] ?? "" },
+			);
 		},
 	},
 	{

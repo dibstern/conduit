@@ -1,4 +1,26 @@
 {
+	"src/lib/frontend/components/overlays/ClaudeSettingsTab.svelte :: max-w-full": {
+		"movedTo": "src/lib/frontend/components/ui/SettingsPicker.svelte",
+		"requires": "<SettingsPicker",
+		"reason": "conduit-test-aoqb.10: the Final value picker owns its maximum width."
+	},
+	"src/lib/frontend/components/overlays/ClaudeSettingsTab.svelte :: w-[220px]": "conduit-test-aoqb.10: Final settings values use an intrinsic-width borderless picker instead of a fixed-width native field.",
+	"src/lib/frontend/components/overlays/VisibilitySettingsTab.svelte :: w-[100px],w-[220px]": "conduit-test-aoqb.10: Final model, effort and context values use intrinsic-width pickers. Model labels retain a 220px maximum and truncate instead of reserving a fixed field width.",
+	"src/lib/frontend/components/overlays/UsageSettingsTab.svelte :: leading-[1.45],rounded-[12px]": {
+		"movedTo": "src/lib/frontend/components/ui/SettingsBanner.svelte",
+		"requires": "<SettingsBanner",
+		"reason": "conduit-test-aoqb.10: the shared Final settings banner owns its corners and line height."
+	},
+	"src/lib/frontend/components/overlays/UsageSettingsTab.svelte :: bg-bg,bg-fill-amber/[0.05],bg-fill-red/[0.06],border-fill-amber/35,border-fill-red/40,headline.limited,headline.warning,px-[12px],py-[8px]": "conduit-test-aoqb.10: set-ban replaces the outlined fleet headline with an 11% semantic tint over settings-card, 11px/14px padding and neutral text. The existing limited/warning expressions now select SettingsBanner's tone; they are not removed classes.",
+	"src/lib/frontend/components/ui/SettingsGroup.svelte :: rotate-90,transition-transform,truncate": {
+		"movedTo": "src/lib/frontend/components/ui/SettingsRow.svelte",
+		"requires": "<SettingsRow",
+		"reason": "conduit-test-aoqb.10: collapsible headers reuse the Final navigation row's chevron and summary."
+	},
+	"src/lib/frontend/components/ui/SettingsGroup.svelte :: border-border-subtle,duration-200,font-normal,open,text-[11.5px],text-center,w-[10px]": "conduit-test-aoqb.10: Final cards are borderless with settings-separator hairlines. set-col uses a 13px chevron, 13.5px label and 12px summary, replacing the old tiny text chevron and typography. open is now a SettingsRow prop, not a removed class.",
+	"src/lib/frontend/components/ui/SettingsRow.svelte :: leading-[1.35],text-[11px],text-[12.5px]": "conduit-test-aoqb.10: Final settings rows use 13.5px labels (15px on phones) and 12px descriptions with 1.4 line height.",
+	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-accent/10,gap-1.5": "conduit-test-aoqb.10: the `field` segmented variant is deleted; SegmentedControl now defaults to `joined` and nothing selected `field`.",
+	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-accent-bg,border-l,first:border-l-0,max-md:min-w-[36px],px-[9px],py-[4px]": "conduit-test-aoqb.10: set-seg intentionally replaces the bordered accent segments with a chip track, raised neutral selection, 10px horizontal padding and 24px desktop height. Phone options retain a 44px touch target.",
 	"src/lib/frontend/components/layout/UsageFooterMeter.svelte :: font-semibold,gap-[8px],items-baseline,mb-[6px],mb-[8px],mx-[8px],pb-[calc(24px+env(safe-area-inset-bottom))],px-[8px],rounded-t-[18px],text-[11.5px],text-[14px],w-[36px]": "Approved peek-sheet redesign (concept A): the phone usage sheet is the dock pulled taller, so it takes the dock's corners, handle, padding and type size and drops its own Usage header row; Usage settings moves to a footer below the fold.",
 	"src/lib/frontend/components/input/InputArea.svelte :: mt-1.5,mx-1.5,px-1.5,py-1.5,rounded-3xl": "The composer becomes approved option D (soft square, roomy): 22px corners and 10px padding (20px/9px on phones) so its 10px-cornered buttons sit concentric. Literal px replace the rem tokens because the 12px root renders rem utilities at 0.75x; the status header's negative margins follow the new padding.",
 	"src/lib/frontend/components/overlays/AppearanceSettingsTab.svelte :: border-b,border-border-subtle,font-semibold,mb-[2px],md:max-w-[260px],mt-[8px],py-[8px],text-text": "conduit-test-cju0.13 intentionally replaces the stacked Appearance fields with a titled SettingsGroup and a SettingsRow for Theme. The group owns the card and heading, the row owns label and description spacing, and the select sits beside its label or wraps on phone. Auto-settle and its state move to SessionsSettingsTab.",

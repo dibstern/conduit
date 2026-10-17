@@ -34,13 +34,13 @@ export const settingsGeneralHandlers: StepHandler[] = [
 			await expect(
 				panel
 					.getByRole("region", { name: "Appearance", exact: true })
-					.getByRole("combobox", { name: /^Theme\b/ }),
+					.getByRole("button", { name: /^Theme\b/ }),
 			).toBeVisible();
 			await expect(
 				panel
 					.getByRole("region", { name: "Sessions", exact: true })
 					.getByTestId("settings-auto-settle-select"),
-			).toHaveValue("3");
+			).toHaveAttribute("data-value", "3");
 		},
 	},
 	{

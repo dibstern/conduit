@@ -15,6 +15,7 @@ const surfaces = [
 	"selection",
 	"settings-bg",
 	"settings-card",
+	"settings-segment",
 	"settings-rail",
 	"code-bg",
 	"input-bg",
