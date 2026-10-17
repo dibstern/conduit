@@ -513,8 +513,9 @@ test("tools open as previews and expand to full detail", async ({
 	const detailsBefore = detailResponses(rpc.frames).length;
 	rpc.failNextDetails = true;
 	const bashRow = await expandTool(page, toolRow(page, BASH_ID));
-	await expect(bashRow).toContainText(
-		"Couldn't load the full command and output.",
+	// The failed load names its reason (j4ff.8), here the injected one.
+	await expect(bashRow.locator(".tool-full-detail")).toContainText(
+		"Injected failure",
 	);
 	await expect(bashRow.locator(".tool-result")).not.toContainText(
 		endOf("result"),

@@ -6,6 +6,7 @@
 		options,
 		value,
 		onChange,
+		onReselect,
 		item,
 		label,
 		lockedReason,
@@ -19,6 +20,8 @@
 		options: readonly { value: T; label: string; locked?: boolean; lockedReason?: string | undefined }[];
 		value: T;
 		onChange: (value: T) => void;
+		/** A click on the already selected option, which a radio group does not report. */
+		onReselect?: (value: T) => void;
 		item: Snippet<[{ value: T; label: string; locked?: boolean }, boolean]>;
 		label: string;
 		lockedReason?: string;
@@ -92,6 +95,7 @@
 			aria-describedby={option.locked ? (option.lockedReason ? `${reasonId}-${option.value}` : lockedReason ? reasonId : undefined) : undefined}
 			data-testid={itemTestId?.(option.value)}
 			class={itemClass}
+			onclick={() => { if (option.value === value && !option.locked) onReselect?.(option.value); }}
 		>
 			{@render item(option, option.value === value)}
 		</RadioGroup.Item>

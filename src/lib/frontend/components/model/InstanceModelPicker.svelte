@@ -595,6 +595,7 @@
 							options={accountCards}
 							value={selectedLogoInstanceId ?? ""}
 							onChange={handleAccountSelect}
+							onReselect={(id) => { if (!locked) selectInstance(id); }}
 							label={accountLabel}
 							lockedReason={hasAccountUsage ? "" : "Harness is fixed for this session"}
 							itemWidth={108}

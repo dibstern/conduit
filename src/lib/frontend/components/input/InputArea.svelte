@@ -43,7 +43,7 @@
 	import PendingInputTray from "./PendingInputTray.svelte";
 	import { openSideThreads } from "../session/side-threads.svelte.js";
 	import { stopBackgroundTasks } from "../session/background-tasks.svelte.js";
-	import { currentChat, draftSend, followSessionBusy, getOrCreateSessionSlot, inputSyncState, isProcessing, phaseToProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
+	import { currentChat, draftSend, draftSendIn, followSessionBusy, getOrCreateSessionSlot, inputSyncState, isProcessing, phaseToProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
@@ -177,7 +177,12 @@
 		return () => clearTimeout(timer);
 	});
 	// A queued prompt waits in the tray, so the transcript's last turn is the started one.
-	const turn = $derived(segmentTurns(currentChat().messages, isProcessing()).at(-1));
+	// A draft's first send starts the turn until its new session places it.
+	const turn = $derived.by(() => {
+		const firstSend = draftSendIn(sessionState.currentId);
+		const { messages } = currentChat();
+		return segmentTurns(firstSend ? [...messages, firstSend] : messages, isProcessing()).at(-1);
+	});
 	const paused = $derived(turn !== undefined && isPaused(turn));
 	const working = $derived(isProcessing() || paused || Boolean(currentSession && sessionAttention(currentSession) === "working"));
 	const elapsed = $derived.by(() => {

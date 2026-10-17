@@ -208,6 +208,10 @@ test.describe("send at an account's reset", () => {
 		harnessOptions: {
 			restartProof: true,
 			continuationSweepIntervalMs: 1000,
+			// A session's model must be in its account's catalogue (fmg0.2).
+			capabilityModels: [
+				{ id: "harness", name: "Harness", providerId: "claude" },
+			],
 		},
 	});
 

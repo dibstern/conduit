@@ -242,20 +242,31 @@ const draft = $state<{
 let draftPermissionChosen = false;
 /** Like the permission mode, an untouched draft pick follows the server default. */
 let draftPickChosen = false;
+/** Only an explicit account pick pins the draft's account; a model pick moves with it. */
+let draftAccountChosen = false;
 const instanceCatalogs = $state<Record<string, ProviderInfo[]>>({});
 const modelMemory = new Map<string, Map<string, DraftPick["model"]>>();
 accountSnapshotChangedListeners.add(() => {
 	const pinned = draft.instanceId;
-	// A removed account, or an untouched draft's former default, falls back to its driver's default.
+	const model = draft.model;
+	// A removed account, or an unpicked draft account, falls back to its driver's default.
 	if (
 		pinned &&
 		draft.driver !== null &&
-		(!draftPickChosen ||
+		(!draftAccountChosen ||
 			!getAvailableInstances().some((account) => account.id === pinned))
 	) {
 		draft.instanceId = null;
-		if (getEffectiveInstanceId() === pinned) draft.instanceId = pinned;
-		else draft.model = null;
+		const next = getEffectiveInstanceId();
+		if (next === pinned) draft.instanceId = pinned;
+		else if (next && model && draftPickChosen) {
+			// A chosen model follows the account; its catalogue revalidates it.
+			draft.instanceId = next;
+			if (instanceCatalogs[next]) {
+				draft.model = null;
+				setDraftModel(model, model.variant, model.contextWindow);
+			}
+		} else draft.model = null;
 	}
 	fillDraftDefault();
 });
@@ -950,6 +961,7 @@ function setDraftModel(
 /** A different instance starts with its own default, never a neighboring model. */
 export function selectInstance(instanceId: string): void {
 	draftPickChosen = true;
+	draftAccountChosen = true;
 	const available = getAvailableInstances();
 	const ref = accountRefFromSelection({ providerId: instanceId });
 	const selected =
@@ -986,6 +998,7 @@ export function clearDraftSelection(): void {
 	draft.permissionMode = serverDiscovery.defaultPermissionMode;
 	draftPermissionChosen = false;
 	draftPickChosen = false;
+	draftAccountChosen = false;
 }
 
 /** Format agent label for display. */

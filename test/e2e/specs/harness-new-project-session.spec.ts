@@ -1,6 +1,7 @@
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
+import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 
@@ -15,6 +16,21 @@ test.afterEach(async ({ harness }, testInfo) => {
 test.use({ harnessOptions: { opencodeRecording: "chat-simple" } });
 
 async function createSession(page: Page, app: AppPage): Promise<void> {
+	// A draft without a configured default sends nothing until a model is picked.
+	const picker = page.locator(
+		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+	);
+	await openPickerRoot(page, picker);
+	if ((await picker.getAttribute("data-instance-id")) !== "opencode")
+		await page.getByTestId("picker-harness-opencode").click();
+	await page.getByTestId("picker-row-model").click();
+	await page
+		.getByTestId("model-picker-list")
+		.locator("[data-model-id]")
+		.first()
+		.click();
+	await page.keyboard.press("Escape");
+	await expect(page.getByTestId("model-picker")).toBeHidden();
 	await app.sendMessage("Hello, reply with just the word pong");
 	await expect(page).toHaveURL(/\/s\/[^/?]+/);
 	await expect(page.locator(".md-content").last()).toContainText(/pong|done\(/);

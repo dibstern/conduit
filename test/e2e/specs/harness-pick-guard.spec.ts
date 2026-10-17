@@ -1704,8 +1704,10 @@ test.describe("session composer owns its stored pick", () => {
 			await showDraft("draft-between");
 			await showSession(openCodeId);
 			await held.wait;
+			// Until its stored pick replies, a session shows no harness (ksw2),
+			// and never the draft's Claude pick; only its bound account.
 			await expectShown(picker, {
-				harness: "opencode",
+				harness: "",
 				provider: "",
 				model: "",
 				effort: "",

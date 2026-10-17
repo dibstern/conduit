@@ -454,6 +454,12 @@ for (const dismiss of [false, true]) {
 				await openPickerRoot(page, picker);
 				await page.getByTestId("picker-harness-claude").click();
 				await page.getByTestId(`picker-account-${account.id}`).click();
+				// An account starts on its own default; this fixture configures none.
+				await page.getByTestId("picker-row-model").click();
+				await page
+					.getByTestId("model-picker-list")
+					.locator('[data-model-id="harness"]')
+					.click();
 				await page.keyboard.press("Escape");
 				const cutOffText =
 					"usage-limit-account-1: keep working on the original request";
@@ -2076,6 +2082,12 @@ test("scenario 12: changing agents sends a budgeted hidden handoff to a fresh na
 			await expect(page.getByTestId(`picker-account-${id}`)).toBeVisible();
 		await capture("01-accounts");
 		await page.getByTestId(`picker-account-${account.id}`).click();
+		// An account starts on its own default; this fixture configures none.
+		await page.getByTestId("picker-row-model").click();
+		await page
+			.getByTestId("model-picker-list")
+			.locator('[data-model-id="harness"]')
+			.click();
 		await page.keyboard.press("Escape");
 		await expect(picker).toHaveAttribute("data-instance-id", account.id);
 
@@ -2253,6 +2265,12 @@ test("scenario 13: the new agent reads omitted history through the registered MC
 		await openPickerRoot(page, picker);
 		await page.getByTestId("picker-harness-claude").click();
 		await page.getByTestId(`picker-account-${addedInstanceId}`).click();
+		// An account starts on its own default; this fixture configures none.
+		await page.getByTestId("picker-row-model").click();
+		await page
+			.getByTestId("model-picker-list")
+			.locator('[data-model-id="harness"]')
+			.click();
 		await page.keyboard.press("Escape");
 
 		for (const [index, prompt] of historyPrompts.entries()) {

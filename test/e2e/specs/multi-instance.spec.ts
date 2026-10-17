@@ -5,6 +5,7 @@ import type { InstanceListResponse } from "../../../src/lib/contracts/ws-rpc.js"
 import {
 	instancesWith,
 	multiInstanceInitMessages,
+	multiInstanceProjectList,
 	noInstanceInitMessages,
 	singleInstanceInitMessages,
 	unboundInitMessages,
@@ -156,12 +157,17 @@ function defaultAccountDaemon() {
 		});
 		publishModels(defaultId());
 		await mockRelayWebSocket(page, {
-			initMessages: unboundInitMessages.filter(
-				(message) =>
-					message.type !== "model_info" &&
-					message.type !== "mock_model_catalog" &&
-					message.type !== "mock_agent_catalog",
-			),
+			// The daemon above owns the accounts; a draft sends into a project.
+			initMessages: [
+				...unboundInitMessages.filter(
+					(message) =>
+						message.type !== "model_info" &&
+						message.type !== "instance_list" &&
+						message.type !== "mock_model_catalog" &&
+						message.type !== "mock_agent_catalog",
+				),
+				multiInstanceProjectList,
+			],
 			responses: new Map(),
 			initDelay: 0,
 			messageDelay: 0,
@@ -206,9 +212,13 @@ test.describe("Claude defaults", () => {
 					.locator('#input-area [data-testid="harness-logo"]:visible')
 					.first(),
 			).toHaveAttribute("data-account", "personal");
+			// A phone shows usage under its session list, not beside a draft.
+			const phone = await client.getByTestId("session-bar-back").isVisible();
+			if (phone) await client.getByTestId("session-bar-back").click();
 			await expect(
 				client.getByTestId("usage-footer-row-personal"),
 			).toHaveAttribute("data-default", "true");
+			if (phone) await client.locator("#new-session-btn:visible").click();
 			await openPickerRoot(
 				client,
 				client.getByTestId("model-picker-trigger").first(),
@@ -264,11 +274,7 @@ test.describe("Claude defaults", () => {
 				request.tag === "GetAgents" &&
 				request.payload["instanceId"] === "claude",
 		);
-		const before = rpc
-			.getRequests()
-			.filter(
-				(request) => request.tag === "GetModels" || request.tag === "GetAgents",
-			).length;
+		const before = rpc.getRequests().length;
 		daemon.setDefault("personal");
 		daemon.publishModels("personal");
 		await openSettingsPanel(page);
@@ -291,14 +297,18 @@ test.describe("Claude defaults", () => {
 		await expect(page.locator('[data-model-id="personal-only"]')).toHaveCount(
 			0,
 		);
+		// The account change resyncs the shell, which may re-read the pinned
+		// account's catalogue; nothing reads the new default's.
 		expect(
 			rpc
 				.getRequests()
+				.slice(before)
 				.filter(
 					(request) =>
-						request.tag === "GetModels" || request.tag === "GetAgents",
+						(request.tag === "GetModels" || request.tag === "GetAgents") &&
+						request.payload["instanceId"] !== "claude",
 				),
-		).toHaveLength(before);
+		).toEqual([]);
 		await page.screenshot({ path: testInfo.outputPath("picked-draft.png") });
 	});
 
@@ -314,6 +324,8 @@ test.describe("Claude defaults", () => {
 		);
 		await page.getByTestId("picker-row-model").click();
 		await page.locator('[data-model-id="shared"]').click();
+		// A phone's sheet stays open on its root after a model pick.
+		await page.keyboard.press("Escape");
 		daemon.setDefault("personal");
 		await expect(
 			page.locator('#input-area [data-testid="harness-logo"]:visible').first(),
@@ -472,8 +484,8 @@ async function mockInstanceRpc(page: Page): Promise<RpcMockControl> {
 }
 
 /**
- * Settings lives in the list overflow or session title sheet on a phone,
- * and in the session bar overflow on desktop.
+ * Settings lives in the list overflow on a phone's list, and in the session
+ * bar (or phone island) overflow otherwise; a draft has no session title sheet.
  */
 async function openSettingsPanel(page: Page): Promise<void> {
 	const listOverflow = page.getByTestId("list-bar-overflow");
@@ -482,13 +494,10 @@ async function openSettingsPanel(page: Page): Promise<void> {
 		await page.getByTestId("list-overflow-settings").click();
 		return;
 	}
-	const titleMenu = page.getByTestId("session-bar-title-menu");
-	if (await titleMenu.isVisible()) {
-		await titleMenu.click();
-		await page.getByTestId("session-title-settings").click();
-		return;
-	}
-	await page.getByTestId("session-bar-overflow").click();
+	await page
+		.getByTestId("session-bar-overflow")
+		.or(page.getByTestId("session-bar-island-overflow"))
+		.click();
 	await page.getByTestId("overflow-settings").click();
 }
 
@@ -876,26 +885,10 @@ test.describe("Session List: Instance Status Banner", () => {
 			if (m.type === "instance_list") {
 				return {
 					type: "instance_list" as const,
-					instances: [
-						{
-							id: "personal",
-							name: "Personal",
-							port: 4096,
-							managed: true,
-							status: "unhealthy",
-							restartCount: 5,
-							createdAt: Date.now(),
-						},
-						{
-							id: "work",
-							name: "Work",
-							port: 4097,
-							managed: true,
-							status: "unhealthy",
-							restartCount: 3,
-							createdAt: Date.now(),
-						},
-					],
+					instances: instancesWith({
+						personal: "unhealthy",
+						work: "unhealthy",
+					}),
 				};
 			}
 			return m;
@@ -918,17 +911,9 @@ test.describe("Session List: Instance Status Banner", () => {
 			if (m.type === "instance_list") {
 				return {
 					type: "instance_list" as const,
-					instances: [
-						{
-							id: "personal",
-							name: "Personal",
-							port: 4096,
-							managed: true,
-							status: "unhealthy",
-							restartCount: 5,
-							createdAt: Date.now(),
-						},
-					],
+					instances: instancesWith({ personal: "unhealthy" }).filter(
+						({ id }) => id === "personal",
+					),
 				};
 			}
 			return m;
@@ -966,17 +951,9 @@ test.describe("Session List: Instance Status Banner", () => {
 			if (m.type === "instance_list") {
 				return {
 					type: "instance_list" as const,
-					instances: [
-						{
-							id: "personal",
-							name: "Personal",
-							port: 4096,
-							managed: false,
-							status: "unhealthy",
-							restartCount: 0,
-							createdAt: Date.now(),
-						},
-					],
+					instances: instancesWith({ personal: "unhealthy" }).filter(
+						({ id }) => id === "personal",
+					),
 				};
 			}
 			return m;
