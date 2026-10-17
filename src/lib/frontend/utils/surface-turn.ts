@@ -43,6 +43,8 @@ export function surfaceTurn(input: {
 	picked: string | null;
 	folded: boolean | null;
 	hasRecap?: boolean;
+	/** A summary citation can reveal its pin without changing the chosen level. */
+	citedOrdinal?: number | null;
 }) {
 	const newest = [...input.parts]
 		.reverse()
@@ -141,7 +143,10 @@ export function surfaceTurn(input: {
 			? []
 			: messages.filter(
 					(message) =>
-						visible.includes(message) || (!folded && message === picked),
+						visible.includes(message) ||
+						(!folded && message === picked) ||
+						(input.citedOrdinal != null &&
+							message.number === input.citedOrdinal),
 				);
 	const target =
 		input.level === "final" || folded
@@ -171,6 +176,7 @@ export function surfaceTurn(input: {
 						null,
 					),
 		pins,
+		citedOrdinal: input.citedOrdinal ?? null,
 		messages,
 		counts,
 		card: target,
@@ -212,6 +218,7 @@ export function surfaceTurn(input: {
 						{
 							number: part.surfacingOrdinal,
 							part,
+							level,
 							belowLevel: rank[level] < rank[input.level],
 						},
 					],

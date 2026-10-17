@@ -70,6 +70,7 @@ import {
 	SURFACING_MARKS_MIGRATION,
 	TOOL_CALL_INDEX_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
+	TURN_RECAPS_MIGRATION,
 } from "../schema.js";
 import { refreshSidebar, rerootSession } from "./sidebar-projection.js";
 
@@ -1274,6 +1275,9 @@ export const effectMigrationEntries = {
 	),
 	"0067_message_part_read": executeSqlStatements(
 		readMigrationSql(MESSAGE_PART_READ_MIGRATION),
+	),
+	"0068_turn_recaps": executeSqlStatements(
+		readMigrationSql(TURN_RECAPS_MIGRATION),
 	),
 } satisfies Record<
 	string,

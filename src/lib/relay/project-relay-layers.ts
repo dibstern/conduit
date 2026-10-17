@@ -17,12 +17,14 @@ import {
 } from "../contracts/provider-instance.js";
 import {
 	type DaemonConfigLoadError,
+	DaemonConfigUnreadable,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	defaultDaemonConfig,
 	getConfigDir,
 	loadDaemonConfigResult,
 } from "../daemon/config-persistence.js";
 import { AccountPictureLive } from "../domain/daemon/Layers/account-picture-layer.js";
+import { CategorySetLive } from "../domain/daemon/Layers/category-set-layer.js";
 import {
 	ConfigPersistenceLive,
 	ConfigSnapshotTag,
@@ -36,12 +38,17 @@ import {
 	AccountDirectory,
 	AccountDirectoryStateLive,
 } from "../domain/daemon/Services/account-directory.js";
+import { CategorySet } from "../domain/daemon/Services/category-set.js";
 import { ConfigPersistenceTag } from "../domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
 	DaemonConfigRefTag,
 	makeDaemonConfigFromOptions,
 } from "../domain/daemon/Services/daemon-config-ref.js";
+import {
+	MessageSurfacingSettings,
+	makeMessageSurfacingSettings,
+} from "../domain/daemon/Services/message-surfacing-settings.js";
 import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
@@ -99,6 +106,7 @@ import {
 } from "../domain/relay/Services/project-management-service.js";
 import { makeProviderRuntimeIngestionLive } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../domain/relay/Services/provider-turn-service.js";
+import { makeRecapServiceLive } from "../domain/relay/Services/recap-service.js";
 import {
 	ScanServiceLive,
 	ScanServiceTag,
@@ -874,9 +882,42 @@ export function createProjectRelayLayers({
 		StatusPollerLive,
 		Layer.provideMerge(SessionGitLive, relayStateAndBridges),
 	);
+	const recapSettingsLayer = Layer.suspend(() => {
+		const shared = config.daemonConfigContext ?? Context.empty();
+		const settings = Context.getOption(shared, MessageSurfacingSettings);
+		const categories = Context.getOption(shared, CategorySet);
+		const configDir = config.configDir ?? getConfigDir();
+		return Layer.merge(
+			Option.isSome(settings)
+				? Layer.succeedContext(
+						Context.make(MessageSurfacingSettings, settings.value),
+					)
+				: Layer.effect(
+						MessageSurfacingSettings,
+						makeMessageSurfacingSettings(configDir),
+					),
+			Option.isSome(categories)
+				? Layer.succeedContext(Context.make(CategorySet, categories.value))
+				: CategorySetLive(configDir),
+		);
+	}).pipe(
+		Layer.mapError(
+			(cause) =>
+				new DaemonConfigUnreadable({
+					path: config.configDir ?? getConfigDir(),
+					cause,
+				}),
+		),
+	);
+	const relayStateWithRecaps = makeRecapServiceLive({
+		queryFactory: config.titleQuery ?? claudeSdk.titleQuery,
+	}).pipe(
+		Layer.provideMerge(relayStateBridgesAndStatus),
+		Layer.provide(recapSettingsLayer),
+	);
 	const relayStateServicesAndBridges = Layer.provideMerge(
 		AgentServiceLive,
-		relayStateBridgesAndStatus,
+		relayStateWithRecaps,
 	);
 	const translatorLayer = Layer.sync(TranslatorTag, () => createTranslator());
 	const baseLayers = Layer.provideMerge(

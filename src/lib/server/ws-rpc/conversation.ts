@@ -4,6 +4,7 @@ import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { RateLimiterTag } from "../../domain/relay/Layers/rate-limiter-layer.js";
+import { RecapServiceTag } from "../../domain/relay/Services/recap-service.js";
 import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import {
 	type SessionInbox,
@@ -50,6 +51,16 @@ const inboxCommand = <E>(
 	);
 
 export const conversationHandlers = {
+	ListRecaps: (request) =>
+		RecapServiceTag.pipe(
+			Effect.flatMap((service) => service.list(request)),
+			Effect.catchAll(mapRpcFailure("ListRecaps")),
+		),
+	GenerateRecap: (request) =>
+		RecapServiceTag.pipe(
+			Effect.flatMap((service) => service.generate(request)),
+			Effect.catchAll(mapRpcFailure("GenerateRecap")),
+		),
 	StopBackgroundTask: (request) =>
 		stopBackgroundTaskById(request.sessionId, request.taskId).pipe(
 			Effect.as({ ok: true as const }),
@@ -230,6 +241,8 @@ export const conversationHandlers = {
 		),
 } satisfies Pick<
 	WsRpcHandlerMap,
+	| "ListRecaps"
+	| "GenerateRecap"
 	| "StopBackgroundTask"
 	| "SwitchPermissionMode"
 	| "RespondPermission"

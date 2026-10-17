@@ -2430,7 +2430,9 @@ export const claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
 		yield {
 			type: "result",
 			subtype: "success",
-			result: "Process harness session",
+			result: params.prompt.startsWith("Summarize this coding-assistant turn")
+				? "The first finding changed the plan [#1]. The last finding confirms the fix [#4]. An invalid citation is removed [#999]."
+				: "Process harness session",
 		};
 	},
 };

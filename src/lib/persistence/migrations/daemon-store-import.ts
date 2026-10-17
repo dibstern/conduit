@@ -90,6 +90,7 @@ const copiedTables = [
 	"events",
 	"sessions",
 	"turns",
+	"turn_recaps",
 	"messages",
 	"message_parts",
 	"message_part_read_state",
@@ -774,7 +775,7 @@ function copyProject(
 			expressions["project_id"] = "COALESCE(project_id, ?)";
 		if (fields.includes("project_key"))
 			expressions["project_key"] = "COALESCE(project_key, ?)";
-		if (fields.includes("version"))
+		if (fields.includes("version") && table !== "turn_recaps")
 			expressions["version"] = `version + ${offsets.version}`;
 		if (table === "events") {
 			expressions["sequence"] = `sequence + ${offsets.event}`;

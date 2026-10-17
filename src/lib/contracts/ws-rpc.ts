@@ -79,6 +79,11 @@ import {
 	TextSurfacedPayloadSchema,
 } from "./stored-event.js";
 import { ToolCallId, ToolDetail, ToolInput, ToolText } from "./tool-wire.js";
+import {
+	RecapScopeSchema,
+	RecapSnapshotSchema,
+	TurnRecapSchema,
+} from "./turn-recap.js";
 
 const NonEmptyString = Schema.NonEmptyString;
 
@@ -1808,6 +1813,29 @@ export class GetSurfacingFeedback extends Schema.TaggedRequest<GetSurfacingFeedb
 	},
 ) {}
 
+export class ListRecaps extends Schema.TaggedRequest<ListRecaps>()(
+	"ListRecaps",
+	{
+		failure: WsRpcError,
+		success: Schema.Array(TurnRecapSchema),
+		payload: { sessionId: NonEmptyString, turnId: NonEmptyString },
+	},
+) {}
+
+export class GenerateRecap extends Schema.TaggedRequest<GenerateRecap>()(
+	"GenerateRecap",
+	{
+		failure: WsRpcError,
+		success: TurnRecapSchema,
+		payload: {
+			sessionId: NonEmptyString,
+			turnId: NonEmptyString,
+			scope: RecapScopeSchema,
+			sourceVersion: Schema.optional(Schema.Int.pipe(Schema.positive())),
+		},
+	},
+) {}
+
 export class ReplaceCategorySet extends Schema.TaggedRequest<ReplaceCategorySet>()(
 	"ReplaceCategorySet",
 	{
@@ -3002,6 +3030,8 @@ const wireTag = <Tag extends string>(tag: Tag) =>
 // One registration per RPC tag, shared by CLI/IPC decoding and browser RPC.
 // Paired forms share one wire tag while keeping their Request constructors.
 const wsRpcRequests = [
+	ListRecaps,
+	GenerateRecap,
 	GetMessageSurfacing,
 	UpdateMessageSurfacing,
 	GetStatus,
@@ -3697,7 +3727,16 @@ export const SubscribeInputDraft = Rpc.make("SubscribeInputDraft", {
 	stream: true,
 });
 
+/** Each snapshot is persisted; subscribing and reloading never invokes a model. */
+export const SubscribeRecaps = Rpc.make("SubscribeRecaps", {
+	payload: { sessionId: NonEmptyString, turnId: NonEmptyString },
+	success: RecapSnapshotSchema,
+	error: WsRpcError,
+	stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
+	SubscribeRecaps,
 	SubscribeShell,
 	SubscribeSessionDetail,
 	SubscribeSessionTodos,

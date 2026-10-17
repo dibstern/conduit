@@ -178,6 +178,8 @@ function history(kind: FixtureKind): History[] {
 	return messages;
 }
 
+export { history as surfacingHistory };
+
 function panel(page: Page): Locator {
 	return page.getByTestId("surfacing-card").last();
 }
@@ -1268,7 +1270,8 @@ export const surfacingCardHandlers: StepHandler[] = [
 					.getByTestId("surfacing-level")
 					.getByRole("radio", { name: /^All\b/ }),
 			).toHaveAttribute("aria-checked", "true");
-			for (const key of ["s", "u", "r", "m", "h", "a", "+", "−"]) {
+			// `s` toggles the turn summary (a modal sheet on phone), so it closes again before the card keys.
+			for (const key of ["s", "s", "u", "r", "m", "h", "a", "+", "−"]) {
 				await expect(card(page)).toBeVisible();
 				const prevented = await card(page).evaluate(
 					(element, pressed) =>
@@ -1300,6 +1303,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 					await expect(card(page)).toBeFocused();
 				}
 			}
+			await expect(card(page)).toBeFocused();
 			await page.keyboard.press("Escape");
 			await expect(card(page)).toHaveCount(0);
 		},
