@@ -107,6 +107,8 @@ type SessionCommandType =
 	| "session.setup_finished"
 	| "session.settled"
 	| "session.unsettled"
+	| "session.archived"
+	| "session.unarchived"
 	| "session.pinned"
 	| "session.unpinned"
 	| "session.snoozed"
@@ -178,6 +180,8 @@ export const openCodeUpstreamAdapter = (
 				return Effect.void;
 			case "session.settled":
 			case "session.unsettled":
+			case "session.archived":
+			case "session.unarchived":
 			case "session.pinned":
 			case "session.unpinned":
 			case "session.snoozed":

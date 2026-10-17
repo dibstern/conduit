@@ -411,6 +411,22 @@ export const sessionHandlers = {
 			params: [event.createdAt, event.data.sessionId],
 		},
 	],
+	"session.archived": (event) => [
+		{
+			sql: "UPDATE sessions SET archived_at = ?, archived_automatically = ? WHERE id = ?",
+			params: [
+				event.createdAt,
+				event.data.automatic ? 1 : 0,
+				event.data.sessionId,
+			],
+		},
+	],
+	"session.unarchived": (event) => [
+		{
+			sql: "UPDATE sessions SET archived_at = NULL, archived_automatically = 0, unarchived_at = ? WHERE id = ?",
+			params: [event.createdAt, event.data.sessionId],
+		},
+	],
 
 	"session.pinned": (event) => [
 		{

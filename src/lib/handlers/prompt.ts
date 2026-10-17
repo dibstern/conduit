@@ -89,28 +89,17 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			...(sessionModel ? { model: sessionModel } : {}),
 			...(input.delivery === "steer" ? { delivery: input.delivery } : {}),
 		});
-		// Talking to a settled or snoozed session brings it back. Triage bookkeeping must
-		// never stop the message itself, so a failure here is only logged.
-		yield* Effect.gen(function* () {
-			yield* sessionManagerService
-				.unsnoozeSession(activeId)
-				.pipe(
-					Effect.catchAll((error) =>
-						Effect.sync(() =>
-							log.warn(`Failed to un-snooze ${activeId}: ${String(error)}`),
-						),
+		// Restore all triage state under one lock. Bookkeeping failures are logged
+		// inside the service so they never prevent delivery of the message.
+		yield* sessionManagerService
+			.restoreSessionForSend(activeId)
+			.pipe(
+				Effect.catchAll((error) =>
+					Effect.sync(() =>
+						log.warn(`Failed to restore ${activeId} on send: ${String(error)}`),
 					),
-				);
-			yield* sessionManagerService.setSessionSettled(activeId, {
-				settled: false,
-			});
-		}).pipe(
-			Effect.catchAll((error) =>
-				Effect.sync(() =>
-					log.warn(`Failed to un-settle ${activeId}: ${String(error)}`),
 				),
-			),
-		);
+			);
 		log.info(
 			`client=${clientId} session=${activeId} → ${text.slice(0, 80)}${text.length > 80 ? "…" : ""}`,
 		);

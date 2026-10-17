@@ -10,7 +10,7 @@
 // costs one indexed range scan returning nothing.
 //
 // Removals come from the same scan. A family that leaves the sidebar (its root
-// deleted, or given a parent) keeps a tombstone at the version it left
+// deleted, archived, or given a parent) keeps a tombstone at the version it left
 // (conduit-test-y7eo.3), so a ranged read returns it as a `remove`. A deleted
 // session, child included, leaves one marked `deleted`, which is what tells a
 // device to leave it; a root given a parent only drops out of the list.

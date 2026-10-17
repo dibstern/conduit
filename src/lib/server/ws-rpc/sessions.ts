@@ -66,6 +66,7 @@ import {
 	renameSessionForClient,
 	resolveSessionCreation,
 	resolveSessionCreationAccount,
+	setSessionArchivedForClient,
 	setSessionAutoSettleForClient,
 	setSessionPinnedForClient,
 	setSessionSettledForClient,
@@ -287,6 +288,20 @@ export const sessionsHandlers = {
 				(error) =>
 					new WsRpcError({
 						message: `SetSessionSettled failed: ${String(error.cause)}`,
+					}),
+			),
+		),
+	SetSessionArchived: (request) =>
+		setSessionArchivedForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+			archived: request.archived,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.mapError(
+				(error) =>
+					new WsRpcError({
+						message: `SetSessionArchived failed: ${String(error.cause)}`,
 					}),
 			),
 		),
@@ -856,6 +871,7 @@ export const sessionsHandlers = {
 	| "ContinueSessionInMainFolder"
 	| "DismissWorkspaceHint"
 	| "SetSessionSettled"
+	| "SetSessionArchived"
 	| "SetSessionPinned"
 	| "SetSessionAutoSettle"
 	| "SnoozeSession"

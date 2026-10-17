@@ -41,6 +41,7 @@ import {
 import {
 	clearDraftSelection,
 	followSessionModelSettings,
+	handlePermissionModeInfo,
 	refreshCatalogs,
 } from "./discovery.svelte.js";
 import { goalDetails, sessionGoals } from "./goal.svelte.js";
@@ -533,12 +534,23 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 	if (next === familyApplied) return;
 	const previousRows = familyApplied.rows;
 	const reconnect = familyApplied.floor !== undefined;
-	// A child is not a shell row, so its settings follow the family feed.
+	// Children and archived roots have no shell row; their family owns settings.
 	const currentId = sessionState.currentId;
 	const viewed = currentId === null ? undefined : next.rows.get(currentId);
 	const previous = viewed && previousRows.get(viewed.id);
-	if (viewed?.parentID && viewed !== previous)
+	if (
+		viewed &&
+		(viewed.parentID !== undefined || viewed.archivedAt != null) &&
+		viewed !== previous
+	) {
 		followSessionModelSettings(viewed, previous);
+		if (
+			viewed.archivedAt != null &&
+			viewed.permissionMode !== undefined &&
+			viewed.permissionMode !== previous?.permissionMode
+		)
+			handlePermissionModeInfo({ mode: viewed.permissionMode });
+	}
 	familyApplied = next;
 	if (change._tag === "upsert") applyTurnRow(change.item);
 	if (change._tag === "remove" && change.deleted === true) {
@@ -546,27 +558,32 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 		forgetSession(change.id);
 		deleteTurn(change.id);
 	}
-	// The shell feed carries roots only, so a child's family row is the only
-	// status it has. Key on parentID, not shell membership: a root that gains a
-	// parent leaves the shell, and its family row is the one kept current.
+	// Children and archived roots follow status here while live roots use shell.
 	if (change._tag === "snapshot") {
 		if (reconnect) rebaseTurns([...previousRows.keys(), ...next.rows.keys()]);
 		// A bounded rebase can omit a child that finished while disconnected.
 		for (const row of previousRows.values()) {
-			if (row.parentID === undefined || next.rows.has(row.id)) continue;
+			if (
+				(row.parentID === undefined && row.archivedAt == null) ||
+				next.rows.has(row.id)
+			)
+				continue;
 			if (isBusy(row)) followSessionBusy(row.id, false);
 			followSessionCompaction(row.id, undefined);
 			followSessionRetry(row.id, undefined);
 		}
 		for (const row of next.rows.values()) {
 			applyTurnRow(row);
-			if (row.parentID === undefined) continue;
+			if (row.parentID === undefined && row.archivedAt == null) continue;
 			followSessionBusy(row.id, isBusy(row), row.lastTurnEndVersion);
 			followSessionCompaction(row.id, row.compacting);
 			followSessionRetry(row.id, row.retrying);
 		}
 	}
-	if (change._tag === "upsert" && change.item.parentID !== undefined) {
+	if (
+		change._tag === "upsert" &&
+		(change.item.parentID !== undefined || change.item.archivedAt != null)
+	) {
 		const previousRow = previousRows.get(change.item.id);
 		const busy = isBusy(change.item);
 		if (
@@ -904,7 +921,11 @@ export function getFilteredSessions(): SessionInfo[] {
 				return [session];
 			}
 			const liveSession = liveRoots.get(session.id);
-			return liveSession ? [liveSession] : [];
+			return liveSession
+				? [liveSession]
+				: session.archivedAt != null
+					? [session]
+					: [];
 		});
 	} else {
 		const localSessions = sessionState.rootSessions;

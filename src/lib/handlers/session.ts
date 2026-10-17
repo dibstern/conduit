@@ -440,6 +440,31 @@ export const setSessionSettledForClient = ({
 		}
 	});
 
+export const setSessionArchivedForClient = ({
+	clientId,
+	sessionId,
+	archived,
+}: {
+	readonly clientId: string;
+	readonly sessionId: string;
+	readonly archived: boolean;
+}) =>
+	Effect.gen(function* () {
+		const service = yield* SessionManagerServiceTag;
+		const log = yield* LoggerTag;
+		if (
+			yield* service.setSessionArchived(
+				sessionId,
+				archived ? { archived: true } : { archived: false },
+			)
+		) {
+			const bus = yield* Effect.serviceOption(DaemonEventBusTag);
+			if (bus._tag === "Some")
+				yield* PubSub.publish(bus.value, DaemonEvent.DaemonSessionsChanged());
+			log.info(`client=${clientId} Set archived=${archived}: ${sessionId}`);
+		}
+	});
+
 export const setSessionPinnedForClient = ({
 	clientId,
 	sessionId,

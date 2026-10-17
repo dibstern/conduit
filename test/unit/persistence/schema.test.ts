@@ -34,6 +34,7 @@ describe("Schema Migration", () => {
 					[60, "daemon_store_imports"],
 					[61, "sessions_lineage"],
 					[62, "legacy_forks"],
+					[63, "sessions_archived"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`

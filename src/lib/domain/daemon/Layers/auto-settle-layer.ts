@@ -9,10 +9,16 @@ import {
 	Ref,
 	Schedule,
 } from "effect";
-import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../../daemon/config-persistence.js";
+import {
+	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
+	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
+} from "../../../daemon/config-persistence.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
-import { hasColdAutoSettleCandidate } from "../Services/daemon-session-reader.js";
+import {
+	hasColdAutoArchiveCandidate,
+	hasColdAutoSettleCandidate,
+} from "../Services/daemon-session-reader.js";
 import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	allProjects,
@@ -33,9 +39,14 @@ export const AutoSettleLive = () =>
 			const missingDirectories = new Set<string>();
 
 			const sweep = Effect.gen(function* () {
-				const days = (yield* Ref.get(configRef)).autoSettleAfterDays;
+				const config = yield* Ref.get(configRef);
+				const days = config.autoSettleAfterDays;
+				const archiveDays = config.autoArchiveAfterDays;
 				const idleWindowMs =
 					(days ?? DEFAULT_AUTO_SETTLE_AFTER_DAYS) * MILLISECONDS_PER_DAY;
+				const archiveWindowMs =
+					(archiveDays ?? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS) *
+					MILLISECONDS_PER_DAY;
 				const now = yield* Clock.currentTimeMillis;
 				const projects = yield* allProjects.pipe(
 					Effect.provideService(ProjectRegistryTag, registry),
@@ -59,19 +70,34 @@ export const AutoSettleLive = () =>
 							return;
 						}
 						missingDirectories.delete(mainFolder);
-						if (days === null) return;
+						if (days === null && archiveDays === null) return;
 						const running = yield* cache.peek(project.slug);
 						const relay = Option.isSome(running)
 							? running.value
-							: (yield* hasColdAutoSettleCandidate(
-										project,
-										now,
-										idleWindowMs,
-									).pipe(Effect.provide(storeContext)))
+							: (days !== null &&
+										(yield* hasColdAutoSettleCandidate(
+											project,
+											now,
+											idleWindowMs,
+										).pipe(Effect.provide(storeContext)))) ||
+									(archiveDays !== null &&
+										(yield* hasColdAutoArchiveCandidate(
+											project,
+											now,
+											archiveWindowMs,
+										).pipe(Effect.provide(storeContext))))
 								? yield* cache.get(project.slug)
 								: null;
-						if (relay?.settleIdleSessions === undefined) return;
-						const count = yield* relay.settleIdleSessions(idleWindowMs, now);
+						if (relay === null) return;
+						const settled =
+							days === null || relay.settleIdleSessions === undefined
+								? 0
+								: yield* relay.settleIdleSessions(idleWindowMs, now);
+						const archived =
+							archiveDays === null || relay.archiveIdleSessions === undefined
+								? 0
+								: yield* relay.archiveIdleSessions(archiveWindowMs, now);
+						const count = settled + archived;
 						if (count > 0)
 							yield* PubSub.publish(bus, DaemonEvent.DaemonSessionsChanged());
 					}).pipe(

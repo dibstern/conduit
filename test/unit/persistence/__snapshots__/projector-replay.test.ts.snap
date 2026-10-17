@@ -205,6 +205,8 @@ exports[`preserves every read model from the recorded Claude event log 1`] = `
   ],
   "sessions": [
     {
+      "archived_at": null,
+      "archived_automatically": 0,
       "auto_settle_disabled_at": null,
       "claude_worktree_state": null,
       "context_window": null,
@@ -240,6 +242,7 @@ exports[`preserves every read model from the recorded Claude event log 1`] = `
       "snoozed_until": null,
       "status": "busy",
       "title": "Recorded turn",
+      "unarchived_at": null,
       "unread": 1,
       "unsettled_at": null,
       "updated_at": 1789525211224,

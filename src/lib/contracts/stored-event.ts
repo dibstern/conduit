@@ -120,6 +120,8 @@ export type SessionSettledPayload = PayloadOf<"session.settled">;
 export type SessionAutoSettleSetPayload = PayloadOf<"session.auto_settle_set">;
 
 export type SessionUnsettledPayload = PayloadOf<"session.unsettled">;
+export type SessionArchivedPayload = PayloadOf<"session.archived">;
+export type SessionUnarchivedPayload = PayloadOf<"session.unarchived">;
 
 export type SessionPinnedPayload = PayloadOf<"session.pinned">;
 
@@ -762,6 +764,18 @@ export const CanonicalEvents = {
 	"session.unsettled": live(
 		Schema.Struct({
 			sessionId: Schema.String,
+		}),
+	),
+	"session.archived": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			automatic: Schema.Boolean,
+		}),
+	),
+	"session.unarchived": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			cause: Schema.Literal("manual", "send"),
 		}),
 	),
 	"session.pinned": live(

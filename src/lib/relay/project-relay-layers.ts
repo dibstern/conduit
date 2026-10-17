@@ -17,6 +17,7 @@ import {
 } from "../contracts/provider-instance.js";
 import {
 	type DaemonConfigLoadError,
+	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	defaultDaemonConfig,
 	getConfigDir,
@@ -345,6 +346,10 @@ export function createProjectRelayLayers({
 									current.autoSettleAfterDays === undefined
 										? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 										: current.autoSettleAfterDays,
+								autoArchiveAfterDays:
+									current.autoArchiveAfterDays === undefined
+										? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS
+										: current.autoArchiveAfterDays,
 								...(current.worktreeCleanup !== undefined && {
 									worktreeCleanup: current.worktreeCleanup,
 								}),

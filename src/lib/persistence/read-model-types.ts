@@ -44,6 +44,9 @@ export interface SessionRow {
 	/** Generated: 1 while a root or fork has a turn end newer than seen. */
 	unread?: number;
 	settled_at: number | null;
+	archived_at?: number | null;
+	archived_automatically?: number;
+	unarchived_at?: number | null;
 	unsettled_at?: number | null;
 	auto_settle_disabled_at?: number | null;
 	settled_automatically?: number;

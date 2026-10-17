@@ -13,6 +13,8 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import { computeProjectGroups } from "../../../project-grouping.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
+import { shouldArchiveIdleSession } from "../../../session/auto-archive-policy.js";
+import { readPersistedAutoArchiveFacts } from "../../../session/auto-archive-sweep.js";
 import { shouldSettleIdleSession } from "../../../session/auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "../../../session/auto-settle-reader.js";
 import { getScopeGroupKey } from "../../../session-scope.js";
@@ -88,6 +90,7 @@ const readProjectSessions = (
 				refreshGit: true,
 			});
 			return yield* rows.list({
+				excludeArchived: options.search === undefined,
 				...(options.roots !== undefined ? { roots: options.roots } : {}),
 				...(options.limit !== undefined ? { limit: options.limit } : {}),
 				...(options.search !== undefined ? { titleQuery: options.search } : {}),
@@ -162,6 +165,21 @@ export const hasColdAutoSettleCandidate = (
 		).pipe(Effect.provide(database));
 		return [...facts.values()].some((item) =>
 			shouldSettleIdleSession(item, now, idleWindowMs),
+		);
+	});
+
+export const hasColdAutoArchiveCandidate = (
+	project: Pick<StoredProject, "slug" | "folders">,
+	now: number,
+	idleWindowMs: number,
+) =>
+	Effect.gen(function* () {
+		const database = yield* projectReadDatabase(project);
+		const facts = yield* readPersistedAutoArchiveFacts(project.slug, now).pipe(
+			Effect.provide(database),
+		);
+		return [...facts.values()].some((item) =>
+			shouldArchiveIdleSession(item, now, idleWindowMs),
 		);
 	});
 

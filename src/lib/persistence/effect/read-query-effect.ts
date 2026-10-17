@@ -308,6 +308,7 @@ export const sessionRowsToSessionInfoList = (
 				? { lastTurnEndInputId: row.last_turn_end_input_id }
 				: {}),
 			...(row.settled_at !== null ? { settledAt: row.settled_at } : {}),
+			...(row.archived_at != null ? { archivedAt: row.archived_at } : {}),
 			limitRecovery:
 				row.limit_recovery == null
 					? null
@@ -500,6 +501,7 @@ export interface ReadQueryEffect {
 			roots?: boolean;
 			limit?: number;
 			titleQuery?: string;
+			excludeArchived?: boolean;
 			before?: { updatedAt: number; id: string };
 		},
 	) => Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError>;
@@ -510,6 +512,7 @@ export interface ReadQueryEffect {
 			roots?: boolean;
 			limit?: number;
 			titleQuery?: string;
+			excludeArchived?: boolean;
 			before?: { updatedAt: number; id: string };
 			statuses?: Readonly<Record<string, { type: string }>>;
 			backgroundOf?: (sessionId: string) => SessionBackground | undefined;
@@ -1194,11 +1197,13 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			roots?: boolean;
 			limit?: number;
 			titleQuery?: string;
+			excludeArchived?: boolean;
 			before?: { updatedAt: number; id: string };
 		},
 	): Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError> =>
 		Effect.gen(function* () {
 			const predicates = [sql`project_id IN ${sql.in(scope.projectIds)}`];
+			if (opts?.excludeArchived) predicates.push(sql`archived_at IS NULL`);
 			if (opts?.roots) predicates.push(sql`parent_id IS NULL`);
 			if (opts?.titleQuery !== undefined) {
 				const escapedQuery = opts.titleQuery.replace(/[\\%_]/g, "\\$&");

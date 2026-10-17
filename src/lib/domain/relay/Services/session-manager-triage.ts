@@ -5,12 +5,18 @@ import { daemonSessionGitCache } from "../../../git/session-git.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import { shouldArchiveIdleSession } from "../../../session/auto-archive-policy.js";
+import { readPersistedAutoArchiveFacts } from "../../../session/auto-archive-sweep.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
+import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import { ConfigTag } from "./services.js";
 import { markSeen, markUnread } from "./session-attention.js";
 import { applySessionCommand } from "./session-command.js";
 import { SessionManagerError } from "./session-manager-error.js";
-import type { SetSessionSettledOptions } from "./session-manager-service.js";
+import type {
+	SetSessionArchivedOptions,
+	SetSessionSettledOptions,
+} from "./session-manager-service.js";
 
 /**
  * Rename a session through Conduit's event store for Claude rows, otherwise via the API.
@@ -128,6 +134,56 @@ export const setSessionSettled = (
 				new SessionManagerError({ operation: "setSessionSettled", cause }),
 		),
 		Effect.withSpan("session.setSessionSettled", { attributes: { sessionId } }),
+	);
+
+export const setSessionArchived = (
+	sessionId: string,
+	options: SetSessionArchivedOptions,
+) =>
+	Effect.gen(function* () {
+		const row = yield* readSessionForTriage(sessionId);
+		if (!row || (row.archived_at != null) === options.archived) return false;
+		if (options.archived && options.automatic) {
+			const { projectId } = yield* EventStoreEffectTag;
+			const activity = yield* SessionActivityTag;
+			const facts = (yield* readPersistedAutoArchiveFacts(
+				projectId,
+				options.now,
+				sessionId,
+			)).get(sessionId);
+			if (
+				!facts ||
+				!shouldArchiveIdleSession(
+					{
+						...facts,
+						hasLiveBackgroundWork: activity.background.hasLiveWork(sessionId),
+					},
+					options.now,
+					options.idleWindowMs,
+				)
+			)
+				return false;
+		}
+		yield* applySessionCommand(
+			options.archived
+				? {
+						type: "session.archived",
+						data: { sessionId, automatic: options.automatic === true },
+					}
+				: {
+						type: "session.unarchived",
+						data: { sessionId, cause: options.cause ?? "manual" },
+					},
+		);
+		return true;
+	}).pipe(
+		Effect.mapError(
+			(cause) =>
+				new SessionManagerError({ operation: "setSessionArchived", cause }),
+		),
+		Effect.withSpan("session.setSessionArchived", {
+			attributes: { sessionId },
+		}),
 	);
 
 export const setSessionPinned = (sessionId: string, pinned: boolean) =>

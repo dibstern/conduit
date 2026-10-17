@@ -21,6 +21,11 @@ const throughLineage = Object.fromEntries(
 		([key]) => key <= "0061_sessions_lineage",
 	),
 );
+const throughForkRepair = Object.fromEntries(
+	Object.entries(effectMigrationEntries).filter(
+		([key]) => key <= "0062_legacy_forks",
+	),
+);
 const T0 = 1_000;
 const created = (
 	id: string,
@@ -188,7 +193,7 @@ describe("legacy Fork migration", () => {
 					yield* sql`SELECT unread FROM sessions WHERE id = 'fork'`,
 				).toEqual([{ unread: 1 }]);
 
-				yield* makeEffectSqlMigrator();
+				yield* makeEffectSqlMigrator(throughForkRepair);
 
 				expect((yield* placement).map((row) => Object.values(row))).toEqual([
 					["event-fork", null, "source", 0, "event-fork", null, null, null],
@@ -286,7 +291,7 @@ describe("legacy Fork migration", () => {
 				const rows =
 					yield* sql`SELECT * FROM session_sidebar ORDER BY session_id`;
 				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 60`;
-				yield* makeEffectSqlMigrator();
+				yield* makeEffectSqlMigrator(throughForkRepair);
 				expect(yield* sql`SELECT * FROM sessions ORDER BY id`).toEqual(
 					migrated,
 				);
@@ -304,7 +309,7 @@ describe("legacy Fork migration", () => {
 		const migrated = await Effect.runPromise(
 			Effect.gen(function* () {
 				yield* seedLegacy;
-				yield* makeEffectSqlMigrator();
+				yield* makeEffectSqlMigrator(throughForkRepair);
 				return { placement: yield* placement, sidebar: yield* sidebar };
 			}).pipe(Effect.provide(SqliteClient.layer({ filename: ":memory:" }))),
 		);
@@ -334,7 +339,7 @@ describe("legacy Fork migration", () => {
 					('side', 'opencode', 'source', 1, 'source', 8, 1, 1)`;
 				yield* sql`UPDATE read_model_counter SET value = 42 WHERE id = 1`;
 				yield* refreshSidebar(["source"], 42);
-				yield* makeEffectSqlMigrator();
+				yield* makeEffectSqlMigrator(throughForkRepair);
 				expect(
 					yield* sql`SELECT id, parent_id, forked_from, side_thread, root_id, version FROM sessions ORDER BY id`,
 				).toEqual([
@@ -378,7 +383,7 @@ describe("legacy Fork migration", () => {
 				const rows =
 					yield* sql`SELECT * FROM session_sidebar ORDER BY session_id`;
 				for (let run = 0; run < 2; run++) {
-					yield* makeEffectSqlMigrator();
+					yield* makeEffectSqlMigrator(throughForkRepair);
 					expect(yield* sql`SELECT * FROM sessions ORDER BY id`).toEqual(
 						before,
 					);
