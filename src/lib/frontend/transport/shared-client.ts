@@ -71,6 +71,9 @@ const makeSubscriptions = (
 	projectSlug: string,
 	sockets: { readonly control: WsRpcClient; readonly stream: WsRpcClient },
 ) => ({
+	/** Cached snapshots, including an automatic recap finishing after the turn. */
+	recaps: (options: { readonly sessionId: string; readonly turnId: string }) =>
+		resumeStream(() => sockets.control("SubscribeRecaps", options)),
 	/** The session list. Low-rate, so it rides the control socket. */
 	shell: (
 		options: {

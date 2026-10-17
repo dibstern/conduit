@@ -856,6 +856,12 @@ export async function mockWsRpc(
 			key: { source: "none", rejected: false },
 		}),
 		GetCategorySet: () => DEFAULT_CATEGORY_SET,
+		ListRecaps: () => [],
+		SubscribeRecaps: () =>
+			Stream.concat(
+				Stream.succeed({ versions: [], generating: false, error: null }),
+				Stream.never,
+			),
 		"input.submit": ({ sessionId }) => ({
 			ok: true,
 			sessionId,

@@ -51,6 +51,7 @@ import {
 import { ScanServiceTag } from "../../relay/Services/scan-service.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
+import { CategorySet } from "../Services/category-set.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
@@ -67,6 +68,7 @@ import {
 	removeInstance as removeEffectInstance,
 	updateInstance as updateEffectInstance,
 } from "../Services/instance-manager-service.js";
+import { MessageSurfacingSettings } from "../Services/message-surfacing-settings.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
 import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
@@ -190,6 +192,8 @@ export const RelayFactoryLive = (
 		RelayFactoryTag,
 		Effect.gen(function* () {
 			const accounts = yield* AccountDirectory;
+			const surfacing = yield* Effect.serviceOption(MessageSurfacingSettings);
+			const categories = yield* Effect.serviceOption(CategorySet);
 			const sessionDirectory = yield* Effect.serviceOption(SessionDirectory);
 			const storeContext = yield* persistenceStoreContext;
 			const unavailable = yield* DaemonStoreAvailability;
@@ -486,6 +490,19 @@ export const RelayFactoryLive = (
 									).pipe(
 										Context.add(ConfigPersistenceTag, configPersistence),
 										Context.add(AccountDirectory, accounts),
+										Context.merge(
+											Option.isSome(surfacing)
+												? Context.make(
+														MessageSurfacingSettings,
+														surfacing.value,
+													)
+												: Context.empty(),
+										),
+										Context.merge(
+											Option.isSome(categories)
+												? Context.make(CategorySet, categories.value)
+												: Context.empty(),
+										),
 										Context.add(SessionActivityTag, activity),
 										Context.add(DaemonEventBusTag, eventBus),
 										Context.add(ProjectRegistryTag, projectRegistry),

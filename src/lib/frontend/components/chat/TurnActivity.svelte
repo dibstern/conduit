@@ -3,8 +3,11 @@
      Resting on the turn prefetches tool details; a strip tap opens its log row. -->
 <script lang="ts">
 	import { onDestroy, tick, untrack } from "svelte";
+	import { MediaQuery } from "svelte/reactivity";
 	import type { CategorySet } from "../../../contracts/category-set.js";
-	import type { MessageSurfacingStatus } from "../../../contracts/message-surfacing.js";
+	import type { MessageSurfacingStatus, MessageSurfacingPreferences } from "../../../contracts/message-surfacing.js";
+	import { TurnRecapState } from "../../stores/turn-recap.svelte.js";
+	import SurfacingSummary from "./SurfacingSummary.svelte";
 	import { messageSurfacing, sessionSurfaceLevel, setSessionSurfaceLevel, touchSurfaceSession, makeSurfaceDefault } from "../../stores/message-surfacing.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { surfaceTurn, surfaceTime, type SurfaceLevel, type SurfacePart, type SurfacePin } from "../../utils/surface-turn.js";
@@ -116,6 +119,32 @@
 	const surfacingActive = $derived(surfacingConfig.status.active && surfacingConfig.status.enabled && surfacingConfig.status.key.source !== "none" && !surfacingConfig.status.key.rejected);
 	const override = $derived(sessionSurfaceLevel(sessionId));
 	const level = $derived(override ?? surfacingConfig.status.defaultLevel);
+	const recap = new TurnRecapState();
+	const recapTurnId = $derived(turn.id);
+	// jsdom has no matchMedia; real browsers always do.
+	const phone = typeof matchMedia === "function" ? new MediaQuery("(max-width: 599px)") : { current: false };
+	let summaryOpen = $state<boolean | null>(null);
+	let summarySettingsError = $state("");
+	let summarySaving = $state(false);
+	let citedOrdinal = $state<number | null>(null);
+	const summarySettings = $derived(surfacingConfig.status.recap);
+	const summaryEnabled = $derived(surfacingActive && final && !!sessionId && summarySettings.model !== "off");
+	const summaryVisible = $derived(summaryEnabled && (summaryOpen ?? (!phone.current && !turn.live && latestTurn && (recap.versions.length > 0 || recap.generating || !!recap.error))));
+	const summaryLabel = $derived(recap.generating ? "✦ Summarising…" : recap.versions.length ? "✦ Summary" : "✦ Summarize");
+	$effect(() => {
+		const id = recapTurnId;
+		const session = sessionId;
+		const active = summaryEnabled;
+		const watch = latestTurn;
+		// A turn can settle while its asynchronous automatic recap is still running.
+		if (active && session) return untrack(() => recap.connect(session, id, watch));
+		return;
+	});
+	$effect(() => {
+		void recapTurnId;
+		void sessionId;
+		summaryOpen = null;
+	});
 	let picked = $state<string | null>(null);
 	let folded = $state<boolean | null>(null);
 	let readSaving = $state(false);
@@ -133,8 +162,9 @@
 	const surface = $derived(surfaceTurn({
 		parts: segment.activity.map((part) => part.type === "assistant" ? feedback.annotate(part) : part), turnParts: turn.segments.flatMap((block) => block.activity.map((part) => part.type === "assistant" ? feedback.annotate(part) : part)),
 		positions: stripLayout(segment, turn, final, now), categorySet: surfacingConfig.categorySet,
-		level, live, latestTurn, latestBlock: final, hasRecap, picked, folded, start: turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0,
+		level, live, latestTurn, latestBlock: final, hasRecap: hasRecap || (summaryEnabled && recap.versions.length > 0 && !recap.error), citedOrdinal, picked, folded, start: turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0,
 	}));
+	const summaryNew = $derived(surface.numbers.filter(({ number }) => number > (recap.versions.at(-1)?.lastOrdinal ?? 0)).length);
 	$effect(() => {
 		if (sessionId && surfacingActive) untrack(() => touchSurfaceSession(sessionId));
 	});
@@ -169,6 +199,30 @@
 		picked = pin.part.uuid;
 		folded = false;
 	}
+	function toggleSummary() {
+		summaryOpen = !summaryVisible;
+	}
+	function retrySummary() {
+		generateSummary(recap.retry?.scope ?? (recap.versions.length && summaryNew > 0 ? "new" : "whole"), recap.retry?.sourceVersion);
+	}
+	function generateSummary(scope: "whole" | "new", sourceVersion?: number) {
+		if (!sessionId || !summaryEnabled) return;
+		summaryOpen = true;
+		void recap.generate(sessionId, turn.id, scope, sourceVersion);
+	}
+	async function updateSummarySettings(patch: Partial<MessageSurfacingPreferences["recap"]>) {
+		summarySaving = true;
+		summarySettingsError = "";
+		try {
+			const status = await rpc("UpdateMessageSurfacing", { recap: patch });
+			messageSurfacing.status = status;
+		} catch (error) {
+			summarySettingsError = error instanceof Error ? error.message : String(error);
+		} finally { summarySaving = false; }
+	}
+	function citeSummary(ordinal: number) {
+		citedOrdinal = ordinal;
+	}
 	function selectLevel(next: SurfaceLevel) {
 		if (sessionId) setSessionSurfaceLevel(sessionId, next);
 		picked = null;
@@ -186,6 +240,13 @@
 		const target = event.target;
 		if (!event.defaultPrevented && event.key === "Escape" && feedback.pending) { event.preventDefault(); feedback.cancel(); return; }
 		if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || (target instanceof HTMLInputElement && target.type !== "checkbox") || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable)) return;
+		if (event.key === "Escape" && summaryVisible) {
+			digits = "";
+			event.stopPropagation();
+			// Native dialog cancel owns the phone sheet's dismissal.
+			if (!phone.current) { event.preventDefault(); summaryOpen = false; }
+			return;
+		}
 		if (/^\d$/.test(event.key)) { event.preventDefault(); digits = (digits + event.key).slice(-8); return; }
 		const key = event.key;
 		if (key === "Enter" && !digits) return;
@@ -194,6 +255,7 @@
 		event.preventDefault();
 		if (onSurfacingShortcut?.(key)) return;
 		if (feedback.command(key, surface.card)) return;
+		if (key === "s" && summaryEnabled) { toggleSummary(); return; }
 		if (key === "ArrowLeft" && surface.previous) pick(surface.previous);
 		else if (key === "ArrowRight" && surface.next) pick(surface.next);
 		else if (key === "Home" && surface.first) pick(surface.first);
@@ -304,6 +366,20 @@
 		<div role="status" class="mark-toast" data-testid="surfacing-mark-toast"><span>{feedback.toast.text}</span><Button variant="ghost" size="content" tone="inherit" class="rounded-full px-[10px] h-[24px] max-md:h-[32px] bg-inverse-text/12 font-semibold" data-testid="surfacing-toast-undo" disabled={feedback.saving} onclick={() => feedback.undo()}>Undo</Button></div>
 	{/if}
 	{#if feedback.error && !feedback.pending}<p role="alert" class="mt-[6px] text-[12px] text-error">{feedback.error}</p>{/if}
+	{#if summaryEnabled}
+		<Button variant="ghost" size="content" align="start" tone="inherit" touchTarget class="min-[600px]:hidden w-full min-h-[40px] gap-[8px] py-[8px] text-[13px]" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>
+			<span>{summaryLabel}</span>{#if recap.versions.length && summaryNew > 0}<span class="text-accent font-mono text-[12px]">{summaryNew} new</span>{/if}<Icon name="chevron-right" size={14} class="ml-auto text-text-muted" />
+		</Button>
+		<SurfacingSummary versions={recap.versions} selected={recap.current} open={summaryVisible} phone={phone.current} {live} {view}
+			start={turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0} settings={summarySettings} {level}
+			generating={recap.generating} error={recap.error} settingsError={summarySettingsError} saving={summarySaving}
+			onclose={() => summaryOpen = false} onversion={(version) => recap.selected = version} ongenerate={generateSummary} onretry={retrySummary}
+			onsettings={updateSummarySettings} oncite={citeSummary} onhover={(ordinal) => { citedOrdinal = ordinal; cite(view.numbers.find(({ number }) => number === ordinal)?.part.uuid ?? null); }} foot={summaryMarkRead} />
+	{/if}
+{/snippet}
+
+{#snippet summaryMarkRead(view: ReturnType<typeof surfaceTurn>)}
+	{#if view.unreadPartIds.length}<Button variant="ghost" size="content" tone="secondary" touchTarget class="h-[24px] rounded-full bg-chip px-[10px] font-sans text-[12px] font-medium" disabled={readSaving} data-testid="surfacing-mark-read" onclick={() => { void writeRead(view.unreadPartIds, true); }}>✓ Mark {view.unreadPartIds.length} read</Button>{/if}
 {/snippet}
 
 <div bind:this={panelEl} role={surfacingActive ? "group" : undefined} aria-label={surfacingActive ? "Turn activity" : undefined} onkeydown={surfacingActive ? surfaceCommand : undefined} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
@@ -344,6 +420,7 @@
 						{#if surface.openAsk}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium bg-status-ask/18 text-status-ask" data-testid="surfacing-ask-chip" onclick={() => revealMessage(surface.openAsk)}>? #{surface.openAsk.surfacingOrdinal}</Button>{/if}
 						{#if surface.hasReadState}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium {surface.unreadCount ? 'bg-accent/18 text-accent' : 'bg-chip text-text-secondary'}" data-testid="surfacing-head-unread" onclick={() => revealMessage(surface.nextUnread?.part ?? null)}>{surface.unreadCount ? `${surface.unreadCount} unread` : "All read ✓"}</Button>{/if}
 						{@render surfacingRegions.headChips?.(surface)}
+						{#if summaryEnabled}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="max-[599px]:hidden shrink-0 h-[24px] rounded-full px-[9px] text-[12px] bg-chip text-text-secondary" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>{summaryLabel}{#if recap.versions.length && summaryNew > 0}<span class="text-accent">· {summaryNew} new</span>{/if}</Button>{/if}
 					</div>
 				{/if}
 				{#if onsummarize}<span class="hidden md:contents"><Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] shrink-0" onclick={onsummarize}>✦ Summarize</Button></span>{/if}
@@ -351,7 +428,7 @@
 			{#if surfacingActive}
 				<SurfacingCard view={surface} {live} {level} overridden={override !== undefined} regions={{ ...surfacingRegions, cardHead: markHead, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
 					{readSaving} {readError} canAutoRead={autoReadAttempt !== readTarget} onread={readMessage} onautoread={(pin) => readMessage(pin, true)}
-					markReadInAxis={surfacingConfig.status.recap.model === "off"} onmarkread={() => { void writeRead(surface.unreadPartIds, true); }}
+					markReadInAxis={!summaryEnabled} onmarkread={() => { void writeRead(surface.unreadPartIds, true); }}
 					startTime={surfaceTime((segment.activity[0]?.createdAt ?? turn.user?.createdAt ?? 0) - (turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0))}
 					endTime={surfaceTime(duration ?? 0)} onpick={pick} onlevel={selectLevel}
 					ondefault={async () => { if (sessionId) await makeSurfaceDefault(sessionId, level); }}

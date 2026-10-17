@@ -24,6 +24,7 @@ import { subscribeApprovals } from "../domain/relay/Services/approvals-subscript
 import { subscribeInputDraft } from "../domain/relay/Services/input-drafts.js";
 import { subscribeProjectSettings } from "../domain/relay/Services/project-settings.js";
 import { subscribePtys } from "../domain/relay/Services/pty-subscription.js";
+import { RecapServiceTag } from "../domain/relay/Services/recap-service.js";
 import { WebSocketHandlerTag } from "../domain/relay/Services/services.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
 import { subscribeSessionFamily } from "../domain/relay/Services/session-family-subscription.js";
@@ -91,6 +92,10 @@ const daemonOnlyStreamHandlers = {
 };
 
 const streamHandlers = {
+	SubscribeRecaps: (request) =>
+		Stream.unwrap(
+			Effect.map(RecapServiceTag, (service) => service.subscribe(request)),
+		),
 	SubscribeShell: (request) =>
 		subscribeShell({
 			...(request.resumeFromSequence === undefined

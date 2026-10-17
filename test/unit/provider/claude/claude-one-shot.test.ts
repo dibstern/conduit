@@ -1,5 +1,6 @@
 // Failure modes: invalid JSON or schema data escapes validation, SDK errors
-// become defects, text sources duplicate each other, or cancellation leaks a query.
+// become defects, error result frames become summaries or hide login errors,
+// text sources duplicate each other, or cancellation leaks a query.
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Schema } from "effect";
 import { expect } from "vitest";
@@ -71,6 +72,46 @@ describe("Claude one-shot", () => {
 				expect(result).toMatchObject({
 					_tag: "Left",
 					left: { _tag: "ClaudeOneShotFailure", reason: "query", cause },
+				});
+			}),
+	);
+
+	it.effect.each([
+		{
+			subtype: "error_during_execution",
+			is_error: true,
+			errors: ["Claude not signed in", "Run /login"],
+		},
+		{
+			subtype: "success",
+			is_error: true,
+			result: "Claude not signed in\nRun /login",
+		},
+	])(
+		"preserves SDK error result text instead of partial output: $subtype",
+		(result) =>
+			Effect.gen(function* () {
+				const client = makeClient(() =>
+					reply([
+						{
+							type: "assistant",
+							message: { content: [{ text: "An unfinished summary" }] },
+						},
+						{ type: "result", ...result },
+					]),
+				);
+				const response = yield* Effect.either(
+					client.ask("Answer", Schema.String, "sonnet"),
+				);
+				expect(response).toMatchObject({
+					_tag: "Left",
+					left: {
+						_tag: "ClaudeOneShotFailure",
+						reason: "query",
+						cause: expect.objectContaining({
+							message: "Claude not signed in\nRun /login",
+						}),
+					},
 				});
 			}),
 	);

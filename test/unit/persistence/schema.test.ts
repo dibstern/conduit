@@ -37,6 +37,7 @@ describe("Schema Migration", () => {
 					[65, "sessions_settled_shelf_index"],
 					[66, "surfacing_marks"],
 					[67, "message_part_read"],
+					[68, "turn_recaps"],
 				]);
 				for (const [filter, count] of [
 					["", 2],
@@ -88,6 +89,7 @@ describe("Schema Migration", () => {
 					[65, "sessions_settled_shelf_index"],
 					[66, "surfacing_marks"],
 					[67, "message_part_read"],
+					[68, "turn_recaps"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -145,6 +147,7 @@ describe("Schema Migration", () => {
 				"store_identity",
 				"surfacing_marks",
 				"tool_content",
+				"turn_recaps",
 				"turns",
 			]);
 		}).pipe(Effect.provide(migratedStore)),
@@ -360,6 +363,11 @@ describe("Schema Migration", () => {
 				{
 					name: "idx_tool_content_session",
 					table: "tool_content",
+					unique: false,
+				},
+				{
+					name: "idx_turn_recaps_session",
+					table: "turn_recaps",
 					unique: false,
 				},
 				{

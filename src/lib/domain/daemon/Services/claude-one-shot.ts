@@ -87,6 +87,26 @@ async function collectGeneratedText(
 			}
 			case "result": {
 				const result = message["result"];
+				const subtype = message["subtype"];
+				if (
+					message["is_error"] === true ||
+					(typeof subtype === "string" && subtype.startsWith("error_"))
+				) {
+					const errors = message["errors"];
+					const errorText = Array.isArray(errors)
+						? errors
+								.filter((error): error is string => typeof error === "string")
+								.join("\n")
+						: "";
+					throw new ClaudeOneShotFailure({
+						reason: "query",
+						cause: new Error(
+							errorText ||
+								(typeof result === "string" ? result : "") ||
+								`Claude returned ${String(subtype ?? "an error")}`,
+						),
+					});
+				}
 				if (typeof result === "string") resultTexts.push(result);
 				break;
 			}
@@ -149,7 +169,9 @@ export const makeClaudeOneShot = (options: {
 							}),
 						),
 					catch: (cause) =>
-						new ClaudeOneShotFailure({ reason: "query", cause }),
+						cause instanceof ClaudeOneShotFailure
+							? cause
+							: new ClaudeOneShotFailure({ reason: "query", cause }),
 				}).pipe(
 					Effect.ensuring(
 						Effect.sync(() => {

@@ -823,11 +823,12 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	).pipe(Layer.provideMerge(withOpenCodeInstances));
 	const registries = RelayFactoryLive(configDir).pipe(
 		Layer.provideMerge(
-			Layer.merge(
+			Layer.mergeAll(
 				makeWorktreeLive(configDir, {
 					setupTimeoutMs: ENV.worktreeSetupTimeoutMs,
 				}),
 				UsageLive(),
+				MessageSurfacingSettingsLive,
 			).pipe(Layer.provideMerge(withSessionDirectory)),
 		),
 	);
@@ -836,10 +837,9 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(registries),
 	);
 
-	const withKeepAwake = Layer.merge(
-		makeKeepAwakeLive(options.keepAwake),
-		MessageSurfacingSettingsLive,
-	).pipe(Layer.provideMerge(withRelayCache));
+	const withKeepAwake = makeKeepAwakeLive(options.keepAwake).pipe(
+		Layer.provideMerge(withRelayCache),
+	);
 	const withDaemonControl = DaemonHandleLive.pipe(
 		Layer.provideMerge(withKeepAwake),
 	);
