@@ -58,6 +58,7 @@ import {
 	type TranscriptEntry,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { PermissionRequest } from "../../../src/lib/frontend/types.js";
 import { seedSessionsWithFamily } from "../stores/session-fixtures.js";
 
@@ -155,7 +156,7 @@ beforeEach(() => {
 		{ id: childId, title: "Child", status: "idle", parentID: parentId },
 		{ id: "drawer-sibling", title: "Sibling", parentID: parentId },
 	]);
-	sessionState.currentId = parentId;
+	openSessionForSetup(parentId, "project-a");
 	seedTranscript(parentId, "Parent reply");
 	seedTranscript(childId, "Child reply");
 	permissionsState.pendingPermissions = [];

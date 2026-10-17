@@ -10,12 +10,12 @@ import {
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 afterEach(() => {
 	sessionActivity.clear();
 	sessionMessages.clear();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 });
 
 it("a background session's busy row moves only that session's phase", () => {
@@ -23,7 +23,7 @@ it("a background session's busy row moves only that session's phase", () => {
 		{ id: "A", title: "A", status: "idle" },
 		{ id: "B", title: "B", status: "idle" },
 	]);
-	sessionState.currentId = "A";
+	openSessionForSetup("A", "project-a");
 	const a = getOrCreateSessionSlot("A");
 	const b = getOrCreateSessionSlot("B");
 	applySessionUpsert({
@@ -41,7 +41,7 @@ it("routes idle rows to the named background session", () => {
 		{ id: "A", title: "A", status: "idle" },
 		{ id: "B", title: "B", status: "idle" },
 	]);
-	sessionState.currentId = "A";
+	openSessionForSetup("A", "project-a");
 	const a = getOrCreateSessionSlot("A");
 	const b = getOrCreateSessionSlot("B");
 	phaseToProcessing(b.activity);

@@ -28,6 +28,7 @@ import { projectState } from "../../stores/project.svelte.js";
 import { routerState } from "../../stores/router.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import InputArea from "./InputArea.svelte";
 
@@ -139,7 +140,7 @@ const meta = {
 	parameters: { layout: "fullscreen" },
 	beforeEach: () => {
 		setComposerPreferences({ controls: "icons", contextWarning: 80 });
-		sessionState.currentId = testId;
+		openSessionForSetup(testId, "conduit");
 		phaseToIdle(getOrCreateSessionActivity(testId));
 		getOrCreateSessionMessages(testId).contextPercent = 0;
 		setupDiscovery();

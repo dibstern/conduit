@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getSessionCommands } from "../../../src/lib/frontend/components/session/session-commands.js";
 import type { SavedTranscript } from "../../../src/lib/frontend/stores/saved-transcripts.js";
 import { initSWMessageListener } from "../../../src/lib/frontend/stores/ws-notifications.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { makeWsRpcClientsLayer } from "../../../src/lib/frontend/transport/shared-client.js";
 import { makeRpcWire } from "../../helpers/rpc-wire.js";
 import type { StubTable } from "../../helpers/stub-ws-rpc.js";
@@ -33,6 +34,7 @@ vi.mock("../../../src/lib/frontend/utils/markdown.js", () => ({
 
 import {
 	currentChat,
+	getOrCreateSessionMessages,
 	inputSyncState,
 	sessionActivity,
 	sessionMessages,
@@ -72,7 +74,6 @@ import { setSessionScope } from "../../../src/lib/frontend/stores/session-scope.
 import { todoState } from "../../../src/lib/frontend/stores/todo.svelte.js";
 import { savedDraw } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { turn } from "../../../src/lib/frontend/stores/turn.svelte.js";
-import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { drawSavedShell } from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
 import { detailRowsOf } from "../../helpers/detail-rows.js";
 import {
@@ -141,7 +142,7 @@ beforeEach(async () => {
 describe("turn readiness for the shown scope", () => {
 	beforeEach(() => {
 		clearDiscoveryState();
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		projectState.projects = [
 			{ slug: "ready", title: "Ready", folders: ["/ready"] },
 		];
@@ -273,6 +274,24 @@ afterEach(async () => {
 });
 
 describe("session selection at the browser RPC wire", () => {
+	it("setup opens a placed session in its project and clearing returns home", async () => {
+		attachedProjectState.slug = "setup-project";
+		start();
+		openSessionForSetup("setup-session", "setup-project");
+		expect(module.selection.shown).toEqual({
+			kind: "placed",
+			sessionId: "setup-session",
+			project: "setup-project",
+		});
+		expect(routerState.path).toBe("/s/setup-session");
+		await settle();
+		expect(
+			calls("ViewSession").map((request) => request.payload),
+		).toMatchObject([{ sessionId: "setup-session" }]);
+		openSessionForSetup(null);
+		expect(module.selection.shown).toEqual({ kind: "none" });
+		expect(routerState.path).toBe("/");
+	});
 	it.each([
 		"A",
 		"B",
@@ -841,13 +860,13 @@ describe("session selection at the browser RPC wire", () => {
 		module.selection.open("last");
 		await settle();
 		todoState.items = [{ id: "old", subject: "Old todo", status: "pending" }];
-		uiState.contextPercent = 75;
+		getOrCreateSessionMessages("last").contextPercent = 75;
 		applySessionRemoved("last");
 		await vi.waitFor(() => expect(routerState.path).toBe("/"));
 		expect(sessionState.currentId).toBeNull();
 		expect(routerState.sessionNotFound).toBe(false);
 		expect(todoState.items).toEqual([]);
-		expect(uiState.contextPercent).toBe(0);
+		expect(currentChat().contextPercent).toBe(0);
 	});
 	it("sends one view after placement and never applies a late draft to another session", async () => {
 		attachedProjectState.slug = "A";
@@ -900,7 +919,7 @@ describe("session selection at the browser RPC wire", () => {
 	it("consumes the pick on session bind so the next draft starts on the default", async () => {
 		clearDiscoveryState();
 		attachedProjectState.slug = "conduit";
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		applyInstanceListResponse({
 			instances: ["claude", "claude-2", "opencode"].map((id) => ({
 				id,
@@ -988,17 +1007,17 @@ describe("session selection at the browser RPC wire", () => {
 			module.selection.open("picked-session");
 			await settle();
 			expect(discoveryState.hasInstanceChoice).toBe(false);
-			sessionState.currentId = null;
+			openSessionForSetup(null);
 			await settle();
 			expect(discoveryState.hasModelChoice).toBe(false);
 			expect(getEffectiveInstanceId()).toBe("claude");
-			sessionState.currentId = "picked-session";
+			openSessionForSetup("picked-session", "conduit");
 			await settle();
 			applyGetModelsResponse({
 				...defaults,
 				active: { model: "gpt", provider: "openai" },
 			});
-			sessionState.currentId = null;
+			openSessionForSetup(null);
 			await settle();
 			expect(getEffectiveInstanceId()).toBe("claude");
 			applyGetModelsResponse(defaults);

@@ -22,7 +22,7 @@ import {
 	handleModelList,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { RelayMessage } from "../../../src/lib/frontend/types.js";
 import { probeClaudeCapabilities } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
@@ -73,12 +73,12 @@ describe("context percent computation", () => {
 			{ id: "history-session", title: "History", projectSlug: "project-a" },
 		]);
 		attachedProjectState.slug = "project-a";
-		sessionState.currentId = "history-session";
+		openSessionForSetup("history-session", "project-a");
 	});
 
 	afterEach(() => {
 		clearDiscoveryState();
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		attachedProjectState.slug = null;
 	});
 

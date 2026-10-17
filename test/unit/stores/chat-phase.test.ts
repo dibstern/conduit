@@ -16,10 +16,10 @@ import {
 	phaseToProcessing,
 	phaseToStreaming,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 beforeEach(() => {
-	sessionState.currentId = "phase-test";
+	openSessionForSetup("phase-test", "project-a");
 	clearMessages();
 });
 

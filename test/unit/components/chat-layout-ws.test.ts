@@ -332,6 +332,7 @@ import {
 	detachSessionList,
 } from "../../../src/lib/frontend/stores/session-list.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 function attach(slug: string): void {
 	attachedProjectState.slug = slug;
@@ -364,7 +365,7 @@ describe("ChatLayout RPC lifecycle", () => {
 		routerState.path = "/";
 		routerState.search = "";
 		routerState.sessionNotFound = false;
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		sessionViewState.compact = false;
 		vi.mocked(resolveSession).mockResolvedValue({
 			projectSlug: "test-project",

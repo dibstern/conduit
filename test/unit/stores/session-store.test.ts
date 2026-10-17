@@ -27,6 +27,7 @@ import {
 	sessionState,
 	setSearchQuery,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import {
 	applySessionChange,
 	sessionSubscription,
@@ -78,7 +79,7 @@ function daysAgoAt(ref: Date, days: number, hour: number): Date {
 
 beforeEach(() => {
 	clearSessionState();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 	sessionState.searchQuery = "";
 	clearDiscoveryState();
 	routerState.path = "/s/old-session";
@@ -95,7 +96,7 @@ it.each([
 		id: "dotfiles-session",
 		projectSlug: "dotfiles",
 	});
-	sessionState.currentId = foreign.id;
+	openSessionForSetup(foreign.id, foreign.projectSlug);
 	if (source === "daemon") seedDaemonSessions([foreign]);
 	else seedSearchResults([foreign]);
 	expect(findSession(foreign.id)?.projectSlug).toBe("dotfiles");
@@ -310,7 +311,7 @@ it("forgets chat without changing the route when a subscription snapshot omits a
 		],
 	});
 	getOrCreateSessionSlot("gone");
-	sessionState.currentId = "gone";
+	openSessionForSetup("gone", "project-a");
 
 	applySessionChange({ _tag: "snapshot", sequence: 11, rows: [] });
 
@@ -333,7 +334,7 @@ it("keeps chat and selection when a root only leaves the list", () => {
 		},
 	});
 	getOrCreateSessionSlot("forked");
-	sessionState.currentId = "forked";
+	openSessionForSetup("forked", "project-a");
 
 	// It gained a parent: out of the sidebar, but not deleted.
 	applySessionChange({ _tag: "remove", sequence: 11, id: "forked" });
@@ -356,7 +357,7 @@ it("forgets chat and selection when the subscription removes a session", () => {
 		},
 	});
 	getOrCreateSessionSlot("gone");
-	sessionState.currentId = "gone";
+	openSessionForSetup("gone", "project-a");
 
 	applySessionChange({
 		_tag: "remove",

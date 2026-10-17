@@ -61,6 +61,7 @@ import {
 	getFilteredSessions,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 
 const decodeSessionInfo = Schema.decodeUnknownSync(SessionInfoSchema);
@@ -78,7 +79,8 @@ beforeEach(() => {
 
 describe("the server half holds only rows the server sent", () => {
 	it("does not synthesize a row for a selected session whose list has not caught up", () => {
-		sessionState.currentId = "ses_child";
+		openSessionForSetup("ses_child", "p");
+		applySessionSnapshot([], "complete");
 
 		expect(sessionState.currentId).toBe("ses_child");
 		expect(sessionState.sessions.has("ses_child")).toBe(false);
@@ -100,7 +102,7 @@ describe("the server half holds only rows the server sent", () => {
 			],
 			"complete",
 		);
-		sessionState.currentId = "ses_child";
+		openSessionForSetup("ses_child", "p");
 		followFork(selection.scope, {
 			projectSlug: "p",
 			sessionId: "ses_child",
@@ -327,7 +329,7 @@ describe("every mutation path leaves the server half wire-valid", () => {
 
 	it("client selection", () => {
 		applySessionSnapshot(ROWS, "complete");
-		sessionState.currentId = "child";
+		openSessionForSetup("child", "p");
 		expectWireValid(ROWS);
 	});
 
@@ -342,7 +344,7 @@ describe("every mutation path leaves the server half wire-valid", () => {
 
 describe("applying server rows never touches the client half", () => {
 	it("keeps the selection and the search query", () => {
-		sessionState.currentId = "root";
+		openSessionForSetup("root", "p");
 		sessionState.searchQuery = "roo";
 
 		applySessionSnapshot(
@@ -382,7 +384,7 @@ describe("deleting the session being viewed", () => {
 				title: "Doomed",
 				status: "idle",
 			});
-			sessionState.currentId = "ses_doomed";
+			openSessionForSetup("ses_doomed", "p");
 			getOrCreateSessionSlot("ses_doomed");
 			expect(sessionActivity.has("ses_doomed")).toBe(true);
 

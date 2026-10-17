@@ -19,10 +19,10 @@ import {
 	applyFamilyChange,
 	clearSessionState,
 	resetSessionFamily,
-	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { usageState } from "../../../src/lib/frontend/stores/usage.svelte.js";
 import { _resetRateLimit } from "../../../src/lib/frontend/stores/ws-send.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import {
 	makeWsRpcClientsLayer,
 	type WsRpcClients,
@@ -61,7 +61,7 @@ const activity = () => {
 beforeEach(() => {
 	clearSessionState();
 	sessionActivity.clear();
-	sessionState.currentId = "s";
+	openSessionForSetup("s", "project-a");
 });
 
 it("a busy row starts the turn and the row going idle ends it once", () => {
@@ -289,7 +289,7 @@ describe("turn control sends over the browser RPC wire", () => {
 		serve({
 			CreateSession: () => ({ projectSlug: "project-a", sessionId: "created" }),
 		});
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		replaceRoute("/new?project=project-a");
 		const sent = control.send({
 			draft: {
@@ -332,7 +332,7 @@ describe("turn control sends over the browser RPC wire", () => {
 					created = resolve;
 				}),
 		});
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		replaceRoute("/new?project=project-a");
 		const sent = control.send({
 			draft: {
@@ -630,7 +630,7 @@ describe("turn control sends over the browser RPC wire", () => {
 	});
 
 	it("a draft's first send follows the placed session and works before its row arrives", async () => {
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		replaceRoute("/new?project=project-a");
 		await runtime.dispose();
 		serve({

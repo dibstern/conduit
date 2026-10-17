@@ -10,11 +10,11 @@ import {
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	transcriptStatus,
 	viewTranscript,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { makeWsRpcClientsLayer } from "../../../src/lib/frontend/transport/shared-client.js";
 import type { HistoryMessage } from "../../../src/lib/frontend/types.js";
 import { detailRowsOf, detailUpserts } from "../../helpers/detail-rows.js";
@@ -87,7 +87,7 @@ beforeEach(() => {
 	runtimeMock.runTransportEffect.mockImplementation((effect) =>
 		runtime.runPromise(effect),
 	);
-	sessionState.currentId = "A";
+	openSessionForSetup("A", "project-a");
 });
 afterEach(async () => {
 	viewTranscript("project", null);
@@ -97,7 +97,7 @@ afterEach(async () => {
 	runtimeMock.runTransportEffect.mockReset();
 	sessionActivity.clear();
 	sessionMessages.clear();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 });
 
 it("applies each detail update once", async () => {

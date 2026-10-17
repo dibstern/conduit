@@ -65,7 +65,6 @@ beforeEach(() => {
 	uiState.planContent = null;
 	uiState.planApproval = null;
 	uiState.lightboxSrc = null;
-	uiState.contextPercent = 0;
 	uiState.clientCount = 0;
 
 	localStorageMock.clear();

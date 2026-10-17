@@ -18,6 +18,7 @@ import {
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 describe("SessionList search summary", () => {
 	beforeEach(() => {
@@ -29,7 +30,7 @@ describe("SessionList search summary", () => {
 		seedRootSessions([]);
 		seedFamilySessions([]);
 		seedDaemonSessions([]);
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		sessionState.searchQuery = "report";
 		seedSearchResults([
 			{ id: "a", title: "Report one", projectSlug: "other-project" },

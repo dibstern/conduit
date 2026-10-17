@@ -7,6 +7,7 @@ import {
 	type WsRpcError,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import type { SavedTranscript } from "../../../src/lib/frontend/stores/saved-transcripts.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { makeWsRpcClientsLayer } from "../../../src/lib/frontend/transport/shared-client.js";
 import type { HistoryMessage } from "../../../src/lib/frontend/types.js";
 
@@ -35,7 +36,6 @@ import {
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	loadOlderTranscript,
 	transcriptStatus,
@@ -150,7 +150,7 @@ beforeEach(() => {
 	runtimeMock.runTransportEffect.mockImplementation((effect) =>
 		runtime.runPromise(effect),
 	);
-	sessionState.currentId = "A";
+	openSessionForSetup("A", "project-a");
 });
 afterEach(async () => {
 	viewTranscript("project", null);
@@ -162,7 +162,7 @@ afterEach(async () => {
 	savedMock.openSavedTranscript.mockReset();
 	sessionActivity.clear();
 	sessionMessages.clear();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 });
 
 describe("transcript feed interface", () => {

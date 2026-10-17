@@ -44,6 +44,7 @@ import {
 	findSession,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { sessionSubscription } from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 import {
@@ -162,7 +163,7 @@ describe("the store's own apply door", () => {
 
 	it("drops the tab's selection with the session it was on", () => {
 		applySessionUpsert(session("s1"));
-		sessionState.currentId = "s1";
+		openSessionForSetup("s1", "project-a");
 
 		applySessionRemoved("s1");
 
@@ -175,7 +176,7 @@ describe("the store's own apply door", () => {
 			[session("kept-session"), session("other-session")],
 			"complete",
 		);
-		sessionState.currentId = "kept-session";
+		openSessionForSetup("kept-session", "project-a");
 
 		applySessionRemoved("other-session");
 

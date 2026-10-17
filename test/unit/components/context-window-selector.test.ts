@@ -6,7 +6,7 @@ import {
 	clearDiscoveryState,
 	discoveryState,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 
 type SwitchContextWindowInput = Parameters<
@@ -68,12 +68,12 @@ describe("InstanceModelPicker context window", () => {
 			},
 			"session-1",
 		);
-		sessionState.currentId = "session-1";
+		openSessionForSetup("session-1", "project-a");
 	});
 
 	afterEach(() => {
 		cleanup();
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 	});
 
 	it("switches context windows through RPC for the active session", async () => {

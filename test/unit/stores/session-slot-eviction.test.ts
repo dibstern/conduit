@@ -48,21 +48,21 @@ import {
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 beforeEach(() => {
 	// Clear all per-session state
 	sessionActivity.clear();
 	sessionMessages.clear();
 	_resetLRU();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 });
 
 afterEach(() => {
 	sessionActivity.clear();
 	sessionMessages.clear();
 	_resetLRU();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 });
 
 describe("Tier 2 LRU cap", () => {
@@ -81,7 +81,7 @@ describe("Tier 2 LRU cap", () => {
 	});
 
 	it("never evicts the current session", () => {
-		sessionState.currentId = "session-0";
+		openSessionForSetup("session-0", "project-a");
 
 		// Create session-0 first (makes it the oldest)
 		getOrCreateSessionMessages("session-0");

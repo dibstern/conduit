@@ -27,6 +27,7 @@ import {
 	getOrCreateSessionSlot,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 let observerCallback: IntersectionObserverCallback | null = null;
 const disconnect = vi.fn();
@@ -51,7 +52,7 @@ const intersect = (isIntersecting = true) =>
 beforeEach(() => {
 	vi.clearAllMocks();
 	observerCallback = null;
-	sessionState.currentId = "test-session";
+	openSessionForSetup("test-session", "project-a");
 	const { messages } = getOrCreateSessionSlot("test-session");
 	messages.historyHasMore = false;
 	messages.historyLoading = false;
@@ -101,7 +102,7 @@ describe("HistoryLoader", () => {
 			props: { sentinelEl: document.createElement("div") },
 		});
 		flushSync();
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		intersect();
 		expect(loadOlderTranscript).not.toHaveBeenCalled();
 	});
