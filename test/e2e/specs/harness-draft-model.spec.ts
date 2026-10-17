@@ -233,8 +233,8 @@ async function openPickedSession(
 	return picker;
 }
 
-/** Settings lives in the list overflow or session title sheet on a phone,
- *  and in the session bar overflow on desktop. */
+/** Settings lives in the list overflow on a phone's list, and in the session
+ *  bar (or phone island) overflow otherwise. */
 async function openSettingsPanel(page: Page): Promise<void> {
 	const listOverflow = page.getByTestId("list-bar-overflow");
 	if (await listOverflow.isVisible()) {
@@ -242,13 +242,10 @@ async function openSettingsPanel(page: Page): Promise<void> {
 		await page.getByTestId("list-overflow-settings").click();
 		return;
 	}
-	const titleMenu = page.getByTestId("session-bar-title-menu");
-	if (await titleMenu.isVisible()) {
-		await titleMenu.click();
-		await page.getByTestId("session-title-settings").click();
-		return;
-	}
-	await page.getByTestId("session-bar-overflow").click();
+	await page
+		.getByTestId("session-bar-overflow")
+		.or(page.getByTestId("session-bar-island-overflow"))
+		.click();
 	await page.getByTestId("overflow-settings").click();
 }
 
