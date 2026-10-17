@@ -1,5 +1,17 @@
 {
 	"src/lib/frontend/components/ui/LabelledGridGroup.svelte :: text-text-dimmer": "conduit-test-voxy.6: the phone sheet group labels (Triage, Session) move from text-dimmer to text-muted. The spec's --text3 measures 3.43:1 on the sheet and fails the gated SessionBar a11y check (WCAG AA needs 4.5:1 at 12.5px).",
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: h-[4px],h-full,whitespace-nowrap": {
+		"movedTo": "src/lib/frontend/components/ui/QuotaMeter.svelte",
+		"requires": "<QuotaMeter",
+		"reason": "conduit-test-aoqb.12: the existing usage meter owns the 4px track, fill and unbroken percentage caption in the Final account cards."
+	},
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: border": {
+		"movedTo": "src/lib/frontend/components/ui/Surface.svelte",
+		"requires": "<Surface",
+		"reason": "conduit-test-aoqb.12: Surface owns the popover border; the model lock notice becomes a borderless chip inset."
+	},
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: bg-[var(--account-color)],bg-border,border-dashed,gap-2.5,last:border-b-0,mb-[2px],mb-[5px],min-h-[46px],mt-[9px],pb-[4px],rounded-[2px],rounded-none,text-[10px],text-sm,tracking-[0.07em],tracking-[0.5px],uppercase,w-16": "conduit-test-aoqb.12: the approved Final model picker replaces the account-coloured full-width meter with QuotaMeter's neutral/semantic 26px usage meter, uppercase section captions with 12px sentence case, and ruled square rows with icon-led 36px rows (50px phone targets), 10px corners and intrinsic trailing values. The popover uses 6px outer padding and its shared primitives own control appearance.",
+	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-border-subtle,bg-text,flex-wrap,font-semibold,gap-0.5,gap-[3px],px-0.5,py-0.5,py-1.5,rounded-[7px],text-bg": "conduit-test-aoqb.12: the picker and picker-context recipes lost their last consumer when the Final model picker moved to the joined segment, so they and their SegmentedControl stories are deleted.",
 	"src/lib/frontend/components/overlays/ClaudeSettingsTab.svelte :: max-w-full": {
 		"movedTo": "src/lib/frontend/components/ui/SettingsPicker.svelte",
 		"requires": "<SettingsPicker",

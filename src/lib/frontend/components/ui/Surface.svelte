@@ -27,6 +27,7 @@
 <script module lang="ts">
 	type SurfaceVariant =
 		| "card"
+		| "popover"
 		| "quiet"
 		| "plain"
 		| "bare"
@@ -40,6 +41,7 @@
 		| "none"
 		| "menu"
 		| "menu-lg"
+		| "popover"
 		| "panel"
 		| "modal"
 		| "dropdown";
@@ -57,6 +59,7 @@
 	// variant rather than a boolean: `variant={grouped ? "bare" : "plain"}`.
 	const VARIANT_CLASSES: Record<SurfaceVariant, string> = {
 		card: "bg-bg-surface border border-border", // 8
+		popover: "bg-popover-bg border border-border",
 		quiet: "bg-bg-surface border border-border-subtle", // 2
 		plain: "bg-bg-surface", // 8
 		bare: "", // 5
@@ -123,6 +126,7 @@
 		none: "", // 50
 		menu: "shadow-menu", // 1
 		"menu-lg": "shadow-menu-lg", // 3
+		popover: "shadow-popover",
 		panel: "shadow-panel", // 5
 		modal: "shadow-modal", // 2
 		dropdown: "shadow-dropdown", // 1

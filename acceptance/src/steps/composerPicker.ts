@@ -301,10 +301,13 @@ export const composerPickerHandlers: StepHandler[] = [
 				);
 			expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(1);
 			for (const tab of await row.getByRole("radio").all()) {
-				await expect(tab).toHaveCSS("height", "32px");
+				await expect(tab).toHaveCSS(
+					"height",
+					(world.page.viewportSize()?.width ?? 1024) < 768 ? "44px" : "30px",
+				);
 				await expect(tab.getByTestId("harness-logo")).toHaveCSS(
 					"width",
-					"14px",
+					"15px",
 				);
 			}
 		},
@@ -325,7 +328,10 @@ export const composerPickerHandlers: StepHandler[] = [
 			).toBe(true);
 			for (const tab of await row.getByRole("radio").all()) {
 				await expect(tab).toHaveCSS("width", "104px");
-				await expect(tab).toHaveCSS("height", "32px");
+				await expect(tab).toHaveCSS(
+					"height",
+					(world.page.viewportSize()?.width ?? 1024) < 768 ? "44px" : "30px",
+				);
 				await expect(tab).toHaveCSS("scroll-snap-align", "start");
 			}
 		},
@@ -460,11 +466,11 @@ export const composerPickerHandlers: StepHandler[] = [
 			).toBeVisible();
 			await expect(picker.getByText(match[1] ?? "", { exact: true })).toHaveCSS(
 				"font-size",
-				"10.5px",
+				"12px",
 			);
 			await expect(
 				picker.getByRole("heading", { name: /^Harness & model/ }),
-			).toHaveCSS("font-size", "11.5px");
+			).toHaveCSS("font-size", "12px");
 		},
 	},
 	{

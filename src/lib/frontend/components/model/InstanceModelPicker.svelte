@@ -12,6 +12,7 @@
 	import SegmentedControl from "../ui/SegmentedControl.svelte";
 	import OptionRow from "../ui/OptionRow.svelte";
 	import AccountDot from "../ui/AccountDot.svelte";
+	import QuotaMeter from "../ui/QuotaMeter.svelte";
 	// biome-ignore lint/style/useImportType: ModelVariant is used as a value for bind:this
 	import ModelVariant from "./ModelVariant.svelte";
 	import { dismiss } from "../../actions/use-dismiss.svelte.js";
@@ -49,7 +50,7 @@
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { getClaudeAccounts, type AccountAvailability } from "../../stores/claude-accounts.svelte.js";
 	import { getDriverTraits, instanceStatusColor } from "../../stores/instance.svelte.js";
-	import { accountColorClass } from "../../utils/account-color.js";
+	import { usageState } from "../../stores/usage.svelte.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import { cursorAuth, openCursorLogin, refreshCursorAuth } from "../../stores/cursor-auth.svelte.js";
 	import { usageResetTime } from "../../utils/continuation.js";
@@ -379,8 +380,7 @@
 	}
 
 	function modelItemClass(model: Immutable<ModelInfo>): string {
-		const base =
-			"model-item flex items-center gap-2 min-w-0 flex-1 min-h-[46px] py-2.5 px-1 m-0 text-[13px] text-left duration-100 leading-[1.4]";
+		const base = "model-item flex-1 leading-[1.4]";
 		return isActiveModel(model) ? `${base} model-item-active` : base;
 	}
 
@@ -538,20 +538,20 @@
 	<!-- The id names the whole visible picker: the sheet on phones, the card on desktop. -->
 	<SheetChrome active={sheet} id="model-picker" data-testid="model-picker" maxHeight="85dvh" bottomPadding={30} safeAreaMode="max" bodyClass="flex flex-col">
 	<Surface
-		variant={sheet ? "bare" : "card"}
+		variant={sheet ? "bare" : "popover"}
 		{@attach !sheet && keepOnscreen}
 		radius="none"
-		elevation={sheet ? "none" : "menu-lg"}
+		elevation={sheet ? "none" : "popover"}
 		id={sheet ? undefined : "model-picker"}
 		data-testid={sheet ? undefined : "model-picker"}
 		data-phone={sheet ? "true" : undefined}
 		role={sheet ? undefined : "dialog"}
 		aria-labelledby={sheet ? undefined : titleId}
 		class="model-dropdown flex flex-col overflow-hidden font-sans {sheet
-			? 'w-full min-h-0 px-[16px]'
-			: 'absolute bottom-[calc(100%+8px)] right-0 w-[404px] max-w-[90vw] max-h-[min(70vh,480px)] rounded-[12px] px-[12px] pt-[9px] pb-[4px] z-[var(--z-popover)]'}"
+			? 'w-full min-h-0 px-[6px]'
+			: 'absolute bottom-[calc(100%+8px)] right-0 w-[404px] max-w-[90vw] max-h-[min(70vh,480px)] rounded-[16px] p-[6px] z-[var(--z-popover)]'}"
 	>
-		<div class="mb-[2px] flex shrink-0 items-center gap-[6px]">
+		<div class="flex shrink-0 items-center gap-[6px] px-[10px] pt-[8px] pb-[6px]">
 			{#if view !== "root"}
 				<Button
 					bind:element={backEl}
@@ -566,24 +566,25 @@
 					onclick={() => { view = "root"; searchQuery = ""; }}
 				/>
 			{/if}
-			<h2 id={titleId} class="text-[11.5px] font-semibold text-text">{title}</h2>
+			<h2 id={titleId} class="text-[12px] font-semibold text-text">{title}</h2>
 			{#if view === "root"}
-				<span data-testid="picker-subtitle" class="ml-auto text-[10.5px] text-text-dimmer">{locked ? "this session" : "new session"}</span>
+				<span data-testid="picker-subtitle" class="ml-auto text-[12px] text-text-muted">{locked ? "this session" : "new session"}</span>
 			{/if}
 		</div>
 		<div class="min-h-0 overflow-y-auto">
 			{#if view === "root"}
 				{#if harnesses.length > 1 || harnesses.some((harness) => harness.unavailableReason) || (harnesses.length > 0 && !harnesses.some((harness) => harness.value === selectedDriver))}
-					<section data-testid="picker-harness-section" aria-label="Harness" class="pb-[4px]">
-						<div class="mt-[9px] mb-[5px] flex justify-between text-[10px] uppercase tracking-[0.07em] text-text-dimmer">
+					<section data-testid="picker-harness-section" aria-label="Harness" class="pb-[6px]">
+						<div class="flex items-center justify-between px-[10px] pt-[8px] pb-[6px] text-[12px] font-medium text-text-muted">
 							<span>Harness</span>
 							{#if locked}
 								<span data-testid="picker-harness-caption" class="inline-flex items-center gap-[4px]">
-									<Icon name="lock" size={9} /> fixed for this session
+									<Icon name="lock" size={12} /> fixed for this session
 								</span>
 							{/if}
 						</div>
 						<OptionRow
+							variant="joined"
 							options={harnesses}
 							value={selectedDriver ?? ""}
 							onChange={handleHarnessSelect}
@@ -592,14 +593,13 @@
 							itemWidth={104}
 							testId="picker-harness-options"
 							itemTestId={(driver) => `picker-harness-${driver}`}
-							class={harnesses.length < 4 ? "gap-[2px] rounded-[9px] border border-border p-[2px]" : ""}
-							itemClass="flex h-[32px] min-w-0 items-center justify-center gap-[6px] rounded-[7px] text-[12px] text-text-muted whitespace-nowrap data-[state=checked]:bg-bg-alt data-[state=checked]:text-text data-[state=checked]:font-semibold aria-disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2"
+							class="mx-[4px]"
 						>
 							{#snippet item(option)}
 								<HarnessLogo
 									driver={option.value}
 									instanceId={option.value === selectedDriver ? selectedLogoInstanceId : instanceForDriver(option.value)?.id}
-									size={14}
+									size={15}
 									surface="surface"
 								/>
 								{option.label}
@@ -607,7 +607,7 @@
 							{/snippet}
 						</OptionRow>
 						{#each harnesses.filter((harness) => harness.unavailableReason) as harness (harness.value)}
-							<p data-testid={`picker-harness-${harness.value}-unavailable`} class="mt-[6px] text-[11px] text-text-muted">{harness.label} unavailable · {harness.unavailableReason}</p>
+							<p data-testid={`picker-harness-${harness.value}-unavailable`} class="mt-[6px] px-[10px] text-[12px] text-text-muted">{harness.label} unavailable · {harness.unavailableReason}</p>
 							{@const auth = getProviderPresentation(harness.value)?.auth}
 							{#if auth && harness.authRequired}
 								<Button variant="ghost-accent" size="sm" data-testid={`picker-harness-${harness.value}-login`} onclick={() => { closePicker(); openCursorLogin(); }}>{cursorAuth.current && cursorAuth.current.source !== "environment" ? auth.login : auth.manage}</Button>
@@ -616,12 +616,13 @@
 					</section>
 				{/if}
 				{#if accountCards.length > 1}
-					<section data-testid="picker-account-section" tabindex="-1" aria-label={accountLabel} class="pb-[4px] outline-none">
-						<div class="mt-[9px] mb-[5px] flex justify-between text-[10px] uppercase tracking-[0.07em] text-text-dimmer">
+					<section data-testid="picker-account-section" tabindex="-1" aria-label={accountLabel} class="pb-[6px] outline-none">
+						<div class="flex items-center justify-between px-[10px] pt-[8px] pb-[6px] text-[12px] font-medium text-text-muted">
 							<span>{accountLabel}</span>
 							<span data-testid="picker-account-section-caption">{hasAccountUsage ? "5-hour use" : "status"}</span>
 						</div>
 						<OptionRow
+							variant="cards"
 							options={accountCards}
 							value={selectedLogoInstanceId ?? ""}
 							onChange={handleAccountSelect}
@@ -631,8 +632,7 @@
 							itemWidth={108}
 							testId="picker-account-options"
 							itemTestId={(id) => `picker-account-${id}`}
-							class="mb-[2px] gap-[6px]"
-							itemClass="block min-w-0 rounded-[9px] text-left focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2"
+							class="mx-[4px] gap-[6px] pt-[2px] pb-[6px]"
 						>
 							{#snippet item(option, selected)}
 								{@const card = accountCards.find((card) => card.value === option.value)}
@@ -640,39 +640,45 @@
 									{@const availability = card.kind === "usage" ? card.availability : undefined}
 									<span
 										class="picker-account-card"
-										class:selected
-										class:limited={availability?.kind === "limited"}
-										class:locked={card.kind === "status" && locked && !selected}
-										style="--account-color:var({accountColorClass(card.value).replace('bg-', '--color-')})"
+										data-option-card
+										data-limited={availability?.kind === "limited" ? "true" : undefined}
+										data-locked={card.kind === "status" && locked && !selected ? "true" : undefined}
 									>
 										<span class="flex min-w-0 items-center gap-[6px]">
 											<AccountDot instanceId={card.value} size={7} />
 											<span data-testid="picker-account-name" class="min-w-0 truncate">{card.label}</span>
-											{#if card.kind === "usage" && availability?.kind === "selectable"}
-												<small data-testid="picker-account-usage" class="ml-auto whitespace-nowrap text-[10px] text-text-muted">{availability.usagePct === null ? "—" : `${Math.round(availability.usagePct)}%`}</small>
-											{/if}
 										</span>
 										{#if card.kind === "status"}
-											<span data-testid="picker-account-caption" class="flex items-center gap-[6px] text-[10px] text-text-muted">
+											<span data-testid="picker-account-caption" class="flex items-center gap-[6px] text-[10.5px] font-normal text-text-muted">
 												<span data-testid="picker-instance-status-dot" class="size-[7px] shrink-0 rounded-full {instanceStatusColor(card.status)}" aria-hidden="true"></span>
 												{card.status}
 											</span>
 										{:else if availability?.kind === "limited"}
 											{@const reset = usageResetTime(availability.resetsAt)}
-											<span data-testid="picker-account-caption" class="text-[10px] text-error">limit{reset ? ` · resets ${reset}` : ""}</span>
+											<span data-testid="picker-account-caption" class="text-[10.5px] font-normal text-error">limit{reset ? ` · resets ${reset}` : ""}</span>
 										{:else if availability?.kind === "selectable" && availability.usagePct !== null}
-											<span data-testid="picker-account-meter" class="block h-[4px] overflow-hidden rounded-[2px] bg-border">
-												<span class="block h-full bg-[var(--account-color)]" style="width:{Math.max(0, Math.min(100, availability.usagePct))}%"></span>
-											</span>
+											<QuotaMeter
+												used={availability.usagePct}
+												warnAt={usageState.limits.warnAt}
+												caption={`${Math.round(availability.usagePct)}%`}
+												variant="usage"
+												trackWidth={26}
+												gap={6}
+												trackTestId="picker-account-meter"
+												captionTestId="picker-account-usage"
+											/>
 										{:else}
-											<span data-testid="picker-account-caption" class="text-[10px] text-text-muted">usage unknown</span>
+											<span class="flex flex-wrap items-center gap-[6px] text-[10.5px] font-normal text-text-muted">
+												{#if card.kind === "usage" && availability?.kind === "selectable"}<small data-testid="picker-account-usage" class="font-mono text-[10.5px]">—</small>{/if}
+												<span data-testid="picker-account-caption">usage unknown</span>
+											</span>
 										{/if}
 									</span>
 								{/if}
 							{/snippet}
 						</OptionRow>
 						{#if locked && hasAccountUsage}
-							<div data-testid="picker-account-note" class="mt-[8px] border-t border-border-subtle pt-[6px] text-[10.5px] text-text-muted">You'll see what carries over before anything changes.</div>
+							<div data-testid="picker-account-note" class="mx-[4px] mt-[8px] border-t border-border-subtle pt-[6px] text-[10.5px] text-text-muted">You'll see what carries over before anything changes.</div>
 						{/if}
 					</section>
 				{/if}
@@ -682,32 +688,35 @@
 						<Button variant="ghost-accent" size="content" data-testid="picker-add-account-btn" onclick={() => { closePicker(); openSettings("server", "instances"); }}>Add account</Button>
 					</div>
 				{/if}
+				{#if accountCards.length > 1}
+					<div aria-hidden="true" class="mx-[8px] my-[4px] h-px bg-border-chip opacity-70"></div>
+				{/if}
 				<Button
-					variant="ghost"
+					variant="picker-row"
 					size="content"
-					tone="default"
-					hoverFill="base"
 					layout="flow"
 					data-testid="picker-row-model"
-					class="flex min-h-[46px] w-full items-center gap-2.5 rounded-none border-b border-border-subtle px-1 py-2.5 text-left last:border-b-0"
 					onclick={() => { view = "model"; }}
 				>
-					<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Model</span>
-					<span class="min-w-0 flex-1 text-[13px] font-semibold">{displayName}</span>
-					<Icon name="chevron-right" size={14} class="text-text-dimmer" />
+					<Icon name="zap" size={16} class="shrink-0 text-text-muted" />
+					<span class="flex-1">Model</span>
+					<span class="min-w-0 truncate text-text-secondary">{displayName}</span>
+					<Icon name="chevron-right" size={13} class="shrink-0 text-text-muted" />
 				</Button>
 				{#if contextLabel}
-					<div data-testid="picker-row-context" tabindex="-1" class="flex min-h-[46px] items-center gap-2.5 border-b border-border-subtle px-1 py-2.5 last:border-b-0">
-						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Context</span>
+					<div data-testid="picker-row-context" tabindex="-1" class="flex min-h-[36px] flex-wrap items-center gap-[10px] px-[10px] py-[6px] text-[13.5px] max-md:min-h-[50px]">
+						<Icon name="gauge" size={16} class="shrink-0 text-text-muted" />
+						<span class="flex-1">Context</span>
 						{#if contextSegments.length > 1}
 							<SegmentedControl
 								bind:value={() => parameterContext?.value ?? selectedContext?.value ?? "", (value) => parameterContext ? selectParameter(parameterContext.id, value) : contextWindow.select(contextOptions.find((option) => option.value === value) ?? null)}
 								options={contextSegments}
-								variant="picker-context"
+								variant="joined"
+								class="flex-wrap"
 								label="Context window"
 							/>
 						{:else}
-							<span class="min-w-0 flex-1 text-[13px] text-text">{contextLabel}</span>
+							<span class="min-w-0 text-text-secondary">{contextLabel}</span>
 						{/if}
 						{#if contextPercent > 0}
 							<span data-testid="picker-context-usage" data-warning={contextWarning ? "true" : undefined} class="shrink-0 text-[11px] {contextWarning ? 'text-status-amber' : 'text-text-muted'}">{Math.round(contextPercent)}% used</span>
@@ -715,85 +724,87 @@
 					</div>
 				{/if}
 				{#if parameters ? parameterEffort : effortSegments.length > 0 || (sessionState.currentId && effort.current)}
-					<div data-testid="picker-row-effort" aria-disabled={effortSegments.length === 0 || undefined} tabindex="-1" class="flex min-h-[46px] items-center gap-2.5 border-b border-border-subtle px-1 py-2.5 last:border-b-0">
-						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Effort</span>
+					<div data-testid="picker-row-effort" aria-disabled={effortSegments.length === 0 || undefined} tabindex="-1" class="flex min-h-[36px] flex-wrap items-center gap-[10px] px-[10px] py-[6px] text-[13.5px] max-md:min-h-[50px]">
+						<Icon name="sliders-horizontal" size={16} class="shrink-0 text-text-muted" />
+						<span class="flex-1">Effort</span>
 						{#if effortSegments.length > (parameters ? 1 : 0)}
 							<SegmentedControl
 								bind:value={() => parameterEffort?.value ?? effort.current ?? "", (value) => parameterEffort ? selectParameter(parameterEffort.id, value) : effort.select(value)}
 								options={effortSegments}
-								variant={effortSegments.length > 5 || effortSegments.some(({ label }) => label.length > 5) ? "picker-context" : "picker"}
+								variant="joined"
+								class="flex-wrap"
 								label="Effort"
 							/>
 						{:else}
-							<span class="min-w-0 flex-1 text-[13px] text-text">{parameterEffort?.label ?? effort.current}</span>
+							<span class="min-w-0 text-text-secondary">{parameterEffort?.label ?? effort.current}</span>
 						{/if}
 					</div>
 				{/if}
 				{#each parameterToggles as row (row.id)}
-					<div data-testid="picker-row-{row.kind}" tabindex="-1" class="flex min-h-[46px] items-center gap-2.5 border-b border-border-subtle px-1 py-2.5 last:border-b-0">
-						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">{row.kind === "thinking" ? "Thinking" : "Fast"}</span>
+					<div data-testid="picker-row-{row.kind}" tabindex="-1" class="flex min-h-[36px] flex-wrap items-center gap-[10px] px-[10px] py-[6px] text-[13.5px] max-md:min-h-[50px]">
+						<Icon name={row.kind === "thinking" ? "brain" : "zap"} size={16} class="shrink-0 text-text-muted" />
+						<span class="flex-1">{row.kind === "thinking" ? "Thinking" : "Fast"}</span>
 						{#if row.options.length > 1}
 							<SegmentedControl
 								bind:value={() => row.value, (value) => selectParameter(row.id, value)}
 								options={row.options}
-								variant="picker"
+								variant="joined"
+								class="flex-wrap"
 								label={row.kind === "thinking" ? "Thinking" : "Fast"}
 							/>
 						{:else}
-							<span class="min-w-0 flex-1 text-[13px] text-text">{row.label}</span>
+							<span class="min-w-0 text-text-secondary">{row.label}</span>
 						{/if}
 					</div>
 				{/each}
 				{#if planLocked}
-					<div data-testid="picker-row-agent" data-locked="plan" class="flex min-h-[46px] items-center gap-2.5 px-1 py-2.5">
-						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Agent</span>
-						<span class="min-w-0 flex-1 truncate text-[13px] text-text">Plan</span>
+					<div data-testid="picker-row-agent" data-locked="plan" class="flex min-h-[36px] items-center gap-[10px] px-[10px] py-[6px] text-[13.5px] max-md:min-h-[50px]">
+						<Icon name="user" size={16} class="shrink-0 text-text-muted" />
+						<span class="flex-1">Agent</span>
+						<span class="min-w-0 truncate text-text-secondary">Plan</span>
 						<span class="shrink-0 text-[11px] text-text-dimmer">Set by approvals</span>
 					</div>
 				{:else if visibleAgents.length > 1}
 					<Button
-						variant="ghost"
+						variant="picker-row"
 						size="content"
-						tone="default"
-						hoverFill="base"
 						layout="flow"
 						data-testid="picker-row-agent"
-						class="flex min-h-[46px] w-full items-center gap-2.5 rounded-none border-b border-border-subtle px-1 py-2.5 text-left last:border-b-0"
 						onclick={() => { view = "agent"; }}
 					>
-						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Agent</span>
-						<span class="min-w-0 flex-1 truncate text-[13px] font-semibold">{activeAgent ? agentLabel(activeAgent) : "Default"}</span>
-						<Icon name="chevron-right" size={14} class="text-text-dimmer" />
+						<Icon name="user" size={16} class="shrink-0 text-text-muted" />
+						<span class="flex-1">Agent</span>
+						<span class="min-w-0 truncate text-text-secondary">{activeAgent ? agentLabel(activeAgent) : "Default"}</span>
+						<Icon name="chevron-right" size={13} class="shrink-0 text-text-muted" />
 					</Button>
 				{:else if activeAgent}
-					<div data-testid="picker-row-agent" class="flex min-h-[46px] items-center gap-2.5 px-1 py-2.5">
-						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Agent</span>
-						<span class="min-w-0 flex-1 truncate text-[13px] text-text">{agentLabel(activeAgent)}</span>
+					<div data-testid="picker-row-agent" class="flex min-h-[36px] items-center gap-[10px] px-[10px] py-[6px] text-[13.5px] max-md:min-h-[50px]">
+						<Icon name="user" size={16} class="shrink-0 text-text-muted" />
+						<span class="flex-1">Agent</span>
+						<span class="min-w-0 truncate text-text-secondary">{agentLabel(activeAgent)}</span>
 					</div>
 				{/if}
 			{:else if view === "agent"}
 				{#each visibleAgents as agent (agent.id)}
 					{@const selected = agent.id === activeAgent?.id}
 					<Button
-						variant="ghost"
+						variant="picker-row"
 						size="content"
-						tone={selected ? "accent" : "default"}
-						hoverFill="base"
 						layout="flow"
 						aria-pressed={selected}
 						data-testid="picker-agent-{agent.id}"
-						class="flex min-h-[46px] w-full items-center gap-2.5 rounded-none border-b border-border-subtle px-1 py-2.5 text-left last:border-b-0"
 						onclick={() => handleAgentSelect(agent)}
 					>
+						<Icon name="user" size={16} class="shrink-0 text-text-muted" />
 						<span class="min-w-0 flex-1">
-							<span class="block text-[13px] font-semibold">{agentLabel(agent)}</span>
-							{#if agent.description}<span class="block text-[11px] text-text-muted">{agent.description}</span>{/if}
+							<span class="block">{agentLabel(agent)}</span>
+							{#if agent.description}<span class="block text-[12px] text-text-muted">{agent.description}</span>{/if}
 						</span>
 						{#if selected}<Icon name="check" size={16} class="text-accent" />{/if}
 					</Button>
 				{/each}
 			{:else}
-				<div class="flex items-center gap-2 border-b border-border py-2.5 text-text-dimmer">
+				<div class="mx-[10px] flex items-center gap-2 border-b border-border py-2.5 text-text-muted">
 					<Icon name="search" size={13} class="shrink-0" />
 					<TextInput
 						bind:element={searchEl}
@@ -822,7 +833,7 @@
 				</div>
 				<div data-testid="model-picker-list" class="py-1.5" aria-busy={draftModelLoading}>
 					{#if locked}
-						<div class="my-1.5 flex items-start gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-[11px] leading-[1.4] text-text-dimmer">
+						<div class="mx-[4px] my-1.5 flex items-start gap-2 rounded-[10px] bg-chip px-[10px] py-2 text-[12px] leading-[1.4] text-text-muted">
 							<Icon name="lock" size={12} class="shrink-0" />
 							<span>Harness fixed at creation — showing <b class="font-semibold text-text-secondary">{selectedLabel}</b> only. Model switching within it is allowed.</span>
 						</div>
@@ -834,31 +845,30 @@
 					{:else}
 						{#each filteredGroups as group (group.provider.id)}
 							<div class={providerSectionClass(group)} role="group" aria-labelledby="{groupHeadingId}-{group.provider.id}">
-								<div id="{groupHeadingId}-{group.provider.id}" class="model-provider-header px-1 py-2 text-sm font-semibold uppercase tracking-[0.5px] text-text-dimmer">
+								<div id="{groupHeadingId}-{group.provider.id}" class="model-provider-header px-[10px] py-2 text-[12px] font-medium text-text-muted">
 									{group.provider.name || group.provider.id}{#if !isProviderConfigured(group.provider)}<span class="font-normal normal-case tracking-normal">{" (not configured)"}</span>{/if}
 								</div>
 								{#each group.models as model (model.id)}
 									{@const cost = formatCost(model.cost)}
 									{@const windows = modelContextLabel(model)}
-									<div class="flex items-center gap-1 border-b border-border-subtle last:border-b-0">
+									<div class="flex items-center gap-1">
 										<Button
-											variant="ghost"
+											variant="picker-row"
 											size="content"
 											layout="flow"
-											tone={isActiveModel(model) ? "accent" : "default"}
-											hoverFill="base"
 											class={modelItemClass(model)}
 											data-model-id={model.id}
 											data-provider-id={model.provider}
 											aria-current={isActiveModel(model) ? "true" : undefined}
 											onclick={(e) => handleModelClick(model, e)}
 										>
-											<span class="model-item-name min-w-0 flex-1 font-semibold">
+											<Icon name="zap" size={16} class="shrink-0 text-text-muted" />
+											<span class="model-item-name min-w-0 flex-1">
 												{stripDateSuffix(formatModelName(model))}
-												{#if isDefaultModel(model)}<span class="ml-1 text-xs font-normal text-text-dimmer">(default)</span>{/if}
+												{#if isDefaultModel(model)}<span class="ml-1 text-xs font-normal text-text-muted">(default)</span>{/if}
 											</span>
 											{#if windows || cost}
-												<span class="min-w-0 text-right text-[11px] font-normal text-text-muted">
+												<span class="min-w-0 text-right font-mono text-[10.5px] font-normal text-text-muted">
 													{#if windows}<span class="model-item-context block">{windows}</span>{/if}
 													{#if cost}<span class="model-item-cost block">{cost}</span>{/if}
 												</span>
@@ -904,7 +914,7 @@
 							</div>
 						{/each}
 					{/if}
-					<div class="mt-1 border-t border-border pt-1">
+					<div class="mx-[4px] mt-1 border-t border-border pt-1">
 						<Button
 							variant="toolbar"
 							size="content"
@@ -1136,34 +1146,3 @@
 		}}
 	/>
 {/if}
-
-<style>
-	.picker-account-card {
-		display: grid;
-		width: 100%;
-		height: 100%;
-		min-width: 0;
-		gap: 6px;
-		border: 1px solid var(--color-border);
-		border-radius: 9px;
-		padding: 7px 9px;
-		font-size: 11.5px;
-	}
-	.picker-account-card.selected {
-		border-color: var(--account-color);
-		background: color-mix(in srgb, var(--account-color) 10%, transparent);
-	}
-	.picker-account-card.limited { opacity: .6; }
-	.picker-account-card.locked { opacity: .5; }
-	:global(.model-dropdown [data-testid="picker-harness-options"][data-layout="scroll"] > [data-radio-group-item]) {
-		border: 1px solid var(--color-border);
-	}
-	:global(.model-dropdown [data-testid="picker-harness-options"][data-layout="scroll"] > [data-state="checked"]) {
-		border-color: var(--color-text-secondary);
-	}
-	:global(.model-dropdown[data-phone="true"] [data-testid^="picker-row-"]),
-	:global(.model-dropdown[data-phone="true"] [data-testid^="picker-agent-"]),
-	:global(.model-dropdown[data-phone="true"] .model-item) {
-		min-height: 50px;
-	}
-</style>
