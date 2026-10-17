@@ -26,7 +26,7 @@
 	     not set the title row's minimum width, so there the row takes no
 	     intrinsic width and the chips truncate in whatever space it is given. -->
 	<span class="flex w-full min-w-0 items-center gap-1">
-	{#if underGoal}<span aria-hidden="true" data-testid="background-tasks-elbow" class="ml-1 mr-px text-status-violet opacity-65">└</span>{/if}
+	{#if underGoal}<span aria-hidden="true" data-testid="background-tasks-elbow" class="ml-1 mr-px text-status-goal opacity-65">└</span>{/if}
 	<TaskGlyph />
 	{#each shown as task (task.id)}
 		<span data-testid="background-task-chip" class="inline-flex min-w-0 shrink items-center gap-1 rounded-[6px] bg-tool/13 py-0 pr-1.5 pl-[5px] text-[10.5px] {compact ? (tasks.length === 1 ? 'max-w-[210px]' : 'max-w-[168px]') : 'max-w-[230px]'}">

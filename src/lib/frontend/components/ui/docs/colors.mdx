@@ -9,15 +9,16 @@ in `style.css`; selecting Light, Dark, or System toggles the corresponding class
 `<html>`. Never hardcode a hex value. Consume the semantic token so the UI follows
 the resolved theme.
 
-The brand pair and its glow tokens are theme-scoped. `--color-backdrop` remains
-theme-aware through the active `--overlay-rgb` channel.
+Accent, status, and glow tokens switch with the theme. Blue means new content or
+a primary action. The on-switch is green.
 
 ## Canvas and content
 
 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "12px" }}>
   <div style={{ background: "var(--color-bg)", color: "var(--color-text)", border: "1px solid var(--color-border)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-bg</code><br /><small>Application canvas</small></div>
-  <div style={{ background: "var(--color-bg-alt)", color: "var(--color-text)", border: "1px solid var(--color-border)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-bg-alt</code><br /><small>Raised alternate surface</small></div>
+  <div style={{ background: "var(--color-bg-raised)", color: "var(--color-text)", border: "1px solid var(--color-border)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-bg-raised</code><br /><small>Raised surface</small></div>
   <div style={{ background: "var(--color-bg-surface)", color: "var(--color-text)", border: "1px solid var(--color-border)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-bg-surface</code><br /><small>Cards and message surfaces</small></div>
+  <div style={{ background: "var(--color-bg-alt)", color: "var(--color-text)", border: "1px solid var(--color-border)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-bg-alt</code><br /><small>Tinted fill: tracks, chips, hovers</small></div>
   <div style={{ background: "var(--color-code-bg)", color: "var(--color-text)", border: "1px solid var(--color-border)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-code-bg</code><br /><small>Code and inset surfaces</small></div>
   <div style={{ background: "var(--color-input-bg)", color: "var(--color-text)", border: "1px solid var(--color-border)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-input-bg</code><br /><small>Input surfaces</small></div>
   <div style={{ background: "var(--color-user-bubble)", color: "var(--color-text)", border: "1px solid var(--color-border)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-user-bubble</code><br /><small>User-message surface</small></div>
@@ -33,14 +34,12 @@ theme-aware through the active `--overlay-rgb` channel.
 | `--color-border-subtle` | Quiet boundary |
 | `--color-backdrop` | Modal and overlay scrim |
 
-## Accent, brand, and state
+## Accent and state
 
 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "12px" }}>
   <div style={{ background: "var(--color-accent)", color: "var(--color-bg)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-accent</code><br /><small>Primary action and selection</small></div>
   <div style={{ background: "var(--color-accent-hover)", color: "var(--color-bg)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-accent-hover</code><br /><small>Accent hover state</small></div>
   <div style={{ background: "var(--color-accent-bg)", color: "var(--color-accent)", border: "1px solid var(--color-accent)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-accent-bg</code><br /><small>Quiet accent surface</small></div>
-  <div style={{ background: "var(--color-brand-a)", color: "var(--color-bg)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-brand-a</code><br /><small>Primary brand channel</small></div>
-  <div style={{ background: "var(--color-brand-b)", color: "var(--color-bg)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-brand-b</code><br /><small>Secondary brand channel</small></div>
   <div style={{ background: "var(--color-error-bg)", color: "var(--color-error)", border: "1px solid var(--color-error)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-error</code> / <code>--color-error-bg</code><br /><small>Failure and destructive state</small></div>
   <div style={{ background: "var(--color-bg-alt)", color: "var(--color-success)", border: "1px solid var(--color-success)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-success</code><br /><small>Successful state</small></div>
   <div style={{ background: "var(--color-warning-bg)", color: "var(--color-warning)", border: "1px solid var(--color-warning)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-warning</code> / <code>--color-warning-bg</code><br /><small>Warning state</small></div>
@@ -48,8 +47,24 @@ theme-aware through the active `--overlay-rgb` channel.
   <div style={{ background: "var(--color-tool-bg)", color: "var(--color-tool)", border: "1px solid var(--color-tool)", padding: "12px", borderRadius: "var(--radius-panel)" }}><code>--color-tool</code> / <code>--color-tool-bg</code><br /><small>Tool state</small></div>
 </div>
 
-`--color-brand-a-glow` and `--color-brand-b-glow` are the quiet brand glow
-channels. Use the existing glow utilities rather than reconstructing their effects.
+`--color-accent-glow` and `--color-success-glow` supply the existing glow utilities.
+
+| Token | Meaning |
+| --- | --- |
+| `--color-status-ask` | Approval or reply needed, orange |
+| `--color-status-snoozed` | Snoozed, lilac |
+| `--color-status-pinned` | Pinned, gold |
+| `--color-status-goal` | Goal, teal |
+| `--color-status-risk` | Risk, magenta |
+| `--color-popover-bg` | Popover surface |
+| `--color-selection` | Selected row surface |
+| `--color-hover` | Hover wash |
+| `--color-chip` | Chip fill |
+| `--shadow-composer` | Composer border and shadow |
+| `--color-settings-bg` | Settings dialog canvas |
+| `--color-settings-card` | Settings card surface |
+| `--color-settings-rail` | Settings navigation surface |
+| `--color-settings-separator` | Settings row separator |
 
 ## Sidebar
 

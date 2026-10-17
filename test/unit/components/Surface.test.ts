@@ -154,7 +154,7 @@ describe("Surface", () => {
 			["radius", { radius: "panel" }, "rounded-lg"],
 			["shadow", { elevation: "panel" }, "shadow-2xl"],
 			["padding", { padding: "md" }, "px-6"],
-			["background", { variant: "card" }, "bg-bg-alt"],
+			["background", { variant: "card" }, "bg-code-bg"],
 		] as const)("warns when a consumer class fights the %s Surface emits", (_label, props, className) => {
 			const warn = vi
 				.spyOn(console, "warn")

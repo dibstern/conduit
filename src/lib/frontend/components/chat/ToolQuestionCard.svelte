@@ -135,7 +135,7 @@
 	const isUnanswered = $derived(message.status === "completed" && !isAnswered);
 	const glowClass = $derived.by(() => {
 		if (message.status === "error") return "glow-tool-error";
-		if (isAnswered) return "glow-brand-b";
+		if (isAnswered) return "glow-success";
 		if (message.status === "running") return "glow-tool-running";
 		return "";
 	});

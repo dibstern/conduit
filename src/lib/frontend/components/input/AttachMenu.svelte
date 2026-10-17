@@ -38,7 +38,7 @@
      opened upwards as-found. `sideOffset` restates the old
      `bottom-[calc(100%+8px)]` gap rather than taking the 4px default.
 
-     `font-brand` was on each row as-found and is the composer's typeface --
+     `font-sans` was on each row as-found and is the composer's typeface --
      the pills beside this button wear it too -- so it moves to the surface
      rather than being repeated per row. This is the only menu in the app that
      is not in the body font. -->
@@ -48,7 +48,7 @@
 	side="top"
 	align="start"
 	sideOffset={8}
-	class="min-w-[170px] font-brand"
+	class="min-w-[170px] font-sans"
 	data-testid="attach-menu"
 >
 	{#snippet trigger({ props })}
@@ -84,9 +84,9 @@
 		disabled={!canSetGoal}
 		onselect={onSetGoal}
 	>
-		<Icon name="target" size={18} class="shrink-0 text-status-violet" />
+		<Icon name="target" size={18} class="shrink-0 text-status-goal" />
 		<span class="flex flex-col">
-			<span class="text-status-violet">{canSetGoal ? "Set goal" : "Goal"}</span>
+			<span class="text-status-goal">{canSetGoal ? "Set goal" : "Goal"}</span>
 			{#if !canSetGoal}<span class="text-xs text-text-muted">Claude only</span>{/if}
 		</span>
 	</MenuItem>

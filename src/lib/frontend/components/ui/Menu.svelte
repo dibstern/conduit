@@ -223,7 +223,7 @@
 		preventOverflowTextSelection: false,
 		...(ariaLabel === undefined ? {} : { "aria-label": ariaLabel }),
 		class: [
-			"fixed inset-x-0 bottom-0 z-[var(--z-sheet)] max-h-[90vh] w-full overflow-y-auto overscroll-contain rounded-t-[18px] border-t border-border bg-bg-alt pb-[calc(12px+env(safe-area-inset-bottom))] shadow-modal focus-visible:outline-hidden",
+			"fixed inset-x-0 bottom-0 z-[var(--z-sheet)] max-h-[90vh] w-full overflow-y-auto overscroll-contain rounded-t-[18px] border-t border-border bg-bg-surface pb-[calc(12px+env(safe-area-inset-bottom))] shadow-modal focus-visible:outline-hidden",
 			className,
 		].filter(Boolean).join(" "),
 	});

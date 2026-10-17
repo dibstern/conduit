@@ -1,4 +1,4 @@
-<!-- Left-aligned user message card with pink glow. Preserves .msg-user class.
+<!-- Left-aligned user message card with an accent glow. Preserves .msg-user class.
      Recognised `/skill` tokens render as the same pill the composer showed while
      typing; recognition is live (from the current command list), so the pill is
      derived at render rather than snapshotted at send. Typo near-misses that the
@@ -42,9 +42,9 @@
 </script>
 
 <div class="msg-user max-w-[760px] mx-auto mb-3 px-5" data-uuid={message.uuid}>
-	<Surface variant="plain" padding="lg" class="relative glow-brand-a">
+	<Surface variant="plain" padding="lg" class="relative glow-accent">
 		<div class="flex items-baseline gap-2.5 mb-2">
-			<span class="text-sm font-mono font-semibold uppercase tracking-[1.5px] text-brand-a">You</span>
+			<span class="text-sm font-mono font-semibold uppercase tracking-[1.5px] text-accent">You</span>
 			<MessageTime createdAt={message.createdAt} />
 			{#if message.steered}
 				<Badge variant="quiet" shape="pill" data-testid="user-message-steered" title="Joined the turn that was already running">Steered</Badge>

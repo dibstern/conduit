@@ -27,13 +27,13 @@
 	// Literal px: the 12px root would shrink rem steps below the design's sizes.
 	// touchTarget restores a 44px hit area on phones without growing the chip.
 	const CHIP_CLASSES =
-		"shrink-0 gap-[6px] rounded-full border px-[11px] py-[8px] md:px-[9px] md:py-[5px] text-[12.5px] md:text-[11.5px] leading-none font-brand";
+		"shrink-0 gap-[6px] rounded-full border px-[11px] py-[8px] md:px-[9px] md:py-[5px] text-[12.5px] md:text-[11.5px] leading-none font-sans";
 
 	// A selected chip takes the design's brand tint (.chip.brand), the only
 	// coloured chip it draws; a neutral selected state vanished on dark.
 	function filterSurfaceClass(coloured: boolean): string {
 		return coloured
-			? "border-accent/55 bg-accent/14 text-status-pink"
+			? "border-accent/55 bg-accent/14 text-accent"
 			: "border-border text-text-secondary";
 	}
 </script>
@@ -88,7 +88,7 @@
 		<!-- Outside the search-input block: the count belongs to the results, and
 		     the input's visibility is local component state. -->
 		<div
-			class="flex shrink-0 items-center justify-between gap-2 px-3.5 pb-1.5 text-xs text-text-dimmer font-brand"
+			class="flex shrink-0 items-center justify-between gap-2 px-3.5 pb-1.5 text-xs text-text-dimmer font-sans"
 			data-testid="session-search-summary"
 		>
 			<span aria-live="polite">{searchSummary}</span>

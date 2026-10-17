@@ -83,7 +83,7 @@
 	const presentation = $derived(sessionViewState.compact ? "sheet" : "popover");
 
 	const chipClass =
-		"min-w-0 gap-1 rounded-full border border-border-chip bg-bg-alt px-[8px] py-[5px] md:px-[7px] md:py-[4px] text-[11.5px] md:text-[11px] leading-none font-medium font-brand";
+		"min-w-0 gap-1 rounded-full border border-border-chip bg-bg-alt px-[8px] py-[5px] md:px-[7px] md:py-[4px] text-[11.5px] md:text-[11px] leading-none font-medium font-sans";
 	const rowClass = "min-h-[44px] md:min-h-0";
 	let picked = false;
 
@@ -243,7 +243,7 @@
 			</MenuGroup>
 		</Menu>
 	{:else if worktree || branch}
-		<span class="truncate font-brand text-[11.5px] md:text-[11px] text-text-muted">{worktree ? "existing worktree" : "current checkout"}</span>
+		<span class="truncate font-sans text-[11.5px] md:text-[11px] text-text-muted">{worktree ? "existing worktree" : "current checkout"}</span>
 	{/if}
 </div>
 

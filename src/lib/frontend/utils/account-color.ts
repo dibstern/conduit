@@ -3,7 +3,7 @@ const ACCOUNT_COLOR_CLASSES = [
 	"bg-project-3",
 	"bg-fill-green",
 	"bg-fill-blue",
-	"bg-fill-indigo",
+	"bg-fill-amber",
 	"bg-project-4",
 ] as const;
 

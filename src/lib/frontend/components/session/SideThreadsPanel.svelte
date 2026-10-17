@@ -42,7 +42,7 @@
 </script>
 
 <Surface id="side-threads-panel" data-testid="side-threads-panel" variant="plain" radius="none" elevation="panel" role="region" aria-label="Side Threads" class="absolute top-full z-[var(--z-popover)] max-h-[70dvh] overflow-y-auto whitespace-normal border-border px-[14px] pt-[12px] pb-[10px] text-[12px] {compact ? 'inset-x-0 rounded-b-[22px] border-b' : 'right-4 mt-1 w-[440px] max-w-[calc(100%-32px)] rounded-[14px] border'}">
-	<div class="flex items-center gap-[7px] font-brand text-[11px] font-semibold uppercase tracking-[0.08em] text-text-secondary">
+	<div class="flex items-center gap-[7px] font-sans text-[11px] font-semibold uppercase tracking-[0.08em] text-text-secondary">
 		<Icon name="messages-square" size={13} />Side Threads
 	</div>
 	{#if threads.length > 0}
@@ -61,7 +61,7 @@
 						<span class="flex min-w-0 items-center gap-1.5">
 							<span data-testid="side-thread-title" class="truncate">{title}</span>
 							{#if unread}
-								<span data-testid="side-thread-unread-dot" class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>
+								<span data-testid="side-thread-unread-dot" class="size-[7px] shrink-0 rounded-full bg-accent" aria-hidden="true"></span>
 							{/if}
 							<span class="sr-only">{marker ? `, ${marker.spoken}` : ""}{unread ? ", unread" : ""}</span>
 						</span>

@@ -62,8 +62,8 @@
 	const panelClass = $derived(
 		[
 			placement === "sheet"
-				? "relative flex max-h-[90vh] w-full flex-col gap-4 rounded-t-[18px] border-t border-border bg-bg-alt pb-[calc(12px+env(safe-area-inset-bottom))] shadow-modal"
-				: "relative flex max-h-[85vh] w-[90vw] flex-col gap-4 rounded-xl border border-border bg-bg-alt py-5 shadow-modal",
+				? "relative flex max-h-[90vh] w-full flex-col gap-4 rounded-t-[18px] border-t border-border bg-bg-surface pb-[calc(12px+env(safe-area-inset-bottom))] shadow-modal"
+				: "relative flex max-h-[85vh] w-[90vw] flex-col gap-4 rounded-xl border border-border bg-bg-surface py-5 shadow-modal",
 			flush ? undefined : "px-6",
 			placement === "center" ? SIZE_CLASSES[size] : undefined,
 			className,

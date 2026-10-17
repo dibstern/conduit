@@ -92,7 +92,7 @@
 				...toast.actions.filter((action) => action.kind === "dismiss"),
 			]}
 			<div
-				class="toast-card pointer-events-auto touch-none px-[16px] py-[12px] font-brand text-sm text-text-secondary md:rounded-[12px] md:border md:border-border md:bg-bg-alt md:p-[12px] md:shadow-modal"
+				class="toast-card pointer-events-auto touch-none px-[16px] py-[12px] font-sans text-sm text-text-secondary md:rounded-[12px] md:border md:border-border md:bg-bg-alt md:p-[12px] md:shadow-modal"
 				data-variant={toast.variant}
 				role={toast.variant === "error" ? "alert" : "status"}
 				aria-live={toast.variant === "error" ? "assertive" : "polite"}
@@ -123,7 +123,7 @@
 				{#if toast.body}
 					<p class="mt-[4px] leading-snug break-words">
 						{#if toast.emphasis && at >= 0}
-							{toast.body.slice(0, at)}<b class="font-semibold text-brand-b">{toast.emphasis}</b>{toast.body.slice(at + toast.emphasis.length)}
+							{toast.body.slice(0, at)}<b class="font-semibold text-success">{toast.emphasis}</b>{toast.body.slice(at + toast.emphasis.length)}
 						{:else}
 							{toast.body}
 						{/if}

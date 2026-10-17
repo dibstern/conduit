@@ -91,7 +91,7 @@ export const composerSetGoalHandlers: StepHandler[] = [
 					send.evaluate((el) => {
 						const style = getComputedStyle(el);
 						const probe = new Option().style;
-						probe.color = style.getPropertyValue("--color-status-violet");
+						probe.color = style.getPropertyValue("--color-status-goal");
 						const violet = probe.color;
 						probe.color = style.getPropertyValue("--color-bg");
 						return {
@@ -100,7 +100,12 @@ export const composerSetGoalHandlers: StepHandler[] = [
 						};
 					}),
 				)
-				.toEqual({ violetBackground: goal, pageColouredText: goal });
+				// Accent send also wears page-coloured ink, so only goal pins it.
+				.toEqual(
+					goal
+						? { violetBackground: true, pageColouredText: true }
+						: expect.objectContaining({ violetBackground: false }),
+				);
 		},
 	},
 ];

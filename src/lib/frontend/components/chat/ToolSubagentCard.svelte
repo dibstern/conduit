@@ -56,7 +56,7 @@
 	const subagentSessionId = $derived(findSubagentSessionId(message));
 	const glowClass = $derived.by(() => {
 		if (message.status === "error") return "glow-tool-error";
-		if (message.status === "completed") return "glow-brand-b";
+		if (message.status === "completed") return "glow-success";
 		if (message.status === "running") return "glow-tool-running";
 		return "";
 	});

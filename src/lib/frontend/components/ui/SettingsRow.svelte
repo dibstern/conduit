@@ -68,7 +68,7 @@
 	>
 		<span class="min-w-0">{@render text()}</span>
 		<span
-			class="relative h-[18px] w-[32px] shrink-0 rounded-full transition-colors {props.checked ? 'bg-accent' : 'bg-border'}"
+			class="relative h-[18px] w-[32px] shrink-0 rounded-full transition-colors {props.checked ? 'bg-success' : 'bg-border'}"
 		>
 			<span
 				class="absolute left-[2px] top-[2px] h-[14px] w-[14px] rounded-full bg-white pointer-events-none transition-[translate] {props.checked ? 'translate-x-[14px]' : ''}"

@@ -200,7 +200,7 @@
 				size="content"
 				tone="default"
 				touchTarget
-				class="min-w-0 gap-1 rounded-full px-[8px] py-[5px] md:px-[7px] md:py-[4px] text-[11.5px] md:text-[11px] leading-none font-medium font-brand"
+				class="min-w-0 gap-1 rounded-full px-[8px] py-[5px] md:px-[7px] md:py-[4px] text-[11.5px] md:text-[11px] leading-none font-medium font-sans"
 				title="Project scope (⌘P)"
 				data-testid="session-scope-chip"
 			>
@@ -306,7 +306,7 @@
 		aria-label="Search sessions"
 		chrome="bare"
 		size="content"
-		class="min-w-0 flex-1 self-stretch -my-[4px] md:my-0 bg-transparent text-[13.5px] md:text-[12.5px] text-text font-brand placeholder:text-text-dimmer"
+		class="min-w-0 flex-1 self-stretch -my-[4px] md:my-0 bg-transparent text-[13.5px] md:text-[12.5px] text-text font-sans placeholder:text-text-dimmer"
 		placeholder="Search sessions..."
 		autocomplete="off"
 		spellcheck={false}
@@ -325,7 +325,7 @@
 			variant="card"
 			radius="panel"
 			elevation="dropdown"
-			class="absolute left-[-1px] right-[-1px] top-full z-[var(--z-dropdown)] mt-[6px] max-h-[60vh] overflow-y-auto py-[6px] font-brand"
+			class="absolute left-[-1px] right-[-1px] top-full z-[var(--z-dropdown)] mt-[6px] max-h-[60vh] overflow-y-auto py-[6px] font-sans"
 			data-testid="session-scope-suggestions"
 		>
 			<div class="px-[14px] pt-[6px] pb-[5px] font-mono text-[10.5px] font-semibold uppercase leading-none tracking-[0.1em] text-text-dimmer">Scope</div>

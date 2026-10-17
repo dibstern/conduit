@@ -914,7 +914,7 @@
 					<div class="flex flex-col flex-1 min-h-0" class:invisible={mobileMaximized} inert={phoneView === "files" || mobileMaximized} {@attach trackSeen(sessionState.currentId)}>
 						<MessageList {topClearance} />
 						{#if !sessionState.currentId && !draftSendIn(null)}
-							<div class="pointer-events-none absolute inset-x-0 top-[28%] flex flex-col items-center gap-2.5 px-6 text-center font-brand" data-testid="draft-empty">
+							<div class="pointer-events-none absolute inset-x-0 top-[28%] flex flex-col items-center gap-2.5 px-6 text-center font-sans" data-testid="draft-empty">
 								{#if draftSlug}<ProjectSquare large label={projectDisplayName(draftSlug)} accent={projectAccent(draftSlug)} />{/if}
 								<b class="text-[16px] font-semibold text-text">What should happen{draftSlug ? ` in ${projectDisplayName(draftSlug)}` : ""}?</b>
 								<span class="text-[13px] text-text-dimmer">Nothing is created until you send.</span>

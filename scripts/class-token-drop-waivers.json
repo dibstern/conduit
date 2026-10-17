@@ -435,5 +435,301 @@
 	"src/lib/frontend/components/ui/SettingsRow.svelte :: gap-3,gap-x-3": "conduit-test-96d9 A: settings rows use the mockup's literal 12px gaps (rem utilities render at 0.75x on the 12px root).",
 	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-border-chip,px-[7px],py-[2px],rounded-[8px],text-[10.5px]": "conduit-test-96d9 D: the `compact` segmented variant is deleted; its last users (Usage's warning and forecast switches) now wear `joined` like the rest of Settings.",
 	"src/lib/frontend/components/ui/field-styles.ts :: h-9,rounded-md": "conduit-test-96d9 G/H: bordered fields follow the mockup's `.inp`/`.sel`: 7px radius and min-height literal px sizes so consumer heights and touch targets win without a collision.",
-	"src/lib/frontend/components/overlays/InstancesSettingsTab.svelte :: whitespace-nowrap": "conduit-test-dc8k.4: the joined Type control overflowed the card at 393px because its labels could not wrap. max-w-full caps it at the card width and lets each option label wrap to two lines, keeping all three readable and selectable on phones; desktop is unchanged."
+	"src/lib/frontend/components/overlays/InstancesSettingsTab.svelte :: whitespace-nowrap": "conduit-test-dc8k.4: the joined Type control overflowed the card at 393px because its labels could not wrap. max-w-full caps it at the card width and lets each option label wrap to two lines, keeping all three readable and selectable on phones; desktop is unchanged.",
+	"src/lib/frontend/components/chat/ActivityStrip.svelte :: focus-visible:ring-brand-b": {
+		"renamedTo": "focus-visible:ring-success",
+		"reason": "conduit-test-aoqb.1 Final token migration: focus-visible:ring-brand-b becomes focus-visible:ring-success; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/chat/AssistantMessage.svelte :: glow-brand-b": {
+		"renamedTo": "glow-success",
+		"reason": "conduit-test-aoqb.1 Final token migration: glow-brand-b becomes glow-success; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/chat/AssistantMessage.svelte :: text-brand-b": {
+		"renamedTo": "text-success",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-brand-b becomes text-success; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/chat/MessageList.svelte :: text-status-violet": {
+		"renamedTo": "text-status-goal",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-status-violet becomes text-status-goal; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/chat/SubagentBackBar.svelte :: bg-brand-a": {
+		"renamedTo": "bg-accent",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-brand-a becomes bg-accent; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/chat/SubagentBackBar.svelte :: bg-brand-b": {
+		"renamedTo": "bg-success",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-brand-b becomes bg-success; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/chat/SubagentBackBar.svelte :: text-white": {
+		"renamedTo": "text-bg",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-white becomes text-bg; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/chat/UserMessage.svelte :: glow-brand-a": {
+		"renamedTo": "glow-accent",
+		"reason": "conduit-test-aoqb.1 Final token migration: glow-brand-a becomes glow-accent; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/chat/UserMessage.svelte :: text-brand-a": {
+		"renamedTo": "text-accent",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-brand-a becomes text-accent; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/input/AttachMenu.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/input/AttachMenu.svelte :: text-status-violet": {
+		"renamedTo": "text-status-goal",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-status-violet becomes text-status-goal; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/input/ComposerStatusHeader.svelte :: text-status-violet": {
+		"renamedTo": "text-status-goal",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-status-violet becomes text-status-goal; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/input/InputArea.svelte :: bg-brand-a": {
+		"renamedTo": "bg-accent",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-brand-a becomes bg-accent; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/input/InputArea.svelte :: bg-status-violet": {
+		"renamedTo": "bg-status-goal",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-status-violet becomes bg-status-goal; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/input/InputArea.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/input/InputArea.svelte :: text-status-violet": {
+		"renamedTo": "text-status-goal",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-status-violet becomes text-status-goal; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/input/InputArea.svelte :: text-white": {
+		"renamedTo": "text-bg",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-white becomes text-bg; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/input/NewSessionContext.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/input/PermissionModeSelector.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/ChatLayout.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: bg-brand-a": {
+		"renamedTo": "bg-accent",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-brand-a becomes bg-accent; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: group-active:bg-brand-a/15": {
+		"renamedTo": "group-active:bg-accent/15",
+		"reason": "conduit-test-aoqb.1 Final token migration: group-active:bg-brand-a/15 becomes group-active:bg-accent/15; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: group-focus-visible:bg-brand-a/10": {
+		"renamedTo": "group-focus-visible:bg-accent/10",
+		"reason": "conduit-test-aoqb.1 Final token migration: group-focus-visible:bg-brand-a/10 becomes group-focus-visible:bg-accent/10; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: group-hover:bg-brand-a/10": {
+		"renamedTo": "group-hover:bg-accent/10",
+		"reason": "conduit-test-aoqb.1 Final token migration: group-hover:bg-brand-a/10 becomes group-hover:bg-accent/10; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: open]:bg-brand-a/15": {
+		"renamedTo": "open]:bg-accent/15",
+		"reason": "conduit-test-aoqb.1 Final token migration: open]:bg-brand-a/15 becomes open]:bg-accent/15; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: text-status-violet": {
+		"renamedTo": "text-status-goal",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-status-violet becomes text-status-goal; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/Sidebar.svelte :: bg-fill-brand": {
+		"renamedTo": "bg-accent",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-fill-brand becomes bg-accent; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/Sidebar.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/Sidebar.svelte :: text-on-brand": {
+		"renamedTo": "text-bg",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-on-brand becomes text-bg; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/model/ModelVariant.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/overlays/ConnectOverlay.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/overlays/Toast.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/overlays/Toast.svelte :: text-brand-b": {
+		"renamedTo": "text-success",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-brand-b becomes text-success; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: text-status-violet": {
+		"renamedTo": "text-status-goal",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-status-violet becomes text-status-goal; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/DeepSearch.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/GitIdentity.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/ProjectScopeItem.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionContextMenu.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionItem.svelte :: bg-brand-a/15": {
+		"renamedTo": "bg-accent/15",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-brand-a/15 becomes bg-accent/15; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionItem.svelte :: bg-fill-indigo": {
+		"renamedTo": "bg-fill-amber",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-fill-indigo becomes bg-fill-amber; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionItem.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionItem.svelte :: text-brand-a": {
+		"renamedTo": "text-accent",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-brand-a becomes text-accent; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionItem.svelte :: text-status-indigo": {
+		"renamedTo": "text-status-ask",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-status-indigo becomes text-status-ask; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionList.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionListBulkBar.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionListFilters.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionListHeader.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionListRows.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionRenameInput.svelte :: text-brand-b": {
+		"renamedTo": "text-success",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-brand-b becomes text-success; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionSearchField.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/ShortcutSheet.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SideThreadsPanel.svelte :: bg-brand-a": {
+		"renamedTo": "bg-accent",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-brand-a becomes bg-accent; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SideThreadsPanel.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SnoozeSheet.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/TaskDrawer.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/todo/TodoOverlay.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/ui/ConduitLogo.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/ui/MenuCheckboxItem.svelte :: text-on-brand": {
+		"renamedTo": "text-bg",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-on-brand becomes text-bg; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/ui/SettingsRow.svelte :: bg-accent": {
+		"renamedTo": "bg-success",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-accent becomes bg-success; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/ui/TranscriptDivider.svelte :: b]:text-brand-b": {
+		"renamedTo": "b]:text-success",
+		"reason": "conduit-test-aoqb.1 Final token migration: b]:text-brand-b becomes b]:text-success; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/ui/button-recipes.ts :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/ui/segmented-styles.ts :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/utils/account-color.ts :: bg-fill-indigo": {
+		"renamedTo": "bg-fill-amber",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-fill-indigo becomes bg-fill-amber; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/chat/SystemMessage.svelte :: bg-black/20": {
+		"renamedTo": "bg-code-bg",
+		"reason": "conduit-test-aoqb.1 light contrast: the details well was black/20 over white (#ccc), which forced light error red down to #aa1c1c. It now sits on the code well, near-identical in dark (#141416), so light error can stay at #bc1f1f."
+	},
+	"src/lib/frontend/components/ui/floating-styles.ts :: bg-bg-alt": {
+		"renamedTo": "bg-popover-bg",
+		"reason": "conduit-test-aoqb.1: every floating surface (Popover, Menu, Tooltip, inline listboxes) wears the Final --pop step. Dark it equals bg-alt (#232327); light it is white, where bg-alt is the tinted #f1f1f3 fill."
+	},
+	"src/lib/frontend/components/input/InputArea.stories.ts :: bg-bg-alt": {
+		"renamedTo": "bg-popover-bg",
+		"reason": "Not a call site: the swap probe follows FLOATING_SURFACE_CLASSES onto the Final --pop step (conduit-test-aoqb.1)."
+	},
+	"src/lib/frontend/components/ui/Modal.svelte :: bg-bg-alt": {
+		"renamedTo": "bg-bg-surface",
+		"reason": "conduit-test-aoqb.1: sheets and dialogs wear the Final --surface step (.f-sheet), not the tinted bg-alt fill."
+	},
+	"src/lib/frontend/components/ui/Menu.svelte :: bg-bg-alt": {
+		"renamedTo": "bg-bg-surface",
+		"reason": "conduit-test-aoqb.1: sheets and dialogs wear the Final --surface step (.f-sheet), not the tinted bg-alt fill."
+	},
+	"src/lib/frontend/components/ui/__fixtures__/DialogDemo.svelte :: bg-bg-alt": {
+		"renamedTo": "bg-bg-surface",
+		"reason": "conduit-test-aoqb.1: the demo dialog panel wears the Final --surface step (.f-sheet), matching Modal."
+	},
+	"src/lib/frontend/components/ui/button-recipes.ts :: hover:text-text-secondary": {
+		"renamedTo": "hover:text-text",
+		"reason": "conduit-test-aoqb.1: the Final palette has one --text2 step, so text-secondary and text-muted are the same colour and a muted-to-secondary hover changed nothing. muted-soft now brightens to full text, the one step above."
+	}
 }

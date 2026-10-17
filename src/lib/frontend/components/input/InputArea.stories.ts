@@ -56,15 +56,11 @@ async function assertSwapStyles(
 	const popoverProbe = document.createElement("div");
 	popoverProbe.className = "z-[var(--z-popover)]";
 	// The swap dropped the consumer's own `bg-bg-surface` in favour of
-	// FLOATING_SURFACE_CLASSES' `bg-bg-alt`. Back then the two
-	// tokens resolved identically, so a second probe asserted their equality --
-	// deliberately, to go red the day they diverged. They have now diverged: the
-	// approved palette puts every surface that FLOATS over content on --alt and
-	// every INSET control on --surface. So the equality
-	// probe is gone and the one below carries the load on its own: pinning the
-	// listbox to bg-alt exactly is what catches a slide back to bg-surface.
+	// FLOATING_SURFACE_CLASSES' floating fill. Every floating surface wears the
+	// Final --pop step (`bg-popover-bg`) and every INSET control --surface, so
+	// pinning the listbox to popover-bg exactly catches a slide back.
 	const surfaceBgProbe = document.createElement("div");
-	surfaceBgProbe.className = "bg-bg-alt";
+	surfaceBgProbe.className = "bg-popover-bg";
 	canvasElement.append(
 		radiusProbe,
 		dropdownProbe,
@@ -643,7 +639,7 @@ export const GoalChecking: Story = {
 		if (!row) throw new Error("Composer is missing");
 		const style = getComputedStyle(row);
 		const expected = new Option().style;
-		expected.color = style.getPropertyValue("--color-status-violet");
+		expected.color = style.getPropertyValue("--color-status-goal");
 		await expect(style.borderColor).toBe(expected.color);
 		await expect(style.borderStyle).toBe("solid");
 	},

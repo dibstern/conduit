@@ -36,7 +36,7 @@
 </script>
 
 <Modal {open} {onclose} {placement} {returnFocus} title="Snooze until…" description={sessionTitle || "New Session"} size="sm">
-	<div class="flex flex-col gap-1 font-brand">
+	<div class="flex flex-col gap-1 font-sans">
 		{#each presets.filter((preset) => preset.id !== "indefinite") as preset (preset.id)}
 			<Button
 				variant="ghost"

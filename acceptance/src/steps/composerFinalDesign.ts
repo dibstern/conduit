@@ -24,7 +24,7 @@ const phoneRows = {
 	Mode: "composer-more-mode",
 	Checkout: "composer-checkout",
 } as const;
-const SEND_OFF = { background: "rgb(74, 34, 51)", color: "rgb(185, 138, 156)" };
+const SEND_OFF = { background: "rgb(35, 35, 39)", color: "rgb(108, 108, 117)" };
 
 async function box(locator: Locator) {
 	const rect = await locator.boundingBox();

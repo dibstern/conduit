@@ -58,23 +58,10 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"all three render the default tab strip: one asserts tablist/tab/aria-selected in play(), and one asserts the selected tab has no inline `style` attribute -- the underline it draws from `border-b-2` alone must be identical to the one the inline style used to draw, so byte equality is the proof that the dead-class fix was zero-diff",
 
 	// Verified legitimate (conduit-test-6owk). ToolItem is a pure dispatcher
-	// that passes each message unchanged to its selected card, and each pair uses
-	// the same fixture in both stories. Once fa0f1041 pinned the visual suite's
-	// clock, the identical bytes became proof of the expected dispatch.
-	"chat-toolgenericcard--default | chat-toolitem--completed":
-		"Both stories use mockToolCompleted, which ToolItem dispatches to ToolGenericCard.",
-	"chat-toolgenericcard--error-state | chat-toolitem--error-state":
-		"Both stories use mockToolError, which ToolItem dispatches to ToolGenericCard.",
-	"chat-toolgenericcard--pending | chat-toolitem--pending":
-		"Both stories use mockToolPending, which ToolItem dispatches to ToolGenericCard.",
-	"chat-toolgenericcard--with-tags | chat-toolitem--read-with-offset-limit":
-		"Both stories use mockToolReadWithOffset, which ToolItem dispatches to ToolGenericCard.",
-	"chat-toolitem--question-answered | chat-toolquestioncard--default":
-		"Both stories use mockQuestionAnswered, which ToolItem dispatches to ToolQuestionCard.",
-	"chat-toolitem--question-pending | chat-toolquestioncard--waiting-without-question-data":
-		"Both stories use mockQuestionPending, which ToolItem dispatches to ToolQuestionCard.",
-	"chat-toolitem--question-skipped | chat-toolquestioncard--skipped":
-		"Both stories use mockQuestionSkipped, which ToolItem dispatches to ToolQuestionCard.",
+	// that passes each message unchanged to its selected card, and the pair uses
+	// the same fixture in both stories. Its other pairs differ by one row since
+	// the 13px root (conduit-test-aoqb.1) made the wrapper's my-1 a fractional
+	// 3.25px, which shifts the screenshot clip; this pair happens to round alike.
 	"chat-toolitem--subagent-completed | chat-toolsubagentcard--default":
 		"Both stories use mockToolSubagentCompleted, which ToolItem dispatches to ToolSubagentCard.",
 
@@ -116,6 +103,12 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"SilentValueChanges ends by emptying the field; its row changes are asserted in play()",
 	"ui-tworowcomposerlayout--idle-empty-light | ui-tworowcomposerlayout--silent-value-changes-light":
 		"SilentValueChanges ends by emptying the field; its row changes are asserted in play()",
+
+	// Verified legitimate (conduit-test-aoqb.1). The Final type scale raised the
+	// root from 12px to 13px, so md (28rem = 364px) now exceeds the 90vw panel
+	// on a 393px phone, just as lg always did. Desktop still differs.
+	"ui-modal--default | ui-modal--large":
+		"on a phone both md and lg clamp to the same 90vw panel width",
 };
 
 const BASELINE_DIRECTORY = resolve(

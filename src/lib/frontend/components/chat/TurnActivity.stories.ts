@@ -296,7 +296,8 @@ const [skilledLiveSegment = EMPTY_SEGMENT] = skilledLive.segments;
 
 async function openSkills(canvasElement: HTMLElement) {
 	const canvas = within(canvasElement);
-	const toggle = canvas.getByRole("button", { name: /skills?$/ });
+	// By title: below 336px the label sheds "skills" and the name is just the count.
+	const toggle = canvas.getByTitle("Which skills ran, and when");
 	await userEvent.click(toggle);
 	toggle.blur();
 	await expect(

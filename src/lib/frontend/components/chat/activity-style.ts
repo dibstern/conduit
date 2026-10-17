@@ -18,8 +18,12 @@ export interface PartStyle {
 }
 
 const CATEGORY_STYLE: Record<ToolCategory, PartStyle> = {
-	explore: { icon: "search", text: "text-brand-b", bg: "bg-brand-b" },
-	edit: { icon: "pencil", text: "text-brand-a", bg: "bg-brand-a" },
+	explore: { icon: "search", text: "text-text-muted", bg: "bg-text-muted" },
+	edit: {
+		icon: "pencil",
+		text: "text-text-secondary",
+		bg: "bg-text-secondary",
+	},
 	shell: { icon: "terminal", text: "text-text", bg: "bg-text-secondary" },
 	fetch: { icon: "external-link", text: "text-success", bg: "bg-success" },
 	task: {
