@@ -13,9 +13,8 @@
 //   --config test/e2e/playwright-harness.config.ts --project=desktop --workers=1 \
 //   harness-recreated-message-resume.spec.ts
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Page } from "@playwright/test";
 import { Effect, Schema } from "effect";
 import type {
 	CanonicalEvent,
@@ -24,13 +23,13 @@ import type {
 } from "../../../src/lib/contracts/stored-event.js";
 import {
 	PartRemovalId,
-	SessionDetailEnvelopeSchema,
+	type SessionDetailEnvelopeSchema,
 	type SessionDetailItemSchema,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import type { ReadModelRead } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { find, observeDetail } from "../helpers/detail-wire.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 
 const SESSION = "recreated-message";
@@ -58,19 +57,6 @@ const seed = (filename: string, events: readonly CanonicalEvent[]) =>
 		),
 	);
 
-/** Match nested RPC requests and chunks without depending on frame batching. */
-const find = (value: unknown, match: (value: object) => boolean): object[] => {
-	if (typeof value !== "object" || value === null) return [];
-	const nested = Object.values(value).flatMap((child) => find(child, match));
-	return match(value) ? [value, ...nested] : nested;
-};
-const parse = (text: string): unknown => {
-	try {
-		return JSON.parse(text);
-	} catch {
-		return undefined;
-	}
-};
 const rowIds = (item: typeof SessionDetailItemSchema.Type) => {
 	if (item._tag === "message")
 		return { kind: item._tag, messageId: item.message.id };
@@ -93,92 +79,6 @@ const envelopeIds = (envelope: typeof SessionDetailEnvelopeSchema.Type) => {
 		};
 	}
 	return { kind: envelope._tag };
-};
-
-const observeDetail = (page: Page, metricsFile: string) => {
-	const sent: unknown[] = [];
-	const received: unknown[] = [];
-	page.on("websocket", (socket) => {
-		socket.on("framesent", ({ payload }) => sent.push(parse(String(payload))));
-		socket.on("framereceived", ({ payload }) =>
-			received.push(parse(String(payload))),
-		);
-	});
-	const mismatches: string[] = [];
-	page.on("console", (message) => {
-		if (message.text().includes("[resume] checksum mismatch"))
-			mismatches.push(message.text());
-	});
-	const pageErrors: string[] = [];
-	page.on("pageerror", (error) => pageErrors.push(error.message));
-
-	const requests = (sessionId: string, from = 0) =>
-		sent
-			.slice(from)
-			.flatMap((value) =>
-				find(
-					value,
-					(found) =>
-						"_tag" in found &&
-						found._tag === "Request" &&
-						"tag" in found &&
-						found.tag === "SubscribeSessionDetail" &&
-						"payload" in found &&
-						typeof found.payload === "object" &&
-						found.payload !== null &&
-						"sessionId" in found.payload &&
-						found.payload.sessionId === sessionId,
-				),
-			);
-	const envelopes = (sessionId: string, sentFrom = 0, receivedFrom = 0) => {
-		const ids = new Set(
-			requests(sessionId, sentFrom).map((request) =>
-				"id" in request ? String(request.id) : "",
-			),
-		);
-		return received
-			.slice(receivedFrom)
-			.flatMap((value) =>
-				find(
-					value,
-					(found) =>
-						"_tag" in found &&
-						found._tag === "Chunk" &&
-						"requestId" in found &&
-						ids.has(String(found.requestId)),
-				),
-			)
-			.flatMap((chunk) => {
-				const values: readonly unknown[] =
-					"values" in chunk && Array.isArray(chunk.values) ? chunk.values : [];
-				return values.filter(Schema.is(SessionDetailEnvelopeSchema));
-			});
-	};
-	// The process harness subscribes to conduit:read-model-read and flushes
-	// source counts atomically every 250ms. Wait for a flush beyond each phase.
-	const detailReads = async () => {
-		const asked = Date.now();
-		await expect.poll(() => existsSync(metricsFile)).toBe(true);
-		const metrics = () =>
-			JSON.parse(readFileSync(metricsFile, "utf8")) as {
-				flushedAt: number;
-				sources: Record<
-					string,
-					{ reads: Partial<Record<ReadModelRead["kind"], number>> }
-				>;
-			};
-		await expect.poll(() => metrics().flushedAt).toBeGreaterThan(asked);
-		return metrics().sources[`session-detail/${SESSION}`]?.reads ?? {};
-	};
-	return {
-		sent,
-		received,
-		mismatches,
-		pageErrors,
-		requests,
-		envelopes,
-		detailReads,
-	};
 };
 
 test.describe.configure({ retries: 0 });
@@ -248,7 +148,7 @@ test("a recreated message resumes without its old parts or a checksum repair", a
 		requests,
 		envelopes,
 		detailReads,
-	} = observeDetail(page, metricsFile);
+	} = observeDetail(page, metricsFile, SESSION);
 	const messages = page.locator("#messages");
 	const open = async (sessionId: string, shown: string) => {
 		await page
@@ -427,7 +327,7 @@ test("an open recreated message catches up through overflow without replacing it
 		requests,
 		envelopes,
 		detailReads,
-	} = observeDetail(page, metricsFile);
+	} = observeDetail(page, metricsFile, SESSION);
 	const messages = page.locator("#messages");
 	await page.goto(`${harness.baseUrl}/s/${SESSION}?p=process-test`);
 	await expect(messages.getByText(TEXT_A, { exact: true })).toBeVisible();
