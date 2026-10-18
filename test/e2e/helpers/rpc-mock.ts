@@ -1,6 +1,6 @@
 import { RpcSchema } from "@effect/rpc";
 import { expect, type Page, type WebSocketRoute } from "@playwright/test";
-import { Effect, Exit, Schema, Scope, Stream } from "effect";
+import { Cause, Effect, Exit, Schema, Scope, Stream } from "effect";
 import { DEFAULT_CATEGORY_SET } from "../../../src/lib/contracts/category-set.js";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/message-surfacing.js";
@@ -998,6 +998,13 @@ export async function mockWsRpc(
 	for (const setting of pendingProjectSettings.get(page) ?? [])
 		control.setProjectSetting(setting);
 	pendingProjectSettings.delete(page);
+	// The mock is the server, so it answers the redial build check too. Under
+	// vite preview /info is the SPA's HTML, so the check would retry forever and
+	// a dropped socket would never reconnect. No buildId reads as "dial at once".
+	await page.route(
+		(url) => url.pathname === "/info",
+		(route) => route.fulfill({ json: {} }),
+	);
 	await page.routeWebSocket(/\/rpc/, (ws: WebSocketRoute) => {
 		const scope = Effect.runSync(Scope.make());
 		const onClose = () => control.unregisterSocket(ws);
@@ -1057,7 +1064,11 @@ export async function mockWsRpc(
 					control.interruptStream(frame["requestId"], ws);
 			}
 			const receive = await ready;
-			await Effect.runPromise(receive(data));
+			// A socket the test closed has its server interrupted; frames the page
+			// sent before it saw the close have nowhere to go.
+			const exit = await Effect.runPromiseExit(receive(data));
+			if (Exit.isFailure(exit) && !Cause.isInterruptedOnly(exit.cause))
+				throw Cause.squash(exit.cause);
 		});
 	});
 	return control;
