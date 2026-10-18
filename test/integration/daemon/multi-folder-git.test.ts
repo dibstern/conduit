@@ -49,7 +49,7 @@ function latestGit(
 	return browser.frames
 		.flatMap(({ message }) => {
 			if (message["type"] !== feed) return [];
-			const rows =
+			const rows: readonly unknown[] =
 				message["_tag"] === "snapshot" && Array.isArray(message["rows"])
 					? message["rows"]
 					: message["_tag"] === "upsert"

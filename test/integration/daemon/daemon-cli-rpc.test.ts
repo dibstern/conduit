@@ -45,8 +45,7 @@ describe("CLI and browser daemon RPC parity", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const context = yield* Effect.context<
-							| Layer.Layer.Context<typeof WsRpcServerLayer>
-							| RpcSubscriptionScopeTag
+							Layer.Services<typeof WsRpcServerLayer> | RpcSubscriptionScopeTag
 						>();
 						yield* Layer.build(
 							makeDaemonRpcSocketLayer(

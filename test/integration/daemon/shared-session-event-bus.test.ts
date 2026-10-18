@@ -10,6 +10,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { NodePath } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
 import {
 	Clock,
@@ -51,7 +52,7 @@ import {
 } from "../../../src/lib/relay/relay-stack.js";
 
 const relayBus = async (relay: ProjectRelay) => {
-	const context = (await relay.effectRuntime.runtime.runtime()).context;
+	const context = await relay.effectRuntime.runtime.context();
 	return Option.getOrThrow(Context.getOption(context, SessionEventBusTag));
 };
 
@@ -104,7 +105,7 @@ describe("daemon-wide committed session signals", () => {
 					hostExplicit: true,
 				}),
 				smartDefault: false,
-			}),
+			}).pipe(Layer.provide(NodePath.layer)),
 		);
 		const relays: ProjectRelay[] = [];
 		try {
@@ -270,7 +271,7 @@ describe("daemon-wide committed session signals", () => {
 				const events = yield* PubSub.subscribe(daemon);
 				const publishedAt: number[] = [];
 				const transient: string[] = [];
-				yield* Stream.fromQueue(events).pipe(
+				yield* Stream.fromSubscription(events).pipe(
 					Stream.filter((event) => event._tag === "DaemonSessionsChanged"),
 					Stream.runForEach(() =>
 						Clock.currentTimeMillis.pipe(

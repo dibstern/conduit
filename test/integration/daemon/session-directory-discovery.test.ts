@@ -327,7 +327,7 @@ describe("Session directory discovery through the built daemon", () => {
 				...missingContext,
 				instanceId: "claude",
 			},
-		])
+		] as const)
 			await expect(sendRpcRequest(socket, request)).rejects.toMatchObject({
 				_tag: "WsRpcError",
 			});

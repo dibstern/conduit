@@ -257,15 +257,18 @@ it.skipIf(!snapshot || !baselineRef)(
 											}
 										: undefined,
 								).pipe(
-									Statement.withTransformer((statement) => {
-										const [sql] = statement.compile();
-										if (
-											/^\s*(SELECT|WITH)/i.test(sql) &&
-											/\bFROM events\b/i.test(sql)
-										)
-											reads.push(sql);
-										return Effect.succeed(statement);
-									}),
+									Effect.provideService(
+										Statement.CurrentTransformer,
+										(statement) => {
+											const [sql] = statement.compile();
+											if (
+												/^\s*(SELECT|WITH)/i.test(sql) &&
+												/\bFROM events\b/i.test(sql)
+											)
+												reads.push(sql);
+											return Effect.succeed(statement);
+										},
+									),
 								),
 							);
 							const elapsed = performance.now() - started;

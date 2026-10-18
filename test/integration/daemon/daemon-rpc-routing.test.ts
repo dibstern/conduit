@@ -113,7 +113,7 @@ describe("daemon shared RPC routing", () => {
 						);
 						const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
 							runtime,
-						}).pipe(Effect.provide(runtime));
+						}).pipe(Effect.provide(yield* runtime.contextEffect));
 						handlers.set(slug, wsHandler);
 						return {
 							slug,
@@ -358,7 +358,7 @@ describe("daemon shared RPC routing", () => {
 						relays.set(slug, runtime);
 						const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
 							runtime,
-						}).pipe(Effect.provide(runtime));
+						}).pipe(Effect.provide(yield* runtime.contextEffect));
 						return {
 							slug,
 							wsHandler: {},

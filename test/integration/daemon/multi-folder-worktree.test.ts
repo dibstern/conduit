@@ -178,6 +178,7 @@ process.exit(result.status ?? 1);
 				projectSlug: "process-test",
 				originId: "multi-folder-worktree-test",
 				providerId: "claude",
+				model: { providerId: "claude", modelId: "sonnet" },
 				title,
 				...(newWorktree ? { newWorktree: true } : {}),
 				...(worktreeBase === undefined ? {} : { worktreeBase }),

@@ -133,6 +133,7 @@ process.exit(result.status ?? 1);
 				projectSlug: "process-test",
 				originId: "new-worktree-test",
 				providerId: "claude",
+				model: { providerId: "claude", modelId: "sonnet" },
 				title,
 				...(newWorktree ? { newWorktree: true } : {}),
 				...(worktreeBase === undefined ? {} : { worktreeBase }),
@@ -375,6 +376,7 @@ process.exit(result.status ?? 1);
 					projectSlug: "process-test",
 					originId: "base-test",
 					providerId: "claude",
+					model: { providerId: "claude", modelId: "sonnet" },
 					newWorktree: true,
 					worktreeBase,
 				}),
@@ -390,6 +392,7 @@ process.exit(result.status ?? 1);
 				projectSlug: "process-test",
 				originId: "base-test",
 				providerId: "claude",
+				model: { providerId: "claude", modelId: "sonnet" },
 				worktreeBase: "main",
 			}),
 		).rejects.toMatchObject({
@@ -545,6 +548,7 @@ process.exit(result.status ?? 1);
 			projectSlug: "process-test",
 			originId: "new-worktree-test",
 			providerId: "claude",
+			model: { providerId: "claude", modelId: "sonnet" },
 			title: "subfolder",
 			newWorktree: true,
 		});
@@ -597,6 +601,7 @@ process.exit(result.status ?? 1);
 					projectSlug: "process-test",
 					originId: "new-worktree-test",
 					providerId: "claude",
+					model: { providerId: "claude", modelId: "sonnet" },
 					title: "failed",
 					newWorktree: true,
 				}),
@@ -646,6 +651,7 @@ process.exit(result.status ?? 1);
 				projectSlug: "process-test",
 				originId: "new-worktree-test",
 				providerId: "unsupported-provider",
+				model: { providerId: "claude", modelId: "sonnet" },
 				newWorktree: true,
 			}),
 		).rejects.toMatchObject({
@@ -659,6 +665,7 @@ process.exit(result.status ?? 1);
 				projectSlug: "process-test",
 				originId: "new-worktree-test",
 				providerId: "claude",
+				model: { providerId: "claude", modelId: "sonnet" },
 				newWorktree: true,
 				worktreePath: fixture.projectDir,
 			}),
@@ -682,6 +689,7 @@ process.exit(result.status ?? 1);
 				projectSlug: "process-test",
 				originId: "new-worktree-test",
 				providerId: "claude",
+				model: { providerId: "claude", modelId: "sonnet" },
 				newWorktree: true,
 			}),
 		).rejects.toMatchObject({

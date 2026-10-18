@@ -156,7 +156,7 @@ describe("Multi-folder terminals through the built daemon", () => {
 		await expect(
 			sendRpcRequest(socket, {
 				_tag: "CreatePty",
-				...scope,
+				sessionId: scope.sessionId,
 				originId: browser.originId,
 				root: fixture.root,
 			}),
@@ -207,7 +207,7 @@ describe("Multi-folder terminals through the built daemon", () => {
 		await expect(
 			sendRpcRequest(socket, {
 				_tag: "CreatePty",
-				...scope,
+				sessionId: scope.sessionId,
 				originId: browser.originId,
 				root: mapped[1],
 			}),

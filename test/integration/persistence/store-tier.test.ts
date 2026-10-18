@@ -316,9 +316,9 @@ describe("store and project persistence tiers", () => {
 
 	it("memoizes each per-file composition while keeping separate compositions independent", async () => {
 		const first =
-			Context.GenericTag<PersistenceServiceTag["Service"]>("FirstStore");
+			Context.Service<PersistenceServiceTag["Service"]>("FirstStore");
 		const second =
-			Context.GenericTag<PersistenceServiceTag["Service"]>("SecondStore");
+			Context.Service<PersistenceServiceTag["Service"]>("SecondStore");
 		const alpha = makePersistenceEffectLayer(":memory:", "alpha");
 		const beta = makePersistenceEffectLayer(":memory:", "beta");
 		const runtime = ManagedRuntime.make(

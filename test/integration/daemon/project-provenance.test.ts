@@ -130,7 +130,9 @@ async function stagePreProvenanceStore(
 		const names = db
 			.prepare(`SELECT name FROM sqlite_master
 			WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-			AND name != 'effect_sql_migrations' ORDER BY name`)
+			AND name != 'effect_sql_migrations'
+			AND name IN (SELECT name FROM previous.sqlite_master WHERE type = 'table')
+			ORDER BY name`)
 			.all() as Array<{ name: string }>;
 		db.transaction(() => {
 			for (const { name } of names) {

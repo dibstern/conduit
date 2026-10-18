@@ -690,7 +690,6 @@ describe("Forked session workspaces through the built daemon", () => {
 		// The daemon dies the moment the second Side Thread exists, so its
 		// prompt may not be admitted yet; the retry must resume that thread.
 		const crashed = {
-			_tag: "StartSideThread" as const,
 			...request,
 			inputId: randomUUID(),
 		};

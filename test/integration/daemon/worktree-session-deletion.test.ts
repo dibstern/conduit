@@ -33,7 +33,6 @@ import {
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DeleteSession } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -272,7 +271,7 @@ process.exit(result.status ?? 1);
 		const remove = async (id: string, removeWorktrees?: boolean) => {
 			const manifest = {
 				payload: {
-					_tag: "DeleteSession",
+					_tag: "DeleteSession" as const,
 					projectSlug: "process-test",
 					sessionId: id,
 					...(removeWorktrees === undefined ? {} : { removeWorktrees }),
@@ -288,10 +287,7 @@ process.exit(result.status ?? 1);
 				`${artifact}-before.json`,
 				`${JSON.stringify(manifest, null, 2)}\n`,
 			);
-			const response = await sendRpcRequest(
-				socket,
-				new DeleteSession(manifest.payload),
-			);
+			const response = await sendRpcRequest(socket, manifest.payload);
 			manifest.response = response;
 			manifest.after = state();
 			writeFileSync(
