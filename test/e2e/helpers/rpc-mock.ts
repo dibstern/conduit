@@ -930,7 +930,6 @@ export async function mockWsRpc(
 			login: { state: "idle" },
 		}),
 		GetStatus: () => MOCK_SERVER_STATUS,
-		GetDefaultGroupingMode: () => ({ mode: "repository" }),
 		GetWorktreeCleanupSetting: () => ({
 			worktreeCleanup: DEFAULT_WORKTREE_CLEANUP,
 		}),

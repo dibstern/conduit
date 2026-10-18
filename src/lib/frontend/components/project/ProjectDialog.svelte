@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from "svelte";
 	import type { SessionMode } from "../../../contracts/project-file.js";
-	import type { GroupingMode } from "../../../shared-types.js";
 	import {
 		type FindFolders,
 		ProjectSaveRejected,
@@ -69,7 +68,6 @@
 	let draft = $state<ProjectDraft>(createDraft());
 	let setupScript = $state("");
 	let sessionMode = $state<SessionMode | "">("");
-	let groupingMode = $state<GroupingMode | "">("");
 	let query = $state("");
 	let entries = $state<FindFoldersResponse["entries"]>([]);
 	let home = $state("");
@@ -111,7 +109,7 @@
 		...saveIssues.filter((issue) => issue.kind !== "permission-denied"),
 	]);
 	const canSave = $derived(
-		!saving && issues.errors.length === 0 && !issues.nameError && (!project || isDirty(draft, original) || setupValue !== (project.setupScript ?? "") || sessionMode !== (project.sessionMode ?? "") || groupingMode !== (project.groupingMode ?? "")),
+		!saving && issues.errors.length === 0 && !issues.nameError && (!project || isDirty(draft, original) || setupValue !== (project.setupScript ?? "") || sessionMode !== (project.sessionMode ?? "")),
 	);
 
 	onMount(() => {
@@ -144,7 +142,6 @@
 		draft = original;
 		setupScript = project?.setupScript ?? "";
 		sessionMode = project?.sessionMode ?? "";
-		groupingMode = project?.groupingMode ?? "";
 		query = "";
 		entries = [];
 		addIssues = [];
@@ -245,7 +242,6 @@
 				folders: draft.folders,
 				...(setupValue ? { setupScript: setupValue } : project?.setupScript ? { setupScript: "" } : {}),
 				...(sessionMode ? { sessionMode } : project?.sessionMode ? { sessionMode: null } : {}),
-				...(groupingMode ? { groupingMode } : project?.groupingMode ? { groupingMode: null } : {}),
 			});
 			if (!open || version !== saveVersion) return;
 			onsaved?.(response);
@@ -417,14 +413,6 @@
 				</Field>
 				<Field label="Setup script" hint="It runs in each new worktree before the agent starts.">
 					<Textarea bind:value={setupScript} rows={3} disabled={saving} spellcheck={false} autocapitalize="none" class="font-mono text-xs max-md:text-[16px]" />
-				</Field>
-				<Field label="Repository grouping" hint="How this project's sessions are labelled in the session list.">
-					<Select bind:value={groupingMode} disabled={saving} touchTarget>
-						<option value="">Use global default</option>
-						<option value="repository">By repository</option>
-						<option value="repository+subfolder">By repository and subfolder</option>
-						<option value="off">Off</option>
-					</Select>
 				</Field>
 				{#if errors.length || saveError || issues.nameError}
 					<div role="alert" class="flex flex-col gap-[5px] break-words text-[11px] text-error">

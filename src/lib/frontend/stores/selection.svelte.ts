@@ -2,7 +2,6 @@
 import { untrack } from "svelte";
 import { SvelteMap } from "svelte/reactivity";
 import { effectiveWorkingDirectory } from "../../session/session-workspace.js";
-import { getScopeGroupKey } from "../../session-scope.js";
 import { getIsConnected } from "../transport/connection-status.svelte.js";
 import { toastFailure } from "../transport/rpc-errors.js";
 import { WsRpcError } from "../transport/ws-rpc.js";
@@ -104,8 +103,7 @@ const wantedProject = $derived.by(() => {
 	if (shown.kind === "placed" || shown.kind === "draft") return shown.project;
 	if (shown.kind === "none" && scope && getDraftProject() !== null)
 		return scope.project;
-	const listScope = getSessionScope();
-	return getScopeGroupKey(listScope) === null ? listScope : null;
+	return getSessionScope();
 });
 
 export const selection = {

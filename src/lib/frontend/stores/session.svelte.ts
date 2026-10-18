@@ -3,7 +3,6 @@
 
 import { SvelteMap } from "svelte/reactivity";
 import { busySessionIds as calculateBusySessionIds } from "../../session-busy.js";
-import { getScopeGroupKey } from "../../session-scope.js";
 import type { BackgroundTask } from "../../shared-types.js";
 import {
 	isBusy,
@@ -45,7 +44,6 @@ import {
 	refreshCatalogs,
 } from "./discovery.svelte.js";
 import { goalDetails, sessionGoals } from "./goal.svelte.js";
-import { getProjectGroup } from "./project-state.svelte.js";
 import { attachedProjectState, getCurrentSlug } from "./router.svelte.js";
 import { markSessionDeleted, selection } from "./selection.svelte.js";
 import { restoreServerUpdateBanner } from "./server-status.svelte.js";
@@ -796,16 +794,8 @@ function lastChangedAt(session: Immutable<SessionInfo>): number {
 /** The sidebar and its search show root sessions only. */
 export function getFilteredSessions(): SessionInfo[] {
 	const scope = getSessionScope();
-	const groupKey = getScopeGroupKey(scope);
-	const inScope = (session: SessionInfo) => {
-		const slug = session.projectSlug;
-		return (
-			scope === null ||
-			(groupKey === null
-				? slug === scope
-				: getProjectGroup(slug)?.key === groupKey)
-		);
-	};
+	const inScope = (session: SessionInfo) =>
+		scope === null || session.projectSlug === scope;
 	let sessions: SessionInfo[];
 	if (sessionState.searchResults !== null) {
 		// The live feed holds every visible unarchived root, so a hit uses its live
