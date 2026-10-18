@@ -287,6 +287,9 @@ export const settingsSurfacingHandlers: StepHandler[] = [
 					.some((r) => r.tag === "ReplaceCategorySet"),
 			).toBe(false);
 			await expect(bar(world.page)).toBeVisible();
+			await expect(
+				world.page.getByTestId("surfacing-category-preview"),
+			).toContainText("No judged messages yet");
 		},
 	},
 	{
@@ -601,6 +604,9 @@ export const settingsSurfacingHandlers: StepHandler[] = [
 			await expect(
 				bar(page).getByRole("button", { name: "Save", exact: true }),
 			).toBeDisabled();
+			await expect(
+				page.getByTestId("surfacing-category-preview"),
+			).toContainText("No judged messages yet");
 			// The app shell also loads the category set, so check the order rather than a count.
 			const tags = requireRpcControl(page)
 				.getRequests()

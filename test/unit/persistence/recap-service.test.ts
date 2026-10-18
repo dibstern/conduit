@@ -68,6 +68,7 @@ const layer = (
 		Layer.succeed(LoggerTag, makeMockLogger()),
 		Layer.succeed(CategorySet, {
 			current: () => Effect.succeed(DEFAULT_CATEGORY_SET),
+			criteriaAtVersion: () => Effect.die("unused"),
 			replace: () => Effect.die("unused"),
 		}),
 		Layer.succeed(MessageSurfacingSettings, {

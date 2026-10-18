@@ -15,13 +15,25 @@ import {
 	CategorySetRejected,
 	CategorySetSchema,
 	type CategorySet as CategorySetSnapshot,
+	categoryCriteriaKey,
 	categoryIdFromLabel,
 	DEFAULT_CATEGORY_SET,
 } from "../../../contracts/category-set.js";
 import { WsRpcError } from "../../../contracts/ws-rpc.js";
 import { CategorySet } from "../Services/category-set.js";
 
-function validateCategories(
+const persistedCategorySetSchema = Schema.Struct({
+	...CategorySetSchema.fields,
+	criteriaVersions: Schema.optionalWith(
+		Schema.Record({
+			key: Schema.String,
+			value: Schema.Array(Schema.NonNegativeInt),
+		}),
+		{ default: () => ({}) },
+	),
+});
+
+export function validateCategories(
 	next: CategorySetSnapshot["categories"],
 	previous: CategorySetSnapshot,
 ) {
@@ -77,7 +89,7 @@ export const CategorySetLive = (configDir: string) =>
 		Effect.gen(function* () {
 			const directory = join(configDir, "surfacing");
 			const filename = join(directory, "categories.json");
-			const write = (snapshot: CategorySetSnapshot) => {
+			const write = (snapshot: typeof persistedCategorySetSchema.Type) => {
 				mkdirSync(directory, { recursive: true });
 				const temporary = `${filename}.tmp-${randomUUID()}`;
 				try {
@@ -94,14 +106,26 @@ export const CategorySetLive = (configDir: string) =>
 			let loadError: unknown;
 			let snapshot = yield* Effect.try({
 				try: () => {
-					let loaded: CategorySetSnapshot;
+					let loaded: typeof persistedCategorySetSchema.Type;
 					try {
 						loaded = Schema.decodeUnknownSync(
-							Schema.parseJson(CategorySetSchema),
+							Schema.parseJson(persistedCategorySetSchema),
 						)(readFileSync(filename, "utf8"));
 						// Persisted custom labels may have changed since their ids were created.
 						validateCategories(loaded.categories, loaded);
-						return loaded;
+						const key = categoryCriteriaKey(loaded);
+						return {
+							...loaded,
+							criteriaVersions: {
+								...loaded.criteriaVersions,
+								[key]: [
+									...new Set([
+										...(loaded.criteriaVersions[key] ?? []),
+										loaded.version,
+									]),
+								],
+							},
+						};
 					} catch (error) {
 						if (
 							!(
@@ -118,7 +142,14 @@ export const CategorySetLive = (configDir: string) =>
 							loadError = error;
 						}
 					}
-					loaded = structuredClone(DEFAULT_CATEGORY_SET);
+					loaded = {
+						...structuredClone(DEFAULT_CATEGORY_SET),
+						criteriaVersions: {
+							[categoryCriteriaKey(DEFAULT_CATEGORY_SET)]: [
+								DEFAULT_CATEGORY_SET.version,
+							],
+						},
+					};
 					write(loaded);
 					return loaded;
 				},
@@ -133,7 +164,20 @@ export const CategorySetLive = (configDir: string) =>
 					{ filename, quarantine, error: String(loadError) },
 				);
 			return {
-				current: () => Effect.sync(() => structuredClone(snapshot)),
+				current: () =>
+					Effect.sync(() =>
+						structuredClone({
+							version: snapshot.version,
+							categories: snapshot.categories,
+						}),
+					),
+				criteriaAtVersion: (version) =>
+					Effect.sync(
+						() =>
+							Object.entries(snapshot.criteriaVersions).find(([, versions]) =>
+								versions.includes(version),
+							)?.[0],
+					),
 				replace: (expectedVersion, nextSet) =>
 					Effect.try({
 						try: () => {
@@ -164,10 +208,21 @@ export const CategorySetLive = (configDir: string) =>
 								});
 							}
 							const next = { version: snapshot.version + 1, categories };
+							const key = categoryCriteriaKey(next);
+							const persisted = {
+								...next,
+								criteriaVersions: {
+									...snapshot.criteriaVersions,
+									[key]: [
+										...(snapshot.criteriaVersions[key] ?? []),
+										next.version,
+									],
+								},
+							};
 							// Synchronous IO keeps check, rename, and publication in one transaction.
-							write(next);
-							snapshot = next;
-							return structuredClone(snapshot);
+							write(persisted);
+							snapshot = persisted;
+							return structuredClone(next);
 						},
 						catch: (error) =>
 							error instanceof CategorySetRejected

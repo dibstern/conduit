@@ -24,6 +24,16 @@ export function surfacingSettingsFixture(
 	let categories: CategorySet = structuredClone(DEFAULT_CATEGORY_SET);
 	const stubs = {
 		GetMessageSurfacing: () => settings,
+		GetSurfacingLedger: () => [],
+		ScoreCategorySet: () => ({
+			agree: 0,
+			total: 0,
+			levels: [],
+			requiredCalls: 0,
+			jevCalls: 0,
+			complete: true,
+			canTest: false,
+		}),
 		UpdateMessageSurfacing: (payload) => {
 			const patch = Schema.decodeUnknownSync(MessageSurfacingPatchSchema)(
 				payload,

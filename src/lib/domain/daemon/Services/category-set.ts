@@ -11,6 +11,9 @@ export class CategorySet extends Context.Tag("CategorySet")<
 	CategorySet,
 	{
 		readonly current: () => Effect.Effect<CategorySetSnapshot>;
+		readonly criteriaAtVersion: (
+			version: number,
+		) => Effect.Effect<string | undefined>;
 		readonly replace: (
 			expectedVersion: number,
 			nextSet: CategorySetContents,

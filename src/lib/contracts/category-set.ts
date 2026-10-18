@@ -32,6 +32,19 @@ export const CategorySetContentsSchema = Schema.Struct({
 });
 export type CategorySetContents = typeof CategorySetContentsSchema.Type;
 
+/** Verdict identity excludes weights, presentation and retirement state. */
+export const categoryCriteriaKey = (set: CategorySetContents): string =>
+	JSON.stringify(
+		set.categories
+			.map(({ id, criteria }) => [
+				id,
+				criteria.what,
+				criteria.not_for ?? "",
+				criteria.examples ?? [],
+			])
+			.sort(([a], [b]) => String(a).localeCompare(String(b))),
+	);
+
 export const CategorySetSchema = Schema.Struct({
 	version: Schema.NonNegativeInt.pipe(
 		Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
@@ -183,6 +196,8 @@ export type SurfacingMark = typeof SurfacingMarkSchema.Type;
 export const SurfacingFeedbackEntrySchema = Schema.Struct({
 	projectId: Schema.String,
 	sessionId: Schema.String,
+	sessionTitle: Schema.String,
+	requestExcerpt: Schema.String,
 	partId: Schema.String,
 	messageId: Schema.String,
 	turnId: Schema.NullOr(Schema.String),

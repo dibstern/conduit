@@ -13,6 +13,7 @@
 	import Tabs from "../ui/Tabs.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 	import SurfacingCategories from "./SurfacingCategories.svelte";
+	import SurfacingFeedbackTab from "./SurfacingFeedbackTab.svelte";
 
 	let { onPageChange }: { onPageChange?: (page: { title: string; back: () => void } | null) => void } = $props();
 	let tab = $state("general");
@@ -24,6 +25,9 @@
 	let apiKey = $state("");
 	// A stored key's Replace reveals the entry field; with no key it is always shown.
 	let replacing = $state(false);
+	let categoryRevision = $state(0);
+	let feedbackOpened = $state(false);
+	$effect(() => { if (tab === "feedback") feedbackOpened = true; });
 	// A key request's failure is shown only through this fixed copy, never echoed, since the request carried a secret.
 	const keyFailures: Record<string, string> = {
 		"TypeSafe rejected the key": "Rejected by TypeSafe. Your saved key is unchanged.",
@@ -69,7 +73,7 @@
 	<Tabs bind:value={tab} label="Surfacing sections" variant="joined" class="mb-[14px] max-md:flex max-md:w-full max-md:[&>*]:flex-auto" options={[
 		{ value: "general", label: "General", testId: "surfacing-tab-general" },
 		{ value: "categories", label: "Categories", testId: "surfacing-tab-categories" },
-		{ value: "feedback", label: "Feedback and tuning", disabled: true },
+		{ value: "feedback", label: "Feedback and tuning", testId: "surfacing-tab-feedback" },
 	]} />
 {/if}
 
@@ -151,5 +155,8 @@
 	{/if}
 </div>
 <div hidden={tab !== "categories"} data-testid="surfacing-settings-categories">
-	<SurfacingCategories onPageChange={(page) => { editPage = page !== null && sessionViewState.compact; onPageChange?.(editPage ? page : null); }} />
+	<SurfacingCategories active={tab === "categories"} revision={categoryRevision} onPageChange={(page) => { editPage = page !== null && sessionViewState.compact; onPageChange?.(editPage ? page : null); }} />
+</div>
+<div hidden={tab !== "feedback"} data-testid="surfacing-settings-feedback">
+	{#if feedbackOpened}<SurfacingFeedbackTab active={tab === "feedback"} onApplied={() => { categoryRevision++; }} />{/if}
 </div>

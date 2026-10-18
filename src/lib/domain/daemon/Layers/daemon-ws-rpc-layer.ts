@@ -48,6 +48,7 @@ import {
 } from "../../../server/ws-rpc.js";
 import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { getVersion } from "../../../version.js";
+import { makeCategoryTuning } from "../../relay/Services/category-tuning.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { readSurfacingFeedback } from "../../relay/Services/surfacing-feedback.js";
@@ -153,6 +154,10 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const usage = yield* Usage;
 		const messageSurfacing = yield* MessageSurfacingSettings;
 		const categorySet = yield* CategorySet;
+		const categoryTuning = yield* makeCategoryTuning({
+			configDir,
+			cwd: configDir,
+		}).pipe(Effect.provide(yield* PersistenceStore));
 		// Serialize process changes together with their config/persistence updates.
 		const keepAwakeLock = yield* Effect.makeSemaphore(1);
 		const tailscaleServeLock = yield* Effect.makeSemaphore(1);
@@ -770,6 +775,18 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						readSurfacingFeedback().pipe(Effect.provide(store)),
 					),
 				),
+			GetSurfacingLedger: () =>
+				run(
+					Effect.flatMap(PersistenceStore, (store) =>
+						readSurfacingFeedback().pipe(Effect.provide(store)),
+					),
+				),
+			ScoreCategorySet: ({ set, estimateOnly }) =>
+				categoryTuning.score(set, estimateOnly),
+			ProposeCategoryTuning: (request) =>
+				categoryTuning.propose({
+					...(request.avoid === undefined ? {} : { avoid: request.avoid }),
+				}),
 			ReplaceCategorySet: ({ expectedVersion, nextSet }) =>
 				categorySet.replace(expectedVersion, nextSet),
 			SetDefaultGroupingMode: ({ mode }) =>

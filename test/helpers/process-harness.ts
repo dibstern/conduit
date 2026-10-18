@@ -603,6 +603,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 				Pick<
 					NodeJS.ProcessEnv,
 					| "CONDUIT_SERVICE"
+					| "TYPESAFE_BASE_URL"
+					| "TYPESAFE_API_KEY"
 					| "CONDUIT_TAILSCALE_BIN"
 					| "CONDUIT_BUILD_READY_PATH"
 					| "NODE_OPTIONS"

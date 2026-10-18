@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { Schema } from "effect";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import { surfacingSettingsFixture } from "../../../../../test/e2e/fixtures/surfacing-settings.js";
 import { CategorySetContentsSchema } from "../../../contracts/category-set.js";
 import { MessageSurfacingPatchSchema } from "../../../contracts/message-surfacing.js";
@@ -45,6 +45,8 @@ const meta = {
 			connectedSocket(),
 			replyRpc("GetMessageSurfacing", fixture.stubs.GetMessageSurfacing),
 			replyRpc("GetCategorySet", fixture.stubs.GetCategorySet),
+			replyRpc("GetSurfacingLedger", fixture.stubs.GetSurfacingLedger),
+			replyRpc("ScoreCategorySet", fixture.stubs.ScoreCategorySet),
 			replyRpc("UpdateMessageSurfacing", (payload) =>
 				fixture.stubs.UpdateMessageSurfacing(
 					new UpdateMessageSurfacing(
@@ -145,6 +147,11 @@ const categories: NonNullable<Story["play"]> = async (context) => {
 		body.getByRole("spinbutton", { name: "Finding weight" }),
 	).toHaveValue(45);
 	await expect(body.getByTestId("surfacing-draft-bar")).toBeVisible();
+	await waitFor(() =>
+		expect(body.getByTestId("surfacing-category-preview")).toHaveTextContent(
+			"No judged messages yet",
+		),
+	);
 	await expect(fixture.categories.version).toBe(1);
 	(
 		context.canvasElement.ownerDocument.activeElement as HTMLElement | null
@@ -195,6 +202,11 @@ export const StaleDraft: Story = {
 		await expect(
 			body.getByRole("spinbutton", { name: "Finding weight" }),
 		).toHaveValue(45);
+		await waitFor(() =>
+			expect(body.getByTestId("surfacing-category-preview")).toHaveTextContent(
+				"No judged messages yet",
+			),
+		);
 		(
 			context.canvasElement.ownerDocument.activeElement as HTMLElement | null
 		)?.blur();
