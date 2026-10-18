@@ -246,7 +246,7 @@ export const ConfigPersistenceLive = Layer.effect(
 			Effect.gen(function* () {
 				yield* Queue.take(requests);
 				yield* Effect.sleep(Duration.millis(500));
-				yield* Queue.takeAll(requests);
+				yield* Queue.clear(requests);
 				yield* backgroundFlush;
 			}).pipe(Effect.forever),
 		);

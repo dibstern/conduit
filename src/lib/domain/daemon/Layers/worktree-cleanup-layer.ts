@@ -152,7 +152,7 @@ export const WorktreeCleanupLive = () =>
 			// One worker owns all removals; requests arriving during a run form the next batch.
 			yield* Effect.gen(function* () {
 				const first = yield* Queue.take(requests);
-				const batch = [first, ...(yield* Queue.takeAll(requests))];
+				const batch = [first, ...(yield* Queue.clear(requests))];
 				const slugs = batch.some(({ projectSlug }) => projectSlug === undefined)
 					? undefined
 					: new Set(

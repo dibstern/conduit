@@ -760,7 +760,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 						}
 						// Stream closure and turn-ended deltas never settle a turn. Only wait does.
 						yield* Fiber.interrupt(stream);
-						for (const pending of yield* Queue.takeAll(queue)) {
+						for (const pending of yield* Queue.clear(queue)) {
 							yield* applyUpdate(pending);
 						}
 						yield* declinePending();

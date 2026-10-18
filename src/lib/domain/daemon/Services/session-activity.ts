@@ -118,7 +118,7 @@ export const SessionActivityDaemonLive = Layer.effect(
 				const delay = lastPublished + 1000 - now;
 				if (delay > 0) yield* Effect.sleep(delay);
 				// Everything received during the wait is represented by this read.
-				yield* Queue.takeAll(pending);
+				yield* Queue.clear(pending);
 				yield* PubSub.publish(bus, DaemonEvent.DaemonSessionsChanged());
 				lastPublished = yield* Clock.currentTimeMillis;
 			}

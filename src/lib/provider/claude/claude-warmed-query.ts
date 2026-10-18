@@ -111,6 +111,7 @@ export const closeClaudeEmptyQuery = <Q extends { close(): void }>(
 	});
 
 interface PendingWarmedQuery {
+	readonly initializingKey: symbol;
 	readonly resource: WarmedClaudeQuery;
 	readonly ready: Deferred.Deferred<WarmedClaudeQuery, ClaudeAdapterError>;
 	readonly inheritedSettings: string | undefined;
@@ -200,7 +201,7 @@ export const makeClaudeWarmedQueryOwner = (
 	prepareQuery?: () => Promise<void>,
 ) =>
 	Effect.gen(function* () {
-		const initializing = yield* FiberMap.make<PendingWarmedQuery, void>();
+		const initializing = yield* FiberMap.make<symbol, void>();
 		const lock = yield* Semaphore.make(1);
 		const pending = new Map<string, PendingWarmedQuery>();
 		let closing = false;
@@ -217,7 +218,7 @@ export const makeClaudeWarmedQueryOwner = (
 						cause: new Error("Unused Claude query discarded"),
 					}),
 				);
-				yield* FiberMap.remove(initializing, entry);
+				yield* FiberMap.remove(initializing, entry.initializingKey);
 				yield* close(entry);
 			}).pipe(Effect.uninterruptible);
 		const owner: ClaudeWarmedQueryOwner = {
@@ -286,6 +287,7 @@ export const makeClaudeWarmedQueryOwner = (
 								},
 							};
 							const created: PendingWarmedQuery = {
+								initializingKey: Symbol(),
 								resource,
 								inheritedSettings,
 								inheritedSettingsFrozen,
@@ -297,7 +299,7 @@ export const makeClaudeWarmedQueryOwner = (
 							pending.set(input.sessionId, created);
 							yield* FiberMap.run(
 								initializing,
-								created,
+								created.initializingKey,
 								Effect.tryPromise({
 									try: () => resource.query.initializationResult(),
 									catch: (cause) =>
