@@ -100,6 +100,7 @@ export const surfacingRecapHandlers: StepHandler[] = [
 			if (!previous) throw new Error("Surfacing must be seeded before recaps");
 			mockMessageSurfacing.set(page, {
 				...previous,
+				summariesEnabled: mode !== "disabled",
 				recap: {
 					model: mode === "disabled" ? "off" : "sonnet",
 					when: mode === "automatic" ? "turn-end" : "on-request",
@@ -456,6 +457,7 @@ export const surfacingRecapHandlers: StepHandler[] = [
 				.filter(({ tag }) => tag === "GetMessageSurfacing").length;
 			mockMessageSurfacing.set(page, {
 				...previous,
+				summariesEnabled: true,
 				recap: { model: "sonnet", when: "on-request" },
 			});
 			rpc.closeStreamSocket("SubscribeShell");

@@ -23,7 +23,9 @@ import {
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import type { StoredEvent } from "../../../persistence/events.js";
+import { mapToolName } from "../../../relay/event-translator.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
+import { numberTurnMessages } from "../../../turn-message-numbers.js";
 import { CategorySet } from "../../daemon/Services/category-set.js";
 import {
 	type ClaudeOneShotQueryFactory,
@@ -184,21 +186,81 @@ export const makeRecapServiceLive = (
 						}),
 					),
 				);
-			const messages = (target: RecapTarget) => sql<{
-				ordinal: number;
-				text: string;
-				createdAt: number;
-				probabilities: string | null;
-			}>`SELECT p.surfacing_ordinal AS ordinal, p.text, p.created_at AS createdAt,
+			const messages = (target: RecapTarget) =>
+				Effect.gen(function* () {
+					const rows = yield* sql<{
+						id: string;
+						messageId: string;
+						endsSegment: number;
+						type: string;
+						tool: string | null;
+						status: string | null;
+						surfacingOrdinal: number | null;
+						text: string;
+						createdAt: number;
+						probabilities: string | null;
+					}>`SELECT p.id, p.message_id AS messageId, p.type, p.tool_name AS tool, p.status,
+			CASE WHEN (m.cost > 0 OR m.tokens_in IS NOT NULL OR m.tokens_out IS NOT NULL
+			OR m.context_tokens IS NOT NULL OR m.context_window IS NOT NULL)
+			AND COALESCE(m.completed_at, CASE WHEN m.rest_payload IS NULL THEN m.updated_at
+			ELSE json_extract(m.rest_payload, '$.time.completed') END) IS NOT NULL
+			AND (json_extract(m.rest_payload, '$.error') IS NOT NULL
+			OR COALESCE(json_extract(m.rest_payload, '$.finish'), '') NOT IN ('tool-calls', 'unknown'))
+			THEN 1 ELSE 0 END AS endsSegment,
+			p.surfacing_ordinal AS surfacingOrdinal, p.text, p.created_at AS createdAt,
 			p.surfacing_probabilities AS probabilities
 			FROM message_parts p JOIN messages m ON m.id = p.message_id
 			WHERE m.session_id = ${target.sessionId} AND m.turn_id = ${target.turnId}
-			AND m.role = 'assistant' AND p.type = 'text' AND p.surfacing_ordinal IS NOT NULL
-			ORDER BY p.surfacing_ordinal`;
+			AND m.role = 'assistant'
+			ORDER BY m.created_at, m.id, p.sort_order`;
+					// A later step folds pending prose into the log. Trailing replies
+					// and prose before a hand-back stay outside the numbered log.
+					const logged = new Set<string>();
+					let pending: string[] = [];
+					let messageId: string | undefined;
+					let endsSegment = false;
+					for (const row of rows) {
+						if (messageId !== row.messageId && endsSegment) pending = [];
+						messageId = row.messageId;
+						endsSegment = row.endsSegment === 1;
+						if (row.type === "text" && row.text) pending.push(row.id);
+						else if (
+							row.type === "tool" &&
+							["AskUserQuestion", "ExitPlanMode"].includes(
+								mapToolName(row.tool ?? ""),
+							)
+						)
+							pending = [];
+						else if (
+							row.type === "thinking" ||
+							row.type === "tool" ||
+							(row.type === "compaction" && row.status !== "failed")
+						) {
+							for (const id of pending) logged.add(id);
+							pending = [];
+						}
+					}
+					return numberTurnMessages(
+						rows.filter(
+							(row) =>
+								row.type === "text" &&
+								!!row.text &&
+								(row.surfacingOrdinal !== null || logged.has(row.id)),
+						),
+					).map((row) => ({
+						ordinal: row.surfacingOrdinal,
+						text: row.text,
+						createdAt: row.createdAt,
+						probabilities: row.probabilities,
+					}));
+				});
 			const generateLocked = (input: GenerateRecapInput, automatic = false) =>
 				Effect.gen(function* () {
 					const preferences = yield* settings.get;
-					if (!preferences.active || preferences.recap.model === "off") {
+					if (
+						!preferences.summariesEnabled ||
+						preferences.recap.model === "off"
+					) {
 						if (automatic) return null;
 						return yield* new RecapFailure({
 							message: "Turn summaries are off",
@@ -209,12 +271,15 @@ export const makeRecapServiceLive = (
 					const allMessages = yield* messages(input);
 					const versions = yield* readVersions(input);
 					const newest = versions.at(-1);
-					const newestOrdinal = allMessages.at(-1)?.ordinal ?? 0;
+					const newestOrdinal = allMessages.reduce(
+						(last, message) => Math.max(last, message.ordinal),
+						0,
+					);
 					if (automatic) {
 						const categorySet = yield* categories.current();
 						const nonRoutine = yield* Effect.forEach(allMessages, (message) =>
 							Effect.gen(function* () {
-								if (!message.probabilities) return false;
+								if (!message.probabilities) return !preferences.active;
 								const probabilities = yield* Schema.decodeUnknown(
 									probabilitiesSchema,
 								)(message.probabilities);
@@ -425,7 +490,7 @@ export const makeRecapServiceLive = (
 					return Effect.gen(function* () {
 						const preferences = yield* settings.get;
 						if (
-							!preferences.active ||
+							!preferences.summariesEnabled ||
 							preferences.recap.model === "off" ||
 							preferences.recap.when !== "turn-end"
 						)

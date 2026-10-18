@@ -17,7 +17,7 @@
 	const media = typeof matchMedia === "function";
 	const viewport = media ? new MediaQuery("(max-width: 599px)") : { current: false };
 	const desktop = media ? new MediaQuery("(min-width: 1024px)") : { current: true };
-	let { versions, selected, open, phone = viewport.current, live, view, start, settings, level = "balanced", generating = false, error = "", settingsError = "", saving = false, onclose, onversion, ongenerate, onretry, onsettings, oncite, onhover, foot }: {
+	let { versions, selected, open, phone = viewport.current, live, view, start, settings, level = "balanced", plainCitations = false, generating = false, error = "", settingsError = "", saving = false, onclose, onversion, ongenerate, onretry, onsettings, oncite, onhover, foot }: {
 		versions: readonly TurnRecap[];
 		selected: TurnRecap | undefined;
 		open: boolean;
@@ -27,6 +27,7 @@
 		start: number;
 		settings: MessageSurfacingPreferences["recap"];
 		level?: SurfaceLevel;
+		plainCitations?: boolean;
 		generating?: boolean;
 		error?: string;
 		settingsError?: string;
@@ -61,6 +62,11 @@
 	const next = $derived(versions[index + 1]);
 	const chunks = $derived(selected?.text.split(/(\[#\d+\])/g) ?? []);
 	function cite(ordinal: number) {
+		if (plainCitations) {
+			if (phone) onclose();
+			oncite(ordinal);
+			return;
+		}
 		readerHeight = summaryEl?.parentElement?.getBoundingClientRect().height;
 		readingOrdinal = ordinal;
 		if (!followed.includes(ordinal)) followed = [...followed, ordinal];
@@ -75,7 +81,7 @@
 </script>
 
 {#snippet citationButton(message: SurfaceTurn["numbers"][number], props: Record<string, unknown>)}
-	<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="recap-cite" data-testid="surfacing-recap-cite-{message.number}" data-unread={message.part.surfacingRead === false} data-followed={followed.includes(message.number)} data-ask={view.openAsk?.uuid === message.part.uuid} ariaLabel={`#${message.number}${message.part.surfacingRead === false ? ", unread" : ""}`} onpointerenter={() => onhover?.(message.number)} onpointerleave={() => onhover?.(null)} onfocus={() => onhover?.(message.number)} onblur={() => onhover?.(null)}>#{message.number}</Button>
+	<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="recap-cite" data-testid="surfacing-recap-cite-{message.number}" data-unread={!plainCitations && message.part.surfacingRead === false} data-followed={!plainCitations && followed.includes(message.number)} data-ask={!plainCitations && view.openAsk?.uuid === message.part.uuid} ariaLabel={`#${message.number}${!plainCitations && message.part.surfacingRead === false ? ", unread" : ""}`} onpointerenter={() => onhover?.(message.number)} onpointerleave={() => onhover?.(null)} onfocus={() => onhover?.(message.number)} onblur={() => onhover?.(null)}>#{message.number}</Button>
 {/snippet}
 
 {#snippet citationReader()}
@@ -139,7 +145,7 @@
 					{@const ordinal = /^\[#(\d+)\]$/.exec(chunk)?.[1]}
 					{@const message = ordinal ? view.numbers.find(({ number }) => number === Number(ordinal)) : undefined}
 					{#if message}
-						{#if citationPopover}
+						{#if citationPopover && !plainCitations}
 							<Popover open={readingOrdinal === message.number} onopenchange={(nextOpen) => nextOpen ? cite(message.number) : closeCitation()} ariaLabel={`Cited message #${message.number}`} side="top" class="max-w-[380px]">
 								{#snippet trigger({ props })}{@render citationButton(message, props)}{/snippet}
 								{@render citationReader()}

@@ -574,6 +574,7 @@
 			{#if segment.activity.length > 0 || (final && turn.live)}
 				{@const reply = segment.reply[0]}
 				<TurnActivity latestTurn={turn.id === latestTurnId} newestSettledTurn={turn.id === newestEndedTurnId} {turn} {segment} {final} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
+					onjump={scrollCtrl.requestJump}
 					forkMessageId={reply ? forkMessageIdAtReply(turn, reply) : undefined}
 					model={turn.user?.modelExecution?.actualModel ?? turn.user?.modelExecution?.requestedModel} />
 			{/if}

@@ -6,6 +6,7 @@
 	import { MediaQuery } from "svelte/reactivity";
 	import type { CategorySet } from "../../../contracts/category-set.js";
 	import type { MessageSurfacingStatus, MessageSurfacingPreferences } from "../../../contracts/message-surfacing.js";
+	import { numberTurnMessages } from "../../../turn-message-numbers.js";
 	import { TurnRecapState } from "../../stores/turn-recap.svelte.js";
 	import SurfacingSummary from "./SurfacingSummary.svelte";
 	import { messageSurfacing, sessionSurfaceLevel, setSessionSurfaceLevel, touchSurfaceSession, makeSurfaceDefault } from "../../stores/message-surfacing.svelte.js";
@@ -49,7 +50,7 @@
 	import TurnEconomics from "./TurnEconomics.svelte";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, hasRecap = false }: {
+	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, hasRecap = false }: {
 		turn: Turn;
 		segment: Segment;
 		final: boolean;
@@ -61,6 +62,7 @@
 		model?: string | undefined;
 		providerId?: string | undefined;
 		onsummarize?: (() => void) | undefined;
+		onjump?: (() => void) | undefined;
 		numbered?: boolean;
 		latestTurn?: boolean;
 		newestSettledTurn?: boolean;
@@ -98,9 +100,13 @@
 	const live = $derived(final && turn.live);
 	const showTicker = $derived(live && segment.reply.length === 0 && !segment.handBack);
 	const earlierCount = $derived(Math.max(0, segment.activity.length - ticker.length));
-	const previousMessages = $derived(turn.segments.slice(0, turn.segments.indexOf(segment)).reduce((count, item) => count + item.activity.filter((part) => part.type === "assistant").length + item.reply.length, 0));
+	const numberedMessages = $derived(numberTurnMessages(turn.segments.flatMap((block) => block.activity.flatMap((part) => part.type === "assistant" ? [part] : []))));
 	function messageNumber(index: number): number | undefined {
-		return numbered ? previousMessages + segment.activity.slice(0, index + 1).filter((part) => part.type === "assistant").length : undefined;
+		const part = segment.activity[index];
+		// A live message Jev has yet to number keeps its icon: a predicted number
+		// shifts if another message persists first, and citations would drift.
+		if (part?.type !== "assistant" || (surfacingActive && turn.live && part.surfacingOrdinal == null)) return undefined;
+		return numbered || surfacingActive || summariesOn ? numberedMessages.find(({ uuid }) => uuid === part.uuid)?.surfacingOrdinal : undefined;
 	}
 
 	$effect(() => {
@@ -132,7 +138,8 @@
 	let summarySaving = $state(false);
 	let citedOrdinal = $state<number | null>(null);
 	const summarySettings = $derived(surfacingConfig.status.recap);
-	const summaryEnabled = $derived(surfacingActive && final && !!sessionId && summarySettings.model !== "off");
+	const summariesOn = $derived(surfacingConfig.status.summariesEnabled && summarySettings.model !== "off");
+	const summaryEnabled = $derived(summariesOn && final && !!sessionId);
 	const summaryLabel = $derived(recap.generating ? "✦ Summarising…" : recap.versions.length ? "✦ Summary" : "✦ Summarize");
 	$effect(() => {
 		const id = recapTurnId;
@@ -163,7 +170,7 @@
 	}, pick, (uuid) => { const part = segment.activity.find((part) => part.uuid === uuid); return part?.type === "assistant" ? part : undefined; });
 	onDestroy(() => feedback.dispose());
 	const surface = $derived(surfaceTurn({
-		parts: segment.activity.map((part) => part.type === "assistant" ? feedback.annotate(part) : part), turnParts: turn.segments.flatMap((block) => block.activity.map((part) => part.type === "assistant" ? feedback.annotate(part) : part)),
+		parts: segment.activity.map((part) => part.type === "assistant" ? feedback.annotate(part) : part), turnParts: numberedMessages.map((part) => feedback.annotate(part)),
 		positions: stripLayout(segment, turn, final, now), categorySet: surfacingConfig.categorySet,
 		level, live, latestTurn, latestBlock: final, hasRecap: hasRecap || (summaryEnabled && recap.versions.length > 0 && !recap.error), citedOrdinal, picked, folded, start: turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0,
 	}));
@@ -251,8 +258,22 @@
 			summarySettingsError = error instanceof Error ? error.message : String(error);
 		} finally { summarySaving = false; }
 	}
-	function citeSummary(ordinal: number) {
+	async function citeSummary(ordinal: number) {
 		citedOrdinal = ordinal;
+		if (surfacingActive) return;
+		// Without Jev a citation opens the numbered step log at its line.
+		const target = numberedMessages.find((part) => part.surfacingOrdinal === ordinal);
+		if (!target) return;
+		const index = segment.activity.findIndex((part) => part.uuid === target.uuid);
+		if (index < 0) return void reveal({ sessionId, uuid: target.uuid });
+		await jumpTo(index);
+		panelEl?.querySelector<HTMLElement>(`[data-log-part="${CSS.escape(target.uuid)}"]`)?.focus({ preventScroll: true });
+	}
+	/** Without Jev, hovering a citation marks its step on the activity strip. */
+	function hoverCitation(ordinal: number | null) {
+		const uuid = numberedMessages.find((part) => part.surfacingOrdinal === ordinal)?.uuid;
+		const index = segment.activity.findIndex((part) => part.uuid === uuid);
+		hovered = index >= 0 ? index : null;
 	}
 	function selectLevel(next: SurfaceLevel) {
 		if (sessionId) setSessionSurfaceLevel(sessionId, next);
@@ -276,6 +297,10 @@
 			event.stopPropagation();
 			// Native dialog cancel owns the phone sheet's dismissal.
 			if (!phone.current) { event.preventDefault(); summaryOpen = false; }
+			return;
+		}
+		if (!surfacingActive) {
+			if (event.key === "s" && summaryEnabled) { event.preventDefault(); toggleSummary(); }
 			return;
 		}
 		if (/^\d$/.test(event.key)) { event.preventDefault(); digits = (digits + event.key).slice(-8); return; }
@@ -366,6 +391,7 @@
 	async function jumpTo(i: number) {
 		const part = segment.activity[i];
 		if (!part) return;
+		onjump?.();
 		openTurn();
 		expanded = true;
 		focusUuid = part.uuid;
@@ -399,23 +425,27 @@
 		<div role="status" class="mark-toast" data-testid="surfacing-mark-toast"><span>{feedback.toast.text}</span><Button variant="ghost" size="content" tone="inherit" class="rounded-full px-[10px] h-[24px] max-md:h-[32px] bg-inverse-text/12 font-semibold" data-testid="surfacing-toast-undo" disabled={feedback.saving} onclick={() => feedback.undo()}>Undo</Button></div>
 	{/if}
 	{#if feedback.error && !feedback.pending}<p role="alert" class="mt-[6px] text-[12px] text-error">{feedback.error}</p>{/if}
-	{#if summaryEnabled}
-		<Button variant="ghost" size="content" align="start" tone="inherit" touchTarget class="min-[600px]:hidden w-full min-h-[40px] gap-[8px] py-[8px] text-[13px]" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>
-			<span>{summaryLabel}</span>{#if recap.versions.length && summaryNew > 0}<span class="text-accent font-mono text-[12px]">{summaryNew} new</span>{/if}<Icon name="chevron-right" size={14} class="ml-auto text-text-muted" />
-		</Button>
-		<SurfacingSummary versions={recap.versions} selected={recap.current} open={summaryVisible} phone={phone.current} {live} {view}
-			start={turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0} settings={summarySettings} {level}
-			generating={recap.generating} error={recap.error} settingsError={summarySettingsError} saving={summarySaving}
-			onclose={() => summaryOpen = false} onversion={(version) => recap.selected = version} ongenerate={generateSummary} onretry={retrySummary}
-			onsettings={updateSummarySettings} oncite={citeSummary} onhover={(ordinal) => { citedOrdinal = ordinal; cite(view.numbers.find(({ number }) => number === ordinal)?.part.uuid ?? null); }} foot={summaryMarkRead} />
-	{/if}
+	{#if summaryEnabled}{@render summaryPanel(view, (ordinal) => { citedOrdinal = ordinal; cite(view.numbers.find(({ number }) => number === ordinal)?.part.uuid ?? null); })}{/if}
+{/snippet}
+
+<!-- Phones open the summary from its own row under the strip; wider screens use the head chip. -->
+{#snippet summaryPanel(view: ReturnType<typeof surfaceTurn>, onhover: (ordinal: number | null) => void)}
+	<Button variant="ghost" size="content" align="start" tone="inherit" touchTarget class="min-[600px]:hidden w-full min-h-[40px] gap-[8px] py-[8px] text-[13px]" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>
+		<span>{summaryLabel}</span>{#if recap.versions.length && summaryNew > 0}<span class="text-accent font-mono text-[12px]">{summaryNew} new</span>{/if}<Icon name="chevron-right" size={14} class="ml-auto text-text-muted" />
+	</Button>
+	<SurfacingSummary versions={recap.versions} selected={recap.current} open={summaryVisible} phone={phone.current} {live} {view}
+		plainCitations={!surfacingActive}
+		start={turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0} settings={summarySettings} {level}
+		generating={recap.generating} error={recap.error} settingsError={summarySettingsError} saving={summarySaving}
+		onclose={() => summaryOpen = false} onversion={(version) => recap.selected = version} ongenerate={generateSummary} onretry={retrySummary}
+		onsettings={updateSummarySettings} oncite={citeSummary} {onhover} foot={surfacingActive ? summaryMarkRead : undefined} />
 {/snippet}
 
 {#snippet summaryMarkRead(view: ReturnType<typeof surfaceTurn>)}
 	{#if view.unreadPartIds.length}<Button variant="ghost" size="content" tone="secondary" touchTarget class="h-[24px] rounded-full bg-chip px-[10px] font-sans text-[12px] font-medium" disabled={readSaving} data-testid="surfacing-mark-read" onclick={() => { void writeRead(view.unreadPartIds, true); }}>✓ Mark {view.unreadPartIds.length} read</Button>{/if}
 {/snippet}
 
-<div bind:this={panelEl} data-turn-id={turn.id} data-minimised={minimised} role={surfacingActive ? "group" : undefined} aria-label={surfacingActive ? "Turn activity" : undefined} onkeydown={surfacingActive ? surfaceCommand : undefined} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
+<div bind:this={panelEl} data-turn-id={turn.id} data-minimised={minimised} role={surfacingActive || summaryEnabled ? "group" : undefined} aria-label={surfacingActive || summaryEnabled ? "Turn activity" : undefined} onkeydown={surfacingActive || summaryEnabled ? surfaceCommand : undefined} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
 	<AssistantHeader message={segment.reply[0]} {sessionId} {forkMessageId} {model} {providerId} createdAt={segment.reply.length > 0 ? undefined : segment.activity[0]?.createdAt} />
 	<div class="md:ml-[42px]">
 		<!-- The active turn is a keyboard navigation group; inactive turns add no tab stop. -->
@@ -448,11 +478,11 @@
 						<span>Click to {expanded ? "hide" : "show"} the step log</span>
 					</div>
 				</Tooltip>
-				{#if surfacingActive}
+				{#if surfacingActive || summaryEnabled}
 					<div class="surface-head-chips" data-surfacing-region="head-chips">
-						{#if surface.openAsk}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium bg-status-ask/18 text-status-ask" data-testid="surfacing-ask-chip" onclick={() => revealMessage(surface.openAsk)}>? #{surface.openAsk.surfacingOrdinal}</Button>{/if}
-						{#if surface.hasReadState}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium {surface.unreadCount ? 'bg-accent/18 text-accent' : 'bg-chip text-text-secondary'}" data-testid="surfacing-head-unread" onclick={() => revealMessage(surface.nextUnread?.part ?? null)}>{surface.unreadCount ? `${surface.unreadCount} unread` : "All read ✓"}</Button>{/if}
-						{@render surfacingRegions.headChips?.(surface)}
+						{#if surfacingActive && surface.openAsk}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium bg-status-ask/18 text-status-ask" data-testid="surfacing-ask-chip" onclick={() => revealMessage(surface.openAsk)}>? #{surface.openAsk.surfacingOrdinal}</Button>{/if}
+						{#if surfacingActive && surface.hasReadState}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium {surface.unreadCount ? 'bg-accent/18 text-accent' : 'bg-chip text-text-secondary'}" data-testid="surfacing-head-unread" onclick={() => revealMessage(surface.nextUnread?.part ?? null)}>{surface.unreadCount ? `${surface.unreadCount} unread` : "All read ✓"}</Button>{/if}
+						{#if surfacingActive}{@render surfacingRegions.headChips?.(surface)}{/if}
 						{#if summaryEnabled}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="{minimised ? '' : 'max-[599px]:hidden'} shrink-0 h-[24px] rounded-full px-[9px] text-[12px] bg-chip text-text-secondary" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>{#if minimised}<span class="max-[599px]:sr-only">{summaryLabel}</span><span class="min-[600px]:hidden" aria-hidden="true">✦</span>{:else}{summaryLabel}{/if}{#if recap.versions.length && summaryNew > 0}<span class="text-accent {minimised ? 'max-[599px]:hidden' : ''}">· {summaryNew} new</span>{/if}</Button>{/if}
 					</div>
 				{/if}
@@ -481,6 +511,7 @@
 				<ActivityStrip {turn} {segment} {final} {now} {running} active={hovered} emphasis={skillSteps}
 					onhover={(index) => { hovered = index; detailsOpen = index !== null; }} onjump={jumpTo} />
 			</div>
+			{#if summaryEnabled}{@render summaryPanel(surface, hoverCitation)}{/if}
 			{/if}
 			{#if onsummarize && !minimised}
 				<Button variant="ghost-accent" size="content" align="start" touchTarget class="md:hidden w-full gap-[8px] py-[8px] text-[13px]" onclick={onsummarize}>
@@ -497,8 +528,8 @@
 				{#each expanded ? segment.activity : ticker as part, index (part.uuid)}
 					{@const i = expanded ? index : earlierCount + index}
 					{@const latestLiveStep = live && i === segment.activity.length - 1}
-					<div data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
-						<ActivityRow {part} {liveTasks} {taskListedAt} live={latestLiveStep} duration={durations?.[i]} highlight={part.uuid === focusUuid} messageNumber={part.type === "assistant" ? surfacingActive ? part.surfacingOrdinal : messageNumber(i) : undefined} />
+					<div data-log-part={part.uuid} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
+						<ActivityRow {part} {liveTasks} {taskListedAt} live={latestLiveStep} duration={durations?.[i]} highlight={part.uuid === focusUuid} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} />
 						{#if surfacingActive && expanded && part.type === "assistant"}
 							{@const pin = surface.messages.find((message) => message.part.uuid === part.uuid)}
 							{#if pin}

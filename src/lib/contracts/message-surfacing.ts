@@ -12,7 +12,9 @@ export const RecapSettingsSchema = Schema.Struct({
 });
 export const TurnsOpenSchema = Schema.Literal("expanded", "auto", "minimised");
 export const MessageSurfacingSettingsSchema = Schema.Struct({
+	// Jev alone needs a TypeSafe key. Summaries use the Claude subscription.
 	enabled: Schema.Boolean,
+	summariesEnabled: Schema.Boolean,
 	defaultLevel: SurfacingLevelSchema,
 	turnsOpen: Schema.optionalWith(TurnsOpenSchema, {
 		default: () => "auto" as const,
@@ -25,9 +27,10 @@ export type MessageSurfacingPreferences =
 
 export const DEFAULT_MESSAGE_SURFACING_SETTINGS: MessageSurfacingPreferences = {
 	enabled: false,
+	summariesEnabled: true,
 	defaultLevel: "balanced",
 	turnsOpen: "auto",
-	recap: { model: "sonnet", when: "turn-end" },
+	recap: { model: "sonnet", when: "on-request" },
 	// Claude's catalog alias follows the newest Opus without starting a probe.
 	tuningModel: "opus",
 };
@@ -46,6 +49,7 @@ export type MessageSurfacingStatus = typeof MessageSurfacingStatusSchema.Type;
 
 export const MessageSurfacingPatchSchema = Schema.Struct({
 	enabled: Schema.optional(Schema.Boolean),
+	summariesEnabled: Schema.optional(Schema.Boolean),
 	apiKey: Schema.optional(Schema.NullOr(Schema.String)),
 	defaultLevel: Schema.optional(SurfacingLevelSchema),
 	turnsOpen: Schema.optional(TurnsOpenSchema),

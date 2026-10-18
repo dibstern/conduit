@@ -7,9 +7,10 @@ Scenario Outline: General shows key state and saves opt-in preferences
   When I open settings to Surfacing
   Then Surfacing shows the <key_state> key state without a saved secret
   And Surfacing is off with its disclosure visible
+  And Jev availability matches the <key_state> key state
   And the settings-panel region visually matches surfacing-general-<key_state>-<viewport>-<theme> at <threshold> percent
-  When I enable Surfacing and choose Key as the default
-  Then Surfacing preferences are saved through the daemon
+  When I save a key if needed and enable Jev with Key as the default
+  Then Surfacing preferences are saved through the daemon from the <key_state> key state
   And summary model timing and tuning persist while Surfacing is off
 
 Examples:
