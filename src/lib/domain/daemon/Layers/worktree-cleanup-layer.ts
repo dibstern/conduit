@@ -18,6 +18,7 @@ import {
 	type WorktreeCleanupReport,
 } from "../../../contracts/worktree.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
+import { stopQuiescentSettledAgents } from "../../../session/stop-settled-agents.js";
 import { worktreeCleanupCandidateFilter } from "../../../session/worktree-cleanup-rules.js";
 import { cleanUpProjectWorktrees } from "../../../session/worktree-cleanup-sweep.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
@@ -68,10 +69,6 @@ export const WorktreeCleanupLive = (configDir: string) =>
 						failed: [],
 					};
 					const now = yield* Clock.currentTimeMillis;
-					if (
-						worktreeCleanupCandidateFilter(yield* getSetting, now) === undefined
-					)
-						return report;
 					const projects = (yield* allProjects.pipe(
 						Effect.provideService(ProjectRegistryTag, registry),
 					)).filter(
@@ -82,6 +79,32 @@ export const WorktreeCleanupLive = (configDir: string) =>
 							let relay = Option.getOrUndefined(
 								yield* cache.peek(project.slug),
 							);
+							if (relay !== undefined) {
+								const context = relay.rpcWsHandler.context;
+								if (context === undefined)
+									return yield* Effect.fail(
+										new Error("Project relay context is unavailable"),
+									);
+								yield* stopQuiescentSettledAgents(now).pipe(
+									Effect.provide(yield* context),
+									Effect.catchAllCause((cause) =>
+										Cause.isInterruptedOnly(cause)
+											? Effect.failCause(cause)
+											: Effect.logWarning(
+													"Could not stop settled project agents",
+													{
+														projectSlug: project.slug,
+														cause: Cause.pretty(cause),
+													},
+												),
+									),
+								);
+							}
+							if (
+								worktreeCleanupCandidateFilter(yield* getSetting, now) ===
+								undefined
+							)
+								return;
 							if (relay === undefined) {
 								const paths = yield* readColdWorktreeCleanupCandidates(
 									project,

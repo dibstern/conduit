@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { SqlClient } from "@effect/sql";
 import {
+	Cause,
 	Context,
 	Deferred,
 	Effect,
@@ -744,6 +745,8 @@ const dispatchEngineTurn = (
 		const driver = account.driver;
 		const orchestrationEngine = yield* OrchestrationEngineTag;
 		const dispatchFibers = yield* ProviderTurnDispatchFibersTag;
+		const config = yield* ConfigTag;
+		const readQuery = yield* ReadQueryEffectTag;
 		const previousProviderId =
 			yield* orchestrationEngine.getProviderForSessionEffect(
 				resolvedInput.sessionId,
@@ -844,6 +847,25 @@ const dispatchEngineTurn = (
 			),
 			Effect.onInterrupt(() => restorePreviousBinding),
 			Effect.ensuring(Deferred.succeed(accepted, undefined)),
+			// The turn's outbox row is terminal here, so cleanup can now stop a
+			// settled session's agent. Adopted runners wait for the hourly run.
+			Effect.ensuring(
+				Effect.gen(function* () {
+					if (
+						config.requestWorktreeCleanup &&
+						(yield* readQuery.getSession(resolvedInput.sessionId))
+							?.settled_at != null
+					)
+						yield* config.requestWorktreeCleanup();
+				}).pipe(
+					Effect.catchAllCause((cause) =>
+						Effect.logWarning("Could not request cleanup after turn", {
+							sessionId: resolvedInput.sessionId,
+							cause: Cause.pretty(cause),
+						}),
+					),
+				),
+			),
 		);
 		const fiber = yield* FiberMap.run(
 			dispatchFibers,

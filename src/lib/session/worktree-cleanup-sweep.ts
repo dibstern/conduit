@@ -45,6 +45,28 @@ export const readWorktreeCleanupPaths = Effect.gen(function* () {
 			AND json_extract(events.data, '$.origin') = 'conduit'`;
 });
 
+/** Everything quiescence reads for one session, apart from its viewers and agent. */
+export const readSessionQuiescence = (now: number, sessionId: string) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const backgroundOf = yield* BackgroundLivenessTag;
+		const retries = yield* Effect.serviceOption(SessionRetriesTag);
+		return {
+			facts: (yield* readPersistedAutoSettleFacts(now, sessionId)).get(
+				sessionId,
+			),
+			hasPendingTurn:
+				(yield* sql<{ found: number }>`SELECT EXISTS (
+					SELECT 1 FROM provider_command_outbox
+					WHERE session_id = ${sessionId} AND effect_type = 'send_turn'
+					AND status IN ('pending', 'running', 'retryable_failed')
+				) AS found`)[0]?.found === 1,
+			hasLiveBackgroundWork: backgroundOf(sessionId) !== undefined,
+			isRetrying:
+				retries._tag === "Some" && retries.value(sessionId) !== undefined,
+		};
+	});
+
 export const cleanUpProjectWorktrees = (
 	getSetting: Effect.Effect<WorktreeCleanup>,
 	getProjectFolders: Effect.Effect<readonly string[]>,
@@ -55,14 +77,11 @@ export const cleanUpProjectWorktrees = (
 		const worktrees = yield* WorktreeServiceTag;
 		const workspace = yield* SessionWorkspaceTag;
 		const inbox = yield* SessionInboxTag;
-		const sql = yield* SqlClient.SqlClient;
 		const localPty = yield* Effect.serviceOption(LocalPtyServiceTag);
 		const instances = yield* OpenCodeInstancesTag;
 		const sessionGit = yield* Effect.serviceOption(SessionGitServiceTag);
 		const viewers = yield* WebSocketHandlerTag;
-		const backgroundOf = yield* BackgroundLivenessTag;
 		const agentIsLive = yield* AgentLivenessTag;
-		const retries = yield* Effect.serviceOption(SessionRetriesTag);
 		const report: {
 			removed: WorktreeCleanupEntry[];
 			kept: WorktreeCleanupEntry[];
@@ -74,22 +93,10 @@ export const cleanUpProjectWorktrees = (
 		const sessionIds = new Set(paths.map(({ session_id }) => session_id));
 		const stateOf = (sessionId: string) =>
 			Effect.gen(function* () {
-				const facts = (yield* readPersistedAutoSettleFacts(now, sessionId)).get(
-					sessionId,
-				);
 				return {
-					facts,
-					hasPendingTurn:
-						(yield* sql<{ found: number }>`SELECT EXISTS (
-							SELECT 1 FROM provider_command_outbox
-							WHERE session_id = ${sessionId} AND effect_type = 'send_turn'
-							AND status IN ('pending', 'running', 'retryable_failed')
-						) AS found`)[0]?.found === 1,
+					...(yield* readSessionQuiescence(now, sessionId)),
 					hasViewer: viewers.getClientsForSession(sessionId).length > 0,
-					hasLiveBackgroundWork: backgroundOf(sessionId) !== undefined,
 					hasLiveAgent: yield* agentIsLive(sessionId),
-					isRetrying:
-						retries._tag === "Some" && retries.value(sessionId) !== undefined,
 				};
 			});
 		const blockedReason = (

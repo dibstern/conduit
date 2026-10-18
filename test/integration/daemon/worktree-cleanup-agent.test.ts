@@ -1,10 +1,15 @@
 /*
  * Failure modes, recorded before implementation:
- * - Settled sessions lose their owned checkout while the Claude runner lives,
- *   or Clean up now omits the exact "Agent process is running" keep reason.
+ * - Settled idle agents remain live, or checkout removal runs before stop ends.
+ * - Settling interrupts foreground turns or live background work.
+ * - Turn/background completion does not request another cleanup run.
+ * - Off disables agent stops, or stops unbind the provider conversation.
+ * - A message racing stop is lost, forks its conversation, or uses a dying runner.
+ * - Unsettling starts an agent, or cleanup ends sessions without live agents.
  * - An ending, stopping, or idle-exiting runner reads as dead before OS exit.
  * - Exited runners permanently prevent the next eligible cleanup removal.
- * - Daemon restart forgets an adopted runner until its next provider command.
+ * - Daemon restart forgets a settled adopted runner until its next command.
+ * - One failed stop prevents the remaining stops or the checkout sweep.
  * - A failed end_session still permits immediate delete-time checkout removal.
  * - A Claude-only guard incorrectly retains an eligible OpenCode checkout.
  * Exercise the built daemon, fake process SDK, real Git checkouts and runner
@@ -12,22 +17,32 @@
  */
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
+import type { WorktreeCleanup } from "../../../src/lib/contracts/worktree.js";
 import {
+	CancelSession,
 	CleanUpWorktreesNow,
 	CreateSession,
 	DeleteSession,
 	ListDaemonSessions,
-	ReloadProviderSession,
 	SetSessionSettled,
 	SetWorktreeCleanupSetting,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
-import { ProcessHarness } from "../../helpers/process-harness.js";
+import {
+	ProcessHarness,
+	responseChunks,
+} from "../../helpers/process-harness.js";
 
 const gitOverrides = [
 	"GIT_DIR",
@@ -58,7 +73,7 @@ const timestamp = new Date().toISOString().replaceAll(/[:.]/g, "-");
 const artifact = `test-results/worktree-cleanup-agent-${timestamp}.json`;
 const outcomes: Record<string, unknown>[] = [];
 
-describe("Worktree cleanup guards live agents through the built daemon", () => {
+describe("Settling stops quiescent agents through the built daemon", () => {
 	let harness: ProcessHarness | undefined;
 	let evidence: Record<string, unknown> = {};
 	const checkouts: Array<{ sessionId: string; path: string; branch: string }> =
@@ -185,15 +200,19 @@ describe("Worktree cleanup guards live agents through the built daemon", () => {
 			expect(result.failed).toEqual([]);
 			return result;
 		};
-		const settle = async (sessionId: string) => {
-			await sendRpcRequest(
+		const settle = (sessionId: string, settled = true) =>
+			sendRpcRequest(socket, new SetSessionSettled({ sessionId, settled }));
+		const set = (worktreeCleanup: WorktreeCleanup) =>
+			sendRpcRequest(
 				socket,
-				new SetSessionSettled({ sessionId, settled: true }),
+				new SetWorktreeCleanupSetting({ worktreeCleanup }),
 			);
-			await sendRpcRequest(
-				socket,
-				new SetWorktreeCleanupSetting({ worktreeCleanup: cleanup }),
-			);
+		const enable = async (session: { path: string }) => {
+			// Keep automatic requests harmless until the manual run observes removal.
+			writeFileSync(join(session.path, "base.txt"), "cleanup guard\n");
+			await set(cleanup);
+			await sweep("drain setting request");
+			git(session.path, "restore", "base.txt");
 		};
 		const send = async (sessionId: string) => {
 			const browser = await fixture.connect();
@@ -210,7 +229,7 @@ describe("Worktree cleanup guards live agents through the built daemon", () => {
 				throw new Error("Missing runner PID proof");
 			return runner;
 		};
-		return { fixture, socket, create, send, settle, sweep };
+		return { fixture, socket, create, send, settle, set, enable, sweep };
 	}
 
 	function alive(pid: number) {
@@ -231,6 +250,44 @@ describe("Worktree cleanup guards live agents through the built daemon", () => {
 					.filter(Boolean)
 					.map((line) => JSON.parse(line) as Record<string, unknown>)
 			: [];
+	}
+
+	function stopCommands(fixture: ProcessHarness, sessionId?: string) {
+		const path = join(fixture.root, "end-session-commands.ndjson");
+		return existsSync(path)
+			? readFileSync(path, "utf8")
+					.trim()
+					.split("\n")
+					.filter(Boolean)
+					.map(
+						(line) =>
+							JSON.parse(line) as { sessionId: string; unbind: boolean },
+					)
+					.filter(
+						(command) =>
+							sessionId === undefined || command.sessionId === sessionId,
+					)
+			: [];
+	}
+
+	function sessionState(fixture: ProcessHarness, sessionId: string) {
+		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		try {
+			return db
+				.prepare(
+					`SELECT provider, settled_at, (
+						SELECT json_extract(value, '$.resumeSessionId') FROM provider_state
+						WHERE session_id = sessions.id AND key = 'nativeThread:' || sessions.provider
+					) AS providerConversationId FROM sessions WHERE id = ?`,
+				)
+				.get(sessionId) as {
+				provider: string;
+				providerConversationId: string | null;
+				settled_at: number | null;
+			};
+		} finally {
+			db.close();
+		}
 	}
 
 	function kept(session: { sessionId: string; path: string }) {
@@ -257,6 +314,7 @@ describe("Worktree cleanup guards live agents through the built daemon", () => {
 					mark.kind.startsWith("runner-"),
 				);
 				evidence["sdk"] = sdkProof(fixture);
+				evidence["stopCommands"] = stopCommands(fixture);
 				if (task.result?.errors?.length)
 					evidence["logs"] = fixture.logTail.slice(-4000);
 				await fixture.dispose();
@@ -280,21 +338,24 @@ describe("Worktree cleanup guards live agents through the built daemon", () => {
 		}
 	});
 
-	it("keeps a settled live Claude runner with its reason and removes its worktree after exit", async () => {
-		const { fixture, create, send, settle, sweep } = await start();
+	it("stops a settled idle agent before removing its worktree in the same cleanup run", async () => {
+		const { fixture, create, send, settle, enable, sweep } = await start();
 		const session = await create("settled live agent");
 		const runner = await send(session.sessionId);
+		const failure = join(fixture.root, `fail-end-session-${session.sessionId}`);
+		writeFileSync(failure, "fail\n");
 		await settle(session.sessionId);
+		await enable(session);
 		expect(alive(runner.pid)).toBe(true);
-		expect((await sweep("settled live runner")).kept).toContainEqual(
+		expect((await sweep("failed stop keeps live runner")).kept).toContainEqual(
 			kept({ sessionId: session.sessionId, path: session.path }),
 		);
 		expect(existsSync(session.path)).toBe(true);
-		process.kill(runner.pid, "SIGTERM");
-		await vi.waitFor(() => expect(alive(runner.pid)).toBe(false), {
-			timeout: 10_000,
-		});
-		const result = await sweep("runner exited");
+		rmSync(failure);
+		const before = stopCommands(fixture, session.sessionId).length;
+		const result = await sweep("stop and remove in one run");
+		expect(alive(runner.pid)).toBe(false);
+		expect(stopCommands(fixture, session.sessionId)).toHaveLength(before + 1);
 		expect(result.removed).toContainEqual({
 			projectSlug: "process-test",
 			sessionId: session.sessionId,
@@ -307,60 +368,299 @@ describe("Worktree cleanup guards live agents through the built daemon", () => {
 		).toBeTruthy();
 	}, 60_000);
 
-	it("keeps a worktree while end-session has stopped the SDK but its process is still alive", async () => {
-		const { fixture, socket, create, send, settle, sweep } = await start();
-		const session = await create("ending live agent");
+	it("settles mid-turn without stopping until the completed turn requests cleanup", async () => {
+		const { fixture, create, send, settle, sweep } = await start();
+		const session = await create("settled during turn");
 		const runner = await send(session.sessionId);
-		await settle(session.sessionId);
-		writeFileSync(
-			join(fixture.root, "claude", "conduit-test-hold-stop"),
-			"hold\n",
-		);
-		const ending = sendRpcRequest(
-			socket,
-			new ReloadProviderSession({
-				sessionId: session.sessionId,
-				commandId: randomUUID(),
-			}),
-			{ requestTimeoutMs: 30_000 },
+		const browser = await fixture.connect(session.sessionId);
+		const turn = browser.send(session.sessionId, "local-work-turn", 60_000);
+		void turn.catch(() => {});
+		await vi.waitFor(
+			() =>
+				expect(
+					sdkProof(fixture).some(
+						(mark) =>
+							mark["kind"] === "pre-assistant-held" &&
+							mark["prompt"] === "local-work-turn",
+					),
+				).toBe(true),
+			{ timeout: 15_000 },
 		);
 		try {
+			await settle(session.sessionId);
+			await sweep("settled during held foreground turn");
+			expect(alive(runner.pid)).toBe(true);
+			expect(stopCommands(fixture, session.sessionId)).toEqual([]);
+			expect(existsSync(session.path)).toBe(true);
+		} finally {
+			writeFileSync(join(fixture.root, "release-local-work"), "release\n");
+		}
+		await turn;
+		await vi.waitFor(() => expect(alive(runner.pid)).toBe(false), {
+			timeout: 15_000,
+		});
+		expect(stopCommands(fixture, session.sessionId)).toEqual([
+			{ sessionId: session.sessionId, unbind: false },
+		]);
+		await browser.close();
+	}, 90_000);
+
+	it("stops only after live background work ends and requests cleanup", async () => {
+		const { fixture, create, settle, sweep } = await start();
+		const session = await create("settled during background work");
+		const browser = await fixture.connect(session.sessionId);
+		expect(
+			(
+				await browser.send(session.sessionId, "upgrade-background-work", 60_000)
+			).chunks.join(""),
+		).toBe(responseChunks("upgrade-background-work").join(""));
+		const runner = fixture.marks.find(
+			(mark) =>
+				mark.kind === "runner-started" && mark.sessionId === session.sessionId,
+		);
+		if (runner?.kind !== "runner-started")
+			throw new Error("Missing background runner");
+		expect(
+			sdkProof(fixture).some(
+				(mark) =>
+					mark["kind"] === "background-work" && mark["phase"] === "started",
+			),
+		).toBe(true);
+		await settle(session.sessionId);
+		await sweep("settled with live background work");
+		expect(alive(runner.pid)).toBe(true);
+		expect(stopCommands(fixture, session.sessionId)).toEqual([]);
+		writeFileSync(
+			join(fixture.root, "release-upgrade-background"),
+			"release\n",
+		);
+		await vi.waitFor(() => expect(alive(runner.pid)).toBe(false), {
+			timeout: 15_000,
+		});
+		expect(
+			sdkProof(fixture).some(
+				(mark) =>
+					mark["kind"] === "background-work" && mark["phase"] === "completed",
+			),
+		).toBe(true);
+		expect(stopCommands(fixture, session.sessionId)).toEqual([
+			{ sessionId: session.sessionId, unbind: false },
+		]);
+		await browser.close();
+	}, 90_000);
+
+	it.each([
+		"failed",
+		"interrupted",
+	] as const)("cleans up a settled session after its %s turn ends", async (ending) => {
+		const { fixture, socket, create, send, settle, sweep } = await start();
+		const session = await create(`settled ${ending} turn`);
+		const runner = await send(session.sessionId);
+		const browser = await fixture.connect(session.sessionId);
+		const cursor = browser.frames.length;
+		const turn = browser.send(
+			session.sessionId,
+			ending === "failed"
+				? "approval-failure-settled"
+				: "approval-settled-interrupt",
+			60_000,
+		);
+		void turn.catch(() => {});
+		const approval = await browser.waitFor(
+			(message) => message["type"] === "permission_pending",
+			cursor,
+			15_000,
+		);
+		await settle(session.sessionId);
+		await sweep("settled while approval holds the turn");
+		expect(alive(runner.pid)).toBe(true);
+		expect(stopCommands(fixture, session.sessionId)).toEqual([]);
+		if (ending === "failed") {
+			await browser.answerApproval(approval, "allow");
+			await turn;
+		} else {
+			await sendRpcRequest(
+				socket,
+				new CancelSession({
+					sessionId: session.sessionId,
+					commandId: randomUUID(),
+				}),
+			);
+		}
+		await vi.waitFor(() => expect(alive(runner.pid)).toBe(false), {
+			timeout: 15_000,
+		});
+		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		try {
+			const turns = db
+				.prepare(
+					"SELECT state FROM turns WHERE session_id = ? ORDER BY requested_at",
+				)
+				.all(session.sessionId);
+			expect(turns).toEqual([
+				{ state: "completed" },
+				{ state: ending === "failed" ? "error" : "interrupted" },
+			]);
+			evidence["turns"] = turns;
+		} finally {
+			db.close();
+		}
+		expect(stopCommands(fixture, session.sessionId)).toEqual([
+			{ sessionId: session.sessionId, unbind: false },
+		]);
+		await browser.close();
+	}, 90_000);
+
+	it("stops with cleanup Off, resumes the same conversation on the next message, and starts nothing on unsettle", async () => {
+		const { fixture, create, send, settle, sweep } = await start();
+		const session = await create("settle while cleanup Off");
+		const first = await send(session.sessionId);
+		const before = await vi.waitFor(
+			() => {
+				const state = sessionState(fixture, session.sessionId);
+				expect(state.providerConversationId).toEqual(expect.any(String));
+				return state;
+			},
+			{ timeout: 15_000 },
+		);
+		await settle(session.sessionId);
+		await vi.waitFor(() => expect(alive(first.pid)).toBe(false), {
+			timeout: 15_000,
+		});
+		expect(existsSync(session.path)).toBe(true);
+		expect(await sweep("Off still stops but never removes")).toEqual({
+			removed: [],
+			kept: [],
+			failed: [],
+		});
+		expect(sessionState(fixture, session.sessionId)).toMatchObject({
+			provider: before.provider,
+			providerConversationId: before.providerConversationId,
+		});
+		const commands = stopCommands(fixture, session.sessionId);
+		expect(commands).toEqual([{ sessionId: session.sessionId, unbind: false }]);
+		const browser = await fixture.connect(session.sessionId);
+		const prompt = "after-settle-stop";
+		expect(
+			(await browser.send(session.sessionId, prompt, 60_000)).chunks.join(""),
+		).toBe(responseChunks(prompt).join(""));
+		const runners = fixture.marks.filter(
+			(mark) =>
+				mark.kind === "runner-started" && mark.sessionId === session.sessionId,
+		);
+		expect(runners).toHaveLength(2);
+		const second = runners.at(-1);
+		if (second?.kind !== "runner-started")
+			throw new Error("Missing resumed runner");
+		expect(second.pid).not.toBe(first.pid);
+		expect(
+			fixture.claudeOptions().find((options) => options.prompt === prompt)
+				?.resumeId,
+		).toBe(before.providerConversationId);
+		expect(
+			sessionState(fixture, session.sessionId).providerConversationId,
+		).toBe(before.providerConversationId);
+		await settle(session.sessionId);
+		await vi.waitFor(() => expect(alive(second.pid)).toBe(false), {
+			timeout: 15_000,
+		});
+		const queryCount = sdkProof(fixture).filter(
+			(mark) => mark["kind"] === "query",
+		).length;
+		const stopCount = stopCommands(fixture, session.sessionId).length;
+		const runnerCount = fixture.marks.filter(
+			(mark) => mark.kind === "runner-started",
+		).length;
+		await settle(session.sessionId, false);
+		await sweep("unsettling starts no agent");
+		expect(
+			fixture.marks.filter((mark) => mark.kind === "runner-started"),
+		).toHaveLength(runnerCount);
+		expect(
+			sdkProof(fixture).filter((mark) => mark["kind"] === "query"),
+		).toHaveLength(queryCount);
+		expect(stopCommands(fixture, session.sessionId)).toHaveLength(stopCount);
+		expect(alive(second.pid)).toBe(false);
+		evidence["conversation"] = {
+			before,
+			after: sessionState(fixture, session.sessionId),
+			queryCount,
+		};
+		await browser.close();
+	}, 90_000);
+
+	it("replies in the same conversation when a message reaches admission while stop holds the inbox", async () => {
+		const { fixture, create, send, settle, sweep } = await start();
+		const session = await create("message during settle-stop");
+		const runner = await send(session.sessionId);
+		const before = await vi.waitFor(
+			() => {
+				const state = sessionState(fixture, session.sessionId);
+				expect(state.providerConversationId).toEqual(expect.any(String));
+				return state;
+			},
+			{ timeout: 15_000 },
+		);
+		const hold = join(fixture.root, "claude", "conduit-test-hold-stop");
+		writeFileSync(hold, "hold\n");
+		await settle(session.sessionId);
+		await vi.waitFor(
+			() =>
+				expect(
+					sdkProof(fixture).some((mark) => mark["kind"] === "stop-held"),
+				).toBe(true),
+			{ timeout: 15_000 },
+		);
+		expect(alive(runner.pid)).toBe(true);
+		expect(existsSync(session.path)).toBe(true);
+		const browser = await fixture.connect(session.sessionId);
+		const prompt = "message-during-settle-stop";
+		const reply = browser.send(session.sessionId, prompt, 60_000);
+		void reply.catch(() => {});
+		try {
+			// Sending clears settled_at before inbox admission. This durable write
+			// proves the request reached the held lock before the stop is released.
 			await vi.waitFor(
 				() =>
 					expect(
-						sdkProof(fixture).some((mark) => mark["kind"] === "stop-held"),
-					).toBe(true),
-				{ timeout: 10_000 },
+						sessionState(fixture, session.sessionId).settled_at,
+					).toBeNull(),
+				{ timeout: 15_000 },
 			);
 			expect(alive(runner.pid)).toBe(true);
 			expect(
-				(await sweep("end-session waiting for SDK interrupt")).kept,
-			).toContainEqual(
-				kept({ sessionId: session.sessionId, path: session.path }),
+				sdkProof(fixture).filter((mark) => mark["kind"] === "query"),
+			).toHaveLength(1);
+			evidence["admissionDuringStop"] = sessionState(
+				fixture,
+				session.sessionId,
 			);
-			expect(existsSync(session.path)).toBe(true);
 		} finally {
+			rmSync(hold, { force: true });
 			writeFileSync(join(fixture.root, "release-switch-stop"), "release\n");
-			await ending;
 		}
-		await vi.waitFor(() => expect(alive(runner.pid)).toBe(false), {
-			timeout: 10_000,
-		});
+		expect((await reply).chunks.join("")).toBe(responseChunks(prompt).join(""));
+		expect(alive(runner.pid)).toBe(false);
 		expect(
-			(await sweep("end-session exited")).removed.some(
-				({ sessionId }) => sessionId === session.sessionId,
-			),
-		).toBe(true);
-		expect(existsSync(session.path)).toBe(false);
+			fixture.claudeOptions().find((options) => options.prompt === prompt)
+				?.resumeId,
+		).toBe(before.providerConversationId);
+		expect(
+			sessionState(fixture, session.sessionId).providerConversationId,
+		).toBe(before.providerConversationId);
+		await sweep("message racing stop finished");
+		expect(stopCommands(fixture, session.sessionId)).toEqual([
+			{ sessionId: session.sessionId, unbind: false },
+		]);
+		await browser.close();
 	}, 60_000);
 
 	it("keeps an idle-exiting runner after stop is requested until its OS process exits", async () => {
-		const { fixture, create, send, settle, sweep } = await start({
+		const { fixture, create, send, settle, enable, sweep } = await start({
 			runnerLifecycle: { idleTimeoutMs: 1500, idleExitDelayMs: 1500 },
 		});
 		const session = await create("idle-exiting live agent");
 		const runner = await send(session.sessionId);
-		await settle(session.sessionId);
 		await vi.waitFor(
 			() =>
 				expect(
@@ -374,6 +674,12 @@ describe("Worktree cleanup guards live agents through the built daemon", () => {
 		);
 		process.kill(runner.pid, "SIGSTOP");
 		try {
+			writeFileSync(
+				join(fixture.root, `fail-end-session-${session.sessionId}`),
+				"fail\n",
+			);
+			await settle(session.sessionId);
+			await enable(session);
 			expect(alive(runner.pid)).toBe(true);
 			expect(
 				(await sweep("idle-exit stop requested, process suspended")).kept,
@@ -395,11 +701,14 @@ describe("Worktree cleanup guards live agents through the built daemon", () => {
 		expect(existsSync(session.path)).toBe(false);
 	}, 60_000);
 
-	it("adopts a live runner before startup cleanup without another provider command", async () => {
-		const { fixture, create, send, settle, sweep } = await start();
+	it("stops a settled adopted runner through the manual hourly-backstop path", async () => {
+		const { fixture, create, send, settle, enable, sweep } = await start();
 		const session = await create("restart live agent");
 		const runner = await send(session.sessionId);
+		const failure = join(fixture.root, `fail-end-session-${session.sessionId}`);
+		writeFileSync(failure, "fail\n");
 		await settle(session.sessionId);
+		await enable(session);
 		await fixture.kill();
 		expect(alive(runner.pid)).toBe(true);
 		await fixture.restart({ startupTimeoutMs: 120_000 });
@@ -422,7 +731,60 @@ describe("Worktree cleanup guards live agents through the built daemon", () => {
 		expect(
 			sdkProof(fixture).filter((mark) => mark["kind"] === "query"),
 		).toHaveLength(1);
+		rmSync(failure);
+		const result = await sweep("hourly backstop after adoption");
+		expect(alive(runner.pid)).toBe(false);
+		expect(
+			result.removed.some(({ sessionId }) => sessionId === session.sessionId),
+		).toBe(true);
+		expect(
+			sdkProof(fixture).filter((mark) => mark["kind"] === "query"),
+		).toHaveLength(1);
 	}, 60_000);
+
+	it("continues stopping other sessions and sweeping after one stop fails, without ending dead runners", async () => {
+		const { fixture, create, send, settle, enable, sweep } = await start();
+		const failed = await create("failed settle-stop");
+		const healthy = await create("healthy settle-stop");
+		const neverStarted = await create("no runner ever started");
+		const exited = await create("runner exited before settling");
+		const failedRunner = await send(failed.sessionId);
+		const healthyRunner = await send(healthy.sessionId);
+		const exitedRunner = await send(exited.sessionId);
+		process.kill(exitedRunner.pid, "SIGTERM");
+		await vi.waitFor(() => expect(alive(exitedRunner.pid)).toBe(false), {
+			timeout: 15_000,
+		});
+		writeFileSync(
+			join(fixture.root, `fail-end-session-${failed.sessionId}`),
+			"fail\n",
+		);
+		const healthyFailure = join(
+			fixture.root,
+			`fail-end-session-${healthy.sessionId}`,
+		);
+		writeFileSync(healthyFailure, "fail\n");
+		for (const session of [failed, healthy, neverStarted, exited])
+			await settle(session.sessionId);
+		await enable(failed);
+		rmSync(healthyFailure);
+		const result = await sweep("one failed stop does not block other sessions");
+		expect(alive(failedRunner.pid)).toBe(true);
+		expect(alive(healthyRunner.pid)).toBe(false);
+		expect(result.kept).toContainEqual(
+			kept({ sessionId: failed.sessionId, path: failed.path }),
+		);
+		for (const session of [healthy, neverStarted, exited])
+			expect(existsSync(session.path)).toBe(false);
+		expect(
+			result.removed.some(({ sessionId }) => sessionId === healthy.sessionId),
+		).toBe(true);
+		expect(stopCommands(fixture, neverStarted.sessionId)).toEqual([]);
+		expect(stopCommands(fixture, exited.sessionId)).toEqual([]);
+		expect(
+			readFileSync(join(fixture.root, "end-session-failures.ndjson"), "utf8"),
+		).toContain(failed.sessionId);
+	}, 120_000);
 
 	it("keeps the worktree during immediate deletion when end_session fails with its runner alive", async () => {
 		const { fixture, socket, create, send } = await start();
@@ -471,7 +833,7 @@ describe("Worktree cleanup guards live agents through the built daemon", () => {
 	}, 60_000);
 
 	it("removes an eligible OpenCode worktree without a Claude runner", async () => {
-		const { fixture, create, settle, sweep } = await start({
+		const { fixture, create, settle, enable, sweep } = await start({
 			managedOpenCode: true,
 		});
 		const session = await create(
@@ -479,6 +841,7 @@ describe("Worktree cleanup guards live agents through the built daemon", () => {
 			"opencode",
 		);
 		await settle(session.sessionId);
+		await enable(session);
 		const result = await sweep("OpenCode has no Claude runner");
 		expect(
 			result.kept.some(

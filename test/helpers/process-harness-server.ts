@@ -345,6 +345,30 @@ async function main(): Promise<void> {
 		: fileURLToPath(new URL("../../src", import.meta.url));
 	const extension = dist ? "js" : "ts";
 	if (existsSync(join(root, "claude-end-session-failure-fixture"))) {
+		const { OrchestrationEngine } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/provider", `orchestration-engine.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/provider/orchestration-engine.js");
+		const dispatch = OrchestrationEngine.prototype.dispatchEffect;
+		Object.assign(OrchestrationEngine.prototype, {
+			dispatchEffect(
+				this: InstanceType<typeof OrchestrationEngine>,
+				command: import("../../src/lib/provider/orchestration-engine.js").OrchestrationCommand,
+			) {
+				return Effect.suspend(() => {
+					if (command.type === "end_session")
+						appendFileSync(
+							join(root, "end-session-commands.ndjson"),
+							`${JSON.stringify({
+								sessionId: command.sessionId,
+								unbind: command.unbind ?? false,
+							})}\n`,
+						);
+					return dispatch.call(this, command);
+				});
+			},
+		});
 		const { ClaudeDriver } = (await import(
 			pathToFileURL(
 				join(

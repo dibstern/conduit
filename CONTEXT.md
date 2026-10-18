@@ -105,8 +105,9 @@ daemon restart. Clean up now reports "Agent process is running". This guard is
 separate from quiescence and applies again at removal time, including immediate
 removal after deletion when ending the agent fails. It reads the relay's runner
 pool, never discovers runners from disk. OpenCode sessions have no Claude runner
-and are unaffected. Until settling stops agents, an otherwise eligible Claude
-checkout waits for its agent's idle exit.
+and are unaffected. Every cleanup run first stops live agents of quiescent
+settled sessions, even when cleanup is Off. The sweep can then remove eligible
+checkouts in the same run.
 
 Automatic worktree cleanup applies only after a session settles or is deleted.
 The default settle rule removes a checkout when nothing is missing: its inspected
