@@ -1,12 +1,7 @@
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
-import {
-	FileSystem,
-	HttpServerRequest,
-	HttpServerResponse,
-	Path,
-} from "@effect/platform";
-import { Context, Data, Effect, Layer } from "effect";
+import { Context, Data, Effect, FileSystem, Layer, Path } from "effect";
+import { HttpServerRequest, HttpServerResponse } from "effect/http";
 
 const gzipAsync = promisify(gzip);
 

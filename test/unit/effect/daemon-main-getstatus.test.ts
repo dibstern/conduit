@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TlsCerts } from "../../../src/lib/cli/tls.js";
 import { RestartWithConfig } from "../../../src/lib/contracts/ws-rpc.js";

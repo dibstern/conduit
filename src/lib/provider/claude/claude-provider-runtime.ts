@@ -27,7 +27,7 @@ import {
 	Context,
 	Deferred,
 	Effect,
-	Either,
+	Result as Either,
 	Exit,
 	Fiber,
 	FiberMap,

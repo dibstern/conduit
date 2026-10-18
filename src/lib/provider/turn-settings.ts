@@ -1,4 +1,4 @@
-import { Data, Either } from "effect";
+import { Data, Result as Either } from "effect";
 import {
 	isKnownDriverKind,
 	type KnownProviderDriverKind,

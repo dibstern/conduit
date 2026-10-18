@@ -1,5 +1,5 @@
-import type { SqlClient } from "@effect/sql";
-import { type Deferred, Effect, FiberRef } from "effect";
+import { type Deferred, Effect, References as FiberRef } from "effect";
+import type { SqlClient } from "effect/sql";
 import type { PermissionResponse } from "../types.js";
 import type { SessionOutputReply } from "./session-runner.js";
 

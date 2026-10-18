@@ -1,4 +1,4 @@
-import { Either, Option, Schema } from "effect";
+import { Result as Either, Option, Schema } from "effect";
 import type { UsageWindow } from "../../contracts/limit-recovery.js";
 import type { UsageRead } from "../usage-reader.js";
 

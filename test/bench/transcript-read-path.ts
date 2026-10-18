@@ -2,9 +2,9 @@
 // pnpm exec tsx test/bench/transcript-read-path.ts /tmp/read-path.db /tmp/read-path.json
 import { channel } from "node:diagnostics_channel";
 import { existsSync, writeFileSync } from "node:fs";
-import { SqlClient } from "@effect/sql";
 import Database from "better-sqlite3";
 import { Chunk, Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import { defaultDaemonConfig } from "../../src/lib/daemon/config-persistence.js";
 import { AccountDirectoryLive } from "../../src/lib/domain/daemon/Services/account-directory.js";
 import { subscribeSessionDetail } from "../../src/lib/domain/relay/Services/session-detail-subscription.js";

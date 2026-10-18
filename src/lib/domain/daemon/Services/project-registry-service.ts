@@ -27,7 +27,7 @@ import {
 	Data,
 	Duration,
 	Effect,
-	Either,
+	Result as Either,
 	HashMap,
 	Layer,
 	Option,

@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { expect, type Page } from "@playwright/test";
-import { Either, Schema } from "effect";
+import { Result as Either, Schema } from "effect";
 import {
 	type AccountChange,
 	type AccountsState,

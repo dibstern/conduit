@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Data, Effect, Either, Schema } from "effect";
+import { Context, Data, Effect, Result as Either, Schema } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
 import {
 	resolveServerSessionPick,

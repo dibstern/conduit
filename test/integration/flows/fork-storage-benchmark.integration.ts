@@ -12,9 +12,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { SqlClient, Statement } from "@effect/sql";
 import Database from "better-sqlite3";
 import { Effect, Layer, ManagedRuntime } from "effect";
+import { SqlClient, Statement } from "effect/sql";
 import { expect, it } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";

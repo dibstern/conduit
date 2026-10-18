@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { makeSessionStateProjectionNotifierLive } from "../../../src/lib/domain/relay/Layers/session-state-projection-notifier-layer.js";
 import { WebSocketHandlerTag } from "../../../src/lib/domain/relay/Services/services.js";

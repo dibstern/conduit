@@ -1,10 +1,10 @@
 import { lstatSync, unlinkSync } from "node:fs";
 import { chmod, lstat, rename, rm, writeFile } from "node:fs/promises";
 import type { Socket as NetSocket } from "node:net";
-import { SocketServer } from "@effect/platform";
 import { NodeSocket, NodeSocketServer } from "@effect/platform-node";
-import { RpcSerialization, RpcServer } from "@effect/rpc";
 import { Context, Effect, Layer, Option } from "effect";
+import { RpcSerialization, RpcServer } from "effect/rpc";
+import { SocketServer } from "effect/socket";
 import { WsRpcGroup } from "../contracts/ws-rpc.js";
 import { SERVER_BUILD_ID } from "../server/build-update.js";
 import type { WsRpcServerLayer } from "../server/ws-rpc.js";

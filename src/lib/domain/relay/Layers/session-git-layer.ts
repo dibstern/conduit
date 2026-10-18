@@ -1,8 +1,8 @@
 import { channel } from "node:diagnostics_channel";
 import { lstat } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
-import { SqlClient } from "@effect/sql";
 import { type Context, Effect, Layer, Option, PubSub, Schema } from "effect";
+import { SqlClient } from "effect/sql";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import type { WorkspaceMissing } from "../../../contracts/worktree.js";
 import { daemonSessionGitCache } from "../../../git/session-git.js";

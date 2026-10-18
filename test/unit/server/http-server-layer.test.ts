@@ -12,18 +12,18 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-	HttpApp,
-	HttpClient,
-	HttpClientRequest,
-	HttpServer,
-} from "@effect/platform";
-import {
 	NodeFileSystem,
 	NodeHttpServer,
 	NodePath,
 } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import {
+	HttpEffect as HttpApp,
+	HttpClient,
+	HttpClientRequest,
+	HttpServer,
+} from "effect/http";
 import { afterAll, beforeAll, expect } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";

@@ -20,8 +20,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcTest } from "@effect/rpc";
-import { Effect, Either, Layer, ManagedRuntime } from "effect";
+import { Effect, Result as Either, Layer, ManagedRuntime } from "effect";
+import { RpcTest } from "effect/rpc";
 import {
 	afterAll,
 	afterEach,

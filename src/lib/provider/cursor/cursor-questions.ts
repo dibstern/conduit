@@ -1,4 +1,4 @@
-import { Effect, Either, Schema } from "effect";
+import { Effect, Result as Either, Schema } from "effect";
 import { createEventId } from "../../persistence/events.js";
 import type { EventSink } from "../types.js";
 import type { CursorTurnEvents } from "./cursor-turn-events.js";

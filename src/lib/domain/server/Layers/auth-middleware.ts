@@ -1,9 +1,5 @@
-import {
-	HttpRouter,
-	HttpServerRequest,
-	HttpServerResponse,
-} from "@effect/platform";
 import { Context, Effect, Layer, Option, Ref } from "effect";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { AuthManager, type AuthResult } from "../../../auth.js";
 import { getClientIp } from "../../../server/http-utils.js";
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";

@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { SqlClient } from "@effect/sql";
 import {
 	Clock,
 	Context,
@@ -10,6 +9,7 @@ import {
 	Ref,
 	Schema,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import type { AccountRef, ClaudeAccount } from "../../../contracts/account.js";
 import {
 	AccountUnavailable,

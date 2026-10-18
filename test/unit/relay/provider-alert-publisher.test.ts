@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Chunk, Effect, PubSub, Queue } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
 import type { Alert } from "../../../src/lib/contracts/ws-rpc.js";
 import {

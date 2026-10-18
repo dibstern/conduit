@@ -1,6 +1,14 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { Context, Data, Effect, Either, Layer, Ref, Schema } from "effect";
+import {
+	Context,
+	Data,
+	Effect,
+	Result as Either,
+	Layer,
+	Ref,
+	Schema,
+} from "effect";
 import { formatErrorDetail } from "../../../errors.js";
 import {
 	commitDaemonRuntimeConfig,

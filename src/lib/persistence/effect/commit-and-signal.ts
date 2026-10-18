@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Effect, Option } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
 import { observeTurnTimelineCommit } from "../../domain/daemon/Services/turn-timeline.js";
 import { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";

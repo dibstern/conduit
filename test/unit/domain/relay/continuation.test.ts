@@ -9,8 +9,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Effect, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
 	accountsStateFromConfig,

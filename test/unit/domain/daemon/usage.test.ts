@@ -35,8 +35,8 @@ import {
 	Ref,
 	Schema,
 	Stream,
-	TestClock,
 } from "effect";
+import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/account.js";
 import {

@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Either, Schema } from "effect";
+import { Result as Either, Schema } from "effect";
 import { expect } from "vitest";
 import { DaemonConfigSchema } from "../../../src/lib/daemon/config-persistence.js";
 

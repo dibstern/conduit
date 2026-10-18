@@ -2,7 +2,8 @@
 // number of attempts with correct exponential backoff timing.
 
 import { describe, it } from "@effect/vitest";
-import { Duration, Effect, Fiber, Ref, Schedule, TestClock } from "effect";
+import { Duration, Effect, Fiber, Ref, Schedule } from "effect";
+import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 
 describe("Retry Behavior with TestClock", () => {

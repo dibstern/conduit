@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Duration, Effect, Fiber, Layer, Option } from "effect";
+import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";

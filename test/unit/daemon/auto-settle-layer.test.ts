@@ -2,16 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import {
-	Effect,
-	Exit,
-	Layer,
-	Logger,
-	LogLevel,
-	Option,
-	Scope,
-	TestClock,
-} from "effect";
+import { Effect, Exit, Layer, Logger, LogLevel, Option, Scope } from "effect";
+import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { AutoSettleLive } from "../../../src/lib/domain/daemon/Layers/auto-settle-layer.js";

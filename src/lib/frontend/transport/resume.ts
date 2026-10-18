@@ -101,7 +101,6 @@
 // the same place: the whole cause goes on as defects, because a cause that
 // killed us is not half a retryable thing.
 
-import type { RpcClientError } from "@effect/rpc/RpcClientError";
 import {
 	Chunk,
 	Data,
@@ -112,6 +111,7 @@ import {
 	Schema,
 	Stream,
 } from "effect";
+import type { RpcClientError } from "effect/rpc/RpcClientError";
 import {
 	digestRows,
 	PartRemovalId,

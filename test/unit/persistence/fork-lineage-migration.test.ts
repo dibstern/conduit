@@ -9,11 +9,11 @@ import fs, {
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Reactivity } from "@effect/experimental";
-import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import Database from "better-sqlite3";
-import { Effect, Either, Layer } from "effect";
+import { Effect, Result as Either, Layer } from "effect";
+import { Reactivity } from "effect/reactivity";
+import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
 import {
 	defaultDaemonConfig,

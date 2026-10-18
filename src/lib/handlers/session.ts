@@ -1,4 +1,4 @@
-import { Effect, Either, PubSub } from "effect";
+import { Effect, Result as Either, PubSub } from "effect";
 import { accountRefFromSelection } from "../account-directory.js";
 import type { Account, AccountRef } from "../contracts/account.js";
 import type { AccountId } from "../contracts/provider-instance.js";

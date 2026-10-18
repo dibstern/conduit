@@ -8,9 +8,9 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import Database from "better-sqlite3";
 import { Effect, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/sql";
 import { defaultDaemonConfig } from "../../src/lib/daemon/config-persistence.js";
 import { makeCommitAndSignal } from "../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../src/lib/persistence/effect/event-store-effect.js";

@@ -22,11 +22,11 @@ import {
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual, parseArgs } from "node:util";
-import { Reactivity } from "@effect/experimental";
-import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import Database from "better-sqlite3";
 import { Effect, Layer } from "effect";
+import { Reactivity } from "effect/reactivity";
+import { SqlClient } from "effect/sql";
 import { PersistenceProjectTag } from "../src/lib/domain/persistence/Services/persistence-service.js";
 import { makeEventStoreEffect } from "../src/lib/persistence/effect/event-store-effect.js";
 import { makeEffectSqlMigrator } from "../src/lib/persistence/effect/migrations.js";

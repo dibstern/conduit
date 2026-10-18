@@ -9,9 +9,9 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer, Queue, Schema, Stream } from "effect";
+import { RpcTest } from "effect/rpc";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { AccountSchema } from "../../../src/lib/contracts/account.js";
 import {

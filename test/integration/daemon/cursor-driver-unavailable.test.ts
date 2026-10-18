@@ -2,7 +2,7 @@
 // invented, or one driver's default replaces another driver's selection.
 import { mkdirSync, writeFileSync } from "node:fs";
 import Database from "better-sqlite3";
-import { Effect, Either } from "effect";
+import { Effect, Result as Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	AddInstance,

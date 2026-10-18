@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { SqlClient } from "@effect/sql";
 import {
 	Context,
 	Deferred,
@@ -11,6 +10,7 @@ import {
 	PubSub,
 	Ref,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../account-directory.js";
 import type { Account } from "../../../contracts/account.js";
 import { AccountUnroutable } from "../../../contracts/limit-recovery.js";

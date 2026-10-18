@@ -1,6 +1,7 @@
-import { RpcSchema } from "@effect/rpc";
-import { RpcClientError } from "@effect/rpc/RpcClientError";
-import { Arbitrary, FastCheck as fc, Schema } from "effect";
+import { Arbitrary, Schema } from "effect";
+import { RpcSchema } from "effect/rpc";
+import { RpcClientError } from "effect/rpc/RpcClientError";
+import * as fc from "fast-check";
 import { afterEach, expect, it, vi } from "vitest";
 import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
 import { WorktreeBranchRenameError } from "../../../src/lib/contracts/worktree.js";

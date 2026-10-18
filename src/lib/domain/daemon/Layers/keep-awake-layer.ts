@@ -1,10 +1,9 @@
 // Each keep-awake child owns a scope attached to the daemon's layer scope.
 
-import { Command, CommandExecutor } from "@effect/platform";
 import {
 	Context,
 	Effect,
-	Either,
+	Result as Either,
 	ExecutionStrategy,
 	Exit,
 	Layer,
@@ -13,6 +12,10 @@ import {
 	Scope,
 	Stream,
 } from "effect";
+import {
+	ChildProcess as Command,
+	ChildProcessSpawner as CommandExecutor,
+} from "effect/process";
 import {
 	type KeepAwakeOptions,
 	resolveKeepAwakeCommand,

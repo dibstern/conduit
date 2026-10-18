@@ -1,4 +1,4 @@
-import { Effect, Either, Option } from "effect";
+import { Effect, Result as Either, Option } from "effect";
 import type { CursorAuthState } from "../../contracts/ws-rpc.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import {

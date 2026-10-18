@@ -1,8 +1,6 @@
 // Typed browser RPC commands and subscription frames for integration tests.
 
 import { randomUUID } from "node:crypto";
-import { Socket } from "@effect/platform";
-import { RpcClient, type RpcClientError, RpcSerialization } from "@effect/rpc";
 import {
 	Cause,
 	Context,
@@ -13,6 +11,8 @@ import {
 	ManagedRuntime,
 	Stream,
 } from "effect";
+import { RpcClient, type RpcClientError, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import WebSocket from "ws";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {

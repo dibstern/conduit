@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcClientError } from "@effect/rpc/RpcClientError";
 import { describe, it } from "@effect/vitest";
 import { Chunk, Effect, Layer, Queue, Schema, Stream } from "effect";
+import { RpcClientError } from "effect/rpc/RpcClientError";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { accountsStateFromConfig } from "../../../src/lib/account-directory.js";
 import type { SessionDetailEnvelope } from "../../../src/lib/contracts/ws-rpc.js";

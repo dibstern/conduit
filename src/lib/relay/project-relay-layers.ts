@@ -1,15 +1,15 @@
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
-import { SqlClient } from "@effect/sql";
 import {
 	Context,
 	Effect,
-	Either,
+	Result as Either,
 	Layer,
 	ManagedRuntime,
 	Option,
 	Ref,
 	Stream,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { accountsStateFromConfig } from "../account-directory.js";
 import {
 	MANAGED_OPENCODE_ACCOUNT_ID,

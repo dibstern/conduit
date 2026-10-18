@@ -3,10 +3,10 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
-import * as Statement from "@effect/sql/Statement";
 import Database from "better-sqlite3";
 import { Effect, Layer, ManagedRuntime, Ref, Stream } from "effect";
+import { SqlClient } from "effect/sql";
+import * as Statement from "effect/sql/Statement";
 import {
 	afterAll,
 	afterEach,

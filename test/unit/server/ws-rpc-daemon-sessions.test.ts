@@ -1,6 +1,6 @@
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Effect, Either, Layer } from "effect";
+import { Effect, Result as Either, Layer } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonSessionQueryServiceTag } from "../../../src/lib/domain/relay/Services/daemon-session-query-service.js";

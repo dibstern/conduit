@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
 import type {
 	WorktreeCleanup,

@@ -1,4 +1,3 @@
-import { Rpc, type RpcGroup, RpcSchema } from "@effect/rpc";
 import {
 	type Cause,
 	type Chunk,
@@ -11,6 +10,7 @@ import {
 	type Scope,
 	Stream,
 } from "effect";
+import { Rpc, type RpcGroup, RpcSchema } from "effect/rpc";
 import type { UsageReading } from "../contracts/limit-recovery.js";
 import {
 	type OpenCodeInstance,

@@ -7,9 +7,10 @@
  * with the real JSON serialization and the real server handlers and terminal
  * service. Production splits them across the control and stream sockets.
  */
-import { Socket, SocketServer } from "@effect/platform";
-import { RpcClient, RpcSerialization, RpcServer } from "@effect/rpc";
+
 import { Deferred, Effect, Fiber, Layer, Stream } from "effect";
+import { RpcClient, RpcSerialization, RpcServer } from "effect/rpc";
+import { Socket, SocketServer } from "effect/socket";
 import { describe, expect, it, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import type {

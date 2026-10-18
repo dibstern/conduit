@@ -1,7 +1,7 @@
 import { relative, resolve as resolvePath } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { SqlClient } from "@effect/sql";
-import { Effect, Either, Layer, Schema } from "effect";
+import { Effect, Result as Either, Layer, Schema } from "effect";
+import { SqlClient } from "effect/sql";
 import type { Account } from "../../../contracts/account.js";
 import {
 	isKnownDriverKind,

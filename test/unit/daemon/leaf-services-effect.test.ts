@@ -1,17 +1,12 @@
 // Tests for Effect-native layer replacements of daemon leaf services.
 
-import { NodeCommandExecutor, NodeFileSystem } from "@effect/platform-node";
-import { describe, it } from "@effect/vitest";
 import {
-	Context,
-	Duration,
-	Effect,
-	Exit,
-	Layer,
-	Ref,
-	Scope,
-	TestClock,
-} from "effect";
+	NodeChildProcessSpawner as NodeCommandExecutor,
+	NodeFileSystem,
+} from "@effect/platform-node";
+import { describe, it } from "@effect/vitest";
+import { Context, Duration, Effect, Exit, Layer, Ref, Scope } from "effect";
+import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { resolveKeepAwakeCommand } from "../../../src/lib/daemon/keep-awake.js";
 import {

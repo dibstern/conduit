@@ -1,5 +1,3 @@
-import { RpcSchema } from "@effect/rpc";
-import { RpcClientError } from "@effect/rpc/RpcClientError";
 import {
 	Arbitrary,
 	Effect,
@@ -8,6 +6,8 @@ import {
 	Schema,
 	Stream,
 } from "effect";
+import { RpcSchema } from "effect/rpc";
+import { RpcClientError } from "effect/rpc/RpcClientError";
 import fc from "fast-check";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";

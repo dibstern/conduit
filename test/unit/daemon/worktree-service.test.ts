@@ -73,7 +73,15 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Cause, Chunk, Effect, Either, Exit, Fiber, Stream } from "effect";
+import {
+	Cause,
+	Chunk,
+	Effect,
+	Result as Either,
+	Exit,
+	Fiber,
+	Stream,
+} from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	isConduitWorktreePath,

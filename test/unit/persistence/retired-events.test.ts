@@ -1,8 +1,9 @@
 // Failure modes: retired rows stop decoding; a retired tool update changes the
 // fork's projected tool input; copying history appends retired events again.
-import { SqlClient } from "@effect/sql";
+
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";

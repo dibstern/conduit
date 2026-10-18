@@ -6,7 +6,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Either, Option } from "effect";
+import { Result as Either, Option } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	type AccountsState,

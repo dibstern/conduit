@@ -1,10 +1,3 @@
-import {
-	RpcClient,
-	type RpcGroup,
-	type RpcMessage,
-	RpcServer,
-	RpcTest,
-} from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import {
 	Cause,
@@ -18,6 +11,13 @@ import {
 	Scope,
 	Stream,
 } from "effect";
+import {
+	RpcClient,
+	type RpcGroup,
+	type RpcMessage,
+	RpcServer,
+	RpcTest,
+} from "effect/rpc";
 import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";

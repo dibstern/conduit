@@ -8,8 +8,8 @@ import {
 } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcServer } from "@effect/rpc";
 import { Deferred, Effect, Layer, Mailbox, Option, Ref } from "effect";
+import { RpcServer } from "effect/rpc";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	GetProjects,

@@ -16,7 +16,14 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Either, Layer, Option, Record, Stream } from "effect";
+import {
+	Effect,
+	Result as Either,
+	Layer,
+	Option,
+	Record,
+	Stream,
+} from "effect";
 import { afterAll, vi } from "vitest";
 import type { Account } from "../../src/lib/contracts/account.js";
 import {

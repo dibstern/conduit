@@ -1,11 +1,4 @@
 import {
-	RpcClient,
-	type RpcMessage,
-	RpcSerialization,
-	RpcServer,
-} from "@effect/rpc";
-import { RpcClientError } from "@effect/rpc/RpcClientError";
-import {
 	Chunk,
 	Deferred,
 	Effect,
@@ -17,6 +10,13 @@ import {
 	Stream,
 	Take,
 } from "effect";
+import {
+	RpcClient,
+	type RpcMessage,
+	RpcSerialization,
+	RpcServer,
+} from "effect/rpc";
+import { RpcClientError } from "effect/rpc/RpcClientError";
 import { WsRpcGroup } from "../../src/lib/contracts/ws-rpc.js";
 import type { WsRpcConnect } from "../../src/lib/frontend/transport/shared-client.js";
 import { type StubTable, stubWsRpc } from "./stub-ws-rpc.js";

@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
-import { Effect, Either } from "effect";
+import { Effect, Result as Either } from "effect";
+import { SqlClient } from "effect/sql";
 import { accountsStateFromConfig, resolve } from "../../account-directory.js";
 import {
 	defaultDaemonConfig,

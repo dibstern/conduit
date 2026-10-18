@@ -12,7 +12,7 @@
 import {
 	Context,
 	Effect,
-	Either,
+	Result as Either,
 	FiberMap,
 	Layer,
 	Option,

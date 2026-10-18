@@ -5,8 +5,6 @@
 // decision. No queue state lives in memory, so a restart has nothing to rebuild.
 
 import { randomUUID } from "node:crypto";
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import {
 	Clock,
 	Context,
@@ -17,6 +15,8 @@ import {
 	Schema,
 	Stream,
 } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import type { Account } from "../../../contracts/account.js";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import { advanceTouchesScope } from "../../../contracts/read-model-advance.js";

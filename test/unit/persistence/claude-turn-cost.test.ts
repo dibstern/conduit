@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Effect, Layer, Logger, ManagedRuntime, Schema } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HistoryMessageSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import {

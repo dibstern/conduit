@@ -1,5 +1,3 @@
-import { Reactivity } from "@effect/experimental";
-import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import {
 	type ConfigError,
@@ -8,6 +6,8 @@ import {
 	Layer,
 	type ManagedRuntime,
 } from "effect";
+import { Reactivity } from "effect/reactivity";
+import { SqlClient } from "effect/sql";
 import {
 	makePersistenceService,
 	PersistenceError,

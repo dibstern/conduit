@@ -15,9 +15,9 @@ import {
 	LogLevel,
 	Queue,
 	Stream,
-	TestClock,
 } from "effect";
 import type { Rpc } from "effect/rpc";
+import { TestClock } from "effect/testing";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import {
 	type SubscribeShell,

@@ -1,8 +1,8 @@
 // All database operations are Effect programs using @effect/sql template literal queries.
 
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect, Schema } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import type { CanonicalEvent, StoredEvent } from "../events.js";
 import { CanonicalEventSchema } from "../events.js";

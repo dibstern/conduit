@@ -5,8 +5,8 @@
 
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Context, Effect, Layer, Option, type Scope } from "effect";
+import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
 import {

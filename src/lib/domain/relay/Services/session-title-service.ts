@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Context, Effect, HashSet, Layer, Match, Ref, Schema } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	AUTO_TITLE_SOURCE,
 	isPlaceholderTitle,

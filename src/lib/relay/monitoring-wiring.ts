@@ -4,8 +4,8 @@
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
-import { SqlClient } from "@effect/sql";
 import { Deferred, Effect, FiberId, Option, Runtime } from "effect";
+import { SqlClient } from "effect/sql";
 import type { Account, AccountRef } from "../contracts/account.js";
 import { getProviderDriver } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";

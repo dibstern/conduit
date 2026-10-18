@@ -15,9 +15,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Result as Either, HashMap, Layer, Ref, Schema } from "effect";
+import { RpcTest } from "effect/rpc";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, vi } from "vitest";
 import { AccountChangeRejected } from "../../../src/lib/contracts/account.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";

@@ -10,10 +10,10 @@ import {
 	unlinkSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { Reactivity } from "@effect/experimental";
-import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Data, Effect, Layer } from "effect";
+import { Reactivity } from "effect/reactivity";
+import { SqlClient } from "effect/sql";
 import * as Failure from "../effect/failure-classification.js";
 
 export class RewriteError extends Data.TaggedError("RewriteError")<{

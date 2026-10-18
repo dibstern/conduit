@@ -4,11 +4,11 @@ import fs, { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
 import Database from "better-sqlite3";
 import { Effect, Layer, Logger } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import {
 	makePersistenceServiceLive,

@@ -1,5 +1,5 @@
-import { SqlError } from "@effect/sql/SqlError";
 import { Effect, Fiber } from "effect";
+import { SqlError } from "effect/sql/SqlError";
 import { describe, expect, it, vi } from "vitest";
 import type {
 	ProviderRuntimeEventPayloadMap,

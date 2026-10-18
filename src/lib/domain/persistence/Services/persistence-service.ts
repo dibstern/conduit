@@ -1,7 +1,7 @@
 // Store preparation, project binding and transaction helpers for the event store.
 
-import { SqlClient } from "@effect/sql";
 import { Context, Data, Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	MAX_PURGEABLE_SKELETON_SESSIONS,
 	makeEffectSqlMigrator,

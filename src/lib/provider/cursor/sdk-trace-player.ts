@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import { Either, Schema } from "effect";
+import { Result as Either, Schema } from "effect";
 import { CursorSdkFailure, cursorSdkFailure } from "./sdk-error.js";
 import type {
 	CursorAgent,

@@ -10,8 +10,6 @@
 // injected at the wire and the assertions are the request frames the client sent
 // and the envelopes the consumer saw.
 
-import type { Rpc } from "@effect/rpc";
-import { RpcClientError } from "@effect/rpc/RpcClientError";
 import { describe, it } from "@effect/vitest";
 import {
 	Cause,
@@ -25,6 +23,8 @@ import {
 	Ref,
 	Stream,
 } from "effect";
+import type { Rpc } from "effect/rpc";
+import { RpcClientError } from "effect/rpc/RpcClientError";
 import { TestClock } from "effect/testing";
 import { beforeAll, expect } from "vitest";
 import {

@@ -4,9 +4,9 @@
 // process-wide, including across ledger instances sharing that store.
 
 import { randomUUID } from "node:crypto";
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 
 /** An immutable originating turn, message, question, or permission identity. */
 export interface SessionAlert {

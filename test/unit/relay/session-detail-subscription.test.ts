@@ -1,8 +1,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcClientError } from "@effect/rpc/RpcClientError";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import {
 	Chunk,
@@ -16,6 +14,8 @@ import {
 	Scope,
 	Stream,
 } from "effect";
+import { RpcClientError } from "effect/rpc/RpcClientError";
+import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { accountsStateFromConfig } from "../../../src/lib/account-directory.js";
 import {

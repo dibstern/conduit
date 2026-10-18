@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {

@@ -1,6 +1,6 @@
-import { Socket } from "@effect/platform";
-import { RpcClient, RpcSchema, RpcSerialization } from "@effect/rpc";
 import { Cause, Chunk, Effect, Layer, Schema, Stream } from "effect";
+import { RpcClient, RpcSchema, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 
 /** A real browser client for exercising the mock's WebSocket boundary. */

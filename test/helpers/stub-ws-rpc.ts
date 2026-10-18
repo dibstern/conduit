@@ -1,5 +1,5 @@
-import { Rpc, type RpcGroup, RpcSchema } from "@effect/rpc";
 import { Effect, Exit, type Layer, Schema, Stream } from "effect";
+import { Rpc, type RpcGroup, RpcSchema } from "effect/rpc";
 import { WsRpcGroup } from "../../src/lib/contracts/ws-rpc.js";
 
 type Rpcs = RpcGroup.Rpcs<typeof WsRpcGroup>;

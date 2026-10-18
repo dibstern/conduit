@@ -1,8 +1,7 @@
 // Failure modes: concurrent requests share counters, routed streams lose SQL
 // attribution, stream lifetime is timed, queued time is omitted, or disabling
 // the warning still changes request execution.
-import { Rpc, RpcGroup, type RpcMessage, RpcServer } from "@effect/rpc";
-import { SqlClient, Statement } from "@effect/sql";
+
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import {
 	Deferred,
@@ -16,6 +15,8 @@ import {
 	Schema,
 	Stream,
 } from "effect";
+import { Rpc, RpcGroup, type RpcMessage, RpcServer } from "effect/rpc";
+import { SqlClient, Statement } from "effect/sql";
 import { describe, expect, it } from "vitest";
 import { withSlowRpcLogging } from "../../../src/lib/server/ws-rpc-handler.js";
 

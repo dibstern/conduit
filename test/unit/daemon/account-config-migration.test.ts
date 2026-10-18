@@ -16,7 +16,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Either, Option, Schema } from "effect";
+import { Effect, Result as Either, Option, Schema } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	accountRefFromSelection,

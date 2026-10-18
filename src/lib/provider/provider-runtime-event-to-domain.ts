@@ -1,4 +1,4 @@
-import { Either, Option, Schema } from "effect";
+import { Result as Either, Option, Schema } from "effect";
 import { getProviderDriver } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import {

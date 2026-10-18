@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { RpcTest } from "@effect/rpc";
 import Database from "better-sqlite3";
-import { Effect, Either, HashMap, Ref, Stream } from "effect";
+import { Effect, Result as Either, HashMap, Ref, Stream } from "effect";
+import { RpcTest } from "effect/rpc";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import {

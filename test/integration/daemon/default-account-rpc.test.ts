@@ -12,10 +12,10 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcTest } from "@effect/rpc";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
-import { Effect, Either, Layer, Queue, Stream } from "effect";
+import { Effect, Result as Either, Layer, Queue, Stream } from "effect";
+import { RpcTest } from "effect/rpc";
+import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
 import { AccountChangeRejected } from "../../../src/lib/contracts/account.js";

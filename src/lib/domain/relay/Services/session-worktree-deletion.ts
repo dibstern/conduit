@@ -1,6 +1,6 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { SqlClient } from "@effect/sql";
-import { Effect, Either, Schema } from "effect";
+import { Effect, Result as Either, Schema } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	SessionWorkspaceSchema,
 	type SessionWorktreeInspection,

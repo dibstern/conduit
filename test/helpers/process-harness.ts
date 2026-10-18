@@ -20,13 +20,11 @@ import { createServer } from "node:net";
 import { userInfo } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { Socket } from "@effect/platform";
-import { RpcClient, type RpcGroup, RpcSerialization } from "@effect/rpc";
 import {
 	Cause,
 	Context,
 	Effect,
-	Either,
+	Result as Either,
 	Exit,
 	Fiber,
 	Layer,
@@ -35,6 +33,8 @@ import {
 	Stream,
 } from "effect";
 import type { Request } from "effect/Request";
+import { RpcClient, type RpcGroup, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import WebSocket from "ws";
 import {
 	AccountIdSchema,
@@ -92,7 +92,7 @@ class BrowserRpc extends Context.Service<
 	BrowserRpc,
 	RpcClient.RpcClient<
 		RpcGroup.Rpcs<typeof WsRpcGroup>,
-		import("@effect/rpc/RpcClientError").RpcClientError
+		import("effect/rpc/RpcClientError").RpcClientError
 	>
 >()("ProcessHarnessBrowserRpc") {}
 

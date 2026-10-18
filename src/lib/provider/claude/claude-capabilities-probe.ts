@@ -5,7 +5,7 @@ import type {
 	SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
-import { Either, Schema } from "effect";
+import { Result as Either, Schema } from "effect";
 import {
 	ClaudeSDKInitializationResultSubsetSchema,
 	decodeClaudeSDKOptionsJsonShape,

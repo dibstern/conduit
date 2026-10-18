@@ -1,4 +1,4 @@
-import { Either, Schema } from "effect";
+import { Result as Either, Schema } from "effect";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { WsRpcRequest } from "../../../src/lib/contracts/ws-rpc.js";

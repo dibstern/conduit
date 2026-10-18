@@ -1,7 +1,7 @@
-import { SqlClient } from "@effect/sql";
-import * as Migrator from "@effect/sql/Migrator";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
+import * as Migrator from "effect/sql/Migrator";
+import type { SqlError } from "effect/sql/SqlError";
 import {
 	BACKFILL_COMPACTION_MESSAGES_MIGRATION,
 	COMPACT_REDUNDANT_EVENTS_MIGRATION,

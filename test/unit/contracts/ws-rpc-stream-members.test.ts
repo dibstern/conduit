@@ -1,5 +1,5 @@
-import { RpcSchema } from "@effect/rpc";
 import { Schema } from "effect";
+import { RpcSchema } from "effect/rpc";
 import { describe, expect, it } from "vitest";
 import * as Contracts from "../../../src/lib/contracts/ws-rpc.js";
 import * as Frontend from "../../../src/lib/frontend/transport/ws-rpc.js";

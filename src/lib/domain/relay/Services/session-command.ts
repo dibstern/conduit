@@ -10,8 +10,8 @@
 // See docs/adr/0004-session-mutations-are-canonical-events.md.
 
 import { randomUUID } from "node:crypto";
-import { SqlClient } from "@effect/sql";
 import { type Cause, Data, Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import type { Account } from "../../../contracts/account.js";
 import {
 	type KnownProviderDriverKind,

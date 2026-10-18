@@ -12,7 +12,7 @@ import {
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
 	GetProjects,

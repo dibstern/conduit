@@ -1,4 +1,4 @@
-import { Effect, Either } from "effect";
+import { Effect, Result as Either } from "effect";
 import { resolve } from "../../account-directory.js";
 import { makeProcessSessionRunner } from "../runner/process-session-runner.js";
 import { connectRunner } from "../runner/runner-connection.js";

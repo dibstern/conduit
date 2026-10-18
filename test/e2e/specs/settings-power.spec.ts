@@ -2,7 +2,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { test as base, expect, type Page } from "@playwright/test";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import {
 	GetStatus,
 	RemoveProject,

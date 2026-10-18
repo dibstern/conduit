@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
-import { Effect, Either } from "effect";
+import { Effect, Result as Either } from "effect";
+import { SqlClient } from "effect/sql";
 import type { Account } from "../../../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";

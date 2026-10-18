@@ -5,7 +5,7 @@
 // defaults dangle after removal or ignore usage order; SetDefault accepts a
 // missing/wrong-driver account; deleted ids are reused or route across drivers;
 // an account's driver changes without deleting and adding it.
-import { Either, Option } from "effect";
+import { Result as Either, Option } from "effect";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {

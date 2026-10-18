@@ -4,7 +4,7 @@ import { isAbsolute, resolve } from "node:path";
 import {
 	Deferred,
 	Effect,
-	Either,
+	Result as Either,
 	Exit,
 	Fiber,
 	FiberId,

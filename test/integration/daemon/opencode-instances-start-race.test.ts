@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import { Effect, Either } from "effect";
+import { Effect, Result as Either } from "effect";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	makeOpenCodeInstancesLive,

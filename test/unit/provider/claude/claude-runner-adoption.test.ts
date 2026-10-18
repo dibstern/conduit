@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { createServer, type Server, Socket } from "node:net";
 import { join } from "node:path";
-import { Deferred, Effect, Either, Fiber } from "effect";
+import { Deferred, Effect, Result as Either, Fiber } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const config = vi.hoisted(() => ({

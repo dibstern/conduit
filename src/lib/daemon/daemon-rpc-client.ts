@@ -1,9 +1,9 @@
 import { createConnection, type Socket as NetSocket } from "node:net";
-import { Socket } from "@effect/platform";
 import { NodeSocket } from "@effect/platform-node";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect, Exit, Option, Schedule } from "effect";
 import type { Request } from "effect/Request";
+import { RpcClient, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import { WsRpcGroup, type WsRpcRequest } from "../contracts/ws-rpc.js";
 import * as Failure from "../effect/failure-classification.js";
 

@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Stream } from "effect";
+import { RpcTest } from "effect/rpc";
 import { afterEach, expect, vi } from "vitest";
 import {
 	CreateSession,
@@ -280,4 +280,4 @@ describe("daemon RPC handlers", () => {
 	);
 });
 
-import { Headers } from "@effect/platform";
+import { Headers } from "effect/http";

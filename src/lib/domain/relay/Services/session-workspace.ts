@@ -1,7 +1,7 @@
 import { lstat } from "node:fs/promises";
 import { join, sep } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Context, Effect, Schema } from "effect";
+import { SqlClient } from "effect/sql";
 import type { Account } from "../../../contracts/account.js";
 import {
 	type SessionWorkspace as RecordedWorkspace,

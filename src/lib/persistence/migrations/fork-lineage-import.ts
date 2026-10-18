@@ -10,10 +10,10 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { Reactivity } from "@effect/experimental";
-import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { type ConfigError, Data, Effect, Layer, Schema } from "effect";
+import { Reactivity } from "effect/reactivity";
+import { SqlClient } from "effect/sql";
 import type { DaemonConfig } from "../../daemon/config-persistence.js";
 import { deserializeRecent } from "../../daemon/recent-projects.js";
 import * as Failure from "../../effect/failure-classification.js";

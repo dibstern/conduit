@@ -2,7 +2,7 @@ import {
 	type Cause,
 	Data,
 	Effect,
-	Either,
+	Result as Either,
 	Fiber,
 	FiberMap,
 	Option,

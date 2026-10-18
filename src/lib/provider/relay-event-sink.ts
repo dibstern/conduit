@@ -6,8 +6,8 @@
 // ProviderRuntimeIngestion is present; the local translation branch here remains
 // for focused translator and compatibility tests.
 
-import { SqlError } from "@effect/sql/SqlError";
 import { Effect, Exit, Option } from "effect";
+import { SqlError } from "effect/sql/SqlError";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import {
 	PendingInteractionCancelled,

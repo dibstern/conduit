@@ -1,16 +1,16 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describe, it } from "@effect/vitest";
+import { Effect, Layer, Queue, Schema, type Scope, Stream } from "effect";
 import {
 	RpcClient,
 	type RpcGroup,
 	type RpcMessage,
 	RpcServer,
 	RpcTest,
-} from "@effect/rpc";
-import { SqlClient } from "@effect/sql";
-import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Queue, Schema, type Scope, Stream } from "effect";
+} from "effect/rpc";
+import { SqlClient } from "effect/sql";
 import { expect, expectTypeOf } from "vitest";
 import {
 	type SessionDetailEnvelope,

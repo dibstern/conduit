@@ -5,10 +5,10 @@
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
 import type { Page, TestInfo } from "@playwright/test";
 import { Effect } from "effect";
+import { RpcClient, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { readNativeThread } from "../../helpers/native-thread.js";
 import { expect, test } from "../helpers/replay-fixture.js";

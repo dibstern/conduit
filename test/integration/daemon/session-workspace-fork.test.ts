@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { Either, Schema } from "effect";
+import { Result as Either, Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	AnswerQuestion,

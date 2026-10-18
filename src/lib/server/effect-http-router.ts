@@ -14,14 +14,14 @@
 //   GET  /auth, /setup, /, /s/*, /p/* — SPA/static entry routes
 
 import { readFile } from "node:fs/promises";
+import { Context, Effect, Option, Schema } from "effect";
 import {
 	HttpMiddleware,
 	HttpRouter,
 	HttpServerRequest,
 	HttpServerResponse,
-} from "@effect/platform";
-import type { HttpBodyError } from "@effect/platform/HttpBody";
-import { Context, Effect, Option, Schema } from "effect";
+} from "effect/http";
+import type { HttpBodyError } from "effect/http/HttpBody";
 import {
 	authRoute,
 	authStatusRoute,

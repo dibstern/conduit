@@ -8,7 +8,6 @@
 //   - Semaphore(1) to prevent duplicate creation on concurrent gets
 //   - Layer.scoped ties all ScopedRefs to the layer scope
 
-import type { SqlError } from "@effect/sql/SqlError";
 import {
 	Context,
 	Data,
@@ -23,6 +22,7 @@ import {
 	Scope,
 	ScopedRef,
 } from "effect";
+import type { SqlError } from "effect/sql/SqlError";
 import type {
 	GlobalSettingTag,
 	WsRpcError,

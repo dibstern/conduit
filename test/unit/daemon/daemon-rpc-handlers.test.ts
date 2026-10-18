@@ -1,6 +1,6 @@
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Either, Layer, Ref } from "effect";
+import { Deferred, Effect, Result as Either, Layer, Ref } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { hashPin } from "../../../src/lib/auth.js";
 import {

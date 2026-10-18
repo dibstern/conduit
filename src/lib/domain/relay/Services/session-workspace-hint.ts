@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Effect, Layer, Schema, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import type { StoredEvent } from "../../../contracts/stored-event.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";

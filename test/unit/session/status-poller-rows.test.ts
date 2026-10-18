@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Effect, HashMap, Layer, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { StatusPollerLive } from "../../../src/lib/domain/relay/Layers/status-poller-layer.js";

@@ -14,8 +14,8 @@
 // removed while the client was away. The session's disappearance is the
 // shell's to report.
 
-import type { SqlError } from "@effect/sql/SqlError";
 import { Effect, Option, Schema, Stream } from "effect";
+import type { SqlError } from "effect/sql/SqlError";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import {
 	PartRemovalId,

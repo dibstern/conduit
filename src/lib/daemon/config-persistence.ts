@@ -7,7 +7,7 @@ import { chmod, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
-import { Data, Effect, Either, Record, Schema } from "effect";
+import { Data, Effect, Result as Either, Record, Schema } from "effect";
 import {
 	type AccountsState,
 	accountsStateFromConfig,

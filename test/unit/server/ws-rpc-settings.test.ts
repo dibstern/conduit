@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { describe, expect, it } from "@effect/vitest";
-import { Context, Effect, Either, Layer, Ref } from "effect";
+import { Context, Effect, Result as Either, Layer, Ref } from "effect";
 import {
 	GetAutoSettleSetting,
 	GetUsageLimitsSetting,

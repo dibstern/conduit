@@ -1,5 +1,5 @@
-import { Socket, SocketServer } from "@effect/platform";
 import { Effect } from "effect";
+import { Socket, SocketServer } from "effect/socket";
 
 /** One connection, matching ws-rpc-handler.ts, with bytes instead of OS sockets. */
 export const makeFakeSocketServer = Effect.gen(function* () {

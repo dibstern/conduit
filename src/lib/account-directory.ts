@@ -1,4 +1,10 @@
-import { Either, Option, ParseResult, Record as Records, Schema } from "effect";
+import {
+	Result as Either,
+	Option,
+	ParseResult,
+	Record as Records,
+	Schema,
+} from "effect";
 import {
 	type Account,
 	AccountAddInputSchema,

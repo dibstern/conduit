@@ -1,7 +1,7 @@
 // test/unit/provider/orchestration-wiring.test.ts
 import { tmpdir } from "node:os";
-import { SqlClient } from "@effect/sql";
 import { Effect, Layer, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/sql";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
 import {

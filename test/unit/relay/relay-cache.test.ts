@@ -11,8 +11,8 @@ import {
 	Logger,
 	Option,
 	Scope,
-	TestClock,
 } from "effect";
+import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 
 import {

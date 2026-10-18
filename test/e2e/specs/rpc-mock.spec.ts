@@ -1,7 +1,7 @@
 import { writeFile } from "node:fs/promises";
-import { RpcSchema } from "@effect/rpc";
 import { expect, test } from "@playwright/test";
 import { Arbitrary, Schema, Stream } from "effect";
+import { RpcSchema } from "effect/rpc";
 import fc from "fast-check";
 import { build } from "vite";
 import {

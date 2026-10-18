@@ -12,7 +12,6 @@ import {
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import Database from "better-sqlite3";
 import {
 	Context,
@@ -23,6 +22,7 @@ import {
 	Option,
 	Ref,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";

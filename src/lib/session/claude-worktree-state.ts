@@ -1,5 +1,5 @@
-import type { SqlClient } from "@effect/sql";
 import { Effect, Schema } from "effect";
+import type { SqlClient } from "effect/sql";
 import {
 	type ClaudeWorktreeState,
 	ClaudeWorktreeStateSchema,

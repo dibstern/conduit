@@ -1,5 +1,5 @@
-import type { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import type { SqlClient } from "effect/sql";
 import { canonicalEvent } from "../events.js";
 
 /** Read inside the ingestion write boundary, immediately before appending. */

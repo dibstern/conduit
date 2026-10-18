@@ -1,11 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { HttpServerRequest, HttpServerResponse } from "@effect/platform";
 import {
 	NodeFileSystem,
 	NodeHttpServer,
 	NodePath,
 } from "@effect/platform-node";
 import { Context, Effect, HashMap, Layer, Option, Ref } from "effect";
+import type { HttpServerRequest, HttpServerResponse } from "effect/http";
 import type { AuthManager } from "../../../auth.js";
 import {
 	CaCertProvider,

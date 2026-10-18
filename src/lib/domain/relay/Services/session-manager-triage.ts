@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Effect, Option, Schema } from "effect";
+import { SqlClient } from "effect/sql";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import { daemonSessionGitCache } from "../../../git/session-git.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";

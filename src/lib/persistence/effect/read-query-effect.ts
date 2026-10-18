@@ -1,7 +1,7 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
-import type { Fragment } from "@effect/sql/Statement";
 import { Context, Data, Effect, Option, Schema } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
+import type { Fragment } from "effect/sql/Statement";
 import type { SessionScope } from "../../contracts/session-scope.js";
 
 export type { SessionScope } from "../../contracts/session-scope.js";

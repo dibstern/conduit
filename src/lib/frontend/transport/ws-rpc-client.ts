@@ -1,6 +1,6 @@
-import type { Rpc, RpcGroup } from "@effect/rpc";
-import { RpcClientError } from "@effect/rpc/RpcClientError";
-import { Effect, Either, Option } from "effect";
+import { Effect, Result as Either, Option } from "effect";
+import type { Rpc, RpcGroup } from "effect/rpc";
+import { RpcClientError } from "effect/rpc/RpcClientError";
 import type { WsRpcGroup } from "../../contracts/ws-rpc.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { runTransportEffect } from "./runtime.js";

@@ -1,8 +1,8 @@
-import { type RpcClient, RpcTest } from "@effect/rpc";
-import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { type RpcClient, RpcTest } from "effect/rpc";
+import { SqlClient } from "effect/sql";
 import { afterEach, expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";

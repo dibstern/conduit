@@ -2,8 +2,6 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
-import { SqlError } from "@effect/sql/SqlError";
 import {
 	Deferred,
 	Effect,
@@ -13,6 +11,8 @@ import {
 	Queue,
 	Stream,
 } from "effect";
+import { SqlClient } from "effect/sql";
+import { SqlError } from "effect/sql/SqlError";
 import {
 	afterEach,
 	beforeEach,

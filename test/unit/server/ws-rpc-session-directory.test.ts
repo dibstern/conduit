@@ -1,6 +1,6 @@
-import { RpcTest } from "@effect/rpc";
 import { it } from "@effect/vitest";
 import { type Context, Effect, Layer, Stream } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";

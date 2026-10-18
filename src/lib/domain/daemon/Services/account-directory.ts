@@ -1,4 +1,4 @@
-import { Context, Effect, Either, Layer, Ref } from "effect";
+import { Context, Effect, Result as Either, Layer, Ref } from "effect";
 import {
 	type AccountChange,
 	type AccountsState,

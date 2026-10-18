@@ -1,10 +1,10 @@
 // Run only against a disposable snapshot: opening the writer analyzes indexes.
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { SqlClient, Statement } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import Database from "better-sqlite3";
 import { Effect, ManagedRuntime } from "effect";
+import { SqlClient, Statement } from "effect/sql";
 import { PersistenceProjectTag } from "../../src/lib/domain/persistence/Services/persistence-service.js";
 import { makeEventStoreEffect } from "../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../src/lib/persistence/effect/live.js";

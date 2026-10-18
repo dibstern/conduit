@@ -1,5 +1,5 @@
-import type { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import type { SqlClient } from "effect/sql";
 import type { SessionScope } from "../contracts/session-scope.js";
 
 export interface ProviderSessionBinding {

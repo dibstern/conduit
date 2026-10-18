@@ -1,7 +1,7 @@
 import { tmpdir } from "node:os";
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { RateLimiterLive } from "../../../src/lib/domain/relay/Layers/rate-limiter-layer.js";

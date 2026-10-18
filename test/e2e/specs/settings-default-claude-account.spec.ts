@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test as base, expect, type Page } from "@playwright/test";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	GetInstances,

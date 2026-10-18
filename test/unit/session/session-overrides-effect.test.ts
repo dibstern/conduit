@@ -2,14 +2,8 @@
 // Ref<OverridesState> + Fiber timeout management.
 
 import { describe, it } from "@effect/vitest";
-import {
-	Duration,
-	Effect,
-	Layer,
-	ManagedRuntime,
-	Ref,
-	TestClock,
-} from "effect";
+import { Duration, Effect, Layer, ManagedRuntime, Ref } from "effect";
+import { TestClock } from "effect/testing";
 import { expect, vi, it as vitestIt } from "vitest";
 import {
 	clearAgent,

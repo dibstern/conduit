@@ -2,8 +2,15 @@
 // OpenCode, persists them, maintains timeouts, and publishes alerts and push
 // notifications using RPC viewer presence.
 
-import type { SqlError } from "@effect/sql/SqlError";
-import { Data, Effect, Either, Option, Runtime, Schema } from "effect";
+import {
+	Data,
+	Effect,
+	Result as Either,
+	Option,
+	Runtime,
+	Schema,
+} from "effect";
+import type { SqlError } from "effect/sql/SqlError";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
 import { OpenCodeEventSchema } from "../contracts/providers/opencode-sdk.js";
 import type { OpenCodeConnectionStatus } from "../contracts/ws-rpc.js";

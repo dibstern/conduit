@@ -1,5 +1,13 @@
 import { isDeepStrictEqual } from "node:util";
-import { Deferred, Effect, Either, Fiber, Queue, Schema, Stream } from "effect";
+import {
+	Deferred,
+	Effect,
+	Result as Either,
+	Fiber,
+	Queue,
+	Schema,
+	Stream,
+} from "effect";
 import { createEventId } from "../../persistence/events.js";
 import { EventSinkIngestionError } from "../event-sink-errors.js";
 import { makeInProcessSessionRunner } from "../runner/in-process-session-runner.js";

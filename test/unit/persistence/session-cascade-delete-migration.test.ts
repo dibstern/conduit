@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import Database from "better-sqlite3";
 import { Effect, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it } from "vitest";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";

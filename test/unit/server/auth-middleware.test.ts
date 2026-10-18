@@ -1,11 +1,11 @@
+import { describe, it } from "@effect/vitest";
+import { Effect, Layer } from "effect";
 import {
-	HttpApp,
+	HttpEffect as HttpApp,
 	HttpRouter,
 	HttpServerRequest,
 	HttpServerResponse,
-} from "@effect/platform";
-import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+} from "effect/http";
 import { expect } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import {

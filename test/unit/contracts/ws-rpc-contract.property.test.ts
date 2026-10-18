@@ -2,11 +2,11 @@ import {
 	Arbitrary,
 	Effect,
 	type Result as Either,
-	FastCheck as fc,
 	Schema,
 	Stream,
 } from "effect";
 import { RpcSchema } from "effect/rpc";
+import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { WsRpcGroup, WsRpcRequest } from "../../../src/lib/contracts/ws-rpc.js";
 import { makeRpcWire } from "../../helpers/rpc-wire.js";

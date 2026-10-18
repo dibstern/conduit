@@ -1,4 +1,4 @@
-import { Effect, Either } from "effect";
+import { Effect, Result as Either } from "effect";
 import { LoggerTag } from "../domain/relay/Services/services.js";
 import { selectSessionContextWindow } from "../domain/relay/Services/session-model-settings.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";

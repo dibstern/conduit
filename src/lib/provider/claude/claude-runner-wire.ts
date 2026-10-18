@@ -1,4 +1,4 @@
-import { Either, Schema } from "effect";
+import { Result as Either, Schema } from "effect";
 import type { Account } from "../../contracts/account.js";
 import {
 	loadDaemonConfigResult,

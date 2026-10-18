@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Cause, Context, Deferred, Effect, Layer, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import type { SessionSetupFinishedPayloadSchema } from "../../../contracts/project-setup.js";
 import { loadDaemonConfigResult } from "../../../daemon/config-persistence.js";
 import { readProjectFile } from "../../../daemon/project-file.js";

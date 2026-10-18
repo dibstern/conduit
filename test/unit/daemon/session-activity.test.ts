@@ -1,5 +1,6 @@
 import { describe, it } from "@effect/vitest";
-import { Clock, Effect, Layer, PubSub, Stream, TestClock } from "effect";
+import { Clock, Effect, Layer, PubSub, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import {
 	DaemonEventBusLive,

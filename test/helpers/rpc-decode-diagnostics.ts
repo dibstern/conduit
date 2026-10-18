@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { Rpc, RpcSchema, RpcSerialization } from "@effect/rpc";
-import { Either, Option, ParseResult, Schema } from "effect";
+import { Result as Either, Option, ParseResult, Schema } from "effect";
+import { Rpc, RpcSchema, RpcSerialization } from "effect/rpc";
 import { WsRpcGroup } from "../../src/lib/contracts/ws-rpc.js";
 import { isRecord } from "../../src/lib/utils.js";
 

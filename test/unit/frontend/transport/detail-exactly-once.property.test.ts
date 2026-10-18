@@ -1,5 +1,5 @@
-import { RpcClientError } from "@effect/rpc/RpcClientError";
 import { Chunk, Effect, Stream } from "effect";
+import { RpcClientError } from "effect/rpc/RpcClientError";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import type { SessionDetailEnvelope } from "../../../../src/lib/contracts/ws-rpc.js";

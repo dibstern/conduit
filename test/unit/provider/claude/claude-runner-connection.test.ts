@@ -2,18 +2,18 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import {
 	Deferred,
 	Effect,
 	Exit,
 	Fiber,
-	FiberRef,
+	References as FiberRef,
 	Layer,
 	ManagedRuntime,
 	Option,
 	Stream,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, expect, it } from "vitest";
 import { BUILD_ID } from "../../../../src/lib/build-id.js";
 import {

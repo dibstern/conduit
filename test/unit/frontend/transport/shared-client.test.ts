@@ -10,7 +10,8 @@
 // the protocol's socket outlives the call that built the client.
 
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Exit, Fiber, Schedule, TestClock } from "effect";
+import { Deferred, Effect, Exit, Fiber, Schedule } from "effect";
+import { TestClock } from "effect/testing";
 import { afterAll, beforeAll, beforeEach, expect, vi } from "vitest";
 import { connectionState } from "../../../../src/lib/frontend/transport/connection-status.svelte.js";
 import {

@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Effect, HashMap, type Option, Ref } from "effect";
+import { SqlClient } from "effect/sql";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import type {
 	SessionDetail,

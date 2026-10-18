@@ -9,7 +9,14 @@ import { createServer } from "node:net";
 import { join } from "node:path";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import Database from "better-sqlite3";
-import { Effect, Either, Fiber, Option, Schema, Stream } from "effect";
+import {
+	Effect,
+	Result as Either,
+	Fiber,
+	Option,
+	Schema,
+	Stream,
+} from "effect";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	GetAgentsResponseSchema,

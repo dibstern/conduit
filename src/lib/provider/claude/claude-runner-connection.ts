@@ -1,4 +1,4 @@
-import { Effect, Either } from "effect";
+import { Effect, Result as Either } from "effect";
 import {
 	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,

@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, expect, vi } from "vitest";
 import {
 	MessageVersion,

@@ -11,10 +11,10 @@
 import { readFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
-import type { HttpServerError } from "@effect/platform";
-import { HttpServer } from "@effect/platform";
 import { NodeHttpServer } from "@effect/platform-node";
 import { Context, Effect, Layer } from "effect";
+import type { HttpServerError } from "effect/http";
+import { HttpServer } from "effect/http";
 import {
 	effectRouterWithCors,
 	type ProjectsProvider,

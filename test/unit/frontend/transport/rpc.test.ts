@@ -1,5 +1,5 @@
-import { RpcClientError } from "@effect/rpc/RpcClientError";
 import { Cause, Effect, Exit, Fiber, ManagedRuntime, Stream } from "effect";
+import { RpcClientError } from "effect/rpc/RpcClientError";
 import { afterEach, beforeEach, expect, expectTypeOf, it, vi } from "vitest";
 import { AccountUnroutable } from "../../../../src/lib/contracts/limit-recovery.js";
 import { WsRpcError } from "../../../../src/lib/contracts/ws-rpc.js";

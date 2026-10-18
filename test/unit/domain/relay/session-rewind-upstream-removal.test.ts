@@ -1,8 +1,9 @@
 // Failure modes: deleting the cut point exposes its hidden tail; deleting a
 // later member leaves an undoable half-removed range; deleting a kept message
 // commits an unrelated rewind; partial projection commits only part of a cut.
-import { SqlClient } from "@effect/sql";
+
 import { Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, it } from "vitest";
 import {
 	ProviderRuntimeIngestionLive,

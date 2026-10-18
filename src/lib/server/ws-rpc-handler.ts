@@ -1,19 +1,19 @@
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
-import { Socket, SocketServer } from "@effect/platform";
-import { RpcSerialization, RpcServer } from "@effect/rpc";
-import { Statement } from "@effect/sql";
 import type { ManagedRuntime } from "effect";
 import {
 	Context,
 	Effect,
-	FiberRef,
+	References as FiberRef,
 	Layer,
 	Option,
 	Runtime,
 	Tracer,
 } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
+import { RpcSerialization, RpcServer } from "effect/rpc";
+import { Socket, SocketServer } from "effect/socket";
+import { Statement } from "effect/sql";
 import type { WebSocket } from "ws";
 import {
 	type OnSuccessfulShutdownResponse,

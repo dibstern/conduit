@@ -17,8 +17,6 @@
 // client to change it — the per-call override stays available to the PTY
 // consumer.
 
-import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
 import {
 	Context,
 	Duration,
@@ -32,6 +30,8 @@ import {
 	Scope,
 	Stream,
 } from "effect";
+import { RpcClient, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import type { SessionDetailEnvelope } from "../../contracts/ws-rpc.js";
 import {
 	markControlSocketOpen,

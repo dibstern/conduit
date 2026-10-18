@@ -6,7 +6,7 @@ import {
 	resolveSettings as sdkResolveSettings,
 	tool,
 } from "@anthropic-ai/claude-agent-sdk";
-import { Effect, Either } from "effect";
+import { Effect, Result as Either } from "effect";
 import { z } from "zod";
 import {
 	loadDaemonConfigResult,

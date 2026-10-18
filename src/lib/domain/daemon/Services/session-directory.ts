@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Context, Data, Effect, HashMap, Layer, Option, Ref } from "effect";
+import { SqlClient } from "effect/sql";
 import { ProjectRegistryTag } from "./project-registry-service.js";
 
 export class SessionDirectoryReadError extends Data.TaggedError(

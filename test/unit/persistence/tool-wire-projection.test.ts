@@ -25,8 +25,8 @@
 //    same call id from another session, or nothing for a part stored without
 //    a call id, which the browser names by its part id.
 
-import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { describe, expect, it } from "vitest";
 import type {
 	EventPayloadMap,

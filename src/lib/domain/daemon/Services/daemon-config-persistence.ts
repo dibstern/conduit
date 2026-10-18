@@ -2,8 +2,7 @@
 // Uses @effect/platform FileSystem for testability and atomic writes with
 // coalesced saves to avoid write contention under rapid state changes.
 
-import { FileSystem } from "@effect/platform";
-import { Context, Effect, Ref } from "effect";
+import { Context, Effect, FileSystem, Ref } from "effect";
 import { migrateProjectFolders } from "../../../daemon/config-persistence.js";
 import type { DaemonState } from "./daemon-state.js";
 import { DaemonStateTag } from "./daemon-state.js";

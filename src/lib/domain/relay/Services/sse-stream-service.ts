@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Context, Effect, Fiber, Layer, Schema, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import type { Logger } from "../../../logger.js";

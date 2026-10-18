@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Chunk, Deferred, Effect, Fiber, Layer, Stream } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { describe, expect, it, vi } from "vitest";
 import {
 	decodeProviderRuntimeEvent,

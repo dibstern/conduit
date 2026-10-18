@@ -13,7 +13,7 @@ import {
 } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { promisify } from "node:util";
-import { Effect, Either, Layer, Stream } from "effect";
+import { Effect, Result as Either, Layer, Stream } from "effect";
 import type { SessionWorktreeOwnership } from "../../../contracts/session-workspace.js";
 import {
 	type WorkspaceMissing,

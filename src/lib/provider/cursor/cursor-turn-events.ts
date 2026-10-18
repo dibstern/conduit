@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { Effect, Either, Schema } from "effect";
+import { Effect, Result as Either, Schema } from "effect";
 import type {
 	ProviderRuntimeEventPayloadMap,
 	ProviderRuntimeEventType,

@@ -1,7 +1,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import {
 	Cause,
 	type Context,
@@ -16,6 +15,7 @@ import {
 	Scope,
 	TestContext,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {

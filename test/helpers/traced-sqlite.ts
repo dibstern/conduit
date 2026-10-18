@@ -1,8 +1,8 @@
-import { SqlClient } from "@effect/sql";
-import type { Connection } from "@effect/sql/SqlConnection";
-import { makeCompilerSqlite } from "@effect/sql/Statement";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect, Stream } from "effect";
+import { SqlClient } from "effect/sql";
+import type { Connection } from "effect/sql/SqlConnection";
+import { makeCompilerSqlite } from "effect/sql/Statement";
 
 /** Owns one real SQLite connection for a sequential benchmark's scoped lifetime. */
 export const makeTracedSqlite = (

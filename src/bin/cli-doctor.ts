@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import {
 	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,

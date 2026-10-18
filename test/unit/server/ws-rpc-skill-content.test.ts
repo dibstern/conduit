@@ -9,9 +9,9 @@ import {
 import fs from "node:fs/promises";
 import os from "node:os";
 import { dirname, join } from "node:path";
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Option } from "effect";
+import { RpcTest } from "effect/rpc";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";

@@ -6,9 +6,9 @@
 import { once } from "node:events";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
-import { Effect, Either, Layer, Schedule } from "effect";
+import { Effect, Result as Either, Layer, Schedule } from "effect";
+import { RpcClient, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import {

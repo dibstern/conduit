@@ -1,6 +1,6 @@
-import { RpcSchema } from "@effect/rpc";
 import { expect, type Page, type WebSocketRoute } from "@playwright/test";
 import { Effect, Exit, Schema, Scope, Stream } from "effect";
+import { RpcSchema } from "effect/rpc";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
 import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import {

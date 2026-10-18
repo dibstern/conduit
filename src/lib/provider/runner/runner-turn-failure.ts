@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Effect, Option } from "effect";
+import { SqlClient } from "effect/sql";
 import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
 import { createEventId } from "../../persistence/events.js";
 import { isRecord } from "../../utils.js";

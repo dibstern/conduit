@@ -1,4 +1,3 @@
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import {
 	type Context,
@@ -10,6 +9,7 @@ import {
 	Scope,
 	Stream,
 } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import {
@@ -422,4 +422,4 @@ describe("routed RPC server", () => {
 	);
 });
 
-import { Headers } from "@effect/platform";
+import { Headers } from "effect/http";

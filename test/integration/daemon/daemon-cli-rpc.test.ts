@@ -10,9 +10,9 @@ import {
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect, Layer, Option, Queue, Stream } from "effect";
+import { RpcClient, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import { describe, expect, it } from "vitest";
 import { run } from "../../../src/bin/cli-core.js";
 import {

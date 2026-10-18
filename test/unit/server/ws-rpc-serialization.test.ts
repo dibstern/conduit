@@ -3,15 +3,16 @@
  * success schema would reach a user's browser as a crash no RpcTest-based test
  * could catch: that helper bypasses serialization. Keep JSON on both sides here.
  */
-import { Socket, SocketServer } from "@effect/platform";
+
+import { Effect, Layer, Schema, Stream } from "effect";
 import {
 	Rpc,
 	RpcClient,
 	RpcGroup,
 	RpcSerialization,
 	RpcServer,
-} from "@effect/rpc";
-import { Effect, Layer, Schema, Stream } from "effect";
+} from "effect/rpc";
+import { Socket, SocketServer } from "effect/socket";
 import { describe, expect, it } from "vitest";
 import * as Contracts from "../../../src/lib/contracts/ws-rpc.js";
 import { PermissionId } from "../../../src/lib/shared-types.js";

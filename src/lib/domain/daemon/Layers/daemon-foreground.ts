@@ -6,7 +6,7 @@ import {
 	Data,
 	Deferred,
 	Effect,
-	Either,
+	Result as Either,
 	Exit,
 	HashMap,
 	Layer,

@@ -1,4 +1,3 @@
-import { SqlClient } from "@effect/sql";
 import {
 	type Cause,
 	Duration,
@@ -9,6 +8,7 @@ import {
 	PubSub,
 	Ref,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import * as Failure from "../../../effect/failure-classification.js";
 import type { SessionStatus } from "../../../instance/sdk-types.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";

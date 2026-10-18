@@ -10,10 +10,10 @@ import {
 import { arch, cpus, platform, release, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import Database from "better-sqlite3";
 import { Effect, Exit, Schema, Tracer } from "effect";
+import { SqlClient } from "effect/sql";
 import { PersistenceProjectTag } from "../../src/lib/domain/persistence/Services/persistence-service.js";
 import { makeEffectSqlMigrator } from "../../src/lib/persistence/effect/migrations.js";
 import { makeProjectionRunnerEffect } from "../../src/lib/persistence/effect/projection-runner-effect.js";

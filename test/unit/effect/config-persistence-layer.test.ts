@@ -11,8 +11,8 @@ import {
 	Layer,
 	Ref,
 	Scope,
-	TestClock,
 } from "effect";
+import { TestClock } from "effect/testing";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import {
 	buildDaemonConfigSnapshot,

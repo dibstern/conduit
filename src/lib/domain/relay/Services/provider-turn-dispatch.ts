@@ -1,17 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { SqlClient } from "@effect/sql";
 import {
 	Context,
 	Deferred,
 	Effect,
-	Either,
+	Result as Either,
 	Fiber,
 	FiberMap,
 	Ref,
 	type Runtime,
 	Schema,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { type Account, AccountSchema } from "../../../contracts/account.js";
 import {
 	PROVIDER_DRIVERS,

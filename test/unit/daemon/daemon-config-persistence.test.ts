@@ -1,7 +1,6 @@
-import { FileSystem } from "@effect/platform";
-import { SystemError } from "@effect/platform/Error";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Ref } from "effect";
+import { Effect, FileSystem, Layer, Ref } from "effect";
+import { SystemError } from "effect/PlatformError";
 import { expect } from "vitest";
 import {
 	PersistencePathTag,

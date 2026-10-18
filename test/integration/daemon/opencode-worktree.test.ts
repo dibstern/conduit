@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	ListDaemonSessions,

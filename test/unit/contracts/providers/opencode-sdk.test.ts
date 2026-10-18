@@ -1,4 +1,4 @@
-import { Either, Schema } from "effect";
+import { Result as Either, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {

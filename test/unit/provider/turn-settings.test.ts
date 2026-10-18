@@ -14,7 +14,7 @@
  * - Offered lists, rejection fields or normalized settings are wrong, or
  *   resolution mutates the pick/catalog.
  */
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { describe, expect, it } from "vitest";
 import {
 	findCatalogModel,

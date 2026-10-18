@@ -1,6 +1,6 @@
-import { SqlClient, Statement } from "@effect/sql";
 import { describe, expect, it } from "@effect/vitest";
 import { Effect } from "effect";
+import { SqlClient, Statement } from "effect/sql";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
 	CommandReadModelRepository,

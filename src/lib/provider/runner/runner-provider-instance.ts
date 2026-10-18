@@ -1,14 +1,14 @@
-import { SqlClient } from "@effect/sql";
 import {
 	Deferred,
 	Effect,
-	Either,
+	Result as Either,
 	Exit,
 	Fiber,
 	FiberMap,
 	Option,
 	type Scope,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	type AccountsState,
 	resolve as resolveAccount,
