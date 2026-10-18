@@ -1,0 +1,2614 @@
+{
+	"sourceFingerprint": "3d8a1bbee6046f1f5fbc404f8a2575b94264f86c4206b390a9217eccb70afee8",
+	"typescript": "5.9.3",
+	"node": "v26.10.0",
+	"baseline": {
+		"total": 28995,
+		"byCode": {
+			"TS1360": 3,
+			"TS18046": 3589,
+			"TS18047": 96,
+			"TS18048": 34,
+			"TS2305": 231,
+			"TS2307": 517,
+			"TS2314": 6,
+			"TS2322": 931,
+			"TS2339": 5090,
+			"TS2344": 94,
+			"TS2345": 4598,
+			"TS2347": 50,
+			"TS2348": 2,
+			"TS2349": 142,
+			"TS2352": 3,
+			"TS2353": 18,
+			"TS2366": 4,
+			"TS2367": 136,
+			"TS2375": 825,
+			"TS2379": 410,
+			"TS2416": 4,
+			"TS2488": 2930,
+			"TS2493": 4,
+			"TS2532": 2,
+			"TS2536": 1,
+			"TS2538": 1,
+			"TS2551": 1202,
+			"TS2554": 1528,
+			"TS2556": 10,
+			"TS2560": 2,
+			"TS2571": 1788,
+			"TS2578": 8,
+			"TS2678": 11,
+			"TS2694": 139,
+			"TS2698": 270,
+			"TS2700": 23,
+			"TS2702": 11,
+			"TS2722": 19,
+			"TS2724": 122,
+			"TS2739": 2,
+			"TS2766": 2,
+			"TS2769": 126,
+			"TS2796": 2,
+			"TS4111": 933,
+			"TS7006": 2327,
+			"TS7030": 2,
+			"TS7031": 614,
+			"TS7053": 133
+		},
+		"byCategory": {
+			"catch": 1053,
+			"core": 4279,
+			"either": 247,
+			"fork": 169,
+			"generators": 737,
+			"imports": 517,
+			"layers": 1560,
+			"option": 84,
+			"other": 17581,
+			"schema": 1961,
+			"services": 256,
+			"testing": 551
+		}
+	},
+	"transforms": {
+		"either": {
+			"edits": 408,
+			"after": {
+				"total": 28729,
+				"byCode": {
+					"TS1360": 3,
+					"TS18046": 3508,
+					"TS18047": 96,
+					"TS18048": 34,
+					"TS2305": 212,
+					"TS2307": 517,
+					"TS2314": 6,
+					"TS2322": 931,
+					"TS2339": 4942,
+					"TS2344": 94,
+					"TS2345": 4598,
+					"TS2347": 50,
+					"TS2348": 2,
+					"TS2349": 142,
+					"TS2352": 3,
+					"TS2353": 18,
+					"TS2366": 4,
+					"TS2367": 136,
+					"TS2375": 813,
+					"TS2379": 408,
+					"TS2416": 4,
+					"TS2488": 2929,
+					"TS2493": 4,
+					"TS2532": 2,
+					"TS2536": 1,
+					"TS2538": 1,
+					"TS2551": 1202,
+					"TS2554": 1528,
+					"TS2556": 10,
+					"TS2560": 2,
+					"TS2571": 1788,
+					"TS2578": 8,
+					"TS2678": 11,
+					"TS2694": 139,
+					"TS2698": 270,
+					"TS2700": 23,
+					"TS2702": 11,
+					"TS2722": 19,
+					"TS2724": 122,
+					"TS2739": 2,
+					"TS2766": 2,
+					"TS2769": 126,
+					"TS2796": 2,
+					"TS4111": 933,
+					"TS7006": 2324,
+					"TS7030": 2,
+					"TS7031": 614,
+					"TS7053": 133
+				},
+				"byCategory": {
+					"catch": 1053,
+					"core": 4129,
+					"either": 225,
+					"fork": 169,
+					"generators": 725,
+					"imports": 517,
+					"layers": 1560,
+					"option": 84,
+					"other": 17499,
+					"schema": 1961,
+					"services": 256,
+					"testing": 551
+				}
+			},
+			"ownBefore": 247,
+			"ownAfter": 225,
+			"introduced": 0,
+			"introducedByCategory": {},
+			"introducedOutsideCategory": 0,
+			"categoryDelta": {
+				"catch": 0,
+				"core": -150,
+				"either": -22,
+				"fork": 0,
+				"generators": -12,
+				"imports": 0,
+				"layers": 0,
+				"option": 0,
+				"other": -82,
+				"schema": 0,
+				"services": 0,
+				"testing": 0
+			},
+			"result": "PASS"
+		},
+		"fork": {
+			"edits": 117,
+			"after": {
+				"total": 28843,
+				"byCode": {
+					"TS1360": 3,
+					"TS18046": 3585,
+					"TS18047": 96,
+					"TS18048": 34,
+					"TS2305": 231,
+					"TS2307": 517,
+					"TS2314": 6,
+					"TS2322": 931,
+					"TS2339": 4973,
+					"TS2344": 94,
+					"TS2345": 4595,
+					"TS2347": 50,
+					"TS2348": 2,
+					"TS2349": 142,
+					"TS2352": 3,
+					"TS2353": 18,
+					"TS2366": 4,
+					"TS2367": 136,
+					"TS2375": 820,
+					"TS2379": 404,
+					"TS2416": 4,
+					"TS2488": 2924,
+					"TS2493": 4,
+					"TS2532": 2,
+					"TS2536": 1,
+					"TS2538": 1,
+					"TS2551": 1202,
+					"TS2554": 1528,
+					"TS2556": 10,
+					"TS2560": 2,
+					"TS2571": 1778,
+					"TS2578": 8,
+					"TS2678": 11,
+					"TS2694": 139,
+					"TS2698": 270,
+					"TS2700": 23,
+					"TS2702": 11,
+					"TS2722": 19,
+					"TS2724": 122,
+					"TS2739": 2,
+					"TS2766": 2,
+					"TS2769": 126,
+					"TS2796": 2,
+					"TS4111": 933,
+					"TS7006": 2327,
+					"TS7030": 2,
+					"TS7031": 613,
+					"TS7053": 133
+				},
+				"byCategory": {
+					"catch": 1053,
+					"core": 4270,
+					"either": 247,
+					"fork": 55,
+					"generators": 733,
+					"imports": 517,
+					"layers": 1560,
+					"option": 81,
+					"other": 17559,
+					"schema": 1961,
+					"services": 256,
+					"testing": 551
+				}
+			},
+			"ownBefore": 169,
+			"ownAfter": 55,
+			"introduced": 3,
+			"introducedByCategory": {
+				"fork": 3
+			},
+			"introducedOutsideCategory": 0,
+			"categoryDelta": {
+				"catch": 0,
+				"core": -9,
+				"either": 0,
+				"fork": -114,
+				"generators": -4,
+				"imports": 0,
+				"layers": 0,
+				"option": -3,
+				"other": -22,
+				"schema": 0,
+				"services": 0,
+				"testing": 0
+			},
+			"result": "PASS"
+		},
+		"option": {
+			"edits": 1,
+			"after": {
+				"total": 28994,
+				"byCode": {
+					"TS1360": 3,
+					"TS18046": 3589,
+					"TS18047": 96,
+					"TS18048": 34,
+					"TS2305": 231,
+					"TS2307": 517,
+					"TS2314": 6,
+					"TS2322": 931,
+					"TS2339": 5089,
+					"TS2344": 94,
+					"TS2345": 4598,
+					"TS2347": 50,
+					"TS2348": 2,
+					"TS2349": 142,
+					"TS2352": 3,
+					"TS2353": 18,
+					"TS2366": 4,
+					"TS2367": 136,
+					"TS2375": 825,
+					"TS2379": 410,
+					"TS2416": 4,
+					"TS2488": 2930,
+					"TS2493": 4,
+					"TS2532": 2,
+					"TS2536": 1,
+					"TS2538": 1,
+					"TS2551": 1202,
+					"TS2554": 1528,
+					"TS2556": 10,
+					"TS2560": 2,
+					"TS2571": 1788,
+					"TS2578": 8,
+					"TS2678": 11,
+					"TS2694": 139,
+					"TS2698": 270,
+					"TS2700": 23,
+					"TS2702": 11,
+					"TS2722": 19,
+					"TS2724": 122,
+					"TS2739": 2,
+					"TS2766": 2,
+					"TS2769": 126,
+					"TS2796": 2,
+					"TS4111": 933,
+					"TS7006": 2327,
+					"TS7030": 2,
+					"TS7031": 614,
+					"TS7053": 133
+				},
+				"byCategory": {
+					"catch": 1053,
+					"core": 4279,
+					"either": 247,
+					"fork": 169,
+					"generators": 737,
+					"imports": 517,
+					"layers": 1560,
+					"option": 83,
+					"other": 17581,
+					"schema": 1961,
+					"services": 256,
+					"testing": 551
+				}
+			},
+			"ownBefore": 84,
+			"ownAfter": 83,
+			"introduced": 0,
+			"introducedByCategory": {},
+			"introducedOutsideCategory": 0,
+			"categoryDelta": {
+				"catch": 0,
+				"core": 0,
+				"either": 0,
+				"fork": 0,
+				"generators": 0,
+				"imports": 0,
+				"layers": 0,
+				"option": -1,
+				"other": 0,
+				"schema": 0,
+				"services": 0,
+				"testing": 0
+			},
+			"result": "PASS"
+		},
+		"schema": {
+			"edits": 26,
+			"after": {
+				"total": 28985,
+				"byCode": {
+					"TS1360": 3,
+					"TS18046": 3589,
+					"TS18047": 96,
+					"TS18048": 34,
+					"TS2305": 231,
+					"TS2307": 517,
+					"TS2314": 6,
+					"TS2322": 931,
+					"TS2339": 5090,
+					"TS2344": 94,
+					"TS2345": 4598,
+					"TS2347": 50,
+					"TS2348": 2,
+					"TS2349": 142,
+					"TS2352": 3,
+					"TS2353": 18,
+					"TS2366": 4,
+					"TS2367": 136,
+					"TS2375": 825,
+					"TS2379": 410,
+					"TS2416": 4,
+					"TS2488": 2930,
+					"TS2493": 4,
+					"TS2532": 2,
+					"TS2536": 1,
+					"TS2538": 1,
+					"TS2551": 1201,
+					"TS2554": 1519,
+					"TS2556": 10,
+					"TS2560": 2,
+					"TS2571": 1788,
+					"TS2578": 8,
+					"TS2678": 11,
+					"TS2694": 139,
+					"TS2698": 270,
+					"TS2700": 23,
+					"TS2702": 11,
+					"TS2722": 19,
+					"TS2724": 122,
+					"TS2739": 2,
+					"TS2766": 2,
+					"TS2769": 126,
+					"TS2796": 2,
+					"TS4111": 933,
+					"TS7006": 2327,
+					"TS7030": 2,
+					"TS7031": 614,
+					"TS7053": 133
+				},
+				"byCategory": {
+					"catch": 1053,
+					"core": 4279,
+					"either": 247,
+					"fork": 169,
+					"generators": 737,
+					"imports": 517,
+					"layers": 1560,
+					"option": 84,
+					"other": 17581,
+					"schema": 1951,
+					"services": 256,
+					"testing": 551
+				}
+			},
+			"ownBefore": 1961,
+			"ownAfter": 1951,
+			"introduced": 0,
+			"introducedByCategory": {},
+			"introducedOutsideCategory": 0,
+			"categoryDelta": {
+				"catch": 0,
+				"core": 0,
+				"either": 0,
+				"fork": 0,
+				"generators": 0,
+				"imports": 0,
+				"layers": 0,
+				"option": 0,
+				"other": 0,
+				"schema": -10,
+				"services": 0,
+				"testing": 0
+			},
+			"result": "PASS"
+		},
+		"testing": {
+			"edits": 285,
+			"after": {
+				"total": 28701,
+				"byCode": {
+					"TS1360": 3,
+					"TS18046": 3589,
+					"TS18047": 96,
+					"TS18048": 34,
+					"TS2305": 212,
+					"TS2307": 517,
+					"TS2314": 6,
+					"TS2322": 931,
+					"TS2339": 5086,
+					"TS2344": 94,
+					"TS2345": 4598,
+					"TS2347": 50,
+					"TS2348": 2,
+					"TS2349": 142,
+					"TS2352": 3,
+					"TS2353": 18,
+					"TS2366": 4,
+					"TS2367": 136,
+					"TS2375": 819,
+					"TS2379": 410,
+					"TS2416": 4,
+					"TS2488": 2930,
+					"TS2493": 4,
+					"TS2532": 2,
+					"TS2536": 1,
+					"TS2538": 1,
+					"TS2551": 1202,
+					"TS2554": 1266,
+					"TS2556": 10,
+					"TS2560": 2,
+					"TS2571": 1788,
+					"TS2578": 8,
+					"TS2678": 11,
+					"TS2694": 139,
+					"TS2698": 270,
+					"TS2700": 23,
+					"TS2702": 11,
+					"TS2722": 19,
+					"TS2724": 122,
+					"TS2739": 2,
+					"TS2766": 2,
+					"TS2769": 126,
+					"TS2796": 2,
+					"TS4111": 933,
+					"TS7006": 2324,
+					"TS7030": 2,
+					"TS7031": 614,
+					"TS7053": 133
+				},
+				"byCategory": {
+					"catch": 1053,
+					"core": 4276,
+					"either": 247,
+					"fork": 169,
+					"generators": 734,
+					"imports": 517,
+					"layers": 1560,
+					"option": 84,
+					"other": 17575,
+					"schema": 1961,
+					"services": 256,
+					"testing": 269
+				}
+			},
+			"ownBefore": 551,
+			"ownAfter": 269,
+			"introduced": 0,
+			"introducedByCategory": {},
+			"introducedOutsideCategory": 0,
+			"categoryDelta": {
+				"catch": 0,
+				"core": -3,
+				"either": 0,
+				"fork": 0,
+				"generators": -3,
+				"imports": 0,
+				"layers": 0,
+				"option": 0,
+				"other": -6,
+				"schema": 0,
+				"services": 0,
+				"testing": -282
+			},
+			"result": "PASS"
+		},
+		"core": {
+			"edits": 29,
+			"after": {
+				"total": 28959,
+				"byCode": {
+					"TS1360": 3,
+					"TS18046": 3585,
+					"TS18047": 96,
+					"TS18048": 34,
+					"TS2305": 231,
+					"TS2307": 517,
+					"TS2314": 6,
+					"TS2322": 931,
+					"TS2339": 5082,
+					"TS2344": 94,
+					"TS2345": 4598,
+					"TS2347": 50,
+					"TS2348": 2,
+					"TS2349": 142,
+					"TS2352": 3,
+					"TS2353": 18,
+					"TS2366": 4,
+					"TS2367": 136,
+					"TS2375": 824,
+					"TS2379": 410,
+					"TS2416": 4,
+					"TS2488": 2930,
+					"TS2493": 4,
+					"TS2532": 2,
+					"TS2536": 1,
+					"TS2538": 1,
+					"TS2551": 1179,
+					"TS2554": 1528,
+					"TS2556": 10,
+					"TS2560": 2,
+					"TS2571": 1788,
+					"TS2578": 8,
+					"TS2678": 11,
+					"TS2694": 139,
+					"TS2698": 270,
+					"TS2700": 23,
+					"TS2702": 11,
+					"TS2722": 19,
+					"TS2724": 122,
+					"TS2739": 2,
+					"TS2766": 2,
+					"TS2769": 126,
+					"TS2796": 2,
+					"TS4111": 933,
+					"TS7006": 2327,
+					"TS7030": 2,
+					"TS7031": 614,
+					"TS7053": 133
+				},
+				"byCategory": {
+					"catch": 1053,
+					"core": 4248,
+					"either": 247,
+					"fork": 169,
+					"generators": 737,
+					"imports": 517,
+					"layers": 1559,
+					"option": 84,
+					"other": 17577,
+					"schema": 1961,
+					"services": 256,
+					"testing": 551
+				}
+			},
+			"ownBefore": 4279,
+			"ownAfter": 4248,
+			"introduced": 0,
+			"introducedByCategory": {},
+			"introducedOutsideCategory": 0,
+			"categoryDelta": {
+				"catch": 0,
+				"core": -31,
+				"either": 0,
+				"fork": 0,
+				"generators": 0,
+				"imports": 0,
+				"layers": -1,
+				"option": 0,
+				"other": -4,
+				"schema": 0,
+				"services": 0,
+				"testing": 0
+			},
+			"result": "PASS"
+		},
+		"combined": {
+			"edits": 956,
+			"after": {
+				"total": 28007,
+				"byCode": {
+					"TS1360": 3,
+					"TS18046": 3487,
+					"TS18047": 96,
+					"TS18048": 34,
+					"TS2305": 193,
+					"TS2307": 476,
+					"TS2314": 6,
+					"TS2322": 931,
+					"TS2339": 4771,
+					"TS2344": 94,
+					"TS2345": 4586,
+					"TS2347": 47,
+					"TS2348": 2,
+					"TS2349": 142,
+					"TS2352": 3,
+					"TS2353": 18,
+					"TS2366": 4,
+					"TS2367": 136,
+					"TS2375": 777,
+					"TS2379": 396,
+					"TS2416": 4,
+					"TS2488": 2910,
+					"TS2493": 4,
+					"TS2532": 2,
+					"TS2536": 1,
+					"TS2538": 1,
+					"TS2551": 1175,
+					"TS2554": 1257,
+					"TS2556": 10,
+					"TS2560": 2,
+					"TS2571": 1755,
+					"TS2578": 8,
+					"TS2678": 11,
+					"TS2694": 139,
+					"TS2698": 269,
+					"TS2700": 23,
+					"TS2702": 11,
+					"TS2722": 19,
+					"TS2724": 122,
+					"TS2739": 2,
+					"TS2766": 2,
+					"TS2769": 126,
+					"TS2796": 2,
+					"TS4111": 933,
+					"TS7006": 2275,
+					"TS7030": 2,
+					"TS7031": 607,
+					"TS7053": 133
+				},
+				"byCategory": {
+					"catch": 1018,
+					"core": 4078,
+					"either": 225,
+					"fork": 51,
+					"generators": 692,
+					"imports": 476,
+					"layers": 1540,
+					"option": 80,
+					"other": 17375,
+					"schema": 1951,
+					"services": 252,
+					"testing": 269
+				}
+			},
+			"ownBefore": 28995,
+			"ownAfter": 28007,
+			"introduced": 0,
+			"introducedByCategory": {},
+			"introducedOutsideCategory": 0,
+			"categoryDelta": {
+				"catch": -35,
+				"core": -201,
+				"either": -22,
+				"fork": -118,
+				"generators": -45,
+				"imports": -41,
+				"layers": -20,
+				"option": -4,
+				"other": -206,
+				"schema": -10,
+				"services": -4,
+				"testing": -282
+			},
+			"result": "PASS"
+		},
+		"imports": {
+			"edits": 41,
+			"after": {
+				"total": 28892,
+				"byCode": {
+					"TS1360": 3,
+					"TS18046": 3586,
+					"TS18047": 96,
+					"TS18048": 34,
+					"TS2305": 231,
+					"TS2307": 476,
+					"TS2314": 6,
+					"TS2322": 931,
+					"TS2339": 5090,
+					"TS2344": 94,
+					"TS2345": 4598,
+					"TS2347": 47,
+					"TS2348": 2,
+					"TS2349": 142,
+					"TS2352": 3,
+					"TS2353": 18,
+					"TS2366": 4,
+					"TS2367": 136,
+					"TS2375": 814,
+					"TS2379": 405,
+					"TS2416": 4,
+					"TS2488": 2930,
+					"TS2493": 4,
+					"TS2532": 2,
+					"TS2536": 1,
+					"TS2538": 1,
+					"TS2551": 1202,
+					"TS2554": 1528,
+					"TS2556": 10,
+					"TS2560": 2,
+					"TS2571": 1788,
+					"TS2578": 8,
+					"TS2678": 11,
+					"TS2694": 139,
+					"TS2698": 270,
+					"TS2700": 23,
+					"TS2702": 11,
+					"TS2722": 19,
+					"TS2724": 122,
+					"TS2739": 2,
+					"TS2766": 2,
+					"TS2769": 126,
+					"TS2796": 2,
+					"TS4111": 933,
+					"TS7006": 2293,
+					"TS7030": 2,
+					"TS7031": 608,
+					"TS7053": 133
+				},
+				"byCategory": {
+					"catch": 1053,
+					"core": 4274,
+					"either": 247,
+					"fork": 169,
+					"generators": 726,
+					"imports": 476,
+					"layers": 1560,
+					"option": 84,
+					"other": 17535,
+					"schema": 1961,
+					"services": 256,
+					"testing": 551
+				}
+			},
+			"ownBefore": 517,
+			"ownAfter": 476,
+			"introduced": 0,
+			"introducedByCategory": {},
+			"introducedOutsideCategory": 0,
+			"categoryDelta": {
+				"catch": 0,
+				"core": -5,
+				"either": 0,
+				"fork": 0,
+				"generators": -11,
+				"imports": -41,
+				"layers": 0,
+				"option": 0,
+				"other": -46,
+				"schema": 0,
+				"services": 0,
+				"testing": 0
+			},
+			"result": "PASS"
+		},
+		"services": {
+			"edits": 12,
+			"after": {
+				"total": 28979,
+				"byCode": {
+					"TS1360": 3,
+					"TS18046": 3588,
+					"TS18047": 96,
+					"TS18048": 34,
+					"TS2305": 231,
+					"TS2307": 517,
+					"TS2314": 6,
+					"TS2322": 931,
+					"TS2339": 5083,
+					"TS2344": 94,
+					"TS2345": 4592,
+					"TS2347": 50,
+					"TS2348": 2,
+					"TS2349": 142,
+					"TS2352": 3,
+					"TS2353": 18,
+					"TS2366": 4,
+					"TS2367": 136,
+					"TS2375": 825,
+					"TS2379": 410,
+					"TS2416": 4,
+					"TS2488": 2928,
+					"TS2493": 4,
+					"TS2532": 2,
+					"TS2536": 1,
+					"TS2538": 1,
+					"TS2551": 1202,
+					"TS2554": 1528,
+					"TS2556": 10,
+					"TS2560": 2,
+					"TS2571": 1788,
+					"TS2578": 8,
+					"TS2678": 11,
+					"TS2694": 139,
+					"TS2698": 270,
+					"TS2700": 23,
+					"TS2702": 11,
+					"TS2722": 19,
+					"TS2724": 122,
+					"TS2739": 2,
+					"TS2766": 2,
+					"TS2769": 126,
+					"TS2796": 2,
+					"TS4111": 933,
+					"TS7006": 2327,
+					"TS7030": 2,
+					"TS7031": 614,
+					"TS7053": 133
+				},
+				"byCategory": {
+					"catch": 1053,
+					"core": 4279,
+					"either": 247,
+					"fork": 169,
+					"generators": 737,
+					"imports": 517,
+					"layers": 1554,
+					"option": 84,
+					"other": 17575,
+					"schema": 1961,
+					"services": 252,
+					"testing": 551
+				}
+			},
+			"ownBefore": 256,
+			"ownAfter": 252,
+			"introduced": 0,
+			"introducedByCategory": {},
+			"introducedOutsideCategory": 0,
+			"categoryDelta": {
+				"catch": 0,
+				"core": 0,
+				"either": 0,
+				"fork": 0,
+				"generators": 0,
+				"imports": 0,
+				"layers": -6,
+				"option": 0,
+				"other": -6,
+				"schema": 0,
+				"services": -4,
+				"testing": 0
+			},
+			"result": "PASS"
+		},
+		"generators": {
+			"edits": 3,
+			"after": {
+				"total": 28966,
+				"byCode": {
+					"TS1360": 3,
+					"TS18046": 3589,
+					"TS18047": 96,
+					"TS18048": 34,
+					"TS2305": 231,
+					"TS2307": 517,
+					"TS2314": 6,
+					"TS2322": 931,
+					"TS2339": 5090,
+					"TS2344": 94,
+					"TS2345": 4595,
+					"TS2347": 50,
+					"TS2348": 2,
+					"TS2349": 142,
+					"TS2352": 3,
+					"TS2353": 18,
+					"TS2366": 4,
+					"TS2367": 136,
+					"TS2375": 822,
+					"TS2379": 410,
+					"TS2416": 4,
+					"TS2488": 2930,
+					"TS2493": 4,
+					"TS2532": 2,
+					"TS2536": 1,
+					"TS2538": 1,
+					"TS2551": 1202,
+					"TS2554": 1528,
+					"TS2556": 10,
+					"TS2560": 2,
+					"TS2571": 1765,
+					"TS2578": 8,
+					"TS2678": 11,
+					"TS2694": 139,
+					"TS2698": 270,
+					"TS2700": 23,
+					"TS2702": 11,
+					"TS2722": 19,
+					"TS2724": 122,
+					"TS2739": 2,
+					"TS2766": 2,
+					"TS2769": 126,
+					"TS2796": 2,
+					"TS4111": 933,
+					"TS7006": 2327,
+					"TS7030": 2,
+					"TS7031": 614,
+					"TS7053": 133
+				},
+				"byCategory": {
+					"catch": 1053,
+					"core": 4279,
+					"either": 247,
+					"fork": 169,
+					"generators": 732,
+					"imports": 517,
+					"layers": 1560,
+					"option": 84,
+					"other": 17557,
+					"schema": 1961,
+					"services": 256,
+					"testing": 551
+				}
+			},
+			"ownBefore": 737,
+			"ownAfter": 732,
+			"introduced": 0,
+			"introducedByCategory": {},
+			"introducedOutsideCategory": 0,
+			"categoryDelta": {
+				"catch": 0,
+				"core": 0,
+				"either": 0,
+				"fork": 0,
+				"generators": -5,
+				"imports": 0,
+				"layers": 0,
+				"option": 0,
+				"other": -24,
+				"schema": 0,
+				"services": 0,
+				"testing": 0
+			},
+			"result": "PASS"
+		},
+		"layers": {
+			"edits": 13,
+			"after": {
+				"total": 28982,
+				"byCode": {
+					"TS1360": 3,
+					"TS18046": 3589,
+					"TS18047": 96,
+					"TS18048": 34,
+					"TS2305": 231,
+					"TS2307": 517,
+					"TS2314": 6,
+					"TS2322": 931,
+					"TS2339": 5077,
+					"TS2344": 94,
+					"TS2345": 4598,
+					"TS2347": 50,
+					"TS2348": 2,
+					"TS2349": 142,
+					"TS2352": 3,
+					"TS2353": 18,
+					"TS2366": 4,
+					"TS2367": 136,
+					"TS2375": 825,
+					"TS2379": 410,
+					"TS2416": 4,
+					"TS2488": 2930,
+					"TS2493": 4,
+					"TS2532": 2,
+					"TS2536": 1,
+					"TS2538": 1,
+					"TS2551": 1202,
+					"TS2554": 1528,
+					"TS2556": 10,
+					"TS2560": 2,
+					"TS2571": 1788,
+					"TS2578": 8,
+					"TS2678": 11,
+					"TS2694": 139,
+					"TS2698": 270,
+					"TS2700": 23,
+					"TS2702": 11,
+					"TS2722": 19,
+					"TS2724": 122,
+					"TS2739": 2,
+					"TS2766": 2,
+					"TS2769": 126,
+					"TS2796": 2,
+					"TS4111": 933,
+					"TS7006": 2327,
+					"TS7030": 2,
+					"TS7031": 614,
+					"TS7053": 133
+				},
+				"byCategory": {
+					"catch": 1053,
+					"core": 4279,
+					"either": 247,
+					"fork": 169,
+					"generators": 736,
+					"imports": 517,
+					"layers": 1548,
+					"option": 84,
+					"other": 17581,
+					"schema": 1961,
+					"services": 256,
+					"testing": 551
+				}
+			},
+			"ownBefore": 1560,
+			"ownAfter": 1548,
+			"introduced": 1,
+			"introducedByCategory": {
+				"layers": 1
+			},
+			"introducedOutsideCategory": 0,
+			"categoryDelta": {
+				"catch": 0,
+				"core": 0,
+				"either": 0,
+				"fork": 0,
+				"generators": -1,
+				"imports": 0,
+				"layers": -12,
+				"option": 0,
+				"other": 0,
+				"schema": 0,
+				"services": 0,
+				"testing": 0
+			},
+			"result": "PASS"
+		},
+		"catch": {
+			"edits": 22,
+			"after": {
+				"total": 28940,
+				"byCode": {
+					"TS1360": 3,
+					"TS18046": 3581,
+					"TS18047": 96,
+					"TS18048": 34,
+					"TS2305": 231,
+					"TS2307": 517,
+					"TS2314": 6,
+					"TS2322": 931,
+					"TS2339": 5069,
+					"TS2344": 94,
+					"TS2345": 4598,
+					"TS2347": 50,
+					"TS2348": 2,
+					"TS2349": 142,
+					"TS2352": 3,
+					"TS2353": 18,
+					"TS2366": 4,
+					"TS2367": 136,
+					"TS2375": 823,
+					"TS2379": 410,
+					"TS2416": 4,
+					"TS2488": 2922,
+					"TS2493": 4,
+					"TS2532": 2,
+					"TS2536": 1,
+					"TS2538": 1,
+					"TS2551": 1199,
+					"TS2554": 1528,
+					"TS2556": 10,
+					"TS2560": 2,
+					"TS2571": 1788,
+					"TS2578": 8,
+					"TS2678": 11,
+					"TS2694": 139,
+					"TS2698": 269,
+					"TS2700": 23,
+					"TS2702": 11,
+					"TS2722": 19,
+					"TS2724": 122,
+					"TS2739": 2,
+					"TS2766": 2,
+					"TS2769": 126,
+					"TS2796": 2,
+					"TS4111": 933,
+					"TS7006": 2315,
+					"TS7030": 2,
+					"TS7031": 614,
+					"TS7053": 133
+				},
+				"byCategory": {
+					"catch": 1018,
+					"core": 4278,
+					"either": 247,
+					"fork": 168,
+					"generators": 734,
+					"imports": 517,
+					"layers": 1560,
+					"option": 84,
+					"other": 17566,
+					"schema": 1961,
+					"services": 256,
+					"testing": 551
+				}
+			},
+			"ownBefore": 1053,
+			"ownAfter": 1018,
+			"introduced": 0,
+			"introducedByCategory": {},
+			"introducedOutsideCategory": 0,
+			"categoryDelta": {
+				"catch": -35,
+				"core": -1,
+				"either": 0,
+				"fork": -1,
+				"generators": -3,
+				"imports": 0,
+				"layers": 0,
+				"option": 0,
+				"other": -15,
+				"schema": 0,
+				"services": 0,
+				"testing": 0
+			},
+			"result": "PASS"
+		}
+	},
+	"commands": [
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/baseline-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/baseline-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/imports.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/imports.patch",
+				"--transform",
+				"imports"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/imports-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/imports.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/imports.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/imports-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/imports-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/prune.mjs",
+				"--transform",
+				"imports"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/imports-prune-0.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/imports.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/imports.patch",
+				"--transform",
+				"imports"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/imports-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/imports.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/imports.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/imports-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/imports-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/services.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/services.patch",
+				"--transform",
+				"services"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/services-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/services.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/services.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/services-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/services-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/prune.mjs",
+				"--transform",
+				"services"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/services-prune-0.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/services.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/services.patch",
+				"--transform",
+				"services"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/services-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/services.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/services.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/services-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/services-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/generators.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/generators.patch",
+				"--transform",
+				"generators"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/generators-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/generators.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/generators.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/generators-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/generators-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/layers.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/layers.patch",
+				"--transform",
+				"layers"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/layers-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/layers.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/layers.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/layers-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/layers-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/catch.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/catch.patch",
+				"--transform",
+				"catch"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/catch-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/catch.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/catch.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/catch-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/catch-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/either.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/either.patch",
+				"--transform",
+				"either"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/either-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/either.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/either.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/either-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/either-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/prune.mjs",
+				"--transform",
+				"either"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/either-prune-0.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/either.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/either.patch",
+				"--transform",
+				"either"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/either-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/either.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/either.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/either-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/either-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/prune.mjs",
+				"--transform",
+				"either",
+				"--all-new"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/either-prune-1.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/either.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/either.patch",
+				"--transform",
+				"either"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/either-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/either.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/either.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/either-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/either-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/fork.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/fork.patch",
+				"--transform",
+				"fork"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/fork-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/fork.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/fork.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/fork-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/fork-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/option.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/option.patch",
+				"--transform",
+				"option"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/option-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/option.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/option.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/option-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/option-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/schema.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/schema.patch",
+				"--transform",
+				"schema"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/schema-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/schema.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/schema.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/schema-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/schema-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/testing.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/testing.patch",
+				"--transform",
+				"testing"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/testing-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/testing.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/testing.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/testing-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/testing-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/core.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/core.patch",
+				"--transform",
+				"core"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/core-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/core.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/core.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/core-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/core-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/combined.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/combined.patch"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/combined-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/combined.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/combined.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/combined-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/combined-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/prune.mjs",
+				"--combined"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/combined-prune-0.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/combined.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/combined.patch"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/combined-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/combined.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/combined.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/combined-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/combined-frontend.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/baseline-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/baseline-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/imports.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/imports.patch",
+				"--transform",
+				"imports"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/imports-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/imports.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/imports.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/imports-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/imports-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/services.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/services.patch",
+				"--transform",
+				"services"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/services-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/services.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/services.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/services-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/services-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/layers.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/layers.patch",
+				"--transform",
+				"layers"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/layers-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/layers.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/layers.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/layers-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/layers-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/catch.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/catch.patch",
+				"--transform",
+				"catch"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/catch-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/catch.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/catch.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/catch-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/catch-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/either.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/either.patch",
+				"--transform",
+				"either"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/either-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/either.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/either.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/either-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/either-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/fork.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/fork.patch",
+				"--transform",
+				"fork"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/fork-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/fork.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/fork.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/fork-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/fork-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/option.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/option.patch",
+				"--transform",
+				"option"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/option-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/option.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/option.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/option-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/option-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/testing.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/testing.patch",
+				"--transform",
+				"testing"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/testing-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/testing.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/testing.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/testing-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/testing-frontend.log"
+		},
+		{
+			"command": [
+				"~/.local/share/mise/installs/node/26.10.0/bin/node",
+				"./scripts/effect4-codemod/index.mjs",
+				"--report",
+				"./test-results/effect4-codemod-measurements/core.md",
+				"--patch",
+				"./test-results/effect4-codemod-measurements/core.patch",
+				"--transform",
+				"core"
+			],
+			"cwd": ".",
+			"log": "./test-results/effect4-codemod-measurements/core-codemod.log"
+		},
+		{
+			"command": [
+				"git",
+				"apply",
+				"--whitespace=nowarn",
+				"./test-results/effect4-codemod-measurements/core.patch"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/core.patch.apply.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/core-root.log"
+		},
+		{
+			"command": [
+				"pnpm",
+				"exec",
+				"tsc",
+				"--noEmit",
+				"--pretty",
+				"false",
+				"--project",
+				"src/lib/frontend/tsconfig.json"
+			],
+			"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/effect4-measure-65n10wc6",
+			"log": "./test-results/effect4-codemod-measurements/core-frontend.log"
+		}
+	]
+}
