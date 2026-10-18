@@ -145,7 +145,7 @@ describe("Session Activity", () => {
 				const bus = yield* DaemonEventBusTag;
 				const events = yield* PubSub.subscribe(bus);
 				const publishedAt: number[] = [];
-				yield* Stream.fromQueue(events).pipe(
+				yield* Stream.fromSubscription(events).pipe(
 					Stream.filter((event) => event._tag === "DaemonSessionsChanged"),
 					Stream.runForEach(() =>
 						Clock.currentTimeMillis.pipe(

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Exit, Layer, Logger, LogLevel, Option, Scope } from "effect";
+import { Effect, Exit, Layer, Logger, Option, References, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
@@ -50,7 +50,7 @@ describe("daemon automatic settlement layer", () => {
 				const get = vi.fn(() => Effect.succeed(fakeRelay("cold", sweep)));
 				const logs: Array<{ level: string; message: unknown }> = [];
 				const logger = Logger.make(({ logLevel, message }) => {
-					logs.push({ level: logLevel.label, message });
+					logs.push({ level: logLevel.toUpperCase(), message });
 				});
 				const layer = AutoSettleLive().pipe(
 					Layer.provide(
@@ -84,14 +84,14 @@ describe("daemon automatic settlement layer", () => {
 								invalidate: () => Effect.void,
 							}),
 							DaemonEventBusLive,
-							Logger.replace(Logger.defaultLogger, logger),
+							Logger.layer([logger]),
 						),
 					),
 				);
 				const scope = yield* Scope.make();
 				try {
-					yield* Layer.buildWithScope(layer, scope).pipe(
-						Logger.withMinimumLogLevel(LogLevel.Debug),
+					yield* Layer.buildWithScope(Layer.fresh(layer), scope).pipe(
+						Effect.provideService(References.MinimumLogLevel, "Debug"),
 					);
 					yield* TestClock.adjust("1 millis");
 					yield* TestClock.adjust("2 minutes");
@@ -179,7 +179,7 @@ describe("daemon automatic settlement layer", () => {
 				);
 				const scope = yield* Scope.make();
 				try {
-					yield* Layer.buildWithScope(layer, scope);
+					yield* Layer.buildWithScope(Layer.fresh(layer), scope);
 					yield* TestClock.adjust("1 millis");
 					expect(calls).toContain("running");
 					expect(get).not.toHaveBeenCalled();
@@ -219,7 +219,11 @@ describe("daemon automatic settlement layer", () => {
 						),
 					])
 						yield* runner.projectEvent(yield* store.append(event));
-				}).pipe(Effect.provide(makePersistenceEffectLayer(dbPath, "cold")));
+				}).pipe(
+					Effect.provide(makePersistenceEffectLayer(dbPath, "cold"), {
+						local: true,
+					}),
+				);
 				const sweep = vi.fn(() => Effect.succeed(1));
 				const get = vi.fn(() => Effect.succeed(fakeRelay("cold", sweep)));
 				const layer = AutoSettleLive().pipe(
@@ -249,7 +253,7 @@ describe("daemon automatic settlement layer", () => {
 				const scope = yield* Scope.make();
 				try {
 					yield* TestClock.setTime(now);
-					yield* Layer.buildWithScope(layer, scope);
+					yield* Layer.buildWithScope(Layer.fresh(layer), scope);
 					yield* TestClock.adjust("1 millis");
 					expect(get).toHaveBeenCalledWith("cold");
 					expect(sweep).toHaveBeenCalled();
@@ -295,7 +299,7 @@ describe("daemon automatic settlement layer", () => {
 					),
 				);
 				const scope = yield* Scope.make();
-				yield* Layer.buildWithScope(layer, scope);
+				yield* Layer.buildWithScope(Layer.fresh(layer), scope);
 				yield* TestClock.adjust("1 minute");
 				expect(peek).not.toHaveBeenCalled();
 				expect(invalidate).toHaveBeenCalledWith("cold");

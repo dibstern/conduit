@@ -79,7 +79,7 @@ describe("shared daemon RPC contracts", () => {
 			_tag: "RestartWithConfig",
 			config: { tls: true, port: 0, keepAwakeArgs: ["-di"] },
 		});
-		expect(request).toBeInstanceOf(RestartWithConfig);
+		expect(Schema.is(RestartWithConfig.payloadSchema)(request)).toBe(true);
 		expect(Schema.encodeSync(WsRpcRequest)(request)).toEqual({
 			_tag: "RestartWithConfig",
 		});
@@ -105,7 +105,7 @@ describe("shared daemon RPC contracts", () => {
 				projectSlug: "project",
 				mode: "worktree",
 			},
-		]) {
+		] as const) {
 			expect(
 				Schema.decodeUnknownSync(WsRpcRequest)(
 					Schema.encodeSync(WsRpcRequest)(request),

@@ -762,7 +762,7 @@ describe("workspace hint resolution against real worktrees", () => {
 					);
 					yield* Deferred.await(publishing);
 					// The SQL commit has succeeded, but its row notification is held.
-					yield* Fiber.interruptFork(dismissal);
+					yield* Effect.sync(() => dismissal.interruptUnsafe());
 					yield* Deferred.succeed(release, undefined);
 					yield* Fiber.await(dismissal);
 					expect(yield* read.getSession(sessionId)).toMatchObject({
@@ -899,8 +899,8 @@ describe("workspace hint resolution against real worktrees", () => {
 						expect(familyRow?.item.workspaceHint).toBeUndefined();
 					}).pipe(
 						Effect.provide(
-							Logger.replace(
-								Logger.defaultLogger,
+							Logger.layer([
+								Logger.tracerLogger,
 								Logger.make(({ message }) => {
 									if (
 										String(message).startsWith(
@@ -909,7 +909,7 @@ describe("workspace hint resolution against real worktrees", () => {
 									)
 										Deferred.doneUnsafe(failed, Effect.void);
 								}),
-							),
+							]),
 						),
 						Effect.ensuring(
 							Effect.sync(() =>

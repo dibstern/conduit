@@ -26,7 +26,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "@effect/vitest";
 import {
-	Chunk,
 	Clock,
 	Deferred,
 	Effect,
@@ -140,10 +139,14 @@ it.effect("shares a five-minute sampler until the last subscriber leaves", () =>
 				},
 			},
 		});
-		const first = yield* Effect.forkChild(Stream.runDrain(service.readings));
+		const first = yield* Effect.forkChild(Stream.runDrain(service.readings), {
+			startImmediately: true,
+		});
 		yield* TestClock.adjust("0 millis");
 		expect(calls).toEqual(["account-1", "account-2"]);
-		const second = yield* Effect.forkChild(Stream.runDrain(service.readings));
+		const second = yield* Effect.forkChild(Stream.runDrain(service.readings), {
+			startImmediately: true,
+		});
 		yield* TestClock.adjust("0 millis");
 		expect(calls).toHaveLength(4);
 		yield* TestClock.adjust("299999 millis");
@@ -180,7 +183,9 @@ it.effect("debounces turn ends per account only while watched", () =>
 		yield* service.turnEnded("account-1");
 		yield* TestClock.adjust("10 seconds");
 		expect(calls).toEqual([]);
-		yield* Effect.forkChild(Stream.runDrain(service.readings));
+		yield* Effect.forkChild(Stream.runDrain(service.readings), {
+			startImmediately: true,
+		});
 		yield* TestClock.adjust("1 millis");
 		calls.length = 0;
 		yield* service.turnEnded("account-1");
@@ -217,6 +222,7 @@ it.effect("keeps five-minute sample times independent of read duration", () =>
 		});
 		const subscriber = yield* Effect.forkChild(
 			Stream.runDrain(service.readings),
+			{ startImmediately: true },
 		);
 		yield* TestClock.adjust("4 seconds");
 		expect(startedAt).toEqual([0]);
@@ -254,7 +260,7 @@ it.effect(
 			expect(yield* service.refresh()).toMatchObject([{ status: "unknown" }]);
 			expect(
 				yield* service.readings.pipe(Stream.take(1), Stream.runCollect),
-			).toEqual(Chunk.of([{ ...previous, stale: true }]));
+			).toEqual([[{ ...previous, stale: true }]]);
 			failed = false;
 			expect(yield* service.refresh()).toMatchObject([
 				{ stale: false, readAt: yield* Clock.currentTimeMillis },
@@ -286,7 +292,7 @@ it.effect("decides on unknown when a refresh times out after a limit", () =>
 		expect(yield* Fiber.join(pending)).toMatchObject([{ status: "unknown" }]);
 		expect(
 			yield* service.readings.pipe(Stream.take(1), Stream.runCollect),
-		).toEqual(Chunk.of([{ ...previous, stale: true }]));
+		).toEqual([[{ ...previous, stale: true }]]);
 		const failover = yield* Effect.forkChild(service.pickFailover("other"));
 		yield* TestClock.adjust("5 seconds");
 		expect(yield* Fiber.join(failover)).toBe("account-1");
@@ -1117,7 +1123,7 @@ it.effect(
 				yield* service.refresh();
 				yield* TestClock.adjust("10 minutes");
 				yield* service.refresh();
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 			const file = join(configDir, "usage-history.json");
 			const snapshot = yield* Effect.tryPromise(() =>
 				readFile(file, "utf8"),
@@ -1138,7 +1144,7 @@ it.effect(
 			const readings = yield* Effect.gen(function* () {
 				const service = yield* Usage;
 				return yield* service.refresh();
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 			expect(readings[0]?.windows[0]).toHaveProperty("forecast", {
 				kind: "under",
 				atReset: 10,

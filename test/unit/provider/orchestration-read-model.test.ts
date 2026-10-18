@@ -29,7 +29,7 @@ describe("CommandReadModelRepository", () => {
 				)
 					.bootstrap()
 					.pipe(
-						Statement.withTransformer((statement) =>
+						Effect.provideService(Statement.CurrentTransformer, (statement) =>
 							Effect.sync(() => {
 								queries.push(statement.compile()[0]);
 								return statement;

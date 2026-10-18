@@ -33,6 +33,7 @@ import {
 	Queue,
 	Schedule,
 	Schema,
+	Semaphore,
 	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
@@ -229,7 +230,7 @@ const withSwitchServices = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 };
 
 const withContinuationAdmission = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
-	const permit = Effect.unsafeMakeSemaphore(1);
+	const permit = Semaphore.makeUnsafe(1);
 	return effect.pipe(
 		Effect.provideService(SessionInboxTag, {
 			steerDeclined: () => Effect.void,

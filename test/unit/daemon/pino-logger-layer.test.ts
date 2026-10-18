@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Cause, Effect, type Layer, Logger, LogLevel } from "effect";
+import { Cause, Effect, type Layer, References } from "effect";
 import { assert, expect, vi } from "vitest";
 import { makePinoLoggerLive } from "../../../src/lib/domain/daemon/Layers/pino-logger-layer.js";
 
@@ -36,7 +36,9 @@ describe("PinoLoggerLive", () => {
 	it.effect("routes Effect.logInfo to pino.info", () =>
 		Effect.gen(function* () {
 			const mock = mockPino();
-			yield* Effect.logInfo("test message").pipe(Effect.provide(layer(mock)));
+			yield* Effect.logInfo("test message").pipe(
+				Effect.provide(layer(mock), { local: true }),
+			);
 			expect(mock.root.info).toHaveBeenCalled();
 			const call = mock.root.info.mock.calls[0];
 			assert.exists(call, "expected info call");
@@ -47,7 +49,9 @@ describe("PinoLoggerLive", () => {
 	it.effect("routes Effect.logWarning to pino.warn", () =>
 		Effect.gen(function* () {
 			const mock = mockPino();
-			yield* Effect.logWarning("warning msg").pipe(Effect.provide(layer(mock)));
+			yield* Effect.logWarning("warning msg").pipe(
+				Effect.provide(layer(mock), { local: true }),
+			);
 			expect(mock.root.warn).toHaveBeenCalled();
 			const call = mock.root.warn.mock.calls[0];
 			assert.exists(call, "expected warning call");
@@ -58,7 +62,9 @@ describe("PinoLoggerLive", () => {
 	it.effect("routes Effect.logError to pino.error", () =>
 		Effect.gen(function* () {
 			const mock = mockPino();
-			yield* Effect.logError("error msg").pipe(Effect.provide(layer(mock)));
+			yield* Effect.logError("error msg").pipe(
+				Effect.provide(layer(mock), { local: true }),
+			);
 			expect(mock.root.error).toHaveBeenCalled();
 		}),
 	);
@@ -67,8 +73,8 @@ describe("PinoLoggerLive", () => {
 		Effect.gen(function* () {
 			const mock = mockPino();
 			yield* Effect.logDebug("debug msg").pipe(
-				Logger.withMinimumLogLevel(LogLevel.Debug),
-				Effect.provide(layer(mock)),
+				Effect.provideService(References.MinimumLogLevel, "Debug"),
+				Effect.provide(layer(mock), { local: true }),
 			);
 			expect(mock.root.debug).toHaveBeenCalled();
 			const call = mock.root.debug.mock.calls[0];
@@ -82,7 +88,7 @@ describe("PinoLoggerLive", () => {
 			const mock = mockPino();
 			yield* Effect.logInfo("annotated").pipe(
 				Effect.annotateLogs({ sessionId: "s1", cmd: "run" }),
-				Effect.provide(layer(mock)),
+				Effect.provide(layer(mock), { local: true }),
 			);
 			// Should have called child() with annotation bindings on root
 			expect(mock.root.child).toHaveBeenCalledWith(
@@ -99,7 +105,7 @@ describe("PinoLoggerLive", () => {
 			const mock = mockPino();
 			yield* Effect.logInfo("spanned").pipe(
 				Effect.withLogSpan("mySpan"),
-				Effect.provide(layer(mock)),
+				Effect.provide(layer(mock), { local: true }),
 			);
 			expect(mock.root.child).toHaveBeenCalledWith(
 				expect.objectContaining({ span: "mySpan" }),
@@ -113,7 +119,9 @@ describe("PinoLoggerLive", () => {
 	it.effect("skips child() when no annotations or spans", () =>
 		Effect.gen(function* () {
 			const mock = mockPino();
-			yield* Effect.logInfo("plain message").pipe(Effect.provide(layer(mock)));
+			yield* Effect.logInfo("plain message").pipe(
+				Effect.provide(layer(mock), { local: true }),
+			);
 			// Should call info directly on root pino, not on a child
 			expect(mock.root.child).not.toHaveBeenCalled();
 			expect(mock.root.info).toHaveBeenCalledWith("plain message");
@@ -136,7 +144,7 @@ describe("PinoLoggerLive", () => {
 					),
 				),
 			);
-			yield* program.pipe(Effect.provide(layer(mock)));
+			yield* program.pipe(Effect.provide(layer(mock), { local: true }));
 
 			// The error call should land on the child (because of the annotation)
 			expect(mock.root.child).toHaveBeenCalledWith(
@@ -153,7 +161,7 @@ describe("PinoLoggerLive", () => {
 			const mock = mockPino();
 			yield* Effect.logWarning("Project relay failed", {
 				error: "sqlite module version mismatch",
-			}).pipe(Effect.provide(layer(mock)));
+			}).pipe(Effect.provide(layer(mock), { local: true }));
 			expect(mock.root.warn).toHaveBeenCalled();
 			const call = mock.root.warn.mock.calls[0];
 			assert.exists(call, "expected warning call");
@@ -168,7 +176,7 @@ describe("PinoLoggerLive", () => {
 		Effect.gen(function* () {
 			const mock = mockPino();
 			yield* Effect.logWarning("upgrade rejected", new Error("boom")).pipe(
-				Effect.provide(layer(mock)),
+				Effect.provide(layer(mock), { local: true }),
 			);
 			expect(mock.root.warn).toHaveBeenCalled();
 			const call = mock.root.warn.mock.calls[0];
@@ -187,7 +195,7 @@ describe("PinoLoggerLive", () => {
 				// array and forwards them via the `cause` parameter of the logger.
 				const cause = Cause.fail(new Error("db connection lost"));
 				yield* Effect.logError("query failed", cause).pipe(
-					Effect.provide(layer(mock)),
+					Effect.provide(layer(mock), { local: true }),
 				);
 
 				// logError with a non-empty cause should call pino.error({err: ...}, text)

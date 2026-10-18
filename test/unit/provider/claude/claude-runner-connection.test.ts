@@ -7,7 +7,6 @@ import {
 	Effect,
 	Exit,
 	Fiber,
-	References as FiberRef,
 	Layer,
 	ManagedRuntime,
 	Option,
@@ -262,7 +261,7 @@ it("fires durable callbacks only for a claimed terminal receipt, never a fenced 
 	await f.runtime.runPromise(f.receipts.attach("runner", "replacement"));
 	const output = terminalOutput("claimed");
 	await f.runtime.runPromise(
-		f.ingest(output).pipe(Effect.locally(currentRunnerOutput, receipt)),
+		f.ingest(output).pipe(Effect.provideService(currentRunnerOutput, receipt)),
 	);
 	expect(callbacks).toBe(0);
 	expect(
@@ -275,12 +274,14 @@ it("fires durable callbacks only for a claimed terminal receipt, never a fenced 
 		committed: await f.runtime.runPromise(Deferred.make<void>()),
 	};
 	await f.runtime.runPromise(
-		f.ingest(output).pipe(Effect.locally(currentRunnerOutput, replacement)),
+		f
+			.ingest(output)
+			.pipe(Effect.provideService(currentRunnerOutput, replacement)),
 	);
 	expect(callbacks).toBe(1);
 	await f.runtime.runPromise(
 		f.ingest(output).pipe(
-			Effect.locally(currentRunnerOutput, {
+			Effect.provideService(currentRunnerOutput, {
 				...replacement,
 				consumed: false,
 				committed: await f.runtime.runPromise(Deferred.make<void>()),
@@ -418,7 +419,7 @@ it("accepts a sequence already durably appended without publishing it twice", as
 		consumed: false,
 	};
 	await f.runtime.runPromise(
-		f.ingest(output).pipe(Effect.locally(currentRunnerOutput, receipt)),
+		f.ingest(output).pipe(Effect.provideService(currentRunnerOutput, receipt)),
 	);
 	const duplicate = {
 		...receipt,
@@ -426,7 +427,9 @@ it("accepts a sequence already durably appended without publishing it twice", as
 		committed: await f.runtime.runPromise(Deferred.make<void>()),
 	};
 	const result = await f.runtime.runPromiseExit(
-		f.ingest(output).pipe(Effect.locally(currentRunnerOutput, duplicate)),
+		f
+			.ingest(output)
+			.pipe(Effect.provideService(currentRunnerOutput, duplicate)),
 	);
 	expect(Exit.isSuccess(result)).toBe(true);
 	expect(
@@ -515,7 +518,7 @@ it("fences a pending approval's later resolution after its ask receipt was consu
 				toolName: "Bash",
 				toolInput: { command: "pwd" },
 			})
-			.pipe(Effect.locally(currentRunnerOutput, receipt)),
+			.pipe(Effect.provideService(currentRunnerOutput, receipt)),
 	);
 	cleanups.push(async () => {
 		await f.runtime.runPromise(Fiber.interrupt(request));
@@ -544,14 +547,14 @@ it("fences later events inherited from a previous hello restoration", async () =
 	await f.attach(
 		undefined,
 		Effect.gen(function* () {
-			restored = yield* FiberRef.get(currentRunnerOutput);
+			restored = yield* currentRunnerOutput;
 		}),
 	);
 	await f.attach();
 	await f.runtime.runPromise(
 		f
 			.ingest(eventOutput("restored"))
-			.pipe(Effect.locally(currentRunnerOutput, restored)),
+			.pipe(Effect.provideService(currentRunnerOutput, restored)),
 	);
 	expect(
 		await f.runtime.runPromise(f.sql`SELECT event_id FROM events`),

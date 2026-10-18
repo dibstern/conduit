@@ -1,7 +1,7 @@
 // test/unit/provider/claude/claude-event-translator.test.ts
 
-import { Effect, Schema, TestContext } from "effect";
-import { TestClock } from "effect/testing";
+import { Effect, Layer, Schema } from "effect";
+import { TestClock, TestConsole } from "effect/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	type ProviderRuntimeEvent,
@@ -2508,7 +2508,11 @@ describe("ClaudeEventTranslator", () => {
 					{ kind: "sdk", message: start },
 					apply,
 				);
-			}).pipe(Effect.provide(TestContext.TestContext)),
+			}).pipe(
+				Effect.provide(Layer.mergeAll(TestConsole.layer, TestClock.layer()), {
+					local: true,
+				}),
+			),
 		);
 
 		const metadata: Record<string, unknown> = {};
@@ -2727,7 +2731,11 @@ describe("ClaudeEventTranslator", () => {
 					).toBe(time);
 					expect(metadata["pausedAt"]).toBe(pausedAt);
 				}
-			}).pipe(Effect.provide(TestContext.TestContext)),
+			}).pipe(
+				Effect.provide(Layer.mergeAll(TestConsole.layer, TestClock.layer()), {
+					local: true,
+				}),
+			),
 		);
 	});
 
@@ -2813,7 +2821,11 @@ describe("ClaudeEventTranslator", () => {
 					task_id: "paused-task",
 					patch: { status: "running", total_paused_ms: 62_000 },
 				} as unknown as SDKMessage);
-			}).pipe(Effect.provide(TestContext.TestContext)),
+			}).pipe(
+				Effect.provide(Layer.mergeAll(TestConsole.layer, TestClock.layer()), {
+					local: true,
+				}),
+			),
 		);
 		const updates = sink.events.filter(
 			(event) => event.type === "tool.running",
@@ -2883,7 +2895,11 @@ describe("ClaudeEventTranslator", () => {
 					).toBe(time);
 					expect(metadata["pausedAt"]).toBe(pausedAt);
 				}
-			}).pipe(Effect.provide(TestContext.TestContext)),
+			}).pipe(
+				Effect.provide(Layer.mergeAll(TestConsole.layer, TestClock.layer()), {
+					local: true,
+				}),
+			),
 		);
 	});
 
@@ -2904,7 +2920,11 @@ describe("ClaudeEventTranslator", () => {
 						patch: { status: "paused", total_paused_ms: 2_000 },
 					} as unknown as SDKMessage);
 				}
-			}).pipe(Effect.provide(TestContext.TestContext)),
+			}).pipe(
+				Effect.provide(Layer.mergeAll(TestConsole.layer, TestClock.layer()), {
+					local: true,
+				}),
+			),
 		);
 		const metadata: Record<string, unknown> = {
 			providerTaskId: "paused-task",
@@ -2957,7 +2977,11 @@ describe("ClaudeEventTranslator", () => {
 					task_id: "paused-task",
 					patch: { status, end_time: 20_000 },
 				} as unknown as SDKMessage);
-			}).pipe(Effect.provide(TestContext.TestContext)),
+			}).pipe(
+				Effect.provide(Layer.mergeAll(TestConsole.layer, TestClock.layer()), {
+					local: true,
+				}),
+			),
 		);
 		const metadata: Record<string, unknown> = {
 			providerTaskId: "paused-task",
@@ -3096,7 +3120,11 @@ describe("ClaudeEventTranslator", () => {
 					if (snapshotFirst) yield* instance.translate(context, start());
 					else yield* instance.translate(context, snapshot());
 					yield* instance.publishBackgroundTasks(context);
-				}).pipe(Effect.provide(TestContext.TestContext)),
+				}).pipe(
+					Effect.provide(Layer.mergeAll(TestConsole.layer, TestClock.layer()), {
+						local: true,
+					}),
+				),
 			);
 			expect(
 				liveness.backgroundOf(context.sessionId)?.tasks[0]?.firstSeenAt,
@@ -3341,7 +3369,11 @@ describe("ClaudeEventTranslator", () => {
 						uuid: `00000000-0000-0000-0000-00000000040${n}`,
 						session_id: "sdk-sess",
 					} as unknown as SDKMessage);
-				}).pipe(Effect.provide(TestContext.TestContext)),
+				}).pipe(
+					Effect.provide(Layer.mergeAll(TestConsole.layer, TestClock.layer()), {
+						local: true,
+					}),
+				),
 			);
 		const bash = {
 			task_id: "bash",

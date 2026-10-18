@@ -418,8 +418,12 @@ describe("SessionManager read-your-writes parity", () => {
 					expect(Exit.isFailure(outcome)).toBe(true);
 					if (Exit.isFailure(outcome)) {
 						const errors = [
-							...Cause.failures(outcome.cause),
-							...Cause.defects(outcome.cause),
+							...outcome.cause.reasons
+								.filter(Cause.isFailReason)
+								.map((reason) => reason.error),
+							...outcome.cause.reasons
+								.filter(Cause.isDieReason)
+								.map((reason) => reason.defect),
 						];
 						expect(errors).toHaveLength(1);
 						expect((errors[0] as Error).name).toBe("AssertionError");

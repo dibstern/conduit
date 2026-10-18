@@ -13,10 +13,10 @@ describe("Retry Behavior with TestClock", () => {
 
 			// Schedule: exponential(1s) intersected with recurs(3)
 			// This means up to 3 retries with delays: 1s, 2s, 4s
-			const schedule = Schedule.intersect(
+			const schedule = Schedule.max([
 				Schedule.exponential(Duration.seconds(1)),
 				Schedule.recurs(3),
-			);
+			]);
 
 			// An effect that always fails, counting each attempt
 			const failing = Effect.gen(function* () {
@@ -80,10 +80,10 @@ describe("Retry Behavior with TestClock", () => {
 		Effect.gen(function* () {
 			const attempts = yield* Ref.make(0);
 
-			const schedule = Schedule.intersect(
+			const schedule = Schedule.max([
 				Schedule.exponential(Duration.seconds(1)),
 				Schedule.recurs(5),
-			);
+			]);
 
 			// Fails on first attempt, succeeds on second
 			const sometimesFailing = Effect.gen(function* () {

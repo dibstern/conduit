@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Stream } from "effect";
+import { Effect, Semaphore, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
@@ -279,7 +279,7 @@ for (const scenario of [
 		let dispatches = 0;
 		const dispatchedAccounts: Account[] = [];
 		const admittedSessions: string[] = [];
-		const admission = Effect.unsafeMakeSemaphore(1);
+		const admission = Semaphore.makeUnsafe(1);
 		const launchLogin = configuredClaudeConfigDir(
 			join(isolatedRoot, "launch-login"),
 		);
@@ -364,7 +364,7 @@ for (const scenario of [
 						Effect.result,
 					);
 				expect(result._tag).toBe(
-					scenario.result === "Right" ? "Right" : "Left",
+					scenario.result === "Right" ? "Success" : "Failure",
 				);
 				if (result._tag === "Failure")
 					expect(result.failure._tag).toBe(scenario.result);

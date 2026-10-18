@@ -235,7 +235,7 @@ describe("GetSession (batched)", () => {
 				// Run two concurrent getSession requests with batching enabled
 				const [s1, s2] = yield* Effect.all(
 					[getSession("s1"), getSession("s2")],
-					{ batching: true },
+					{ concurrency: "unbounded" },
 				).pipe(Effect.provide(layer));
 
 				expect(s1.id).toBe("s1");
@@ -267,7 +267,7 @@ describe("GetSession (batched)", () => {
 
 			// Both requests should fail
 			const result = yield* Effect.all([getSession("s1"), getSession("s2")], {
-				batching: true,
+				concurrency: "unbounded",
 			}).pipe(Effect.flip, Effect.provide(layer));
 
 			expect(result).toBeInstanceOf(OpenCodeRequestError);

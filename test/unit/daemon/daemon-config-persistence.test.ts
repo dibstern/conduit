@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Ref } from "effect";
-import { SystemError } from "effect/PlatformError";
+import { systemError } from "effect/PlatformError";
 import { expect } from "vitest";
 import {
 	PersistencePathTag,
@@ -24,8 +24,8 @@ const makeTestFileSystem = () => {
 				const content = files.get(path);
 				if (content === undefined) {
 					return yield* Effect.fail(
-						new SystemError({
-							reason: "NotFound",
+						systemError({
+							_tag: "NotFound",
 							module: "FileSystem",
 							method: "readFileString",
 							description: `File not found: ${path}`,
@@ -128,8 +128,8 @@ describe("daemon-config-persistence", () => {
 						const content = files.get(path);
 						if (content === undefined) {
 							return yield* Effect.fail(
-								new SystemError({
-									reason: "NotFound",
+								systemError({
+									_tag: "NotFound",
 									module: "FileSystem",
 									method: "readFileString",
 									description: `File not found: ${path}`,
