@@ -159,7 +159,9 @@ function makeHarness(options?: {
 				: [],
 		),
 	);
-	const sql = executeSql as unknown as SqlClient.SqlClient & {
+	const sql = Object.assign(executeSql, {
+		transactionService: SqlClient.TransactionConnection(0),
+	}) as unknown as SqlClient.SqlClient & {
 		withTransaction: <A, E, R>(
 			effect: Effect.Effect<A, E, R>,
 		) => Effect.Effect<A, E, R>;
@@ -420,7 +422,7 @@ describe("ProviderRuntimeIngestion", () => {
 
 				yield* Deferred.await(publishStarted);
 				projectedCountAtPublish = harness.projected.length;
-				yield* Fiber.interruptFork(fiber);
+				fiber.interruptUnsafe();
 				yield* Effect.yieldNow;
 				yield* Deferred.succeed(publishGate, undefined);
 				yield* Fiber.await(fiber);

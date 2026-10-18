@@ -8,8 +8,8 @@ import {
 } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Deferred, Effect, Layer, Mailbox, Option, Ref } from "effect";
-import { RpcServer } from "effect/rpc";
+import { Deferred, Effect, Layer, Option, Queue, Ref } from "effect";
+import { RpcSerialization, RpcServer } from "effect/rpc";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	type GetProjects,
@@ -42,7 +42,7 @@ describe("committed daemon shutdown replies", () => {
 						const signal = yield* ShutdownSignalTag;
 						const handlers = yield* DaemonWsRpcHandlersTag;
 						const replyAttempted = yield* Deferred.make<void>();
-						const disconnects = yield* Mailbox.make<number>();
+						const disconnects = yield* Queue.make<number>();
 						const protocol = RpcServer.Protocol.of({
 							run: (handle) =>
 								handle(1, {
@@ -68,6 +68,8 @@ describe("committed daemon shutdown replies", () => {
 							supportsAck: false,
 							supportsTransferables: false,
 							supportsSpanPropagation: false,
+							supportsNotifications: false,
+							codecFor: RpcSerialization.json.codecFor,
 						});
 						yield* RpcServer.make(WsRpcGroup).pipe(
 							Effect.provideService(
@@ -151,7 +153,9 @@ describe("daemon Unix RPC transport", () => {
 		).rejects.toMatchObject({ code: "ECONNREFUSED" });
 	});
 
-	it("rejects malformed RPC framing instead of hanging", async () => {
+	// Effect 4's ndjson parser drops lines that are not JSON, so the request
+	// settles on the socket close rather than on a decode error.
+	it("rejects instead of hanging when the server sends malformed framing", async () => {
 		const path = join(directory, "malformed.sock");
 		server = createServer((socket) => {
 			sockets.add(socket);
@@ -161,10 +165,7 @@ describe("daemon Unix RPC transport", () => {
 		await new Promise<void>((resolve) => server?.listen(path, resolve));
 		await expect(
 			sendRpcRequest(path, { _tag: "GetProjects" }, { requestTimeoutMs: 500 }),
-		).rejects.toMatchObject({
-			reason: "Protocol",
-			message: "Error decoding message",
-		});
+		).rejects.toMatchObject({ _tag: "RpcClientError" });
 	});
 
 	it("never replays a request after its response times out", async () => {
@@ -198,7 +199,7 @@ describe("daemon Unix RPC transport", () => {
 		const shutdownCallbacks: string[] = [];
 		let shutdownDrain: Effect.Effect<void> = Effect.void;
 		const daemonHandlers = {
-			GetProjects: (request: GetProjects) =>
+			GetProjects: (request: typeof GetProjects.payloadSchema.Type) =>
 				request.projectSlug === "fail"
 					? Effect.fail(new WsRpcError({ message: "expected failure" }))
 					: Effect.succeed({ projectSlug: request.projectSlug, projects: [] }),

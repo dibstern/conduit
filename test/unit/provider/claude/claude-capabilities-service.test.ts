@@ -521,12 +521,11 @@ describe("ClaudeCapabilitiesService", () => {
 		() =>
 			Effect.gen(function* () {
 				let warned = false;
-				const refreshLogs = Logger.replace(
-					Logger.defaultLogger,
+				const refreshLogs = Logger.layer([
 					Logger.make(() => {
 						warned = true;
 					}),
-				);
+				]);
 				const release = yield* Deferred.make<void>();
 				const probe = vi
 					.fn()

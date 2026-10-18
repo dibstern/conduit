@@ -2508,7 +2508,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			),
 		]);
 		expect(second).not.toBe("timeout");
-		expect(second).toMatchObject({ _tag: "Left" });
+		expect(second).toMatchObject({ _tag: "Failure" });
 	});
 
 	// Test 8: sendTurn() without persistence (eventSink only)

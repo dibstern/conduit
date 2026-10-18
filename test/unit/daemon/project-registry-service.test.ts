@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Fiber, Layer, Option } from "effect";
 import { afterAll, afterEach, expect } from "vitest";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
@@ -264,7 +264,7 @@ describe("waitForRelay", () => {
 			yield* markReady(testProject.slug);
 
 			// The fiber should complete successfully
-			yield* fiber.await;
+			yield* Fiber.await(fiber);
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 });

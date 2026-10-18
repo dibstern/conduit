@@ -63,9 +63,11 @@ it("returns readiness while initial git is blocked and completes it in the relay
 				Layer.succeed(SessionGitServiceTag)({
 					refresh: () =>
 						Effect.tryPromise(readGit).pipe(
-							Effect.tap(() => {
-								refreshed = true;
-							}),
+							Effect.tap(() =>
+								Effect.sync(() => {
+									refreshed = true;
+								}),
+							),
 						),
 				}),
 			),

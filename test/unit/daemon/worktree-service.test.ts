@@ -75,7 +75,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	Cause,
-	Chunk,
 	Effect,
 	Option as Effect4PollOption,
 	Result as Either,
@@ -915,7 +914,7 @@ finish();
 			).toBe("None");
 		} finally {
 			// Request interruption before allowing Git to return and transfer ownership.
-			await Effect.runPromise(Fiber.interruptFork(fiber));
+			fiber.interruptUnsafe();
 			writeFileSync(release, "release");
 			const exit = await Effect.runPromise(Fiber.await(fiber));
 			expect(Exit.isFailure(exit)).toBe(true);
@@ -1253,7 +1252,7 @@ finish();
 		]);
 		expect(results.filter(Either.isSuccess)).toHaveLength(1);
 		expect(
-			results.filter(Either.isFailure).map(({ left }) => left.reason),
+			results.filter(Either.isFailure).map(({ failure }) => failure.reason),
 		).toEqual(["target-exists"]);
 		expect(git("-C", path, "branch", "--show-current")).toBe(
 			created.branchName,
@@ -1360,10 +1359,7 @@ describe("daemon Worktree setup runner", () => {
 	) =>
 		Effect.flatMap(WorktreeServiceTag, (service) =>
 			Stream.runCollect(service.runSetup(cwd, script, env)),
-		).pipe(
-			Effect.provide(makeWorktreeLive(fixture, { setupTimeoutMs })),
-			Effect.map(Chunk.toReadonlyArray),
-		);
+		).pipe(Effect.provide(makeWorktreeLive(fixture, { setupTimeoutMs })));
 	const outputText = (
 		updates: readonly { readonly _tag: string; readonly output?: string }[],
 	) =>

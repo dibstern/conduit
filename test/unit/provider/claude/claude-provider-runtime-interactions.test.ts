@@ -12,10 +12,9 @@ import {
 	ManagedRuntime,
 	Schedule,
 	Scope,
-	TestContext,
 } from "effect";
 import { SqlClient } from "effect/sql";
-import { TestClock } from "effect/testing";
+import { TestClock, TestConsole } from "effect/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	makePendingInteractionServiceLive,
@@ -371,7 +370,7 @@ describe("Claude runner interaction transport", () => {
 
 // The approval reaching the browser is its pending_approvals row.
 const awaitPendingApproval = (
-	readQuery: Context.Tag.Service<typeof ReadQueryEffectTag>,
+	readQuery: Context.Service.Shape<typeof ReadQueryEffectTag>,
 ) =>
 	readQuery
 		.countPendingApprovalsBySession({ projectIds: ["test-project"] })
@@ -798,7 +797,9 @@ describe("Claude recovered runner processing timeout", () => {
 				}),
 			).pipe(
 				Effect.provide(makeOverridesStateLive()),
-				Effect.provide(TestContext.TestContext),
+				Effect.provide(Layer.mergeAll(TestConsole.layer, TestClock.layer()), {
+					local: true,
+				}),
 			),
 		);
 		expect(fired).toBe(false);

@@ -5,7 +5,16 @@ import {
 	NodeFileSystem,
 } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
-import { Context, Duration, Effect, Exit, Layer, Ref, Scope } from "effect";
+import {
+	Context,
+	Duration,
+	Effect,
+	Exit,
+	Layer,
+	Path,
+	Ref,
+	Scope,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { resolveKeepAwakeCommand } from "../../../src/lib/daemon/keep-awake.js";
@@ -35,11 +44,11 @@ const withMonitor = (
 	config: {
 		getStorageUsage: () => Effect.Effect<number>;
 		persistence: { evictOldEvents: () => Effect.Effect<void> };
-		checkInterval: Duration.DurationInput;
+		checkInterval: Duration.Input;
 		highWaterMark: number;
 	},
 	body: (
-		svc: Context.Tag.Service<typeof StorageMonitorTag>,
+		svc: Context.Service.Shape<typeof StorageMonitorTag>,
 	) => Effect.Effect<void>,
 ) =>
 	Effect.gen(function* () {
@@ -154,10 +163,10 @@ describe("Leaf service Layers", () => {
 			config: {
 				getCurrentVersion: () => string;
 				fetchLatestVersion: () => Effect.Effect<string | null>;
-				checkInterval: Duration.DurationInput;
+				checkInterval: Duration.Input;
 			},
 			body: (
-				svc: Context.Tag.Service<typeof VersionCheckerTag>,
+				svc: Context.Service.Shape<typeof VersionCheckerTag>,
 			) => Effect.Effect<void>,
 		) =>
 			Effect.gen(function* () {
@@ -267,7 +276,7 @@ describe("Leaf service Layers", () => {
 			config: {
 				probeFn: (port: number) => Effect.Effect<boolean>;
 				portRange: [number, number];
-				scanInterval: Duration.DurationInput;
+				scanInterval: Duration.Input;
 				removalThreshold: number;
 				onDiscovered: (port: number) => Effect.Effect<void>;
 				onLost: (port: number) => Effect.Effect<void>;
@@ -280,7 +289,7 @@ describe("Leaf service Layers", () => {
 				getExcludedPorts?: () => Effect.Effect<ReadonlySet<number>>;
 			},
 			body: (
-				svc: Context.Tag.Service<typeof PortScannerTag>,
+				svc: Context.Service.Shape<typeof PortScannerTag>,
 			) => Effect.Effect<void>,
 		) =>
 			Effect.gen(function* () {
@@ -506,6 +515,7 @@ describe("Leaf service Layers", () => {
 				const layer = KeepAwakeLive().pipe(
 					Layer.provide(NodeCommandExecutor.layer),
 					Layer.provide(NodeFileSystem.layer),
+					Layer.provide(Path.layer),
 				);
 				const scope = yield* Scope.make();
 				const ctx = yield* Layer.buildWithScope(layer, scope);
@@ -525,6 +535,7 @@ describe("Leaf service Layers", () => {
 				const layer = KeepAwakeLive({ command: "sleep", args: ["86400"] }).pipe(
 					Layer.provide(NodeCommandExecutor.layer),
 					Layer.provide(NodeFileSystem.layer),
+					Layer.provide(Path.layer),
 				);
 				const scope = yield* Scope.make();
 				const ctx = yield* Layer.buildWithScope(layer, scope);
@@ -551,6 +562,7 @@ describe("Leaf service Layers", () => {
 				const layer = KeepAwakeLive({ command: "sleep", args: ["86400"] }).pipe(
 					Layer.provide(NodeCommandExecutor.layer),
 					Layer.provide(NodeFileSystem.layer),
+					Layer.provide(Path.layer),
 				);
 				const scope = yield* Scope.make();
 				const ctx = yield* Layer.buildWithScope(layer, scope);

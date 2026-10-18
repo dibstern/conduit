@@ -9,14 +9,12 @@ import {
 	Layer,
 	Option,
 	PubSub,
-	Queue,
 	Ref,
 } from "effect";
 import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import {
-	type DaemonEvent,
 	DaemonEventBusLive,
 	DaemonEventBusTag,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
@@ -131,12 +129,7 @@ describe("InstanceManager health polling", () => {
 			yield* TestClock.adjust(Duration.seconds(6));
 
 			// Drain events
-			const events: Array<DaemonEvent> = [];
-			let next = yield* Queue.poll(dequeue);
-			while (Option.isSome(next)) {
-				events.push(next.value);
-				next = yield* Queue.poll(dequeue);
-			}
+			const events = yield* PubSub.takeUpTo(dequeue, Number.POSITIVE_INFINITY);
 
 			const statusEvents = events.filter(
 				(e) => e._tag === "InstanceStatusChanged",
@@ -259,12 +252,7 @@ describe("InstanceManager restart scheduling", () => {
 			}
 
 			// Should have published an InstanceError event
-			const events: Array<DaemonEvent> = [];
-			let next = yield* Queue.poll(dequeue);
-			while (Option.isSome(next)) {
-				events.push(next.value);
-				next = yield* Queue.poll(dequeue);
-			}
+			const events = yield* PubSub.takeUpTo(dequeue, Number.POSITIVE_INFINITY);
 			const errorEvents = events.filter((e) => e._tag === "InstanceError");
 			expect(errorEvents.length).toBe(1);
 			expect(events).toContainEqual({

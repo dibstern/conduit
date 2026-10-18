@@ -27,7 +27,7 @@ vi.mock("effect", async (importOriginal) => {
 				effect.Deferred.make<A, E>().pipe(
 					effect.Effect.tap(() =>
 						scheduling.yieldDeferred
-							? effect.Effect.yieldNow()
+							? effect.Effect.yieldNow
 							: effect.Effect.void,
 					),
 				),

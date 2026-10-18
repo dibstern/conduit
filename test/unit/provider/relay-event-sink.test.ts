@@ -1,5 +1,5 @@
 import { Effect, Fiber } from "effect";
-import { SqlError } from "effect/sql/SqlError";
+import { SqlError, UnknownError } from "effect/sql/SqlError";
 import { describe, expect, it, vi } from "vitest";
 import type {
 	ProviderRuntimeEventPayloadMap,
@@ -187,7 +187,12 @@ describe("createRelayEventSink — persistence", () => {
 			partId: "part_1",
 			text: "Hello",
 		});
-		const ingestionError = new SqlError({ message: "ingestion failed" });
+		const ingestionError = new SqlError({
+			reason: new UnknownError({
+				cause: "ingestion failed",
+				message: "ingestion failed",
+			}),
+		});
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
 			ingestion: {
