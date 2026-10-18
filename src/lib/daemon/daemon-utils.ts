@@ -1,9 +1,12 @@
 // Pure utility functions extracted from the Daemon class.
 
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { DEFAULT_CONFIG_DIR, ENV } from "../env.js";
+import { isProcessAlive } from "../instance/managed-opencode-process.js";
+import { isRecord } from "../utils.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -128,4 +131,29 @@ export async function isDaemonRunning(socketPath?: string): Promise<boolean> {
 			resolve(false);
 		});
 	});
+}
+
+/** Plain JSON beside the RPC socket, so a client learns the build without RPC. */
+export const daemonBuildPath = (socketPath: string): string =>
+	`${socketPath}.build`;
+
+/** The listening daemon's build, or undefined for an older or vanished one. */
+export function readDaemonBuild(
+	socketPath: string,
+): { buildId: string; pid: number } | undefined {
+	try {
+		const info: unknown = JSON.parse(
+			readFileSync(daemonBuildPath(socketPath), "utf8"),
+		);
+		if (
+			isRecord(info) &&
+			typeof info["buildId"] === "string" &&
+			typeof info["pid"] === "number" &&
+			isProcessAlive(info["pid"])
+		)
+			return { buildId: info["buildId"], pid: info["pid"] };
+	} catch {
+		// Missing or unreadable: a daemon from before builds were reported.
+	}
+	return undefined;
 }
