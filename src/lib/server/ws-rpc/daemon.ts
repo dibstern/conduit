@@ -32,6 +32,9 @@ export const daemonOnlyHandlers = {
 		daemonRequired("GetDefaultGroupingMode"),
 	GetCategorySet: (_request) => daemonRequired("GetCategorySet"),
 	GetSurfacingFeedback: (_request) => daemonRequired("GetSurfacingFeedback"),
+	GetSurfacingLedger: (_request) => daemonRequired("GetSurfacingLedger"),
+	ScoreCategorySet: (_request) => daemonRequired("ScoreCategorySet"),
+	ProposeCategoryTuning: (_request) => daemonRequired("ProposeCategoryTuning"),
 	ReplaceCategorySet: (_request) => daemonRequired("ReplaceCategorySet"),
 } satisfies Pick<
 	WsRpcHandlerMap,
@@ -57,5 +60,8 @@ export const daemonOnlyHandlers = {
 	| "GetDefaultGroupingMode"
 	| "GetCategorySet"
 	| "GetSurfacingFeedback"
+	| "GetSurfacingLedger"
+	| "ScoreCategorySet"
+	| "ProposeCategoryTuning"
 	| "ReplaceCategorySet"
 >;

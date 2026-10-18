@@ -50,6 +50,8 @@ export function surfacingMarkStubs(page: Page): StubTable {
 				rows.push({
 					projectId: "myapp",
 					sessionId,
+					sessionTitle: "Surfacing feedback acceptance",
+					requestExcerpt: "Review the session routing.",
 					partId,
 					messageId: "surfacing-agent",
 					turnId: "surfacing-user",
@@ -125,6 +127,8 @@ export const surfacingMarksHandlers: StepHandler[] = [
 						rows.push({
 							projectId: "myapp",
 							sessionId: "surfacing-feedback-history",
+							sessionTitle: "Earlier surfacing corrections",
+							requestExcerpt: "Review the earlier messages.",
 							partId: id,
 							messageId: `message-${id}`,
 							turnId: "feedback-turn",

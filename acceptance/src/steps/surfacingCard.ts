@@ -1271,7 +1271,8 @@ export const surfacingCardHandlers: StepHandler[] = [
 					.getByRole("radio", { name: /^All\b/ }),
 			).toHaveAttribute("aria-checked", "true");
 			// `s` toggles the turn summary (a modal sheet on phone), so it closes again before the card keys.
-			for (const key of ["s", "s", "u", "r", "m", "h", "a", "+", "−"]) {
+			// `h` unmounts the card; surfacing-minimise covers its focus and toggle behavior.
+			for (const key of ["s", "s", "u", "r", "m", "a", "+", "−"]) {
 				await expect(card(page)).toBeVisible();
 				const prevented = await card(page).evaluate(
 					(element, pressed) =>

@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { Schema } from "effect";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import { surfacingSettingsFixture } from "../../../../../test/e2e/fixtures/surfacing-settings.js";
 import { CategorySetContentsSchema } from "../../../contracts/category-set.js";
 import { MessageSurfacingPatchSchema } from "../../../contracts/message-surfacing.js";
@@ -9,6 +9,7 @@ import {
 	UpdateMessageSurfacing,
 } from "../../../contracts/ws-rpc.js";
 import { applyInstanceListResponse } from "../../stores/instance.svelte.js";
+import { messageSurfacing } from "../../stores/message-surfacing.svelte.js";
 import { routerState } from "../../stores/router.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { applyUsageReadings } from "../../stores/usage.svelte.js";
@@ -26,6 +27,7 @@ const meta = {
 	args: { visible: true, initialTab: "surfacing" },
 	beforeEach: ({ name }) => {
 		const compact = sessionViewState.compact;
+		const previousStatus = messageSurfacing.status;
 		sessionViewState.compact = window.innerWidth < 768;
 		routerState.path = "/";
 		applyInstanceListResponse({ instances: [] });
@@ -45,6 +47,8 @@ const meta = {
 			connectedSocket(),
 			replyRpc("GetMessageSurfacing", fixture.stubs.GetMessageSurfacing),
 			replyRpc("GetCategorySet", fixture.stubs.GetCategorySet),
+			replyRpc("GetSurfacingLedger", fixture.stubs.GetSurfacingLedger),
+			replyRpc("ScoreCategorySet", fixture.stubs.ScoreCategorySet),
 			replyRpc("UpdateMessageSurfacing", (payload) =>
 				fixture.stubs.UpdateMessageSurfacing(
 					new UpdateMessageSurfacing(
@@ -68,6 +72,7 @@ const meta = {
 		return () => {
 			for (const restore of cleanup.reverse()) restore();
 			sessionViewState.compact = compact;
+			messageSurfacing.status = previousStatus;
 		};
 	},
 } satisfies Meta<typeof SettingsPanel>;
@@ -145,6 +150,11 @@ const categories: NonNullable<Story["play"]> = async (context) => {
 		body.getByRole("spinbutton", { name: "Finding weight" }),
 	).toHaveValue(45);
 	await expect(body.getByTestId("surfacing-draft-bar")).toBeVisible();
+	await waitFor(() =>
+		expect(body.getByTestId("surfacing-category-preview")).toHaveTextContent(
+			"No judged messages yet",
+		),
+	);
 	await expect(fixture.categories.version).toBe(1);
 	(
 		context.canvasElement.ownerDocument.activeElement as HTMLElement | null
@@ -195,6 +205,11 @@ export const StaleDraft: Story = {
 		await expect(
 			body.getByRole("spinbutton", { name: "Finding weight" }),
 		).toHaveValue(45);
+		await waitFor(() =>
+			expect(body.getByTestId("surfacing-category-preview")).toHaveTextContent(
+				"No judged messages yet",
+			),
+		);
 		(
 			context.canvasElement.ownerDocument.activeElement as HTMLElement | null
 		)?.blur();

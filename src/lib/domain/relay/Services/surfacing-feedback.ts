@@ -16,6 +16,8 @@ export const readSurfacingFeedback = (projectId?: string) =>
 		const rows = yield* sql<{
 			project_id: string;
 			session_id: string;
+			session_title: string;
+			request_excerpt: string;
 			part_id: string;
 			message_id: string;
 			turn_id: string | null;
@@ -27,11 +29,14 @@ export const readSurfacingFeedback = (projectId?: string) =>
 			reason: string | null;
 			direction: string | null;
 			created_at: number;
-		}>`SELECT s.project_id, sm.session_id, sm.part_id, sm.message_id,
-			m.turn_id, mp.surfacing_ordinal, COALESCE(mp.text, '') AS text, mp.surfacing_probabilities,
+		}>`SELECT s.project_id, sm.session_id, s.title AS session_title,
+			substr(COALESCE(u.text, ''), 1, 1000) AS request_excerpt, sm.part_id, sm.message_id,
+			m.turn_id, mp.surfacing_ordinal, substr(COALESCE(mp.text, ''), 1, 2000) AS text, mp.surfacing_probabilities,
 			sm.level, sm.category, sm.reason, sm.direction, sm.created_at
 			FROM surfacing_marks sm JOIN sessions s ON s.id = sm.session_id
 			LEFT JOIN messages m ON m.id = sm.message_id AND m.session_id = sm.session_id
+			LEFT JOIN turns t ON t.id = m.turn_id AND t.session_id = m.session_id
+			LEFT JOIN messages u ON u.id = t.user_message_id AND u.session_id = m.session_id
 			LEFT JOIN message_parts mp ON mp.id = sm.part_id AND mp.message_id = m.id
 			WHERE ${projectId === undefined ? sql`1 = 1` : sql`s.project_id = ${projectId}`}
 			ORDER BY sm.created_at DESC, sm.part_id`;
@@ -41,6 +46,8 @@ export const readSurfacingFeedback = (projectId?: string) =>
 			rows.map((row) => ({
 				projectId: row.project_id,
 				sessionId: row.session_id,
+				sessionTitle: row.session_title,
+				requestExcerpt: row.request_excerpt,
 				partId: row.part_id,
 				messageId: row.message_id,
 				turnId: row.turn_id,

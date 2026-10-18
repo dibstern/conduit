@@ -160,18 +160,29 @@ export function connectedSocket(project: string | null = null): () => void {
 			}
 			const reply = replies.get(request.tag ?? "");
 			if (request._tag === "Request" && reply) {
-				let exit: unknown;
+				const respond = (exit: unknown) =>
+					this.emit(
+						"message",
+						new MessageEvent("message", {
+							data: JSON.stringify({
+								_tag: "Exit",
+								requestId: request.id,
+								exit,
+							}),
+						}),
+					);
 				try {
-					exit = { _tag: "Success", value: reply(request.payload ?? {}) };
+					const value = reply(request.payload ?? {});
+					if (value instanceof Promise)
+						void value.then(
+							(result: unknown) => respond({ _tag: "Success", value: result }),
+							(error: unknown) =>
+								respond({ _tag: "Failure", cause: { _tag: "Fail", error } }),
+						);
+					else respond({ _tag: "Success", value });
 				} catch (error) {
-					exit = { _tag: "Failure", cause: { _tag: "Fail", error } };
+					respond({ _tag: "Failure", cause: { _tag: "Fail", error } });
 				}
-				this.emit(
-					"message",
-					new MessageEvent("message", {
-						data: JSON.stringify({ _tag: "Exit", requestId: request.id, exit }),
-					}),
-				);
 				return;
 			}
 			// A session that exists opens on an empty transcript, already settled.

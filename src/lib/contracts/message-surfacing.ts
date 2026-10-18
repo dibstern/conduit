@@ -10,9 +10,13 @@ export const RecapSettingsSchema = Schema.Struct({
 	model: Schema.Literal("sonnet", "opus", "off"),
 	when: Schema.Literal("turn-end", "on-request"),
 });
+export const TurnsOpenSchema = Schema.Literal("expanded", "auto", "minimised");
 export const MessageSurfacingSettingsSchema = Schema.Struct({
 	enabled: Schema.Boolean,
 	defaultLevel: SurfacingLevelSchema,
+	turnsOpen: Schema.optionalWith(TurnsOpenSchema, {
+		default: () => "auto" as const,
+	}),
 	recap: RecapSettingsSchema,
 	tuningModel: Schema.NonEmptyTrimmedString,
 });
@@ -22,6 +26,7 @@ export type MessageSurfacingPreferences =
 export const DEFAULT_MESSAGE_SURFACING_SETTINGS: MessageSurfacingPreferences = {
 	enabled: false,
 	defaultLevel: "balanced",
+	turnsOpen: "auto",
 	recap: { model: "sonnet", when: "turn-end" },
 	// Claude's catalog alias follows the newest Opus without starting a probe.
 	tuningModel: "opus",
@@ -43,6 +48,7 @@ export const MessageSurfacingPatchSchema = Schema.Struct({
 	enabled: Schema.optional(Schema.Boolean),
 	apiKey: Schema.optional(Schema.NullOr(Schema.String)),
 	defaultLevel: Schema.optional(SurfacingLevelSchema),
+	turnsOpen: Schema.optional(TurnsOpenSchema),
 	recap: Schema.optional(Schema.partial(RecapSettingsSchema)),
 	tuningModel: Schema.optional(Schema.NonEmptyTrimmedString),
 });

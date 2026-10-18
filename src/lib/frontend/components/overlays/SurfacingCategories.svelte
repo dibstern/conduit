@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, tick } from "svelte";
+	import { onMount, tick, untrack } from "svelte";
 	import { Schema } from "effect";
 	import { BUILTIN_CATEGORIES, CategorySchema, CategorySetRejected, DEFAULT_CUSTOM_CATEGORY_WEIGHT, type Category, type CategorySet } from "../../../contracts/category-set.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
@@ -11,8 +11,10 @@
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import NumberStepper from "../ui/NumberStepper.svelte";
 	import SurfacingCategoryEditor from "./SurfacingCategoryEditor.svelte";
+	import SurfacingCategoryPreview from "./SurfacingCategoryPreview.svelte";
+	import { messageSurfacing } from "../../stores/message-surfacing.svelte.js";
 
-	let { onPageChange }: { onPageChange: (page: { title: string; back: () => void } | null) => void } = $props();
+	let { onPageChange, active: visible = false, revision = 0 }: { onPageChange: (page: { title: string; back: () => void } | null) => void; active?: boolean; revision?: number } = $props();
 	let current = $state<CategorySet | null>(null);
 	let draft = $state<readonly Category[]>([]);
 	let loading = $state(true);
@@ -29,6 +31,12 @@
 	const phoneEditor = $derived(sessionViewState.compact && editor !== null);
 
 	onMount(() => { void load(); return () => onPageChange(null); });
+	$effect(() => {
+		if (revision > 0) untrack(() => {
+			if (dirty) { stale = true; void reloadCurrent(); }
+			else void load();
+		});
+	});
 
 	async function load(): Promise<void> {
 		loading = true;
@@ -79,6 +87,7 @@
 		error = "";
 		try {
 			current = await rpc("ReplaceCategorySet", { expectedVersion: current.version, nextSet: { categories: draft } });
+			messageSurfacing.categorySet = current;
 			draft = current.categories;
 		} catch (cause) {
 			if (Schema.is(CategorySetRejected)(cause) && cause.reason === "stale_version") {
@@ -100,6 +109,7 @@
 		{#if reloadFailed}<Button size="sm" onclick={() => { void reloadCurrent(); }}>Retry reload</Button>{/if}
 	{/if}
 	{#if !phoneEditor}
+		<SurfacingCategoryPreview current={current} draft={{ categories: draft }} {valid} active={visible} />
 		<p class="mb-[12px] text-[12px] leading-[1.5] text-text-muted">Weight changes re-level every message at once, at no cost. Definition changes and new categories apply to messages judged from now on.</p>
 	{/if}
 	{#if editor}

@@ -42,12 +42,14 @@
 	} from "../../utils/turns.js";
 	import ActivityRow from "./ActivityRow.svelte";
 	import ActivityStrip from "./ActivityStrip.svelte";
+	import MinimisedTurn from "./MinimisedTurn.svelte";
+	import { setTurnMinimised, turnMinimised } from "../../stores/turn-minimisation.svelte.js";
 	import { partStyle } from "./activity-style.js";
 	import RunningPill from "./RunningPill.svelte";
 	import TurnEconomics from "./TurnEconomics.svelte";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, numbered = false, latestTurn = true, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, hasRecap = false }: {
+	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, hasRecap = false }: {
 		turn: Turn;
 		segment: Segment;
 		final: boolean;
@@ -61,6 +63,7 @@
 		onsummarize?: (() => void) | undefined;
 		numbered?: boolean;
 		latestTurn?: boolean;
+		newestSettledTurn?: boolean;
 		surfacing?: { status: MessageSurfacingStatus; categorySet: CategorySet };
 		surfacingRegions?: SurfacingRegions;
 		hasRecap?: boolean;
@@ -105,6 +108,7 @@
 		untrack(() => {
 			if (!request || request.sessionId !== sessionId) return;
 			const i = segment.activity.findIndex((part) => part.uuid === request.uuid);
+			if (i >= 0 || turn.user?.uuid === request.uuid || segment.reply.some((part) => part.uuid === request.uuid)) openTurn();
 			if (i >= 0) {
 				const target = surfacingActive ? surface.messages.find(({ part }) => part.uuid === request.uuid) : undefined;
 				if (target && (live || target.part.surfacingProbabilities !== undefined)) {
@@ -129,7 +133,6 @@
 	let citedOrdinal = $state<number | null>(null);
 	const summarySettings = $derived(surfacingConfig.status.recap);
 	const summaryEnabled = $derived(surfacingActive && final && !!sessionId && summarySettings.model !== "off");
-	const summaryVisible = $derived(summaryEnabled && (summaryOpen ?? (!phone.current && !turn.live && latestTurn && (recap.versions.length > 0 || recap.generating || !!recap.error))));
 	const summaryLabel = $derived(recap.generating ? "✦ Summarising…" : recap.versions.length ? "✦ Summary" : "✦ Summarize");
 	$effect(() => {
 		const id = recapTurnId;
@@ -165,6 +168,31 @@
 		level, live, latestTurn, latestBlock: final, hasRecap: hasRecap || (summaryEnabled && recap.versions.length > 0 && !recap.error), citedOrdinal, picked, folded, start: turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0,
 	}));
 	const summaryNew = $derived(surface.numbers.filter(({ number }) => number > (recap.versions.at(-1)?.lastOrdinal ?? 0)).length);
+	// Unknown read state and hidden unread messages must not make Auto fold a turn.
+	const turnParts = $derived(turn.segments.flatMap((block) => block.activity));
+	const allRead = $derived(turnParts.some((part) => part.type === "assistant") && turnParts.every((part) => part.type !== "assistant" || part.surfacingRead === true));
+	const minimised = $derived(surfacingActive && (turnMinimised(sessionId, turn.id) ?? (surfacingConfig.status.turnsOpen === "minimised" || (surfacingConfig.status.turnsOpen === "auto" && !turn.live && !newestSettledTurn && allRead && !surface.openAsk))));
+	const summaryVisible = $derived(!minimised && summaryEnabled && (summaryOpen ?? (!phone.current && !turn.live && latestTurn && (recap.versions.length > 0 || recap.generating || !!recap.error))));
+	$effect(() => {
+		if (minimised) { hovered = null; detailsOpen = false; }
+	});
+	function openTurn() {
+		// Only expanding counts as a hand choice; working inside an open turn leaves Auto in charge.
+		if (minimised) setTurnMinimised(sessionId, turn.id, false);
+	}
+	function toggleMinimised() {
+		setTurnMinimised(sessionId, turn.id, !minimised);
+		void tick().then(() => panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-card"]')?.focus({ preventScroll: true }));
+	}
+	async function openMinimisedMessage(pin: SurfacePin) {
+		openTurn();
+		if (live || pin.part.surfacingProbabilities !== undefined || pin.part.surfacingMark) {
+			if (level === "final") selectLevel("all");
+			pick(pin);
+			await tick();
+			panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-msg-card"]')?.focus({ preventScroll: true });
+		} else await jumpTo(pin.step);
+	}
 	$effect(() => {
 		if (sessionId && surfacingActive) untrack(() => touchSurfaceSession(sessionId));
 	});
@@ -196,11 +224,14 @@
 	}
 
 	function pick(pin: SurfacePin) {
+		openTurn();
 		picked = pin.part.uuid;
 		folded = false;
 	}
 	function toggleSummary() {
-		summaryOpen = !summaryVisible;
+		const visible = summaryVisible;
+		openTurn();
+		summaryOpen = !visible;
 	}
 	function retrySummary() {
 		generateSummary(recap.retry?.scope ?? (recap.versions.length && summaryNew > 0 ? "new" : "whole"), recap.retry?.sourceVersion);
@@ -254,6 +285,7 @@
 		// Plain session shortcuts bubble to SessionBar; focused-turn keys own them first.
 		event.preventDefault();
 		if (onSurfacingShortcut?.(key)) return;
+		if (key === "h") { digits = ""; toggleMinimised(); return; }
 		if (feedback.command(key, surface.card)) return;
 		if (key === "s" && summaryEnabled) { toggleSummary(); return; }
 		if (key === "ArrowLeft" && surface.previous) pick(surface.previous);
@@ -334,6 +366,7 @@
 	async function jumpTo(i: number) {
 		const part = segment.activity[i];
 		if (!part) return;
+		openTurn();
 		expanded = true;
 		focusUuid = part.uuid;
 		await tick();
@@ -382,7 +415,7 @@
 	{#if view.unreadPartIds.length}<Button variant="ghost" size="content" tone="secondary" touchTarget class="h-[24px] rounded-full bg-chip px-[10px] font-sans text-[12px] font-medium" disabled={readSaving} data-testid="surfacing-mark-read" onclick={() => { void writeRead(view.unreadPartIds, true); }}>✓ Mark {view.unreadPartIds.length} read</Button>{/if}
 {/snippet}
 
-<div bind:this={panelEl} role={surfacingActive ? "group" : undefined} aria-label={surfacingActive ? "Turn activity" : undefined} onkeydown={surfacingActive ? surfaceCommand : undefined} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
+<div bind:this={panelEl} data-turn-id={turn.id} data-minimised={minimised} role={surfacingActive ? "group" : undefined} aria-label={surfacingActive ? "Turn activity" : undefined} onkeydown={surfacingActive ? surfaceCommand : undefined} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
 	<AssistantHeader message={segment.reply[0]} {sessionId} {forkMessageId} {model} {providerId} createdAt={segment.reply.length > 0 ? undefined : segment.activity[0]?.createdAt} />
 	<div class="md:ml-[42px]">
 		<!-- The active turn is a keyboard navigation group; inactive turns add no tab stop. -->
@@ -393,7 +426,7 @@
 					{#snippet trigger({ props })}
 						<Button {...props} variant="ghost" size="content" tone="secondary" hoverFill="none" align="start" touchTarget
 							class="turn-activity-toggle gap-[6px] text-[13px] min-w-0" aria-expanded={expanded}
-							onclick={() => (expanded = !expanded)}>
+							onclick={() => { openTurn(); expanded = !expanded; }}>
 							{#if live}<Icon name="loader-circle" size={13} class="animate-spin shrink-0 text-accent" />
 							{:else}<Icon name={expanded ? "chevron-down" : "chevron-right"} size={14} class="shrink-0 text-text-muted" />{/if}
 							<span class="font-semibold">{live ? "Working" : "Worked"}</span>
@@ -402,7 +435,7 @@
 							{:else if duration !== undefined}
 								<span class="turn-duration font-mono text-[12px] text-text-muted shrink-0" data-testid={live ? "turn-live-elapsed" : undefined}>{live && duration < 1000 ? "0s" : fmtDuration(duration)}</span>
 							{/if}
-							{#if phrase}<span class="truncate text-[12px] text-text-muted">· {phrase}</span>{/if}
+							{#if phrase}<span class="truncate text-[12px] text-text-muted {minimised ? 'max-[599px]:hidden' : ''}">· {phrase}</span>{/if}
 						</Button>
 					{/snippet}
 					<div class="max-w-[340px] flex flex-col gap-[6px] text-[12px]">
@@ -420,12 +453,17 @@
 						{#if surface.openAsk}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium bg-status-ask/18 text-status-ask" data-testid="surfacing-ask-chip" onclick={() => revealMessage(surface.openAsk)}>? #{surface.openAsk.surfacingOrdinal}</Button>{/if}
 						{#if surface.hasReadState}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium {surface.unreadCount ? 'bg-accent/18 text-accent' : 'bg-chip text-text-secondary'}" data-testid="surfacing-head-unread" onclick={() => revealMessage(surface.nextUnread?.part ?? null)}>{surface.unreadCount ? `${surface.unreadCount} unread` : "All read ✓"}</Button>{/if}
 						{@render surfacingRegions.headChips?.(surface)}
-						{#if summaryEnabled}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="max-[599px]:hidden shrink-0 h-[24px] rounded-full px-[9px] text-[12px] bg-chip text-text-secondary" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>{summaryLabel}{#if recap.versions.length && summaryNew > 0}<span class="text-accent">· {summaryNew} new</span>{/if}</Button>{/if}
+						{#if summaryEnabled}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="{minimised ? '' : 'max-[599px]:hidden'} shrink-0 h-[24px] rounded-full px-[9px] text-[12px] bg-chip text-text-secondary" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>{#if minimised}<span class="max-[599px]:sr-only">{summaryLabel}</span><span class="min-[600px]:hidden" aria-hidden="true">✦</span>{:else}{summaryLabel}{/if}{#if recap.versions.length && summaryNew > 0}<span class="text-accent {minimised ? 'max-[599px]:hidden' : ''}">· {summaryNew} new</span>{/if}</Button>{/if}
 					</div>
 				{/if}
 				{#if onsummarize}<span class="hidden md:contents"><Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] shrink-0" onclick={onsummarize}>✦ Summarize</Button></span>{/if}
+				{#if surfacingActive}<Button variant="ghost" size="content" tone="muted" touchTarget class="ml-auto shrink-0 -my-[2px] h-[24px] w-[24px]" data-testid="surfacing-minimise-toggle" ariaLabel={minimised ? "Expand turn" : "Minimise turn"} aria-expanded={!minimised} onclick={toggleMinimised}><Icon name={minimised ? "chevron-down" : "chevron-up"} size={14} /></Button>{/if}
 			</div>
-			{#if surfacingActive}
+			{#if minimised}
+				<MinimisedTurn view={surface} onopen={openMinimisedMessage}>
+					{#snippet strip()}<ActivityStrip {turn} {segment} {final} {now} {running} interactive={false} />{/snippet}
+				</MinimisedTurn>
+			{:else if surfacingActive}
 				<SurfacingCard view={surface} {live} {level} overridden={override !== undefined} regions={{ ...surfacingRegions, cardHead: markHead, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
 					{readSaving} {readError} canAutoRead={autoReadAttempt !== readTarget} onread={readMessage} onautoread={(pin) => readMessage(pin, true)}
 					markReadInAxis={!summaryEnabled} onmarkread={() => { void writeRead(surface.unreadPartIds, true); }}
@@ -444,13 +482,13 @@
 					onhover={(index) => { hovered = index; detailsOpen = index !== null; }} onjump={jumpTo} />
 			</div>
 			{/if}
-			{#if onsummarize}
+			{#if onsummarize && !minimised}
 				<Button variant="ghost-accent" size="content" align="start" touchTarget class="md:hidden w-full gap-[8px] py-[8px] text-[13px]" onclick={onsummarize}>
 					<span>✦ Summarize</span><Icon name="chevron-right" size={14} class="ml-auto" />
 				</Button>
 			{/if}
 		</div>
-		{#if expanded || showTicker}
+		{#if !minimised && (expanded || showTicker)}
 			<div class="step-log mt-[6px]" data-testid={live ? "turn-live-activity" : undefined}>
 				{#if !expanded && earlierCount > 0}
 					<Button variant="ghost" size="content" tone="muted" hoverFill="none" align="start" touchTarget
@@ -508,5 +546,6 @@
 
 <style>
 	.surface-head-chips { display:contents; }
+	.turn-activity[data-minimised="true"] .turn-duration { min-width:0; flex-shrink:1; overflow:hidden; text-overflow:ellipsis; }
 	.mark-toast { display:flex; align-items:center; gap:10px; width:fit-content; max-width:100%; min-height:34px; margin:10px auto 2px; padding:4px 5px 4px 14px; border-radius:999px; background:var(--color-inverse-bg); color:var(--color-inverse-text); font-size:13px; box-shadow:0 8px 24px rgb(0 0 0 / .22); }
 </style>
