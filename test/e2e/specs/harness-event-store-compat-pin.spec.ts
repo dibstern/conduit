@@ -57,7 +57,7 @@ const SESSIONS = [
 	},
 ];
 const RENDERED_HISTORY_HASH =
-	"297147da1b2a22984147227ecb6441969b8537df6cf184efb9b0c864ae9d8182";
+	"a218d9e2d912f5b8b95e6d4faad258d3029dd8f04411da161861e5a7d419e781";
 /** The fixture's history rows; its other tables are recorded, not pinned. */
 const FIXTURE_ROWS = {
 	sessions: 3,

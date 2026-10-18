@@ -114,6 +114,14 @@ async function setUp(page: Page, relayUrl: string, harness: ReplayHarness) {
 	await expect(recorded.getByTestId("session-unread-dot")).toHaveCount(0);
 	// The recording holds one session; the commands need a second to move around.
 	await new SidebarPage(page).createNewSession();
+	// Its title lands after the turn and re-sorts the list; let it land
+	// before rows are picked by position.
+	const created = new URL(page.url()).pathname.split("/").pop();
+	await expect(
+		page.locator(
+			`#session-list [data-session-id="${created}"] .session-title-inner`,
+		),
+	).not.toHaveText("Untitled");
 	await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(2);
 	const id = await rows.nth(1).getAttribute("data-session-id");
 	const row = page.locator(`#session-list [data-session-id="${id}"]`);
@@ -535,8 +543,11 @@ test.describe("phone", () => {
 		await expect(trigger).toBeFocused();
 		await trigger.click();
 		await sheet.getByTestId("session-ctx-snooze").click();
-		await expect(page.getByTestId("snooze-option-indefinite")).toBeVisible();
-		await page.getByTestId("snooze-option-indefinite").click();
+		const indefinite = page
+			.getByRole("menu", { name: "Snooze until", exact: true })
+			.locator('[data-hold-menu-item="indefinite"]');
+		await expect(indefinite).toBeVisible();
+		await indefinite.click();
 		await expect(
 			page.getByRole("status").filter({ hasText: "Snoozed “" }),
 		).toBeVisible();

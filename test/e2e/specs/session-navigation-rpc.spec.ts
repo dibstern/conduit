@@ -530,17 +530,13 @@ test("a delayed project attach keeps the target session's transcript and files",
 				request.payload["sessionId"] === target,
 		),
 	).toEqual([]);
-	const projectReadsBeforeAttach = rpc
-		.getRequests()
-		.filter((request) => request.tag === "GetProjects").length;
 	finishAttach({ projectSlug: otherProject, sessionSlug: null });
-	await expect
-		.poll(
-			() =>
-				rpc.getRequests().filter((request) => request.tag === "GetProjects")
-					.length,
-		)
-		.toBeGreaterThan(projectReadsBeforeAttach);
+	// The attach reply is what releases the target's scoped reads.
+	await rpc.waitForRequest(
+		(request) =>
+			request.tag === "SubscribeSessionDetail" &&
+			request.payload["sessionId"] === target,
+	);
 	if (
 		(await page
 			.getByTestId("views-rail-files")
