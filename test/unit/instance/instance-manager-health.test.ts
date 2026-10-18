@@ -1,18 +1,8 @@
 // test/unit/instance/instance-manager-health.test.ts
 // Tests for health polling and restart scheduling in InstanceManager Effect service.
 import { describe, it } from "@effect/vitest";
-import {
-	Duration,
-	Effect,
-	FiberMap,
-	HashMap,
-	Layer,
-	Option,
-	PubSub,
-	Queue,
-	Ref,
-	TestClock,
-} from "effect";
+import { Duration, Effect, FiberMap, HashMap, Layer, Option, PubSub, Queue, Ref } from "effect";
+import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import {
@@ -64,7 +54,7 @@ const mkInstance = (
 });
 
 describe("InstanceManager health polling", () => {
-	it.scoped("startHealthPoller registers a fiber in FiberMap", () =>
+	it.effect("startHealthPoller registers a fiber in FiberMap", () =>
 		Effect.gen(function* () {
 			yield* addInstance(mkInstance("inst-1", 4096));
 			yield* startHealthPoller("inst-1");
@@ -74,7 +64,7 @@ describe("InstanceManager health polling", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("stopHealthPoller removes the polling fiber", () =>
+	it.effect("stopHealthPoller removes the polling fiber", () =>
 		Effect.gen(function* () {
 			yield* addInstance(mkInstance("inst-1", 4096));
 			yield* startHealthPoller("inst-1");
@@ -85,7 +75,7 @@ describe("InstanceManager health polling", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped(
+	it.effect(
 		"marks instance unhealthy on fetch failure after poll interval",
 		() =>
 			Effect.gen(function* () {
@@ -112,7 +102,7 @@ describe("InstanceManager health polling", () => {
 			}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("publishes InstanceStatusChanged on status transition", () =>
+	it.effect("publishes InstanceStatusChanged on status transition", () =>
 		Effect.gen(function* () {
 			const bus = yield* DaemonEventBusTag;
 			const dequeue = yield* PubSub.subscribe(bus);
@@ -145,7 +135,7 @@ describe("InstanceManager health polling", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("stops polling if instance removed during polling", () =>
+	it.effect("stops polling if instance removed during polling", () =>
 		Effect.gen(function* () {
 			yield* addInstance(mkInstance("inst-1", 1));
 			yield* startHealthPoller("inst-1");
@@ -159,7 +149,7 @@ describe("InstanceManager health polling", () => {
 });
 
 describe("InstanceManager restart scheduling", () => {
-	it.scoped("scheduleRestart registers a restart fiber", () =>
+	it.effect("scheduleRestart registers a restart fiber", () =>
 		Effect.gen(function* () {
 			yield* addInstance(mkInstance("inst-1", 4096));
 			// Set to unhealthy so restart makes sense
@@ -178,7 +168,7 @@ describe("InstanceManager restart scheduling", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("restartInstance directly resets status to starting", () =>
+	it.effect("restartInstance directly resets status to starting", () =>
 		Effect.gen(function* () {
 			yield* addInstance(mkInstance("inst-1", 4096));
 			const stateRef = yield* InstanceManagerStateTag;
@@ -200,7 +190,7 @@ describe("InstanceManager restart scheduling", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("scheduleRestart records timestamp and registers fiber", () =>
+	it.effect("scheduleRestart records timestamp and registers fiber", () =>
 		Effect.gen(function* () {
 			yield* addInstance(mkInstance("inst-1", 4096));
 			const stateRef = yield* InstanceManagerStateTag;
@@ -226,7 +216,7 @@ describe("InstanceManager restart scheduling", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("gives up after maxRestartsPerWindow exceeded", () =>
+	it.effect("gives up after maxRestartsPerWindow exceeded", () =>
 		Effect.gen(function* () {
 			const bus = yield* DaemonEventBusTag;
 			const dequeue = yield* PubSub.subscribe(bus);
@@ -274,7 +264,7 @@ describe("InstanceManager restart scheduling", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("cancelInstanceFibers removes both poller and restart fibers", () =>
+	it.effect("cancelInstanceFibers removes both poller and restart fibers", () =>
 		Effect.gen(function* () {
 			yield* addInstance(mkInstance("inst-1", 4096));
 			const stateRef = yield* InstanceManagerStateTag;
@@ -298,7 +288,7 @@ describe("InstanceManager restart scheduling", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("removeInstance cancels both poller and restart fibers", () =>
+	it.effect("removeInstance cancels both poller and restart fibers", () =>
 		Effect.gen(function* () {
 			yield* addInstance(mkInstance("inst-1", 4096));
 			const stateRef = yield* InstanceManagerStateTag;

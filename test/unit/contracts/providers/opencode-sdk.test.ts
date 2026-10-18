@@ -56,7 +56,7 @@ describe("OpenCode provider contract schemas", () => {
 
 	it("decodes session status maps returned by OpenCode", () => {
 		const result = Schema.decodeUnknownEither(
-			Schema.Record({ key: Schema.String, value: OpenCodeSessionStatusSchema }),
+			Schema.Record(Schema.String, OpenCodeSessionStatusSchema),
 		)({
 			ses_1: { type: "idle" },
 			ses_2: { type: "busy" },

@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Either, Schema } from "effect";
+import { Result as Either, Schema } from "effect";
 import { expect } from "vitest";
 import {
 	ResolveSessionMode,
@@ -32,7 +32,7 @@ describe("shared daemon RPC contracts", () => {
 		}
 		expect(WsRpcGroup.requests.has("SetModel")).toBe(false);
 		expect(
-			Either.isLeft(
+			Either.isFailure(
 				Schema.decodeUnknownEither(WsRpcRequest)({
 					_tag: "SetModel",
 					slug: "project",
@@ -46,7 +46,7 @@ describe("shared daemon RPC contracts", () => {
 	it("accepts only a four to eight digit PIN or clearing the PIN", () => {
 		for (const pin of ["1234", "12345678", null]) {
 			expect(
-				Either.isRight(
+				Either.isSuccess(
 					Schema.decodeUnknownEither(SetPin)({
 						_tag: "SetPin",
 						pin,
@@ -56,7 +56,7 @@ describe("shared daemon RPC contracts", () => {
 		}
 		for (const pin of ["", "123", "123456789", "12ab", 1234]) {
 			expect(
-				Either.isLeft(
+				Either.isFailure(
 					Schema.decodeUnknownEither(SetPin)({
 						_tag: "SetPin",
 						pin,

@@ -1,4 +1,4 @@
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { it } from "@effect/vitest";
 import { Context, Deferred, Effect, Fiber, Layer } from "effect";
 import { expect } from "vitest";
@@ -97,7 +97,7 @@ const backfill = (
 
 // Late provider/backfill rows can arrive after preparation but before acceptance.
 // They must receive tombstones with the original suffix and resist later import.
-it.scoped(
+it.effect(
 	"commits a late hidden backfill with the rewind and prevents resurrection",
 	() =>
 		Effect.gen(function* () {

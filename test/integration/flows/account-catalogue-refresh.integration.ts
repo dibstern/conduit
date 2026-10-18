@@ -165,7 +165,7 @@ const clients = (pendingOriginal?: Deferred.Deferred<ProviderCapabilities>) =>
 	});
 
 describe("account catalogue refresh through browser RPC", () => {
-	it.scoped(
+	it.effect(
 		"validates and publishes a model default using the current default account",
 		() =>
 			Effect.gen(function* () {
@@ -185,7 +185,7 @@ describe("account catalogue refresh through browser RPC", () => {
 				});
 			}).pipe(Effect.provide(daemonLayer()), Effect.timeout("10 seconds")),
 	);
-	it.scoped(
+	it.effect(
 		"discovers a changed default while the former default is still pending",
 		() =>
 			Effect.gen(function* () {
@@ -243,7 +243,7 @@ describe("account catalogue refresh through browser RPC", () => {
 			}).pipe(Effect.provide(daemonLayer()), Effect.timeout("10 seconds")),
 	);
 
-	it.scoped(
+	it.effect(
 		"tags the catalogue published when a model-only CreateSession validates an account",
 		() =>
 			Effect.gen(function* () {

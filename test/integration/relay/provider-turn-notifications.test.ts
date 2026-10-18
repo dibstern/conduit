@@ -1,4 +1,4 @@
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { Chunk, Effect, Layer, PubSub, Queue } from "effect";
 import { expect, it, vi } from "vitest";
 import {
@@ -33,7 +33,7 @@ it.each([
 		expired: [],
 	}));
 	const persistence = makePersistenceEffectLayer(":memory:", "test-project");
-	const layer = Layer.unwrapEffect(
+	const layer = Layer.unwrap(
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const alerts = yield* AlertsTag;

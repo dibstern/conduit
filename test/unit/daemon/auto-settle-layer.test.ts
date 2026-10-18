@@ -177,7 +177,7 @@ describe("daemon automatic settlement layer", () => {
 							]),
 							Layer.succeed(RelayCacheTag, {
 								peek: (slug: string) =>
-									Effect.succeed(Option.fromNullable(relays.get(slug))),
+									Effect.succeed(Option.fromNullishOr(relays.get(slug))),
 								get,
 								invalidate: () => Effect.void,
 							}),

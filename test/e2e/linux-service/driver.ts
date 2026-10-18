@@ -12,9 +12,9 @@ import {
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
-import { Socket } from "@effect/platform";
+import { Socket } from "effect/socket";
 import { NodeSocket } from "@effect/platform-node";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
+import { RpcClient, RpcSerialization } from "effect/rpc";
 import { Effect, Option, Schedule, Stream } from "effect";
 import {
 	AddInstance,

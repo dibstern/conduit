@@ -100,15 +100,15 @@ describe("session triage RPCs", () => {
 					),
 				),
 			);
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				client.SetSessionSettled({
 					sessionId: "s1",
 					settled: true,
 				}),
 			);
 			expect(result._tag).toBe("Left");
-			if (result._tag === "Left")
-				expect(result.left).toMatchObject({
+			if (result._tag === "Failure")
+				expect(result.failure).toMatchObject({
 					_tag: "WsRpcError",
 					message: expect.stringMatching(/pinned.*unpinned first/),
 				});
@@ -180,15 +180,15 @@ describe("session triage RPCs", () => {
 						),
 					),
 				);
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					client.SnoozeSession({
 						sessionId: "s1",
 						until: null,
 					}),
 				);
 				expect(result._tag).toBe("Left");
-				if (result._tag === "Left")
-					expect(result.left).toMatchObject({
+				if (result._tag === "Failure")
+					expect(result.failure).toMatchObject({
 						_tag: "WsRpcError",
 						message: expect.stringContaining(message),
 					});

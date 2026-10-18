@@ -79,7 +79,7 @@ const decodeSteeredMessage = Schema.decodeUnknownEither(
 
 const decodeTerminal = Schema.decodeUnknownEither(
 	Schema.Struct({
-		status: Schema.Literal("finished", "cancelled", "error"),
+		status: Schema.Literals(["finished", "cancelled", "error"]),
 		requestId: Schema.optional(Schema.String),
 		durationMs: Schema.optional(Schema.Number),
 		model: Schema.optional(Schema.Struct({ id: Schema.String })),
@@ -410,7 +410,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 					const modelParams =
 						input.providerState["cursor.modelParams"] === undefined
 							? undefined
-							: yield* Schema.decodeUnknown(CursorModelParameters)(
+							: yield* Schema.decodeUnknownEffect(CursorModelParameters)(
 									input.providerState["cursor.modelParams"],
 								).pipe(
 									Effect.mapError(
@@ -448,7 +448,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 									abandoned
 										? Effect.void
 										: sdkCall("store dispose", () => store.dispose()).pipe(
-												Effect.catchAll((failure) =>
+												Effect.catch((failure) =>
 													Effect.logError(failure.message),
 												),
 											),
@@ -491,7 +491,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 									(abandoned
 										? Effect.void
 										: sdkCall("agent close", () => agent.close()).pipe(
-												Effect.catchAll((failure) =>
+												Effect.catch((failure) =>
 													Effect.logError(failure.message),
 												),
 											)
@@ -587,7 +587,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 							const decoded = decodeBilling(value);
 							return Either.isRight(decoded) ? decoded.right : undefined;
 						}),
-						Effect.catchAll(() => Effect.succeed(undefined)),
+						Effect.catch(() => Effect.succeed(undefined)),
 					);
 					const beforeUsage = yield* readUsage;
 					const run = yield* sdkCall("send", () =>
@@ -671,7 +671,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 					);
 					// An async iterator's return can wait behind its stalled next().
 					// Await ordinary cleanup, but let controller retirement end a stuck one.
-					const stream = yield* Effect.forkDaemon(
+					const stream = yield* Effect.forkDetach(
 						Stream.fromAsyncIterable(run.stream, (cause): SessionFailure => {
 							const failure = cursorSdkFailure("stream", cause);
 							return {
@@ -686,7 +686,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 									? Queue.offer(queue, { channel: "stream", value })
 									: Effect.void,
 							),
-							Effect.catchAll((failure) => Effect.logWarning(failure.message)),
+							Effect.catch((failure) => Effect.logWarning(failure.message)),
 						),
 					);
 					yield* Effect.addFinalizer(() =>
@@ -720,7 +720,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 								// Start the deadline when cancel is invoked, even if cancel itself hangs.
 								yield* Effect.forkScoped(
 									sdkCall("cancel", () => run.cancel()).pipe(
-										Effect.catchAll((failure) =>
+										Effect.catch((failure) =>
 											Effect.logWarning(failure.message),
 										),
 									),
@@ -874,7 +874,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 						);
 					}
 				}).pipe(
-					Effect.catchAll((failure) =>
+					Effect.catch((failure) =>
 						finish(
 							"error",
 							cursorTurnError(failure).code,

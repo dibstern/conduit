@@ -126,7 +126,7 @@ describe("slow browser RPC warnings", () => {
 							if (++active === 2) yield* Deferred.succeed(started, undefined);
 							yield* Deferred.await(started);
 							yield* Effect.sleep("5 millis");
-							const child = yield* Effect.fork(
+							const child = yield* Effect.forkChild(
 								Effect.forEach(
 									Array.from({ length: payload.statements }),
 									() => sql`SELECT 1`.pipe(Effect.orDie),

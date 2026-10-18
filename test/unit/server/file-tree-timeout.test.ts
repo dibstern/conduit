@@ -1,6 +1,7 @@
 import { describe, it } from "@effect/vitest";
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
-import { Cause, Effect, Fiber, Layer, Option, TestClock } from "effect";
+import { Cause, Effect, Fiber, Layer, Option } from "effect";
+import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { GetFileTree } from "../../../src/lib/contracts/ws-rpc.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";

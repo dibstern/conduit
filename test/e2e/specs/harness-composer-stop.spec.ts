@@ -708,7 +708,7 @@ test("correction: interrupt rejection reaches RPC and leaves the running tool in
 		.poll(() => toolStatus(browser, sessionId, "correction-foreground"))
 		.toBe("running");
 	const rejected = await Effect.runPromise(
-		Effect.either(cancel(browser, sessionId)),
+		Effect.result(cancel(browser, sessionId)),
 	);
 	const rejectionPath = testInfo.outputPath("interrupt-rejection.json");
 	writeFileSync(rejectionPath, JSON.stringify(rejected, null, 2));

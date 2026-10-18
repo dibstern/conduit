@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { channel } from "node:diagnostics_channel";
-import type { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
+import type { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import {
 	type Cause,
 	Duration,
@@ -92,7 +92,7 @@ export const subscribeShellProjects = <E>(
 	| AccountDirectory
 	| SqlClient.SqlClient
 > =>
-	Stream.unwrapScoped(
+	Stream.unwrap(
 		Effect.gen(function* () {
 			const bus = yield* SessionEventBusTag;
 			const readQuery = yield* ReadQueryEffectTag;
@@ -152,7 +152,7 @@ export const subscribeShellProjects = <E>(
 						);
 						const point = Option.getOrUndefined(
 							Option.filter(
-								Option.fromNullable(
+								Option.fromNullishOr(
 									first ? options.resumePoint : undefined,
 								).pipe(Option.flatMap(Schema.decodeOption(ResumePointBody))),
 								(body) =>
@@ -229,7 +229,7 @@ export const subscribeShellProjects = <E>(
 								rowsDone = true;
 								return finish;
 							}),
-							Effect.catchAllCause(fail),
+							Effect.catchCause(fail),
 							Effect.forkScoped,
 						);
 					}),
@@ -238,7 +238,7 @@ export const subscribeShellProjects = <E>(
 					projectsDone = true;
 					return finish;
 				}),
-				Effect.catchAllCause(fail),
+				Effect.catchCause(fail),
 				Effect.forkScoped,
 			);
 			return Stream.fromQueue(output).pipe(Stream.flattenTake);

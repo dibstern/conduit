@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
 import {
 	Chunk,

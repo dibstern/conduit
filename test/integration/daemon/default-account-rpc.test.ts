@@ -162,7 +162,7 @@ const makeClient = Effect.gen(function* () {
 });
 
 describe("default Claude account through daemon RPC", () => {
-	it.scoped(
+	it.effect(
 		"resolves deleted bindings and refreshes effective accounts when the default moves",
 		() => {
 			const project = sessionFixture();
@@ -213,7 +213,7 @@ describe("default Claude account through daemon RPC", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"keeps legacy history visible without a built-in account and after adding the first account",
 		() => {
 			const project = sessionFixture();
@@ -259,7 +259,7 @@ describe("default Claude account through daemon RPC", () => {
 		},
 	);
 
-	it.scoped("follows a new default when no live claude id remains", () => {
+	it.effect("follows a new default when no live claude id remains", () => {
 		const project = sessionFixture();
 		return Effect.gen(function* () {
 			const client = yield* makeClient;
@@ -297,7 +297,7 @@ describe("default Claude account through daemon RPC", () => {
 		);
 	});
 
-	it.scoped(
+	it.effect(
 		"persists the pointer and refreshes two clients and session subscribers",
 		() =>
 			Effect.gen(function* () {
@@ -359,7 +359,7 @@ describe("default Claude account through daemon RPC", () => {
 			}).pipe(Effect.provide(fixture()), Effect.timeout("10 seconds")),
 	);
 
-	it.scoped(
+	it.effect(
 		"rejects unknown and OpenCode defaults without moving the pointer",
 		() =>
 			Effect.gen(function* () {

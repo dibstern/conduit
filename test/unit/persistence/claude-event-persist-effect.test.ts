@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
@@ -16,7 +16,7 @@ import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/p
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 
 describe("ClaudeEventPersistEffect session lifecycle", () => {
-	it.scoped(
+	it.effect(
 		"omits empty user deltas without losing attachments or nonempty text",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-empty-delta-"));
@@ -110,7 +110,7 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"preserves delayed authoritative OpenCode ownership during user-message persistence",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-interleaving-"));
@@ -177,7 +177,7 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"rejects a user message for a missing session without writing or publishing",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-lifecycle-"));
@@ -198,7 +198,7 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 
 			return Effect.gen(function* () {
 				const persist = yield* ClaudeEventPersistEffectTag;
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					persist.persistUserMessage("missing-session", "hello"),
 				);
 				const sql = yield* SqlClient.SqlClient;
@@ -229,7 +229,7 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"rejects a raw-only session row without a durable creation event",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-raw-only-"));
@@ -247,7 +247,7 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 						${sessionId}, 'opencode', ${sessionId}, 'Legacy raw seed', 'idle', 1, 1
 					)`;
 
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					persist.persistUserMessage(sessionId, "must not dispatch"),
 				);
 				const events = yield* sql<{ readonly count: number }>`
@@ -273,7 +273,7 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"rejects an ordinary content event for a raw-only session row",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-raw-content-"));
@@ -291,7 +291,7 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 						${sessionId}, 'opencode', ${sessionId}, 'Legacy raw seed', 'idle', 1, 1
 					)`;
 
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					persist.persistEvent(
 						canonicalEvent(
 							"message.created",
@@ -328,7 +328,7 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"deletes an existing session but rejects a missing compatibility delete",
 		() => {
 			const dir = mkdtempSync(
@@ -363,7 +363,7 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 						{ provider: "claude" },
 					),
 				);
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					persist.persistEvent(
 						canonicalEvent(
 							"session.deleted",

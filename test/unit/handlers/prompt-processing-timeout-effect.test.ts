@@ -1,6 +1,7 @@
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, TestClock } from "effect";
+import { Effect, Layer } from "effect";
+import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";

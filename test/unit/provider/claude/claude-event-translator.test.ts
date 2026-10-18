@@ -1,6 +1,7 @@
 // test/unit/provider/claude/claude-event-translator.test.ts
 
-import { Effect, Schema, TestClock, TestContext } from "effect";
+import { Effect, Schema, TestContext } from "effect";
+import { TestClock } from "effect/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	type ProviderRuntimeEvent,

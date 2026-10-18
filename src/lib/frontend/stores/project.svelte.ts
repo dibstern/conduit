@@ -167,7 +167,7 @@ export function followDaemonLists(on: boolean): void {
 															applyUsageLimitsSetting(usageLimits);
 													}),
 												),
-												Effect.catchAll(() => Effect.void),
+												Effect.catch(() => Effect.void),
 											);
 										}),
 								),

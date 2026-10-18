@@ -63,7 +63,7 @@ const rpcClient = Effect.gen(function* () {
 });
 
 describe("WsRpcServerLayer ResolveSession", () => {
-	it.scoped("uses session manager existence with persistence", () => {
+	it.effect("uses session manager existence with persistence", () => {
 		const sessionExists = vi.fn((sessionId: string) =>
 			Effect.succeed(sessionId === "existing"),
 		);
@@ -78,7 +78,7 @@ describe("WsRpcServerLayer ResolveSession", () => {
 				projectSlug: "project-a",
 			});
 			expect(
-				yield* Effect.either(client.ResolveSession({ sessionId: "missing" })),
+				yield* Effect.result(client.ResolveSession({ sessionId: "missing" })),
 			).toMatchObject({
 				_tag: "Left",
 				left: { _tag: "WsRpcError", message: "Unknown session: missing" },
@@ -193,7 +193,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 		);
 	});
 
-	it.scoped(
+	it.effect(
 		"rejects a worktree base without a new worktree before creating a session",
 		() => {
 			const createSession = vi.fn(() =>
@@ -206,7 +206,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			);
 			return Effect.gen(function* () {
 				const client = yield* rpcClient;
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					client.CreateSession({
 						permissionMode: "ask",
 						projectSlug: "project-a",
@@ -240,7 +240,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"preserves an unavailable instance's cause in the CreateSession error without auth details",
 		() => {
 			const dir = mkdtempSync(
@@ -909,7 +909,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 					)).map((message) => message.id),
 				).toContain(`result-only_${resultOnlyFork.sessionId}`);
 				const beforeMissingPoint = (yield* sessionCount())[0]?.count;
-				const missingPoint = yield* Effect.either(
+				const missingPoint = yield* Effect.result(
 					client.ForkSession({
 						sessionId: "ses-parent",
 						messageId: "not-in-history",
@@ -917,8 +917,8 @@ describe("WsRpcServerLayer ListSessions", () => {
 					}),
 				);
 				expect(missingPoint._tag).toBe("Left");
-				if (missingPoint._tag === "Left")
-					expect(String(missingPoint.left)).toContain(
+				if (missingPoint._tag === "Failure")
+					expect(String(missingPoint.failure)).toContain(
 						"was not found in the session history",
 					);
 				expect((yield* sessionCount())[0]?.count).toBe(beforeMissingPoint);
@@ -935,7 +935,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 							}),
 						),
 					);
-				const rolledBack = yield* Effect.either(
+				const rolledBack = yield* Effect.result(
 					client.ForkSession({
 						sessionId: "ses-parent",
 						originId: "browser-tab-a",
@@ -954,15 +954,15 @@ describe("WsRpcServerLayer ListSessions", () => {
 						provider: "my-claude",
 					},
 				});
-				const missing = yield* Effect.either(
+				const missing = yield* Effect.result(
 					client.ForkSession({
 						sessionId: "ses-no-transcript",
 						originId: "browser-tab-a",
 					}),
 				);
 				expect(missing._tag).toBe("Left");
-				if (missing._tag === "Left")
-					expect(String(missing.left)).toContain(
+				if (missing._tag === "Failure")
+					expect(String(missing.failure)).toContain(
 						"has no Claude transcript yet",
 					);
 				expect(forkSession).toHaveBeenCalledTimes(usesCanonicalHistory ? 0 : 3);

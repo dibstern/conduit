@@ -233,7 +233,7 @@ describe("explicit project registration", () => {
 });
 
 describe("waitForRelay", () => {
-	it.scoped("resolves immediately if project is already Ready", () =>
+	it.effect("resolves immediately if project is already Ready", () =>
 		Effect.gen(function* () {
 			yield* addWithoutRelay(testProject);
 			yield* markReady(testProject.slug);
@@ -244,14 +244,14 @@ describe("waitForRelay", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("fails with ProjectNotFound for unknown slug", () =>
+	it.effect("fails with ProjectNotFound for unknown slug", () =>
 		Effect.gen(function* () {
 			const result = yield* waitForRelay("nonexistent", 1000).pipe(Effect.flip);
 			expect(result._tag).toBe("ProjectNotFound");
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("waits for InstanceStatusChanged then verifies Ready", () =>
+	it.effect("waits for InstanceStatusChanged then verifies Ready", () =>
 		Effect.gen(function* () {
 			yield* addWithoutRelay(testProject);
 

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RpcMessage } from "@effect/rpc";
+import type { RpcMessage } from "effect/rpc";
 import { Deferred, Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { isRecord } from "../../../src/lib/utils.js";

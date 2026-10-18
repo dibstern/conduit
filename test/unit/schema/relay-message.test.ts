@@ -1,4 +1,4 @@
-import { Either, Schema } from "effect";
+import { Result as Either, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { ProjectSettingSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import {
@@ -10,13 +10,13 @@ describe("RelayMessage Schema", () => {
 	it("decodes delta message", () => {
 		const raw = { type: "delta", sessionId: "s1", text: "hello" };
 		const result = Schema.decodeUnknownEither(RelayMessageSchema)(raw);
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("decodes thinking_start message", () => {
 		const raw = { type: "thinking_start", sessionId: "s1" };
 		const result = Schema.decodeUnknownEither(RelayMessageSchema)(raw);
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("decodes a failed done", () => {
@@ -27,19 +27,19 @@ describe("RelayMessage Schema", () => {
 			error: "Rate limited",
 		};
 		const result = Schema.decodeUnknownEither(RelayMessageSchema)(raw);
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("rejects unknown message type", () => {
 		const raw = { type: "not_a_real_type", sessionId: "s1" };
 		const result = Schema.decodeUnknownEither(RelayMessageSchema)(raw);
-		expect(Either.isLeft(result)).toBe(true);
+		expect(Either.isFailure(result)).toBe(true);
 	});
 
 	it("rejects message missing required fields", () => {
 		const raw = { type: "delta" }; // missing sessionId, text
 		const result = Schema.decodeUnknownEither(RelayMessageSchema)(raw);
-		expect(Either.isLeft(result)).toBe(true);
+		expect(Either.isFailure(result)).toBe(true);
 	});
 
 	it("no longer carries facts that moved to subscriptions (ni8.12)", () => {
@@ -55,7 +55,7 @@ describe("RelayMessage Schema", () => {
 
 	it("rejects a non-JSON Claude settings fact", () => {
 		expect(
-			Either.isLeft(
+			Either.isFailure(
 				Schema.decodeUnknownEither(ProjectSettingSchema)({
 					_tag: "claudeSettings",
 					overrides: { invalid: Number.NaN },

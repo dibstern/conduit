@@ -58,7 +58,7 @@ describe("InstanceHealthCheckLiveService", () => {
 			expect(fetch).toHaveBeenCalledOnce();
 			expect(Exit.isFailure(exit)).toBe(true);
 			if (Exit.isFailure(exit)) {
-				expect(Cause.isInterruptedOnly(exit.cause)).toBe(true);
+				expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true);
 			}
 			expect(aborted).toHaveBeenCalledOnce();
 			expect(signal?.aborted).toBe(true);

@@ -1227,7 +1227,7 @@ describe("listDaemonSessions", () => {
 });
 
 describe("ResolveSession", () => {
-	it.scoped("finds indexed sessions and rejects unknown IDs", () => {
+	it.effect("finds indexed sessions and rejects unknown IDs", () => {
 		const root = makeTemporaryRoot();
 		const projects = ["project-a", "project-b"].map((slug) => ({
 			slug,
@@ -1262,7 +1262,7 @@ describe("ResolveSession", () => {
 				}),
 			).toEqual({ projectSlug: "project-b" });
 			expect(
-				yield* Effect.either(client.ResolveSession({ sessionId: "unknown" })),
+				yield* Effect.result(client.ResolveSession({ sessionId: "unknown" })),
 			).toMatchObject({
 				_tag: "Left",
 				left: { _tag: "WsRpcError", message: "Unknown session: unknown" },

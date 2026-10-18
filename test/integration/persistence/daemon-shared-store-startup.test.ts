@@ -291,7 +291,7 @@ describe("daemon shared-store startup", () => {
 						yield* Ref.set(yield* HttpServerRefTag, createServer());
 						const factory = yield* RelayFactoryTag;
 						for (let retry = 0; retry < 2; retry++) {
-							expect(yield* Effect.either(factory.create(beta))).toMatchObject({
+							expect(yield* Effect.result(factory.create(beta))).toMatchObject({
 								_tag: "Left",
 								left: { _tag: "RelayFactoryError", reason },
 							});
@@ -922,7 +922,7 @@ describe("daemon shared-store startup", () => {
 					const directory = yield* SessionDirectory;
 					const sql = yield* SqlClient.SqlClient;
 					yield* sql`ALTER TABLE sessions RENAME TO unavailable_sessions`;
-					return yield* Effect.either(directory.projectOf("parent"));
+					return yield* Effect.result(directory.projectOf("parent"));
 				}),
 			);
 			expect(result).toMatchObject({

@@ -3,7 +3,8 @@
 // whose discovery is faked, read through `subscribePtys`.
 
 import { describe, it } from "@effect/vitest";
-import { Chunk, Effect, Fiber, Layer, Stream, TestClock } from "effect";
+import { Chunk, Effect, Fiber, Layer, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import type { PtyEnvelope } from "../../../src/lib/contracts/ws-rpc.js";
 import { subscribePtys } from "../../../src/lib/domain/relay/Services/pty-subscription.js";

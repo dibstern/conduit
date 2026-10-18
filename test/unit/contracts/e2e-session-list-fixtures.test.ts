@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Either, Schema } from "effect";
+import { Result as Either, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
 	EnvelopeSchema,
@@ -56,8 +56,8 @@ const expectDecodable = (
 			sequence: 1,
 			rows: message["sessions"],
 		});
-		if (Either.isLeft(result)) {
-			throw new Error(`${source}: ${String(result.left)}`);
+		if (Either.isFailure(result)) {
+			throw new Error(`${source}: ${String(result.failure)}`);
 		}
 	}
 };
@@ -81,8 +81,8 @@ describe("e2e session fixtures decode at their wire boundaries", () => {
 				sequence: 1,
 				rows: snapshot["sessions"],
 			});
-			if (Either.isLeft(result))
-				throw new Error(`mockup-state.ts: ${String(result.left)}`);
+			if (Either.isFailure(result))
+				throw new Error(`mockup-state.ts: ${String(result.failure)}`);
 		}
 	});
 });

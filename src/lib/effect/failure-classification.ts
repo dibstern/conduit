@@ -1,15 +1,15 @@
 import { Cause, Effect, HashSet, Option, type Schema } from "effect";
 
 // Keep Effect-version-specific failure semantics here, shared by server and browser.
-export const firstFailure = Cause.failureOption;
+export const firstFailure = Cause.findErrorOption;
 export const failures = Cause.failures;
 export const defects = Cause.defects;
-export const isInterrupted = Cause.isInterrupted;
-export const isInterruptedOnly = Cause.isInterruptedOnly;
+export const isInterrupted = Cause.hasInterrupts;
+export const isInterruptedOnly = Cause.hasInterruptsOnly;
 export const isEmpty = Cause.isEmpty;
 export const isCause = Cause.isCause;
 export const isUnknownException = Cause.isUnknownException;
-export const isTimeoutException = Cause.isTimeoutException;
+export const isTimeoutException = Cause.isTimeoutError;
 export const renderCause = Cause.pretty;
 export const squashCause = Cause.squash;
 export const withoutFailures = Cause.stripFailures;

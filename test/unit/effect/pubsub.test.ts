@@ -3,7 +3,7 @@ import { Effect, PubSub, Queue } from "effect";
 import { expect } from "vitest";
 
 describe("Effect PubSub replaces EventEmitter", () => {
-	it.scoped("publishes to multiple subscribers", () =>
+	it.effect("publishes to multiple subscribers", () =>
 		Effect.gen(function* () {
 			const pubsub = yield* PubSub.unbounded<{
 				_tag: string;
@@ -27,7 +27,7 @@ describe("Effect PubSub replaces EventEmitter", () => {
 		}),
 	);
 
-	it.scoped("subscriber receives only messages after subscription", () =>
+	it.effect("subscriber receives only messages after subscription", () =>
 		Effect.gen(function* () {
 			const pubsub = yield* PubSub.unbounded<string>();
 
@@ -44,7 +44,7 @@ describe("Effect PubSub replaces EventEmitter", () => {
 		}),
 	);
 
-	it.scoped("shutdown prevents further publishes", () =>
+	it.effect("shutdown prevents further publishes", () =>
 		Effect.gen(function* () {
 			const pubsub = yield* PubSub.unbounded<string>();
 			yield* PubSub.publish(pubsub, "hello");

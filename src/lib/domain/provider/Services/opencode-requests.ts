@@ -168,7 +168,7 @@ export const GetSessionBatchedResolver = RequestResolver.makeBatched(
 			);
 		}).pipe(
 			// If the batch fetch itself fails, fail all requests
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.forEach(requests, (req) => Request.fail(req, error), {
 					discard: true,
 				}),

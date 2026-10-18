@@ -23,7 +23,7 @@ describe("RPC registration", () => {
 		WsRpcGroup.of(Struct.omit(Server.wsRpcHandlers, "GetStatus"));
 	});
 
-	it.scoped("ignores daemon hooks outside the RPC group", () =>
+	it.effect("ignores daemon hooks outside the RPC group", () =>
 		Effect.gen(function* () {
 			const handlers = yield* DaemonWsRpcHandlersTag;
 			const nonRpcHook = vi.fn(() => Effect.void);

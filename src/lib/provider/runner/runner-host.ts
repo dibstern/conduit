@@ -378,7 +378,7 @@ export const runSessionRunner = (
 								});
 								initializing = false;
 							}).pipe(
-								Effect.catchAll((failure) =>
+								Effect.catch((failure) =>
 									Effect.sync(() => {
 										initializing = false;
 										peer.refuse(failure);
@@ -445,7 +445,7 @@ export const runSessionRunner = (
 								},
 								catch: (cause) => runnerFailure("prune runner sends", cause),
 							}).pipe(
-								Effect.catchAll((failure) =>
+								Effect.catch((failure) =>
 									Effect.logWarning(failure.message),
 								),
 							),

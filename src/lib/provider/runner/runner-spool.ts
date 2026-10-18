@@ -90,7 +90,7 @@ export class RunnerSpool {
 	emit(
 		output: SessionOutput,
 	): Effect.Effect<SessionOutputReply, SessionFailure> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			// Cleanup and the idle tail must not hold the next SDK enqueue.
 			// Both notices remain retained until their durable acknowledgement.
 			const notification =

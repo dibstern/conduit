@@ -10,7 +10,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 
 describe("DaemonEventBus", () => {
-	it.scoped("publishes and receives StatusChanged events", () =>
+	it.effect("publishes and receives StatusChanged events", () =>
 		Effect.gen(function* () {
 			const sub = yield* subscribeToDaemonEvents;
 			yield* publishStatusChanged({ s1: "busy", s2: "idle" });
@@ -19,7 +19,7 @@ describe("DaemonEventBus", () => {
 		}).pipe(Effect.provide(Layer.fresh(DaemonEventBusLive))),
 	);
 
-	it.scoped("multiple subscribers each receive events", () =>
+	it.effect("multiple subscribers each receive events", () =>
 		Effect.gen(function* () {
 			const sub1 = yield* subscribeToDaemonEvents;
 			const sub2 = yield* subscribeToDaemonEvents;
@@ -31,7 +31,7 @@ describe("DaemonEventBus", () => {
 		}).pipe(Effect.provide(Layer.fresh(DaemonEventBusLive))),
 	);
 
-	it.scoped("InstanceAdded carries instanceId", () =>
+	it.effect("InstanceAdded carries instanceId", () =>
 		Effect.gen(function* () {
 			const sub = yield* subscribeToDaemonEvents;
 			yield* publishInstanceAdded("inst-42");

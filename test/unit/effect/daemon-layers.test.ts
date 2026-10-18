@@ -299,7 +299,7 @@ describe("DaemonHandleTag", () => {
 				const missingExit = yield* Effect.exit(handle.removeProject("missing"));
 				expect(Exit.isFailure(missingExit)).toBe(true);
 				if (Exit.isFailure(missingExit)) {
-					const failure = Cause.failureOption(missingExit.cause);
+					const failure = Cause.findErrorOption(missingExit.cause);
 					expect(Option.isSome(failure)).toBe(true);
 					if (Option.isSome(failure)) {
 						expect(failure.value._tag).toBe("ProjectNotFound");

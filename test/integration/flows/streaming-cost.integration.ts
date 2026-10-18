@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { Effect, Layer, Queue, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import type { SessionDetailEnvelope } from "../../../src/lib/contracts/ws-rpc.js";

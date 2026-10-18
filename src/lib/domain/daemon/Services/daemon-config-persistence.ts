@@ -9,10 +9,10 @@ import type { DaemonState } from "./daemon-state.js";
 import { DaemonStateTag } from "./daemon-state.js";
 
 /** Path to the daemon.json config file on disk. */
-export class PersistencePathTag extends Context.Tag("PersistencePath")<
+export class PersistencePathTag extends Context.Service<
 	PersistencePathTag,
 	string
->() {}
+>()("PersistencePath") {}
 
 /** Serialize persisted fields of DaemonState to a JSON-safe object. */
 function serializeState(state: DaemonState) {

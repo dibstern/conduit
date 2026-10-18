@@ -57,7 +57,7 @@ describe("WsRpcServerLayer GetToolDetails", () => {
 	it.effect("fails the request when the read fails", () =>
 		Effect.gen(function* () {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				client.GetToolDetails({
 					sessionId: "session-a",
 					toolIds: [ToolCallId.make("tool-1")],

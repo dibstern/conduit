@@ -353,7 +353,7 @@ describe("Session git refresh", () => {
 			await runtime.runPromise(
 				Effect.gen(function* () {
 					const service = yield* SessionGitServiceTag;
-					const running = yield* Effect.fork(
+					const running = yield* Effect.forkChild(
 						service.refresh({ sessionId: "one" }),
 					);
 					yield* Effect.promise(() => reading);

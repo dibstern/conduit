@@ -34,7 +34,7 @@ import {
 
 const makeFamilyTestLayer = () => {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-family-sub-"));
-	const cleanup = Layer.scopedDiscard(
+	const cleanup = Layer.effectDiscard(
 		Effect.addFinalizer(() =>
 			Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 		),
@@ -129,7 +129,7 @@ const seedTwoFamilies = commit([
 ]);
 
 describe("subscribeSessionFamily", () => {
-	it.scoped(
+	it.effect(
 		"serves the viewed member and its ancestors, and nothing outside its family",
 		() =>
 			Effect.gen(function* () {
@@ -156,7 +156,7 @@ describe("subscribeSessionFamily", () => {
 			}).pipe(Effect.provide(makeFamilyTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"a new child and a child's model change arrive as versioned upserts; other families stay silent",
 		() =>
 			Effect.gen(function* () {
@@ -193,7 +193,7 @@ describe("subscribeSessionFamily", () => {
 			}).pipe(Effect.provide(makeFamilyTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"a member's deletion is a remove; another family's deletion is silent",
 		() =>
 			Effect.gen(function* () {
@@ -208,7 +208,7 @@ describe("subscribeSessionFamily", () => {
 			}).pipe(Effect.provide(makeFamilyTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"follows the family after the member it was opened on is deleted",
 		() =>
 			Effect.gen(function* () {
@@ -229,7 +229,7 @@ describe("subscribeSessionFamily", () => {
 			}).pipe(Effect.provide(makeFamilyTestLayer())),
 	);
 
-	it.scoped("a resume is a fresh snapshot for the viewed member", () =>
+	it.effect("a resume is a fresh snapshot for the viewed member", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* seedTwoFamilies;

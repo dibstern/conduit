@@ -13,19 +13,8 @@
 import type { Rpc } from "@effect/rpc";
 import { RpcClientError } from "@effect/rpc/RpcClientError";
 import { describe, it } from "@effect/vitest";
-import {
-	Cause,
-	Channel,
-	Chunk,
-	Deferred,
-	Effect,
-	Exit,
-	Fiber,
-	Queue,
-	Ref,
-	Stream,
-	TestClock,
-} from "effect";
+import { Cause, Channel, Chunk, Deferred, Effect, Exit, Fiber, Queue, Ref, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import { beforeAll, expect } from "vitest";
 import {
 	type SubscribeSessionDetail,
@@ -702,7 +691,7 @@ describe("client-side resume at the shared client", () => {
 		withSockets((sockets, links) =>
 			Effect.scoped(
 				Effect.gen(function* () {
-					const consumer = yield* Effect.fork(
+					const consumer = yield* Effect.forkChild(
 						Stream.runForEach(
 							sockets.subscriptions.sessionDetail({ sessionId: "s1" }),
 							() => Effect.void,
@@ -741,7 +730,7 @@ describe("client-side resume at the shared client", () => {
 					// A daemon, so that a wrong answer below fails on its assertion
 					// rather than wedging the test at scope close: an uninterruptible
 					// fiber that re-issues has nothing left to interrupt it with.
-					const consumer = yield* Effect.forkDaemon(
+					const consumer = yield* Effect.forkDetach(
 						Effect.scoped(
 							Effect.gen(function* () {
 								const pull = yield* Stream.toPull(
@@ -776,7 +765,7 @@ describe("client-side resume at the shared client", () => {
 
 					// Cancel while the consumer cannot take it, then kill the socket
 					// under it, so the two arrive at the handler together.
-					yield* Effect.fork(Fiber.interrupt(consumer));
+					yield* Effect.forkChild(Fiber.interrupt(consumer));
 					yield* Effect.sleep("20 millis");
 					yield* links.stream.tearDown;
 					yield* Deferred.succeed(release, undefined);

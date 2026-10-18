@@ -268,7 +268,7 @@ describe("HTTP Server Layer", () => {
 		Layer.provideMerge(AllTestLayers),
 	);
 
-	it.scoped("health endpoint responds via real HTTP server", () =>
+	it.effect("health endpoint responds via real HTTP server", () =>
 		Effect.gen(function* () {
 			const client = yield* HttpClient.HttpClient;
 			const response = yield* client.get("/health");
@@ -279,7 +279,7 @@ describe("HTTP Server Layer", () => {
 		}).pipe(Effect.provide(TestServerLayer)),
 	);
 
-	it.scoped("info endpoint responds via real HTTP server", () =>
+	it.effect("info endpoint responds via real HTTP server", () =>
 		Effect.gen(function* () {
 			const client = yield* HttpClient.HttpClient;
 			const response = yield* client.get("/info");
@@ -289,7 +289,7 @@ describe("HTTP Server Layer", () => {
 		}).pipe(Effect.provide(TestServerLayer)),
 	);
 
-	it.scoped("projects endpoint responds via real HTTP server", () =>
+	it.effect("projects endpoint responds via real HTTP server", () =>
 		Effect.gen(function* () {
 			const client = yield* HttpClient.HttpClient;
 			const response = yield* client.get("/api/projects");
@@ -303,7 +303,7 @@ describe("HTTP Server Layer", () => {
 		}).pipe(Effect.provide(TestServerLayer)),
 	);
 
-	it.scoped("CORS headers present on responses", () =>
+	it.effect("CORS headers present on responses", () =>
 		Effect.gen(function* () {
 			const client = yield* HttpClient.HttpClient;
 			const response = yield* client.get("/info");
@@ -312,7 +312,7 @@ describe("HTTP Server Layer", () => {
 		}).pipe(Effect.provide(TestServerLayer)),
 	);
 
-	it.scoped("push subscribe works via real HTTP server", () =>
+	it.effect("push subscribe works via real HTTP server", () =>
 		Effect.gen(function* () {
 			const client = yield* HttpClient.HttpClient;
 			const response = yield* HttpClientRequest.post(
@@ -332,7 +332,7 @@ describe("HTTP Server Layer", () => {
 		}).pipe(Effect.provide(TestServerLayer)),
 	);
 
-	it.scoped("push unsubscribe works via real HTTP server", () =>
+	it.effect("push unsubscribe works via real HTTP server", () =>
 		Effect.gen(function* () {
 			const client = yield* HttpClient.HttpClient;
 			const response = yield* HttpClientRequest.post(
@@ -351,7 +351,7 @@ describe("HTTP Server Layer", () => {
 });
 
 describe("HttpServerLive layer construction", () => {
-	it.scoped("can construct and start a server on port 0", () =>
+	it.effect("can construct and start a server on port 0", () =>
 		Effect.gen(function* () {
 			// Provide a minimal config with port 0 to let the OS pick a free port.
 			const configLayer = Layer.succeed(HttpServerConfigTag, {

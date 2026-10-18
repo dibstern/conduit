@@ -107,7 +107,7 @@ export function cursorAskUserTool(
 							})
 							.pipe(
 								Effect.map((answers) => JSON.stringify(answers)),
-								Effect.catchAll(() =>
+								Effect.catch(() =>
 									Effect.succeed("Question request failed or was cancelled."),
 								),
 								Effect.raceFirst(aborted),

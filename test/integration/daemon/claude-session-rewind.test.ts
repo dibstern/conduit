@@ -235,7 +235,7 @@ describe("Claude rewind through the detached runner and real relay", () => {
 		evidence["pending"] = persisted(harness, sessionId);
 		const pendingBeforeContinue = persisted(harness, sessionId);
 		const continuation = await Effect.runPromise(
-			Effect.either(
+			Effect.result(
 				browser.rpc.ContinueSession({
 					sessionId,
 					instanceId: "claude",

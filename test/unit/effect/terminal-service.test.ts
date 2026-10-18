@@ -1,5 +1,6 @@
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Layer, Option, TestClock } from "effect";
+import { Deferred, Effect, Fiber, Layer, Option } from "effect";
+import { TestClock } from "effect/testing";
 import { expect, type Mock, vi } from "vitest";
 import type { PtyEvent } from "../../../src/lib/contracts/ws-rpc.js";
 import {
@@ -223,11 +224,11 @@ describe("OpenCodeTerminalServiceLive", () => {
 						});
 					yield* Effect.gen(function* () {
 						const service = yield* OpenCodeTerminalServiceTag;
-						const first = yield* Effect.fork(service.list());
+						const first = yield* Effect.forkChild(service.list());
 						yield* Deferred.await(attaching);
 						yield* Fiber.interrupt(first);
 						present = false;
-						const second = yield* Effect.fork(service.list());
+						const second = yield* Effect.forkChild(service.list());
 						yield* TestClock.adjust("0 millis");
 						yield* Deferred.succeed(release, undefined);
 						yield* Deferred.await(registered);
@@ -714,9 +715,9 @@ describe("OpenCodeTerminalServiceLive", () => {
 				yield* service.create("client-1");
 				oldUpstream.readyState = 0;
 				disconnectHandlers[0]?.();
-				const listing = yield* Effect.fork(service.list());
+				const listing = yield* Effect.forkChild(service.list());
 				yield* Deferred.await(attachStarted);
-				const closing = yield* Effect.fork(
+				const closing = yield* Effect.forkChild(
 					Effect.gen(function* () {
 						yield* Deferred.succeed(closeStarted, undefined);
 						yield* service.close(initial.pty.id);

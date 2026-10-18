@@ -17,7 +17,7 @@ import {
 } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import {
 	Context,
 	Deferred,
@@ -495,7 +495,7 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 							committed,
 							consumed: false,
 						};
-						const append = yield* Effect.fork(
+						const append = yield* Effect.forkChild(
 							ingestion
 								.ingestBatch([
 									providerRuntimeEvent("workspace.changed", sessionId, {

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Cause, Effect, Exit, Layer } from "effect";
 import { expect, vi } from "vitest";

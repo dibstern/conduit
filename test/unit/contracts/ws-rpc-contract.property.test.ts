@@ -1,12 +1,5 @@
-import { RpcSchema } from "@effect/rpc";
-import {
-	Arbitrary,
-	Effect,
-	type Either,
-	FastCheck as fc,
-	Schema,
-	Stream,
-} from "effect";
+import { RpcSchema } from "effect/rpc";
+import { Arbitrary, Effect, type Result as Either, FastCheck as fc, Schema, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { WsRpcGroup, WsRpcRequest } from "../../../src/lib/contracts/ws-rpc.js";
 import { makeRpcWire } from "../../helpers/rpc-wire.js";
@@ -40,7 +33,7 @@ const withClient = (
 		call: (
 			tag: string,
 			payload: unknown,
-		) => Promise<Either.Either<unknown, unknown>>,
+		) => Promise<Either.Result<unknown, unknown>>,
 	) => Promise<void>,
 ) =>
 	Effect.runPromise(
@@ -63,7 +56,7 @@ const withClient = (
 									: Stream.runCollect(response).pipe(
 											Effect.map((chunks) => Array.from(chunks)),
 										)
-								).pipe(Effect.either, Effect.timeout("3 seconds")),
+								).pipe(Effect.result, Effect.timeout("3 seconds")),
 							);
 						}),
 					catch: (error) => error,
@@ -118,8 +111,8 @@ for (const rpc of WsRpcGroup.requests.values()) {
 									json(Schema.encodeSync(payloadSchema)(received)),
 								).toEqual(encodedPayload);
 								expect(result._tag).toBe("Right");
-								if (result._tag === "Right") {
-									expect(result.right).toEqual(stream ? success : success[0]);
+								if (result._tag === "Success") {
+									expect(result.success).toEqual(stream ? success : success[0]);
 								}
 								if (!stream) {
 									expect(
@@ -163,12 +156,12 @@ for (const rpc of WsRpcGroup.requests.values()) {
 									failure = error;
 									const result = await call(rpc._tag, payload);
 									expect(result._tag).toBe("Left");
-									if (result._tag === "Left") {
+									if (result._tag === "Failure") {
 										expect(
-											json(Schema.encodeSync(errorSchema)(result.left)),
+											json(Schema.encodeSync(errorSchema)(result.failure)),
 										).toEqual(json(Schema.encodeSync(errorSchema)(error)));
 										if (typeof error === "object" && error !== null) {
-											expect(result.left).toBeInstanceOf(error.constructor);
+											expect(result.failure).toBeInstanceOf(error.constructor);
 										}
 									}
 								},

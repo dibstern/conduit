@@ -84,7 +84,7 @@ const testLayer = () => {
 			SessionEventBusLive,
 		),
 		SessionEventBusLive,
-		Layer.scopedDiscard(
+		Layer.effectDiscard(
 			Effect.addFinalizer(() =>
 				Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 			),
@@ -368,7 +368,7 @@ describe("session detail wire", () => {
 				]);
 			}),
 	);
-	it.scoped(
+	it.effect(
 		"a corrupted total requests a whole-row snapshot and streaming continues correctly",
 		() =>
 			Effect.gen(function* () {
@@ -475,7 +475,7 @@ describe("session detail wire", () => {
 				});
 			}).pipe(Effect.provide(testLayer())),
 	);
-	it.scoped(
+	it.effect(
 		"delivers linear UTF-8 bytes across N persisted streaming part writes",
 		() =>
 			Effect.gen(function* () {

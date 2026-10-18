@@ -133,7 +133,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 				const client = yield* rpcClient;
 				const announced = yield* client
 					.SubscribePtys({ projectSlug: "proj-1" })
-					.pipe(Stream.take(4), Stream.runCollect, Effect.fork);
+					.pipe(Stream.take(4), Stream.runCollect, Effect.forkChild);
 				yield* Effect.sleep("10 millis");
 
 				expect(

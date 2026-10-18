@@ -402,7 +402,7 @@ describe("applySessionCommand", () => {
 				Effect.gen(function* () {
 					yield* seedSession("ses-opencode", "opencode");
 
-					const result = yield* Effect.either(
+					const result = yield* Effect.result(
 						applySessionCommand({
 							type: "session.deleted",
 							data: { sessionId: "ses-opencode" },
@@ -413,14 +413,14 @@ describe("applySessionCommand", () => {
 					// while the row it reads back is still there.
 					expect(result._tag).toBe("Left");
 					if (
-						result._tag === "Left" &&
-						result.left instanceof SessionCommandError
+						result._tag === "Failure" &&
+						result.failure instanceof SessionCommandError
 					) {
-						expect(result.left).toBeInstanceOf(SessionCommandError);
+						expect(result.failure).toBeInstanceOf(SessionCommandError);
 						// Append and project are one transaction, so the failure names the
 						// commit that rolled back, not a separate project step.
-						expect(result.left.operation).toBe("session.deleted.commit");
-						expect(result.left.cause).toBeInstanceOf(ProjectionRunnerError);
+						expect(result.failure.operation).toBe("session.deleted.commit");
+						expect(result.failure.cause).toBeInstanceOf(ProjectionRunnerError);
 					}
 					expect(yield* sessionIds).toEqual(["ses-opencode"]);
 					expect(api.session.delete).not.toHaveBeenCalled();
@@ -572,7 +572,7 @@ describe("applySessionCommand", () => {
 			withHarness(({ api }) =>
 				Effect.gen(function* () {
 					api.session.messages.mockRejectedValueOnce(new Error("unavailable"));
-					const result = yield* Effect.either(
+					const result = yield* Effect.result(
 						forkOpenCodeSession(
 							"ses-parent",
 							{

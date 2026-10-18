@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
-import { Either, Schema } from "effect";
+import { Result as Either, Schema } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
 
 import {
@@ -79,7 +79,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 
 	it("accepts a content-addressed OpenCode REST snapshot envelope", () => {
 		expect(
-			Either.isRight(
+			Either.isSuccess(
 				decodeEither({
 					...baseEvent,
 					eventId: "evt_opencode_snapshot_msg_1_digest",
@@ -102,7 +102,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 	});
 
 	it("rejects missing base envelope identity", () => {
-		expect(Either.isRight(decodeEither(baseEvent))).toBe(true);
+		expect(Either.isSuccess(decodeEither(baseEvent))).toBe(true);
 
 		for (const field of [
 			"eventId",
@@ -116,14 +116,14 @@ describe("ProviderRuntimeEvent contracts", () => {
 		] as const) {
 			const { [field]: _removed, ...eventWithoutRequiredField } = baseEvent;
 
-			expect(Either.isLeft(decodeEither(eventWithoutRequiredField))).toBe(true);
+			expect(Either.isFailure(decodeEither(eventWithoutRequiredField))).toBe(true);
 		}
 	});
 
 	it("rejects inherited base envelope identity", () => {
 		const inheritedEnvelope = Object.create(baseEvent);
 
-		expect(Either.isLeft(decodeEither(inheritedEnvelope))).toBe(true);
+		expect(Either.isFailure(decodeEither(inheritedEnvelope))).toBe(true);
 	});
 
 	it("decodes turn.model_resolved evidence without changing its ids", () => {
@@ -161,7 +161,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 		});
 
 		expect(
-			Either.isRight(
+			Either.isSuccess(
 				Schema.decodeUnknownEither(ProviderRuntimeRawSourceSchema)(rawSource),
 			),
 		).toBe(true);
@@ -190,7 +190,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 		});
 
 		expect(
-			Either.isRight(
+			Either.isSuccess(
 				Schema.decodeUnknownEither(ProviderRuntimeProviderRefsSchema)(
 					providerRefs,
 				),
@@ -202,19 +202,19 @@ describe("ProviderRuntimeEvent contracts", () => {
 
 	it("rejects the retired tool.input_updated runtime event", () => {
 		expect(
-			Either.isLeft(
+			Either.isFailure(
 				Schema.decodeUnknownEither(ProviderRuntimeEventTypeSchema)(
 					"tool.input_updated",
 				),
 			),
 		).toBe(true);
 		expect(
-			Either.isLeft(decodeEither({ ...baseEvent, type: "tool.input_updated" })),
+			Either.isFailure(decodeEither({ ...baseEvent, type: "tool.input_updated" })),
 		).toBe(true);
 	});
 
 	it("rejects unknown runtime event type", () => {
-		expect(Either.isLeft(decodeEither({ ...baseEvent, type: "made.up" }))).toBe(
+		expect(Either.isFailure(decodeEither({ ...baseEvent, type: "made.up" }))).toBe(
 			true,
 		);
 	});
@@ -227,7 +227,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 			"providerPayload",
 		] as const) {
 			expect(
-				Either.isLeft(
+				Either.isFailure(
 					decodeEither({
 						...baseEvent,
 						rawSource: { kind: "claude-sdk", [field]: { type: "assistant" } },
@@ -240,7 +240,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 	it("rejects top-level raw payload fields", () => {
 		for (const field of ["raw", "payload", "rawPayload"] as const) {
 			expect(
-				Either.isLeft(
+				Either.isFailure(
 					decodeEither({
 						...baseEvent,
 						[field]: { type: "provider-message", content: [] },
@@ -251,7 +251,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 	});
 
 	it("rejects arbitrary unknown top-level fields", () => {
-		expect(Either.isLeft(decodeEither({ ...baseEvent, extra: true }))).toBe(
+		expect(Either.isFailure(decodeEither({ ...baseEvent, extra: true }))).toBe(
 			true,
 		);
 	});
@@ -282,7 +282,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 		});
 
 		expect(
-			Either.isRight(
+			Either.isSuccess(
 				Schema.decodeUnknownEither(ProviderRuntimeProviderRefsSchema)(
 					providerRefs,
 				),
@@ -341,13 +341,13 @@ describe("ProviderRuntimeEvent contracts", () => {
 			{ providerSessionId: "session_1", providerItemId: "item_1" },
 		]) {
 			expect(
-				Either.isLeft(
+				Either.isFailure(
 					Schema.decodeUnknownEither(ProviderRuntimeProviderRefsSchema)(
 						providerRefs,
 					),
 				),
 			).toBe(true);
-			expect(Either.isLeft(decodeEither({ ...baseEvent, providerRefs }))).toBe(
+			expect(Either.isFailure(decodeEither({ ...baseEvent, providerRefs }))).toBe(
 				true,
 			);
 		}
@@ -359,13 +359,13 @@ describe("ProviderRuntimeEvent contracts", () => {
 			new Map([["providerSessionId", "session_1"]]),
 		]) {
 			expect(
-				Either.isLeft(
+				Either.isFailure(
 					Schema.decodeUnknownEither(ProviderRuntimeProviderRefsSchema)(
 						providerRefs,
 					),
 				),
 			).toBe(true);
-			expect(Either.isLeft(decodeEither({ ...baseEvent, providerRefs }))).toBe(
+			expect(Either.isFailure(decodeEither({ ...baseEvent, providerRefs }))).toBe(
 				true,
 			);
 		}

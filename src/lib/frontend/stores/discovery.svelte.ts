@@ -1,6 +1,6 @@
 // Agents, models, providers, and commands.
 
-import { Effect, Either, Fiber, Stream } from "effect";
+import { Effect, Result as Either, Fiber, Stream } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
 import { untrack } from "svelte";
 import { accountRefFromSelection } from "../../account-directory.js";
@@ -557,7 +557,7 @@ export function getDraftPick(): Immutable<DraftPick> | undefined {
 		return undefined;
 	if (!draftModel || !instanceId) return undefined;
 	if (
-		Either.isLeft(
+		Either.isFailure(
 			resolveTurnSettings(
 				{
 					harness: draftDriver(instanceId),
@@ -1125,7 +1125,7 @@ function fillDraftDefault(): void {
 		},
 		catalog,
 	);
-	if (Either.isLeft(resolved)) return;
+	if (Either.isFailure(resolved)) return;
 	if (!draftPermissionChosen)
 		draft.permissionMode = serverDiscovery.defaultPermissionMode;
 	setDraftModel(
@@ -1190,15 +1190,15 @@ function setDraftModel(
 		},
 		catalog,
 	);
-	if (Either.isLeft(resolved)) return;
+	if (Either.isFailure(resolved)) return;
 	if (!scope) {
 		draft.instanceId = instanceId;
 		draft.driver = harness;
 	}
 	draftModels[target.key] = {
-		...resolved.right.model,
-		variant: resolved.right.effort,
-		contextWindow: resolved.right.contextWindow,
+		...resolved.success.model,
+		variant: resolved.success.effort,
+		contextWindow: resolved.success.contextWindow,
 	};
 	// Prefilling a harness default must not erase this model's browser memory.
 	if ((effort === undefined && contextWindow === undefined) || !remembered)

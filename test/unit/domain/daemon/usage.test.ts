@@ -139,10 +139,10 @@ it.scoped("shares a five-minute sampler until the last subscriber leaves", () =>
 				},
 			},
 		});
-		const first = yield* Effect.fork(Stream.runDrain(service.readings));
+		const first = yield* Effect.forkChild(Stream.runDrain(service.readings));
 		yield* TestClock.adjust("0 millis");
 		expect(calls).toEqual(["account-1", "account-2"]);
-		const second = yield* Effect.fork(Stream.runDrain(service.readings));
+		const second = yield* Effect.forkChild(Stream.runDrain(service.readings));
 		yield* TestClock.adjust("0 millis");
 		expect(calls).toHaveLength(4);
 		yield* TestClock.adjust("299999 millis");
@@ -179,7 +179,7 @@ it.scoped("debounces turn ends per account only while watched", () =>
 		yield* service.turnEnded("account-1");
 		yield* TestClock.adjust("10 seconds");
 		expect(calls).toEqual([]);
-		yield* Effect.fork(Stream.runDrain(service.readings));
+		yield* Effect.forkChild(Stream.runDrain(service.readings));
 		yield* TestClock.adjust("1 millis");
 		calls.length = 0;
 		yield* service.turnEnded("account-1");
@@ -214,7 +214,7 @@ it.scoped("keeps five-minute sample times independent of read duration", () =>
 				},
 			},
 		});
-		const subscriber = yield* Effect.fork(Stream.runDrain(service.readings));
+		const subscriber = yield* Effect.forkChild(Stream.runDrain(service.readings));
 		yield* TestClock.adjust("4 seconds");
 		expect(startedAt).toEqual([0]);
 		yield* TestClock.adjust("296 seconds");
@@ -278,13 +278,13 @@ it.scoped("decides on unknown when a refresh times out after a limit", () =>
 		});
 		const [previous] = yield* service.refresh();
 		timedOut = true;
-		const pending = yield* Effect.fork(service.refresh());
+		const pending = yield* Effect.forkChild(service.refresh());
 		yield* TestClock.adjust("5 seconds");
 		expect(yield* Fiber.join(pending)).toMatchObject([{ status: "unknown" }]);
 		expect(
 			yield* service.readings.pipe(Stream.take(1), Stream.runCollect),
 		).toEqual(Chunk.of([{ ...previous, stale: true }]));
-		const failover = yield* Effect.fork(service.pickFailover("other"));
+		const failover = yield* Effect.forkChild(service.pickFailover("other"));
 		yield* TestClock.adjust("5 seconds");
 		expect(yield* Fiber.join(failover)).toBe("account-1");
 	}),
@@ -397,9 +397,9 @@ it.scoped(
 				]),
 				readers: { claude: reader },
 			});
-			const first = yield* Effect.fork(service.refresh(["account-1"]));
+			const first = yield* Effect.forkChild(service.refresh(["account-1"]));
 			yield* Deferred.await(started);
-			const second = yield* Effect.fork(service.refresh(["account-1"]));
+			const second = yield* Effect.forkChild(service.refresh(["account-1"]));
 			yield* Effect.yieldNow();
 			yield* Fiber.interrupt(first);
 			expect(calls).toBe(1);
@@ -462,7 +462,7 @@ it.scoped(
 				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
 				readers: { claude: reader },
 			});
-			const first = yield* Effect.fork(service.refresh(["account-1"]));
+			const first = yield* Effect.forkChild(service.refresh(["account-1"]));
 			yield* Deferred.await(started);
 			yield* TestClock.adjust("4999 millis");
 			expect((yield* Fiber.poll(first))._tag).toBe("None");
@@ -479,7 +479,7 @@ it.scoped(
 				},
 			]);
 			expect(released).toBe(1);
-			const retry = yield* Effect.fork(service.refresh(["account-1"]));
+			const retry = yield* Effect.forkChild(service.refresh(["account-1"]));
 			yield* TestClock.adjust("5 seconds");
 			expect(yield* Fiber.join(retry)).toMatchObject([
 				{ status: "unknown", windows: [] },
@@ -1003,9 +1003,9 @@ it.scoped("serializes saves without losing concurrent account history", () =>
 					}),
 			},
 		});
-		const first = yield* Effect.fork(service.refresh(["account-1"]));
+		const first = yield* Effect.forkChild(service.refresh(["account-1"]));
 		yield* Deferred.await(started);
-		const second = yield* Effect.fork(service.refresh(["account-2"]));
+		const second = yield* Effect.forkChild(service.refresh(["account-2"]));
 		yield* Effect.yieldNow();
 		yield* Deferred.succeed(release, undefined);
 		yield* Fiber.join(first);

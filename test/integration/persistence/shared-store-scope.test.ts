@@ -1050,8 +1050,8 @@ describe("shared-store relay project scope", () => {
 					sessionId: id(B, "settings"),
 					title: "wrong owner",
 				});
-				const single = yield* Effect.either(eventStore.append(foreign));
-				const batch = yield* Effect.either(
+				const single = yield* Effect.result(eventStore.append(foreign));
+				const batch = yield* Effect.result(
 					eventStore.appendBatch([
 						canonicalEvent("session.created", "new-alpha-session", {
 							sessionId: "new-alpha-session",
@@ -1094,8 +1094,8 @@ describe("shared-store relay project scope", () => {
 		expect(result.batch._tag).toBe("Left");
 		expect(result.leakedBatch).toBe(0);
 		for (const outcome of [result.single, result.batch])
-			if (outcome._tag === "Left") {
-				expect(outcome.left).toMatchObject({
+			if (outcome._tag === "Failure") {
+				expect(outcome.failure).toMatchObject({
 					_tag: "EventStoreError",
 					operation: "appendOwnership",
 					sessionId: id(B, "settings"),
@@ -1120,7 +1120,7 @@ describe("shared-store relay project scope", () => {
 			let ownershipLookups = 0;
 			try {
 				const outcome = await store.runtime.runPromise(
-					Effect.either(
+					Effect.result(
 						Effect.gen(function* () {
 							if (operation === "append") {
 								const eventStore = yield* EventStoreEffectTag;

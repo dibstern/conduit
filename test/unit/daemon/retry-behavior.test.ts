@@ -26,8 +26,8 @@ describe("Retry Behavior with TestClock", () => {
 			// Fork the retrying effect so we can control time
 			const fiber = yield* failing.pipe(
 				Effect.retry(schedule),
-				Effect.catchAll(() => Effect.void),
-				Effect.fork,
+				Effect.catch(() => Effect.void),
+				Effect.forkChild,
 			);
 
 			// Initial attempt runs immediately
@@ -67,7 +67,7 @@ describe("Retry Behavior with TestClock", () => {
 
 			yield* failing.pipe(
 				Effect.retry(schedule),
-				Effect.catchAll(() => Effect.void),
+				Effect.catch(() => Effect.void),
 			);
 
 			// Only the initial attempt
@@ -95,7 +95,7 @@ describe("Retry Behavior with TestClock", () => {
 
 			const fiber = yield* sometimesFailing.pipe(
 				Effect.retry(schedule),
-				Effect.fork,
+				Effect.forkChild,
 			);
 
 			// Initial attempt fails

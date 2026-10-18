@@ -59,7 +59,7 @@ describe("Full Layer composition", () => {
 		DaemonEventBusLive,
 	);
 
-	it.scoped("all state Tags are accessible from composed layer", () =>
+	it.effect("all state Tags are accessible from composed layer", () =>
 		Effect.gen(function* () {
 			const daemonState = yield* DaemonStateTag;
 			const sessionState = yield* SessionManagerStateTag;

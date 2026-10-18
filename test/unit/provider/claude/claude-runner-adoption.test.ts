@@ -363,7 +363,7 @@ describe("Claude runner adoption", () => {
 						},
 						() => Effect.succeed({}),
 					);
-					const recovery = yield* Effect.fork(runner.recoverEffect);
+					const recovery = yield* Effect.forkChild(runner.recoverEffect);
 					yield* Deferred.await(rejected);
 					yield* Fiber.interrupt(recovery);
 				}),

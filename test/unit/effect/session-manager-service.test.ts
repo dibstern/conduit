@@ -2,22 +2,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { describe, it } from "@effect/vitest";
 import Database from "better-sqlite3";
-import {
-	Deferred,
-	Effect,
-	Exit,
-	Fiber,
-	HashMap,
-	Layer,
-	Option,
-	Queue,
-	Ref,
-	Stream,
-	TestClock,
-} from "effect";
+import { Deferred, Effect, Exit, Fiber, HashMap, Layer, Option, Queue, Ref, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import { assert, expect, vi } from "vitest";
 import { accountsStateFromConfig } from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
@@ -463,7 +452,7 @@ describe("SessionManagerService", () => {
 		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
 	});
 
-	it.scoped("cascade delete forgets every descendant it removed", () => {
+	it.effect("cascade delete forgets every descendant it removed", () => {
 		const tmpDir = mkdtempSync(
 			join(tmpdir(), "conduit-session-delete-lineage-"),
 		);
@@ -510,7 +499,7 @@ describe("SessionManagerService", () => {
 		);
 	});
 
-	it.scoped(
+	it.effect(
 		"live service publishes one SessionCreated after create succeeds",
 		() => {
 			const dbFile = join(
@@ -572,7 +561,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"live service creates a SQLite-backed session without OpenCode when default provider is Claude",
 		() => {
 			const dbFile = join(
@@ -628,7 +617,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"live service creates through OpenCode when an OpenCode provider is requested",
 		() => {
 			const dbFile = join(
@@ -741,7 +730,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"creates an OpenCode session when durable persistence is not configured",
 		() => {
 			const api = makeMockOpenCodeAPI();
@@ -791,7 +780,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"establishes a fork-shaped OpenCode child before Claude message persistence",
 		() => {
 			const dbFile = join(
@@ -868,7 +857,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"fails establishment when projection does not create an active provider binding",
 		() => {
 			const dbFile = join(
@@ -942,7 +931,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"removes a newly seeded row when canonical establishment append fails",
 		() => {
 			const dbFile = join(
@@ -1005,7 +994,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"keeps native Claude creation singular after first user-message persistence",
 		() => {
 			const dbFile = join(
@@ -1049,7 +1038,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"binds explicitly selected default instances through their config-resolved drivers and persists active bindings",
 		() => {
 			const tmpDir = mkdtempSync(
@@ -1194,7 +1183,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"persists named OpenCode creation in both the session row and initial provider binding",
 		() => {
 			const tmpDir = mkdtempSync(
@@ -1305,7 +1294,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"live service does not fabricate a local session when requested OpenCode creation fails",
 		() => {
 			const dbFile = join(
@@ -1361,7 +1350,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"rejects creation with PickRequired before model discovery provides a harness default",
 		() => {
 			const dbFile = join(
@@ -1416,7 +1405,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"deletes locally and records cleanup failure when end_session and provider delete both fail",
 		() => {
 			const tmpDir = mkdtempSync(
@@ -1551,7 +1540,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"cleans up OpenCode driver state and upstream state without writing a failure receipt",
 		() => {
 			const tmpDir = mkdtempSync(
@@ -1629,7 +1618,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped("coalesces concurrent deletes of the same session", () => {
+	it.effect("coalesces concurrent deletes of the same session", () => {
 		const tmpDir = mkdtempSync(
 			join(tmpdir(), "conduit-session-delete-single-flight-"),
 		);
@@ -1682,9 +1671,9 @@ describe("SessionManagerService", () => {
 					lastKnownSessionCount: 2,
 				}));
 
-				const winner = yield* Effect.fork(service.deleteSession(sessionId));
+				const winner = yield* Effect.forkChild(service.deleteSession(sessionId));
 				yield* Deferred.await(cleanupStarted);
-				const follower = yield* Effect.fork(service.deleteSession(sessionId));
+				const follower = yield* Effect.forkChild(service.deleteSession(sessionId));
 				yield* Effect.yieldNow();
 				yield* Deferred.succeed(releaseCleanup, undefined);
 
@@ -1723,7 +1712,7 @@ describe("SessionManagerService", () => {
 		);
 	});
 
-	it.scoped(
+	it.effect(
 		"persists a queryable named-instance cleanup failure receipt with log-safe detail",
 		() => {
 			const tmpDir = mkdtempSync(
@@ -1813,7 +1802,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"still deletes locally and records a receipt when cleanup detail rendering throws",
 		() => {
 			const tmpDir = mkdtempSync(
@@ -1905,7 +1894,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped("bounds the durable provider cleanup failure reason", () => {
+	it.effect("bounds the durable provider cleanup failure reason", () => {
 		const tmpDir = mkdtempSync(
 			join(tmpdir(), "conduit-session-delete-bounded-reason-"),
 		);
@@ -1975,7 +1964,7 @@ describe("SessionManagerService", () => {
 		);
 	});
 
-	it.scoped(
+	it.effect(
 		"dispatches Claude end_session after the tombstone is projected",
 		() => {
 			const tmpDir = mkdtempSync(
@@ -2044,7 +2033,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"captures a durable-only provider binding before tombstone projection and targets it for cleanup",
 		() => {
 			const tmpDir = mkdtempSync(
@@ -2192,7 +2181,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"records a cleanup failure receipt when provider cleanup exceeds its timeout",
 		() => {
 			const tmpDir = mkdtempSync(
@@ -2245,7 +2234,7 @@ describe("SessionManagerService", () => {
 						saveDaemonConfig(makeNamedOpenCodeDaemonConfig(), tmpDir),
 					);
 					const service = yield* SessionManagerServiceTag;
-					const fiber = yield* Effect.fork(service.deleteSession(sessionId));
+					const fiber = yield* Effect.forkChild(service.deleteSession(sessionId));
 					yield* Deferred.await(cleanupStarted);
 					engine.bindSession(sessionId, "claude");
 					yield* TestClock.adjust("1999 millis");
@@ -2286,7 +2275,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"live service updates the relay status session-count snapshot",
 		() => {
 			const dbFile = join(

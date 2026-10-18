@@ -2,7 +2,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Option, PubSub } from "effect";
 import { expect, vi } from "vitest";
@@ -327,7 +327,7 @@ describe("SessionLifecycleWiringLive", () => {
 			const cause = new Error("history unavailable");
 			services.client.session.messages.mockRejectedValue(cause);
 
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				handleSessionCreated("s-reject", {
 					translator: deps.translator as any,
 					client: services.client,
@@ -337,12 +337,12 @@ describe("SessionLifecycleWiringLive", () => {
 			);
 
 			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expect(result.left).toBeInstanceOf(SessionLifecycleHistoryRebuildError);
-				expect(result.left._tag).toBe("SessionLifecycleHistoryRebuildError");
-				expect(result.left.sessionId).toBe("s-reject");
-				expect(result.left.operation).toBe("rebuildTranslatorFromHistory");
-				expect(result.left.cause).toBe(cause);
+			if (result._tag === "Failure") {
+				expect(result.failure).toBeInstanceOf(SessionLifecycleHistoryRebuildError);
+				expect(result.failure._tag).toBe("SessionLifecycleHistoryRebuildError");
+				expect(result.failure.sessionId).toBe("s-reject");
+				expect(result.failure.operation).toBe("rebuildTranslatorFromHistory");
+				expect(result.failure.cause).toBe(cause);
 			}
 			expect(deps.translator.reset).toHaveBeenCalledWith("s-reject");
 			expect(deps.translator.rebuildStateFromHistory).not.toHaveBeenCalled();

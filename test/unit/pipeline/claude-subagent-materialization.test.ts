@@ -706,7 +706,7 @@ describe("Claude subagent materialization pipeline", () => {
 						subagentSdk: sdk,
 						ensureClaudeSubagentSession: persist.ensureClaudeSubagentSession,
 					});
-					const turnFiber = yield* Effect.fork(
+					const turnFiber = yield* Effect.forkChild(
 						instance.sendTurnEffect(
 							makeBaseSendTurnInput({
 								sessionId: parentSessionId,

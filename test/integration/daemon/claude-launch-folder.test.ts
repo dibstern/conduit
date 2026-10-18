@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
-import { Effect, Either } from "effect";
+import { Effect, Result as Either } from "effect";
 import { afterEach, expect, it, vi } from "vitest";
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";

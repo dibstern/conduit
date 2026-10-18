@@ -68,7 +68,7 @@ describe("commit advance ordering", () => {
 						canonicalEvent("turn.completed", "git-session", {
 							messageId: "assistant-1",
 						}),
-					]).pipe(Effect.fork);
+					]).pipe(Effect.forkChild);
 					yield* Deferred.await(refreshStarted);
 					expect((yield* Fiber.poll(call))._tag).toBe("Some");
 					releaseRefresh?.();
@@ -176,7 +176,7 @@ describe("commit advance ordering", () => {
 		}).pipe(Effect.provide(testLayer)),
 	);
 
-	it.scoped(
+	it.effect(
 		"allows afterCommit to commit again after publishing its own advance",
 		() =>
 			Effect.gen(function* () {
@@ -195,7 +195,7 @@ describe("commit advance ordering", () => {
 			}).pipe(Effect.provide(testLayer)),
 	);
 
-	it.scoped(
+	it.effect(
 		"publishes in commit order across writers while afterCommit is stalled",
 		() =>
 			Effect.gen(function* () {
@@ -212,7 +212,7 @@ describe("commit advance ordering", () => {
 						Deferred.succeed(entered, undefined),
 						Deferred.await(release),
 					),
-				}).pipe(Effect.fork);
+				}).pipe(Effect.forkChild);
 				yield* Deferred.await(entered);
 				yield* secondWriter([created("b")]);
 				yield* Deferred.succeed(release, undefined);

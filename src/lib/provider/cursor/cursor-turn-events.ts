@@ -30,15 +30,12 @@ type ChildSessionInput = Extract<
 	SessionOutput,
 	{ type: "ensure-subagent-session" }
 >["input"];
-const RecordSchema = Schema.Record({
-	key: Schema.String,
-	value: Schema.Unknown,
-});
+const RecordSchema = Schema.Record(Schema.String, Schema.Unknown);
 const ToolDelta = Schema.Struct({
-	type: Schema.Literal(
+	type: Schema.Literals([
 		"tool-call-started",
 		"tool-call-completed",
-		"partial-tool-call",
+		"partial-tool-call",]
 	),
 	callId: Schema.String,
 	toolCall: Schema.Struct({
@@ -48,9 +45,9 @@ const ToolDelta = Schema.Struct({
 	}),
 });
 const decodeDelta = Schema.decodeUnknownEither(
-	Schema.Union(
+	Schema.Union([
 		Schema.Struct({
-			type: Schema.Literal("text-delta", "thinking-delta"),
+			type: Schema.Literals(["text-delta", "thinking-delta"]),
 			text: Schema.String,
 		}),
 		Schema.Struct({ type: Schema.Literal("thinking-completed") }),
@@ -69,7 +66,7 @@ const decodeDelta = Schema.decodeUnknownEither(
 			callCount: Schema.Number,
 		}),
 		Schema.Struct({
-			type: Schema.Literal(
+			type: Schema.Literals([
 				"token-delta",
 				"step-started",
 				"step-completed",
@@ -77,13 +74,13 @@ const decodeDelta = Schema.decodeUnknownEither(
 				"user-message-appended",
 				"summary-started",
 				"summary-completed",
-				"summary",
+				"summary",]
 			),
-		}),
+		}),]
 	),
 );
 const decodeStream = Schema.decodeUnknownEither(
-	Schema.Union(
+	Schema.Union([
 		Schema.Struct({
 			type: Schema.Literal("request"),
 			request_id: Schema.String,
@@ -104,7 +101,7 @@ const decodeStream = Schema.decodeUnknownEither(
 			),
 		}),
 		Schema.Struct({
-			type: Schema.Literal(
+			type: Schema.Literals([
 				"status",
 				"assistant",
 				"thinking",
@@ -112,9 +109,9 @@ const decodeStream = Schema.decodeUnknownEither(
 				"system",
 				"user",
 				"error",
-				"result",
+				"result",]
 			),
-		}),
+		}),]
 	),
 );
 

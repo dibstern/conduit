@@ -1,14 +1,6 @@
 import { describe, it } from "@effect/vitest";
-import {
-	Deferred,
-	Effect,
-	Exit,
-	Fiber,
-	Layer,
-	Logger,
-	Scope,
-	TestClock,
-} from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Logger, Scope } from "effect";
+import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import {
 	makeSessionStateProjectionNotifierLive,
@@ -138,7 +130,7 @@ describe("SessionStateProjectionNotifier", () => {
 				const notifier = yield* SessionStateProjectionNotifierTag;
 				const call = yield* notifier
 					.sessionStateProjected("session-1", "turn.completed")
-					.pipe(Effect.fork);
+					.pipe(Effect.forkChild);
 				yield* Deferred.await(refreshStarted);
 				expect((yield* Fiber.poll(call))._tag).toBe("Some");
 				releaseRefresh?.();

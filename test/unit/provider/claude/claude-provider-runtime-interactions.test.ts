@@ -2,21 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
-import {
-	Cause,
-	type Context,
-	Deferred,
-	Effect,
-	Exit,
-	Fiber,
-	FiberId,
-	Layer,
-	ManagedRuntime,
-	Schedule,
-	Scope,
-	TestClock,
-	TestContext,
-} from "effect";
+import { Cause, type Context, Deferred, Effect, Exit, Fiber, FiberId, Layer, ManagedRuntime, Schedule, Scope, TestContext } from "effect";
+import { TestClock } from "effect/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	makePendingInteractionServiceLive,
@@ -226,7 +213,7 @@ describe("Claude runner interaction transport", () => {
 						queryFactory: factory,
 						capabilitiesService,
 					});
-					const turn = yield* Effect.fork(
+					const turn = yield* Effect.forkChild(
 						runtime.sendTurnEffect(
 							makeBaseSendTurnInput({
 								eventSink: sink,
@@ -277,7 +264,7 @@ describe("Claude runner interaction transport", () => {
 						queryFactory: factory,
 						capabilitiesService,
 					});
-					const turn = yield* Effect.fork(
+					const turn = yield* Effect.forkChild(
 						runtime.sendTurnEffect(
 							makeBaseSendTurnInput({
 								eventSink: sink,
@@ -343,7 +330,7 @@ describe("Claude runner interaction transport", () => {
 						queryFactory: factory,
 						capabilitiesService,
 					});
-					const turn = yield* Effect.fork(
+					const turn = yield* Effect.forkChild(
 						runtime.sendTurnEffect(
 							makeBaseSendTurnInput({
 								eventSink: sink,
@@ -415,7 +402,7 @@ describe("Claude durable interaction resolution", () => {
 						queryFactory: factory,
 						capabilitiesService,
 					});
-					const turn = yield* Effect.fork(
+					const turn = yield* Effect.forkChild(
 						runtime.sendTurnEffect(
 							makeBaseSendTurnInput({
 								eventSink: f.sink,
@@ -496,7 +483,7 @@ describe("Claude durable interaction resolution", () => {
 							Scope.extend(relayScope),
 						);
 					}
-					yield* Effect.fork(
+					yield* Effect.forkChild(
 						runtime.sendTurnEffect(
 							makeBaseSendTurnInput({
 								eventSink: f.sink,
@@ -605,7 +592,7 @@ describe("Claude durable interaction resolution", () => {
 							resolveQuestionRequest: f.pending.resolveQuestionRequest,
 						},
 					});
-					const request = yield* Effect.fork(
+					const request = yield* Effect.forkChild(
 						kind === "permission"
 							? sink
 									.requestPermission({
@@ -668,7 +655,7 @@ describe("Claude durable interaction resolution", () => {
 		await f.persistence.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
-					const request = yield* Effect.fork(
+					const request = yield* Effect.forkChild(
 						kind === "permission"
 							? f.sink
 									.requestPermission({
@@ -719,7 +706,7 @@ describe("Claude durable interaction resolution", () => {
 		await f.persistence.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
-					const request = yield* Effect.fork(
+					const request = yield* Effect.forkChild(
 						f.sink.requestPermission({
 							requestId: "request-1",
 							sessionId: "session-1",

@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Fiber, Layer, Stream } from "effect";
 import { expect } from "vitest";
@@ -167,7 +167,7 @@ describe("SessionManagerService settle signal", () => {
 
 				const seen: SessionInfo[] = [];
 				let synchronized = false;
-				const shell = yield* Effect.fork(
+				const shell = yield* Effect.forkChild(
 					Stream.runForEach(subscribeShell(), (envelope) =>
 						Effect.sync(() => {
 							if (envelope._tag === "synchronized") synchronized = true;

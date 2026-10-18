@@ -109,7 +109,7 @@ const makeDetailTestLayer = (options?: {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-detail-sub-"));
 	const filename = join(dir, "events.db");
 	const busLayer = options?.busLayer ?? SessionEventBusLive;
-	const cleanup = Layer.scopedDiscard(
+	const cleanup = Layer.effectDiscard(
 		Effect.addFinalizer(() =>
 			Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 		),
@@ -334,7 +334,7 @@ const runtimeEvent = (event: Record<string, unknown>): ProviderRuntimeEvent =>
 	decodeProviderRuntimeEvent({ ...RUNTIME_BASE, ...event });
 
 describe("subscribeSessionDetail", () => {
-	it.scoped(
+	it.effect(
 		"cold start includes only the newest 50 messages and a paging cursor",
 		() =>
 			Effect.gen(function* () {
@@ -370,7 +370,7 @@ describe("subscribeSessionDetail", () => {
 			}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
-	it.scoped("cold start emits the transcript snapshot then synchronized", () =>
+	it.effect("cold start emits the transcript snapshot then synchronized", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -399,7 +399,7 @@ describe("subscribeSessionDetail", () => {
 		}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"a live commit sends the message and only the parts that moved",
 		() =>
 			Effect.gen(function* () {
@@ -442,7 +442,7 @@ describe("subscribeSessionDetail", () => {
 			}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
-	it.scoped("the sequence on every envelope is the read-model version", () =>
+	it.effect("the sequence on every envelope is the read-model version", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -472,7 +472,7 @@ describe("subscribeSessionDetail", () => {
 		}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"delivers what the REAL ingestion service committed, as projected messages",
 		() =>
 			// F4: driven through the ProviderRuntimeIngestion service — its own
@@ -539,7 +539,7 @@ describe("subscribeSessionDetail", () => {
 			}).pipe(Effect.provide(makeDetailIngestionTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"exactly-once across the base read: only messages past the base come back",
 		() =>
 			Effect.gen(function* () {
@@ -579,7 +579,7 @@ describe("subscribeSessionDetail", () => {
 
 	// Over-limit resumes must choose a snapshot before reading bodies; exactly
 	// the limit must still catch up. Saved pages have the smaller ten-message cap.
-	it.scoped.each([
+	it.effect.each([
 		{ saved: false, messages: 50, snapshot: false },
 		{ saved: false, messages: 51, snapshot: true },
 		{ saved: true, messages: 10, snapshot: false },
@@ -620,7 +620,7 @@ describe("subscribeSessionDetail", () => {
 			}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
-	it.scoped.each([
+	it.effect.each([
 		{ parts: 1, snapshot: false },
 		{ parts: 200, snapshot: true },
 	])(
@@ -645,7 +645,7 @@ describe("subscribeSessionDetail", () => {
 			}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
-	it.scoped("resume catches up from the cursor with no base envelope", () =>
+	it.effect("resume catches up from the cursor with no base envelope", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -697,7 +697,7 @@ describe("subscribeSessionDetail", () => {
 		}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"resume reports a removed message and fresh transcript omits it",
 		() =>
 			Effect.gen(function* () {
@@ -728,7 +728,7 @@ describe("subscribeSessionDetail", () => {
 			}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
-	it.scoped("live removal emits a remove at the committed version", () =>
+	it.effect("live removal emits a remove at the committed version", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([sessionCreated(SID), messageCreated(SID, "gone", "user")]);
@@ -746,7 +746,7 @@ describe("subscribeSessionDetail", () => {
 		}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"a deleted part is removed live and on resume, and the browser drops it",
 		() =>
 			Effect.gen(function* () {
@@ -807,7 +807,7 @@ describe("subscribeSessionDetail", () => {
 	);
 
 	for (const separateBatches of [false, true]) {
-		it.scoped(
+		it.effect(
 			`real client resumes without repeating messages after ${separateBatches ? "multiple projection batches in one commit" : "an unrelated commit"}`,
 			() =>
 				Effect.gen(function* () {
@@ -918,7 +918,7 @@ describe("subscribeSessionDetail", () => {
 		);
 	}
 
-	it.scoped("never emits a remove envelope across a full turn", () =>
+	it.effect("never emits a remove envelope across a full turn", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -944,7 +944,7 @@ describe("subscribeSessionDetail", () => {
 		}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
-	it.scoped("delivers only the subscribed session's messages", () =>
+	it.effect("delivers only the subscribed session's messages", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -969,7 +969,7 @@ describe("subscribeSessionDetail", () => {
 		}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
-	it.scoped("closing the scope tears down the advance subscription", () =>
+	it.effect("closing the scope tears down the advance subscription", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -987,11 +987,11 @@ describe("subscribeSessionDetail", () => {
 			yield* takeN(q, 2); // running & subscribed
 			yield* Scope.close(scope, Exit.void);
 
-			expect(Exit.isInterrupted(yield* Fiber.await(fiber))).toBe(true);
+			expect(Exit.hasInterrupts(yield* Fiber.await(fiber))).toBe(true);
 		}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"producer fix: a persisted user message is delivered live to detail subscribers",
 		() =>
 			Effect.gen(function* () {
@@ -1026,7 +1026,7 @@ describe("subscribeSessionDetail", () => {
 			}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"publish:false persists silently, and the next advance heals it",
 		() =>
 			Effect.gen(function* () {
@@ -1056,7 +1056,7 @@ describe("subscribeSessionDetail", () => {
 			}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"a projector failure fails the persist and suppresses the bus signal",
 		() =>
 			// F2: the persist service is all-or-nothing — a projection failure rolls
@@ -1069,7 +1069,7 @@ describe("subscribeSessionDetail", () => {
 				const events = yield* bus.subscribe({ sessionId: SID });
 				const persist = yield* ClaudeEventPersistEffectTag;
 
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					persist.persistEvent(
 						canonicalEvent(
 							"session.renamed",
@@ -1111,7 +1111,7 @@ describe("subscribeSessionDetail", () => {
 			),
 	);
 
-	it.scoped(
+	it.effect(
 		"an interrupt cannot split the projection commit from its bus signal",
 		() =>
 			// F3: append → project → publish is one uninterruptible region. An
@@ -1139,7 +1139,7 @@ describe("subscribeSessionDetail", () => {
 					const persist = yield* ClaudeEventPersistEffectTag;
 					const sql = yield* SqlClient.SqlClient;
 
-					const fiber = yield* Effect.fork(
+					const fiber = yield* Effect.forkChild(
 						persist.persistUserMessage(SID, "hello"),
 					);
 					yield* Deferred.await(publishStarted);
@@ -1196,7 +1196,7 @@ describe("transcript states carried by the detail feed alone", () => {
 			[],
 		);
 
-	it.scoped(
+	it.effect(
 		"thinking is in progress until thinking.end, which stamps its end",
 		() =>
 			Effect.gen(function* () {
@@ -1226,7 +1226,7 @@ describe("transcript states carried by the detail feed alone", () => {
 			}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
-	it.scoped("an interrupted turn closes thinking that never ended", () =>
+	it.effect("an interrupted turn closes thinking that never ended", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -1242,7 +1242,7 @@ describe("transcript states carried by the detail feed alone", () => {
 		}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
-	it.scoped("a tool's input refreshed after tool.started reaches the row", () =>
+	it.effect("a tool's input refreshed after tool.started reaches the row", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -1283,7 +1283,7 @@ describe("transcript states carried by the detail feed alone", () => {
 		}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
-	it.scoped("a turn error is transcript content and survives a reload", () =>
+	it.effect("a turn error is transcript content and survives a reload", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -1326,7 +1326,7 @@ describe("transcript states carried by the detail feed alone", () => {
 		}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"ingestion keeps a compaction's outcome and drops its transient start",
 		() =>
 			Effect.gen(function* () {
@@ -1357,7 +1357,7 @@ describe("transcript states carried by the detail feed alone", () => {
 			}).pipe(Effect.provide(makeDetailIngestionTestLayer())),
 	);
 
-	it.scoped("a failed compaction is an error notice, not a boundary", () =>
+	it.effect("a failed compaction is an error notice, not a boundary", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([

@@ -149,7 +149,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				registry,
 				durableCommands: yield* makeDurableOptions({ sql }),
 			});
-			const result = yield* Effect.either(engine.dispatchEffect(command));
+			const result = yield* Effect.result(engine.dispatchEffect(command));
 			expect(result._tag).toBe("Left");
 			expect(
 				JSON.stringify({
@@ -327,13 +327,13 @@ describe("OrchestrationEngine durable receipts", () => {
 				}),
 			});
 
-			const failed = yield* Effect.either(
+			const failed = yield* Effect.result(
 				engine.dispatchEffect(sendTurnCommand()),
 			);
 
 			expect(failed._tag).toBe("Left");
-			if (failed._tag === "Left") {
-				expect(failed.left._tag).toBe("CommandIdGenerationFailed");
+			if (failed._tag === "Failure") {
+				expect(failed.failure._tag).toBe("CommandIdGenerationFailed");
 			}
 			expect(instance.sendTurnEffect).not.toHaveBeenCalled();
 			expect(yield* receiptRow(sql, "cmd-durable-1")).toBeUndefined();
@@ -399,13 +399,13 @@ describe("OrchestrationEngine durable receipts", () => {
 					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
-				const rejected = yield* Effect.either(
+				const rejected = yield* Effect.result(
 					secondEngine.dispatchEffect(sendTurnCommand({ prompt: "changed" })),
 				);
 
 				expect(rejected._tag).toBe("Left");
-				if (rejected._tag === "Left") {
-					expect(rejected.left._tag).toBe("CommandFingerprintMismatch");
+				if (rejected._tag === "Failure") {
+					expect(rejected.failure._tag).toBe("CommandFingerprintMismatch");
 				}
 				expect(secondInstance.sendTurnEffect).not.toHaveBeenCalled();
 
@@ -417,7 +417,7 @@ describe("OrchestrationEngine durable receipts", () => {
 					registry: thirdRegistry,
 					durableCommands: yield* makeDurableOptions({ sql }),
 				});
-				const rejectedAgain = yield* Effect.either(
+				const rejectedAgain = yield* Effect.result(
 					thirdEngine.dispatchEffect(sendTurnCommand({ prompt: "changed" })),
 				);
 				expect(rejectedAgain._tag).toBe("Left");
@@ -501,7 +501,7 @@ describe("OrchestrationEngine durable receipts", () => {
 					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
-				const first = yield* Effect.either(
+				const first = yield* Effect.result(
 					engine.dispatchEffect(sendTurnCommand()),
 				);
 				expect(first._tag).toBe("Left");
@@ -564,7 +564,7 @@ describe("OrchestrationEngine durable receipts", () => {
 					registry: secondRegistry,
 					durableCommands: yield* makeDurableOptions({ sql }),
 				});
-				yield* Effect.either(secondEngine.dispatchEffect(sendTurnCommand()));
+				yield* Effect.result(secondEngine.dispatchEffect(sendTurnCommand()));
 				expect(secondInstance.sendTurnEffect).toHaveBeenCalled();
 			}).pipe(
 				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
@@ -739,10 +739,10 @@ describe("OrchestrationEngine durable receipts", () => {
 					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
-				const result = yield* Effect.either(engine.dispatchEffect(command));
+				const result = yield* Effect.result(engine.dispatchEffect(command));
 				expect(result._tag).toBe("Left");
-				if (result._tag === "Left") {
-					expect((result.left as { _tag: string })._tag).toBe(
+				if (result._tag === "Failure") {
+					expect((result.failure as { _tag: string })._tag).toBe(
 						"CommandFingerprintMismatch",
 					);
 				}
@@ -773,13 +773,13 @@ describe("OrchestrationEngine durable receipts", () => {
 					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
-				const rejected = yield* Effect.either(
+				const rejected = yield* Effect.result(
 					engine.dispatchEffect(sendTurnCommand()),
 				);
 
 				expect(rejected._tag).toBe("Left");
-				if (rejected._tag === "Left") {
-					expect(rejected.left._tag).toBe("StaleCommandRejected");
+				if (rejected._tag === "Failure") {
+					expect(rejected.failure._tag).toBe("StaleCommandRejected");
 				}
 				expect(instance.sendTurnEffect).not.toHaveBeenCalled();
 				expect(yield* receiptRow(sql, "cmd-durable-1")).toBeUndefined();

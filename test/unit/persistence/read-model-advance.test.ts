@@ -683,7 +683,7 @@ it("a write body cannot announce rows its own rollback took back", async () => {
 								return yield* Effect.fail("inner failed" as const);
 							}),
 						)
-						.pipe(Effect.catchAll(() => Effect.void)),
+						.pipe(Effect.catch(() => Effect.void)),
 				),
 			);
 

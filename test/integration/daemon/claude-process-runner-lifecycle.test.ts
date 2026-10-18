@@ -341,10 +341,10 @@ describe("Claude runner admission socket probes", () => {
 				Effect.gen(function* () {
 					const runner = yield* fixture.make;
 					yield* runner.recoverEffect;
-					const send = yield* Effect.fork(runner.executeEffect(fixture.send));
+					const send = yield* Effect.forkChild(runner.executeEffect(fixture.send));
 					yield* Deferred.await(fixture.received);
-					const end = yield* Effect.fork(
-						Effect.either(
+					const end = yield* Effect.forkChild(
+						Effect.result(
 							runner.executeEffect({
 								type: "end-session",
 								sessionId: fixture.send.input.sessionId,
@@ -381,7 +381,7 @@ describe("Claude runner admission socket probes", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runner = yield* fixture.make;
-					const recovery = yield* Effect.fork(runner.recoverEffect);
+					const recovery = yield* Effect.forkChild(runner.recoverEffect);
 					yield* Deferred.await(fixture.received);
 					yield* runner
 						.executeEffect(fixture.preWarm)
@@ -402,7 +402,7 @@ describe("Claude runner admission socket probes", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runner = yield* fixture.make;
-					const recovery = yield* Effect.fork(
+					const recovery = yield* Effect.forkChild(
 						Effect.exit(runner.recoverEffect),
 					);
 					yield* Deferred.await(fixture.received);
@@ -430,11 +430,11 @@ describe("Claude runner admission socket probes", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runner = yield* fixture.make;
-					const recovery = yield* Effect.fork(
+					const recovery = yield* Effect.forkChild(
 						Effect.exit(runner.recoverEffect),
 					);
 					yield* Deferred.await(fixture.received);
-					const disposal = yield* Effect.fork(
+					const disposal = yield* Effect.forkChild(
 						runner
 							.executeEffect({ type: "shutdown" })
 							.pipe(Effect.timeout("6 seconds")),
@@ -464,11 +464,11 @@ describe("Claude runner admission socket probes", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runner = yield* fixture.make;
-					const recovery = yield* Effect.fork(
-						Effect.either(runner.recoverEffect),
+					const recovery = yield* Effect.forkChild(
+						Effect.result(runner.recoverEffect),
 					);
 					yield* Deferred.await(fixture.received);
-					const send = yield* Effect.fork(
+					const send = yield* Effect.forkChild(
 						Effect.exit(runner.executeEffect(fixture.send)),
 					);
 					yield* Effect.sleep("25 millis");
@@ -491,7 +491,7 @@ describe("Claude runner admission socket probes", () => {
 					} else {
 						expect(result._tag).toBe("Failure");
 						if (phase === "interrupted" && result._tag === "Failure")
-							expect(Cause.isInterruptedOnly(result.cause)).toBe(true);
+							expect(Cause.hasInterruptsOnly(result.cause)).toBe(true);
 						expect([...fixture.runnerPids]).toHaveLength(1);
 						expect(testRunnerAlive(fixture.child.pid ?? 0)).toBe(true);
 					}

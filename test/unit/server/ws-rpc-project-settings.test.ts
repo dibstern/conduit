@@ -73,7 +73,7 @@ const open = Effect.gen(function* () {
 });
 
 describe("SubscribeProjectSettings", () => {
-	it.scoped("opens with a snapshot of every current project setting", () =>
+	it.effect("opens with a snapshot of every current project setting", () =>
 		Effect.gen(function* () {
 			const { subscribe } = yield* open;
 			const { snapshot } = yield* subscribe;
@@ -94,7 +94,7 @@ describe("SubscribeProjectSettings", () => {
 		}).pipe(Effect.provide(makeLayer())),
 	);
 
-	it.scoped("a visibility change in one tab reaches every open tab", () =>
+	it.effect("a visibility change in one tab reaches every open tab", () =>
 		Effect.gen(function* () {
 			const { client, subscribe } = yield* open;
 			const tabA = yield* subscribe;
@@ -124,7 +124,7 @@ describe("SubscribeProjectSettings", () => {
 		}).pipe(Effect.provide(makeLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"a default-model change made with no browser (CLI) reaches an open tab",
 		() =>
 			Effect.gen(function* () {
@@ -157,7 +157,7 @@ describe("SubscribeProjectSettings", () => {
 			}).pipe(Effect.provide(makeLayer())),
 	);
 
-	it.scoped("a default approval-mode change reaches an open tab", () =>
+	it.effect("a default approval-mode change reaches an open tab", () =>
 		Effect.gen(function* () {
 			const { client, subscribe } = yield* open;
 			const { q } = yield* subscribe;
@@ -178,7 +178,7 @@ describe("SubscribeProjectSettings", () => {
 // Failure case: a session-mode write must notify an open draft on this relay,
 // and a later subscriber must read the persisted default rather than Local.
 describe("defaultSessionMode subscriptions", () => {
-	it.scoped("publishes writes and includes the mode in later snapshots", () =>
+	it.effect("publishes writes and includes the mode in later snapshots", () =>
 		Effect.gen(function* () {
 			const { client, subscribe } = yield* open;
 			const { q } = yield* subscribe;
@@ -205,7 +205,7 @@ describe("defaultSessionMode subscriptions", () => {
 // ni8.15 / ni8.40: live project facts ride the same subscription. The relay
 // publishes them as they change; a tab that opens later still sees the latest.
 describe("SubscribeProjectSettings live facts", () => {
-	it.scoped(
+	it.effect(
 		"the browser count and OpenCode upstream state reach open tabs and later snapshots",
 		() =>
 			Effect.gen(function* () {

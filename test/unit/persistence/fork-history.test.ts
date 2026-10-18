@@ -225,15 +225,15 @@ describe("readForkSource", () => {
 	it.effect("refuses an unknown point without copying", () =>
 		Effect.gen(function* () {
 			yield* seed();
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				readForkSource("parent", {
 					messageId: "missing",
 					sideThread: false,
 				}),
 			);
 			expect(result._tag).toBe("Left");
-			if (result._tag === "Left")
-				expect(result.left).toMatchObject({
+			if (result._tag === "Failure")
+				expect(result.failure).toMatchObject({
 					_tag: "ForkRefusal",
 					reason: "message_not_found",
 					messageId: "missing",
@@ -247,21 +247,21 @@ describe("readForkSource", () => {
 			Effect.gen(function* () {
 				const commit = yield* makeCommitAndSignal;
 				yield* commit([history[0]]);
-				const empty = yield* Effect.either(
+				const empty = yield* Effect.result(
 					readForkSource("parent", { sideThread: false }),
 				);
 				expect(empty._tag).toBe("Left");
-				if (empty._tag === "Left")
-					expect(empty.left).toMatchObject({ reason: "no_transcript" });
+				if (empty._tag === "Failure")
+					expect(empty.failure).toMatchObject({ reason: "no_transcript" });
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at)
 				VALUES ('projected-only', 'parent', 'assistant', 1, 1)`;
-				const missing = yield* Effect.either(
+				const missing = yield* Effect.result(
 					readForkSource("parent", { sideThread: false }),
 				);
 				expect(missing._tag).toBe("Left");
-				if (missing._tag === "Left")
-					expect(missing.left).toMatchObject({ reason: "point_not_found" });
+				if (missing._tag === "Failure")
+					expect(missing.failure).toMatchObject({ reason: "point_not_found" });
 			}).pipe(Effect.provide(testLayer)),
 	);
 
@@ -552,15 +552,15 @@ describe("readForkSource", () => {
 						messageId: "msg_assistant_1",
 					}),
 				]);
-				const removed = yield* Effect.either(
+				const removed = yield* Effect.result(
 					readForkSource("parent", {
 						messageId: "msg_assistant_1",
 						sideThread: false,
 					}),
 				);
 				expect(removed._tag).toBe("Left");
-				if (removed._tag === "Left")
-					expect(removed.left).toMatchObject({ reason: "message_not_found" });
+				if (removed._tag === "Failure")
+					expect(removed.failure).toMatchObject({ reason: "message_not_found" });
 			}).pipe(Effect.provide(testLayer)),
 	);
 
@@ -584,7 +584,7 @@ describe("readForkSource", () => {
 					{ id: "a", role: "assistant", created_at: 10 },
 				]);
 				expect(pending.historyMessageId).toBe("a");
-				const hidden = yield* Effect.either(
+				const hidden = yield* Effect.result(
 					readForkSource("parent", { messageId: "b", sideThread: false }),
 				);
 				expect(hidden._tag).toBe("Left");
@@ -678,7 +678,7 @@ describe("readForkSource", () => {
 					messageId: "msg_assistant_2",
 					sideThread: false,
 				});
-				const invalid = yield* Effect.either(later.copy("child"));
+				const invalid = yield* Effect.result(later.copy("child"));
 				expect(invalid._tag).toBe("Left");
 			}).pipe(Effect.provide(testLayer)),
 	);
@@ -816,12 +816,12 @@ describe("Side Thread boundary reads", () => {
 						status: "busy",
 					}),
 				]);
-				const first = yield* Effect.either(
+				const first = yield* Effect.result(
 					readForkSource("parent", { sideThread: true }),
 				);
 				expect(first._tag).toBe("Left");
-				if (first._tag === "Left")
-					expect(first.left).toMatchObject({ reason: "no_completed_turn" });
+				if (first._tag === "Failure")
+					expect(first.failure).toMatchObject({ reason: "no_completed_turn" });
 				const commit = yield* makeCommitAndSignal;
 				yield* commit([
 					canonicalEvent("session.created", "empty", {

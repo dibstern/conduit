@@ -11,10 +11,10 @@ describe("Supervisor.track diagnostics", () => {
 			const sv = yield* Supervisor.track;
 			yield* Effect.supervised(
 				Effect.gen(function* () {
-					const f1 = yield* Effect.fork(Effect.succeed("ok"));
+					const f1 = yield* Effect.forkChild(Effect.succeed("ok"));
 					yield* Fiber.join(f1);
-					const f2 = yield* Effect.fork(Effect.fail("boom"));
-					yield* Fiber.join(f2).pipe(Effect.catchAll(() => Effect.void));
+					const f2 = yield* Effect.forkChild(Effect.fail("boom"));
+					yield* Fiber.join(f2).pipe(Effect.catch(() => Effect.void));
 				}),
 				sv,
 			);
@@ -30,7 +30,7 @@ describe("Supervisor.track diagnostics", () => {
 			yield* Effect.supervised(
 				Effect.gen(function* () {
 					const fibers = Array.from({ length: 5 }, (_, i) =>
-						Effect.fork(Effect.succeed(i)),
+						Effect.forkChild(Effect.succeed(i)),
 					);
 					yield* Effect.all(fibers);
 				}),

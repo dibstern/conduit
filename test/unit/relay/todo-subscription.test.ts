@@ -45,7 +45,7 @@ import {
 
 const makeTodoTestLayer = () => {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-todo-sub-"));
-	const cleanup = Layer.scopedDiscard(
+	const cleanup = Layer.effectDiscard(
 		Effect.addFinalizer(() =>
 			Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 		),
@@ -150,7 +150,7 @@ const claudeTodos = (...pairs: [string, string][]) => ({
 });
 
 describe("subscribeSessionTodos", () => {
-	it.scopedLive(
+	it.live(
 		"two staggered subscribers share todo windows and text deltas only read their collections",
 		() =>
 			Effect.gen(function* () {
@@ -292,7 +292,7 @@ describe("subscribeSessionTodos", () => {
 			}).pipe(Effect.provide(makeTodoTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"todo updates land as ordered upserts after an empty base, and other writes stay silent",
 		() =>
 			Effect.gen(function* () {
@@ -352,7 +352,7 @@ describe("subscribeSessionTodos", () => {
 			}).pipe(Effect.provide(makeTodoTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"an OpenCode TodoWrite whose list lives only in its result still lands",
 		() =>
 			Effect.gen(function* () {
@@ -385,7 +385,7 @@ describe("subscribeSessionTodos", () => {
 			}).pipe(Effect.provide(makeTodoTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"the session is the argument: a subscription for B never sees A's todos",
 		() =>
 			Effect.gen(function* () {
@@ -407,7 +407,7 @@ describe("subscribeSessionTodos", () => {
 			}).pipe(Effect.provide(makeTodoTestLayer())),
 	);
 
-	it.scoped("a fresh subscription (a reload) starts from the stored list", () =>
+	it.effect("a fresh subscription (a reload) starts from the stored list", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([sessionCreated("A")]);

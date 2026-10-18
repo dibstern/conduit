@@ -27,7 +27,7 @@ describe("MessagePoller Effect", () => {
 		Layer.succeed(OpenCodeAPITag, mockApi),
 	);
 
-	it.scoped("starts a poller for a session", () =>
+	it.effect("starts a poller for a session", () =>
 		Effect.gen(function* () {
 			yield* startPoller("s1");
 			const result = yield* isPollerActive("s1");
@@ -35,7 +35,7 @@ describe("MessagePoller Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("replaces poller for same session (FiberMap auto-dedup)", () =>
+	it.effect("replaces poller for same session (FiberMap auto-dedup)", () =>
 		Effect.gen(function* () {
 			yield* startPoller("s1");
 			yield* startPoller("s1"); // FiberMap.run auto-interrupts previous
@@ -44,7 +44,7 @@ describe("MessagePoller Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("stops a poller by interrupting its fiber", () =>
+	it.effect("stops a poller by interrupting its fiber", () =>
 		Effect.gen(function* () {
 			yield* startPoller("s1");
 			expect(yield* isPollerActive("s1")).toBe(true);

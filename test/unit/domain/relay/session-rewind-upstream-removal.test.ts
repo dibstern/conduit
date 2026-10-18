@@ -162,7 +162,7 @@ it("rolls back the entire upstream rewind commit when a hidden removal cannot pr
 			const sql = yield* SqlClient.SqlClient;
 			const events = yield* EventStoreEffectTag;
 			const before = yield* events.readAllBySession(SESSION_ID);
-			const outcome = yield* Effect.either(
+			const outcome = yield* Effect.result(
 				ingestion.ingest(upstreamRemoval("cut-user")),
 			);
 			expect.soft(outcome._tag).toBe("Left");

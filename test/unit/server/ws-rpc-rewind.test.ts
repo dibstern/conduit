@@ -19,7 +19,7 @@ describe("WsRpcServerLayer RewindSession", () => {
 		const api = makeMockOpenCodeAPI();
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				client.RewindSession({
 					sessionId: "session-1",
 					messageId: "client-only-uuid",

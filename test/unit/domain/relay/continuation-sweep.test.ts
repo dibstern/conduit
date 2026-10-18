@@ -24,19 +24,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { it as effectIt } from "@effect/vitest";
-import {
-	Context,
-	Effect,
-	Fiber,
-	Layer,
-	Queue,
-	Schedule,
-	Schema,
-	Stream,
-	TestClock,
-} from "effect";
+import { Context, Effect, Fiber, Layer, Queue, Schedule, Schema, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { accountsStateFromConfig } from "../../../../src/lib/account-directory.js";
 import { AccountSchema } from "../../../../src/lib/contracts/account.js";
@@ -539,7 +530,7 @@ it("a due continuation waits for the session admission lock before dispatch", as
 });
 
 for (const admission of ["user", "quota-reset"] as const) {
-	effectIt.scoped(
+	effectIt.effect(
 		`pending rewind allows ${admission} scheduling and blocks continuation dispatch`,
 		() =>
 			withResetInbox(
@@ -581,7 +572,7 @@ for (const admission of ["user", "quota-reset"] as const) {
 											),
 										)
 								: fixture.submit("q1")
-						).pipe(Effect.either);
+						).pipe(Effect.result);
 						expect(scheduled).toMatchObject({ _tag: "Right" });
 						expect(
 							(yield* fixture.read.listSessionInfos({
@@ -601,7 +592,7 @@ for (const admission of ["user", "quota-reset"] as const) {
 							})
 							.pipe(
 								Effect.provideService(ProviderTurnServiceTag, fixture.turns),
-								Effect.either,
+								Effect.result,
 							);
 						expect(immediate).toMatchObject({
 							_tag: "Left",
@@ -625,7 +616,7 @@ for (const schedule of [
 	"cancelled",
 	"later-stopped",
 ] as const) {
-	effectIt.scoped(
+	effectIt.effect(
 		`send at reset: ${schedule} schedules once and releases in turn order`,
 		() => {
 			let reading = usageReading("claude", {
@@ -789,7 +780,7 @@ for (const schedule of [
 }
 
 for (const reset of ["expired", "missing", "invalid"] as const) {
-	effectIt.scoped(`send at reset: a ${reset} reset holds nothing`, () =>
+	effectIt.effect(`send at reset: a ${reset} reset holds nothing`, () =>
 		withResetInbox(
 			() =>
 				usageReading("claude", {

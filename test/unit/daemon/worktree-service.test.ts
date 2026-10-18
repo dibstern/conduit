@@ -903,7 +903,7 @@ finish();
 			const exit = await Effect.runPromise(Fiber.await(fiber));
 			expect(Exit.isFailure(exit)).toBe(true);
 			if (Exit.isFailure(exit))
-				expect(Cause.isInterrupted(exit.cause)).toBe(true);
+				expect(Cause.hasInterrupts(exit.cause)).toBe(true);
 		}
 		assertUnchanged(before);
 	}, 30_000);

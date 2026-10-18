@@ -31,7 +31,7 @@ const open = Effect.gen(function* () {
 });
 
 describe("SubscribeInputDraft", () => {
-	it.scoped("a draft typed in one tab reaches every tab on that session", () =>
+	it.effect("a draft typed in one tab reaches every tab on that session", () =>
 		Effect.gen(function* () {
 			const { client, subscribe } = yield* open;
 			const tabA = yield* subscribe("s1");
@@ -54,7 +54,7 @@ describe("SubscribeInputDraft", () => {
 		}).pipe(Effect.provide(makeLayer())),
 	);
 
-	it.scoped("a cleared draft reaches open tabs as empty text", () =>
+	it.effect("a cleared draft reaches open tabs as empty text", () =>
 		Effect.gen(function* () {
 			const { client, subscribe } = yield* open;
 			const q = yield* subscribe("s1");
@@ -68,7 +68,7 @@ describe("SubscribeInputDraft", () => {
 		}).pipe(Effect.provide(makeLayer())),
 	);
 
-	it.scoped("opens live-only: an earlier draft is not replayed", () =>
+	it.effect("opens live-only: an earlier draft is not replayed", () =>
 		Effect.gen(function* () {
 			const { client, subscribe } = yield* open;
 			yield* client.SyncInputDraft({

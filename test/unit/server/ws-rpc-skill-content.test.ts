@@ -121,10 +121,10 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 				"a..b",
 				".hidden",
 			]) {
-				const result = yield* Effect.either(readSkill(name));
+				const result = yield* Effect.result(readSkill(name));
 				expect(result._tag).toBe("Left");
-				if (result._tag === "Left") {
-					expect(result.left.message).toBe("Skill content not available");
+				if (result._tag === "Failure") {
+					expect(result.failure.message).toBe("Skill content not available");
 				}
 			}
 			expect(realpath).not.toHaveBeenCalled();
@@ -179,10 +179,10 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 					join(root, "escaped-file", "SKILL.md"),
 				);
 				for (const name of ["escaped-dir", "escaped-file"]) {
-					const result = yield* Effect.either(readSkill(name));
+					const result = yield* Effect.result(readSkill(name));
 					expect(result._tag).toBe("Left");
-					if (result._tag === "Left") {
-						expect(result.left.message).toBe("Skill content not available");
+					if (result._tag === "Failure") {
+						expect(result.failure.message).toBe("Skill content not available");
 					}
 				}
 			}),
@@ -275,7 +275,7 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 			realpath.mockClear();
 			open.mockClear();
 			expect(
-				yield* Effect.either(
+				yield* Effect.result(
 					client.GetSkillContent({ sessionId: "missing", name: "review" }),
 				),
 			).toMatchObject({
@@ -290,10 +290,10 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 
 	it.effect("returns not-found when neither root contains the skill", () =>
 		Effect.gen(function* () {
-			const result = yield* Effect.either(readSkill("missing"));
+			const result = yield* Effect.result(readSkill("missing"));
 			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expect(result.left.message).toBe("Skill content not available");
+			if (result._tag === "Failure") {
+				expect(result.failure.message).toBe("Skill content not available");
 			}
 		}),
 	);

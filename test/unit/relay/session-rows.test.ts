@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Option, Ref, Stream } from "effect";
 import { expect } from "vitest";
@@ -63,7 +63,7 @@ describe("Session Rows read paths", () => {
 		["local_bash", "monitoring"],
 		["workflow", "working"],
 	] as const) {
-		it.scoped(
+		it.effect(
 			`shares ${attention} activity and hint dismissals across all four readers`,
 			() => {
 				const configDir = mkdtempSync(join(tmpdir(), "conduit-session-rows-"));

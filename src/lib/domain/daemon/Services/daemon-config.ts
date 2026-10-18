@@ -42,50 +42,50 @@ export const DaemonEnvConfigLive: Layer.Layer<
 > = Layer.effect(
 	DaemonEnvConfigTag,
 	Effect.gen(function* () {
-		const host = yield* Config.string("HOST").pipe(
+		const host = yield* Config.String("HOST").pipe(
 			Config.withDefault("127.0.0.1"),
 		);
 		const hostExplicit = yield* Effect.map(
-			Config.option(Config.string("HOST")),
+			Config.option(Config.String("HOST")),
 			(o) => o._tag === "Some",
 		);
-		const port = yield* Config.integer("CONDUIT_PORT").pipe(
+		const port = yield* Config.Int("CONDUIT_PORT").pipe(
 			Config.withDefault(2633),
 		);
 		const opencodeUrl = yield* Effect.map(
-			Config.option(Config.string("OPENCODE_URL")),
+			Config.option(Config.String("OPENCODE_URL")),
 			optionToUndefined,
 		);
 		const opencodePassword = yield* Effect.map(
-			Config.option(Config.redacted(Config.string("OPENCODE_SERVER_PASSWORD"))),
+			Config.option(Config.redacted(Config.String("OPENCODE_SERVER_PASSWORD"))),
 			optionToUndefined,
 		);
-		const opencodeUsername = yield* Config.string(
+		const opencodeUsername = yield* Config.String(
 			"OPENCODE_SERVER_USERNAME",
 		).pipe(Config.withDefault("opencode"));
 		// Match the original `process.env["DEBUG"] === "1"` semantics exactly:
 		// only "1" and "true" are truthy; absent or any other value is false.
 		const debug = yield* Effect.map(
-			Config.string("DEBUG").pipe(Config.withDefault("0")),
+			Config.String("DEBUG").pipe(Config.withDefault("0")),
 			(v) => v === "1" || v.toLowerCase() === "true",
 		);
-		const logLevel = yield* Config.string("LOG_LEVEL").pipe(
+		const logLevel = yield* Config.String("LOG_LEVEL").pipe(
 			Config.withDefault("info"),
 		);
 		const logFormat = yield* Effect.map(
-			Config.option(Config.string("LOG_FORMAT")),
+			Config.option(Config.String("LOG_FORMAT")),
 			optionToUndefined,
 		);
 		const tls = yield* Effect.map(
-			Config.string("CONDUIT_TLS").pipe(Config.withDefault("0")),
+			Config.String("CONDUIT_TLS").pipe(Config.withDefault("0")),
 			(v) => v === "1" || v.toLowerCase() === "true",
 		);
 		const tlsCertPath = yield* Effect.map(
-			Config.option(Config.string("CONDUIT_TLS_CERT")),
+			Config.option(Config.String("CONDUIT_TLS_CERT")),
 			optionToUndefined,
 		);
 		const tlsKeyPath = yield* Effect.map(
-			Config.option(Config.string("CONDUIT_TLS_KEY")),
+			Config.option(Config.String("CONDUIT_TLS_KEY")),
 			optionToUndefined,
 		);
 

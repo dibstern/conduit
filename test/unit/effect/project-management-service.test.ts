@@ -27,7 +27,7 @@ describe("standalone ProjectManagementServiceLive", () => {
 		Effect.gen(function* () {
 			const service = yield* ProjectManagementServiceTag;
 			expect(
-				yield* Effect.either(service.save({ folders: ["/work/new"] })),
+				yield* Effect.result(service.save({ folders: ["/work/new"] })),
 			).toMatchObject({
 				_tag: "Left",
 				left: {
@@ -36,7 +36,7 @@ describe("standalone ProjectManagementServiceLive", () => {
 					message: "Saving projects is not supported in this mode",
 				},
 			});
-			expect(yield* Effect.either(service.remove("missing"))).toMatchObject({
+			expect(yield* Effect.result(service.remove("missing"))).toMatchObject({
 				_tag: "Left",
 				left: {
 					_tag: "ProjectManagementNotSupported",

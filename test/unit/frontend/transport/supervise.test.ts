@@ -4,7 +4,7 @@
 // only what a consumer sees: the envelopes, the statuses, and when the
 // subscription is asked for again.
 
-import type { Rpc } from "@effect/rpc";
+import type { Rpc } from "effect/rpc";
 import { describe, it } from "@effect/vitest";
 import {
 	Chunk,

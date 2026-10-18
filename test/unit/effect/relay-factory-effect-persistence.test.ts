@@ -356,7 +356,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						port: 4322,
 					}),
 				);
-				const missing = yield* Effect.either(
+				const missing = yield* Effect.result(
 					service.update("missing", { name: "Missing" }),
 				);
 				expect(missing).toMatchObject({
@@ -536,7 +536,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 			yield* Ref.set(httpServerRef, server);
 
 			const factory = yield* RelayFactoryTag;
-			const fiber = yield* Effect.fork(
+			const fiber = yield* Effect.forkChild(
 				factory.create({
 					slug: "effect-project",
 					title: "Effect Project",
@@ -659,7 +659,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				expect(projects).toContainEqual(
 					expect.objectContaining({ slug: added.slug, title: "Added Project" }),
 				);
-				const invalid = yield* Effect.either(
+				const invalid = yield* Effect.result(
 					service.save({ folders: [join(dir, "missing")] }),
 				);
 				expect(invalid).toMatchObject({

@@ -21,7 +21,7 @@ const accepted = (commandId: string): RelayEvent => ({
 });
 
 describe("RelayEventBus", () => {
-	it.scoped("publishes relay domain events to subscribers", () =>
+	it.effect("publishes relay domain events to subscribers", () =>
 		Effect.gen(function* () {
 			const sub = yield* subscribeToRelayEvents;
 			yield* publishRelayEvent(accepted("cmd-a"));
@@ -36,7 +36,7 @@ describe("RelayEventBus", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeRelayEventBusLive()))),
 	);
 
-	it.scoped("fans out events to each subscriber", () =>
+	it.effect("fans out events to each subscriber", () =>
 		Effect.gen(function* () {
 			const sub1 = yield* subscribeToRelayEvents;
 			const sub2 = yield* subscribeToRelayEvents;
@@ -50,7 +50,7 @@ describe("RelayEventBus", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeRelayEventBusLive()))),
 	);
 
-	it.scoped("uses a bounded sliding buffer for slow subscribers", () =>
+	it.effect("uses a bounded sliding buffer for slow subscribers", () =>
 		Effect.gen(function* () {
 			const sub = yield* subscribeToRelayEvents;
 

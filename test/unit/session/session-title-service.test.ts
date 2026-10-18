@@ -251,7 +251,7 @@ const makeManualRenameRaceLayer = (input: {
 								),
 							)
 							.pipe(
-								Effect.catchAll((error) =>
+								Effect.catch((error) =>
 									Effect.dieMessage(
 										`Failed to append manual rename race event: ${String(error)}`,
 									),

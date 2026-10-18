@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Context, Effect, Layer, Option, PubSub, Queue, Ref } from "effect";
 import { expect, vi } from "vitest";
@@ -172,11 +172,11 @@ describe("RelayFactoryTag", () => {
 
 			const result = yield* factory
 				.create(project)
-				.pipe(Effect.scoped, Effect.either);
+				.pipe(Effect.scoped, Effect.result);
 
 			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				const error = result.left;
+			if (result._tag === "Failure") {
+				const error = result.failure;
 				expect(error).toBeInstanceOf(RelayFactoryError);
 				expect(error._tag).toBe("RelayFactoryError");
 				expect(error.reason).toBe("HTTP server not started");
@@ -201,10 +201,10 @@ describe("RelayFactoryTag", () => {
 						title: "Missing",
 						folders: [missingDirectory],
 					})
-					.pipe(Effect.either);
+					.pipe(Effect.result);
 				expect(result._tag).toBe("Left");
-				if (result._tag === "Left")
-					expect(result.left.reason).toContain("directory does not exist");
+				if (result._tag === "Failure")
+					expect(result.failure.reason).toContain("directory does not exist");
 				expect(existsSync(missingDirectory)).toBe(false);
 				expect(createProjectRelayMock).not.toHaveBeenCalled();
 			}).pipe(

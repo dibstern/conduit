@@ -812,7 +812,7 @@ describe("ReadModelSubscription", () => {
 
 				yield* Scope.close(scope, Exit.void);
 
-				expect(Exit.isInterrupted(yield* Fiber.await(fiber))).toBe(true);
+				expect(Exit.hasInterrupts(yield* Fiber.await(fiber))).toBe(true);
 			}),
 		),
 	);
@@ -927,7 +927,7 @@ describe("ReadModelSubscription shared windows", () => {
 							yield* pullA;
 							yield* pullB;
 							yield* bus.publishAdvance(advance(1));
-							const asker = yield* Effect.fork(
+							const asker = yield* Effect.forkChild(
 								Effect.withMaxOpsBeforeYield(pullA, ops),
 							);
 							for (let i = 0; i < yields; i++) yield* Effect.yieldNow();

@@ -344,7 +344,7 @@ describe("Schema Migration", () => {
 				VALUES ('s1', 'opencode', 'Test', 'idle', ${T}, ${T})`;
 			yield* sql`INSERT INTO events (event_id, session_id, stream_version, type, data, provider, created_at)
 				VALUES ('evt-1', 's1', 0, 'session.created', '{}', 'opencode', ${T})`;
-			const duplicate = yield* Effect.either(
+			const duplicate = yield* Effect.result(
 				sql`INSERT INTO events (event_id, session_id, stream_version, type, data, provider, created_at)
 				VALUES ('evt-1', 's1', 1, 'session.created', '{}', 'opencode', ${T})`,
 			);
@@ -361,7 +361,7 @@ describe("Schema Migration", () => {
 				VALUES ('s1', 'opencode', 'Test', 'idle', ${T}, ${T})`;
 				yield* sql`INSERT INTO events (event_id, session_id, stream_version, type, data, provider, created_at)
 				VALUES ('evt-1', 's1', 0, 'session.created', '{}', 'opencode', ${T})`;
-				const conflict = yield* Effect.either(
+				const conflict = yield* Effect.result(
 					sql`INSERT INTO events (event_id, session_id, stream_version, type, data, provider, created_at)
 				VALUES ('evt-2', 's1', 0, 'text.delta', '{}', 'opencode', ${T})`,
 				);
@@ -436,7 +436,7 @@ describe("Schema Migration", () => {
 				VALUES ('s1', 'opencode', 'Test', 'idle', ${T}, ${T})`;
 				yield* sql`INSERT INTO events (event_id, session_id, stream_version, type, data, provider, created_at)
 				VALUES ('evt-1', 's1', 0, 'session.created', '{}', 'opencode', ${T})`;
-				const deleted = yield* Effect.either(
+				const deleted = yield* Effect.result(
 					sql`DELETE FROM sessions WHERE id = 's1'`,
 				);
 				expect(deleted._tag).toBe("Right");

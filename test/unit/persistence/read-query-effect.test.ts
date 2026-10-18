@@ -1349,7 +1349,7 @@ describe("ReadQueryEffect.readSessionTranscriptPage", () => {
 				VALUES ('other-message', 's2', 'user', 'other', 1, 1)`;
 			const readQuery = yield* makeReadQueryEffect;
 			for (const before of ["missing", "other-message"]) {
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					readQuery.readSessionTranscriptPage("s1", { before, limit: 50 }),
 				);
 				expect(result).toMatchObject({

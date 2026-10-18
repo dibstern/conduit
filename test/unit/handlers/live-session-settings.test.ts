@@ -3,7 +3,7 @@
 // already has, so sending only the field that changed reads as "cleared" and
 // silently resets the other two.
 
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";

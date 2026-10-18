@@ -358,7 +358,7 @@ function makeTestSqliteLayer() {
 	return SqliteNode.layer({ filename }).pipe(
 		Layer.provide(Reactivity.layer),
 		Layer.merge(
-			Layer.scopedDiscard(
+			Layer.effectDiscard(
 				Effect.addFinalizer(() =>
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 				),

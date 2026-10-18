@@ -578,7 +578,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 					.pipe(Effect.timeout("15 seconds")),
 			);
 			cachedFailure = await Effect.runPromise(
-				Effect.either(
+				Effect.result(
 					direct.commandEffect(
 						command.command_id,
 						{

@@ -522,7 +522,7 @@ export async function startForegroundDaemon(
 							yield* relayCache.get(project.slug);
 						}
 					}).pipe(
-						Effect.catchAllCause((cause) =>
+						Effect.catchCause((cause) =>
 							Failure.isInterruptedOnly(cause)
 								? Effect.failCause(cause)
 								: Effect.logError(

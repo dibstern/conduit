@@ -80,7 +80,7 @@ describe("OpenCodeProviderInstance.endSessionEffect()", () => {
 
 	it("fails the in-flight send turn for the session", async () => {
 		const resultPromise = Effect.runPromise(
-			Effect.either(instance.sendTurnEffect(makeSendTurnInput())),
+			Effect.result(instance.sendTurnEffect(makeSendTurnInput())),
 		);
 		await vi.waitFor(() => {
 			expect(client.session.prompt).toHaveBeenCalled();
@@ -91,18 +91,18 @@ describe("OpenCodeProviderInstance.endSessionEffect()", () => {
 		const result = await resultPromise;
 
 		expect(result._tag).toBe("Left");
-		if (result._tag !== "Left") return;
-		expect(result.left).toMatchObject({
+		if (result._tag !== "Failure") return;
+		expect(result.failure).toMatchObject({
 			_tag: "ProviderInstanceFailure",
 			operation: "sendTurn",
 			providerId: "opencode",
 		});
-		expect(result.left.message).toContain("reload");
+		expect(result.failure.message).toContain("reload");
 	});
 
 	it("does NOT call client.session.abort (reload is not a turn cancel)", async () => {
 		const resultPromise = Effect.runPromise(
-			Effect.either(
+			Effect.result(
 				instance.sendTurnEffect(makeSendTurnInput({ sessionId: "sess-2" })),
 			),
 		);

@@ -202,7 +202,7 @@ describe("WsRpcServerLayer input.submit", () => {
 				delivery: "queue",
 			});
 
-			const second = yield* Effect.either(
+			const second = yield* Effect.result(
 				client.input.submit({
 					sessionId: "session-1",
 					text: "second",

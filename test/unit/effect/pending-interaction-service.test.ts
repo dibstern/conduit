@@ -1,6 +1,7 @@
 import type { PermissionUpdate } from "@anthropic-ai/claude-agent-sdk";
 import { describe, it } from "@effect/vitest";
-import { Effect, Exit, Fiber, Option, TestClock } from "effect";
+import { Effect, Exit, Fiber, Option } from "effect";
+import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import {
 	makePendingInteractionServiceLive,
@@ -86,7 +87,7 @@ describe("PendingInteractionService", () => {
 					toolInput: { patterns: [], metadata: {} },
 					always: [],
 				});
-				const waiter = yield* Effect.fork(pending.awaitResponse);
+				const waiter = yield* Effect.forkChild(pending.awaitResponse);
 
 				const resolved = yield* service.resolvePermissionFromBrowser(
 					"perm-1",
@@ -136,7 +137,7 @@ describe("PendingInteractionService", () => {
 					permissionSuggestions: [sessionSuggestion, localSuggestion],
 				};
 				const pending = yield* service.beginPermissionRequest(request);
-				const waiter = yield* Effect.fork(pending.awaitResponse);
+				const waiter = yield* Effect.forkChild(pending.awaitResponse);
 
 				const resolveWithDestination = service.resolvePermissionFromBrowser as (
 					requestId: string,
@@ -195,7 +196,7 @@ describe("PendingInteractionService", () => {
 				toolInput: { patterns: [], metadata: {} },
 				always: [],
 			});
-			const waiter = yield* Effect.fork(pending.awaitResponse);
+			const waiter = yield* Effect.forkChild(pending.awaitResponse);
 
 			yield* TestClock.adjust("1 seconds");
 
@@ -275,7 +276,7 @@ describe("PendingInteractionService", () => {
 					},
 				],
 			});
-			const waiter = yield* Effect.fork(pending.awaitAnswers);
+			const waiter = yield* Effect.forkChild(pending.awaitAnswers);
 
 			const resolved = yield* service.resolveQuestionFromBrowser("question-1", {
 				"0": "Yes",
@@ -346,8 +347,8 @@ describe("PendingInteractionService", () => {
 				sessionId: "session-1",
 				questions: [{ question: "Continue?" }],
 			});
-			const permissionWaiter = yield* Effect.fork(permission.awaitResponse);
-			const questionWaiter = yield* Effect.fork(question.awaitAnswers);
+			const permissionWaiter = yield* Effect.forkChild(permission.awaitResponse);
+			const questionWaiter = yield* Effect.forkChild(question.awaitAnswers);
 
 			yield* service.cancelSessionInteractions("session-1", "Turn interrupted");
 
@@ -415,7 +416,7 @@ describe("PendingInteractionService", () => {
 					sessionId: "session-1",
 					questions: [{ question: "Continue?" }],
 				});
-				const waiter = yield* Effect.fork(pending.awaitAnswers);
+				const waiter = yield* Effect.forkChild(pending.awaitAnswers);
 				yield* service.cancelSessionInteractions("session-1", "disposed", {
 					recoverQuestions: true,
 				});

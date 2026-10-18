@@ -135,7 +135,7 @@ describe("StopBackgroundTask RPC", () => {
 			state.stopTaskEffect.mockImplementationOnce(() => Effect.fail(error));
 			return Effect.gen(function* () {
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
-				const result = yield* Effect.either(client.StopBackgroundTask(request));
+				const result = yield* Effect.result(client.StopBackgroundTask(request));
 				expect(result._tag).toBe("Left");
 				state.stopTaskEffect.mockImplementationOnce(() => {
 					state.finish();
@@ -153,7 +153,7 @@ describe("StopBackgroundTask RPC", () => {
 			const state = setup("opencode");
 			return Effect.gen(function* () {
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
-				const result = yield* Effect.either(client.StopBackgroundTask(request));
+				const result = yield* Effect.result(client.StopBackgroundTask(request));
 				expect(result._tag).toBe("Left");
 				expect(state.stopTaskEffect).not.toHaveBeenCalled();
 				expect(state.interruptTurnEffect).not.toHaveBeenCalled();

@@ -24,7 +24,7 @@ async function callRpc(tag: string, payload: unknown, take?: number) {
 							),
 			);
 			if (result._tag === "Success") return { value: result.value };
-			const failure = Cause.failureOption(result.cause);
+			const failure = Cause.findErrorOption(result.cause);
 			if (failure._tag === "None")
 				return { defect: String(Cause.squash(result.cause)) };
 			const error = failure.value;

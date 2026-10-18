@@ -43,7 +43,7 @@ import {
 } from "../../helpers/mock-factories.js";
 
 describe("relay tracing propagation", () => {
-	it.scoped(
+	it.effect(
 		"propagates the daemon tracer into the relay ManagedRuntime",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-relay-tracing-"));
@@ -150,7 +150,7 @@ describe("relay tracing propagation", () => {
 		20_000,
 	);
 
-	it.scoped(
+	it.effect(
 		"propagates the daemon tracer into fibers forked during relay layer construction",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-relay-fiber-tracing-"));

@@ -122,13 +122,13 @@ describe("WebSocketRoutingLive", () => {
 		Layer.provide(wsRelayRouterLayer),
 	);
 
-	it.scoped("builds without error", () =>
+	it.effect("builds without error", () =>
 		Effect.sync(() => {
 			expect(true).toBe(true);
 		}).pipe(Effect.provide(Layer.fresh(wsLayer))),
 	);
 
-	it.scoped("resolves all dependency Tags from context", () =>
+	it.effect("resolves all dependency Tags from context", () =>
 		Effect.gen(function* () {
 			const configRef = yield* DaemonConfigRefTag;
 			expect(configRef).toBeDefined();
@@ -139,7 +139,7 @@ describe("WebSocketRoutingLive", () => {
 		),
 	);
 
-	it.scoped("finalizer runs on scope close without error", () =>
+	it.effect("finalizer runs on scope close without error", () =>
 		Effect.gen(function* () {
 			const scope = yield* Scope.make();
 			yield* Layer.buildWithScope(Layer.fresh(wsLayer), scope);
@@ -175,7 +175,7 @@ describe("prefetchSessionCounts", () => {
 		},
 	];
 
-	it.scoped(
+	it.effect(
 		"does not ask for an instance for a missing project directory",
 		() => {
 			const calls: Array<[string, string | undefined]> = [];
@@ -199,7 +199,7 @@ describe("prefetchSessionCounts", () => {
 		},
 	);
 
-	it.scoped("returns 0 when no projects registered", () =>
+	it.effect("returns 0 when no projects registered", () =>
 		Effect.gen(function* () {
 			const count = yield* prefetchSessionCounts;
 			expect(count).toBe(0);
@@ -212,7 +212,7 @@ describe("prefetchSessionCounts", () => {
 		),
 	);
 
-	it.scoped("skips projects with existing persisted session counts", () => {
+	it.effect("skips projects with existing persisted session counts", () => {
 		const calls: Array<[string, string | undefined]> = [];
 		return Effect.gen(function* () {
 			const count = yield* prefetchSessionCounts;
@@ -236,7 +236,7 @@ describe("prefetchSessionCounts", () => {
 		);
 	});
 
-	it.scoped("returns 0 when the first OpenCode instance is not running", () =>
+	it.effect("returns 0 when the first OpenCode instance is not running", () =>
 		Effect.gen(function* () {
 			const count = yield* prefetchSessionCounts;
 			expect(count).toBe(0);
@@ -253,7 +253,7 @@ describe("prefetchSessionCounts", () => {
 		),
 	);
 
-	it.scoped("counts and persists sessions from a running instance", () =>
+	it.effect("counts and persists sessions from a running instance", () =>
 		Effect.gen(function* () {
 			const count = yield* prefetchSessionCounts;
 			expect(count).toBe(1);
@@ -276,7 +276,7 @@ describe("prefetchSessionCounts", () => {
 		),
 	);
 
-	it.scoped("uses daemon-state seeded projects", () => {
+	it.effect("uses daemon-state seeded projects", () => {
 		const calls: Array<[string, string | undefined]> = [];
 		return Effect.gen(function* () {
 			const count = yield* prefetchSessionCounts;
@@ -313,7 +313,7 @@ describe("prefetchSessionCounts", () => {
 		);
 	});
 
-	it.scoped(
+	it.effect(
 		"a failed session list for one project does not prevent others from prefetching",
 		() =>
 			Effect.gen(function* () {
@@ -351,7 +351,7 @@ describe("SessionPrefetchLive", () => {
 		Layer.provide(registryLayer),
 	);
 
-	it.scoped("builds without error", () =>
+	it.effect("builds without error", () =>
 		Effect.sync(() => {
 			expect(true).toBe(true);
 		}).pipe(Effect.provide(Layer.fresh(prefetchLayer))),
@@ -387,7 +387,7 @@ describe("Scoped fiber lifecycle", () => {
 		}),
 	);
 
-	it.scoped("SessionPrefetchLive scope close tears down cleanly", () =>
+	it.effect("SessionPrefetchLive scope close tears down cleanly", () =>
 		Effect.gen(function* () {
 			const layer = Layer.fresh(
 				SessionPrefetchLive.pipe(
@@ -402,7 +402,7 @@ describe("Scoped fiber lifecycle", () => {
 		}),
 	);
 
-	it.scoped("WebSocketRoutingLive scope close tears down cleanly", () =>
+	it.effect("WebSocketRoutingLive scope close tears down cleanly", () =>
 		Effect.gen(function* () {
 			const layer = Layer.fresh(
 				WebSocketRoutingLive.pipe(

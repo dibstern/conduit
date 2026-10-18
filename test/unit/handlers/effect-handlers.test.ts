@@ -1,4 +1,4 @@
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { MessageVersion } from "../../../src/lib/contracts/tool-wire.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
@@ -28,16 +28,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, layer } from "@effect/vitest";
-import {
-	Deferred,
-	Effect,
-	Exit,
-	Fiber,
-	Layer,
-	Option,
-	Stream,
-	TestClock,
-} from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Option, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { GetAgents, GetProjects } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
@@ -530,7 +522,7 @@ describe("reloadProviderSessionForClient", () => {
 			);
 			const engine = withDispatchEffect({ dispatchEffect, getProviderForSessionEffect: () => Effect.succeed(account.id) });
 			const getWorkspace = vi.fn(() => Effect.succeed("/tmp/session-worktree"));
-			const reload = yield* Effect.fork(reloadProviderSessionForClient({
+			const reload = yield* Effect.forkChild(reloadProviderSessionForClient({
 				clientId: "client-1", sessionId: "session-42", commandId: "cmd-reload-session",
 			}).pipe(Effect.provide(Layer.mergeAll(
 				Layer.succeed(LoggerTag, mockLogger()),
@@ -570,7 +562,7 @@ describe("reloadProviderSessionForClient", () => {
 					return Deferred.await(release).pipe(Effect.as({ models: [], commands: [] }));
 				});
 				const engine = withDispatchEffect({ dispatchEffect, getProviderForSessionEffect: () => Effect.succeed("claude") });
-				const reload = yield* Effect.fork(reloadProviderSessionForClient({ clientId: "client-1", sessionId: "session-42", commandId: "reload" }).pipe(
+				const reload = yield* Effect.forkChild(reloadProviderSessionForClient({ clientId: "client-1", sessionId: "session-42", commandId: "reload" }).pipe(
 					Effect.provide(Layer.mergeAll(
 						Layer.succeed(LoggerTag, log),
 						Layer.succeed(OrchestrationEngineTag, engine),
@@ -1297,7 +1289,7 @@ describe("switchContextWindowForSession", () => {
 					modelID: "claude-haiku-4-7",
 				});
 				yield* setContextWindow("session-42", "200k");
-				const result = yield* Effect.either(switchContextWindowForSession({
+				const result = yield* Effect.result(switchContextWindowForSession({
 					clientId: "client-1",
 					sessionId: "session-42",
 					contextWindow: "1m",
@@ -2016,7 +2008,7 @@ describe("handlePermissionResponse", () => {
 				);
 
 				yield* Effect.gen(function* () {
-					const fiber = yield* Effect.fork(
+					const fiber = yield* Effect.forkChild(
 						engine.dispatchEffect({
 							type: "send_turn",
 							commandId: "cmd-claude-in-flight",

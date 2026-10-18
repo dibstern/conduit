@@ -53,7 +53,7 @@ const makeLayer = () => {
 	const persistence = Layer.mergeAll(
 		persistenceLayer,
 		SessionEventBusLive,
-		Layer.scopedDiscard(
+		Layer.effectDiscard(
 			Effect.addFinalizer(() =>
 				Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 			),
@@ -96,7 +96,7 @@ const commit = (event: CanonicalEvent) =>
 	});
 
 describe("subscription RPC handlers", () => {
-	it.scoped(
+	it.effect(
 		"sends suffixes by default and keeps snapshots and headers whole",
 		() =>
 			Effect.gen(function* () {
@@ -173,7 +173,7 @@ describe("subscription RPC handlers", () => {
 		>().toEqualTypeOf<never>();
 	});
 
-	it.scoped(
+	it.effect(
 		"shell snapshots Forks as roots and republishes their own rows",
 		() =>
 			Effect.gen(function* () {
@@ -275,7 +275,7 @@ describe("subscription RPC handlers", () => {
 	);
 
 	for (const member of ["SubscribeShell", "SubscribeSessionDetail"] as const) {
-		it.scoped(
+		it.effect(
 			`${member} delivers real snapshots, live updates and resume with 33 subscriptions`,
 			() =>
 				Effect.gen(function* () {

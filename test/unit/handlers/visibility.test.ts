@@ -55,7 +55,7 @@ const published = Effect.flatMap(ProjectSettingsTag, ({ changes }) =>
 );
 
 describe("setHiddenEntriesForRelay", () => {
-	it.scoped(
+	it.effect(
 		"persists provided lists to relay settings and publishes the visibility setting",
 		() => {
 			const configDir = mkdtempSync(join(tmpdir(), "conduit-visibility-"));
@@ -87,7 +87,7 @@ describe("setHiddenEntriesForRelay", () => {
 		},
 	);
 
-	it.scoped("leaves the omitted list untouched", () => {
+	it.effect("leaves the omitted list untouched", () => {
 		const configDir = mkdtempSync(join(tmpdir(), "conduit-visibility-"));
 		saveRelaySettings({ hiddenAgents: ["claude/researcher"] }, configDir);
 		const layer = makeLayer(configDir);
@@ -116,7 +116,7 @@ describe("setHiddenEntriesForRelay", () => {
 		}).pipe(Effect.provide(layer));
 	});
 
-	it.scoped(
+	it.effect(
 		"surfaces fs failures as a catchable typed failure, not a defect",
 		() => {
 			// configDir points at a FILE, so saveRelaySettings' mkdirSync throws.
@@ -133,7 +133,7 @@ describe("setHiddenEntriesForRelay", () => {
 
 				expect(Exit.isFailure(exit)).toBe(true);
 				const failure = Exit.isFailure(exit)
-					? Cause.failureOption(exit.cause) // Some only for a Fail, not a Die
+					? Cause.findErrorOption(exit.cause) // Some only for a Fail, not a Die
 					: Option.none();
 				expect(Option.isSome(failure)).toBe(true);
 				if (Option.isSome(failure)) {

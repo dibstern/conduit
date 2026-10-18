@@ -6,19 +6,8 @@ import {
 	RpcTest,
 } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import {
-	Cause,
-	Chunk,
-	Effect,
-	Exit,
-	Fiber,
-	Layer,
-	type Mailbox,
-	Queue,
-	Scope,
-	Stream,
-	TestClock,
-} from "effect";
+import { Cause, Chunk, Effect, Exit, Fiber, Layer, type Mailbox, Queue, Scope, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
 import { MessageVersion } from "../../../src/lib/contracts/tool-wire.js";
@@ -329,7 +318,7 @@ describe("RpcTest subscription stream semantics", () => {
 			member === "SubscribeShell"
 				? client.SubscribeShell({})
 				: client.SubscribeSessionDetail({ sessionId: "session-1" });
-		it.scoped(`${member} preserves handler chunking`, () =>
+		it.effect(`${member} preserves handler chunking`, () =>
 			Effect.gen(function* () {
 				const messages: Observation[] = [];
 				const rpcTest = yield* RpcTest.makeClient(WsRpcGroup);
@@ -350,7 +339,7 @@ describe("RpcTest subscription stream semantics", () => {
 				]);
 			}).pipe(Effect.provide(makeLayer({ member }))),
 		);
-		it.scoped(`${member} waits for each chunk acknowledgement`, () =>
+		it.effect(`${member} waits for each chunk acknowledgement`, () =>
 			Effect.gen(function* () {
 				const messages: Observation[] = [];
 				const acknowledgements = yield* Queue.unbounded<Effect.Effect<void>>();
@@ -375,7 +364,7 @@ describe("RpcTest subscription stream semantics", () => {
 			}).pipe(Effect.provide(makeLayer({ member }))),
 		);
 
-		it.scoped(
+		it.effect(
 			`${member} carries the declared failure in the terminal Exit`,
 			() =>
 				Effect.gen(function* () {
@@ -406,7 +395,7 @@ describe("RpcTest subscription stream semantics", () => {
 				}).pipe(Effect.provide(makeLayer({ member, failRead: true }))),
 		);
 
-		it.scoped(
+		it.effect(
 			`${member} interrupts the handler when the consumer scope closes`,
 			() =>
 				Effect.gen(function* () {
@@ -477,12 +466,12 @@ describe("RpcTest subscription stream semantics", () => {
 									return yield* Effect.die(
 										"Expected interrupted terminal Exit",
 									);
-								expect(Cause.isInterrupted(terminal.exit.cause)).toBe(true);
+								expect(Cause.hasInterrupts(terminal.exit.cause)).toBe(true);
 							}
 							expect(
 								released.map(
 									(exit) =>
-										Exit.isFailure(exit) && Cause.isInterrupted(exit.cause),
+										Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause),
 								),
 							).toEqual([true]);
 						}).pipe(Effect.provide(makeLayer({ member, advances })));

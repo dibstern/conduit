@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { describe, layer } from "@effect/vitest";
 import {
 	Deferred,
@@ -329,7 +329,7 @@ describe("model handlers with Effect-native model service", () => {
 				makeOverridesStateLive(), ProjectSettingsLive, RpcSubscriptionScopeLive,
 			);
 			return yield* Effect.gen(function* () {
-				const request = yield* Effect.fork(getModelsResponse());
+				const request = yield* Effect.forkChild(getModelsResponse());
 				yield* Deferred.await(started);
 				const response = yield* Fiber.join(request);
 				expect(yield* Deferred.isDone(pending)).toBe(false);
@@ -338,7 +338,7 @@ describe("model handlers with Effect-native model service", () => {
 				const update = yield* subscribeProjectSettings().pipe(
 					Stream.tap((envelope) => envelope._tag === "synchronized" ? Deferred.succeed(subscribed, undefined) : Effect.void),
 					Stream.filter((envelope) => envelope._tag === "upsert" && envelope.item._tag === "providerModels"),
-					Stream.runHead, Effect.fork,
+					Stream.runHead, Effect.forkChild,
 				);
 				yield* Deferred.await(subscribed);
 				yield* Deferred.succeed(pending, {
@@ -360,7 +360,7 @@ describe("model handlers with Effect-native model service", () => {
 				const refreshedUpdate = yield* subscribeProjectSettings().pipe(
 					Stream.tap((envelope) => envelope._tag === "synchronized" ? Deferred.succeed(refreshSubscribed, undefined) : Effect.void),
 					Stream.filter((envelope) => envelope._tag === "upsert" && envelope.item._tag === "providerModels"),
-					Stream.runHead, Effect.fork,
+					Stream.runHead, Effect.forkChild,
 				);
 				yield* Deferred.await(refreshSubscribed);
 				const refreshed = yield* getModelsResponse({ instanceId: "claude" });

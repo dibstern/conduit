@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 describe("daemon RPC handlers", () => {
-	it.scoped(
+	it.effect(
 		"rejects session creation without a project even with a daemon default",
 		() =>
 			Effect.gen(function* () {
@@ -43,7 +43,7 @@ describe("daemon RPC handlers", () => {
 					{ originId: "daemon-client" },
 					{ disableValidation: true },
 				);
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					createSession(malformed, Headers.empty),
 				);
 				expect(result).toMatchObject({
@@ -54,7 +54,7 @@ describe("daemon RPC handlers", () => {
 			}).pipe(Effect.provide(makeDaemonRpcTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"serves daemon operations without a project or relay context",
 		() => {
 			const directory = mkdtempSync("/tmp/rpc-first-project-");
@@ -88,7 +88,7 @@ describe("daemon RPC handlers", () => {
 				).toEqual([]);
 				expect((yield* client.ListDaemonSessions({})).sessions).toEqual([]);
 				expect(
-					yield* Effect.either(client.ResolveSession({ sessionId: "missing" })),
+					yield* Effect.result(client.ResolveSession({ sessionId: "missing" })),
 				).toMatchObject({
 					_tag: "Left",
 					left: { _tag: "WsRpcError", message: "Unknown session: missing" },
@@ -105,7 +105,7 @@ describe("daemon RPC handlers", () => {
 					(yield* client.GetAutoSettleSetting({})).autoSettleAfterDays,
 				).toBe(7);
 				expect(
-					(yield* Effect.either(
+					(yield* Effect.result(
 						client.SetAutoSettleSetting({ autoSettleAfterDays: 91 }),
 					))._tag,
 				).toBe("Left");
@@ -165,7 +165,7 @@ describe("daemon RPC handlers", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"removes a project until the directory is explicitly added again",
 		() => {
 			const directory = mkdtempSync("/tmp/rpc-removed-project-");
@@ -196,7 +196,7 @@ describe("daemon RPC handlers", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"publishes project and instance changes to list subscribers without starting relays",
 		() => {
 			const directory = mkdtempSync("/tmp/rpc-project-broadcast-");

@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { Effect, Layer, ManagedRuntime, Queue, Stream } from "effect";
 import { expect, it, vi } from "vitest";
 import type { ReadModelAdvance } from "../../../../src/lib/contracts/read-model-advance.js";

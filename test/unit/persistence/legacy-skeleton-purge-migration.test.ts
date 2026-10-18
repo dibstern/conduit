@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
 import Database from "better-sqlite3";
@@ -423,7 +423,7 @@ describe("legacy skeleton purge migration", () => {
 		() =>
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					sql`DELETE FROM sessions WHERE id = 'with-message'`,
 				);
 				expect(result._tag).toBe("Left");

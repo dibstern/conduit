@@ -916,7 +916,7 @@ describe("Claude turn economics through SQLite persistence", () => {
 				yield* sql`CREATE TEMP TRIGGER reject_cost BEFORE INSERT ON events
 					WHEN NEW.type = 'turn.completed' AND json_extract(NEW.data, '$.providerCostTotalUsd') = 2
 					BEGIN SELECT RAISE(ABORT, 'reject test completion'); END`;
-				const rejected = yield* Effect.either(
+				const rejected = yield* Effect.result(
 					persist.persistEvents([
 						completion("s1", "a1", 1.5),
 						completion("s1", "a1", 2),

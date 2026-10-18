@@ -36,10 +36,10 @@ export interface HttpServerConfig {
 	readonly tlsKeyPath: string | undefined;
 }
 
-export class HttpServerConfigTag extends Context.Tag("HttpServerConfig")<
+export class HttpServerConfigTag extends Context.Service<
 	HttpServerConfigTag,
 	HttpServerConfig
->() {}
+>()("HttpServerConfig") {}
 
 /**
  * Derive HttpServerConfigTag from DaemonEnvConfigTag — production use.
@@ -92,7 +92,7 @@ export const HttpServerLive: Layer.Layer<
 	| ProjectsProvider
 	| SetupInfoProvider
 	| StaticDirTag
-> = Layer.unwrapEffect(
+> = Layer.unwrap(
 	Effect.gen(function* () {
 		const config = yield* HttpServerConfigTag;
 		const factory = makeServerFactory(config);

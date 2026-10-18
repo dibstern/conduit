@@ -12,7 +12,7 @@ describe("standalone DaemonSessionQueryServiceLive", () => {
 		() =>
 			Effect.gen(function* () {
 				const service = yield* DaemonSessionQueryServiceTag;
-				expect(yield* Effect.either(service.list({ limit: 5 }))).toMatchObject({
+				expect(yield* Effect.result(service.list({ limit: 5 }))).toMatchObject({
 					_tag: "Left",
 					left: {
 						_tag: "DaemonSessionQueryNotSupported",

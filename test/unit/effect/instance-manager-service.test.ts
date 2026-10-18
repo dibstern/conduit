@@ -47,7 +47,7 @@ const sampleInput: AddInstanceInput = {
 
 describe("InstanceManager — missing methods", () => {
 	describe("addInstance return type", () => {
-		it.scoped("returns the created OpenCodeInstance", () =>
+		it.effect("returns the created OpenCodeInstance", () =>
 			Effect.gen(function* () {
 				const result = yield* addInstance(sampleInput);
 				expect(result.id).toBe("inst-1");
@@ -60,7 +60,7 @@ describe("InstanceManager — missing methods", () => {
 			}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);
 
-		it.scoped(
+		it.effect(
 			"rejects duplicate IDs without leaking the previous external URL",
 			() =>
 				Effect.gen(function* () {
@@ -91,7 +91,7 @@ describe("InstanceManager — missing methods", () => {
 	});
 
 	describe("startInstance", () => {
-		it.scoped("sets status to 'starting' and publishes event", () =>
+		it.effect("sets status to 'starting' and publishes event", () =>
 			Effect.gen(function* () {
 				// First add an instance, then stop it, then start it
 				yield* addInstance(sampleInput);
@@ -111,7 +111,7 @@ describe("InstanceManager — missing methods", () => {
 			}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);
 
-		it.scoped(
+		it.effect(
 			"keeps configured Claude instances healthy without health checks",
 			() => {
 				let healthChecks = 0;
@@ -160,7 +160,7 @@ describe("InstanceManager — missing methods", () => {
 	});
 
 	describe("stopInstance", () => {
-		it.scoped("sets status to 'stopped' and publishes event", () =>
+		it.effect("sets status to 'stopped' and publishes event", () =>
 			Effect.gen(function* () {
 				yield* addInstance(sampleInput);
 
@@ -181,7 +181,7 @@ describe("InstanceManager — missing methods", () => {
 	});
 
 	describe("updateInstance", () => {
-		it.scoped("merges partial updates into existing instance", () =>
+		it.effect("merges partial updates into existing instance", () =>
 			Effect.gen(function* () {
 				yield* addInstance(sampleInput);
 
@@ -199,7 +199,7 @@ describe("InstanceManager — missing methods", () => {
 			}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);
 
-		it.scoped("publishes status changed event", () =>
+		it.effect("publishes status changed event", () =>
 			Effect.gen(function* () {
 				yield* addInstance(sampleInput);
 				const sub = yield* subscribeToDaemonEvents;
@@ -211,7 +211,7 @@ describe("InstanceManager — missing methods", () => {
 			}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);
 
-		it.scoped("can update status field", () =>
+		it.effect("can update status field", () =>
 			Effect.gen(function* () {
 				yield* addInstance(sampleInput);
 
@@ -224,7 +224,7 @@ describe("InstanceManager — missing methods", () => {
 	});
 
 	describe("persistConfig", () => {
-		it.scoped("requests config persistence", () => {
+		it.effect("requests config persistence", () => {
 			let requests = 0;
 			const trackingPersistence = Layer.succeed(ConfigPersistenceTag, {
 				requestSave: Effect.sync(() => {
@@ -247,7 +247,7 @@ describe("InstanceManager — missing methods", () => {
 	});
 
 	describe("legacy event bus", () => {
-		it.scoped("still publishes status events through the daemon bus", () =>
+		it.effect("still publishes status events through the daemon bus", () =>
 			Effect.gen(function* () {
 				const sub = yield* subscribeToDaemonEvents;
 
@@ -262,7 +262,7 @@ describe("InstanceManager — missing methods", () => {
 	});
 
 	describe("getExternalUrl", () => {
-		it.scoped("returns URL with daemon host and instance port", () =>
+		it.effect("returns URL with daemon host and instance port", () =>
 			Effect.gen(function* () {
 				yield* addInstance(sampleInput);
 
@@ -271,7 +271,7 @@ describe("InstanceManager — missing methods", () => {
 			}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);
 
-		it.scoped("returns null for non-existent instance", () =>
+		it.effect("returns null for non-existent instance", () =>
 			Effect.gen(function* () {
 				const url = yield* getExternalUrl("does-not-exist", "host");
 				expect(url).toBeNull();
@@ -280,7 +280,7 @@ describe("InstanceManager — missing methods", () => {
 	});
 
 	describe("getInstanceUrl", () => {
-		it.scoped("returns configured external URL for unmanaged instances", () =>
+		it.effect("returns configured external URL for unmanaged instances", () =>
 			Effect.gen(function* () {
 				yield* addInstance({
 					id: "remote-1",
@@ -295,7 +295,7 @@ describe("InstanceManager — missing methods", () => {
 			}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);
 
-		it.scoped(
+		it.effect(
 			"includes configured external URL in persisted instance config",
 			() =>
 				Effect.gen(function* () {
@@ -321,7 +321,7 @@ describe("InstanceManager — missing methods", () => {
 				}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);
 
-		it.scoped("persists Claude driver and config directory", () =>
+		it.effect("persists Claude driver and config directory", () =>
 			Effect.gen(function* () {
 				yield* addInstance({
 					id: "work-claude",
@@ -349,7 +349,7 @@ describe("InstanceManager — missing methods", () => {
 			}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);
 
-		it.scoped("returns localhost URL with instance port", () =>
+		it.effect("returns localhost URL with instance port", () =>
 			Effect.gen(function* () {
 				yield* addInstance(sampleInput);
 
@@ -358,7 +358,7 @@ describe("InstanceManager — missing methods", () => {
 			}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);
 
-		it.scoped("returns null for non-existent instance", () =>
+		it.effect("returns null for non-existent instance", () =>
 			Effect.gen(function* () {
 				const url = yield* getInstanceUrl("does-not-exist");
 				expect(url).toBeNull();

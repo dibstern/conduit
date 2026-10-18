@@ -1,4 +1,4 @@
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber } from "effect";
 import { expect, vi } from "vitest";
@@ -195,10 +195,10 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				const engine = new OrchestrationEngine({ registry });
 				const command = sendTurnCommand();
 
-				const failed = yield* Effect.either(engine.dispatchEffect(command));
+				const failed = yield* Effect.result(engine.dispatchEffect(command));
 				expect(failed._tag).toBe("Left");
-				if (failed._tag === "Left") {
-					expect(failed.left).toMatchObject({
+				if (failed._tag === "Failure") {
+					expect(failed.failure).toMatchObject({
 						_tag: "ProviderNotRegistered",
 						providerId: "opencode",
 					});
@@ -402,7 +402,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 					providerId: "deleted-instance",
 				};
 
-				const result = yield* Effect.either(engine.dispatchEffect(command));
+				const result = yield* Effect.result(engine.dispatchEffect(command));
 
 				expect(result).toMatchObject({
 					_tag: "Left",
@@ -442,7 +442,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				);
 				registry.registerInstance(instance);
 
-				const fiber = yield* Effect.fork(
+				const fiber = yield* Effect.forkChild(
 					engine.dispatchEffect({
 						...sendTurnCommand(),
 						commandId: "cmd-bind-in-flight",

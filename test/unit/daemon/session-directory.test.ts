@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { it } from "@effect/vitest";
 import { Effect, Layer, Option, Ref } from "effect";
 import { afterEach, expect, vi } from "vitest";
@@ -85,7 +85,7 @@ it.scoped(
 				),
 			).toEqual({ projectSlug: "b" });
 			expect(
-				yield* Effect.either(
+				yield* Effect.result(
 					handlers.ResolveSession(new ResolveSession({ sessionId: "missing" })),
 				),
 			).toMatchObject({ _tag: "Left", left: { _tag: "WsRpcError" } });
@@ -114,7 +114,7 @@ it.scoped(
 				yield* attach({ originId: "directory-test", sessionId: "ses_b" }),
 			).toEqual({ projectSlug: "b", sessionSlug: "b" });
 			expect(
-				yield* Effect.either(
+				yield* Effect.result(
 					attach({ originId: "directory-test", sessionId: "missing" }),
 				),
 			).toMatchObject({ _tag: "Left", left: { _tag: "WsRpcError" } });
@@ -160,7 +160,7 @@ it.scoped(
 					),
 				);
 				expect(yield* directory.projectOf("child")).toEqual(Option.some("b"));
-				yield* Effect.either(
+				yield* Effect.result(
 					commit.write((_project, stamp) =>
 						stamp(() =>
 							Effect.gen(function* () {
@@ -193,7 +193,7 @@ it.scoped(
 	() => {
 		const { root, projects } = fixture();
 		return Effect.gen(function* () {
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				resolveDaemonOpenCodeSession("opencode", "shared-provider-id"),
 			);
 			expect(result).toMatchObject({

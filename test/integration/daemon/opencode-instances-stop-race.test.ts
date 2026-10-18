@@ -1,13 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import {
-	Deferred,
-	Effect,
-	Fiber,
-	Option,
-	TestClock,
-	TestContext,
-} from "effect";
+import { Deferred, Effect, Fiber, Option, TestContext } from "effect";
+import { TestClock } from "effect/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	makeOpenCodeInstancesLive,
@@ -119,7 +113,7 @@ describe("OpenCode Instances use during an idle stop", () => {
 					// No demand: the grace runs out and the idle stop begins.
 					yield* TestClock.adjust("1 second");
 					yield* Deferred.await(stopBegan);
-					const during = yield* Effect.fork(cwdViaUse);
+					const during = yield* Effect.forkChild(cwdViaUse);
 					yield* Effect.promise(
 						() => new Promise((done) => setTimeout(done, 200)),
 					);

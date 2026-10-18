@@ -11,18 +11,8 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import {
-	Clock,
-	Context,
-	Effect,
-	Fiber,
-	Layer,
-	ManagedRuntime,
-	Option,
-	PubSub,
-	Stream,
-	TestClock,
-} from "effect";
+import { Clock, Context, Effect, Fiber, Layer, ManagedRuntime, Option, PubSub, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { makeDaemonLive } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { RelayFactoryTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
@@ -260,7 +250,7 @@ describe("daemon-wide committed session signals", () => {
 		}
 	});
 
-	it.scoped(
+	it.effect(
 		"coalesces sidebar advances across projects with one trailing refresh",
 		() =>
 			Effect.gen(function* () {

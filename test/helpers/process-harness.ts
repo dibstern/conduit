@@ -88,13 +88,13 @@ export { responseChunks };
 
 const TIMEOUT_MS = 15_000;
 
-class BrowserRpc extends Context.Tag("ProcessHarnessBrowserRpc")<
+class BrowserRpc extends Context.Service<
 	BrowserRpc,
 	RpcClient.RpcClient<
 		RpcGroup.Rpcs<typeof WsRpcGroup>,
 		import("@effect/rpc/RpcClientError").RpcClientError
 	>
->() {}
+>()("ProcessHarnessBrowserRpc") {}
 
 function browserRpcRuntime(
 	port: number,
@@ -2161,7 +2161,7 @@ export class ProcessBrowser {
 		this.sessionsReady = (async () => {
 			const cursor = this.frames.length;
 			this.sessions = this.watch(this.rpc.SubscribeShell({}), (envelope) =>
-				Effect.gen(this, function* () {
+				Effect.gen({ self: this }, function* () {
 					this.record({ type: "shell", ...envelope });
 					if (envelope._tag === "snapshot")
 						this.record({ type: "session_snapshot" });
@@ -2250,7 +2250,7 @@ export class ProcessBrowser {
 						sessionId,
 					}),
 					(envelope) =>
-						Effect.gen(this, function* () {
+						Effect.gen({ self: this }, function* () {
 							this.record({ type: "family", familyOf: sessionId, ...envelope });
 							const rows =
 								envelope._tag === "snapshot"

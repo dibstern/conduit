@@ -530,7 +530,7 @@ describe("ProviderTurnService", () => {
 					},
 					{ eventId: "evt-required-ingestion", providerId: "claude" },
 				);
-				const result = yield* Effect.either(sink.push(event));
+				const result = yield* Effect.result(sink.push(event));
 				expect(result._tag).toBe("Right");
 				expect(ingestion.ingest).toHaveBeenCalledWith(event);
 			}),

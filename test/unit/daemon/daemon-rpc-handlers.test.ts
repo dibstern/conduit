@@ -41,7 +41,7 @@ const makeClient = Effect.gen(function* () {
 });
 
 describe("daemon control through the shared RPC group", () => {
-	it.scoped(
+	it.effect(
 		"returns live status, cached session counts and optional SSE health",
 		() => {
 			const sse = {
@@ -134,7 +134,7 @@ describe("daemon control through the shared RPC group", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"updates reactive auth and both PIN refs before requesting persistence",
 		() => {
 			const snapshots: Array<{
@@ -174,7 +174,7 @@ describe("daemon control through the shared RPC group", () => {
 		},
 	);
 
-	it.scoped("toggles keep-awake and persists command arguments", () =>
+	it.effect("toggles keep-awake and persists command arguments", () =>
 		Effect.gen(function* () {
 			const client = yield* makeClient;
 			const state = yield* DaemonStateTag;
@@ -213,7 +213,7 @@ describe("daemon control through the shared RPC group", () => {
 	// Failure modes: unavailable CLI, conflicting Serve handler, failed enable or
 	// disable, stale URL after disabling, and HTTP/HTTPS proxy mismatch.
 	for (const tlsEnabled of [false, true]) {
-		it.scoped(
+		it.effect(
 			`applies and persists Tailscale Serve with TLS ${tlsEnabled}`,
 			() => {
 				const calls: string[][] = [];
@@ -307,7 +307,7 @@ describe("daemon control through the shared RPC group", () => {
 	}
 
 	for (const enabled of [true, false]) {
-		it.scoped(
+		it.effect(
 			`keeps the previous Tailscale state when setting ${enabled} fails`,
 			() => {
 				const requestSave = vi.fn(() => {});
@@ -372,7 +372,7 @@ describe("daemon control through the shared RPC group", () => {
 		);
 	}
 
-	it.scoped(
+	it.effect(
 		"reports unavailable Tailscale and rejects enabling without persisting",
 		() => {
 			const requestSave = vi.fn(() => {});
@@ -408,7 +408,7 @@ describe("daemon control through the shared RPC group", () => {
 		},
 	);
 
-	it.scoped("rejects a conflicting Serve root and leaves it untouched", () => {
+	it.effect("rejects a conflicting Serve root and leaves it untouched", () => {
 		const calls: string[][] = [];
 		return Effect.gen(function* () {
 			const client = yield* makeClient;
@@ -455,7 +455,7 @@ describe("daemon control through the shared RPC group", () => {
 		);
 	});
 
-	it.scoped(
+	it.effect(
 		"reconciles its HTTPS proxy after a restart changes the local listener to HTTP",
 		() => {
 			const calls: string[][] = [];
@@ -504,7 +504,7 @@ describe("daemon control through the shared RPC group", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"updates the project default agent through the cached relay",
 		() => {
 			const setDefaultAgent = vi.fn((_agent: string) => Effect.void);
@@ -533,7 +533,7 @@ describe("daemon control through the shared RPC group", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"returns typed errors when a relay rejects default agent updates",
 		() =>
 			Effect.gen(function* () {
@@ -576,7 +576,7 @@ describe("daemon control through the shared RPC group", () => {
 	);
 
 	for (const command of ["Shutdown", "RestartWithConfig"] as const) {
-		it.scoped(
+		it.effect(
 			`${command} marks shutdown without completing the shutdown signal`,
 			() => {
 				const saves = vi.fn();
@@ -619,7 +619,7 @@ describe("daemon control through the shared RPC group", () => {
 		);
 	}
 
-	it.scoped(
+	it.effect(
 		"lists and inspects instances with stable added IDs and typed missing-instance errors",
 		() =>
 			Effect.gen(function* () {

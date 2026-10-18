@@ -69,17 +69,17 @@ describe("OpenCodeProviderInstance action methods", () => {
 			instance = new OpenCodeProviderInstance({ client });
 
 			const result = await Effect.runPromise(
-				Effect.either(instance.interruptTurnEffect("bad-session")),
+				Effect.result(instance.interruptTurnEffect("bad-session")),
 			);
 
 			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expect(result.left).toMatchObject({
+			if (result._tag === "Failure") {
+				expect(result.failure).toMatchObject({
 					_tag: "ProviderInstanceFailure",
 					providerId: "opencode",
 					operation: "interruptTurn",
 				});
-				expect(result.left.message).toContain("session not found");
+				expect(result.failure.message).toContain("session not found");
 			}
 		});
 	});
@@ -222,17 +222,17 @@ describe("OpenCodeProviderInstance action methods", () => {
 			const result = await Effect.runPromise(
 				instance
 					.resolvePermissionEffect("s1", "perm-2", "always")
-					.pipe(Effect.either),
+					.pipe(Effect.result),
 			);
 
 			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expect(result.left).toMatchObject({
+			if (result._tag === "Failure") {
+				expect(result.failure).toMatchObject({
 					_tag: "ProviderInstanceFailure",
 					providerId: "opencode",
 					operation: "resolvePermission",
 				});
-				expect(result.left.message).toContain(`${operation} failed`);
+				expect(result.failure.message).toContain(`${operation} failed`);
 			}
 			expect(client.permission.reply).not.toHaveBeenCalled();
 		});
@@ -251,17 +251,17 @@ describe("OpenCodeProviderInstance action methods", () => {
 			const result = await Effect.runPromise(
 				instance
 					.resolvePermissionEffect("s1", "bad-perm", "once")
-					.pipe(Effect.either),
+					.pipe(Effect.result),
 			);
 
 			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expect(result.left).toMatchObject({
+			if (result._tag === "Failure") {
+				expect(result.failure).toMatchObject({
 					_tag: "ProviderInstanceFailure",
 					providerId: "opencode",
 					operation: "resolvePermission",
 				});
-				expect(result.left.message).toContain("permission expired");
+				expect(result.failure.message).toContain("permission expired");
 			}
 		});
 	});
@@ -325,17 +325,17 @@ describe("OpenCodeProviderInstance action methods", () => {
 			const result = await Effect.runPromise(
 				instance
 					.resolveQuestionEffect("s1", "bad-q", { answer: "yes" })
-					.pipe(Effect.either),
+					.pipe(Effect.result),
 			);
 
 			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expect(result.left).toMatchObject({
+			if (result._tag === "Failure") {
+				expect(result.failure).toMatchObject({
 					_tag: "ProviderInstanceFailure",
 					providerId: "opencode",
 					operation: "resolveQuestion",
 				});
-				expect(result.left.message).toContain("question expired");
+				expect(result.failure.message).toContain("question expired");
 			}
 		});
 	});
@@ -423,16 +423,16 @@ describe("OpenCodeProviderInstance action methods", () => {
 			});
 
 			const result = await Effect.runPromise(
-				Effect.either(instance.interruptTurnEffect("bound-s")),
+				Effect.result(instance.interruptTurnEffect("bound-s")),
 			);
 
 			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expect(result.left).toMatchObject({
+			if (result._tag === "Failure") {
+				expect(result.failure).toMatchObject({
 					_tag: "ProviderInstanceFailure",
 					operation: "interruptTurn",
 				});
-				expect(result.left.message).toContain("oc-b unavailable");
+				expect(result.failure.message).toContain("oc-b unavailable");
 			}
 			expect(client.session.abort).not.toHaveBeenCalled();
 		});

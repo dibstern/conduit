@@ -35,10 +35,10 @@ import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import { assembleDetailRows } from "../../helpers/detail-rows.js";
 
-class TestRpc extends Context.Tag("IntegrationTestBrowserRpc")<
+class TestRpc extends Context.Service<
 	TestRpc,
 	RpcClient.FromGroup<typeof WsRpcGroup, RpcClientError.RpcClientError>
->() {}
+>()("IntegrationTestBrowserRpc") {}
 
 type HistoryMessage = typeof HistoryMessageSchema.Type;
 
@@ -741,7 +741,7 @@ export class TestWsClient {
 				).pipe(
 					Effect.onExit((exit) =>
 						Effect.sync(() => {
-							if (Exit.isFailure(exit) && Cause.isInterruptedOnly(exit.cause))
+							if (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause))
 								return;
 							if (Exit.isFailure(exit)) this.fail(Cause.squash(exit.cause));
 							else this.fail(new Error("RPC subscription ended"));

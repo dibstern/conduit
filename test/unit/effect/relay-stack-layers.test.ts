@@ -56,7 +56,7 @@ const relayStateTestLayer = RelayStateLive.pipe(
 );
 
 describe("Relay stack Layer composition", () => {
-	it.scoped("RelayStateLive constructs all Effect-native state services", () =>
+	it.effect("RelayStateLive constructs all Effect-native state services", () =>
 		Effect.gen(function* () {
 			// Verify all state Tags are accessible through the composed Layer
 			const registryRef = yield* SessionRegistryStateTag;
@@ -77,7 +77,7 @@ describe("Relay stack Layer composition", () => {
 		}).pipe(Effect.provide(Layer.fresh(relayStateTestLayer))),
 	);
 
-	it.scoped("RelayStateLive composes with service dependencies provided", () =>
+	it.effect("RelayStateLive composes with service dependencies provided", () =>
 		Effect.gen(function* () {
 			// Just verify construction succeeds — bridge layers not needed
 			const ref = yield* SessionRegistryStateTag;

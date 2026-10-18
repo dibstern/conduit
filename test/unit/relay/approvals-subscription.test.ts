@@ -32,7 +32,7 @@ const makeLayer = () => {
 			SessionEventBusLive,
 		),
 		SessionEventBusLive,
-		Layer.scopedDiscard(
+		Layer.effectDiscard(
 			Effect.addFinalizer(() =>
 				Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 			),
@@ -130,7 +130,7 @@ const take = <A>(q: Queue.Queue<A>, n: number) =>
 	Effect.forEach(Array.from({ length: n }), () => Queue.take(q));
 
 describe("subscribeApprovals", () => {
-	it.scoped(
+	it.effect(
 		"raise then resolve: snapshot, synchronized, upsert, remove, each version once",
 		() =>
 			Effect.gen(function* () {
@@ -203,7 +203,7 @@ describe("subscribeApprovals", () => {
 			}).pipe(Effect.provide(makeLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"serves the whole project: a subagent's approval needs no membership",
 		() =>
 			Effect.gen(function* () {
@@ -222,7 +222,7 @@ describe("subscribeApprovals", () => {
 			}).pipe(Effect.provide(makeLayer())),
 	);
 
-	it.scoped("deleting a session removes the approvals it was holding", () =>
+	it.effect("deleting a session removes the approvals it was holding", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			const q = yield* open;

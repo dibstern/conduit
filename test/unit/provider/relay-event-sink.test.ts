@@ -195,11 +195,11 @@ describe("createRelayEventSink — persistence", () => {
 			},
 		});
 
-		const result = await Effect.runPromise(Effect.either(sink.push(event)));
+		const result = await Effect.runPromise(Effect.result(sink.push(event)));
 
 		expect(result._tag).toBe("Left");
-		if (result._tag === "Left") {
-			expect(result.left).toBe(ingestionError);
+		if (result._tag === "Failure") {
+			expect(result.failure).toBe(ingestionError);
 		}
 	});
 
@@ -290,7 +290,7 @@ describe("createRelayEventSink — permission/question", () => {
 		const sink = createRelayEventSink({ sessionId: "ses-1" });
 
 		const permissionResult = await Effect.runPromise(
-			Effect.either(
+			Effect.result(
 				sink.requestPermission({
 					requestId: "req_1",
 					toolName: "Bash",
@@ -311,7 +311,7 @@ describe("createRelayEventSink — permission/question", () => {
 		});
 
 		const questionResult = await Effect.runPromise(
-			Effect.either(
+			Effect.result(
 				sink.requestQuestion({
 					requestId: "que_1",
 					questions: [

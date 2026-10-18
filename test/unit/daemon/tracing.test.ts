@@ -92,7 +92,7 @@ const makeRecordingTracer = (
 	});
 
 describe("Tracing Layer", () => {
-	it.scoped("provides NodeSdk and captures spans via InMemoryExporter", () => {
+	it.effect("provides NodeSdk and captures spans via InMemoryExporter", () => {
 		const exporter = new InMemorySpanExporter();
 		const processor = new SimpleSpanProcessor(exporter);
 
@@ -115,7 +115,7 @@ describe("Tracing Layer", () => {
 		);
 	});
 
-	it.scoped("captures spans with a shared exporter reference", () => {
+	it.effect("captures spans with a shared exporter reference", () => {
 		const exporter = new InMemorySpanExporter();
 		const processor = new SimpleSpanProcessor(exporter);
 
@@ -140,7 +140,7 @@ describe("Tracing Layer", () => {
 		);
 	});
 
-	it.scoped("is a no-op when disabled", () =>
+	it.effect("is a no-op when disabled", () =>
 		Effect.gen(function* () {
 			// When disabled, Effect.withSpan should still work (it's always
 			// safe) — it just won't export to any backend.
@@ -148,7 +148,7 @@ describe("Tracing Layer", () => {
 		}).pipe(Effect.provide(makeTracingLive({ enabled: false }))),
 	);
 
-	it.scoped("is a no-op when enabled but no exporters configured", () =>
+	it.effect("is a no-op when enabled but no exporters configured", () =>
 		Effect.gen(function* () {
 			yield* Effect.withSpan("no.exporters")(Effect.void);
 		}).pipe(
@@ -161,7 +161,7 @@ describe("Tracing Layer", () => {
 		),
 	);
 
-	it.scoped(
+	it.effect(
 		"makeDaemonTracingLive writes local spans with the floor disabled",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-daemon-tracing-"));
@@ -195,7 +195,7 @@ describe("Tracing Layer", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"makeDaemonTracingLive fans out spans to local file tracing and OTel processors",
 		() => {
 			const exporter = new InMemorySpanExporter();
@@ -377,7 +377,7 @@ describe("Tracing Layer", () => {
 		expect(upstreamContextSpan?.traceId).toBe("upstream-trace");
 	});
 
-	it.scoped(
+	it.effect(
 		"makeDaemonTracingLive does not create a local file when disabled",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-daemon-tracing-"));

@@ -379,7 +379,7 @@ describe("Persistence Effect", () => {
 		),
 	);
 
-	it.scoped(
+	it.effect(
 		"re-announces a tripped legacy skeleton breaker on every startup",
 		() => {
 			const messages: string[] = [];
@@ -435,7 +435,7 @@ describe("Persistence Effect", () => {
 		"rejects an unknown migration ledger before changing the database",
 		() =>
 			Effect.gen(function* () {
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					Effect.gen(function* () {
 						yield* PersistenceServiceTag;
 					}).pipe(
@@ -460,8 +460,8 @@ describe("Persistence Effect", () => {
 					),
 				);
 				expect(result._tag).toBe("Left");
-				if (result._tag === "Left")
-					expectMigrationFailure(result.left, "Unknown recorded migration");
+				if (result._tag === "Failure")
+					expectMigrationFailure(result.failure, "Unknown recorded migration");
 			}),
 	);
 
@@ -524,7 +524,7 @@ describe("Persistence Effect", () => {
 
 	it.effect("startup migration refuses readonly Effect SQLite layers", () =>
 		Effect.gen(function* () {
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				Effect.gen(function* () {
 					yield* PersistenceServiceTag;
 				}).pipe(
@@ -538,13 +538,13 @@ describe("Persistence Effect", () => {
 			);
 
 			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expectMigrationFailure(result.left, "Failed to execute statement");
+			if (result._tag === "Failure") {
+				expectMigrationFailure(result.failure, "Failed to execute statement");
 			}
 		}),
 	);
 
-	it.scoped.each(["reclaim", "below threshold", "low disk", "rename failure"])(
+	it.effect.each(["reclaim", "below threshold", "low disk", "rename failure"])(
 		"file-backed startup stays healthy after %s",
 		(scenario) => {
 			const messages: string[] = [];
@@ -684,7 +684,7 @@ describe("Persistence Effect", () => {
 					yield* sql`INSERT INTO test_rollback (id, name) VALUES (1, 'x')`;
 					yield* Effect.fail(new Error("boom"));
 				}),
-			).pipe(Effect.catchAll(() => Effect.void));
+			).pipe(Effect.catch(() => Effect.void));
 			const rows = yield* sql`SELECT * FROM test_rollback`;
 			expect(rows.length).toBe(0);
 		}).pipe(Effect.provide(makeTestSqlLayer())),

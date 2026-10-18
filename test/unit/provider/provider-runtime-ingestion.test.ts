@@ -362,7 +362,7 @@ describe("ProviderRuntimeIngestion", () => {
 							},
 						}),
 					)
-					.pipe(Effect.either);
+					.pipe(Effect.result);
 			}).pipe(Effect.provide(layer)),
 		);
 
@@ -404,7 +404,7 @@ describe("ProviderRuntimeIngestion", () => {
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const ingestion = yield* ProviderRuntimeIngestionTag;
-				const fiber = yield* Effect.fork(
+				const fiber = yield* Effect.forkChild(
 					ingestion.ingest(
 						runtimeEvent({
 							eventId: "interrupt-during-bus-publish",
@@ -773,7 +773,7 @@ describe("ProviderRuntimeIngestion", () => {
 							},
 						}),
 					)
-					.pipe(Effect.fork);
+					.pipe(Effect.forkChild);
 				yield* Deferred.await(firstAppendStarted);
 				const second = yield* ingestion
 					.ingest(
@@ -786,7 +786,7 @@ describe("ProviderRuntimeIngestion", () => {
 							},
 						}),
 					)
-					.pipe(Effect.fork);
+					.pipe(Effect.forkChild);
 
 				expect(harness.append).toHaveBeenCalledTimes(1);
 				yield* Deferred.succeed(releaseFirstAppend, undefined);
@@ -840,7 +840,7 @@ describe("ProviderRuntimeIngestion", () => {
 							},
 						}),
 					)
-					.pipe(Effect.either);
+					.pipe(Effect.result);
 				yield* ingestion.ingest(
 					runtimeEvent({
 						eventId: "thinking-start",

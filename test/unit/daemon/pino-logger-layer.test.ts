@@ -128,7 +128,7 @@ describe("PinoLoggerLive", () => {
 			const program = Effect.gen(function* () {
 				yield* Effect.fail(new Error("boom"));
 			}).pipe(
-				Effect.catchAllCause((cause) =>
+				Effect.catchCause((cause) =>
 					Effect.logError("operation failed").pipe(
 						Effect.annotateLogs({
 							err: Cause.pretty(cause),

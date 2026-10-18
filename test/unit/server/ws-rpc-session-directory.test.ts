@@ -88,7 +88,7 @@ it.scoped(
 			expect(resolve.mock.calls.every(([slug]) => slug === "b")).toBe(true);
 			resolve.mockClear();
 			expect(
-				yield* Effect.either(client.MarkSessionRead({ sessionId: "missing" })),
+				yield* Effect.result(client.MarkSessionRead({ sessionId: "missing" })),
 			).toMatchObject({
 				_tag: "Left",
 				left: {
@@ -97,7 +97,7 @@ it.scoped(
 				},
 			});
 			expect(
-				yield* Effect.either(
+				yield* Effect.result(
 					client
 						.SubscribeSessionTodos({ sessionId: "missing" })
 						.pipe(Stream.runDrain),

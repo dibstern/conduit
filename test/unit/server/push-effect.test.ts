@@ -11,7 +11,7 @@ import {
 } from "../../../src/lib/domain/server/Services/push-service.js";
 
 describe("Push Notifications Effect", () => {
-	it.scoped("subscribe adds subscription", () => {
+	it.effect("subscribe adds subscription", () => {
 		const mockSend = vi.fn().mockReturnValue(Effect.succeed(undefined));
 		return Effect.gen(function* () {
 			const push = yield* PushManagerTag;
@@ -24,7 +24,7 @@ describe("Push Notifications Effect", () => {
 		}).pipe(Effect.provide(PushManagerLive({ sendPush: mockSend })));
 	});
 
-	it.scoped("broadcast sends to all", () => {
+	it.effect("broadcast sends to all", () => {
 		const mockSend = vi.fn().mockReturnValue(Effect.succeed(undefined));
 		return Effect.gen(function* () {
 			const push = yield* PushManagerTag;
@@ -43,7 +43,7 @@ describe("Push Notifications Effect", () => {
 		}).pipe(Effect.provide(PushManagerLive({ sendPush: mockSend })));
 	});
 
-	it.scoped("individual failure does not block others", () => {
+	it.effect("individual failure does not block others", () => {
 		const mockSend = vi
 			.fn()
 			.mockReturnValueOnce(Effect.fail(new Error("network")))
@@ -65,7 +65,7 @@ describe("Push Notifications Effect", () => {
 		}).pipe(Effect.provide(PushManagerLive({ sendPush: mockSend })));
 	});
 
-	it.scoped(
+	it.effect(
 		"daemon live layer exposes one initialized legacy-compatible sender",
 		() => {
 			const configDir = mkdtempSync(join(tmpdir(), "conduit-push-"));

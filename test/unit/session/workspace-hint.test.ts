@@ -833,7 +833,7 @@ describe("workspace hint resolution against real worktrees", () => {
 								),
 							),
 						).pipe(
-							Effect.catchAllDefect((defect) => {
+							Effect.catchDefect((defect) => {
 								if (!(defect instanceof SqlError)) return Effect.die(defect);
 								expect(bodyCompleted).toBe(true);
 								// Effect SQL makes COMMIT errors defects and leaves SQLite's
@@ -940,7 +940,7 @@ describe("workspace hint resolution against real worktrees", () => {
 				expect(
 					yield* workspace
 						.move("s-opencode", folders.b, "user")
-						.pipe(Effect.either),
+						.pipe(Effect.result),
 				).toMatchObject({
 					_tag: "Left",
 					left: { reason: "unsupported-provider" },
@@ -953,7 +953,7 @@ describe("workspace hint resolution against real worktrees", () => {
 				expect(
 					yield* workspace
 						.move("s-opencode", folders.c, "user")
-						.pipe(Effect.either),
+						.pipe(Effect.result),
 				).toMatchObject({
 					_tag: "Left",
 					left: { reason: "unsupported-provider" },
@@ -961,7 +961,7 @@ describe("workspace hint resolution against real worktrees", () => {
 				expect(
 					yield* workspace
 						.resolve("s-opencode", folders.b, "launch")
-						.pipe(Effect.either),
+						.pipe(Effect.result),
 				).toMatchObject({
 					_tag: "Left",
 					left: { reason: "unsupported-provider" },
