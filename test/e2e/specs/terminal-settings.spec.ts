@@ -1,9 +1,24 @@
 import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test as base, expect, type Page } from "@playwright/test";
+import {
+	DEFAULT_TERMINAL_KEYS,
+	type TerminalKeyAction,
+} from "../../../src/lib/contracts/terminal-keys.js";
 import { GetTerminalKeys } from "../../../src/lib/contracts/ws-rpc.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 import { chooseSettingsOption } from "../helpers/settings.js";
 import { startByteDump } from "../helpers/terminal-bytes.js";
+import {
+	confirmationsShown,
+	countConfirmations,
+	flick,
+	openPhoneTerminal,
+	row,
+	rowKey,
+	tap,
+	textarea,
+} from "../helpers/terminal-keys.js";
 import { AppPage } from "../page-objects/app.page.js";
 
 // Exercise the daemon's persisted settings and live project stream, with a
@@ -289,6 +304,7 @@ test("Terminal settings persist each change and update a second device live", as
 				modifiers: false,
 				arrows: false,
 			},
+			row: DEFAULT_TERMINAL_KEYS.row,
 			optionKey: "meta",
 			tapTwiceToLock: false,
 			pasteAsOneBlock: false,
@@ -307,6 +323,137 @@ test("Terminal settings persist each change and update a second device live", as
 			});
 	} finally {
 		await secondContext.close();
+	}
+});
+
+test("a desktop row edit reaches an open phone and persists after reload", async ({
+	page,
+	browser,
+	harness,
+	sessionUrl,
+}, testInfo) => {
+	await new AppPage(page).goto(sessionUrl);
+	await openTerminalSettings(page);
+	const phoneContext = await browser.newContext({
+		viewport: { width: 390, height: 844 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	try {
+		const phone = await phoneContext.newPage();
+		await new AppPage(phone).goto(sessionUrl);
+		await phone.getByTestId("session-bar-island-overflow").tap();
+		await phone.getByTestId("overflow-view-terminal").tap();
+		const row = phone.locator(".term-key-row");
+		await expect(
+			row.getByRole("button", {
+				name: "Paste, flick up for Copy",
+				exact: true,
+			}),
+		).toBeVisible();
+		await page
+			.getByTestId("terminal-row-key-0")
+			.getByRole("button")
+			.first()
+			.click();
+		await expect(page.getByTestId("terminal-key-slot-tap")).toHaveAttribute(
+			"aria-pressed",
+			"true",
+		);
+		await page.getByTestId("terminal-key-action-home").click();
+		await expect(page.getByTestId("terminal-key-action-home")).toHaveAttribute(
+			"aria-pressed",
+			"true",
+		);
+		await expect(
+			row.getByRole("button", { name: "Home, flick up for Copy", exact: true }),
+		).toHaveText("home");
+		await expect(
+			row.getByRole("button", {
+				name: "Paste, flick up for Copy",
+				exact: true,
+			}),
+		).toHaveCount(0);
+		await testInfo.attach("desktop key editor", {
+			body: await page.screenshot(),
+			contentType: "image/png",
+		});
+		await testInfo.attach("phone updated live", {
+			body: await phone.screenshot(),
+			contentType: "image/png",
+		});
+		await page.getByTestId("terminal-key-editor-close").click();
+		await page.reload();
+		await new AppPage(page).layout.waitFor({ state: "attached" });
+		await openTerminalSettings(page);
+		await expect(
+			page
+				.getByTestId("terminal-row-key-0")
+				.getByRole("button", { name: "Home, flick up for Copy", exact: true }),
+		).toHaveText("home");
+		const saved = await harness.requestRpc(new GetTerminalKeys({}));
+		expect(saved.terminalKeys.row.keys[0]).toEqual({ tap: "home", up: "copy" });
+		await testInfo.attach("saved phone row", {
+			body: JSON.stringify(saved, null, 2),
+			contentType: "application/json",
+		});
+	} finally {
+		await phoneContext.close();
+	}
+});
+
+test("stored Terminal settings without a row decode to the default phone row", async ({
+	browser,
+	harness,
+	sessionUrl,
+}, testInfo) => {
+	const legacy = {
+		bar: { ...DEFAULT_TERMINAL_KEYS.bar, show: false },
+		optionKey: "meta",
+		tapTwiceToLock: false,
+		pasteAsOneBlock: false,
+	};
+	writeFileSync(
+		join(harness.configDir, "settings.jsonc"),
+		JSON.stringify({ terminalKeys: legacy }),
+	);
+	const saved = await harness.requestRpc(new GetTerminalKeys({}));
+	expect(saved.terminalKeys).toEqual({
+		...legacy,
+		row: DEFAULT_TERMINAL_KEYS.row,
+	});
+	const phoneContext = await browser.newContext({
+		viewport: { width: 390, height: 844 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	try {
+		const phone = await phoneContext.newPage();
+		await new AppPage(phone).goto(sessionUrl);
+		await phone.getByTestId("session-bar-island-overflow").tap();
+		await phone.getByTestId("overflow-view-terminal").tap();
+		for (const name of [
+			"Paste, flick up for Copy",
+			"Escape, flick up for Tab",
+			"Control, flick up for Command",
+			"Option, flick up for Shift",
+		])
+			await expect(
+				phone
+					.locator(".term-key-row")
+					.getByRole("button", { name, exact: true }),
+			).toBeVisible();
+		await expect(phone.locator(".term-key-row [data-corner]")).toHaveCount(4);
+		await testInfo.attach("legacy settings with default phone row", {
+			body: await phone.screenshot(),
+			contentType: "image/png",
+		});
+		await testInfo.attach("decoded legacy settings", {
+			body: JSON.stringify(saved, null, 2),
+			contentType: "application/json",
+		});
+	} finally {
+		await phoneContext.close();
 	}
 });
 
@@ -330,5 +477,241 @@ test("Terminal Option key is absent away from macOS", async ({
 	await testInfo.attach("non-macOS Terminal settings", {
 		body: await page.screenshot(),
 		contentType: "image/png",
+	});
+});
+
+test.describe("Phone row", () => {
+	test.use({
+		viewport: { width: 390, height: 844 },
+		isMobile: true,
+		hasTouch: true,
+		permissions: ["clipboard-read", "clipboard-write"],
+	});
+
+	async function openPhoneSettings(page: Page) {
+		await tap(page, page.getByTestId("session-bar-island-overflow"));
+		await tap(page, page.getByTestId("overflow-settings"));
+		await tap(page, page.getByTestId("settings-tab-terminal"));
+		await expect(page.getByTestId("terminal-row-preview")).toBeVisible();
+	}
+
+	async function closePhoneSettings(page: Page) {
+		await tap(page, page.getByTestId("settings-close-btn"));
+		await expect(page.locator("#settings-panel")).toHaveCount(0);
+		await textarea(page).focus();
+	}
+
+	async function editPhoneRow(
+		page: Page,
+		edits: readonly {
+			index: number;
+			tap?: TerminalKeyAction;
+			up?: TerminalKeyAction;
+		}[],
+	) {
+		await openPhoneSettings(page);
+		for (const edit of edits) {
+			// A real finger: the sheet must survive the click that follows it.
+			await tap(
+				page,
+				page
+					.getByTestId(`terminal-row-key-${edit.index}`)
+					.getByRole("button")
+					.first(),
+			);
+			await expect(page.getByTestId("terminal-key-slot-tap")).toHaveAttribute(
+				"aria-pressed",
+				"true",
+			);
+			for (const slot of ["tap", "up"] as const) {
+				const action = edit[slot];
+				if (action === undefined) continue;
+				await tap(page, page.getByTestId(`terminal-key-slot-${slot}`));
+				const choice = page.getByTestId(`terminal-key-action-${action}`);
+				await expect(choice).toBeEnabled();
+				await tap(page, choice);
+				await expect(choice).toHaveAttribute("aria-pressed", "true");
+			}
+			await tap(page, page.getByTestId("terminal-key-editor-close"));
+			await expect(page.getByTestId("terminal-key-editor")).toHaveCount(0);
+		}
+		await closePhoneSettings(page);
+	}
+
+	test("editing tap and flick-up changes the phone key labels and bytes", async ({
+		page,
+		sessionUrl,
+	}, testInfo) => {
+		await openPhoneTerminal(page, sessionUrl);
+		await editPhoneRow(page, [{ index: 0, tap: "return", up: "delete" }]);
+		const edited = rowKey(page, "Return, flick up for Delete");
+		await expect(edited).toBeVisible();
+		await expect(edited).toHaveText("ret");
+		await expect(rowKey(page, "Delete")).toHaveText("del");
+		await expect(rowKey(page, "Paste, flick up for Copy")).toHaveCount(0);
+		const dump = await startByteDump(page, testInfo);
+		await tap(page, edited);
+		await dump.group();
+		await flick(page, edited);
+		expect(await dump.finish()).toEqual(["0d", "7f"]);
+	});
+
+	test("Nothing removes a flick action and keeps a waiting modifier through empty taps and flicks", async ({
+		page,
+		sessionUrl,
+	}, testInfo) => {
+		await openPhoneTerminal(page, sessionUrl);
+		await editPhoneRow(page, [{ index: 0, tap: "nothing", up: "nothing" }]);
+		const empty = rowKey(page, "Nothing");
+		await expect(empty).toBeEmpty();
+		await expect(
+			row(page).locator(".flick-key").first().locator("[data-corner]"),
+		).toHaveCount(0);
+		await expect(rowKey(page, "Copy")).toHaveCount(0);
+		await countConfirmations(page);
+		const dump = await startByteDump(page, testInfo);
+		const ctrl = rowKey(page, "Control, flick up for Command");
+		await tap(page, ctrl);
+		await tap(page, empty);
+		await flick(page, empty);
+		await expect(ctrl).toHaveAttribute("aria-pressed", "mixed");
+		await expect(row(page).locator(".flick-bubble")).toHaveCount(0);
+		expect(await confirmationsShown(page)).toBe(0);
+		await page.keyboard.insertText("c");
+		await expect(ctrl).toHaveAttribute("aria-pressed", "false");
+		expect(await dump.finish()).toEqual(["03"]);
+	});
+
+	test("Flick hints hide the corners without disabling flicks, and Show the key row removes it", async ({
+		page,
+		sessionUrl,
+	}, testInfo) => {
+		await openPhoneTerminal(page, sessionUrl);
+		await openPhoneSettings(page);
+		await tap(
+			page,
+			page.getByRole("switch", { name: "Flick hints", exact: true }),
+		);
+		await expect(
+			page.getByRole("switch", { name: "Flick hints", exact: true }),
+		).toHaveAttribute("aria-checked", "false");
+		await closePhoneSettings(page);
+		await expect(row(page).locator("[data-corner]")).toHaveCount(0);
+		const dump = await startByteDump(page, testInfo);
+		await flick(page, rowKey(page, "Escape, flick up for Tab"));
+		expect(await dump.finish()).toEqual(["09"]);
+		await openPhoneSettings(page);
+		await tap(
+			page,
+			page.getByRole("switch", { name: "Show the key row", exact: true }),
+		);
+		await expect(
+			page.getByRole("switch", { name: "Show the key row", exact: true }),
+		).toHaveAttribute("aria-checked", "false");
+		await closePhoneSettings(page);
+		await expect(row(page)).toHaveCount(0);
+		await testInfo.attach("phone row hidden", {
+			body: await page.screenshot(),
+			contentType: "image/png",
+		});
+	});
+
+	test("the remaining actions send their terminal bytes from phone keys", async ({
+		page,
+		sessionUrl,
+	}, testInfo) => {
+		await openPhoneTerminal(page, sessionUrl);
+		await editPhoneRow(page, [
+			{ index: 0, tap: "return", up: "delete" },
+			{ index: 1, tap: "home", up: "end" },
+			{ index: 2, tap: "pageUp", up: "pageDown" },
+			{ index: 3, tap: "interrupt", up: "nothing" },
+		]);
+		const dump = await startByteDump(page, testInfo);
+		for (const name of [
+			"Return, flick up for Delete",
+			"Home, flick up for End",
+			"Page up, flick up for Page down",
+		]) {
+			await tap(page, rowKey(page, name));
+			await dump.group();
+			await flick(page, rowKey(page, name));
+			await dump.group();
+		}
+		await tap(page, rowKey(page, "Interrupt"));
+		expect(await dump.finish()).toEqual([
+			"0d",
+			"7f",
+			"1b 5b 48",
+			"1b 5b 46",
+			"1b 5b 35 7e",
+			"1b 5b 36 7e",
+			"03",
+		]);
+	});
+
+	test("Home and End follow application mode and navigation keys spend waiting modifiers and keep locked ones", async ({
+		page,
+		sessionUrl,
+	}, testInfo) => {
+		await openPhoneTerminal(page, sessionUrl);
+		await editPhoneRow(page, [
+			{ index: 0, tap: "home", up: "end" },
+			{ index: 1, tap: "pageUp", up: "pageDown" },
+		]);
+		const dump = await startByteDump(page, testInfo, {
+			applicationCursor: true,
+		});
+		const home = rowKey(page, "Home, flick up for End");
+		const pageUp = rowKey(page, "Page up, flick up for Page down");
+		const ctrl = rowKey(page, "Control, flick up for Command");
+		await tap(page, home);
+		await flick(page, home);
+		await dump.group();
+		for (const navigation of [home, pageUp]) {
+			await tap(page, ctrl);
+			await tap(page, navigation);
+			await expect(ctrl).toHaveAttribute("aria-pressed", "false");
+			await dump.group();
+		}
+		await tap(page, ctrl);
+		await tap(page, ctrl);
+		await flick(page, home);
+		await flick(page, pageUp);
+		await expect(ctrl).toHaveAttribute("aria-pressed", "true");
+		await tap(page, ctrl);
+		expect(await dump.finish()).toEqual([
+			"1b 4f 48 1b 4f 46",
+			"1b 5b 31 3b 35 48",
+			"1b 5b 35 3b 35 7e",
+			"1b 5b 31 3b 35 46 1b 5b 36 3b 35 7e",
+		]);
+	});
+
+	test("Return, Delete and Interrupt spend waiting modifiers like Escape and Tab", async ({
+		page,
+		sessionUrl,
+	}, testInfo) => {
+		await openPhoneTerminal(page, sessionUrl);
+		await editPhoneRow(page, [
+			{ index: 0, tap: "return", up: "delete" },
+			{ index: 1, tap: "interrupt", up: "nothing" },
+		]);
+		const dump = await startByteDump(page, testInfo);
+		const ctrl = rowKey(page, "Control, flick up for Command");
+		const option = rowKey(page, "Option, flick up for Shift");
+		const enter = rowKey(page, "Return, flick up for Delete");
+		await tap(page, ctrl);
+		await tap(page, enter);
+		await expect(ctrl).toHaveAttribute("aria-pressed", "false");
+		await dump.group();
+		await tap(page, option);
+		await flick(page, enter);
+		await expect(option).toHaveAttribute("aria-pressed", "false");
+		await dump.group();
+		await tap(page, ctrl);
+		await tap(page, rowKey(page, "Interrupt"));
+		await expect(ctrl).toHaveAttribute("aria-pressed", "false");
+		expect(await dump.finish()).toEqual(["0d", "1b 7f", "03"]);
 	});
 });

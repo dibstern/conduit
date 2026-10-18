@@ -54,11 +54,12 @@ export const terminalSettingsHandlers: StepHandler[] = [
 	{
 		name: "assert Terminal settings groups and defaults",
 		match:
-			/^Terminal shows the desktop key groups and behavior controls on (macOS|iOS)$/,
+			/^Terminal shows the desktop and phone key groups and behavior controls on (macOS|iOS)$/,
 		run: async ({ world, match }) => {
 			const panel = world.page.locator("#settings-panel");
 			await expect(panel.getByRole("heading", { level: 3 })).toHaveText([
 				"Desktop",
+				"Phone and tablet",
 				"How keys behave",
 			]);
 			for (const name of [
@@ -66,6 +67,8 @@ export const terminalSettingsHandlers: StepHandler[] = [
 				"Paste, esc and tab",
 				"Modifiers",
 				"Arrows",
+				"Show the key row",
+				"Flick hints",
 				"Tap twice to lock",
 				"Paste as one block",
 			])
@@ -76,11 +79,57 @@ export const terminalSettingsHandlers: StepHandler[] = [
 			if (match[1] === "macOS")
 				await expect(optionKey).toHaveAttribute("data-value", "characters");
 			else await expect(optionKey).toHaveCount(0);
+			await expect(
+				world.page.getByTestId("terminal-row-preview"),
+			).toBeVisible();
 			expect(
 				requireRpcControl(world.page)
 					.getRequests()
 					.some(({ tag }) => tag === "GetTerminalKeys"),
 			).toBe(true);
+		},
+	},
+	{
+		name: "edit the first phone key Tap action",
+		match: /^I set the first phone key Tap action to Home$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByTestId("terminal-row-key-0")
+				.getByRole("button")
+				.first()
+				.click();
+			await expect(world.page.getByTestId("terminal-key-editor")).toBeVisible();
+			await expect(
+				world.page.getByTestId("terminal-key-slot-tap"),
+			).toHaveAttribute("aria-pressed", "true");
+			await world.page.getByTestId("terminal-key-action-home").click();
+		},
+	},
+	{
+		name: "assert the phone key editor current action",
+		match: /^the phone key editor shows Home selected for Tap$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("terminal-key-slot-tap"),
+			).toContainText("Home");
+			await expect(
+				world.page.getByTestId("terminal-key-slot-tap"),
+			).toHaveAttribute("aria-pressed", "true");
+			await expect(
+				world.page.getByTestId("terminal-key-slot-up"),
+			).toContainText("Copy");
+			await expect(
+				world.page.getByTestId("terminal-key-slot-up"),
+			).toHaveAttribute("aria-pressed", "false");
+			await expect(world.page.getByTestId(/^terminal-key-action-/)).toHaveCount(
+				16,
+			);
+			await expect(
+				world.page.getByTestId("terminal-key-action-home"),
+			).toHaveAttribute("aria-pressed", "true");
+			await expect(
+				world.page.getByTestId("terminal-key-action-paste"),
+			).toHaveAttribute("aria-pressed", "false");
 		},
 	},
 	{

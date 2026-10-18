@@ -24,7 +24,7 @@ import { replaceScrollback, terminalState } from "../stores/terminal.svelte.js";
 
 export type TerminalArrow = "left" | "up" | "down" | "right";
 type PlainKey =
-	| Exclude<TerminalKeyAction, TerminalModifier | "paste" | "copy">
+	| Exclude<TerminalKeyAction, TerminalModifier | "paste" | "copy" | "nothing">
 	| TerminalArrow;
 /** Everything an on-screen key can do. The keyboard toggle shows or hides
  *  the software keyboard by focusing or blurring the terminal's input. */
@@ -34,11 +34,13 @@ export type ModifierState = "off" | "waiting" | "locked";
 export const isTerminalModifier = (key: string): key is TerminalModifier =>
 	(TERMINAL_MODIFIERS as readonly string[]).includes(key);
 
-const ARROW_FINAL: Record<TerminalArrow, string> = {
+const CURSOR_FINAL: Record<TerminalArrow | "home" | "end", string> = {
 	up: "A",
 	down: "B",
 	right: "C",
 	left: "D",
+	home: "H",
+	end: "F",
 };
 
 /** The bytes the physical key sends. Arrows follow the program's cursor-key
@@ -46,8 +48,13 @@ const ARROW_FINAL: Record<TerminalArrow, string> = {
 function encode(terminal: Terminal, key: PlainKey): string {
 	if (key === "esc") return "\x1b";
 	if (key === "tab") return "\t";
+	if (key === "return") return "\r";
+	if (key === "delete") return "\x7f";
+	if (key === "interrupt") return "\x03";
+	if (key === "pageUp") return "\x1b[5~";
+	if (key === "pageDown") return "\x1b[6~";
 	const prefix = terminal.modes.applicationCursorKeysMode ? "\x1bO" : "\x1b[";
-	return prefix + ARROW_FINAL[key];
+	return prefix + CURSOR_FINAL[key];
 }
 
 // ---- Applying held modifiers to one key, as xterm.js encodes the physical
@@ -71,6 +78,7 @@ type KeyEncoding = {
 const NAMED_KEYS: Record<string, KeyEncoding> = {
 	"\t": { label: "tab", encode: (h) => withMeta(h, h.shift ? "\x1b[Z" : "\t") },
 	"\x1b": { label: "esc", encode: (h) => withMeta(h, "\x1b") },
+	"\x03": { label: "interrupt", encode: (h) => withMeta(h, "\x03") },
 	"\r": { label: "⏎", encode: (h) => withMeta(h, "\r") },
 	"\x7f": { label: "⌫", encode: (h) => withMeta(h, h.ctrl ? "\b" : "\x7f") },
 	"\x1b[5~": {
@@ -142,6 +150,14 @@ export const TERMINAL_KEY_LABELS: Record<
 	opt: { text: "⌥", name: "Option" },
 	cmd: { text: "⌘", name: "Command" },
 	shift: { text: "⇧", name: "Shift" },
+	return: { text: "ret", name: "Return" },
+	delete: { text: "del", name: "Delete" },
+	home: { text: "home", name: "Home" },
+	end: { text: "end", name: "End" },
+	pageUp: { text: "pg up", name: "Page up" },
+	pageDown: { text: "pg dn", name: "Page down" },
+	interrupt: { text: "⌃C", name: "Interrupt" },
+	nothing: { text: "", name: "Nothing" },
 	left: { text: "", name: "Left arrow", icon: "arrow-left" },
 	up: { text: "", name: "Up arrow", icon: "arrow-up" },
 	down: { text: "", name: "Down arrow", icon: "arrow-down" },
@@ -346,6 +362,7 @@ export function createTerminalKeys({
 		/** Run an on-screen key on the active tab. Paste reads the clipboard, so
 		 *  it, like the keyboard toggle, must run in a user gesture. */
 		press(key: TerminalKeyPress, repeated = false): void {
+			if (key === "nothing") return;
 			const terminal = activeTerminal();
 			if (!terminal) return;
 			if (isTerminalModifier(key)) {

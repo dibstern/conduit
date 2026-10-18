@@ -9,6 +9,7 @@
 -->
 <script lang="ts">
 	import type { TerminalKeyAction } from "../../../contracts/terminal-keys.js";
+	import { projectState } from "../../stores/project-state.svelte.js";
 	import {
 		isTerminalModifier,
 		TERMINAL_KEY_LABELS,
@@ -20,13 +21,7 @@
 
 	let { keys }: { keys: TerminalKeys } = $props();
 
-	/** Tap, then flick up. */
-	const ROW: readonly (readonly [TerminalKeyAction, TerminalKeyAction])[] = [
-		["paste", "copy"],
-		["esc", "tab"],
-		["ctrl", "cmd"],
-		["opt", "shift"],
-	];
+	const row = $derived(projectState.terminalKeys.row);
 
 	const slot = (action: TerminalKeyAction) => ({
 		...TERMINAL_KEY_LABELS[action],
@@ -42,10 +37,11 @@
 	role="toolbar"
 	aria-label="Terminal keys"
 >
-	{#each ROW as [tap, up] (tap)}
+	{#each row.keys as { tap, up }, index (index)}
 		<FlickKey
 			tap={slot(tap)}
-			up={slot(up)}
+			up={up === "nothing" ? undefined : slot(up)}
+			hints={row.hints}
 			onpress={(which) => keys.press(which === "tap" ? tap : up)}
 		/>
 	{/each}

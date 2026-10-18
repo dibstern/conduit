@@ -621,7 +621,7 @@
 				{/each}
 			{/await}
 		</div>
-		{#if !finePointer.current && tabs.length > 0}
+		{#if !finePointer.current && tabs.length > 0 && projectState.terminalKeys.row.show}
 			<TerminalKeyRow {keys} />
 		{/if}
 

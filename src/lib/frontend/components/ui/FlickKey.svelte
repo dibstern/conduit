@@ -29,10 +29,15 @@
 	let {
 		tap,
 		up,
+		hints = true,
+		preserveFocus = true,
 		onpress,
 	}: {
 		tap: Slot;
-		up: Slot;
+		up?: Slot | undefined;
+		hints?: boolean;
+		/** Terminal keys keep the input focused; preview keys can take focus. */
+		preserveFocus?: boolean;
 		onpress: (slot: "tap" | "up") => void;
 	} = $props();
 
@@ -69,7 +74,7 @@
 		if (gesture?.pointerId !== event.pointerId) return;
 		const slot = gesture.flicking || gesture.onCorner ? "up" : "tap";
 		gesture = null;
-		onpress(slot);
+		if (slot === "tap" || up) onpress(slot);
 	}
 </script>
 
@@ -78,7 +83,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	class="flick-key relative h-[46px] min-w-0 flex-1 touch-none select-none"
-	onmousedown={(event) => event.preventDefault()}
+	onmousedown={(event) => { if (preserveFocus) event.preventDefault(); }}
 	onpointerdown={handlePointerDown}
 	onpointermove={handlePointerMove}
 	onpointerup={handlePointerUp}
@@ -87,11 +92,11 @@
 >
 	<button
 		type="button"
-		aria-label="{tap.name}, flick up for {up.name}"
+		aria-label={up ? `${tap.name}, flick up for ${up.name}` : tap.name}
 		aria-pressed={tap.state && pressed[tap.state]}
 		class="absolute inset-0 grid place-items-center rounded-[12px] pt-[11px] font-sans font-medium transition-[background,color,box-shadow] duration-100
 			{tap.text.length === 1 ? 'text-[19px]' : 'text-[16px]'}
-			{gesture?.flicking
+			{gesture?.flicking && up
 			? 'bg-accent/[14%] text-text'
 			: held(tap)
 				? 'bg-accent/[18%] text-accent'
@@ -105,6 +110,7 @@
 	>
 		{#if tap.icon}<Icon name={tap.icon} size={19} />{:else}{tap.text}{/if}
 	</button>
+	{#if up && hints}
 	<button
 		type="button"
 		data-corner
@@ -123,7 +129,8 @@
 	>
 		{up.text}
 	</button>
-	{#if gesture?.flicking}
+	{/if}
+	{#if gesture?.flicking && up}
 		<span
 			class="flick-bubble pointer-events-none absolute bottom-[calc(100%+8px)] z-10 min-w-[64px] rounded-[14px] border border-border bg-popover-bg px-3 pt-2 pb-[7px] text-center shadow-dropdown"
 			aria-hidden="true"
