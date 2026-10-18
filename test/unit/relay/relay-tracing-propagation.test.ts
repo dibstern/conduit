@@ -36,6 +36,7 @@ import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-ser
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { createProjectRelay } from "../../../src/lib/relay/relay-stack.js";
+import { makeDaemonStoreTestLayer } from "../../helpers/daemon-rpc.js";
 import {
 	makeMockAccountDirectory,
 	makeOpenCodeInstancesStub,
@@ -56,6 +57,7 @@ describe("relay tracing propagation", () => {
 				.mockRejectedValue(new DOMException("test timeout", "AbortError"));
 
 			const dependencies = Layer.mergeAll(
+				makeDaemonStoreTestLayer(),
 				Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 				makeDaemonTracingLive({
 					enabled: false,

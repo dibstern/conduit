@@ -16,6 +16,7 @@ import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
 import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 // Effect Handler Tests (Batch 1)
 // Verifies that the Effect handler implementations produce the expected
@@ -27,7 +28,16 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, layer } from "@effect/vitest";
-import { Deferred, Effect, Exit, Fiber, Layer, Option, Stream } from "effect";
+import {
+	Deferred,
+	Effect,
+	Exit,
+	Fiber,
+	Layer,
+	Option,
+	Stream,
+	TestClock,
+} from "effect";
 import { expect, vi } from "vitest";
 import { GetAgents, GetProjects } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
@@ -35,7 +45,10 @@ import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { ProjectManagementServiceLive } from "../../../src/lib/domain/relay/Services/project-management-service.js";
+import {
+	ProjectManagementServiceLive,
+	ProjectManagementServiceTag,
+} from "../../../src/lib/domain/relay/Services/project-management-service.js";
 import {
 	ProjectSettingsLive,
 	publishProjectSetting,
@@ -134,7 +147,10 @@ import {
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import {
+	type OrchestrationCommand,
+	OrchestrationEngine,
+} from "../../../src/lib/provider/orchestration-engine.js";
 import {
 	ProviderRegistry,
 	ProviderRegistryTag,
@@ -190,9 +206,9 @@ const seedSessionPick = (
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const provider = modelProvider === "claude" ? "claude" : "opencode";
-		yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at,
+		yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at,
 			model_id, model_provider, variant, context_window)
-			VALUES (${sessionId}, ${provider}, 'Session', 'idle', 0, 0, ${modelId}, ${modelProvider}, '', ${contextWindow})
+			VALUES (${sessionId}, 'test-project', ${provider}, 'Session', 'idle', 0, 0, ${modelId}, ${modelProvider}, '', ${contextWindow})
 			ON CONFLICT(id) DO UPDATE SET provider = ${provider}, model_id = ${modelId},
 			model_provider = ${modelProvider}, variant = '', context_window = ${contextWindow}`;
 	});
@@ -375,18 +391,22 @@ describe("GetAgents", () => {
 });
 
 describe("GetProjects", () => {
-	it.effect("uses config.getProjects when available", () => {
+	it.effect("uses the provided project service", () => {
 		const ws = mockWsHandler();
 		const projects = [
 			{ slug: "proj-1", title: "Project 1", folders: ["/path"] as const },
 		];
-		const config = mockConfig({
-			getProjects: () => projects,
-		});
+		const config = mockConfig();
 		const client = makeHandlerOpenCodeAPI();
 
 		const layer = Layer.mergeAll(
 			projectManagementLayer(client, config),
+			Layer.succeed(ProjectManagementServiceTag, {
+				currentSlug: () => Effect.succeed(config.slug),
+				list: () => Effect.succeed(projects),
+				save: () => Effect.die("Unexpected save"),
+				remove: () => Effect.die("Unexpected remove"),
+			}),
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
@@ -395,7 +415,7 @@ describe("GetProjects", () => {
 			Effect.tap((reply) => {
 				expect(reply).toEqual({
 					projectSlug: "test-project",
-					projects: [{ ...projects[0], folders: ["/path"], missing: true }],
+					projects,
 					current: "test-project",
 				});
 			}),
@@ -436,11 +456,12 @@ describe("GetProjects", () => {
 });
 
 describe("reloadProviderSessionForClient", () => {
-	it.effect("reloads the provider session", () => {
+	it.effect("reloads an OpenCode-bound session without discovery", () => {
 		const log = mockLogger();
 		const engine = withDispatchEffect({
 			dispatch: vi.fn(async () => ({ models: [] })),
 			bindSession: vi.fn(),
+			getProviderForSessionEffect: () => Effect.succeed("opencode"),
 		});
 		const client = makeHandlerOpenCodeAPI({
 			provider: {
@@ -456,6 +477,8 @@ describe("reloadProviderSessionForClient", () => {
 		const config = mockConfig();
 
 		const layer = Layer.mergeAll(
+			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+			Layer.mock(SessionWorkspaceTag, {}),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			openCodeModelAndSettingsLayer(client),
@@ -478,9 +501,95 @@ describe("reloadProviderSessionForClient", () => {
 						sessionId: "session-42",
 					}),
 				);
+				expect(engine.dispatchEffect).toHaveBeenCalledTimes(1);
 			}),
 		);
 	});
+
+	it.effect("ends the Claude session before concurrently refreshing both catalogs and waits for both", () =>
+		Effect.gen(function* () {
+			const endRelease = yield* Deferred.make<void>();
+			const workspaceRelease = yield* Deferred.make<void>();
+			const projectRelease = yield* Deferred.make<void>();
+			const directory = makeMockAccountDirectory();
+			const account = yield* directory.resolve({ _tag: "Id", id: "claude" });
+			const events: string[] = [];
+			const dispatchEffect = vi.fn((command: OrchestrationCommand) =>
+				Effect.gen(function* () {
+					if (command.type === "end_session") {
+						yield* Deferred.await(endRelease);
+						events.push("ended");
+						return;
+					}
+					if (command.type === "discover") {
+						events.push(command.workspaceRoot === undefined ? "project" : "workspace");
+						yield* Deferred.await(command.workspaceRoot === undefined ? projectRelease : workspaceRelease);
+						return { models: [], commands: [] };
+					}
+					return;
+				}),
+			);
+			const engine = withDispatchEffect({ dispatchEffect, getProviderForSessionEffect: () => Effect.succeed(account.id) });
+			const getWorkspace = vi.fn(() => Effect.succeed("/tmp/session-worktree"));
+			const reload = yield* Effect.fork(reloadProviderSessionForClient({
+				clientId: "client-1", sessionId: "session-42", commandId: "cmd-reload-session",
+			}).pipe(Effect.provide(Layer.mergeAll(
+				Layer.succeed(LoggerTag, mockLogger()),
+				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(AccountDirectory, directory),
+				Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
+				Layer.mock(SessionWorkspaceTag, { get: getWorkspace }),
+			))));
+			yield* TestClock.adjust(1);
+			expect(dispatchEffect).toHaveBeenCalledTimes(1);
+			expect(dispatchEffect).toHaveBeenCalledWith({ type: "end_session", commandId: "cmd-reload-session", sessionId: "session-42", targetProviderId: account.id, account });
+			yield* Deferred.succeed(endRelease, undefined);
+			yield* TestClock.adjust(1);
+			expect(events[0]).toBe("ended");
+			expect(events.slice(1)).toEqual(expect.arrayContaining(["workspace", "project"]));
+			expect(getWorkspace).toHaveBeenCalledWith("session-42");
+			expect(dispatchEffect).toHaveBeenCalledWith({ type: "discover", providerId: account.id, account, workspaceRoot: "/tmp/session-worktree", refresh: true });
+			expect(dispatchEffect).toHaveBeenCalledWith({ type: "discover", providerId: account.id, account, refresh: true });
+			expect(Option.isNone(yield* Fiber.poll(reload))).toBe(true);
+			yield* Deferred.succeed(workspaceRelease, undefined);
+			yield* TestClock.adjust(1);
+			expect(Option.isNone(yield* Fiber.poll(reload))).toBe(true);
+			yield* Deferred.succeed(projectRelease, undefined);
+			expect(yield* Fiber.join(reload)).toEqual({ sessionId: "session-42" });
+			expect(dispatchEffect).toHaveBeenCalledTimes(3);
+		}),
+	);
+
+	for (const endFails of [false, true]) {
+		it.effect(`warns on refresh failure and awaits the other refresh when end_session ${endFails ? "fails" : "succeeds"}`, () =>
+			Effect.gen(function* () {
+				const release = yield* Deferred.make<void>();
+				const log = mockLogger();
+				const dispatchEffect = vi.fn((command: OrchestrationCommand) => {
+					if (command.type === "end_session") return endFails ? Effect.fail(new Error("end failed")) : Effect.void;
+					if (command.type === "discover" && command.workspaceRoot !== undefined) return Effect.fail(new Error("probe failed"));
+					return Deferred.await(release).pipe(Effect.as({ models: [], commands: [] }));
+				});
+				const engine = withDispatchEffect({ dispatchEffect, getProviderForSessionEffect: () => Effect.succeed("claude") });
+				const reload = yield* Effect.fork(reloadProviderSessionForClient({ clientId: "client-1", sessionId: "session-42", commandId: "reload" }).pipe(
+					Effect.provide(Layer.mergeAll(
+						Layer.succeed(LoggerTag, log),
+						Layer.succeed(OrchestrationEngineTag, engine),
+						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+						Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
+						Layer.mock(SessionWorkspaceTag, { get: () => Effect.succeed("/tmp/session-worktree") }),
+					)),
+				));
+				yield* TestClock.adjust(1);
+				expect(dispatchEffect).toHaveBeenCalledTimes(3);
+				expect(Option.isNone(yield* Fiber.poll(reload))).toBe(true);
+				yield* Deferred.succeed(release, undefined);
+				expect(yield* Fiber.join(reload)).toEqual({ sessionId: "session-42" });
+				expect(log.warn).toHaveBeenCalledWith(expect.stringMatching(/refresh.*probe failed/i));
+				if (endFails) expect(log.warn).toHaveBeenCalledWith(expect.stringMatching(/endSession failed:.*end failed/));
+			}),
+		);
+	}
 });
 
 describe("sendModelsStateToClient", () => {
@@ -826,6 +935,7 @@ describe("switchModelForSession", () => {
 				},
 			});
 			const readQuery = {
+				listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -1513,7 +1623,7 @@ describe("handleForkSession", () => {
 						title: "Forked Session",
 						status: "idle" as const,
 						updatedAt: 201,
-						parentID: "ses-parent",
+						forkedFrom: "ses-parent",
 						forkMessageId: "msg-1",
 						forkPointTimestamp: 456,
 					},
@@ -1551,7 +1661,7 @@ describe("handleForkSession", () => {
 					expect(legacyListSessions).not.toHaveBeenCalled();
 					expect(fork).toEqual({
 						id: "ses-child",
-						parentId: "ses-parent",
+						forkedFrom: "ses-parent",
 						forkMessageId: "msg-1",
 						forkPointTimestamp: 456,
 					});
@@ -1862,7 +1972,6 @@ describe("handlePermissionResponse", () => {
 				const releaseSend = yield* Deferred.make<void>();
 				const instance: ProviderInstance = {
 					providerId: "claude",
-					steering: false,
 					discoverEffect: vi.fn(() =>
 						Effect.succeed({
 							models: [],
@@ -2355,6 +2464,7 @@ describe("handleNewSession", () => {
 				question: { list: vi.fn(async () => []) },
 			});
 			const readQuery = {
+				listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -2459,6 +2569,7 @@ describe("handleNewSession", () => {
 				question: { list: vi.fn(async () => []) },
 			});
 			const readQuery = {
+				listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("processing")),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -2757,6 +2868,7 @@ describe("loadMoreHistoryForSession", () => {
 			loadPreRenderedHistory,
 		});
 		const readQuery = {
+			listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 			readToolDetails: vi.fn(() => Effect.succeed([])),
 			getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 			getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -3004,7 +3116,7 @@ Layer.effect(SessionActivityTag, makeSessionActivity),
 		);
 	}
 
-	it.effect("sends the message when unsnooze bookkeeping fails", () => {
+	it.effect("sends the message when triage restoration bookkeeping fails", () => {
 		const sendTurn = vi.fn(() => Effect.void);
 		const provider: ProviderTurnService = {
 			holdUserTurnsForAccountSwitch: () => Effect.void,
@@ -3013,7 +3125,7 @@ Layer.effect(SessionActivityTag, makeSessionActivity),
 			interruptTurn: () => Effect.void,
 		};
 		const service = makeMockSessionManagerService({
-			unsnoozeSession: () =>
+			restoreSessionForSend: () =>
 				Effect.fail(
 					new SessionManagerError({
 						operation: "unsnoozeSession",
@@ -3344,6 +3456,7 @@ describe("handleMessage", () => {
 				})),
 			});
 			const readQuery = {
+				listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -3607,6 +3720,7 @@ describe("handleMessage", () => {
 			const config = mockConfig();
 			const client = makeHandlerOpenCodeAPI();
 			const readQuery = {
+				listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -3765,8 +3879,8 @@ describe("handleMessage", () => {
 			return Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`INSERT INTO sessions
-					(id, provider, title, status, created_at, updated_at, model_id, model_provider, variant, context_window)
-					VALUES ('session-rejected', 'claude', 'Rejected session', 'idle', 0, 0, 'sonnet', 'claude', '', '')`;
+					(id, project_id, provider, title, status, created_at, updated_at, model_id, model_provider, variant, context_window)
+					VALUES ('session-rejected', 'test-project', 'claude', 'Rejected session', 'idle', 0, 0, 'sonnet', 'claude', '', '')`;
 				yield* sendMessageToSession({
 					clientId: "client-1",
 					sessionId: "session-rejected",

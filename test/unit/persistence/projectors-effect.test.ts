@@ -546,8 +546,8 @@ function readSessionProjectionSnapshot(sessionId: string) {
 function seedSession(sessionId: string, createdAt: number = FIXED_TS) {
 	return Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
-		yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-			VALUES (${sessionId}, 'opencode', 'Test Session', 'idle', ${createdAt}, ${createdAt})`;
+		yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+			VALUES (${sessionId}, 'test-project', 'opencode', 'Test Session', 'idle', ${createdAt}, ${createdAt})`;
 	});
 }
 
@@ -1601,9 +1601,9 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 					messageId: row.id,
 					createdAt: row.created_at,
 				}));
-				const info = (yield* reads.listSessionInfos()).find(
-					({ id }) => id === "child",
-				);
+				const info = (yield* reads.listSessionInfos({
+					projectIds: ["test-project"],
+				})).find(({ id }) => id === "child");
 				expect(info?.forkPointTimestamp).toBe(copy?.created_at);
 				expect(
 					splitAtForkPoint(
@@ -1684,7 +1684,7 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 						sessionId: "child",
 						title: "Fork",
 						provider: "claude",
-						parentId: "parent",
+						forkedFrom: "parent",
 						forkPointEvent: "boundary",
 					}),
 				])
@@ -1694,7 +1694,9 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 					yield* store.append(makeSessionCreated("child")),
 				);
 				expect(
-					(yield* reads.listSessionInfos()).find(({ id }) => id === "child"),
+					(yield* reads.listSessionInfos({
+						projectIds: ["test-project"],
+					})).find(({ id }) => id === "child"),
 				).toMatchObject({
 					forkMessageId: "boundary",
 					forkPointTimestamp: 1000,
@@ -1719,9 +1721,9 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 					}),
 				])
 					yield* runner.projectEvent(yield* store.append(event));
-				const child = (yield* reads.listSessionInfos()).find(
-					({ id }) => id === "child",
-				);
+				const child = (yield* reads.listSessionInfos({
+					projectIds: ["test-project"],
+				})).find(({ id }) => id === "child");
 				const page = [
 					{
 						type: "user" as const,
@@ -1773,6 +1775,7 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 				yield* sql`
 					INSERT INTO sessions (
 						id,
+						project_id,
 						provider,
 						title,
 						status,
@@ -1781,6 +1784,7 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 					)
 					VALUES (
 						${"s-named"},
+						${"test-project"},
 						${"work-oc"},
 						${"Untitled"},
 						${"idle"},
@@ -3090,7 +3094,6 @@ describe("ProjectionRunnerEffect", () => {
 		);
 
 		expect(result.recovery).toMatchObject({
-			projectId: "test-project",
 			startCursor: 0,
 			endCursor: 1,
 			totalReplayed: 4,
@@ -3218,7 +3221,6 @@ describe("ProjectionRunnerEffect", () => {
 		}
 		expect(result.failuresAfterFirst).toEqual([{ count: 1 }]);
 		expect(result.secondRecovery).toMatchObject({
-			projectId: "test-project",
 			startCursor: 0,
 			endCursor: result.poisonEvent.sequence,
 			totalReplayed: 0,
@@ -3309,7 +3311,6 @@ describe("ProjectionRunnerEffect", () => {
 		expect(result.messageCursorAfterFailure).toEqual([{ last_applied_seq: 0 }]);
 		expect(result.recoveredAfterFailure).toBe(false);
 		expect(result.retryRecovery).toMatchObject({
-			projectId: "test-project",
 			startCursor: 0,
 			endCursor: 1,
 			totalReplayed: 3,
@@ -3376,7 +3377,6 @@ describe("ProjectionRunnerEffect", () => {
 		);
 
 		expect(cold.recovery).toMatchObject({
-			projectId: "test-project",
 			startCursor: 0,
 			endCursor: 3,
 			totalReplayed: 7,
@@ -3533,7 +3533,6 @@ describe("ProjectionRunnerEffect", () => {
 				}>`SELECT projector_name, last_applied_seq FROM projector_cursors ORDER BY projector_name`;
 
 				expect(recovery).toMatchObject({
-					projectId: "test-project",
 					startCursor: 0,
 					endCursor: 4,
 					totalReplayed: 3,
@@ -3648,7 +3647,6 @@ describe("ProjectionRunnerEffect", () => {
 				}>`SELECT projector_name, last_applied_seq FROM projector_cursors ORDER BY projector_name`;
 
 				expect(first).toMatchObject({
-					projectId: "test-project",
 					startCursor: 0,
 					endCursor: 501,
 					totalReplayed: 1002,
@@ -3668,7 +3666,6 @@ describe("ProjectionRunnerEffect", () => {
 					status: string;
 				}>`SELECT status FROM sessions WHERE id = 's-paged'`;
 				expect(second).toMatchObject({
-					projectId: "test-project",
 					startCursor: 501,
 					endCursor: 502,
 					totalReplayed: 2,

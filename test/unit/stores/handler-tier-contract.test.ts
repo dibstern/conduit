@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // Verifies that each handler only touches its declared tier fields
 // (Activity or Messages). Catches silent tier leaks — e.g., a handler
 // that should only write Activity accidentally touching Messages.
@@ -21,7 +22,7 @@ import {
 	type SessionActivity,
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 /** Shallow snapshot of a SessionActivity, converting Sets to plain arrays
@@ -38,7 +39,6 @@ function snapActivity(a: SessionActivity) {
 		doneMessageIds: [...a.doneMessageIds],
 		seenMessageIds: [...a.seenMessageIds],
 		renderTimer: a.renderTimer,
-		awaitingInputId: a.awaitingInputId,
 	};
 }
 
@@ -60,7 +60,7 @@ let ta: SessionActivity;
 let tm: SessionMessages;
 
 beforeEach(() => {
-	sessionState.currentId = "test-session";
+	openSessionForSetup("test-session", "project-a");
 	clearMessages();
 	ta = testActivity();
 	tm = testMessages();

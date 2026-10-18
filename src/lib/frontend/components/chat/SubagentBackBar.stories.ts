@@ -1,9 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import {
-	clearSessionState,
-	sessionState,
-} from "../../stores/session.svelte.js";
+import { clearSessionState } from "../../stores/session.svelte.js";
 import { mockSession, mockSubagentSession } from "../../stories/mocks.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import type { SessionInfo } from "../../types.js";
 import SubagentBackBar from "./SubagentBackBar.svelte";
@@ -29,7 +27,7 @@ function seedSessions(rows: readonly Row[]): void {
 
 const resetSessions = () => {
 	clearSessionState();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 };
 
 const meta = {
@@ -45,7 +43,7 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {
 	beforeEach: () => {
 		seedSessions([mockSession, mockSubagentSession]);
-		sessionState.currentId = mockSubagentSession.id;
+		openSessionForSetup(mockSubagentSession.id, "conduit");
 	},
 };
 
@@ -58,7 +56,7 @@ export const MissingParent: Story = {
 				parentID: "sess_story_unavailable_parent",
 			},
 		]);
-		sessionState.currentId = "sess_story_missing_parent";
+		openSessionForSetup("sess_story_missing_parent", "conduit");
 	},
 };
 
@@ -75,7 +73,7 @@ function seedSideThread(parentStatus: SessionInfo["status"] = "idle"): void {
 		{ ...mockSession, status: parentStatus },
 		{ ...sideThread, status: "busy" },
 	]);
-	sessionState.currentId = sideThread.id;
+	openSessionForSetup(sideThread.id, "conduit");
 }
 
 export const SideThread: Story = {

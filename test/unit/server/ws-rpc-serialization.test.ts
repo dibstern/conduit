@@ -376,7 +376,7 @@ const handlers = group.toLayer({
 		return Rpc.fork(Stream.fromIterable(projectSettingsEnvelopes));
 	},
 	SubscribeShell: (payload) => {
-		expect(payload).toEqual({ projectSlug: "project", resumeFromSequence: 39 });
+		expect(payload).toEqual({ resumeFromSequence: 39 });
 		return Rpc.fork(
 			Stream.fromIterable(shellEnvelopes).pipe(Stream.rechunk(1)),
 		);
@@ -409,17 +409,14 @@ describe("RPC serialization over a per-connection SocketServer", () => {
 				Effect.gen(function* () {
 					const { client, clientFrames, serverFrames } = yield* connect;
 					const result = yield* Stream.runCollect(
-						client.SubscribeShell({
-							projectSlug: "project",
-							resumeFromSequence: 39,
-						}),
+						client.SubscribeShell({ resumeFromSequence: 39 }),
 					);
 					expect(Array.from(result)).toEqual(shellEnvelopes);
 					expect(clientFrames.map((frame) => JSON.parse(frame))).toContainEqual(
 						expect.objectContaining({
 							_tag: "Request",
 							tag: "SubscribeShell",
-							payload: { projectSlug: "project", resumeFromSequence: 39 },
+							payload: { resumeFromSequence: 39 },
 						}),
 					);
 					for (const envelope of shellEnvelopes) {

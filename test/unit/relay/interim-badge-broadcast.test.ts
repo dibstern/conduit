@@ -110,7 +110,11 @@ it("publishes task additions and removals from onChange without another event", 
 			backgroundTasks: [{ ...b, firstSeenAt: 200 }],
 		});
 		const reconnected = await runtime.runPromise(
-			Stream.runHead(subscribeShell()),
+			Stream.runHead(
+				subscribeShell().pipe(
+					Stream.filter((frame) => frame._tag !== "projects"),
+				),
+			),
 		);
 		expect(reconnected).toMatchObject({
 			_tag: "Some",

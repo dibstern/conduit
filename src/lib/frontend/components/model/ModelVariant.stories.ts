@@ -9,8 +9,8 @@ import {
 	handleModelList,
 	selectInstance,
 } from "../../stores/discovery.svelte.js";
-import { sessionState } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import ModelVariant from "./ModelVariant.svelte";
 
 const onOpen = fn();
@@ -97,7 +97,7 @@ const meta = {
 		const composerWidth = sessionViewState.composerWidth;
 		clearDiscoveryState();
 		// A draft changes local discovery state without a session or RPC connection.
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		onOpen.mockClear();
 		seed();
 		const width = Object.getOwnPropertyDescriptor(window, "innerWidth");

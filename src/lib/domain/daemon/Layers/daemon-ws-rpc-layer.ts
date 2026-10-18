@@ -28,6 +28,8 @@ import {
 import { getRecent } from "../../../daemon/recent-projects.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { getLogLevel } from "../../../logger.js";
+import { PersistenceStore } from "../../../persistence/effect/live.js";
+import { makeCursorAuth } from "../../../provider/cursor/cursor-auth.js";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
@@ -47,6 +49,7 @@ import {
 import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { getVersion } from "../../../version.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
+import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { AuthManagerTag } from "../../server/Layers/auth-middleware.js";
 import type { AccountDirectory } from "../Services/account-directory.js";
@@ -62,6 +65,7 @@ import { DaemonHandleTag } from "../Services/daemon-handle.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
 	findOpenCodeSession,
+	listArchivedSessions,
 	listDaemonSessions,
 	resolveDaemonOpenCodeSession,
 	resolveDaemonSession,
@@ -71,6 +75,7 @@ import type { InstanceHealthCheckTag } from "../Services/instance-health-service
 import {
 	addInstance,
 	applyAccountChange,
+	discoverInstances,
 	getInstance,
 	getInstances,
 	type InstanceManagerStateTag,
@@ -81,6 +86,7 @@ import {
 	updateInstance,
 } from "../Services/instance-manager-service.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
+import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	allProjects,
 	broadcastProjectList,
@@ -93,6 +99,7 @@ import {
 import { RelayCacheTag } from "../Services/relay-cache.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
 import type { SessionDirectory } from "../Services/session-directory.js";
+import { subscribeDaemonShell } from "../Services/shell-subscription.js";
 import { Usage } from "../Services/usage.js";
 import { KeepAwakeTag } from "./keep-awake-layer.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
@@ -114,6 +121,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const baseContext = yield* Effect.context<
 			| ProjectRegistryTag
 			| SessionDirectory
+			| PersistenceStore
 			| ProjectSaveLockTag
 			| DaemonConfigRefTag
 			| DaemonEventBusTag
@@ -130,7 +138,12 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| TailscaleCliTag
 		>();
 		const activity = yield* SessionActivityTag;
-		const context = Context.add(baseContext, SessionActivityTag, activity);
+		const sessionEventBus = yield* SessionEventBusTag;
+		const context = Context.add(baseContext, SessionActivityTag, activity).pipe(
+			Context.add(SessionEventBusTag, sessionEventBus),
+			Context.merge(yield* persistenceStoreContext),
+		);
+		const shellContext = Context.merge(context, yield* PersistenceStore);
 		const bus = yield* DaemonEventBusTag;
 		const cache = yield* RelayCacheTag;
 		const handle = yield* DaemonHandleTag;
@@ -144,7 +157,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const invalidateBrowsers = () => {
 			for (const invalidate of browserConnections) invalidate();
 		};
-		// Every open SubscribeInstances / SubscribeProjects stream, across all
+		// Every open SubscribeInstances / SubscribeShell stream, across all
 		// connections and projects (conduit-test-ni8.14). A change wakes each
 		// one following that list; it re-reads the list itself.
 		const listSubscribers = new Set<{
@@ -193,6 +206,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				E,
 				| ProjectRegistryTag
 				| SessionDirectory
+				| PersistenceStore
 				| ProjectSaveLockTag
 				| DaemonConfigRefTag
 				| DaemonEventBusTag
@@ -262,8 +276,24 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			});
 		const instanceList = Effect.gen(function* () {
 			yield* PubSub.publish(bus, DaemonEvent.InstancesChanged());
-			return Array.from(yield* getInstances);
+			return Array.from(yield* discoverInstances);
 		});
+		const cursorAuth = yield* makeCursorAuth((authenticated) =>
+			run(
+				Effect.gen(function* () {
+					if (
+						authenticated &&
+						!(yield* getInstances).some(
+							(instance) => instance.driver === "cursor",
+						)
+					) {
+						yield* addInstance({ name: "Cursor", driver: "cursor" });
+						yield* persistConfig;
+					}
+					yield* PubSub.publish(bus, DaemonEvent.InstancesChanged());
+				}),
+			),
+		);
 		// Join the subscriber set BEFORE the first read, so a change landing
 		// between the two still wakes this stream: snapshot, then a fresh list
 		// per change.
@@ -276,6 +306,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| InstanceManagerStateTag
 				| ProjectRegistryTag
 				| SessionDirectory
+				| PersistenceStore
 				| DaemonConfigRefTag
 			>,
 		) =>
@@ -297,7 +328,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			SubscribeInstances: () =>
 				followList(
 					"instances",
-					Effect.map(getInstances, (instances) => ({
+					Effect.map(discoverInstances, (instances) => ({
 						instances: Array.from(instances),
 						providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
 						providerTraits: PROVIDER_DRIVERS,
@@ -305,19 +336,30 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			SubscribeUsage: () =>
 				usage.readings.pipe(Stream.map((readings) => ({ readings }))),
-			SubscribeProjects: () =>
-				followList(
-					"projects",
-					Effect.gen(function* () {
-						const projects = yield* projectInfos;
-						const { newSessionProject } = yield* Ref.get(
-							yield* DaemonConfigRefTag,
-						);
-						return {
-							projects,
-							...(newSessionProject !== undefined && { newSessionProject }),
-						};
-					}),
+			SubscribeShell: (request) =>
+				subscribeDaemonShell(
+					request,
+					followList(
+						"projects",
+						Effect.gen(function* () {
+							const projects = yield* projectInfos;
+							const { newSessionProject } = yield* Ref.get(
+								yield* DaemonConfigRefTag,
+							);
+							return {
+								_tag: "projects" as const,
+								projects,
+								...(newSessionProject !== undefined && { newSessionProject }),
+							};
+						}),
+					),
+				).pipe(
+					Stream.provideContext(shellContext),
+					Stream.mapError((error) =>
+						error instanceof WsRpcError
+							? error
+							: new WsRpcError({ message: formatErrorDetail(error) }),
+					),
 				),
 			sessionCreated: (projectSlug) =>
 				run(rememberNewSessionProject(projectSlug)).pipe(
@@ -478,11 +520,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 								message: `Relay "${request.slug}" does not support default agent updates`,
 							});
 						}
-						yield* Effect.tryPromise({
-							try: () => setDefaultAgent(request.agent),
-							catch: (cause) =>
-								new WsRpcError({ message: formatErrorDetail(cause) }),
-						});
+						yield* setDefaultAgent(request.agent);
 						return { ok: true as const };
 					}),
 				),
@@ -504,7 +542,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			GetInstances: () =>
 				run(
-					getInstances.pipe(
+					discoverInstances.pipe(
 						Effect.map((instances) => ({
 							instances: Array.from(instances),
 							providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
@@ -512,6 +550,10 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						})),
 					),
 				),
+			GetCursorAuth: () => cursorAuth.read,
+			StartCursorLogin: () => cursorAuth.start,
+			CancelCursorLogin: () => cursorAuth.cancel,
+			LogoutCursor: () => cursorAuth.logout,
 			GetInstanceStatus: (request) =>
 				run(
 					getInstance(request.instanceId).pipe(
@@ -723,6 +765,12 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(wsRpcHandlers.GetUsageLimitsSetting(request)),
 			SetUsageLimitsSetting: (request) =>
 				run(wsRpcHandlers.SetUsageLimitsSetting(request)),
+			SetCursorUsageKeychain: (request) =>
+				run(
+					wsRpcHandlers
+						.SetCursorUsageKeychain(request)
+						.pipe(Effect.provideService(Usage, usage)),
+				),
 			ScanNow: (request) =>
 				run(
 					Effect.gen(function* () {
@@ -739,6 +787,9 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						...(request.limit !== undefined ? { limit: request.limit } : {}),
 						...(request.roots !== undefined ? { roots: request.roots } : {}),
 						...(request.search !== undefined ? { search: request.search } : {}),
+						...(request.includeArchived !== undefined
+							? { includeArchived: request.includeArchived }
+							: {}),
 						...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
 						...(request.scope !== undefined ? { scope: request.scope } : {}),
 						...(request.exclude !== undefined
@@ -751,13 +802,19 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						})),
 					),
 				),
+			ListArchivedSessions: (request) =>
+				run(
+					listArchivedSessions({
+						...(request.limit !== undefined ? { limit: request.limit } : {}),
+						...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
+					}),
+				),
 			ResolveSession: (request) =>
 				run(
 					resolveDaemonSession(request.sessionId).pipe(
 						Effect.mapError(
 							(error) =>
 								new WsRpcError({
-									code: "ambiguous-session",
 									message: error.message,
 								}),
 						),
@@ -786,7 +843,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 								"Declared worktree moves require a Conduit-managed OpenCode instance",
 						});
 					const target = yield* resolveDaemonOpenCodeSession(
-						configDir,
 						request.instanceId,
 						request.providerSessionId,
 					);
@@ -803,6 +859,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					const relayContext = yield* relay.rpcWsHandler.context;
 					return yield* Effect.gen(function* () {
 						const sessionId = yield* findOpenCodeSession(
+							{ projectIds: [target.projectSlug] },
 							request.instanceId,
 							request.providerSessionId,
 						);

@@ -5,12 +5,14 @@ import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js"
 import {
 	DEFAULT_WORKTREE_CLEANUP,
 	type ProjectWorktreeCleanup,
-	ProjectWorktreeCleanupSchema,
 	type WorktreeCleanup,
-	WorktreeCleanupSchema,
 } from "../../../src/lib/contracts/worktree.js";
 import {
 	type Alert,
+	GetAgentsResponseSchema,
+	GetCommandsResponseSchema,
+	GetModelsResponseSchema,
+	GetProjectsResponseSchema,
 	type GetStatusResponse,
 	type ProjectSetting,
 	WsRpcError,
@@ -25,24 +27,12 @@ import {
 	subscribeMockDetail,
 } from "./detail-projection-mock.js";
 
-interface JsonRpcRequest {
-	readonly jsonrpc?: "2.0";
-	readonly id?: number | string | null;
-	readonly method: string;
-	readonly params?: Record<string, unknown>;
-}
-
 interface EffectRpcRequest {
 	readonly _tag: "Request";
 	readonly id: string;
 	readonly tag: string;
 	readonly payload?: Record<string, unknown>;
 }
-
-type RpcHandler = (
-	params: Record<string, unknown>,
-	request: JsonRpcRequest | EffectRpcRequest,
-) => unknown | Promise<unknown>;
 
 export const MOCK_SERVER_STATUS: GetStatusResponse = {
 	uptime: 273_600,
@@ -65,7 +55,6 @@ export const MOCK_SERVER_STATUS: GetStatusResponse = {
 type DaemonListTag =
 	| "SubscribeInstances"
 	| "SubscribeUsage"
-	| "SubscribeProjects"
 	| "SubscribeServerStatus";
 
 /** Subscriptions opened once per session, so each session gets its own stream. */
@@ -80,15 +69,13 @@ const isLiveOnlyStream = (tag: string): boolean =>
 
 export interface RpcMockOptions {
 	readonly stubs?: StubTable;
-	/** Temporary wire-shaped fixtures, migrated to stubs one domain at a time. */
-	readonly handlers?: Record<string, RpcHandler>;
 	readonly streams?: Record<
 		string,
 		(params: Record<string, unknown>) => readonly unknown[]
 	>;
 }
 
-/** Mock-only catalog served by GetModels/GetAgents/GetCommands when a spec has no handler. */
+/** Mock-only catalog served by GetModels/GetAgents/GetCommands by default. */
 export interface MockCatalog {
 	instanceId?: string;
 	defaultOpenCodeInstanceId?: string;
@@ -124,8 +111,6 @@ export class RpcMockControl {
 	private readonly sockets = new Set<WebSocketRoute>();
 	private connectionCount = 0;
 	private readonly requests: RecordedRpcRequest[] = [];
-	private readonly responseHandlers = new Map<string, RpcHandler>();
-	initialHandlers: Record<string, RpcHandler> = {};
 	private readonly streams = new Map<
 		string,
 		{
@@ -148,46 +133,67 @@ export class RpcMockControl {
 	private readonly sessionTodos = new Map<string, readonly unknown[]>();
 	private sessionTodosSequence = 0;
 
-	setResponse(tag: string, value: unknown): void {
-		this.responseHandlers.set(tag, () => value);
+	stubs: StubTable = {};
+
+	/** Updates typed replies; a stub may throw a WsRpcError to fail the call. */
+	setStubs(stubs: StubTable): void {
+		Object.assign(this.stubs, stubs);
 	}
 
-	/** Answers `tag` from a handler, which may throw a WsRpcError to fail it. */
-	setHandler(tag: string, handler: RpcHandler): void {
-		this.responseHandlers.set(tag, handler);
-	}
-
-	getResponseHandler(tag: string): RpcHandler | undefined {
-		return this.responseHandlers.get(tag) ?? this.initialHandlers[tag];
-	}
-
-	catalogHandler(tag: string): RpcHandler | undefined {
-		const { providers, agents, commands, ...modelState } = this.catalog;
-		const projectSlug = this.projectSlug;
-		if (tag === "GetModels" && (providers || Object.keys(modelState).length))
-			return ({ sessionId }) => ({
-				projectSlug,
-				providers: providers ?? [],
-				...modelState,
-				...(sessionId && modelState.instanceId === undefined
-					? {
-							instanceId:
-								(modelState.active as { provider?: string } | undefined)
-									?.provider === "claude"
-									? "claude"
-									: "opencode",
-						}
-					: {}),
-			});
-		if (tag === "GetCommands" && commands)
-			return () => ({ projectSlug, commands });
-		if (tag === "GetAgents" && agents?.length)
-			return ({ instanceId }) => ({
-				projectSlug,
-				...(agents.find((list) => list.providerScope.id === instanceId) ??
-					agents.at(-1)),
-			});
-		return undefined;
+	catalogStubs(): Required<
+		Pick<StubTable, "GetModels" | "GetCommands" | "GetAgents">
+	> {
+		return {
+			GetModels: (payload) => {
+				const {
+					providers,
+					agents: _agents,
+					commands: _commands,
+					...modelState
+				} = this.catalog;
+				if (!providers && !Object.keys(modelState).length)
+					return new Promise<never>(() => {});
+				return checkedReply("GetModels", () =>
+					Schema.decodeUnknownSync(GetModelsResponseSchema)({
+						projectSlug: this.projectSlug,
+						defaultOpenCodeInstanceId: "opencode",
+						providers: providers ?? [],
+						...modelState,
+						...("sessionId" in payload &&
+						payload.sessionId &&
+						modelState.instanceId === undefined
+							? {
+									instanceId:
+										(modelState.active as { provider?: string } | undefined)
+											?.provider === "claude"
+											? "claude"
+											: "opencode",
+								}
+							: {}),
+					}),
+				);
+			},
+			GetCommands: () =>
+				this.catalog.commands
+					? checkedReply("GetCommands", () =>
+							Schema.decodeUnknownSync(GetCommandsResponseSchema)({
+								projectSlug: this.projectSlug,
+								commands: this.catalog.commands,
+							}),
+						)
+					: new Promise<never>(() => {}),
+			GetAgents: ({ instanceId }) =>
+				this.catalog.agents?.length
+					? checkedReply("GetAgents", () =>
+							Schema.decodeUnknownSync(GetAgentsResponseSchema)({
+								projectSlug: this.projectSlug,
+								...(this.catalog.agents?.find(
+									(list) => list.providerScope.id === instanceId,
+								) ?? this.catalog.agents?.at(-1)),
+							}),
+						)
+					: new Promise<never>(() => {}),
+		};
 	}
 
 	setDetailRows(sessionId: string, rows: readonly unknown[]): void {
@@ -225,7 +231,7 @@ export class RpcMockControl {
 		return this.detailFeed === "stall" ? frames.slice(0, 1) : frames;
 	}
 
-	/** The relay stamps its own project on every session row it streams. */
+	/** Unowned legacy fixture rows belong to the fixture project. */
 	owned(rows: readonly unknown[]): readonly unknown[] {
 		return rows.map((row) => ({
 			projectSlug: this.projectSlug,
@@ -242,7 +248,7 @@ export class RpcMockControl {
 				{
 					_tag: "snapshot",
 					sequence: this.shellSequence,
-					rows: this.owned(rows),
+					rows: this.visibleShellRows(rows),
 				},
 				{ _tag: "synchronized" },
 			]);
@@ -389,16 +395,70 @@ export class RpcMockControl {
 	}
 
 	initialShellFrames(): readonly unknown[] {
-		return this.shellRows === null
-			? []
-			: [
-					{
-						_tag: "snapshot",
-						sequence: this.shellSequence,
-						rows: this.owned(this.shellRows),
-					},
-					{ _tag: "synchronized" },
-				];
+		return [
+			...this.initialProjectsFrames(),
+			...(this.shellRows === null
+				? []
+				: [
+						{
+							_tag: "snapshot",
+							sequence: this.shellSequence,
+							rows: this.visibleShellRows(this.shellRows),
+						},
+						{ _tag: "synchronized" },
+					]),
+		];
+	}
+
+	private projects: Record<string, unknown> = { projects: [] };
+	private projectsSet = false;
+
+	private visibleShellRows(rows: readonly unknown[]): readonly unknown[] {
+		const owned = this.owned(rows);
+		if (!this.projectsSet) return owned;
+		const projects = Array.isArray(this.projects["projects"])
+			? this.projects["projects"]
+			: [];
+		const visible = new Set(
+			projects
+				.filter(
+					(project: { unavailableReason?: string }) =>
+						project.unavailableReason === undefined,
+				)
+				.map((project: { slug: string }) => project.slug),
+		);
+		return owned.filter((row) =>
+			visible.has((row as { projectSlug: string }).projectSlug),
+		);
+	}
+
+	/** Stays silent until a test sets projects: an empty list would read as the
+	 *  attached project being removed and navigate away. */
+	initialProjectsFrames(): readonly unknown[] {
+		return this.projectsSet ? [this.projectsFrame()] : [];
+	}
+
+	projectsFrame(): Record<string, unknown> {
+		return { ...this.projects, _tag: "projects" };
+	}
+
+	setProjects(value: Record<string, unknown>): void {
+		const membership = (list: Record<string, unknown>) =>
+			JSON.stringify(
+				(Array.isArray(list["projects"]) ? list["projects"] : [])
+					.map((project: { slug: string; unavailableReason?: string }) => [
+						project.slug,
+						project.unavailableReason !== undefined,
+					])
+					.sort(),
+			);
+		const changed = membership(this.projects) !== membership(value);
+		this.projects = value;
+		this.projectsSet = true;
+		if (this.streams.has("SubscribeShell")) {
+			this.sendChunk("SubscribeShell", [this.projectsFrame()]);
+			if (changed && this.shellRows !== null) this.setShellRows(this.shellRows);
+		}
 	}
 
 	/** The daemon-global lists, keyed by subscription tag; unset lists stay silent. */
@@ -427,9 +487,18 @@ export class RpcMockControl {
 	}
 
 	/** GetProjects answers from the mocked list, as the daemon does. */
-	projectsHandler(): RpcHandler | undefined {
-		const list = this.daemonLists.get("SubscribeProjects");
-		return list && (() => ({ projectSlug: this.projectSlug, ...list }));
+	projectsHandler(): StubTable["GetProjects"] | undefined {
+		const list = this.projects;
+		return (
+			list &&
+			(() =>
+				checkedReply("GetProjects", () =>
+					Schema.decodeUnknownSync(GetProjectsResponseSchema)({
+						projectSlug: this.projectSlug,
+						...list,
+					}),
+				))
+		);
 	}
 
 	record(tag: string, payload: Record<string, unknown>): void {
@@ -539,6 +608,7 @@ const pendingDaemonLists = new WeakMap<
 	Map<DaemonListTag, Record<string, unknown>>
 >();
 const pendingShellRows = new WeakMap<Page, readonly unknown[]>();
+const pendingProjects = new WeakMap<Page, Record<string, unknown>>();
 const pendingFamilyRows = new WeakMap<Page, readonly unknown[]>();
 const pendingProjectSlugs = new WeakMap<Page, string>();
 const pendingCatalogs = new WeakMap<Page, MockCatalog>();
@@ -560,6 +630,16 @@ export function sendMockModelState(page: Page, state: MockModelState): void {
 	const control = controls.get(page);
 	if (control) control.setModelState(state);
 	else pendingCatalogs.set(page, { ...pendingCatalogs.get(page), ...state });
+}
+
+/** Mock-only input: publish project metadata through the shell feed. */
+export function sendMockProjects(
+	page: Page,
+	value: Record<string, unknown>,
+): void {
+	const control = controls.get(page);
+	if (control) control.setProjects(value);
+	else pendingProjects.set(page, value);
 }
 
 /** Mock-only input: deliver a daemon list through its RPC subscription. */
@@ -650,96 +730,15 @@ export function sendMockFamily(page: Page, rows: readonly unknown[]): void {
 
 /** Validation makes an invalid typed fixture fail its owning Playwright spec.
  * The real engine still owns every response frame and its serialization. */
-function checkedReply(
-	tag: string,
-	schema: Schema.Schema<unknown, unknown>,
-	value: unknown,
-	typed: boolean,
-): unknown {
+function checkedReply<A>(tag: string, validate: () => A): A {
 	try {
-		if (!typed) return Schema.decodeUnknownSync(schema)(value);
-		Schema.encodeUnknownSync(schema)(value);
-		return value;
+		return validate();
 	} catch (error) {
-		const message = `Invalid ${typed ? "typed" : "legacy"} RPC reply for ${tag}: ${String(error)}`;
-		if (typed) expect.soft(false, message).toBe(true);
-		else console.warn(message);
+		expect
+			.soft(false, `Invalid typed RPC reply for ${tag}: ${String(error)}`)
+			.toBe(true);
 		throw error;
 	}
-}
-
-function defaultHandler(
-	tag: string,
-	control: RpcMockControl,
-): RpcHandler | undefined {
-	return (
-		control.catalogHandler(tag) ??
-		(tag === "ResolveSessionMode"
-			? () => ({ mode: "local", source: "global" })
-			: undefined) ??
-		(tag === "GetProjects" ? control.projectsHandler() : undefined) ??
-		(tag === "GetStatus" ? () => MOCK_SERVER_STATUS : undefined) ??
-		(tag === "GetDefaultGroupingMode"
-			? () => ({ mode: "repository" })
-			: undefined) ??
-		(tag === "GetWorktreeCleanupSetting"
-			? ({ projectSlug }) => ({
-					global: control.worktreeCleanupGlobal,
-					...(typeof projectSlug === "string" && {
-						project: control.worktreeCleanupProjects.get(projectSlug) ?? null,
-					}),
-				})
-			: tag === "SetWorktreeCleanupSetting"
-				? ({ scope, projectSlug, override, rules }) => {
-						if (scope === "project" && typeof projectSlug === "string") {
-							if (override === null)
-								control.worktreeCleanupProjects.delete(projectSlug);
-							else
-								control.worktreeCleanupProjects.set(
-									projectSlug,
-									Schema.decodeUnknownSync(ProjectWorktreeCleanupSchema)(
-										override,
-									),
-								);
-							return {
-								global: control.worktreeCleanupGlobal,
-								project:
-									control.worktreeCleanupProjects.get(projectSlug) ?? null,
-							};
-						}
-						control.worktreeCleanupGlobal = Schema.decodeUnknownSync(
-							WorktreeCleanupSchema,
-						)(rules);
-						return { global: control.worktreeCleanupGlobal };
-					}
-				: undefined) ??
-		(tag === "GetUsageLimitsSetting"
-			? () => ({
-					usageLimits: { autoResume: false, autoSwitch: false, order: [] },
-				})
-			: tag === "ResolveSession"
-				? () => ({ projectSlug: control.projectSlug })
-				: tag === "AttachProject"
-					? ({ projectSlug, sessionId }) => ({
-							projectSlug:
-								typeof projectSlug === "string"
-									? projectSlug
-									: control.projectSlug,
-							sessionSlug:
-								typeof sessionId === "string" ? control.projectSlug : null,
-						})
-					: tag === "ViewSession"
-						? () => ({ ok: true })
-						: tag === "InspectSessionWorktrees"
-							? () => ({
-									worktrees: [],
-									removeWorktrees: false,
-									onDelete: "ask",
-								})
-							: tag === "input.submit"
-								? ({ sessionId }) => ({ ok: true, sessionId })
-								: undefined)
-	);
 }
 
 function initialStream(
@@ -749,7 +748,13 @@ function initialStream(
 	control: RpcMockControl,
 ): readonly unknown[] {
 	const stream = options.streams?.[tag];
-	if (stream) return stream(payload);
+	if (stream) {
+		const frames = stream(payload);
+		return tag === "SubscribeShell" &&
+			(frames[0] as { _tag?: string } | undefined)?._tag !== "projects"
+			? [...control.initialProjectsFrames(), ...frames]
+			: frames;
+	}
 	switch (tag) {
 		case "SubscribeShell":
 			return control.initialShellFrames();
@@ -765,7 +770,6 @@ function initialStream(
 			return control.initialProjectSettingsFrames();
 		case "SubscribeInstances":
 		case "SubscribeUsage":
-		case "SubscribeProjects":
 		case "SubscribeServerStatus":
 			return control.initialDaemonList(tag);
 		default:
@@ -780,7 +784,7 @@ function socketTable(
 	requests: Map<string, EffectRpcRequest[]>,
 ): StubTable {
 	// Iterating the group erases the tag/payload correlation checked by StubTable.
-	const stubs = (options.stubs ?? {}) as Readonly<
+	const stubs = control.stubs as Readonly<
 		Record<string, ((payload: Record<string, unknown>) => unknown) | undefined>
 	>;
 	const table: Record<string, (payload: never) => unknown> = {};
@@ -790,12 +794,10 @@ function socketTable(
 			const request = requests.get(rpc._tag)?.shift();
 			if (!request) throw new Error(`Missing request for ${rpc._tag}`);
 			const stub = stubs[rpc._tag];
-			const override = control.getResponseHandler(rpc._tag);
-			const typed = stub !== undefined && override === undefined;
 			if (streamSchema._tag === "Some") {
 				const schema = Schema.make(streamSchema.value.success.ast);
 				// The group's stream schema establishes this result's shape.
-				const source = typed
+				const source = stub
 					? (stub(payload) as Stream.Stream<unknown, unknown>)
 					: undefined;
 				return Stream.unwrap(
@@ -819,14 +821,10 @@ function socketTable(
 							});
 						}
 						if (rpc._tag === "SubscribeDraftModels") {
-							const handler =
-								control.getResponseHandler("GetModels") ??
-								stubs["GetModels"] ??
-								defaultHandler("GetModels", control);
+							const handler = stubs["GetModels"];
 							if (handler) {
 								const response = yield* Effect.tryPromise({
-									try: async () =>
-										handler(payload, { ...request, tag: "GetModels" }),
+									try: async () => handler(payload),
 									catch: (error) => new WsRpcError({ message: String(error) }),
 								});
 								if (!isRecord(response))
@@ -854,15 +852,22 @@ function socketTable(
 						return queue.stream;
 					}),
 				).pipe(
-					Stream.map((value) => checkedReply(rpc._tag, schema, value, typed)),
+					Stream.map((value) =>
+						stub
+							? checkedReply(rpc._tag, () => {
+									Schema.encodeUnknownSync(schema)(value);
+									return value;
+								})
+							: Schema.decodeUnknownSync(schema)(value),
+					),
 					Stream.mapError((error) =>
-						typed
-							? checkedReply(
-									rpc._tag,
-									Schema.make(streamSchema.value.failure.ast),
-									error,
-									true,
-								)
+						stub
+							? checkedReply(rpc._tag, () => {
+									Schema.encodeUnknownSync(
+										Schema.make(streamSchema.value.failure.ast),
+									)(error);
+									return error;
+								})
 							: error,
 					),
 					Stream.ensuring(
@@ -870,24 +875,19 @@ function socketTable(
 					),
 				);
 			}
-			const handler =
-				override ?? (typed ? stub : defaultHandler(rpc._tag, control));
-			if (!handler) return new Promise<never>(() => {});
+			if (!stub) return new Promise<never>(() => {});
 			return (async () => {
-				const response = await handler(payload, request);
-				const result =
-					!typed && rpc._tag === "GetModels" && isRecord(response)
-						? { defaultOpenCodeInstanceId: "opencode", ...response }
-						: response;
-				const value = checkedReply(
-					rpc._tag,
-					Schema.make(rpc.successSchema.ast),
-					result,
-					typed,
-				);
+				const response = await stub(payload);
+				const value = checkedReply(rpc._tag, () => {
+					Schema.encodeUnknownSync(Schema.make(rpc.successSchema.ast))(
+						response,
+					);
+					return response;
+				});
 				if (!rpc._tag.startsWith("Get") && isRecord(value)) {
 					if (Array.isArray(value["projects"]))
-						control.setDaemonList("SubscribeProjects", {
+						control.setProjects({
+							...control.projectsFrame(),
 							projects: value["projects"],
 						});
 					if (Array.isArray(value["instances"]))
@@ -905,17 +905,84 @@ function socketTable(
 
 export async function mockWsRpc(
 	page: Page,
-	options: RpcMockOptions,
+	options: RpcMockOptions = {},
 ): Promise<RpcMockControl> {
 	const control = controls.get(page) ?? new RpcMockControl(page);
 	controls.set(page, control);
-	control.initialHandlers = options.handlers ?? {};
+	control.stubs = {
+		"input.submit": ({ sessionId }) => ({
+			ok: true,
+			sessionId,
+			handedOff: true,
+		}),
+		GetProjects: (payload) =>
+			control.projectsHandler()?.(payload) ?? new Promise<never>(() => {}),
+		AttachProject: (payload) => ({
+			projectSlug:
+				"projectSlug" in payload && typeof payload.projectSlug === "string"
+					? payload.projectSlug
+					: control.projectSlug,
+			sessionSlug: "sessionId" in payload ? control.projectSlug : null,
+		}),
+		ResolveSession: () => ({ projectSlug: control.projectSlug }),
+		ViewSession: () => ({ ok: true }),
+		InspectSessionWorktrees: () => ({
+			worktrees: [],
+			removeWorktrees: false,
+			onDelete: "ask",
+		}),
+		...control.catalogStubs(),
+		ResolveSessionMode: () => ({ mode: "local", source: "global" }),
+		GetCursorAuth: () => ({
+			source: "none",
+			status: "logged-out",
+			expiresSoon: false,
+			login: { state: "idle" },
+		}),
+		GetStatus: () => MOCK_SERVER_STATUS,
+		GetDefaultGroupingMode: () => ({ mode: "repository" }),
+		GetWorktreeCleanupSetting: ({ projectSlug }) => ({
+			global: control.worktreeCleanupGlobal,
+			...(projectSlug !== undefined && {
+				project: control.worktreeCleanupProjects.get(projectSlug) ?? null,
+			}),
+		}),
+		SetWorktreeCleanupSetting: (payload) => {
+			if (payload.scope === "global") {
+				control.worktreeCleanupGlobal = payload.rules;
+				return { global: control.worktreeCleanupGlobal };
+			}
+			if (payload.override === null)
+				control.worktreeCleanupProjects.delete(payload.projectSlug);
+			else
+				control.worktreeCleanupProjects.set(
+					payload.projectSlug,
+					payload.override,
+				);
+			return {
+				global: control.worktreeCleanupGlobal,
+				project:
+					control.worktreeCleanupProjects.get(payload.projectSlug) ?? null,
+			};
+		},
+		GetUsageLimitsSetting: () => ({
+			usageLimits: {
+				autoResume: false,
+				autoSwitch: false,
+				warnAt: 80,
+				order: [],
+			},
+		}),
+		...options.stubs,
+	};
 	control.projectSlug = pendingProjectSlugs.get(page) ?? control.projectSlug;
 	control.catalog = pendingCatalogs.get(page) ?? control.catalog;
 	subscribeMockDetail(page, (sessionId, envelope) => {
 		if (control.hasStream("SubscribeSessionDetail", sessionId))
 			control.sendChunk("SubscribeSessionDetail", [envelope], sessionId);
 	});
+	const projects = pendingProjects.get(page);
+	if (projects) control.setProjects(projects);
 	const rows = pendingShellRows.get(page);
 	if (rows) control.setShellRows(rows);
 	const familyRows = pendingFamilyRows.get(page);
@@ -990,10 +1057,15 @@ export async function ensureMockTranscriptRpc(
 	const control = controls.get(page);
 	if (control) return control;
 	return mockWsRpc(page, {
-		handlers: {
+		stubs: {
+			LoadMoreHistory: ({ sessionId, before }) => ({
+				projectSlug: "e2e-replay",
+				sessionId,
+				...mockDetailPage(page, sessionId, before),
+			}),
 			ViewSession: () => ({ ok: true }),
-			ResolveSession: ({ projectSlug }) => ({
-				projectSlug: String(projectSlug ?? "e2e-replay"),
+			ResolveSession: () => ({
+				projectSlug: "e2e-replay",
 			}),
 			ListDaemonSessions: () => ({
 				sessions: [],
@@ -1001,14 +1073,11 @@ export async function ensureMockTranscriptRpc(
 				hasMore: false,
 				nextCursor: null,
 			}),
-			LoadMoreHistory: ({ projectSlug, sessionId, before }) => ({
-				projectSlug: String(projectSlug ?? "e2e-replay"),
-				sessionId: String(sessionId ?? ""),
-				...mockDetailPage(
-					page,
-					String(sessionId ?? ""),
-					typeof before === "string" ? before : undefined,
-				),
+			ListArchivedSessions: () => ({
+				sessions: [],
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
 			}),
 		},
 	});

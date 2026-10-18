@@ -1,5 +1,133 @@
 [
 	{
+		"label": "session.archived required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 700000,
+			"event_id": "fixture-archive-0",
+			"session_id": "fixture-session",
+			"stream_version": 500,
+			"type": "session.archived",
+			"data": "{\"sessionId\":\"fixture\",\"automatic\":false}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.archived optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 700001,
+			"event_id": "fixture-archive-1",
+			"session_id": "fixture-session",
+			"stream_version": 501,
+			"type": "session.archived",
+			"data": "{\"sessionId\":\"fixture\",\"automatic\":true,\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.archived empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 700002,
+			"event_id": "fixture-archive-2",
+			"session_id": "fixture-session",
+			"stream_version": 502,
+			"type": "session.archived",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.archived missing automatic",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 700003,
+			"event_id": "fixture-archive-3",
+			"session_id": "fixture-session",
+			"stream_version": 503,
+			"type": "session.archived",
+			"data": "{\"sessionId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.unarchived required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 700004,
+			"event_id": "fixture-archive-4",
+			"session_id": "fixture-session",
+			"stream_version": 504,
+			"type": "session.unarchived",
+			"data": "{\"sessionId\":\"fixture\",\"cause\":\"manual\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.unarchived optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 700005,
+			"event_id": "fixture-archive-5",
+			"session_id": "fixture-session",
+			"stream_version": 505,
+			"type": "session.unarchived",
+			"data": "{\"sessionId\":\"fixture\",\"cause\":\"send\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.unarchived empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 700006,
+			"event_id": "fixture-archive-6",
+			"session_id": "fixture-session",
+			"stream_version": 506,
+			"type": "session.unarchived",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.unarchived invalid cause",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 700007,
+			"event_id": "fixture-archive-7",
+			"session_id": "fixture-session",
+			"stream_version": 507,
+			"type": "session.unarchived",
+			"data": "{\"sessionId\":\"fixture\",\"cause\":\"automatic\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
 		"label": "historical sequence 609186",
 		"accepted": true,
 		"row": {

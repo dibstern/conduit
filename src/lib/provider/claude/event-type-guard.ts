@@ -145,6 +145,8 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	},
 	"session.settled": { produced: false, reason: "Relay-owned triage state" },
 	"session.unsettled": { produced: false, reason: "Relay-owned triage state" },
+	"session.archived": { produced: false, reason: "Relay-owned triage state" },
+	"session.unarchived": { produced: false, reason: "Relay-owned triage state" },
 	"session.pinned": { produced: false, reason: "Relay-owned triage state" },
 	"session.unpinned": { produced: false, reason: "Relay-owned triage state" },
 	"session.snoozed": { produced: false, reason: "Relay-owned triage state" },
@@ -178,6 +180,10 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		produced: false,
 		reason:
 			"Relay-owned: the Session Inbox records turn handoff or steering delivery",
+	},
+	"input.requeued": {
+		produced: false,
+		reason: "Inbox recovery after a declined or failed steer",
 	},
 	"input.cancelled": {
 		produced: false,

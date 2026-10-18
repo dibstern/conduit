@@ -4,6 +4,7 @@ import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
+import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { backgroundOpenCodeAPI } from "../domain/relay/Layers/relay-core-layers.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
@@ -44,8 +45,8 @@ import { formatErrorDetail } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
-import { ClaudeProviderInstance } from "../provider/claude/claude-provider-instance.js";
 import { getOrchestrationLayer } from "../provider/orchestration-wiring.js";
+import { RunnerProviderInstance } from "../provider/runner/runner-provider-instance.js";
 import { makeWsRpcWebSocketHandler } from "../server/ws-rpc-handler.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { wireMonitoringEffect } from "./monitoring-wiring.js";
@@ -57,6 +58,24 @@ import {
 import type { parseDefaultModel, RelaySettings } from "./relay-settings.js";
 import { RelayCreationAbortedError } from "./relay-stack.js";
 import { wireSSEConsumerEffect } from "./sse-wiring.js";
+
+export const readPersistedStartupSessions = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const { projectId } = yield* PersistenceProjectTag;
+	return yield* Effect.all({
+		count: sql<{ count: number }>`SELECT COUNT(*) AS count FROM sessions
+			WHERE project_id = ${projectId}`.pipe(
+			Effect.map((rows) => rows[0]?.count ?? 0),
+		),
+		sessionId: sql<{ id: string | null }>`SELECT COALESCE(
+			(SELECT id FROM sessions WHERE project_id = ${projectId}
+				AND (parent_id IS NULL OR parent_id = '')
+				ORDER BY updated_at DESC, id DESC LIMIT 1),
+			(SELECT id FROM sessions WHERE project_id = ${projectId}
+				ORDER BY updated_at DESC, id DESC LIMIT 1)
+		) AS id`.pipe(Effect.map((rows) => rows[0]?.id ?? undefined)),
+	});
+});
 
 interface StartupInputs {
 	config: ProjectRelayConfig;
@@ -83,6 +102,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 	const { relayManagedRuntime } = layers;
 	return Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		const persistenceProject = yield* PersistenceProjectTag;
 		const activity = yield* SessionActivityTag;
 		const projectSettingsContext = yield* Effect.context<
 			ProjectSettingsTag | OverridesStateTag | ConfigTag
@@ -111,9 +131,12 @@ function acquireStartupServices(inputs: StartupInputs) {
 		// Recover pending state before initialization advances projector cursors.
 		yield* restoreClaudeQuestionsFromStore;
 		const orchestration = yield* getOrchestrationLayer;
-		const instance = yield* orchestration.registry.getInstanceEffect("claude");
-		if (instance instanceof ClaudeProviderInstance)
-			yield* instance.recoverEffect();
+		for (const providerId of orchestration.registry.listProviders()) {
+			const instance =
+				yield* orchestration.registry.getInstanceEffect(providerId);
+			if (instance instanceof RunnerProviderInstance)
+				yield* instance.recoverEffect();
+		}
 		const projectionRunner = yield* ProjectionRunnerEffectTag;
 		if (!(yield* projectionRunner.isRecovered()))
 			yield* projectionRunner.recover();
@@ -171,20 +194,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 		// Read-model only: creating a first session could call OpenCode, so attach
 		// creates it instead (getDefaultSessionId).
 		const readQueryEffect = yield* ReadQueryEffectTag;
-		const sessionsResult = yield* Effect.either(
-			Effect.all({
-				count: sql<{
-					count: number;
-				}>`SELECT COUNT(*) AS count FROM sessions`.pipe(
-					Effect.map((rows) => rows[0]?.count ?? 0),
-				),
-				sessionId: sql<{ id: string | null }>`SELECT COALESCE(
-					(SELECT id FROM sessions WHERE parent_id IS NULL OR parent_id = ''
-						ORDER BY updated_at DESC, id DESC LIMIT 1),
-					(SELECT id FROM sessions ORDER BY updated_at DESC, id DESC LIMIT 1)
-				) AS id`.pipe(Effect.map((rows) => rows[0]?.id ?? undefined)),
-			}),
-		);
+		const sessionsResult = yield* Effect.either(readPersistedStartupSessions);
 		if (sessionsResult._tag === "Right" && sessionsResult.right.count > 0)
 			yield* statusSnapshot.setSessionCount(sessionsResult.right.count);
 		if (sessionsResult._tag === "Left")
@@ -252,6 +262,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 		}
 		return {
 			sql,
+			persistenceProject,
 			activity,
 			projectSettingsContext,
 			translator,
@@ -450,6 +461,7 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				} = services;
 				return {
 					sql,
+					persistenceProject: services.persistenceProject,
 					activity: services.activity,
 					projectSettingsContext: services.projectSettingsContext,
 					sessionManagerService,

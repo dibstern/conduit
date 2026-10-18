@@ -12,12 +12,12 @@ import { basename, join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	type ClaudeRunnerHello,
-	type ClaudeRunnerMessage,
-	ClaudeRunnerSocket,
-} from "../../../src/lib/provider/claude/claude-runner-protocol.js";
-import type { ClaudeSessionTurn } from "../../../src/lib/provider/claude/claude-session-runner.js";
+import { ClaudeRunnerSocket } from "../../../src/lib/provider/claude/claude-runner-protocol.js";
+import type {
+	RunnerHello,
+	RunnerMessage,
+} from "../../../src/lib/provider/runner/runner-protocol.js";
+import type { SessionTurn } from "../../../src/lib/provider/runner/session-runner.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import {
 	ProcessHarness,
@@ -25,7 +25,7 @@ import {
 } from "../../helpers/process-harness.js";
 
 function persisted(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath(), {
+	const db = new Database(harness.daemonStorePath(), {
 		readonly: true,
 	});
 	try {
@@ -453,7 +453,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started")
 			throw new Error("Missing verified runner");
-		const db = new Database(harness.projectStorePath());
+		const db = new Database(harness.daemonStorePath());
 		const command = db
 			.prepare(
 				"SELECT command_id, payload_json, attempt_count FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn'",
@@ -466,7 +466,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 		const upstreamPath = `${runner.socketPath}.upstream`;
 		const sockets = new Set<Socket>();
 		const held: string[] = [];
-		const wire: Array<{ direction: string; message: ClaudeRunnerMessage }> = [];
+		const wire: Array<{ direction: string; message: RunnerMessage }> = [];
 		let cachedReceived: (socket: Socket) => void = () => {};
 		const cachedReady = new Promise<Socket>((resolve) => {
 			cachedReceived = resolve;
@@ -496,7 +496,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 					const boundary = incoming.indexOf("\n");
 					const line = incoming.slice(0, boundary);
 					incoming = incoming.slice(boundary + 1);
-					const message = JSON.parse(line) as ClaudeRunnerMessage;
+					const message = JSON.parse(line) as RunnerMessage;
 					wire.push({ direction: "server-to-runner", message });
 					if (released && message.type === "replay" && ++retries >= 2)
 						retriesReceived();
@@ -510,7 +510,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 					const boundary = outgoing.indexOf("\n");
 					const line = outgoing.slice(0, boundary);
 					outgoing = outgoing.slice(boundary + 1);
-					const message = JSON.parse(line) as ClaudeRunnerMessage;
+					const message = JSON.parse(line) as RunnerMessage;
 					wire.push({ direction: "runner-to-server", message });
 					if (message.type === "hello" || released) client.write(`${line}\n`);
 					else held.push(`${line}\n`);
@@ -524,16 +524,16 @@ describe("Claude runners survive server replacement through built dist", () => {
 			});
 		});
 		let direct: ClaudeRunnerSocket | undefined;
-		let directHello: ClaudeRunnerHello | undefined;
+		let directHello: RunnerHello | undefined;
 		let cachedFailure: unknown;
 		let blockedState: ReturnType<typeof persisted> | undefined;
-		let burst: ClaudeRunnerMessage[] = [];
+		let burst: RunnerMessage[] = [];
 		try {
 			await harness.kill();
 			await pending;
 			const socket = createConnection(runner.socketPath);
 			const greeted = new Promise<{
-				hello: ClaudeRunnerHello;
+				hello: RunnerHello;
 				peer: ClaudeRunnerSocket;
 			}>((resolve, reject) => {
 				const peer = new ClaudeRunnerSocket(
@@ -586,7 +586,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 							sinkId: binding.sinkId,
 							aborted: false,
 							input: {
-								...(JSON.parse(command.payload_json) as ClaudeSessionTurn),
+								...(JSON.parse(command.payload_json) as SessionTurn),
 								commandAttempt: command.attempt_count,
 							},
 						},
@@ -613,7 +613,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 			const downstream = await Effect.runPromise(
 				Effect.promise(() => cachedReady).pipe(Effect.timeout("15 seconds")),
 			);
-			burst = held.map((line) => JSON.parse(line) as ClaudeRunnerMessage);
+			burst = held.map((line) => JSON.parse(line) as RunnerMessage);
 			const terminalIndex = burst.findIndex(
 				(message) =>
 					message.type === "output" &&
@@ -764,8 +764,9 @@ describe("Claude runners survive server replacement through built dist", () => {
 		if (runner?.kind !== "runner-started")
 			throw new Error("Missing verified runner");
 		const admitted = persisted(harness, sessionId);
+		// Admission starts the turn before the runner receives the command.
 		expect(admitted).toMatchObject({
-			turns: [{ state: "pending", assistant_message_id: null }],
+			turns: [{ state: "running", assistant_message_id: null }],
 			commands: [{ status: "running" }],
 		});
 		expect(
@@ -842,6 +843,129 @@ describe("Claude runners survive server replacement through built dist", () => {
 			);
 		}
 	}, 45_000);
+
+	it("accepts an unseen recovered command before a steer while its environment warms", async () => {
+		const harness = await ProcessHarness.start({
+			dist: "dist",
+			restartProof: true,
+			shellEnvProof: true,
+			holdRunnerOutput: "send-turn",
+		});
+		harnesses.push(harness);
+		const before = await harness.connect();
+		const sessionId = await before.createSession("Recovery before steer");
+		const prompt = "approval-recovery-before-steer";
+		const pending = before.send(sessionId, prompt).catch(() => undefined);
+		await vi.waitFor(
+			() =>
+				expect(
+					existsSync(join(harness.root, "sdk-proof.ndjson")) &&
+						sdkProof(harness).some((mark) => mark["kind"] === "held-output"),
+				).toBe(true),
+			{ timeout: 15_000 },
+		);
+		await harness.kill();
+		await pending;
+		const profile = join(harness.root, "home/.zprofile");
+		const release = join(harness.root, "home/release-recovery-env");
+		writeFileSync(
+			profile,
+			'printf ready > "$ZDOTDIR/recovery-env-started"\nwhile [ ! -f "$ZDOTDIR/release-recovery-env" ]; do sleep 0.02; done\n' +
+				readFileSync(profile, "utf8"),
+		);
+		try {
+			await harness.restart();
+			const after = await harness.connect(sessionId);
+			await vi.waitFor(
+				() =>
+					expect(
+						existsSync(join(harness.root, "home/recovery-env-started")),
+					).toBe(true),
+				{ timeout: 15_000 },
+			);
+			const steer = "recovery-steer";
+			const submitted = await Effect.runPromise(
+				after.rpc.input.submit({
+					sessionId,
+					inputId: randomUUID(),
+					originId: after.originId,
+					delivery: "steer",
+					text: steer,
+				}),
+			);
+			expect(submitted.ok).toBe(true);
+			await vi.waitFor(
+				() =>
+					expect(
+						harness.marks.some(
+							(mark) => mark.kind === "receipt" && mark.prompt === steer,
+						),
+					).toBe(true),
+				{ timeout: 15_000 },
+			);
+			await new Promise<void>((done) => setTimeout(done, 100));
+			expect(
+				sdkProof(harness).filter(
+					(mark) => mark["kind"] === "query" || mark["kind"] === "enqueue",
+				),
+			).toEqual([]);
+			writeFileSync(release, "release");
+			await vi.waitFor(
+				() =>
+					expect(
+						sdkProof(harness)
+							.filter((mark) => mark["kind"] === "enqueue")
+							.map((mark) => mark["prompt"]),
+					).toEqual([expect.stringMatching(/approval-recovery-before-steer$/)]),
+				{ timeout: 15_000 },
+			);
+			const approval = await after.waitFor(
+				(message) => message["type"] === "permission_pending",
+			);
+			expect(persisted(harness, sessionId).approvals).toMatchObject([
+				{ status: "pending" },
+			]);
+			await after.answerApproval(approval, "allow");
+			await vi.waitFor(
+				() =>
+					expect(
+						sdkProof(harness)
+							.filter((mark) => mark["kind"] === "enqueue")
+							.map((mark) => mark["prompt"]),
+					).toEqual([
+						expect.stringMatching(/approval-recovery-before-steer$/),
+						expect.stringMatching(/recovery-steer$/),
+					]),
+				{ timeout: 15_000 },
+			);
+			await vi.waitFor(
+				() => {
+					const state = persisted(harness, sessionId);
+					expect(state.commands.map(({ status }) => status)).toEqual([
+						"completed",
+						"completed",
+					]);
+					expect(state.session.status).toBe("idle");
+				},
+				{ timeout: 10_000 },
+			);
+		} finally {
+			writeFileSync(release, "cleanup release");
+			mkdirSync("test-results", { recursive: true });
+			writeFileSync(
+				"test-results/85kb-w3fix-recovery-steer-order.json",
+				JSON.stringify(
+					{
+						persisted: persisted(harness, sessionId),
+						sdk: sdkProof(harness),
+						process: harness.proof(),
+					},
+					null,
+					2,
+				),
+			);
+		}
+	}, 60_000);
 
 	it("preserves an adopted approval turn through another graceful server restart", async () => {
 		const harness = await ProcessHarness.start({
@@ -1054,7 +1178,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 		}
 	}, 45_000);
 
-	it("terminalizes the owning pending turn when the adopted SDK fails before an assistant message", async () => {
+	it("terminalizes the owning running turn when the adopted SDK fails before an assistant message", async () => {
 		const harness = await ProcessHarness.start({
 			dist: "dist",
 			restartProof: true,
@@ -1081,7 +1205,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 		const active = persisted(harness, sessionId);
 		expect(active.turns).toEqual([
 			{
-				state: "pending",
+				state: "running",
 				user_message_id: expect.any(String),
 				assistant_message_id: null,
 			},

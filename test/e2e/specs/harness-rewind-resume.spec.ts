@@ -107,7 +107,7 @@ const seed = (filename: string, events: readonly CanonicalEvent[]) =>
 			const commit = yield* makeCommitAndSignal;
 			yield* commit([...events], { publish: false });
 		}).pipe(
-			Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+			Effect.provide(makePersistenceEffectLayer(filename, "process-test")),
 		),
 	);
 
@@ -154,7 +154,7 @@ test("returning to a session after a rewind or its undo resumes it", async ({
 		"The wire is the same on every device; desktop shows the sidebar beside the transcript.",
 	);
 	test.setTimeout(300_000);
-	const store = harness.projectStorePath();
+	const store = harness.daemonStorePath();
 	const viewport = testInfo.project.use.viewport ?? null;
 	const url = (sessionId: string) =>
 		`${harness.baseUrl}/s/${sessionId}?p=process-test`;

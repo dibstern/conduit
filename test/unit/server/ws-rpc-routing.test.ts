@@ -1,11 +1,12 @@
 import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import {
-	Context,
+	type Context,
 	Effect,
 	Exit,
 	Layer,
 	ManagedRuntime,
+	Option,
 	Scope,
 	Stream,
 } from "effect";
@@ -16,17 +17,12 @@ import {
 	WsRpcError,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
-import {
-	makeSessionDirectoryLive,
-	SessionDirectory,
-} from "../../../src/lib/domain/daemon/Services/session-directory.js";
+import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
-import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { makeSessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -41,16 +37,16 @@ import {
 	makeWsRpcWebSocketHandler,
 } from "../../../src/lib/server/ws-rpc-handler.js";
 import {
-	makeMockAccountDirectory,
 	makeMockConfig,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
-const sessionDirectory = makeSessionDirectoryLive("/unused", []).pipe(
-	Layer.tap((context) =>
-		Context.get(context, SessionDirectory).record("project-a", ["session-a"]),
-	),
-);
+const sessionDirectory = Layer.succeed(SessionDirectory, {
+	projectOf: (sessionId) =>
+		Effect.succeed(
+			sessionId === "session-a" ? Option.some("project-a") : Option.none(),
+		),
+});
 describe("routed RPC server", () => {
 	it.scoped(
 		"rejects session creation without a project even with a relay default",
@@ -84,69 +80,6 @@ describe("routed RPC server", () => {
 				});
 				expect(resolve).not.toHaveBeenCalled();
 			}),
-	);
-
-	it.scoped("keeps two project shell streams on their own read models", () =>
-		Effect.gen(function* () {
-			const contexts = new Map<string, Context.Context<unknown>>();
-			for (const slug of ["project-a", "project-b"]) {
-				const bus = makeSessionEventBusLive();
-				const context = yield* Layer.build(
-					Layer.mergeAll(
-						RpcSubscriptionScopeLive,
-						bus,
-						makePersistenceEffectLayer(
-							":memory:",
-							"test-project",
-							undefined,
-							bus,
-						),
-						Layer.effect(SessionActivityTag, makeSessionActivity),
-						Layer.succeed(ConfigTag, makeMockConfig({ slug })),
-						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-					),
-				);
-				contexts.set(slug, context as Context.Context<unknown>);
-				yield* Effect.gen(function* () {
-					const runner = yield* ProjectionRunnerEffectTag;
-					yield* runner.recover();
-					const commit = yield* makeCommitAndSignal;
-					yield* commit([
-						canonicalEvent(
-							"session.created",
-							slug,
-							{
-								sessionId: slug,
-								title: slug,
-								provider: "claude",
-							},
-							{ provider: "claude", createdAt: 1 },
-						),
-					]);
-				}).pipe(Effect.provide(context));
-			}
-			const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
-				Effect.provide(
-					makeRoutedWsRpcServerLayer((slug) => {
-						const context = contexts.get(slug);
-						return context
-							? Effect.succeed(context)
-							: Effect.fail(
-									new WsRpcError({ message: `Unknown project ${slug}` }),
-								);
-					}).pipe(Layer.provide(sessionDirectory)),
-				),
-			);
-			for (const slug of ["project-a", "project-b"]) {
-				const envelopes = yield* client
-					.SubscribeShell({ projectSlug: slug })
-					.pipe(Stream.take(2), Stream.runCollect);
-				expect(Array.from(envelopes)).toMatchObject([
-					{ _tag: "snapshot", rows: [{ id: slug, projectSlug: slug }] },
-					{ _tag: "synchronized" },
-				]);
-			}
-		}),
 	);
 
 	it.scoped(
@@ -306,7 +239,7 @@ describe("routed RPC server", () => {
 			Effect.gen(function* () {
 				const context = yield* Layer.build(
 					makeTestHandlerLayer({
-						config: makeMockConfig({ slug: "initial", getProjects: () => [] }),
+						config: makeMockConfig({ slug: "initial" }),
 					}).pipe(Layer.provideMerge(RpcSubscriptionScopeLive)),
 				);
 				const resolve = vi.fn(() => Effect.succeed(context));
@@ -356,7 +289,7 @@ describe("routed RPC server", () => {
 			Effect.gen(function* () {
 				const context = yield* Layer.build(
 					makeTestHandlerLayer({
-						config: makeMockConfig({ slug: "initial", getProjects: () => [] }),
+						config: makeMockConfig({ slug: "initial" }),
 					}).pipe(Layer.provideMerge(RpcSubscriptionScopeLive)),
 				);
 				const resolve = vi.fn(() => Effect.succeed(context));
@@ -410,12 +343,16 @@ describe("routed RPC server", () => {
 						slug,
 						yield* Layer.build(
 							makeTestHandlerLayer({
-								config: makeMockConfig({
-									slug,
-									getProjects: () => [
-										{ slug, title: slug, folders: [`/tmp/${slug}`] as const },
-									],
-								}),
+								config: makeMockConfig({ slug }),
+								projectManagementService: {
+									currentSlug: () => Effect.succeed(slug),
+									list: () =>
+										Effect.succeed([
+											{ slug, title: slug, folders: [`/tmp/${slug}`] as const },
+										]),
+									save: () => Effect.die("Unexpected save"),
+									remove: () => Effect.die("Unexpected remove"),
+								},
 							}),
 						),
 					);

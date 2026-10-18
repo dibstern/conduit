@@ -10,7 +10,8 @@ export default defineConfig({
 		globalSetup: ["test/contract/global-setup.ts"],
 		// Contract tests run sequentially since they share a real server
 		pool: "forks",
-		poolOptions: { forks: { singleFork: true } },
+		maxWorkers: 1,
+		isolate: false,
 	},
 	resolve: {
 		alias: {

@@ -66,6 +66,7 @@ import {
 	renameSessionForClient,
 	resolveSessionCreation,
 	resolveSessionCreationAccount,
+	setSessionArchivedForClient,
 	setSessionAutoSettleForClient,
 	setSessionPinnedForClient,
 	setSessionSettledForClient,
@@ -241,6 +242,9 @@ export const sessionsHandlers = {
 				...(request.limit !== undefined ? { limit: request.limit } : {}),
 				...(request.roots !== undefined ? { roots: request.roots } : {}),
 				...(request.search !== undefined ? { search: request.search } : {}),
+				...(request.includeArchived !== undefined
+					? { includeArchived: request.includeArchived }
+					: {}),
 				...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
 				...(request.scope !== undefined ? { scope: request.scope } : {}),
 				...(request.exclude !== undefined ? { exclude: request.exclude } : {}),
@@ -250,6 +254,14 @@ export const sessionsHandlers = {
 				...result,
 			};
 		}).pipe(Effect.catchAll(mapRpcFailure("ListDaemonSessions"))),
+	ListArchivedSessions: (request) =>
+		Effect.gen(function* () {
+			const daemonSessions = yield* DaemonSessionQueryServiceTag;
+			return yield* daemonSessions.listArchived({
+				...(request.limit !== undefined ? { limit: request.limit } : {}),
+				...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
+			});
+		}).pipe(Effect.catchAll(mapRpcFailure("ListArchivedSessions"))),
 	ReloadProviderSession: (request) =>
 		Effect.flatMap(ConfigTag, (config) =>
 			reloadProviderSessionForClient({
@@ -296,6 +308,20 @@ export const sessionsHandlers = {
 				(error) =>
 					new WsRpcError({
 						message: `SetSessionSettled failed: ${String(error.cause)}`,
+					}),
+			),
+		),
+	SetSessionArchived: (request) =>
+		setSessionArchivedForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+			archived: request.archived,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.mapError(
+				(error) =>
+					new WsRpcError({
+						message: `SetSessionArchived failed: ${String(error.cause)}`,
 					}),
 			),
 		),
@@ -731,7 +757,7 @@ export const sessionsHandlers = {
 						: Effect.succeed({
 								projectSlug: config.slug,
 								sessionId: session.id,
-								parentId: session.parentId,
+								forkedFrom: session.forkedFrom,
 								...(session.forkMessageId && {
 									forkMessageId: session.forkMessageId,
 								}),
@@ -854,6 +880,7 @@ export const sessionsHandlers = {
 	| "PreWarmDraft"
 	| "ResolveSession"
 	| "ListDaemonSessions"
+	| "ListArchivedSessions"
 	| "ReloadProviderSession"
 	| "RenameSession"
 	| "RenameSessionBranch"
@@ -865,6 +892,7 @@ export const sessionsHandlers = {
 	| "ContinueSessionInMainFolder"
 	| "DismissWorkspaceHint"
 	| "SetSessionSettled"
+	| "SetSessionArchived"
 	| "SetSessionPinned"
 	| "SetSessionAutoSettle"
 	| "SnoozeSession"

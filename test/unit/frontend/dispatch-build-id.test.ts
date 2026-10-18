@@ -49,7 +49,6 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 	showBanner: mocks.showBanner,
 	removeBanner: mocks.removeBanner,
 	setClientCount: vi.fn(),
-	updateContextPercent: vi.fn(),
 }));
 vi.mock("../../../src/lib/frontend/transport/runtime.js", async () => {
 	const { Effect } = await import("effect");
@@ -245,10 +244,10 @@ describe("build ID dispatch", () => {
 		const run = restartAction();
 		mocks.showBanner.mockClear();
 		await run();
-		expect(mocks.showToast).toHaveBeenCalledWith(
-			expect.stringContaining("restart rejected"),
-			{ variant: "error" },
-		);
+		expect(mocks.showToast).toHaveBeenCalledWith({
+			title: "Failed to restart conduit",
+			variant: "error",
+		});
 		await restartAction()();
 		expect(mocks.restartWithConfig).toHaveBeenCalledTimes(2);
 		expect(mocks.showToast).toHaveBeenCalledWith("Restarting conduit…");

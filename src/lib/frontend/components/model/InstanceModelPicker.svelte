@@ -21,8 +21,7 @@
 	} from "../../stores/composer-settings.svelte.js";
 	import {
 		applyDefaultModelSet,
-		followModelsRead,
-		applyGetAgentsResponse,
+		refreshCatalogs,
 		chooseAgent,
 		chooseDefaultModel,
 		discoveryState,
@@ -51,18 +50,14 @@
 	import { getDriverTraits, instanceStatusColor } from "../../stores/instance.svelte.js";
 	import { accountColorClass } from "../../utils/account-color.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
+	import { cursorAuth, openCursorLogin, refreshCursorAuth } from "../../stores/cursor-auth.svelte.js";
 	import { usageResetTime } from "../../utils/continuation.js";
 	import { getDraftProject } from "../../stores/project.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { findSession, reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { openSettings } from "../layout/chrome-actions.js";
-	import {
-		getAgentsRpc,
-		getModelsRpc,
-		setDefaultModelRpc,
-		switchAgentRpc,
-	} from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import type { AgentInfo, Immutable, InstanceStatus, ModelCost, ModelInfo, ProviderGroup } from "../../types.js";
 	import Surface from "../ui/Surface.svelte";
 	import TextInput from "../ui/TextInput.svelte";
@@ -120,13 +115,27 @@
 	);
 	const selectedLogoInstanceId = $derived(selectedId);
 	const harnesses = $derived(
-		[...new Set(instances.map((instance) => instance.driver))].map((driver) => ({
-			value: driver,
-			label: driverLabel(driver),
-			locked: locked && driver !== selectedDriver,
-		})),
+		[...new Set(instances.map((instance) => instance.driver))].map((driver) => {
+			const accounts = instances.filter((instance) => instance.driver === driver);
+			const unavailable = accounts.every((account) => account.available === false);
+			const unavailableReason = unavailable
+				? accounts.find((account) => account.unavailableReason)?.unavailableReason ?? "Runtime unavailable"
+				: undefined;
+			return {
+				value: driver,
+				label: driverLabel(driver),
+				locked: unavailable || (locked && driver !== selectedDriver),
+				lockedReason: unavailableReason,
+				unavailableReason,
+				authRequired: unavailable && accounts.some((account) => account.unavailableCode === "auth_required"),
+			};
+		}),
 	);
 	const driverInstances = $derived(instances.filter((instance) => instance.driver === selectedDriver));
+	$effect(() => {
+		if (pickerOpen && harnesses.some((harness) => getProviderPresentation(harness.value)?.auth && harness.authRequired))
+			void refreshCursorAuth();
+	});
 	const needsAccount = $derived(selectedTraits?.accountKind === "config-directory" && driverInstances.length === 0);
 	const accountProjectSlug = $derived(
 		sessionState.currentId
@@ -159,7 +168,7 @@
 		return driverInstances.map((instance) => ({
 			value: instance.id,
 			label: accounts.nameOf(instance.id, instance.label),
-			locked,
+			locked: locked || instance.available === false,
 			kind: "status",
 			// Built-in instances carry no managed status; they serve the catalog, so they're up.
 			status: instance.status ?? "healthy",
@@ -189,25 +198,69 @@
 		getActiveModel(activeModelId, activeProviderId),
 	);
 	const hasModel = $derived(!!activeModelId);
+	const parameters = $derived(activeModel?.parameters);
+	const defaultCombination = $derived(
+		parameters?.combinations.find((entry) => entry.isDefault) ?? parameters?.combinations[0],
+	);
+	const combination = $derived(
+		parameters?.combinations.find((entry) => entry.variant === effort.current) ?? defaultCombination,
+	);
+	function parameterCombination(id: string, value: string) {
+		if (!combination) return undefined;
+		const values = { ...combination.values, [id]: value };
+		return parameters?.combinations.find((entry) =>
+			Object.keys(entry.values).length === Object.keys(values).length &&
+			Object.entries(values).every(([key, value]) => entry.values[key] === value),
+		);
+	}
+	function selectParameter(id: string, value: string) {
+		const next = parameterCombination(id, value);
+		if (next && !effort.pending) effort.select(next.variant);
+	}
+	const parameterRows = $derived((parameters?.rows ?? []).flatMap((row) => {
+		const kind = ["effort", "reasoning", "reasoning_effort"].includes(row.id) ? "effort" : row.id;
+		if (!["effort", "context", "thinking", "fast"].includes(kind)) return [];
+		const options = row.values.map(({ value, label }) => ({
+			value,
+			label: kind === "effort" ? (value === "medium" ? "med" : value) :
+				kind === "thinking" || kind === "fast" ? (value === "true" ? "On" : "Off") : label,
+			testId: `picker-${kind}-option-${value}`,
+			disabled: effort.pending || !parameterCombination(row.id, value),
+		}));
+		const value = combination?.values[row.id] ?? "";
+		return [{ id: row.id, kind, options, value, label: options.find((option) => option.value === value)?.label ?? value }];
+	}));
+	const parameterEffort = $derived(parameterRows.find((row) => row.kind === "effort"));
+	const parameterContext = $derived(parameterRows.find((row) => row.kind === "context"));
+	const parameterToggles = $derived(parameterRows.filter((row) => row.kind === "thinking" || row.kind === "fast"));
+	const parameterEffortWord = $derived.by(() => {
+		const thinking = parameterRows.find((row) => row.kind === "thinking");
+		const fast = parameterRows.find((row) => row.kind === "fast")?.value === "true";
+		const label = parameterEffort?.label ?? (thinking ? (thinking.value === "true" ? "Thinking" : "No thinking") : "");
+		return label ? `${label}${fast ? " · Fast" : ""}` : fast ? "Fast" : "Standard";
+	});
 	const contextOptions = $derived(contextWindow.options);
 	const selectedContext = $derived(contextWindow.current);
-	const contextLabel = $derived(sessionLoading ? "" : selectedContext?.label ??
+	const contextLabel = $derived(sessionLoading ? "" : parameterContext?.label ?? selectedContext?.label ??
 		(sessionState.currentId && contextOptions.length ? "Default" : modelContextLabel(activeModel)));
-	const showContextWord = $derived(!!contextLabel && (!phone || (selectedContext !== null && !selectedContext.isDefault)));
+	// Phones show the context word only when it differs from the default.
+	const showContextWord = $derived(!!contextLabel && (!phone || (parameterContext
+		? parameterContext.value !== defaultCombination?.values[parameterContext.id]
+		: selectedContext !== null && !selectedContext.isDefault)));
 	const contextPercent = $derived(currentChat().contextPercent);
 	const contextWarning = $derived(isContextWarning(contextPercent, composerPreferences.contextWarning));
-	const contextSegments = $derived(contextOptions.map((option) => ({
+	const contextSegments = $derived(parameterContext?.options ?? contextOptions.map((option) => ({
 		value: option.value,
 		label: option.label,
 		testId: `picker-context-option-${option.value}`,
 		disabled: contextWindow.pending,
 	})));
-	const effortSegments = $derived(effort.options.map((variant) => ({
+	const effortSegments = $derived(parameterEffort?.options ?? (parameters ? [] : effort.options.map((variant) => ({
 		value: variant,
 		label: variant === "medium" ? "med" : variant,
 		testId: `picker-effort-option-${variant}`,
 		disabled: effort.pending,
-	})));
+	}))));
 	$effect(() => {
 		// Refetch once each turn ends.
 		const endedGeneration = currentChat().endedGeneration;
@@ -215,14 +268,7 @@
 		const sessionId = sessionState.currentId;
 		if (endedGeneration < 0 || !projectSlug || !sessionId) return;
 
-		const applyModels = followModelsRead(sessionId);
-		void getModelsRpc({ sessionId })
-			.then((response) => {
-				if (sessionState.currentId === sessionId) {
-					applyModels(response);
-				}
-			})
-			.catch(() => undefined);
+		untrack(() => { void refreshCatalogs(); });
 	});
 
 	/** Display name for the trigger button, with date suffix stripped.
@@ -277,7 +323,7 @@
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
 		if (projectSlug && sessionId) {
-			void switchAgentRpc({ sessionId, agentId: agent.id }).catch(undoAgent);
+			void rpc("SwitchAgent", { sessionId, agentId: agent.id }).catch(undoAgent);
 		}
 	}
 
@@ -382,22 +428,11 @@
 		view = "root";
 		if (instance.id === selectedId && discoveryState.hasInstanceChoice) return;
 		selectInstance(instance.id);
-		const projectSlug = getDraftProject();
-		const applyModels = followModelsRead();
-		if (projectSlug) void getModelsRpc({ projectSlug, instanceId: instance.id })
-			.then(applyModels)
-			.catch(() => undefined);
-		if (projectSlug) void getAgentsRpc({ projectSlug, instanceId: instance.id })
-			.then((response) => {
-				if (!sessionState.currentId && getDraftProject() === projectSlug && getEffectiveInstanceId() === instance.id)
-					applyGetAgentsResponse(response);
-			})
-			.catch(() => undefined);
 		searchQuery = "";
 	}
 
 	function handleHarnessSelect(driver: ProviderDriverKind) {
-		if (locked) return;
+		if (locked || harnesses.find((harness) => harness.value === driver)?.locked) return;
 		const instance = instanceForDriver(driver);
 		if (instance) handleInstanceSelect(instance);
 	}
@@ -435,7 +470,7 @@
 		});
 		const projectSlug = getCurrentSlug();
 		if (projectSlug) {
-			void setDefaultModelRpc({
+			void rpc("SetDefaultModel", {
 				projectSlug,
 				model: model.id,
 				provider: model.provider,
@@ -447,10 +482,9 @@
 
 	function handleReload(e: MouseEvent) {
 		e.stopPropagation();
-		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
-		if (projectSlug && sessionId) {
-			void reloadProviderSession(projectSlug, sessionId).catch(() => undefined);
+		if (sessionId) {
+			void reloadProviderSession(sessionId).catch(() => undefined);
 		}
 		showToast("Reloading skills…", { duration: 1500 });
 		closePicker();
@@ -543,7 +577,7 @@
 		</div>
 		<div class="min-h-0 overflow-y-auto">
 			{#if view === "root"}
-				{#if harnesses.length > 1 || (harnesses.length > 0 && !harnesses.some((harness) => harness.value === selectedDriver))}
+				{#if harnesses.length > 1 || harnesses.some((harness) => harness.unavailableReason) || (harnesses.length > 0 && !harnesses.some((harness) => harness.value === selectedDriver))}
 					<section data-testid="picker-harness-section" aria-label="Harness" class="pb-[4px]">
 						<div class="mt-[9px] mb-[5px] flex justify-between text-[10px] uppercase tracking-[0.07em] text-text-dimmer">
 							<span>Harness</span>
@@ -576,6 +610,13 @@
 								{#if option.locked}<Icon name="lock" size={10} />{/if}
 							{/snippet}
 						</OptionRow>
+						{#each harnesses.filter((harness) => harness.unavailableReason) as harness (harness.value)}
+							<p data-testid={`picker-harness-${harness.value}-unavailable`} class="mt-[6px] text-[11px] text-text-muted">{harness.label} unavailable · {harness.unavailableReason}</p>
+							{@const auth = getProviderPresentation(harness.value)?.auth}
+							{#if auth && harness.authRequired}
+								<Button variant="ghost-accent" size="sm" data-testid={`picker-harness-${harness.value}-login`} onclick={() => { closePicker(); openCursorLogin(); }}>{cursorAuth.current && cursorAuth.current.source !== "environment" ? auth.login : auth.manage}</Button>
+							{/if}
+						{/each}
 					</section>
 				{/if}
 				{#if accountCards.length > 1}
@@ -661,9 +702,9 @@
 				{#if contextLabel}
 					<div data-testid="picker-row-context" tabindex="-1" class="flex min-h-[46px] items-center gap-2.5 border-b border-border-subtle px-1 py-2.5 last:border-b-0">
 						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Context</span>
-						{#if contextOptions.length > 1}
+						{#if contextSegments.length > 1}
 							<SegmentedControl
-								bind:value={() => selectedContext?.value ?? "", (value) => contextWindow.select(contextOptions.find((option) => option.value === value) ?? null)}
+								bind:value={() => parameterContext?.value ?? selectedContext?.value ?? "", (value) => parameterContext ? selectParameter(parameterContext.id, value) : contextWindow.select(contextOptions.find((option) => option.value === value) ?? null)}
 								options={contextSegments}
 								variant="picker-context"
 								label="Context window"
@@ -676,21 +717,36 @@
 						{/if}
 					</div>
 				{/if}
-				{#if effortSegments.length > 0 || (sessionState.currentId && effort.current)}
+				{#if parameters ? parameterEffort : effortSegments.length > 0 || (sessionState.currentId && effort.current)}
 					<div data-testid="picker-row-effort" aria-disabled={effortSegments.length === 0 || undefined} tabindex="-1" class="flex min-h-[46px] items-center gap-2.5 border-b border-border-subtle px-1 py-2.5 last:border-b-0">
 						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Effort</span>
-						{#if effortSegments.length > 0}
+						{#if effortSegments.length > (parameters ? 1 : 0)}
 							<SegmentedControl
-								bind:value={() => effort.current ?? "", (value) => effort.select(value)}
+								bind:value={() => parameterEffort?.value ?? effort.current ?? "", (value) => parameterEffort ? selectParameter(parameterEffort.id, value) : effort.select(value)}
 								options={effortSegments}
-								variant="picker"
+								variant={effortSegments.length > 5 ? "picker-context" : "picker"}
 								label="Effort"
 							/>
 						{:else}
-							<span class="min-w-0 flex-1 text-[13px] text-text">{effort.current}</span>
+							<span class="min-w-0 flex-1 text-[13px] text-text">{parameterEffort?.label ?? effort.current}</span>
 						{/if}
 					</div>
 				{/if}
+				{#each parameterToggles as row (row.id)}
+					<div data-testid="picker-row-{row.kind}" tabindex="-1" class="flex min-h-[46px] items-center gap-2.5 border-b border-border-subtle px-1 py-2.5 last:border-b-0">
+						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">{row.kind === "thinking" ? "Thinking" : "Fast"}</span>
+						{#if row.options.length > 1}
+							<SegmentedControl
+								bind:value={() => row.value, (value) => selectParameter(row.id, value)}
+								options={row.options}
+								variant="picker"
+								label={row.kind === "thinking" ? "Thinking" : "Fast"}
+							/>
+						{:else}
+							<span class="min-w-0 flex-1 text-[13px] text-text">{row.label}</span>
+						{/if}
+					</div>
+				{/each}
 				{#if planLocked}
 					<div data-testid="picker-row-agent" data-locked="plan" class="flex min-h-[46px] items-center gap-2.5 px-1 py-2.5">
 						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Agent</span>
@@ -1074,7 +1130,7 @@
 			{/snippet}
 		</ModelVariant>
 	{:else}
-		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant={variant === "icons" && !phone ? "control" : variant} />
+		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant={variant === "icons" && !phone ? "control" : variant} wordLabel={parameters ? parameterEffortWord : undefined} />
 	{/if}
 	{#if variant === "words" && selectedTraits?.composerModeControl === "agent"}
 		<span aria-hidden="true" class="text-border-chip">·</span>

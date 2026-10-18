@@ -36,24 +36,32 @@ import { AccountDirectory } from "../domain/daemon/Services/account-directory.js
 import { ConfigPersistenceTag } from "../domain/daemon/Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../domain/daemon/Services/daemon-config-ref.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
-import { SessionDirectory } from "../domain/daemon/Services/session-directory.js";
+import {
+	SessionDirectory,
+	SessionDirectoryReadError,
+} from "../domain/daemon/Services/session-directory.js";
+import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import { ContinuationTag } from "../domain/relay/Services/continuation.js";
+import {
+	ProjectManagementNotSupported,
+	type ProjectManagementService,
+	ProjectManagementServiceError,
+	ProjectManagementServiceTag,
+} from "../domain/relay/Services/project-management-service.js";
 import {
 	ProjectSettingsTag,
 	refreshGlobalDefaults,
 	syncGlobalSetting,
 } from "../domain/relay/Services/project-settings.js";
 import type { SessionManagerError } from "../domain/relay/Services/session-manager-error.js";
-import {
-	type OverridesStateTag,
-	setDefaultAgent,
-} from "../domain/relay/Services/session-overrides-state.js";
+import { setDefaultAgent } from "../domain/relay/Services/session-overrides-state.js";
 import {
 	makeStandaloneHttpRouterRequestHandler,
 	type RouterProjectInfo,
 } from "../domain/server/Layers/http-router-layer.js";
 import { ENV } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
+import { withCachedProjectGit } from "../git/session-git.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger, type Logger } from "../logger.js";
 import { makeClaudeSessionRunner } from "../provider/claude/claude-provider-runtime.js";
@@ -66,6 +74,7 @@ import {
 	RoutedWsRpcWebSocketHandlerTag,
 	type RpcWebSocketHandlerShape,
 } from "../server/ws-rpc-handler.js";
+import { archiveIdleSessions } from "../session/auto-archive-sweep.js";
 import { settleIdleSessions } from "../session/auto-settle-sweep.js";
 import type { ConnectionHealth, ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
@@ -292,6 +301,10 @@ export interface ProjectRelay {
 		idleWindowMs: number,
 		now: number,
 	): Effect.Effect<number, SqlError | SessionManagerError>;
+	archiveIdleSessions(
+		idleWindowMs: number,
+		now: number,
+	): Effect.Effect<number, SqlError | SessionManagerError>;
 	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
 	sseStream: SSEStreamPort;
@@ -306,130 +319,12 @@ export interface ProjectRelay {
 	/** True when at least one session in this project is busy or retrying. */
 	isAnySessionProcessing(): boolean;
 	/** Set the relay-wide default agent through the relay-owned Effect runtime. */
-	setDefaultAgent(agent: string): Promise<void>;
+	setDefaultAgent(agent: string): Effect.Effect<void>;
 	/** Session selected during relay startup. */
 	readonly initialSessionId: string;
 	/** Gracefully stop relay components (SSE + WebSocket). Does NOT stop the HTTP server. */
 	stop(): Promise<void>;
 }
-
-class RelayDefaultCommandQueueClosed extends Data.TaggedError(
-	"RelayDefaultCommandQueueClosed",
-)<Record<never, never>> {}
-
-type RelayDefaultCommand = {
-	readonly _tag: "SetDefaultAgent";
-	readonly agent: string;
-	readonly resolve: () => void;
-	readonly reject: (cause: unknown) => void;
-};
-
-type RelayDefaultCommandResume = (
-	effect: Effect.Effect<RelayDefaultCommand, RelayDefaultCommandQueueClosed>,
-) => void;
-
-class RelayDefaultCommandQueue {
-	private pending: RelayDefaultCommand[] = [];
-	private takers: RelayDefaultCommandResume[] = [];
-	private closed = false;
-
-	setDefaultAgent(agent: string): Promise<void> {
-		return this.enqueue((resolve, reject) => ({
-			_tag: "SetDefaultAgent",
-			agent,
-			resolve,
-			reject,
-		}));
-	}
-
-	take(): Effect.Effect<RelayDefaultCommand, RelayDefaultCommandQueueClosed> {
-		return Effect.async<RelayDefaultCommand, RelayDefaultCommandQueueClosed>(
-			(resume) => {
-				const command = this.pending.shift();
-				if (command) {
-					resume(Effect.succeed(command));
-					return;
-				}
-				if (this.closed) {
-					resume(Effect.fail(new RelayDefaultCommandQueueClosed()));
-					return;
-				}
-				this.takers.push(resume);
-				return Effect.sync(() => {
-					this.takers = this.takers.filter((taker) => taker !== resume);
-				});
-			},
-		);
-	}
-
-	close(): void {
-		if (this.closed) return;
-		this.closed = true;
-		const error = new RelayDefaultCommandQueueClosed();
-		for (const command of this.pending.splice(0)) {
-			command.reject(error);
-		}
-		for (const taker of this.takers.splice(0)) {
-			taker(Effect.fail(error));
-		}
-	}
-
-	private enqueue(
-		makeCommand: (
-			resolve: () => void,
-			reject: (cause: unknown) => void,
-		) => RelayDefaultCommand,
-	): Promise<void> {
-		return new Promise<void>((resolve, reject) => {
-			if (this.closed) {
-				reject(new RelayDefaultCommandQueueClosed());
-				return;
-			}
-			const command = makeCommand(resolve, reject);
-			const taker = this.takers.shift();
-			if (taker) {
-				taker(Effect.succeed(command));
-				return;
-			}
-			this.pending.push(command);
-		});
-	}
-}
-
-const makeRelayDefaultCommandQueueLive = (
-	queue: RelayDefaultCommandQueue,
-): Layer.Layer<never, never, OverridesStateTag> =>
-	Layer.scopedDiscard(
-		Effect.gen(function* () {
-			const settle = <R>(
-				command: RelayDefaultCommand,
-				effect: Effect.Effect<void, unknown, R>,
-			) =>
-				effect.pipe(
-					Effect.matchCauseEffect({
-						onFailure: (cause) =>
-							Effect.sync(() => command.reject(Cause.squash(cause))),
-						onSuccess: () => Effect.sync(() => command.resolve()),
-					}),
-				);
-
-			const runCommand = (command: RelayDefaultCommand) =>
-				settle(command, setDefaultAgent(command.agent));
-
-			yield* Effect.addFinalizer(() => Effect.sync(() => queue.close()));
-			yield* Effect.forkScoped(
-				Effect.forever(
-					queue.take().pipe(
-						Effect.flatMap(runCommand),
-						Effect.catchTag(
-							"RelayDefaultCommandQueueClosed",
-							() => Effect.interrupt,
-						),
-					),
-				),
-			);
-		}),
-	);
 
 export interface ProjectRelayStatusSnapshot {
 	readonly sessionCount: number;
@@ -478,6 +373,8 @@ export interface RelayStackConfig {
 }
 
 export interface RelayStack {
+	archiveIdleSessions: ProjectRelay["archiveIdleSessions"];
+	settleIdleSessions: ProjectRelay["settleIdleSessions"];
 	server: EffectRelayServer;
 	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
@@ -568,15 +465,12 @@ export async function createProjectRelay(
 	// Publisher and viewer callbacks in the Layer graph run after startup supplies the handler.
 	let wsHandler: WebSocketHandlerShape;
 
-	const defaultCommandQueue = new RelayDefaultCommandQueue();
 	const layers = createProjectRelayLayers({
 		config,
 		...(claudeRunnerFactory && { claudeRunnerFactory }),
 		...(testSendLimit !== undefined && { testSendLimit }),
 		onBackgroundWorkChanged: (sessionId) => announceBackgroundWork?.(sessionId),
 		getWsHandler: () => wsHandler,
-		defaultCommandQueueLayer:
-			makeRelayDefaultCommandQueueLive(defaultCommandQueue),
 	});
 	const { effectRuntime } = layers;
 	const startup = await startProjectRelay({
@@ -668,7 +562,34 @@ export async function createProjectRelay(
 				},
 				idleWindowMs,
 				now,
-			).pipe(Effect.provideService(SqlClient.SqlClient, startup.sql)),
+			).pipe(
+				Effect.provideService(SqlClient.SqlClient, startup.sql),
+				Effect.provideService(
+					PersistenceProjectTag,
+					startup.persistenceProject,
+				),
+			),
+		archiveIdleSessions: (idleWindowMs, now) =>
+			archiveIdleSessions(
+				{
+					hasLiveBackgroundWork: startup.activity.background.hasLiveWork,
+					setArchived: (id) =>
+						startup.sessionManagerService.setSessionArchived(id, {
+							archived: true,
+							automatic: true,
+							idleWindowMs,
+							now,
+						}),
+				},
+				idleWindowMs,
+				now,
+			).pipe(
+				Effect.provideService(SqlClient.SqlClient, startup.sql),
+				Effect.provideService(
+					PersistenceProjectTag,
+					startup.persistenceProject,
+				),
+			),
 		wsHandler,
 		rpcWsHandler,
 		sseStream,
@@ -685,7 +606,9 @@ export async function createProjectRelay(
 		},
 
 		setDefaultAgent(agent: string) {
-			return defaultCommandQueue.setDefaultAgent(agent);
+			return setDefaultAgent(agent).pipe(
+				Effect.provide(startup.projectSettingsContext),
+			);
 		},
 
 		async stop() {
@@ -770,17 +693,36 @@ export async function createRelayStack(
 			folders: p.folders,
 		}));
 
-	const saveProjectRelay: NonNullable<
-		ProjectRelayConfig["saveProject"]
-	> = async (input) => {
-		const main = input.folders[0];
-		if (typeof main !== "string")
-			throw new RelayProjectDirectoryError({
-				directory: "",
-				reason: "missing",
-			});
-		return { project: await addProjectRelay(main), warnings: [] };
-	};
+	const projectManagement = (slug: string): ProjectManagementService => ({
+		currentSlug: () => Effect.succeed(slug),
+		list: () => Effect.sync(() => withCachedProjectGit(getProjectList())),
+		save: (input) =>
+			Effect.tryPromise({
+				try: async () => {
+					const main = input.folders[0];
+					if (typeof main !== "string")
+						throw new RelayProjectDirectoryError({
+							directory: "",
+							reason: "missing",
+						});
+					const project = await addProjectRelay(main);
+					return {
+						project,
+						projects: withCachedProjectGit(getProjectList()),
+						warnings: [],
+					};
+				},
+				catch: (cause) =>
+					new ProjectManagementServiceError({ operation: "save", cause }),
+			}),
+		remove: () =>
+			Effect.fail(
+				new ProjectManagementNotSupported({
+					operation: "remove",
+					message: "Removing projects is not supported in this mode",
+				}),
+			),
+	});
 
 	/** Create a new project relay and register it. */
 	async function addProjectRelay(directory: string): Promise<{
@@ -832,21 +774,17 @@ export async function createRelayStack(
 			);
 			const parentContext = (await relay.effectRuntime.runtime.runtime())
 				.context;
-			const sessionDirectory = Context.getOption(
-				parentContext,
-				SessionDirectory,
-			);
 			const daemonContext = Context.pick(
 				DaemonConfigRefTag,
 				ConfigPersistenceTag,
 				AccountDirectory,
 				SessionActivityTag,
-			)(parentContext);
+			)(parentContext).pipe(
+				Context.add(ProjectManagementServiceTag, projectManagement(slug)),
+			);
 			const newRelay = await createProjectRelay({
 				httpServer,
-				daemonConfigContext: Option.isSome(sessionDirectory)
-					? Context.add(daemonContext, SessionDirectory, sessionDirectory.value)
-					: daemonContext,
+				daemonConfigContext: daemonContext,
 				opencodeUrl: config.opencodeUrl,
 				projectDir: directory,
 				slug,
@@ -855,9 +793,7 @@ export async function createRelayStack(
 					sessionTitle: config.sessionTitle,
 				}),
 				log,
-				getProjects: getProjectList,
 				publishGlobalSetting: () => Effect.void,
-				saveProject: saveProjectRelay,
 				persistenceDbPath,
 				...(pushMgr != null && { pushManager: pushMgr }),
 				...(config.configDir != null && { configDir: config.configDir }),
@@ -891,9 +827,11 @@ export async function createRelayStack(
 
 	const relay = await createProjectRelay({
 		httpServer,
-		...(config.daemonConfigContext === undefined
-			? {}
-			: { daemonConfigContext: config.daemonConfigContext }),
+		daemonConfigContext: Context.add(
+			config.daemonConfigContext ?? Context.empty(),
+			ProjectManagementServiceTag,
+			projectManagement(config.slug),
+		),
 		opencodeUrl: config.opencodeUrl,
 		projectDir: config.projectDir,
 		...(config.extraFolders != null && { extraFolders: config.extraFolders }),
@@ -901,9 +839,7 @@ export async function createRelayStack(
 		...(config.sessionTitle != null && { sessionTitle: config.sessionTitle }),
 		log,
 		noServer: true,
-		getProjects: getProjectList,
 		publishGlobalSetting: () => Effect.void,
-		saveProject: saveProjectRelay,
 		...(pushMgr != null && { pushManager: pushMgr }),
 		...(config.configDir != null && { configDir: config.configDir }),
 		...(config.pollerGatingConfig != null && {
@@ -952,12 +888,28 @@ export async function createRelayStack(
 				undefined,
 				config.slug,
 			).pipe(
-				Effect.provideServiceEffect(
-					SessionDirectory,
-					Effect.map(relay.effectRuntime.runtime.runtimeEffect, (runtime) =>
-						Context.get(runtime.context, SessionDirectory),
-					),
-				),
+				// Each relay owns its own store and claims only its own sessions,
+				// so ask every mounted relay, including projects added later.
+				Effect.provideService(SessionDirectory, {
+					projectOf: (sessionId) =>
+						Effect.gen(function* () {
+							for (const mounted of [...relays.values()]) {
+								const runtime =
+									yield* mounted.effectRuntime.runtime.runtimeEffect.pipe(
+										Effect.mapError(
+											(cause) =>
+												new SessionDirectoryReadError({ sessionId, cause }),
+										),
+									);
+								const owner = yield* Context.get(
+									runtime.context,
+									SessionDirectory,
+								).projectOf(sessionId);
+								if (Option.isSome(owner)) return owner;
+							}
+							return Option.none<string>();
+						}),
+				}),
 			),
 		),
 	);
@@ -1012,6 +964,8 @@ export async function createRelayStack(
 	return {
 		server,
 		effectRuntime: relay.effectRuntime,
+		archiveIdleSessions: relay.archiveIdleSessions,
+		settleIdleSessions: relay.settleIdleSessions,
 		wsHandler: relay.wsHandler,
 		rpcWsHandler: relay.rpcWsHandler,
 		sseStream: relay.sseStream,

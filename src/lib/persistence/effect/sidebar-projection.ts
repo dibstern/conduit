@@ -96,9 +96,15 @@ export const refreshSidebar = (
 			}
 			const { changed } = changeSidebarRow(storedRows.get(rootId), row);
 			if (!changed) continue;
+			// Migration 0039 also uses this upkeep before project_id exists.
+			const projectId = top.find((root) => root.id === rootId)?.project_id;
+			const projectColumn =
+				projectId === undefined ? sql.literal("") : sql`, project_id`;
+			const projectValue =
+				projectId === undefined ? sql.literal("") : sql`, ${projectId}`;
 			yield* sql`
-				INSERT INTO session_sidebar (session_id, version, last_activity, row)
-				VALUES (${rootId}, ${row.version}, ${row.lastActivity}, ${encodeRow(row)})
+				INSERT INTO session_sidebar (session_id, version, last_activity, row ${projectColumn})
+				VALUES (${rootId}, ${row.version}, ${row.lastActivity}, ${encodeRow(row)} ${projectValue})
 				ON CONFLICT (session_id) DO UPDATE SET
 					version = excluded.version,
 					last_activity = excluded.last_activity,
@@ -116,9 +122,11 @@ export const refreshSidebar = (
  * both agree on a session whose chain never reaches a top-level one: an orphan
  * (its parent is missing) or a member of a parent cycle has no root, and no
  * family shows it, as the full session list does not.
+ * When supplied, `version` stamps every row whose root changes.
  */
 export const rerootSession = (
 	sessionId: string,
+	version?: number,
 ): Effect.Effect<readonly string[], SqlError, SqlClient.SqlClient> =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
@@ -139,8 +147,8 @@ export const rerootSession = (
 					SELECT child.id FROM sessions child
 					JOIN subtree ON child.parent_id = subtree.id
 				)
-				UPDATE sessions SET root_id = ${row.next}
-				WHERE id IN (SELECT id FROM subtree)`;
+				UPDATE sessions SET root_id = ${row.next}${version === undefined ? sql.literal("") : sql`, version = ${version}`}
+				WHERE id IN (SELECT id FROM subtree) AND root_id IS NOT ${row.next}`;
 		return row.root_id === null ? [sessionId] : [sessionId, row.root_id];
 	});
 
@@ -214,6 +222,9 @@ export const sidebarRows = (
 	}
 	return new Map(
 		roots.flatMap((root, index) => {
+			// Older migrations build this projection before archive columns exist.
+			// An archived root leaves a tombstone while its session still exists.
+			if (root.archived_at != null) return [];
 			const item = items[index];
 			if (item === undefined) return [];
 			const {

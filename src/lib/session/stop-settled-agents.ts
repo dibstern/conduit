@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
 import { Cause, Effect } from "effect";
+import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import {
 	AgentLivenessTag,
 	OrchestrationEngineTag,
@@ -13,6 +14,7 @@ import { readSessionQuiescence } from "./worktree-cleanup-sweep.js";
 export const stopQuiescentSettledAgents = (now: number) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		const { projectId } = yield* PersistenceProjectTag;
 		const inbox = yield* SessionInboxTag;
 		const engine = yield* OrchestrationEngineTag;
 		const agentIsLive = yield* AgentLivenessTag;
@@ -23,7 +25,7 @@ export const stopQuiescentSettledAgents = (now: number) =>
 				return state.facts?.settledAt != null && isSessionQuiescent(state);
 			});
 		const sessions = yield* sql<{ id: string }>`
-			SELECT id FROM sessions WHERE settled_at IS NOT NULL`;
+			SELECT id FROM sessions WHERE project_id = ${projectId} AND settled_at IS NOT NULL`;
 		for (const { id: sessionId } of sessions) {
 			yield* Effect.gen(function* () {
 				if (!(yield* eligible(sessionId))) return;

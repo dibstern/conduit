@@ -17,6 +17,7 @@ import {
 } from "../contracts/provider-instance.js";
 import {
 	type DaemonConfigLoadError,
+	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	defaultDaemonConfig,
 	getConfigDir,
@@ -28,12 +29,13 @@ import {
 	makeConfigWriterLive,
 } from "../domain/daemon/Layers/config-persistence-layer.js";
 import { makeStandaloneOpenCodeInstancesLive } from "../domain/daemon/Layers/opencode-instances-layer.js";
+import { makeConfiguredCursorUsage } from "../domain/daemon/Layers/usage-layer.js";
 import { makeWorktreeLive } from "../domain/daemon/Layers/worktree-layer.js";
 import {
 	AccountDirectory,
 	AccountDirectoryStateLive,
 } from "../domain/daemon/Services/account-directory.js";
-import type { ConfigPersistenceTag } from "../domain/daemon/Services/config-persistence-service.js";
+import { ConfigPersistenceTag } from "../domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
 	DaemonConfigRefTag,
@@ -48,8 +50,8 @@ import {
 	SessionActivityTag,
 } from "../domain/daemon/Services/session-activity.js";
 import {
-	makeSessionDirectoryLive,
 	SessionDirectory,
+	SessionDirectoryReadError,
 } from "../domain/daemon/Services/session-directory.js";
 import { makeUsage, Usage } from "../domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
@@ -74,12 +76,15 @@ import {
 	AlertLedgerTag,
 } from "../domain/relay/Services/alert-ledger.js";
 import { AlertsLive, AlertsTag } from "../domain/relay/Services/alerts.js";
-import { DaemonSessionQueryServiceLive } from "../domain/relay/Services/daemon-session-query-service.js";
+import {
+	DaemonSessionQueryServiceLive,
+	DaemonSessionQueryServiceTag,
+} from "../domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
 import { DraftPreWarmLive } from "../domain/relay/Services/draft-prewarm.js";
 import {
-	hasInstanceManagementConfig,
-	InstanceManagementServiceFromConfigLive,
+	InstanceManagementServiceLive,
+	InstanceManagementServiceTag,
 } from "../domain/relay/Services/instance-management-service.js";
 import {
 	type EffectOpenCodeRuntimeIngressPort,
@@ -87,10 +92,16 @@ import {
 	OpenCodeSessionCreationGateTag,
 } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import { PendingInteractionServiceLive } from "../domain/relay/Services/pending-interaction-service.js";
-import { ProjectManagementServiceLive } from "../domain/relay/Services/project-management-service.js";
+import {
+	ProjectManagementServiceLive,
+	ProjectManagementServiceTag,
+} from "../domain/relay/Services/project-management-service.js";
 import { makeProviderRuntimeIngestionLive } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../domain/relay/Services/provider-turn-service.js";
-import { ScanServiceLive } from "../domain/relay/Services/scan-service.js";
+import {
+	ScanServiceLive,
+	ScanServiceTag,
+} from "../domain/relay/Services/scan-service.js";
 import {
 	AgentLivenessTag,
 	BackgroundLivenessTag,
@@ -99,14 +110,12 @@ import {
 	LoggerTag,
 	OpenCodeFileServiceLive,
 	OpenCodeModelServiceLive,
-	type OpenCodeModelServiceTag,
 	OpenCodeSettingsServiceLive,
 	type OpenCodeSettingsServiceTag,
 	type OrchestrationEngineTag,
 	openCodeInstanceTarget,
 	SessionCompactionsTag,
 	SessionRetriesTag,
-	type WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import {
 	SessionEventBusLive,
@@ -135,7 +144,9 @@ import type { EventStoreEffectTag } from "../persistence/effect/event-store-effe
 import { EventStoreError } from "../persistence/effect/event-store-effect.js";
 import {
 	makePersistenceEffectLayer,
+	makePersistenceProjectLayer,
 	type PersistenceEffectError,
+	PersistenceStore,
 } from "../persistence/effect/live.js";
 import type { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
@@ -149,6 +160,7 @@ import {
 } from "../provider/orchestration-wiring.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import { SqliteProviderSessionBindingReadModel } from "../provider/provider-session-binding-read-model.js";
+import { usageAccounts } from "../provider/usage-reader.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import { RpcSubscriptionScopeLive } from "../server/ws-rpc.js";
 import type { ProjectRelayConfig } from "../types.js";
@@ -230,6 +242,10 @@ export type RelayRuntimeServices =
 	| ReadQueryEffectTag
 	| OpenCodeInstancesTag
 	| SessionManagerServiceTag
+	| ScanServiceTag
+	| DaemonSessionQueryServiceTag
+	| ProjectManagementServiceTag
+	| InstanceManagementServiceTag
 	| SqlClient.SqlClient
 	| ReturnType<typeof createTranslator>;
 
@@ -250,17 +266,6 @@ export interface ProjectRelayLayerInputs {
 	testSendLimit?: number;
 	onBackgroundWorkChanged: (sessionId: string) => void;
 	getWsHandler: () => WebSocketHandlerShape;
-	defaultCommandQueueLayer: Layer.Layer<
-		never,
-		never,
-		| ConfigTag
-		| LoggerTag
-		| OpenCodeModelServiceTag
-		| OrchestrationEngineTag
-		| ReadQueryEffectTag
-		| OverridesStateTag
-		| WebSocketHandlerTag
-	>;
 }
 
 /** Build the shared per-project Layer graph and its managed runtime. */
@@ -270,9 +275,7 @@ export function createProjectRelayLayers({
 	testSendLimit,
 	onBackgroundWorkChanged,
 	getWsHandler,
-	defaultCommandQueueLayer,
 }: ProjectRelayLayerInputs) {
-	const hasInstanceManagement = hasInstanceManagementConfig(config);
 	const claudeSdk = config.claudeSdk ?? {
 		query: sdkQuery,
 		titleQuery: sdkQuery,
@@ -284,67 +287,97 @@ export function createProjectRelayLayers({
 	// Imperative edge objects are provided as ports and merged into one Layer tree.
 
 	const configLayer = makeProjectRelayConfigLive({ ...config, claudeSdk });
-	const daemonConfigLayer = config.daemonConfigContext
-		? Layer.succeedContext(config.daemonConfigContext)
-		: Layer.unwrapEffect(
-				Effect.gen(function* () {
-					const configDir = config.configDir ?? getConfigDir();
-					const loaded = loadDaemonConfigResult(configDir);
-					if (Either.isLeft(loaded) && loaded.left._tag !== "NotFound")
-						return yield* loaded.left;
-					const saved = Either.getOrElse(loaded, defaultDaemonConfig);
-					const accounts = accountsStateFromConfig(
-						saved,
-						captureClaudeLaunchLogin(process.env),
-					);
-					const { pinHash, tls, ...initial } = saved;
-					const configRefLayer = DaemonConfigRefLive(
-						makeDaemonConfigFromOptions({
-							...initial,
-							tlsEnabled: tls,
-							...(pinHash !== null && { pinHash }),
-						}),
-					);
-					// Standalone relays have no daemon project/instance registry.
-					// Preserve those disk fields while snapshotting their live settings.
-					const snapshot = Layer.effect(
-						ConfigSnapshotTag,
-						Effect.gen(function* () {
-							const configRef = yield* DaemonConfigRefTag;
-							return {
-								build: Effect.gen(function* () {
-									const current = yield* Ref.get(configRef);
-									const persisted = yield* Effect.suspend(() =>
-										loadDaemonConfigResult(configDir),
-									).pipe(
-										Effect.catchTag("NotFound", () =>
-											Effect.succeed(defaultDaemonConfig()),
-										),
-									);
-									return {
-										...persisted,
-										autoSettleAfterDays:
-											current.autoSettleAfterDays === undefined
-												? DEFAULT_AUTO_SETTLE_AFTER_DAYS
-												: current.autoSettleAfterDays,
-										...(current.worktreeCleanup !== undefined && {
-											worktreeCleanup: current.worktreeCleanup,
-										}),
-										...(current.usageLimits !== undefined && {
-											usageLimits: current.usageLimits,
-										}),
-									};
-								}),
-							};
-						}),
-					).pipe(Layer.provideMerge(configRefLayer));
-					return ConfigPersistenceLive.pipe(
-						Layer.provideMerge(snapshot),
-						Layer.provide(makeConfigWriterLive(configDir)),
-						Layer.provideMerge(AccountDirectoryStateLive(accounts)),
-					);
+	const daemonConfigLayer: Layer.Layer<
+		DaemonConfigRefTag | ConfigPersistenceTag | AccountDirectory,
+		DaemonConfigLoadError
+	> = Layer.unwrapEffect(
+		Effect.gen(function* () {
+			const shared = config.daemonConfigContext ?? Context.empty();
+			const configRef = Context.getOption(shared, DaemonConfigRefTag);
+			const persistence = Context.getOption(shared, ConfigPersistenceTag);
+			const accountsService = Context.getOption(shared, AccountDirectory);
+			if (
+				Option.isSome(configRef) &&
+				Option.isSome(persistence) &&
+				Option.isSome(accountsService)
+			) {
+				return Layer.succeedContext(
+					Context.make(DaemonConfigRefTag, configRef.value).pipe(
+						Context.add(ConfigPersistenceTag, persistence.value),
+						Context.add(AccountDirectory, accountsService.value),
+						Context.merge(shared),
+					),
+				);
+			}
+			const configDir = config.configDir ?? getConfigDir();
+			const loaded = loadDaemonConfigResult(configDir);
+			if (Either.isLeft(loaded) && loaded.left._tag !== "NotFound")
+				return yield* loaded.left;
+			const saved = Either.getOrElse(loaded, defaultDaemonConfig);
+			const accounts = accountsStateFromConfig(
+				saved,
+				captureClaudeLaunchLogin(process.env),
+			);
+			const { pinHash, tls, ...initial } = saved;
+			const configRefLayer = DaemonConfigRefLive(
+				makeDaemonConfigFromOptions({
+					...initial,
+					tlsEnabled: tls,
+					...(pinHash !== null && { pinHash }),
 				}),
 			);
+			// Standalone relays have no daemon project/instance registry.
+			// Preserve those disk fields while snapshotting their live settings.
+			const snapshot = Layer.effect(
+				ConfigSnapshotTag,
+				Effect.gen(function* () {
+					const configRef = yield* DaemonConfigRefTag;
+					return {
+						build: Effect.gen(function* () {
+							const current = yield* Ref.get(configRef);
+							const persisted = yield* Effect.suspend(() =>
+								loadDaemonConfigResult(configDir),
+							).pipe(
+								Effect.catchTag("NotFound", () =>
+									Effect.succeed(defaultDaemonConfig()),
+								),
+							);
+							const { cursorUsageBinding: _binding, ...unchanged } = persisted;
+							return {
+								...unchanged,
+								autoSettleAfterDays:
+									current.autoSettleAfterDays === undefined
+										? DEFAULT_AUTO_SETTLE_AFTER_DAYS
+										: current.autoSettleAfterDays,
+								autoArchiveAfterDays:
+									current.autoArchiveAfterDays === undefined
+										? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS
+										: current.autoArchiveAfterDays,
+								...(current.worktreeCleanup !== undefined && {
+									worktreeCleanup: current.worktreeCleanup,
+								}),
+								...(current.usageLimits !== undefined && {
+									usageLimits: current.usageLimits,
+								}),
+								...(current.cursorUsageBinding
+									? { cursorUsageBinding: current.cursorUsageBinding }
+									: {}),
+							};
+						}),
+					};
+				}),
+			).pipe(Layer.provideMerge(configRefLayer));
+			return ConfigPersistenceLive.pipe(
+				Layer.provideMerge(snapshot),
+				Layer.provide(makeConfigWriterLive(configDir)),
+				Layer.provideMerge(AccountDirectoryStateLive(accounts)),
+			);
+		}),
+	).pipe(
+		Layer.merge(
+			Layer.succeedContext(config.daemonConfigContext ?? Context.empty()),
+		),
+	);
 	const activityLayer = Layer.effect(
 		SessionActivityTag,
 		Effect.gen(function* () {
@@ -413,23 +446,24 @@ export function createProjectRelayLayers({
 		? Layer.sync(Usage, () => sharedUsage)
 		: Layer.scoped(
 				Usage,
-				Effect.flatMap(AccountDirectory, (directory) =>
-					makeUsage({
-						accounts: Effect.map(directory.list, (accounts) =>
-							accounts.flatMap((account) =>
-								account.driver === "claude" && account.usageEligible
-									? [
-											{
-												id: account.id,
-												harness: PROVIDER_DRIVERS[account.driver].usageHarness,
-												folder: account.folder,
-												...(account.env ? { env: account.env } : {}),
-											},
-										]
-									: [],
-							),
-						),
+				Effect.gen(function* () {
+					const directory = yield* AccountDirectory;
+					const configRef = yield* DaemonConfigRefTag;
+					const accountList = directory.list.pipe(
+						Effect.provideService(DaemonConfigRefTag, configRef),
+					);
+					const cursor = yield* makeConfiguredCursorUsage;
+					const usage = yield* makeUsage({
+						accounts: Effect.map(accountList, usageAccounts),
+						accountHarness: (id) =>
+							Effect.map(accountList, (accounts) => {
+								const account = accounts.find((account) => account.id === id);
+								return account
+									? PROVIDER_DRIVERS[account.driver].usageHarness
+									: undefined;
+							}),
 						readers: {
+							cursor: cursor.reader,
 							claude: makeClaudeUsageReader({
 								queryFactory: claudeSdk.query,
 								cwd: config.projectDir,
@@ -438,8 +472,9 @@ export function createProjectRelayLayers({
 									: {}),
 							}),
 						},
-					}),
-				),
+					});
+					return { ...usage, setCursorKeychain: cursor.setKeychain };
+				}),
 			).pipe(Layer.provide(daemonConfigLayer));
 	const loggerLayer = ProjectRelayLoggerLive.pipe(Layer.provide(configLayer));
 	// One shared layer reference (Effect memoizes it), so orchestration wiring,
@@ -448,23 +483,56 @@ export function createProjectRelayLayers({
 	const sharedDirectory = config.daemonConfigContext
 		? Context.getOption(config.daemonConfigContext, SessionDirectory)
 		: Option.none();
+	const sharedStore = config.daemonConfigContext
+		? Context.getOption(config.daemonConfigContext, PersistenceStore)
+		: Option.none();
+	const sharedBus = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		SessionEventBusTag,
+	);
+	// Returning the daemon instance adds no ownership to the relay scope.
+	// Keep one layer reference so every writer and subscriber uses the same bus.
+	const sessionEventBusLayer = Option.isSome(sharedBus)
+		? Layer.sync(SessionEventBusTag, () => sharedBus.value)
+		: SessionEventBusLive;
+	const persistenceEffectLayer = (
+		Option.isSome(sharedStore)
+			? makePersistenceProjectLayer(config.slug, {
+					sessionEventBusLayer,
+				}).pipe(Layer.provideMerge(Layer.succeedContext(sharedStore.value)))
+			: makePersistenceEffectLayer(
+					config.persistenceDbPath,
+					config.slug,
+					undefined,
+					sessionEventBusLayer,
+				)
+	).pipe(Layer.provideMerge(activityReaders));
+	// Standalone WebSocket routing resolves only sessions owned by this relay.
 	const sessionDirectoryLayer = Option.isSome(sharedDirectory)
 		? Layer.succeedContext(
 				Context.make(SessionDirectory, sharedDirectory.value),
 			)
-		: makeSessionDirectoryLive(config.configDir ?? getConfigDir(), [
-				{
-					slug: config.slug,
-					folders: [config.projectDir, ...(config.extraFolders ?? [])],
-				},
-			]);
-	const persistenceEffectLayer = makePersistenceEffectLayer(
-		config.persistenceDbPath,
-		config.slug,
-		undefined,
-		SessionEventBusLive,
-		sessionDirectoryLayer,
-	).pipe(Layer.provideMerge(activityReaders));
+		: Layer.effect(
+				SessionDirectory,
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					return {
+						projectOf: (sessionId: string) =>
+							sql<{ readonly project_id: string | null }>`
+								SELECT project_id FROM sessions WHERE id = ${sessionId}`.pipe(
+								Effect.map((rows) =>
+									rows[0]?.project_id === config.slug
+										? Option.some(config.slug)
+										: Option.none(),
+								),
+								Effect.mapError(
+									(cause) =>
+										new SessionDirectoryReadError({ sessionId, cause }),
+								),
+							),
+					};
+				}),
+			).pipe(Layer.provide(persistenceEffectLayer));
 	const openCodeInstancesLayer = Layer.effect(
 		OpenCodeInstancesTag,
 		Effect.gen(function* () {
@@ -472,7 +540,7 @@ export function createProjectRelayLayers({
 			const sql = yield* SqlClient.SqlClient;
 			const bindings = yield* new SqliteProviderSessionBindingReadModel(
 				sql,
-			).listBoundSessions();
+			).listBoundSessions({ projectIds: [config.slug] });
 			return relayOpenCodeInstances(
 				instances,
 				config,
@@ -504,7 +572,7 @@ export function createProjectRelayLayers({
 				configLayer,
 				loggerLayer,
 				openCodeApiLayer,
-				SessionEventBusLive,
+				sessionEventBusLayer,
 			),
 		),
 	);
@@ -611,7 +679,7 @@ export function createProjectRelayLayers({
 			Layer.mergeAll(
 				persistenceEffectLayer,
 				sessionWorkspaceLayer,
-				SessionEventBusLive,
+				sessionEventBusLayer,
 				alertLedgerLayer,
 				// The same reference makeRelayStateLive merges, so it memoizes to the
 				// one PubSub SubscribeAlerts reads.
@@ -627,16 +695,24 @@ export function createProjectRelayLayers({
 	// ingestion pipeline — no duplicate event append. Likewise the shared
 	// persistenceEffectLayer reference gives orchestration (session bindings,
 	// durable command receipts) the relay's one SqlClient connection.
-	const instanceManagementLayer = hasInstanceManagement
-		? InstanceManagementServiceFromConfigLive.pipe(Layer.provide(configLayer))
-		: Layer.empty;
+	const instanceManagementLayer = Option.match(
+		Context.getOption(
+			config.daemonConfigContext ?? Context.empty(),
+			InstanceManagementServiceTag,
+		),
+		{
+			onNone: () => InstanceManagementServiceLive,
+			onSome: (service) =>
+				Layer.sync(InstanceManagementServiceTag, () => service),
+		},
+	);
 	const providerOrchestrationDeps = Layer.mergeAll(
 		daemonConfigLayer,
 		openCodeApiLayer,
 		persistenceEffectLayer,
 		// The engine commits input.sent through commit-and-signal, which
-		// announces on the relay's one bus.
-		SessionEventBusLive,
+		// announces on the same bus as the relay's subscribers.
+		sessionEventBusLayer,
 		providerRuntimeIngestionLayer,
 		openCodeInstancesLayer,
 		instanceManagementLayer,
@@ -682,19 +758,45 @@ export function createProjectRelayLayers({
 			),
 		),
 	);
-	const projectManagementServiceLayer = ProjectManagementServiceLive.pipe(
-		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
+	const projectManagementServiceLayer = Option.match(
+		Context.getOption(
+			config.daemonConfigContext ?? Context.empty(),
+			ProjectManagementServiceTag,
+		),
+		{
+			onNone: () =>
+				ProjectManagementServiceLive.pipe(Layer.provide(configLayer)),
+			onSome: (service) =>
+				Layer.sync(ProjectManagementServiceTag, () => service),
+		},
 	);
-	const daemonSessionQueryServiceLayer = DaemonSessionQueryServiceLive.pipe(
-		Layer.provide(configLayer),
+	const daemonSessionQueryServiceLayer = Option.match(
+		Context.getOption(
+			config.daemonConfigContext ?? Context.empty(),
+			DaemonSessionQueryServiceTag,
+		),
+		{
+			onNone: () => DaemonSessionQueryServiceLive,
+			onSome: (service) =>
+				Layer.sync(DaemonSessionQueryServiceTag, () => service),
+		},
 	);
-	const scanServiceLayer = ScanServiceLive.pipe(Layer.provide(configLayer));
+	const scanServiceLayer = Option.match(
+		Context.getOption(
+			config.daemonConfigContext ?? Context.empty(),
+			ScanServiceTag,
+		),
+		{
+			onNone: () => ScanServiceLive,
+			onSome: (service) => Layer.sync(ScanServiceTag, () => service),
+		},
+	);
 	const webSocketHandlerLayer = WebSocketHandlerLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
 				configLayer,
 				loggerLayer,
-				SessionEventBusLive,
+				sessionEventBusLayer,
 				persistenceEffectLayer,
 			),
 		),
@@ -787,6 +889,7 @@ export function createProjectRelayLayers({
 	// (provides sseTracker, getMonitoringState).
 	const relayStateAndBridges = Layer.provideMerge(
 		makeRelayStateLive({
+			sessionEventBusLayer,
 			titleQueryFactory: config.titleQuery ?? claudeSdk.titleQuery,
 			...(testSendLimit !== undefined && { testSendLimit }),
 		}),
@@ -838,10 +941,8 @@ export function createProjectRelayLayers({
 	const wiringLayers = Layer.mergeAll(
 		PermissionTimeoutLive,
 		sessionLifecycleWiringLayer,
-		defaultCommandQueueLayer,
 	).pipe(Layer.provide(baseLayers));
-	// The inbox drains on the relay's one bus (memoised by layer reference).
-	const inboxLayer = SessionInboxLive.pipe(Layer.provide(SessionEventBusLive));
+	const inboxLayer = SessionInboxLive.pipe(Layer.provide(sessionEventBusLayer));
 	// The borrowed daemon tracer goes BENEATH everything, not beside it:
 	// Layer.setTracer patches a FiberRef in its own build fiber, so a merged
 	// tracer never reaches fibers forked while building sibling layers
@@ -854,32 +955,6 @@ export function createProjectRelayLayers({
 					wiringLayers,
 					inboxLayer,
 					SessionWorkspaceHintReactorLive,
-					// Post-commit row changes include status and attention stamps.
-					// Transcript-only deltas stay quiet; a dropped advance recovers conservatively.
-					Layer.scopedDiscard(
-						Effect.gen(function* () {
-							const activity = yield* SessionActivityTag;
-							const advances =
-								yield* (yield* SessionEventBusTag).subscribeAdvances();
-							yield* advances.pipe(
-								Stream.filter(
-									(advance) =>
-										advance.dropped === true ||
-										advance.collections.includes("sidebar"),
-								),
-								Stream.runForEach((advance) =>
-									Effect.sync(() => {
-										for (const id of [
-											...advance.sessionIds,
-											...advance.removedSessionIds,
-										])
-											activity.changed(id);
-									}),
-								),
-								Effect.forkScoped,
-							);
-						}),
-					),
 				),
 				fullBaseLayers,
 			),

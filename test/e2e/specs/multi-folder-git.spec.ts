@@ -94,22 +94,26 @@ for (const scenario of [
 			git,
 		};
 		await mockWsRpc(page, {
-			handlers: {
-				GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
-				GetProjects: () => ({ projects: [project], current: slug }),
-				GetAgents: () => ({
-					projectSlug: slug,
-					agents: [],
-					providerScope: { id: "claude", name: "Claude" },
-					instanceId: "claude",
-				}),
+			stubs: {
+				FindFolders: () => ({ home: "/workspace", entries: [] }),
 				ListDaemonSessions: () => ({
 					sessions: [session],
 					availability: [],
 					hasMore: false,
 					nextCursor: null,
 				}),
-				FindFolders: () => ({ home: "/workspace", entries: [] }),
+				GetModels: (input) => ({
+					defaultOpenCodeInstanceId: "opencode",
+					projectSlug: "projectSlug" in input ? input.projectSlug : slug,
+					providers: [],
+				}),
+				GetAgents: () => ({
+					projectSlug: slug,
+					agents: [],
+					providerScope: { id: "claude", name: "Claude" },
+					instanceId: "claude",
+				}),
+				GetProjects: () => ({ projects: [project], current: slug }),
 			},
 		});
 		await mockRelayWebSocket(page, {

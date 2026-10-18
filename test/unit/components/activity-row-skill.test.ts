@@ -13,7 +13,10 @@ const getSkillContentRpc = vi.hoisted(() =>
 );
 
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	getSkillContentRpc,
+	rpc: (
+		_tag: "GetSkillContent",
+		input: { projectSlug: string; name: string },
+	) => getSkillContentRpc(input),
 }));
 vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
 	getCurrentSlug: () => "conduit",

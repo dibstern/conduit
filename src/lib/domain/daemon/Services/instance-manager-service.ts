@@ -34,7 +34,9 @@ import {
 } from "../../../contracts/account.js";
 import {
 	getProviderDriver,
+	type KnownProviderDriverKind,
 	MANAGED_OPENCODE_ACCOUNT_ID,
+	PROVIDER_DRIVERS,
 } from "../../../contracts/provider-instance.js";
 import { instanceNotFound } from "../../../instance/instance-errors.js";
 import {
@@ -56,6 +58,8 @@ import {
 	type ClaudeConfigDir,
 	captureClaudeLaunchLogin,
 } from "../../../provider/claude/claude-sdk-env.js";
+import { discoverCursorEffect } from "../../../provider/cursor/cursor-runner-driver.js";
+import { cursorUsageSource } from "../../../provider/cursor/cursor-usage.js";
 import type { OpenCodeInstance } from "../../../shared-types.js";
 import { isRecord } from "../../../utils.js";
 import {
@@ -556,19 +560,37 @@ export const removeInstance = (instanceId: string) =>
 // Capabilities describe the adapter, not persisted instance configuration.
 function instanceInfo(instance: OpenCodeInstance): OpenCodeInstance {
 	const driver = instance.driver ?? "opencode";
+	const traits = getProviderDriver(driver);
 	return {
 		...instance,
-		capabilities: getProviderDriver(driver)?.sessionCapabilities ?? {
+		...(instance.env?.["CURSOR_AUTH_TOKEN"] !== undefined
+			? {
+					env: Object.fromEntries(
+						Object.entries(instance.env).filter(
+							([key]) => key !== "CURSOR_AUTH_TOKEN",
+						),
+					),
+				}
+			: {}),
+		capabilities: traits?.sessionCapabilities ?? {
 			supportsMultiFolder: false,
 			supportsWorktree: false,
 		},
 	};
 }
 
+const instanceDiscovery: Partial<
+	Record<KnownProviderDriverKind, typeof discoverCursorEffect>
+> = { cursor: discoverCursorEffect };
+
 /** Publish account metadata together with its OpenCode runtime status. */
 export const getInstances = Effect.gen(function* () {
 	const directory = yield* AccountDirectory;
 	const accounts = yield* directory.list;
+	const config = yield* Effect.serviceOption(DaemonConfigRefTag);
+	const binding = Option.isSome(config)
+		? (yield* Ref.get(config.value)).cursorUsageBinding
+		: undefined;
 	const state = yield* Ref.get(yield* InstanceManagerStateTag);
 	const runtimeOrder = new Map(
 		Array.from(
@@ -611,7 +633,12 @@ export const getInstances = Effect.gen(function* () {
 									: { ...account.env },
 						}),
 				isDefault: account.isDefault,
-				usageEligible: account.driver === "claude" && account.usageEligible,
+				usageEligible:
+					PROVIDER_DRIVERS[account.driver].usageHarness !== undefined &&
+					account.usageEligible,
+				...(account.driver === "cursor"
+					? { cursorUsageSource: cursorUsageSource(account, binding) }
+					: {}),
 			});
 		})
 		.sort(
@@ -620,6 +647,42 @@ export const getInstances = Effect.gen(function* () {
 				(runtimeOrder.get(right.id) ?? runtimeOrder.size),
 		);
 }).pipe(Effect.withSpan("instance.getAll"));
+
+/** External inventory probes must not delay other providers' runtime operations. */
+export const discoverInstances = Effect.gen(function* () {
+	const instances = yield* getInstances;
+	const accounts = yield* (yield* AccountDirectory).list;
+	const availability = new Map<
+		string,
+		{
+			available: boolean;
+			unavailableReason?: string;
+			unavailableCode?: "auth_required";
+		}
+	>();
+	for (const account of accounts) {
+		const discover = instanceDiscovery[account.driver];
+		if (!discover) continue;
+		const result = yield* Effect.either(discover(undefined, account));
+		availability.set(
+			account.id,
+			result._tag === "Right"
+				? { available: true }
+				: {
+						available: false,
+						unavailableReason:
+							result.left.cause instanceof Error
+								? result.left.cause.message
+								: "Provider discovery failed",
+						...(result.left.code ? { unavailableCode: result.left.code } : {}),
+					},
+		);
+	}
+	return instances.map((instance) => ({
+		...instance,
+		...availability.get(instance.id),
+	}));
+}).pipe(Effect.withSpan("instance.discover"));
 
 /** Get a live account's read model; status reads never apply routing fallbacks. */
 export const getInstance = (instanceId: string) =>

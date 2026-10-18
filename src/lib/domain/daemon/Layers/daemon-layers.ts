@@ -9,11 +9,9 @@ import {
 	Data,
 	Deferred,
 	Effect,
-	Exit,
 	Layer,
 	PubSub,
 	Ref,
-	Runtime,
 	Stream,
 } from "effect";
 import { accountsStateFromConfig } from "../../../account-directory.js";
@@ -35,8 +33,8 @@ import {
 } from "../../../daemon/daemon-lifecycle.js";
 import { makeDaemonRpcSocketLayer } from "../../../daemon/daemon-rpc-server.js";
 import { ENV, resolveTraceConfig } from "../../../env.js";
-import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
-import { migrateProjectStorage } from "../../../persistence/migrations/project-storage-migration.js";
+import { startContentionMetrics } from "../../../persistence/contention-metrics.js";
+import { PersistenceStore } from "../../../persistence/effect/live.js";
 import {
 	type ClaudeConfigDir,
 	captureClaudeLaunchLogin,
@@ -46,6 +44,7 @@ import {
 	BrowserRpcConnectionsLive,
 	makeRoutedWsRpcServerLayer,
 } from "../../../server/ws-rpc.js";
+import { SessionEventBusLive } from "../../relay/Services/session-event-bus.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
 	DaemonHttpRequestHandlerTag,
@@ -85,14 +84,14 @@ import {
 	makeInstanceManagerStateFromDaemonStateLive,
 	makeInstanceManagerStateLive,
 } from "../Services/instance-manager-service.js";
+import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
-	allProjects,
 	broadcastProjectList,
 	getProject,
 	makeProjectRegistryFromDaemonStateLive,
 	makeProjectRegistryLive,
 	ProjectRegistryTag,
-	ProjectSaveLockTag,
+	type ProjectSaveLockTag,
 	removeProjectFromEffectRegistry,
 	saveProject,
 } from "../Services/project-registry-service.js";
@@ -103,7 +102,7 @@ import {
 } from "../Services/relay-cache.js";
 import { SessionActivityDaemonLive } from "../Services/session-activity.js";
 import {
-	makeSessionDirectoryLive,
+	makeSharedSessionDirectoryLive,
 	SessionDirectory,
 } from "../Services/session-directory.js";
 import { WorktreeCleanupQueueLive } from "../Services/worktree-cleanup-service.js";
@@ -114,6 +113,7 @@ import {
 	ConfigSnapshotFromEffectStateLive,
 	makeConfigWriterLive,
 } from "./config-persistence-layer.js";
+import { makeDaemonSharedStoreLayer } from "./daemon-shared-store-layer.js";
 import {
 	DaemonWsRpcHandlersLive,
 	DaemonWsRpcHandlersTag,
@@ -347,32 +347,26 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 	| DaemonEventBusTag
 	| ConfigPersistenceTag
 	| DaemonStateTag
+	| PersistenceStore
 > =>
 	Layer.scoped(
 		RelayCacheTag,
 		Effect.gen(function* () {
 			const relayFactory = yield* RelayFactoryTag;
 			const projectRegistry = yield* ProjectRegistryTag;
-			const projectSaveLock = yield* ProjectSaveLockTag;
-			const configRef = yield* DaemonConfigRefTag;
-			const eventBus = yield* DaemonEventBusTag;
-			const configPersistence = yield* ConfigPersistenceTag;
-			const daemonState = yield* DaemonStateTag;
-			const runtime = yield* Effect.runtime<never>();
+			const baseDaemonContext = yield* Effect.context<
+				| ProjectRegistryTag
+				| ProjectSaveLockTag
+				| DaemonConfigRefTag
+				| DaemonEventBusTag
+				| ConfigPersistenceTag
+				| DaemonStateTag
+			>();
+			const daemonContext = Context.merge(
+				baseDaemonContext,
+				yield* persistenceStoreContext,
+			);
 			let relayCache: RelayCache | undefined;
-
-			const runCallback = <A>(effect: Effect.Effect<A, unknown>) =>
-				new Promise<A>((resolve, reject) => {
-					Runtime.runCallback(runtime)(effect, {
-						onExit: (exit) => {
-							if (Exit.isSuccess(exit)) {
-								resolve(exit.value);
-								return;
-							}
-							reject(Cause.squash(exit.cause));
-						},
-					});
-				});
 
 			const provideProjectMutationDeps = <A, E>(
 				effect: Effect.Effect<
@@ -385,19 +379,15 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 					| ConfigPersistenceTag
 					| RelayCacheTag
 					| DaemonStateTag
+					| PersistenceStore
 				>,
 			) => {
 				if (relayCache === undefined) {
 					return Effect.dieMessage("Relay cache not initialized");
 				}
 				return effect.pipe(
-					Effect.provideService(ProjectRegistryTag, projectRegistry),
-					Effect.provideService(ProjectSaveLockTag, projectSaveLock),
-					Effect.provideService(DaemonConfigRefTag, configRef),
-					Effect.provideService(DaemonEventBusTag, eventBus),
-					Effect.provideService(ConfigPersistenceTag, configPersistence),
 					Effect.provideService(RelayCacheTag, relayCache),
-					Effect.provideService(DaemonStateTag, daemonState),
+					Effect.provide(daemonContext),
 				);
 			};
 
@@ -410,19 +400,13 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 						saveProject: (
 							input: import("../../../contracts/ws-rpc.js").SaveProjectInput,
 						) =>
-							runCallback(
-								provideProjectMutationDeps(
-									saveProject(input).pipe(
-										Effect.tap(() => broadcastProjectList),
-									),
-								),
+							provideProjectMutationDeps(
+								saveProject(input).pipe(Effect.tap(() => broadcastProjectList)),
 							),
 						removeProject: (projectSlug: string) =>
-							runCallback(
-								provideProjectMutationDeps(
-									removeProjectFromEffectRegistry(projectSlug).pipe(
-										Effect.tap(() => broadcastProjectList),
-									),
+							provideProjectMutationDeps(
+								removeProjectFromEffectRegistry(projectSlug).pipe(
+									Effect.tap(() => broadcastProjectList),
 								),
 							),
 					};
@@ -433,6 +417,8 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 						refreshGlobalDefaults: relay.refreshGlobalDefaults,
 						settleIdleSessions: (idleWindowMs: number, now: number) =>
 							relay.settleIdleSessions(idleWindowMs, now),
+						archiveIdleSessions: (idleWindowMs: number, now: number) =>
+							relay.archiveIdleSessions(idleWindowMs, now),
 						rpcWsHandler: relay.rpcWsHandler,
 						getStatusSnapshot: () => relay.getStatusSnapshot(),
 						setDefaultAgent: (agent: string) => relay.setDefaultAgent(agent),
@@ -656,11 +642,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		options.persistedConfig ?? defaultDaemonConfig(),
 		launchLogin,
 	);
-
-	// Tier 0: Foundation (no inter-dependencies)
-	// These Layers have zero dependencies on other Tags. They form the base
-	// of the Layer stack that all subsequent tiers build on.
-	const foundation = Layer.mergeAll(
+	const configMigration =
 		options.persistedConfig === undefined
 			? Layer.empty
 			: Layer.effectDiscard(
@@ -668,16 +650,31 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 						options.persistedConfig,
 						configDir,
 						options.persistedConfigNeedsMigration ?? false,
-					).pipe(
-						Effect.andThen(
-							migrateProjectStorage(configDir, options.persistedConfig),
-						),
-						Effect.andThen(
-							migrateForkLineage(configDir, options.persistedConfig),
-						),
+					),
+				);
+	const storageStartup = makeDaemonSharedStoreLayer(
+		configDir,
+		options.persistedConfig ?? defaultDaemonConfig(),
+	).pipe(Layer.provideMerge(configMigration), Layer.provide(PinoLoggerLive));
+
+	// Tier 0: Foundation (no inter-dependencies)
+	// These Layers have zero dependencies on other Tags. They form the base
+	// of the Layer stack that all subsequent tiers build on.
+	const foundation = Layer.mergeAll(
+		Layer.scopedDiscard(
+			Effect.acquireRelease(Effect.sync(startContentionMetrics), (metrics) =>
+				Effect.tryPromise(async () => {
+					await metrics?.close();
+				}).pipe(
+					Effect.catchAll((error) =>
+						Effect.logError("Contention metrics shutdown failed", error),
 					),
 				),
-		SessionActivityDaemonLive.pipe(Layer.provideMerge(DaemonEventBusLive)),
+			),
+		),
+		SessionActivityDaemonLive.pipe(
+			Layer.provideMerge(Layer.merge(DaemonEventBusLive, SessionEventBusLive)),
+		),
 		BrowserRpcConnectionsLive,
 		PinoLoggerLive,
 		makeDaemonTracingLive(resolveTraceConfig(configDir)),
@@ -690,7 +687,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		SignalHandlerLayer,
 		ProcessErrorHandlerLayer,
 		makeConfigWriterLive(configDir),
-	);
+	).pipe(Layer.provideMerge(storageStartup));
 
 	// These Layers depend on Tags from Tier 0 (primarily DaemonConfigRefTag).
 	// Layer.provideMerge makes Tier 0 Tags available AND passes them through.
@@ -813,9 +810,12 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(withManagedOpenCodeServers),
 	);
 	const withSessionDirectory = Layer.unwrapEffect(
-		Effect.map(allProjects, (projects) =>
-			makeSessionDirectoryLive(configDir, projects),
-		),
+		Effect.gen(function* () {
+			const store = yield* PersistenceStore;
+			return makeSharedSessionDirectoryLive.pipe(
+				Layer.provide(Layer.succeedContext(store)),
+			);
+		}),
 	).pipe(Layer.provideMerge(withOpenCodeInstances));
 	const registries = RelayFactoryLive(configDir).pipe(
 		Layer.provideMerge(
@@ -881,8 +881,8 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// They read Tags from upstream tiers via Layer.provideMerge passthrough.
 	const scopedFibers = Layer.mergeAll(
 		DaemonRpcServerLive,
-		AutoSettleLive(configDir),
-		WorktreeCleanupLive(configDir),
+		AutoSettleLive(),
+		WorktreeCleanupLive(),
 		WebSocketRoutingLive,
 		SessionPrefetchLive,
 		ServerBuildUpdateLive,

@@ -1,0 +1,186 @@
+import type { Effect } from "effect";
+import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
+import type { BackgroundTaskTransition } from "../../session/background-liveness.js";
+import type { SessionPermissionMode } from "../../shared-types.js";
+import type {
+	LegacyRunnerPermissionMode as LegacyPermissionMode,
+	LegacyRunnerSettings as Settings,
+} from "../claude/claude-runner-snapshot.js";
+import type {
+	PermissionDecision,
+	PermissionRequest,
+	PermissionResponse,
+	PreWarmSessionInput,
+	ProviderNativeSession,
+	QuestionRequest,
+	SendTurnInput,
+	TurnResult,
+} from "../types.js";
+import type { RunnerSettingsSnapshot } from "./runner-upgrade.js";
+
+/** Provider-Owned Payload fields contain JSON data, as on the event ingress. */
+export type SessionTurn = Omit<SendTurnInput, "eventSink" | "abortSignal">;
+
+export type SessionCommand =
+	| {
+			readonly type: "pre-warm";
+			readonly sessionId: string;
+			readonly input: PreWarmSessionInput;
+			readonly claudeSettingsOverrides?: Settings | undefined;
+			readonly shellEnv?: Readonly<Record<string, string | undefined>>;
+			readonly settingsSnapshot?: RunnerSettingsSnapshot;
+	  }
+	| {
+			readonly type: "send-turn";
+			readonly sinkId: string;
+			readonly aborted: boolean;
+			readonly claudeSettingsOverrides?: Settings | undefined;
+			readonly shellEnv?: Readonly<Record<string, string | undefined>>;
+			readonly input: SessionTurn;
+	  }
+	| {
+			readonly type: "answer-permission";
+			readonly sinkId: string;
+			readonly requestId: string;
+			readonly response: PermissionResponse;
+	  }
+	| {
+			readonly type: "answer-question";
+			readonly sinkId: string;
+			readonly requestId: string;
+			readonly answers: Record<string, unknown>;
+	  }
+	| {
+			readonly type: "interaction-failed";
+			readonly sinkId: string;
+			readonly requestId: string;
+			readonly kind: "permission" | "question";
+			readonly failure: SessionFailure;
+	  }
+	| {
+			readonly type: "resolve-permission";
+			readonly sessionId: string;
+			readonly requestId: string;
+			readonly decision: PermissionDecision;
+	  }
+	| {
+			readonly type: "resolve-question";
+			readonly sessionId: string;
+			readonly requestId: string;
+			readonly answers: Record<string, unknown>;
+	  }
+	| {
+			readonly type: "interrupt" | "end-session" | "shutdown-after-turn";
+			readonly sessionId: string;
+	  }
+	| {
+			readonly type: "stop-task";
+			readonly sessionId: string;
+			readonly taskId: string;
+	  }
+	| { readonly type: "abort"; readonly sinkId: string }
+	| {
+			readonly type: "apply-live-settings";
+			readonly sessionId: string;
+			readonly settings: {
+				readonly modelId?: string | undefined;
+				readonly contextWindow?: string | undefined;
+				readonly variant?: string | undefined;
+				readonly permissionMode?: SessionPermissionMode | undefined;
+			};
+	  }
+	| {
+			readonly type: "set-permission-mode";
+			readonly sessionId: string;
+			readonly mode: LegacyPermissionMode;
+	  }
+	| { readonly type: "shutdown" };
+
+/** Runtime events and the existing EventSink interaction operations, all data. */
+export type SessionOutput =
+	| {
+			readonly type: "background-task";
+			readonly transition: BackgroundTaskTransition;
+	  }
+	| ({ readonly sinkId: string } & (
+			| { readonly type: "event"; readonly event: ProviderRuntimeEvent }
+			| {
+					readonly type: "permission-request";
+					readonly request: PermissionRequest;
+			  }
+			| { readonly type: "question-request"; readonly request: QuestionRequest }
+			| { readonly type: "cancel-interaction"; readonly requestId: string }
+			| {
+					readonly type: "resolve-permission";
+					readonly requestId: string;
+					readonly response: PermissionResponse;
+			  }
+			| {
+					readonly type: "resolve-question";
+					readonly requestId: string;
+					readonly answers: Record<string, unknown>;
+			  }
+			| {
+					readonly type: "cancel-interactions";
+					readonly reason: string;
+					readonly recoverQuestions: boolean;
+			  }
+			| { readonly type: "release-sink" }
+			| {
+					/** Places a send's user message before the query admits it. */
+					readonly type: "place-user-message";
+					readonly input: {
+						readonly sessionId: string;
+						readonly inputId: string;
+						readonly text: string;
+					};
+			  }
+			| {
+					readonly type: "ensure-subagent-session";
+					readonly input: {
+						readonly childSessionId: string;
+						readonly parentSessionId: string;
+						readonly providerSessionId: string;
+						readonly title: string;
+						readonly instanceId?: string;
+						readonly modelId?: string;
+					};
+			  }
+	  ));
+
+/** Plain-data reply to an output operation; events and notifications return {}. */
+export type SessionOutputReply = Readonly<Record<string, never>>;
+
+/** Failure replies preserve the SDK fields used by the side-effect reactor. */
+export interface SessionFailure {
+	readonly operation: string;
+	readonly message: string;
+	readonly name?: string;
+	readonly code?: string | number;
+	readonly retryable?: boolean;
+}
+
+/** Effects are execution carriers; only command/output/reply data crosses here. */
+export interface SessionRunner {
+	readonly recoverEffect?: Effect.Effect<void, SessionFailure>;
+	/** Process ownership in every lifecycle state, even when no session is usable. */
+	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean>;
+	/** Local runner lifecycle state, including work outside the foreground turn. */
+	hasPendingSubagentFinalizers?(sessionId: string): boolean;
+	/** Undefined means no runtime session; null means its cursor is cleared. */
+	getResumeSessionIdEffect?(
+		sessionId: string,
+	): Effect.Effect<string | null | undefined>;
+	getNativeSessionEffect?(
+		sessionId: string,
+	): Effect.Effect<ProviderNativeSession | undefined>;
+	executeEffect(
+		command: Extract<SessionCommand, { type: "send-turn" }>,
+	): Effect.Effect<TurnResult, SessionFailure>;
+	executeEffect(
+		command: Exclude<SessionCommand, { type: "send-turn" }>,
+	): Effect.Effect<void, SessionFailure>;
+	executeEffect(
+		command: SessionCommand,
+	): Effect.Effect<TurnResult | undefined, SessionFailure>;
+}

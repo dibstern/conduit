@@ -11,12 +11,13 @@ import {
 	phaseToIdle,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import { connectionState } from "../../../src/lib/frontend/transport/connection-status.svelte.js";
+import { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import {
-	cancelSessionRpc,
-	syncInputDraftRpc,
-} from "../../../src/lib/frontend/transport/ws-rpc-client.js";
-import { seedDaemonSessions } from "../stores/session-fixtures.js";
+	applySessionSnapshot,
+	seedSessions,
+} from "../stores/session-fixtures.js";
 
 vi.mock(
 	"../../../src/lib/frontend/transport/ws-rpc-client.js",
@@ -24,8 +25,7 @@ vi.mock(
 		...(await original<
 			typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js")
 		>()),
-		syncInputDraftRpc: vi.fn(async () => {}),
-		cancelSessionRpc: vi.fn(async () => {}),
+		rpc: vi.fn(() => Promise.resolve({ ok: true })),
 	}),
 );
 
@@ -83,11 +83,11 @@ describe("InputArea build reload recovery", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date("2026-10-02T00:00:00Z"));
-		vi.mocked(syncInputDraftRpc).mockReset().mockResolvedValue(undefined);
-		vi.mocked(cancelSessionRpc).mockReset().mockResolvedValue(undefined);
+		vi.mocked(rpc).mockReset().mockResolvedValue({ ok: true });
 		sessionStorage.clear();
-		sessionState.currentId = sessionId;
+		openSessionForSetup(sessionId, "test");
 		attachedProjectState.slug = "test";
+		connectionState.status = "connected";
 		phaseToIdle(getOrCreateSessionActivity(sessionId));
 		Object.assign(inputSyncState, {
 			text: "",
@@ -107,23 +107,26 @@ describe("InputArea build reload recovery", () => {
 		vi.clearAllTimers();
 		vi.useRealTimers();
 		vi.unstubAllGlobals();
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		attachedProjectState.slug = null;
-		seedDaemonSessions([]);
+		connectionState.status = "";
+		seedSessions([]);
 		sessionStorage.clear();
 	});
 
 	it("syncs a loaded foreign session draft by session id", async () => {
-		seedDaemonSessions([
-			{ id: sessionId, title: "Foreign session", projectSlug: "dotfiles" },
-		]);
+		applySessionSnapshot(
+			[{ id: sessionId, title: "Foreign session", projectSlug: "dotfiles" }],
+			"partial",
+		);
 		const { getByRole } = render(InputArea);
 		const textarea = getByRole("textbox", {
 			name: "Message",
 		}) as HTMLTextAreaElement;
 		await enterText(textarea, "draft for dotfiles");
 		await vi.advanceTimersByTimeAsync(300);
-		expect(syncInputDraftRpc).toHaveBeenCalledWith(
+		expect(rpc).toHaveBeenCalledWith(
+			"SyncInputDraft",
 			expect.objectContaining({
 				sessionId,
 				text: "draft for dotfiles",
@@ -132,7 +135,7 @@ describe("InputArea build reload recovery", () => {
 	});
 
 	it("stops a loaded foreign session by session id", async () => {
-		seedDaemonSessions([
+		seedSessions([
 			{
 				id: sessionId,
 				title: "Foreign session",
@@ -143,7 +146,8 @@ describe("InputArea build reload recovery", () => {
 		followSessionBusy(sessionId, true);
 		const { getByRole } = render(InputArea);
 		await fireEvent.click(getByRole("button", { name: "Stop generating" }));
-		expect(cancelSessionRpc).toHaveBeenCalledWith(
+		expect(rpc).toHaveBeenCalledWith(
+			"CancelSession",
 			expect.objectContaining({
 				sessionId,
 			}),
@@ -173,10 +177,10 @@ describe("InputArea build reload recovery", () => {
 
 	it("defers if an image is attached while the draft RPC is pending", async () => {
 		let finishSave: (() => void) | undefined;
-		vi.mocked(syncInputDraftRpc).mockImplementationOnce(
+		vi.mocked(rpc).mockImplementationOnce(
 			() =>
-				new Promise<void>((resolve) => {
-					finishSave = resolve;
+				new Promise<{ ok: true }>((resolve) => {
+					finishSave = () => resolve({ ok: true });
 				}),
 		);
 		render(InputArea);
@@ -205,9 +209,9 @@ describe("InputArea build reload recovery", () => {
 			name: "Message",
 		}) as HTMLTextAreaElement;
 		await enterText(textarea, cached);
-		sessionState.currentId = "other-session";
+		openSessionForSetup("other-session", "test");
 		await tick();
-		sessionState.currentId = sessionId;
+		openSessionForSetup(sessionId, "test");
 		await tick();
 
 		await receiveDraft("newer draft from another tab");
@@ -227,9 +231,9 @@ describe("InputArea build reload recovery", () => {
 		expect(textarea.value).toBe("saved before reload");
 		expect(sessionStorage.getItem(reloadDraftKey)).toBeNull();
 
-		sessionState.currentId = "other-session";
+		openSessionForSetup("other-session", "test");
 		await tick();
-		sessionState.currentId = sessionId;
+		openSessionForSetup(sessionId, "test");
 		await tick();
 		await receiveDraft("newer draft from another tab");
 		expect(textarea.value).toBe("newer draft from another tab");

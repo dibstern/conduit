@@ -13,17 +13,19 @@ import { handleClaudeSettingsInfo } from "./claude-settings.svelte.js";
 import {
 	applyDefaultPermissionMode,
 	applyDefaultSessionMode,
-	discoveryState,
 	handleDefaultModelInfo,
 	handleHarnessDefaults,
 	handleModelList,
 	handleVisibilityInfo,
 } from "./discovery.svelte.js";
-import { getDriverTraits } from "./instance.svelte.js";
 import { projectState } from "./project-state.svelte.js";
+import { getCurrentSlug } from "./router.svelte.js";
 import { setClientCount, uiState } from "./ui.svelte.js";
 
-export const applyProjectSetting = (setting: ProjectSetting): void => {
+export const applyProjectSetting = (
+	setting: ProjectSetting,
+	project = getCurrentSlug() ?? "",
+): void => {
 	switch (setting._tag) {
 		case "defaultModel":
 			handleDefaultModelInfo(setting);
@@ -54,18 +56,7 @@ export const applyProjectSetting = (setting: ProjectSetting): void => {
 			uiState.opencodeConnections[setting.instanceId] = setting.status;
 			break;
 		case "providerModels":
-			handleModelList({
-				...(setting.accountId === undefined
-					? {}
-					: { accountId: setting.accountId }),
-				providers: [
-					...discoveryState.providers.filter(
-						(provider) =>
-							getDriverTraits(provider.id)?.catalogSource !== "discovery",
-					),
-					...setting.providers,
-				],
-			});
+			handleModelList(setting, project);
 			break;
 	}
 };
@@ -99,9 +90,11 @@ export function viewProjectSettings(project: string | null): void {
 								Effect.sync(() => {
 									if (currentGeneration !== generation) return;
 									if (envelope._tag === "snapshot")
-										envelope.rows.forEach(applyProjectSetting);
+										envelope.rows.forEach((setting) => {
+											applyProjectSetting(setting, project);
+										});
 									if (envelope._tag === "upsert")
-										applyProjectSetting(envelope.item);
+										applyProjectSetting(envelope.item, project);
 								}),
 						),
 					),

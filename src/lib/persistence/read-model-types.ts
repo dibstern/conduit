@@ -5,6 +5,7 @@ import type { HistoryMessage } from "../shared-types.js";
 
 export interface SessionRow {
 	id: string;
+	project_id?: string | null;
 	version: number;
 	provider: string;
 	provider_sid: string | null;
@@ -13,6 +14,7 @@ export interface SessionRow {
 	status: string;
 	history_complete?: number;
 	parent_id: string | null;
+	forked_from?: string | null;
 	side_thread?: number;
 	fork_point_event: string | null;
 	fork_point_timestamp?: number | null;
@@ -42,6 +44,9 @@ export interface SessionRow {
 	/** Generated: 1 while a root or fork has a turn end newer than seen. */
 	unread?: number;
 	settled_at: number | null;
+	archived_at?: number | null;
+	archived_automatically?: number;
+	unarchived_at?: number | null;
 	unsettled_at?: number | null;
 	auto_settle_disabled_at?: number | null;
 	settled_automatically?: number;

@@ -87,7 +87,7 @@ async function mockRelayWithViewSessionRpc(
 ): Promise<WsMockControl> {
 	let control!: WsMockControl;
 	await mockWsRpc(page, {
-		handlers: {
+		stubs: {
 			ViewSession: (params) => {
 				const sessionId = String(params["sessionId"] ?? "");
 				const messages = viewResponses.get(sessionId);

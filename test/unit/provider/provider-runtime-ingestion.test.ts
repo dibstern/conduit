@@ -98,6 +98,7 @@ function makeHarness(options?: {
 			).pipe(
 				Effect.as({
 					version: event.sequence,
+					projectIds: [event.projectId],
 					sessionIds: [event.sessionId],
 					removedSessionIds: [],
 					collections: ["messages"] as const,
@@ -115,6 +116,7 @@ function makeHarness(options?: {
 		).pipe(
 			Effect.as({
 				version: events[events.length - 1]?.sequence ?? 0,
+				projectIds: [...new Set(events.map((event) => event.projectId))],
 				sessionIds: [...new Set(events.map((event) => event.sessionId))],
 				removedSessionIds: [],
 				collections: ["messages"] as const,

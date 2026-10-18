@@ -58,9 +58,9 @@ test("filters models and agents, clears no matches and resets groups on reopen",
 	let hiddenModels = ["anthropic/claude-haiku-3-5"];
 	let hiddenAgents = ["claude/review"];
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
+		stubs: {
 			GetModels: () => ({
+				defaultOpenCodeInstanceId: "opencode",
 				projectSlug: "e2e-replay",
 				providers,
 				hiddenModels,
@@ -74,15 +74,10 @@ test("filters models and agents, clears no matches and resets groups on reopen",
 				],
 				hiddenAgents,
 			}),
+			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
 			SetHiddenEntries: (params) => {
-				if (Array.isArray(params["hiddenModels"]))
-					hiddenModels = params["hiddenModels"].filter(
-						(entry): entry is string => typeof entry === "string",
-					);
-				if (Array.isArray(params["hiddenAgents"]))
-					hiddenAgents = params["hiddenAgents"].filter(
-						(entry): entry is string => typeof entry === "string",
-					);
+				if (params.hiddenModels) hiddenModels = [...params.hiddenModels];
+				if (params.hiddenAgents) hiddenAgents = [...params.hiddenAgents];
 				return { projectSlug: "e2e-replay", hiddenModels, hiddenAgents };
 			},
 		},

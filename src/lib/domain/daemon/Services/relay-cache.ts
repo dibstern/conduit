@@ -23,7 +23,10 @@ import {
 	Scope,
 	ScopedRef,
 } from "effect";
-import type { GlobalSettingTag } from "../../../contracts/ws-rpc.js";
+import type {
+	GlobalSettingTag,
+	WsRpcError,
+} from "../../../contracts/ws-rpc.js";
 import type { PersistenceEffectError } from "../../../persistence/effect/live.js";
 import type { RpcWebSocketHandlerShape } from "../../../server/ws-rpc-handler.js";
 import type { ConnectionHealth } from "../../../types.js";
@@ -46,10 +49,14 @@ export interface Relay {
 		idleWindowMs: number,
 		now: number,
 	) => Effect.Effect<number, Error | SqlError | SessionManagerError>;
+	archiveIdleSessions?: (
+		idleWindowMs: number,
+		now: number,
+	) => Effect.Effect<number, Error | SqlError | SessionManagerError>;
 	slug: string;
 	rpcWsHandler: Pick<RpcWebSocketHandlerShape, "context">;
 	getStatusSnapshot?: () => RelayStatusSnapshot;
-	setDefaultAgent?: (agent: string) => Promise<void>;
+	setDefaultAgent?: (agent: string) => Effect.Effect<void, WsRpcError>;
 	stop: () => void | Promise<void>;
 }
 

@@ -14,12 +14,11 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 		name: "fail the cleanup settings read",
 		match: /^reading worktree cleanup settings fails$/,
 		run: ({ world }) => {
-			requireRpcControl(world.page).setHandler(
-				"GetWorktreeCleanupSetting",
-				() => {
+			requireRpcControl(world.page).setStubs({
+				GetWorktreeCleanupSetting: () => {
 					throw new WsRpcError({ message: "Cleanup settings unavailable" });
 				},
-			);
+			});
 		},
 	},
 	{
@@ -49,12 +48,12 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 		match: /^the current cleanup project is (draft|routed) named "([^"]+)"$/,
 		run: async ({ world, match }) => {
 			const projects = [
-				{ slug: "other", title: "Other project", folders: ["/other"] },
-				{ slug: "myapp", title: match[2] ?? "", folders: ["/myapp"] },
+				{ slug: "other", title: "Other project", folders: ["/other"] as const },
+				{ slug: "myapp", title: match[2] ?? "", folders: ["/myapp"] as const },
 			];
 			const rpc = requireRpcControl(world.page);
-			rpc.setDaemonList("SubscribeProjects", { projects });
-			rpc.setResponse("GetProjects", { projects, current: "other" });
+			rpc.setStubs({ GetProjects: () => ({ projects, current: "other" }) });
+			rpc.setProjects({ projects });
 			const path = match[1] === "draft" ? "/new?project=myapp" : "/?p=myapp";
 			await world.page.goto(new URL(path, world.page.url()).toString());
 			await expect(world.page.locator("#layout")).toBeVisible();
@@ -65,12 +64,11 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 		match: /^cleanup settings have no current project$/,
 		run: async ({ world }) => {
 			const rpc = requireRpcControl(world.page);
-			rpc.setDaemonList("SubscribeProjects", { projects: [] });
-			rpc.setResponse("GetProjects", { projects: [], current: null });
-			rpc.setResponse("AttachProject", {
-				projectSlug: null,
-				sessionSlug: null,
+			rpc.setStubs({
+				GetProjects: () => ({ projects: [] }),
+				AttachProject: () => ({ projectSlug: null, sessionSlug: null }),
 			});
+			rpc.setProjects({ projects: [] });
 			await world.page.goto(new URL("/", world.page.url()).toString());
 			await expect(world.page.locator("#layout")).toBeVisible();
 		},
@@ -405,10 +403,14 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 				path,
 				reason,
 			});
-			requireRpcControl(world.page).setResponse("CleanUpWorktreesNow", {
-				removed: [entry("row-opencode", "/worktrees/opencode", match[1] ?? "")],
-				kept: [entry("row-kept", match[2] ?? "", match[3] ?? "")],
-				failed: [entry("row-failed", match[4] ?? "", match[5] ?? "")],
+			requireRpcControl(world.page).setStubs({
+				CleanUpWorktreesNow: () => ({
+					removed: [
+						entry("row-opencode", "/worktrees/opencode", match[1] ?? ""),
+					],
+					kept: [entry("row-kept", match[2] ?? "", match[3] ?? "")],
+					failed: [entry("row-failed", match[4] ?? "", match[5] ?? "")],
+				}),
 			});
 		},
 	},
@@ -416,17 +418,19 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 		name: "seed the session's delete inspection",
 		match: /^that session's worktree inspection says "(ask|remove)" on delete$/,
 		run: ({ world, match }) => {
-			requireRpcControl(world.page).setResponse("InspectSessionWorktrees", {
-				worktrees: [
-					{
-						folder: "/myapp",
-						path: "/worktrees/delete-session/myapp",
-						reasons: [],
-						inUse: false,
-					},
-				],
-				removeWorktrees: true,
-				onDelete: match[1],
+			requireRpcControl(world.page).setStubs({
+				InspectSessionWorktrees: () => ({
+					worktrees: [
+						{
+							folder: "/myapp",
+							path: "/worktrees/delete-session/myapp",
+							reasons: [],
+							inUse: false,
+						},
+					],
+					removeWorktrees: true,
+					onDelete: match[1] === "remove" ? "remove" : "ask",
+				}),
 			});
 		},
 	},
@@ -496,15 +500,14 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 		name: "hold cleanup until the server fails it",
 		match: /^cleaning up now waits for the server$/,
 		run: ({ world }) => {
-			requireRpcControl(world.page).setHandler(
-				"CleanUpWorktreesNow",
-				() =>
-					new Promise((_, reject) =>
+			requireRpcControl(world.page).setStubs({
+				CleanUpWorktreesNow: () =>
+					new Promise<never>((_, reject) =>
 						heldCleanups.set(world.page, () =>
 							reject(new WsRpcError({ message: "Cleanup failed" })),
 						),
 					),
-			);
+			});
 		},
 	},
 	{

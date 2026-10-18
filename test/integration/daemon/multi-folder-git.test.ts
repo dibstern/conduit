@@ -365,15 +365,15 @@ describe("Multi-folder git through the built daemon", () => {
 		const list = () =>
 			sendRpcRequest(socket, new ListDaemonSessions({ scope: "process-test" }));
 		const readGitState = () => {
-			const db = new Database(
-				join(fixture.configDir, "projects", "process-test", "events.db"),
-				{ readonly: true, fileMustExist: true },
-			);
+			const db = new Database(fixture.daemonStorePath(), {
+				readonly: true,
+				fileMustExist: true,
+			});
 			try {
 				const sessions = db
 					.prepare<[], { id: string; version: number; sidebarVersion: number }>(
 						`SELECT id, sessions.version, session_sidebar.version AS sidebarVersion
-						FROM sessions JOIN session_sidebar ON session_id = id ORDER BY id`,
+						FROM sessions JOIN session_sidebar ON session_id = id WHERE sessions.project_id = 'process-test' ORDER BY id`,
 					)
 					.all();
 				const published = db

@@ -33,6 +33,10 @@ vi.mock("../../../src/lib/frontend/utils/notif-settings.js", () => ({
 	saveNotifSettings: vi.fn(),
 }));
 
+vi.mock("../../../src/lib/frontend/stores/selection.svelte.js", () => ({
+	selection: { open: vi.fn() },
+}));
+
 // localStorage mock (needed by ws-notifications module init)
 
 function createLocalStorageMock(initial?: Record<string, string>) {
@@ -83,18 +87,20 @@ describe("triggerNotifications", () => {
 		vi.stubGlobal("document", { hidden: true });
 
 		// Mock Notification constructor
-		const MockNotification = vi.fn(
-			(title: string, options?: NotificationOptions) => {
-				const instance = {
-					title,
-					options: options ?? {},
-					close: vi.fn(),
-					onclick: null as ((this: Notification, ev: Event) => unknown) | null,
-				};
-				notificationInstances.push(instance);
-				return instance;
-			},
-		);
+		// biome-ignore lint/complexity/useArrowFunction: Vitest invokes this mock as a constructor.
+		const MockNotification = vi.fn(function (
+			title: string,
+			options?: NotificationOptions,
+		) {
+			const instance = {
+				title,
+				options: options ?? {},
+				close: vi.fn(),
+				onclick: null as ((this: Notification, ev: Event) => unknown) | null,
+			};
+			notificationInstances.push(instance);
+			return instance;
+		});
 		Object.defineProperty(MockNotification, "permission", {
 			value: "granted",
 			writable: true,

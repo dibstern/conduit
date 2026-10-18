@@ -22,7 +22,7 @@ import {
 // launch options, cancellation poisoning another session's shared catalog,
 // named-instance config routing, and an unused query surviving shutdown.
 function durableCounts(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath(), {
+	const db = new Database(harness.daemonStorePath(), {
 		readonly: true,
 	});
 	try {
@@ -74,7 +74,7 @@ function sdkProof(harness: ProcessHarness): ProcessMark[] {
 
 // Seed the legacy discovery path only while the isolated daemon is stopped.
 function seedSessionWithoutPick(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath());
+	const db = new Database(harness.daemonStorePath());
 	try {
 		db.prepare(
 			"UPDATE sessions SET model_id = NULL, model_provider = NULL, variant = NULL, context_window = NULL WHERE id = ?",

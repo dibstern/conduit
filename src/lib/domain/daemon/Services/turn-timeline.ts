@@ -1,6 +1,6 @@
 import { performance } from "node:perf_hooks";
 import type { StoredEvent } from "../../../contracts/stored-event.js";
-import type { ClaudeSessionOutput } from "../../../provider/claude/claude-session-runner.js";
+import type { SessionOutput } from "../../../provider/runner/session-runner.js";
 import { isRecord } from "../../../utils.js";
 import type { TraceSink } from "./local-trace-artifact.js";
 
@@ -178,7 +178,7 @@ export const bindTurnTimelineSink = (sinkId: string, key: TurnKey): void => {
 	active.sinks.set(sinkId, id);
 };
 
-export const observeTurnTimelineFrame = (output: ClaudeSessionOutput): void => {
+export const observeTurnTimelineFrame = (output: SessionOutput): void => {
 	if (!active || output.type === "background-task") return;
 	const id = active.sinks.get(output.sinkId);
 	const turn = id === undefined ? undefined : active.pending.get(id);

@@ -7,6 +7,7 @@ import {
 	type WsRpcError,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import type { SavedTranscript } from "../../../src/lib/frontend/stores/saved-transcripts.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { makeWsRpcClientsLayer } from "../../../src/lib/frontend/transport/shared-client.js";
 import type { HistoryMessage } from "../../../src/lib/frontend/types.js";
 
@@ -14,7 +15,7 @@ const runtimeMock = vi.hoisted(() => ({
 	getRuntime: vi.fn(),
 	runTransportEffect: vi.fn(),
 }));
-const pageMock = vi.hoisted(() => ({ loadMoreHistoryRpc: vi.fn() }));
+const pageMock = vi.hoisted(() => ({ rpc: vi.fn() }));
 const savedMock = vi.hoisted(() => ({
 	openSavedTranscript: vi.fn<() => Promise<SavedTranscript | undefined>>(),
 	saveTranscript: vi.fn(() => Promise.resolve()),
@@ -35,7 +36,6 @@ import {
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	loadOlderTranscript,
 	transcriptStatus,
@@ -150,7 +150,7 @@ beforeEach(() => {
 	runtimeMock.runTransportEffect.mockImplementation((effect) =>
 		runtime.runPromise(effect),
 	);
-	sessionState.currentId = "A";
+	openSessionForSetup("A", "project-a");
 });
 afterEach(async () => {
 	viewTranscript("project", null);
@@ -158,11 +158,11 @@ afterEach(async () => {
 	await runtime.dispose();
 	runtimeMock.getRuntime.mockReset();
 	runtimeMock.runTransportEffect.mockReset();
-	pageMock.loadMoreHistoryRpc.mockReset();
+	pageMock.rpc.mockReset();
 	savedMock.openSavedTranscript.mockReset();
 	sessionActivity.clear();
 	sessionMessages.clear();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 });
 
 describe("transcript feed interface", () => {
@@ -359,7 +359,7 @@ describe("transcript feed interface", () => {
 		let finish:
 			| ((value: { messages: HistoryMessage[]; hasMore: boolean }) => void)
 			| undefined;
-		pageMock.loadMoreHistoryRpc.mockImplementation(
+		pageMock.rpc.mockImplementation(
 			() =>
 				new Promise((resolve) => {
 					finish = resolve;
@@ -368,7 +368,7 @@ describe("transcript feed interface", () => {
 		const one = loadOlderTranscript("A");
 		const two = loadOlderTranscript("A");
 		expect(two).toBe(one);
-		expect(pageMock.loadMoreHistoryRpc).toHaveBeenCalledExactlyOnceWith({
+		expect(pageMock.rpc).toHaveBeenCalledExactlyOnceWith("LoadMoreHistory", {
 			sessionId: "A",
 			before: "u2",
 		});

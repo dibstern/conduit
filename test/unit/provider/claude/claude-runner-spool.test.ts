@@ -11,12 +11,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Fiber, Option } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	type ClaudeRunnerMessage,
-	ClaudeRunnerSocket,
-} from "../../../../src/lib/provider/claude/claude-runner-protocol.js";
-import { ClaudeRunnerSpool } from "../../../../src/lib/provider/claude/claude-runner-spool.js";
-import type { ClaudeSessionOutput } from "../../../../src/lib/provider/claude/claude-session-runner.js";
+import { ClaudeRunnerSocket } from "../../../../src/lib/provider/claude/claude-runner-protocol.js";
+import type { RunnerMessage } from "../../../../src/lib/provider/runner/runner-protocol.js";
+import { RunnerSpool } from "../../../../src/lib/provider/runner/runner-spool.js";
+import type { SessionOutput } from "../../../../src/lib/provider/runner/session-runner.js";
 
 const scheduling = vi.hoisted(() => ({ yieldDeferred: false }));
 vi.mock("effect", async (importOriginal) => {
@@ -54,7 +52,7 @@ function fixture() {
 	const directory = mkdtempSync(join(tmpdir(), "conduit-spool-regression-"));
 	directories.push(directory);
 	const filename = join(directory, "runner.spool");
-	const spool = new ClaudeRunnerSpool(filename);
+	const spool = new RunnerSpool(filename);
 	const socket = new Socket();
 	sockets.push(socket);
 	const connection = new ClaudeRunnerSocket(
@@ -66,7 +64,7 @@ function fixture() {
 	return { spool, filename, connection };
 }
 
-function statusOutput(status: "idle" | "busy"): ClaudeSessionOutput {
+function statusOutput(status: "idle" | "busy"): SessionOutput {
 	return {
 		type: "event",
 		sinkId: "turn-1",
@@ -103,7 +101,7 @@ describe("Claude runner output spool", () => {
 		const persisted = readFileSync(filename, "utf8")
 			.trim()
 			.split("\n")
-			.map((line) => JSON.parse(line) as ClaudeRunnerMessage);
+			.map((line) => JSON.parse(line) as RunnerMessage);
 		expect(persisted).toMatchObject([
 			{
 				type: "output",
@@ -190,7 +188,7 @@ describe("Claude runner output spool", () => {
 	it("writes concurrent notification and release frames in sequence order", async () => {
 		scheduling.yieldDeferred = true;
 		const { spool, connection } = fixture();
-		const frames: ClaudeRunnerMessage[] = [];
+		const frames: RunnerMessage[] = [];
 		vi.mocked(connection.write).mockImplementation((message) => {
 			frames.push(message);
 			if (message.type === "output")

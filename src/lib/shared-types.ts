@@ -21,6 +21,7 @@ export type {
 
 import { SessionGoalChangedPayloadSchema } from "./contracts/stored-event.js";
 import type { ToolInput, ToolText } from "./contracts/tool-wire.js";
+import type { ModelInfo as WireModelInfo } from "./contracts/ws-rpc.js";
 // SDK-derived type aliases — single source of truth for Part/Tool enums.
 // Imported for local use; re-exported below for downstream consumers.
 import type { PartType, ToolStatus } from "./instance/sdk-types.js";
@@ -183,6 +184,7 @@ export interface ModelInfo {
 	cost?: { input?: number; output?: number };
 	limit?: { context?: number; output?: number };
 	variants?: string[];
+	parameters?: WireModelInfo["parameters"];
 	contextWindowOptions?: ContextWindowOption[];
 	/** Geo routing scopes for grouped Bedrock models; value is the full model id to send. */
 	routingOptions?: ContextWindowOption[];
@@ -320,8 +322,10 @@ export const SessionInfoSchema = Schema.Struct({
 	),
 	variant: Schema.optional(Schema.String),
 	contextWindow: Schema.optional(Schema.String),
-	/** Parent session ID — set when this session was forked from another. */
+	/** Containing session, for subagents and Side Threads only. */
 	parentID: Schema.optional(Schema.String),
+	/** Source session whose context started this Fork or Side Thread. */
+	forkedFrom: Schema.optional(Schema.String),
 	sideThread: Schema.optional(Schema.Boolean),
 	/** The message ID at the fork point — messages up to this ID are inherited context. */
 	forkMessageId: Schema.optional(Schema.String),
@@ -346,6 +350,7 @@ export const SessionInfoSchema = Schema.Struct({
 	/** The send whose turn ended at `lastTurnEndVersion`, when known. */
 	lastTurnEndInputId: Schema.optional(Schema.String),
 	settledAt: Schema.optional(Schema.Number),
+	archivedAt: Schema.optional(Schema.Number),
 	settledAutomatically: Schema.optional(Schema.Boolean),
 	autoSettleDisabled: Schema.optional(Schema.Boolean),
 	pinnedAt: Schema.optional(Schema.Number),
@@ -372,6 +377,7 @@ export interface DaemonSessionQueryOptions {
 	readonly limit?: number;
 	readonly roots?: boolean;
 	readonly search?: string;
+	readonly includeArchived?: boolean;
 	readonly cursor?: DaemonSessionCursor;
 	/** Read one project slug or an encoded repository group scope. Filter projects
 	 *  before merging their pages, so scoped search and paging remain complete. */
@@ -384,6 +390,16 @@ export interface DaemonSessionQueryOptions {
 export interface DaemonSessionCursor {
 	readonly updatedAt: number;
 	readonly id: string;
+}
+
+export interface ArchivedSessionCursor {
+	readonly archivedAt: number;
+	readonly id: string;
+}
+
+export interface ArchivedSessionQueryOptions {
+	readonly limit?: number;
+	readonly cursor?: ArchivedSessionCursor;
 }
 
 export type ProjectSessionAvailability =
@@ -402,6 +418,11 @@ export interface DaemonSessionQueryResult {
 	readonly availability: ReadonlyArray<ProjectSessionAvailability>;
 	readonly hasMore: boolean;
 	readonly nextCursor: DaemonSessionCursor | null;
+}
+
+export interface ArchivedSessionQueryResult
+	extends Omit<DaemonSessionQueryResult, "nextCursor"> {
+	readonly nextCursor: ArchivedSessionCursor | null;
 }
 
 export interface AskUserQuestion {
@@ -573,6 +594,7 @@ export interface ProjectInfo {
 	/** Keys are Project Folder paths; absent entries have no Repository Identity. */
 	repositoryIdentities?: Readonly<Record<string, RepositoryIdentity>>;
 	missing?: boolean;
+	unavailableReason?: string;
 	git?: SessionGit;
 	clientCount?: number;
 	instanceId?: string;
@@ -820,6 +842,10 @@ export interface OpenCodeInstance {
 	/** Published directory default marker; runtime records need not store it. */
 	isDefault?: boolean;
 	usageEligible?: boolean;
+	cursorUsageSource?: "token" | "keychain" | "can_enable" | "unsupported";
+	available?: boolean;
+	unavailableReason?: string;
+	unavailableCode?: "auth_required";
 	id: string;
 	name: string;
 	port: number;
@@ -890,6 +916,7 @@ export interface HealthResponse {
 
 export interface InfoResponse {
 	version: string;
+	buildId: string;
 }
 
 export interface DashboardProjectResponse {

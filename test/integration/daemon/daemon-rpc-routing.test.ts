@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,7 +27,7 @@ import {
 	WebSocketRoutingLive,
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
 import { clearSessionInputDraft } from "../../../src/lib/handlers/prompt.js";
-import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
+import { daemonStorePath } from "../../../src/lib/persistence/project-storage.js";
 import { makeWsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handler.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 import {
@@ -42,15 +42,13 @@ const makeProjectStore = (
 	slug: string,
 	sessionId: string,
 ): void => {
-	const storageDirectory = projectStorageDir(configDir, slug);
-	mkdirSync(storageDirectory, { recursive: true });
 	writeEventStore(
-		join(storageDirectory, "events.db"),
+		daemonStorePath(configDir),
 		Effect.flatMap(
 			SqlClient.SqlClient,
 			(sql) => sql`INSERT INTO sessions (
-				id, provider, title, status, created_at, updated_at
-			) VALUES (${sessionId}, 'opencode', ${sessionId}, 'idle', 1, 1)`,
+				id, provider, title, status, created_at, updated_at, project_id
+			) VALUES (${sessionId}, 'opencode', ${sessionId}, 'idle', 1, 1, ${slug})`,
 		),
 	);
 };
@@ -196,7 +194,7 @@ describe("daemon shared RPC routing", () => {
 						projectSlug: "project-a",
 						originId: "daemon-client",
 					}),
-				).toEqual({ projectSlug: "project-a" });
+				).toEqual({ projectSlug: "project-a", sessionSlug: null });
 				if (operation === "ViewSession") {
 					yield* rpcClient.SyncInputDraft({
 						sessionId: "session-b",
@@ -247,7 +245,7 @@ describe("daemon shared RPC routing", () => {
 			Effect.gen(function* () {
 				const directory = yield* Effect.acquireRelease(
 					Effect.sync(() =>
-						mkdtempSync(join(tmpdir(), "conduit-first-project-")),
+						realpathSync(mkdtempSync(join(tmpdir(), "conduit-first-project-"))),
 					),
 					(path) =>
 						Effect.sync(() => rmSync(path, { recursive: true, force: true })),
@@ -343,9 +341,16 @@ describe("daemon shared RPC routing", () => {
 								makeTestHandlerLayer({
 									config: makeMockConfig({
 										slug,
-										getProjects: () =>
-											projects.filter((project) => project.slug === slug),
 									}),
+									projectManagementService: {
+										currentSlug: () => Effect.succeed(slug),
+										list: () =>
+											Effect.succeed(
+												projects.filter((project) => project.slug === slug),
+											),
+										save: () => Effect.dieMessage("unused save"),
+										remove: () => Effect.dieMessage("unused remove"),
+									},
 								}),
 								makeWsTransportLive({ noServer: true }),
 							),

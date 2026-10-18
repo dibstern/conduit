@@ -13,7 +13,9 @@ for (const multiple of [true, false]) {
 			const projectSlug = "e2e-replay";
 			const primary = "/workspace/web";
 			const secondary = "/workspace/api";
-			const folders = multiple ? [primary, secondary] : [primary];
+			const folders: [string, ...string[]] = multiple
+				? [primary, secondary]
+				: [primary];
 			const projects = [
 				{ slug: projectSlug, title: "Folders project", folders },
 			];
@@ -21,26 +23,12 @@ for (const multiple of [true, false]) {
 				accountId: null,
 				id: "folders-session",
 				title: "Folders session",
-				status: "idle",
+				status: "idle" as const,
 				projectSlug,
 			};
 			let moved = false;
 			const rpc = await mockWsRpc(page, {
-				handlers: {
-					GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
-					GetProjects: () => ({ projects, current: projectSlug }),
-					GetAgents: () => ({
-						projectSlug,
-						agents: [],
-						providerScope: { id: "claude", name: "Claude" },
-						instanceId: "claude",
-					}),
-					ListDaemonSessions: () => ({
-						sessions: [session],
-						availability: [],
-						hasMore: false,
-						nextCursor: null,
-					}),
+				stubs: {
 					GetFileTree: () => ({
 						projectSlug,
 						entries: ["primary-only.txt", "src/", "src/index.ts"],
@@ -82,6 +70,25 @@ for (const multiple of [true, false]) {
 									: "secondary content"
 								: "primary content",
 					}),
+					ListDaemonSessions: () => ({
+						sessions: [session],
+						availability: [],
+						hasMore: false,
+						nextCursor: null,
+					}),
+					GetModels: (input) => ({
+						defaultOpenCodeInstanceId: "opencode",
+						projectSlug:
+							"projectSlug" in input ? input.projectSlug : projectSlug,
+						providers: [],
+					}),
+					GetAgents: () => ({
+						projectSlug,
+						agents: [],
+						providerScope: { id: "claude", name: "Claude" },
+						instanceId: "claude",
+					}),
+					GetProjects: () => ({ projects, current: projectSlug }),
 				},
 			});
 			await mockRelayWebSocket(page, {

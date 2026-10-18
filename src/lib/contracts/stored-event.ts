@@ -100,6 +100,8 @@ export type InputAdmittedPayload = PayloadOf<"input.admitted">;
 
 export type InputSentPayload = PayloadOf<"input.sent">;
 
+export type InputRequeuedPayload = PayloadOf<"input.requeued">;
+
 export type InputCancelledPayload = PayloadOf<"input.cancelled">;
 
 export type InputInterruptRequestedPayload =
@@ -118,6 +120,8 @@ export type SessionSettledPayload = PayloadOf<"session.settled">;
 export type SessionAutoSettleSetPayload = PayloadOf<"session.auto_settle_set">;
 
 export type SessionUnsettledPayload = PayloadOf<"session.unsettled">;
+export type SessionArchivedPayload = PayloadOf<"session.archived">;
+export type SessionUnarchivedPayload = PayloadOf<"session.unarchived">;
 
 export type SessionPinnedPayload = PayloadOf<"session.pinned">;
 
@@ -290,6 +294,7 @@ const TokensSchema = Schema.Struct({
 	output: Schema.optionalWith(Schema.Number, { exact: true }),
 	cacheRead: Schema.optionalWith(Schema.Number, { exact: true }),
 	cacheWrite: Schema.optionalWith(Schema.Number, { exact: true }),
+	/** Zero explicitly records an unavailable capacity; omission retains legacy display. */
 	contextWindow: Schema.optionalWith(Schema.Number, { exact: true }),
 });
 
@@ -603,6 +608,7 @@ export const CanonicalEvents = {
 			userMessageId: Schema.optionalWith(Schema.String, { exact: true }),
 			error: Schema.String,
 			code: Schema.optionalWith(Schema.String, { exact: true }),
+			retryable: Schema.optionalWith(Schema.Boolean, { exact: true }),
 		}),
 	),
 	"turn.interrupted": live(
@@ -612,6 +618,7 @@ export const CanonicalEvents = {
 	),
 	"turn.model_resolved": live(
 		Schema.Struct({
+			messageId: Schema.optionalWith(Schema.String, { exact: true }),
 			requestedModel: Schema.optionalWith(NonEmptyStringSchema, {
 				exact: true,
 			}),
@@ -639,6 +646,14 @@ export const CanonicalEvents = {
 			}),
 		}),
 	),
+	"input.requeued": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			inputId: Schema.String,
+			sentSequence: Schema.Number,
+			reason: Schema.Literal("declined", "failed"),
+		}),
+	),
 	"input.cancelled": live(
 		Schema.Struct({
 			sessionId: Schema.String,
@@ -657,6 +672,7 @@ export const CanonicalEvents = {
 			title: Schema.String,
 			provider: Schema.String,
 			parentId: Schema.optionalWith(Schema.String, { exact: true }),
+			forkedFrom: Schema.optionalWith(Schema.String, { exact: true }),
 			forkPointEvent: Schema.optionalWith(Schema.String, { exact: true }),
 			forkPointTimestamp: Schema.optionalWith(Schema.Number, { exact: true }),
 			forkPointMessageId: Schema.optionalWith(Schema.String, { exact: true }),
@@ -748,6 +764,18 @@ export const CanonicalEvents = {
 	"session.unsettled": live(
 		Schema.Struct({
 			sessionId: Schema.String,
+		}),
+	),
+	"session.archived": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			automatic: Schema.Boolean,
+		}),
+	),
+	"session.unarchived": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			cause: Schema.Literal("manual", "send"),
 		}),
 	),
 	"session.pinned": live(

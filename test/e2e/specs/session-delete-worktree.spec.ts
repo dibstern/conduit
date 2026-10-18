@@ -56,9 +56,15 @@ async function setup(
 ) {
 	const projectSlug = options.foreign ? "second-project" : "e2e-replay";
 	const projects = [
-		{ slug: "e2e-replay", title: "App", folders: [folder] },
+		{ slug: "e2e-replay", title: "App", folders: [folder] as const },
 		...(options.foreign
-			? [{ slug: projectSlug, title: "Second", folders: ["/workspace/second"] }]
+			? [
+					{
+						slug: projectSlug,
+						title: "Second",
+						folders: ["/workspace/second"] as const,
+					},
+				]
 			: []),
 	];
 	let sessions = [
@@ -66,13 +72,13 @@ async function setup(
 			accountId: null,
 			id: "delete-session",
 			title: "Delete this session",
-			status: "idle",
+			status: "idle" as const,
 			projectSlug,
 			...(inspection.worktrees.length > 0
 				? {
 						workspace: {
-							cause: "launch",
-							origin: "conduit",
+							cause: "launch" as const,
+							origin: "conduit" as const,
 							worktrees: { [folder]: worktree },
 						},
 						git: { branch: "conduit/session-delete", worktree: "app" },
@@ -85,34 +91,14 @@ async function setup(
 						accountId: null,
 						id: "local-session",
 						title: "Local session",
-						status: "idle",
+						status: "idle" as const,
 						projectSlug: "e2e-replay",
 					},
 				]
 			: []),
 	];
-	// The scoped shell covers the current project; the daemon list covers the rest.
-	const shellRows = () =>
-		options.foreign
-			? sessions.filter((session) => session.projectSlug === "e2e-replay")
-			: sessions;
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
-			GetProjects: () => ({ projects, current: "e2e-replay" }),
-			GetWorktreeCleanupSetting: () => ({
-				global: {
-					...DEFAULT_WORKTREE_CLEANUP,
-					onDelete: options.globalOnDelete ?? false,
-				},
-				...(options.projectOff ? { project: "off" } : {}),
-			}),
-			ListDaemonSessions: () => ({
-				sessions: options.foreign ? sessions : [],
-				availability: [],
-				hasMore: false,
-				nextCursor: null,
-			}),
+		stubs: {
 			InspectSessionWorktrees: async ({ sessionId }) => {
 				await options.inspectionDelay;
 				if (options.failInspection)
@@ -125,11 +111,30 @@ async function setup(
 						})
 					: inspection;
 			},
+			ListDaemonSessions: () => ({
+				sessions: options.foreign ? sessions : [],
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
+			}),
 			DeleteSession: ({ sessionId }) => {
 				sessions = sessions.filter(({ id }) => id !== sessionId);
-				rpc.setShellRows(shellRows());
+				rpc.setShellRows(sessions);
 				return { ok: true, worktreeWarnings: options.warnings ?? [] };
 			},
+			GetModels: (input) => ({
+				defaultOpenCodeInstanceId: "opencode",
+				projectSlug: "projectSlug" in input ? input.projectSlug : projectSlug,
+				providers: [],
+			}),
+			GetProjects: () => ({ projects, current: "e2e-replay" }),
+			GetWorktreeCleanupSetting: () => ({
+				global: {
+					...DEFAULT_WORKTREE_CLEANUP,
+					onDelete: options.globalOnDelete ?? false,
+				},
+				...(options.projectOff ? { project: "off" as const } : {}),
+			}),
 		},
 	});
 	await mockRelayWebSocket(page, {
@@ -138,12 +143,12 @@ async function setup(
 			{
 				type: "shell_snapshot",
 				roots: true,
-				sessions: shellRows(),
+				sessions,
 			},
 		],
 		responses: new Map(),
 	});
-	rpc.setShellRows(shellRows());
+	rpc.setShellRows(sessions);
 	controls.set(page, rpc);
 	await page.goto(`${baseUrl}/?p=e2e-replay`);
 	if (options.foreign)

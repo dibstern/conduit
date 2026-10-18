@@ -124,8 +124,8 @@ const seedBusySession = (sessionId: string, updatedAt: number) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		yield* sql`
-			INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-			VALUES (${sessionId}, 'opencode', ${sessionId}, 'busy', 1000, ${updatedAt})`;
+			INSERT INTO sessions (id, provider, title, status, created_at, updated_at, project_id)
+			VALUES (${sessionId}, 'opencode', ${sessionId}, 'busy', 1000, ${updatedAt}, 'test-project')`;
 		expect(yield* versionOf(sessionId)).toBe(0);
 	});
 
@@ -294,8 +294,8 @@ it("persistSessionPermissionMode advances the version of the session it edits", 
 					yield* (yield* ProjectionRunnerEffectTag).recover();
 					const sql = yield* SqlClient.SqlClient;
 					yield* sql`
-						INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-						VALUES ('permissioned', 'claude', 'Permissioned', 'idle', 1000, 1000)`;
+						INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+						VALUES ('permissioned', 'test-project', 'claude', 'Permissioned', 'idle', 1000, 1000)`;
 					expect(yield* versionOf("permissioned")).toBe(0);
 
 					const announced = yield* announcedDuring(
@@ -374,8 +374,8 @@ it("the auto-title rename advances the version of the session it renames", async
 					yield* (yield* ProjectionRunnerEffectTag).recover();
 					const sql = yield* SqlClient.SqlClient;
 					yield* sql`
-						INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-						VALUES ('titled', 'claude', 'Claude Session', 'idle', 1000, 1000)`;
+						INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+						VALUES ('titled', 'test-project', 'claude', 'Claude Session', 'idle', 1000, 1000)`;
 					expect(yield* versionOf("titled")).toBe(0);
 
 					const titles = yield* SessionTitleServiceTag;

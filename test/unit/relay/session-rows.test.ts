@@ -23,11 +23,14 @@ import { emptySessionManagerState } from "../../../src/lib/domain/relay/Services
 import { subscribeShell } from "../../../src/lib/domain/relay/Services/shell-subscription.js";
 import { createSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
-import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import {
+	makePersistenceEffectLayer,
+	PersistenceStore,
+	type PersistenceStoreContext,
+} from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import {
 	makeMockAccountDirectory,
@@ -67,9 +70,7 @@ describe("Session Rows read paths", () => {
 				const projectDir = join(configDir, "project-folder");
 				const slug = "project";
 				const folders: [string] = [projectDir];
-				const storageDir = projectStorageDir(configDir, slug);
 				mkdirSync(projectDir);
-				mkdirSync(storageDir, { recursive: true });
 				return Effect.gen(function* () {
 					yield* Effect.addFinalizer(() =>
 						Effect.sync(() =>
@@ -79,13 +80,17 @@ describe("Session Rows read paths", () => {
 					const activity = yield* makeSessionActivity;
 					const activityLayer = Layer.succeed(SessionActivityTag, activity);
 					const persistence = makePersistenceEffectLayer(
-						join(storageDir, "events.db"),
+						join(configDir, "events.db"),
 						slug,
 						undefined,
 						SessionEventBusLive,
 					).pipe(Layer.provide(activityLayer));
+					const store = Layer.effect(
+						PersistenceStore,
+						Effect.context<PersistenceStoreContext>(),
+					).pipe(Layer.provideMerge(persistence));
 					const layer = Layer.mergeAll(
-						persistence,
+						store,
 						activityLayer,
 						SessionEventBusLive,
 						Layer.succeed(
@@ -149,7 +154,11 @@ describe("Session Rows read paths", () => {
 						const cache = createSessionGitCache(async () => undefined);
 						const readAll = Effect.gen(function* () {
 							const relay = yield* operations.serviceListSessions();
-							const shell = yield* Stream.runHead(subscribeShell());
+							const shell = yield* Stream.runHead(
+								subscribeShell().pipe(
+									Stream.filter((frame) => frame._tag !== "projects"),
+								),
+							);
 							const family = yield* Stream.runHead(
 								subscribeSessionFamily({ sessionId }),
 							);

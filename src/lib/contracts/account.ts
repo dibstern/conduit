@@ -3,6 +3,11 @@ import { ClaudeConfigDirSchema } from "./claude-config-dir.js";
 
 export const AccountIdSchema = Schema.String.pipe(Schema.brand("AccountId"));
 export type AccountId = typeof AccountIdSchema.Type;
+export const CursorUsageBindingSchema = Schema.Struct({
+	accountId: Schema.String,
+	subjectHash: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+});
+export type CursorUsageBinding = typeof CursorUsageBindingSchema.Type;
 export const MANAGED_OPENCODE_ACCOUNT_ID = AccountIdSchema.make("opencode");
 
 export const ClaudeAccountSchema = Schema.Struct({
@@ -22,6 +27,7 @@ export const OpenCodeAccountSchema = Schema.Struct({
 	driver: Schema.Literal("opencode"),
 	id: Schema.suspend(() => AccountIdSchema),
 	name: Schema.String,
+	usageEligible: Schema.Literal(false),
 	url: Schema.optional(Schema.String),
 	port: Schema.optional(Schema.Number),
 	managed: Schema.optional(Schema.Boolean),
@@ -32,9 +38,22 @@ export const OpenCodeAccountSchema = Schema.Struct({
 });
 export type OpenCodeAccount = typeof OpenCodeAccountSchema.Type;
 
+export const CursorAccountSchema = Schema.Struct({
+	driver: Schema.Literal("cursor"),
+	id: Schema.suspend(() => AccountIdSchema),
+	name: Schema.String,
+	configuredFolder: Schema.optional(Schema.String),
+	env: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.String }),
+	),
+	usageEligible: Schema.Boolean,
+});
+export type CursorAccount = typeof CursorAccountSchema.Type;
+
 export const AccountSchema = Schema.Union(
 	ClaudeAccountSchema,
 	OpenCodeAccountSchema,
+	CursorAccountSchema,
 );
 export type Account = typeof AccountSchema.Type;
 export type AccountListItem = Account & { readonly isDefault: boolean };
@@ -64,6 +83,13 @@ const validPort = Schema.Number.pipe(
 
 /** Driver-specific add rules are decoded by the directory, inside its commit. */
 export const AccountAddInputSchema = Schema.Union(
+	Schema.Struct({
+		...addFields,
+		driver: Schema.Literal("cursor"),
+		managed: Schema.optional(Schema.Literal(false)),
+		port: Schema.optional(Schema.Never),
+		url: Schema.optional(Schema.Never),
+	}),
 	Schema.Struct({
 		...addFields,
 		driver: Schema.Literal("claude"),
@@ -141,7 +167,7 @@ export const AccountAddInputSchema = Schema.Union(
 export const AccountRefSchema = Schema.Union(
 	Schema.TaggedStruct("Id", { id: Schema.String }),
 	Schema.TaggedStruct("DriverDefault", {
-		driver: Schema.Literal("claude", "opencode"),
+		driver: Schema.Literal("claude", "opencode", "cursor"),
 	}),
 );
 export type AccountRef = typeof AccountRefSchema.Type;

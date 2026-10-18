@@ -1,6 +1,9 @@
 import { Effect } from "effect";
 import type { Account } from "../../../contracts/account.js";
-import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
+import {
+	PROVIDER_DRIVERS,
+	type ProviderDriverTraits,
+} from "../../../contracts/provider-instance.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { createEventId } from "../../../persistence/events.js";
@@ -11,10 +14,7 @@ import {
 	type PendingQuestion,
 } from "./pending-interaction-service.js";
 import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
-import {
-	CLAUDE_PROVIDER_ID,
-	isProviderTurnInterruptProvider,
-} from "./provider-turn-dispatch.js";
+import { CLAUDE_PROVIDER_ID } from "./provider-turn-dispatch.js";
 import type {
 	ProviderTurnServiceInterruptInput,
 	ProviderTurnServicePrepareInput,
@@ -181,7 +181,16 @@ export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 			_tag: "Id",
 			id: providerId,
 		});
-		const traits = PROVIDER_DRIVERS[account.driver];
+		const traits: ProviderDriverTraits = PROVIDER_DRIVERS[account.driver];
+		if (
+			traits.readOnlySubagents &&
+			session?.parent_id &&
+			session.side_thread !== 1 &&
+			!session.fork_point_event &&
+			session.fork_point_message_id == null &&
+			session.fork_point_timestamp == null
+		)
+			return yield* Effect.fail(new Error("Subagent sessions are read-only."));
 		if (
 			traits.interactionSink === "permission-asking" &&
 			input.delivery !== "steer"
@@ -235,7 +244,7 @@ export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 			yield* interruptLegacyTurn(input);
 			return;
 		}
-		if (!isProviderTurnInterruptProvider(account.driver)) return;
+		if (!PROVIDER_DRIVERS[account.driver].interruptViaEngine) return;
 
 		const interruptResult = yield* Effect.either(
 			engine.dispatchEffect({

@@ -21,7 +21,6 @@ import { ProjectionRunnerError } from "../persistence/effect/projection-runner-e
 import { PersistenceError } from "../persistence/errors.js";
 import { type CanonicalEvent, createEventId } from "../persistence/events.js";
 import type { PermissionId, SessionPermissionMode } from "../shared-types.js";
-import { currentClaudeRunnerPermissionReply } from "./claude/claude-runner-receipts.js";
 import { MissingPendingInteractions } from "./errors.js";
 import {
 	type EventSinkError,
@@ -33,6 +32,7 @@ import {
 	translateProviderRuntimeEventToDomain,
 } from "./provider-runtime-event-to-domain.js";
 import { providerRefsFromRuntimeData } from "./provider-runtime-refs.js";
+import { currentRunnerPermissionReply } from "./runner/runner-receipts.js";
 import type {
 	EventSink,
 	PermissionRequest,
@@ -426,7 +426,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 								decision: Exit.isSuccess(exit) ? exit.value.decision : "reject",
 							}).pipe(
 								Effect.locally(
-									currentClaudeRunnerPermissionReply,
+									currentRunnerPermissionReply,
 									Exit.isSuccess(exit)
 										? {
 												sessionId,

@@ -97,23 +97,28 @@ describe("WsRpcServerLayer ListSessions", () => {
 			const projections = yield* ProjectionRunnerEffectTag;
 			yield* projections.recover();
 			const sql = yield* SqlClient.SqlClient;
-			yield* sql`INSERT INTO sessions (id, provider, title, created_at, updated_at, version)
-				VALUES ('root', 'claude', 'Root', 1, 1, 1)`;
+			yield* sql`INSERT INTO sessions (id, project_id, provider, title, created_at, updated_at, version)
+				VALUES ('root', 'test-project', 'claude', 'Root', 1, 1, 1)`;
 			yield* sql`INSERT INTO sessions
-				(id, provider, title, parent_id, created_at, updated_at, version, snoozed_at)
-				VALUES ('child', 'claude', 'Child', 'root', 1, 1, 1, 2)`;
+				(id, project_id, provider, title, parent_id, created_at, updated_at, version, snoozed_at)
+				VALUES ('child', 'test-project', 'claude', 'Child', 'root', 1, 1, 1, 2)`;
 			yield* sql`UPDATE read_model_counter SET value = 1 WHERE id = 1`;
 			yield* sql`UPDATE sessions SET root_id = 'root'`;
 			yield* refreshSidebar(["root"], 1);
 			const reader = yield* ReadQueryEffectTag;
-			const before = yield* reader.readSessionList();
+			const before = yield* reader.readSessionList({
+				projectIds: ["test-project"],
+			});
 			expect(before.rows.map(({ item }) => item.id)).toEqual(["root"]);
 			expect(before.rows[0]?.version).toBe(1);
 			yield* sql`UPDATE sessions SET woken_at = 3, woken_reason = 'activity', version = 2
 				WHERE id = 'child'`;
 			yield* sql`UPDATE read_model_counter SET value = 2 WHERE id = 1`;
 			yield* refreshSidebar(["child"], 2);
-			const after = yield* reader.readSessionList({ after: 1 });
+			const after = yield* reader.readSessionList(
+				{ projectIds: ["test-project"] },
+				{ after: 1 },
+			);
 			expect(after).toEqual({
 				rows: [],
 				version: 2,
@@ -272,6 +277,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				accountDirectory: makeMockAccountDirectory([
 					{
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("work-oc"),
 						name: "Work OpenCode",
 					},
@@ -448,7 +454,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			expect(result).toEqual({
 				projectSlug: "test-project",
 				sessionId: "session-forked",
-				parentId: "session-1",
+				forkedFrom: "session-1",
 				forkMessageId: "message-1",
 			});
 			// OpenCode cuts before messageID, so the fork keeps message-1.
@@ -460,7 +466,8 @@ describe("WsRpcServerLayer ListSessions", () => {
 			expect(setForkEntry).not.toHaveBeenCalled();
 			const readQuery = yield* ReadQueryEffectTag;
 			expect(yield* readQuery.getSession("session-forked")).toMatchObject({
-				parent_id: "session-1",
+				parent_id: null,
+				forked_from: "session-1",
 				fork_point_event: "message-1",
 				fork_point_timestamp: null,
 				fork_point_message_id: "message-1",
@@ -805,7 +812,8 @@ describe("WsRpcServerLayer ListSessions", () => {
 				const forkRow = yield* readQuery.getSession(result.sessionId);
 				expect(forkRow).toMatchObject({
 					provider: "my-claude",
-					parent_id: "ses-parent",
+					parent_id: null,
+					forked_from: "ses-parent",
 					provider_sid: usesCanonicalHistory ? null : "sdk-fork",
 					fork_point_event: "api-first",
 					fork_point_message_id: "api-first",
@@ -836,7 +844,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 					usesCanonicalHistory ? 0 : 1,
 				);
 				expect(result).toMatchObject({
-					parentId: "ses-parent",
+					forkedFrom: "ses-parent",
 					forkMessageId: "api-first",
 					forkPointTimestamp: expect.any(Number),
 				});

@@ -96,6 +96,7 @@ describe("account directory reads", () => {
 		const input = state();
 		const alias = {
 			driver: "opencode" as const,
+			usageEligible: false as const,
 			id: AccountIdSchema.make("claude-sdk"),
 			name: "Alias account",
 		};
@@ -114,7 +115,7 @@ describe("account directory reads", () => {
 		const moved = {
 			...input,
 			accounts: input.accounts.filter((account) => account.id !== "claude"),
-			defaults: { claude: Option.some(work.id) },
+			defaults: { ...input.defaults, claude: Option.some(work.id) },
 			deleted: [
 				{ id: AccountIdSchema.make("removed"), driver: "claude" as const },
 			],
@@ -131,7 +132,7 @@ describe("account directory reads", () => {
 			launchLogin: launch,
 			maxAccounts: 5,
 			accounts: [],
-			defaults: { claude: Option.none() },
+			defaults: { ...state().defaults, claude: Option.none() },
 			deleted: [],
 		};
 		for (const ref of [
@@ -159,7 +160,10 @@ describe("account directory reads", () => {
 		for (const id of ["absent", "external"]) {
 			const dangling = {
 				...input,
-				defaults: { claude: Option.some(AccountIdSchema.make(id)) },
+				defaults: {
+					...input.defaults,
+					claude: Option.some(AccountIdSchema.make(id)),
+				},
 			};
 			expect(defaultFor(dangling, "claude")).toEqual(Option.none());
 			expect(

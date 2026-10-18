@@ -245,6 +245,7 @@ async function createTestHarness(
 	const relayServer = createServer();
 	await new Promise<void>((r) => relayServer.listen(0, "127.0.0.1", r));
 	const relayPort = (relayServer.address() as { port: number }).port;
+	const slug = `test-sse-gating-${relayPort}`;
 	const dbPath = tempEventsDbPath();
 	await Effect.runPromise(
 		Effect.gen(function* () {
@@ -258,25 +259,14 @@ async function createTestHarness(
 							sessionId: session.id,
 							title: session.title,
 							provider: "opencode",
+							// A subagent is contained by its parent; session.forked would make it a Fork.
+							...(session.parentID != null && { parentId: session.parentID }),
 						},
 						{ provider: "opencode" },
 					),
 				);
-				if (session.parentID) {
-					yield* store.append(
-						canonicalEvent(
-							"session.forked",
-							session.id,
-							{
-								sessionId: session.id,
-								parentId: session.parentID,
-							},
-							{ provider: "opencode" },
-						),
-					);
-				}
 			}
-		}).pipe(Effect.provide(makePersistenceEffectLayer(dbPath, "test-project"))),
+		}).pipe(Effect.provide(makePersistenceEffectLayer(dbPath, slug))),
 	);
 	const persistenceDir = mkdtempSync(join(tmpdir(), "conduit-sse-gating-"));
 
@@ -286,7 +276,7 @@ async function createTestHarness(
 		httpServer: relayServer,
 		opencodeUrl: `http://127.0.0.1:${mock.port}`,
 		projectDir: process.cwd(),
-		slug: `test-sse-gating-${relayPort}`,
+		slug,
 		// Keep the real ~/.config/conduit settings out of the relay.
 		configDir: persistenceDir,
 		noServer: true,
@@ -370,7 +360,7 @@ async function createTestHarness(
 		relayPort,
 		async connectClient() {
 			const client = new TestWsClient(
-				`ws://127.0.0.1:${relayPort}/rpc?p=test-sse-gating-${relayPort}`,
+				`ws://127.0.0.1:${relayPort}/rpc?p=${slug}`,
 			);
 			await client.waitForOpen();
 			return client;

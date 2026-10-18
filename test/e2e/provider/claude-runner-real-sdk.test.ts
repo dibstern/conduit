@@ -9,7 +9,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import Database from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
-import type { ClaudeRunnerRegistration } from "../../../src/lib/provider/claude/claude-runner-registry.js";
+import type { RunnerRegistration } from "../../../src/lib/provider/runner/runner-registry.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -18,6 +18,7 @@ const RUN_EXPENSIVE = process.env["RUN_EXPENSIVE_E2E"] === "1";
 describe.skipIf(!RUN_EXPENSIVE)("Claude process runner E2E (real SDK)", () => {
 	it(
 		"completes a real turn in a child of the default build",
+		{ timeout: 150_000 },
 		async () => {
 			const evidence = {
 				ticket: "conduit-test-85kb.15",
@@ -121,9 +122,9 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude process runner E2E (real SDK)", () => {
 				expect(evidence.timings.runnerSpawnMs).not.toBeNull();
 				const registration = JSON.parse(
 					readFileSync(`${runner.socketPath}.json`, "utf8"),
-				) as ClaudeRunnerRegistration;
+				) as RunnerRegistration;
 				expect(registration).toMatchObject({ sessionId, pid: runner.pid });
-				const db = new Database(harness.projectStorePath(), {
+				const db = new Database(harness.daemonStorePath(), {
 					readonly: true,
 				});
 				try {
@@ -166,6 +167,5 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude process runner E2E (real SDK)", () => {
 				}
 			}
 		},
-		{ timeout: 150_000 },
 	);
 });

@@ -1,12 +1,13 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
-	import { Schema } from "effect";
-	import { type WorkspaceMoveCause, WorkspaceMoveError } from "../../../contracts/session-workspace.js";
-	import { type WorkspaceMissing, WorktreeBranchRenameError, WorktreeRecoveryError } from "../../../contracts/worktree.js";
+	import type { WorkspaceMoveCause } from "../../../contracts/session-workspace.js";
+	import type { WorkspaceMissing } from "../../../contracts/worktree.js";
 	import type { SessionGit, WorktreeInfo } from "../../../shared-types.js";
 	import { labelProjectFolders } from "../../../project-folders.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
+	import { failureLine, toastFailure } from "../../transport/rpc-errors.js";
+	import type { rpc } from "../../transport/ws-rpc-client.js";
 	import Button from "../ui/Button.svelte";
 	import Field from "../ui/Field.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -25,12 +26,12 @@
 		workspaceMissing?: WorkspaceMissing | undefined;
 		workspaceMismatch?: { readonly actualPath: string } | undefined;
 		workspaceHint?: string | undefined;
-		loadWorktrees?: (() => Promise<{ readonly worktrees: readonly WorktreeInfo[]; readonly directory?: string | undefined }>) | undefined;
-		onmove?: ((path: string) => Promise<void>) | undefined;
-		onrecreate?: (() => Promise<void>) | undefined;
-		oncontinue?: (() => Promise<void>) | undefined;
-		ondismiss?: ((path: string) => Promise<void>) | undefined;
-		onrenamebranch?: ((branchName: string) => Promise<void>) | undefined;
+		loadWorktrees?: (() => ReturnType<typeof rpc<"ListWorktrees">>) | undefined;
+		onmove?: ((path: string) => Promise<unknown>) | undefined;
+		onrecreate?: (() => Promise<unknown>) | undefined;
+		oncontinue?: (() => Promise<unknown>) | undefined;
+		ondismiss?: ((path: string) => Promise<unknown>) | undefined;
+		onrenamebranch?: ((branchName: string) => Promise<unknown>) | undefined;
 		children?: Snippet<[attention: boolean, checkout: Snippet, warning: Snippet]> | undefined;
 	} = $props();
 	const folders = $derived(folderGit?.folders ?? []);
@@ -70,9 +71,7 @@
 			await onrenamebranch(branchName);
 			showBranchRename = false;
 		} catch (error) {
-			branchRenameError = Schema.is(WorktreeBranchRenameError)(error)
-				? `${error.folder}: ${error.message}`
-				: "Could not rename branch";
+			branchRenameError = failureLine(error, "Could not rename branch");
 		} finally {
 			renamingBranch = false;
 		}
@@ -86,25 +85,18 @@
 			const result = await loadWorktrees?.();
 			worktrees = result?.worktrees ?? [];
 			currentDirectory = result?.directory;
-		} catch {
+		} catch (error) {
 			worktrees = [];
-			showToast("Could not list worktrees", { variant: "error" });
+			toastFailure("Could not list worktrees")(error);
 		}
 	}
-
-	const moveFailures: Record<WorkspaceMoveError["reason"], string> = {
-		missing: "Could not move session: that folder no longer exists",
-		"not-a-worktree": "Could not move session: that folder is not a git worktree",
-		"other-repository": "Could not move session: that worktree belongs to another repository",
-		"unsupported-provider": "Could not move session: its provider cannot switch worktrees",
-	};
 
 	async function move(path: string) {
 		moving = true;
 		try {
 			await onmove?.(path);
 		} catch (error) {
-			showToast(Schema.is(WorkspaceMoveError)(error) ? moveFailures[error.reason] : "Could not move session", { variant: "error" });
+			toastFailure("Could not move session")(error);
 		} finally {
 			moving = false;
 		}
@@ -115,7 +107,7 @@
 			if (action === "recreate") await onrecreate?.();
 			else await oncontinue?.();
 		} catch (error) {
-			showToast(Schema.is(WorktreeRecoveryError)(error) ? error.message : Schema.is(WorkspaceMoveError)(error) ? moveFailures[error.reason] : action === "recreate" ? "Could not recreate worktree" : "Could not continue in main folder", { variant: "error" });
+			toastFailure(action === "recreate" ? "Could not recreate worktree" : "Could not continue in main folder")(error);
 		} finally {
 			moving = false;
 		}
@@ -130,8 +122,8 @@
 		dismissing = true;
 		try {
 			await ondismiss?.(path);
-		} catch {
-			showToast("Could not dismiss workspace hint", { variant: "error" });
+		} catch (error) {
+			toastFailure("Could not dismiss workspace hint")(error);
 		} finally {
 			dismissing = false;
 		}

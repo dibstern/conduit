@@ -103,7 +103,7 @@ export const listSessions = (
 					? { statuses: options.statuses }
 					: {}),
 			}),
-			readQuery.getSessionLineage(),
+			readQuery.getSessionLineage({ projectIds: [scope.slug] }),
 		]).pipe(
 			Effect.mapError(
 				(cause) =>
@@ -201,15 +201,17 @@ export const makeSessionListOperations = ({
 	const refreshSessionLineage: SessionManagerService["refreshSessionLineage"] =
 		() =>
 			Effect.gen(function* () {
-				const lineage = yield* readQuery.getSessionLineage().pipe(
-					Effect.mapError(
-						(cause) =>
-							new SessionManagerError({
-								operation: "refreshSessionLineage",
-								cause,
-							}),
-					),
-				);
+				const lineage = yield* readQuery
+					.getSessionLineage({ projectIds: [projectSlug] })
+					.pipe(
+						Effect.mapError(
+							(cause) =>
+								new SessionManagerError({
+									operation: "refreshSessionLineage",
+									cause,
+								}),
+						),
+					);
 				yield* Ref.update(stateRef, (current) => ({
 					...current,
 					cachedParentMap: sessionRowsParentMap(lineage.rows),

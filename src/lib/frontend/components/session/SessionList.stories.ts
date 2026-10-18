@@ -8,13 +8,13 @@ import {
 	routerState,
 } from "../../stores/router.svelte.js";
 import {
-	applyListDaemonSessionsResponse,
 	clearSessionState,
 	sessionState,
 	setSearchQuery,
 } from "../../stores/session.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { mockSessionsAllGroups } from "../../stories/mocks.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import type { SessionInfo } from "../../types.js";
 import SessionList from "./SessionList.svelte";
@@ -40,12 +40,12 @@ function seedDaemonSessions(
 		status?: SessionInfo["status"];
 	})[],
 ) {
-	applyListDaemonSessionsResponse({
-		sessions: rows.map((row) => ({ status: "idle", ...row })),
-		availability: [],
-		hasMore: false,
-		nextCursor: null,
-	});
+	for (const row of rows)
+		applySessionChange({
+			_tag: "upsert",
+			item: { status: "idle", ...row },
+			sequence: ++sequence,
+		});
 }
 
 function resetSessionState() {
@@ -268,8 +268,7 @@ export const WithItems: Story = {
 		seedSessions([...mockSessionsAllGroups]);
 		const firstSession = mockSessionsAllGroups[0];
 		if (firstSession !== undefined) {
-			sessionState.currentId = firstSession.id;
-			routerState.path = `/s/${sessionState.currentId}`;
+			openSessionForSetup(firstSession.id, "conduit");
 		}
 	},
 };

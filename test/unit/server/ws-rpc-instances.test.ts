@@ -3,11 +3,11 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { afterEach, expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import { ScanServiceTag } from "../../../src/lib/domain/relay/Services/scan-service.js";
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import type { OpenCodeInstance } from "../../../src/lib/shared-types.js";
 import {
-	makeMockConfig,
 	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
@@ -236,12 +236,13 @@ describe("WsRpcServerLayer instance management", () => {
 	});
 
 	it.effect("returns scan results through RPC", () => {
-		const triggerScan = vi.fn(async () => ({
-			discovered: [4097],
-			lost: [4095],
-			active: [4096, 4097],
-		}));
-		const config = makeMockConfig({ triggerScan });
+		const triggerScan = vi.fn(() =>
+			Effect.succeed({
+				discovered: [4097],
+				lost: [4095],
+				active: [4096, 4097],
+			}),
+		);
 
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
@@ -258,7 +259,12 @@ describe("WsRpcServerLayer instance management", () => {
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ config })),
+					Layer.provideMerge(
+						Layer.merge(
+							makeTestHandlerLayer(),
+							Layer.succeed(ScanServiceTag, { scanNow: triggerScan }),
+						),
+					),
 				),
 			),
 		);

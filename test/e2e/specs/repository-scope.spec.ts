@@ -95,17 +95,12 @@ async function openList(
 		),
 	);
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			AttachProject: ({ projectSlug }) => ({
-				projectSlug: projectSlug ?? projects[0]?.slug ?? null,
-				sessionSlug: null,
-			}),
-			GetProjects: () => ({ projects, current: projects[0]?.slug ?? null }),
+		stubs: {
 			GetDefaultGroupingMode: () => ({
 				mode: projects[0]?.effectiveGroupingMode ?? "repository",
 			}),
 			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
-			ListDaemonSessions: ({ scope, search, cursor, exclude, limit }) => {
+			ListDaemonSessions: ({ scope, search, cursor, limit }) => {
 				const members = projects
 					.filter(
 						(project) =>
@@ -119,7 +114,6 @@ async function openList(
 							(scope === groupScope
 								? members.includes(session.projectSlug ?? "")
 								: session.projectSlug === scope)) &&
-						session.projectSlug !== exclude &&
 						(!search ||
 							session.title
 								.toLowerCase()
@@ -142,18 +136,26 @@ async function openList(
 					availability: [],
 					hasMore,
 					nextCursor:
-						hasMore && last ? { updatedAt: last.updatedAt, id: last.id } : null,
+						hasMore && last
+							? { updatedAt: Number(last.updatedAt), id: last.id }
+							: null,
 				};
 			},
+			AttachProject: (payload) => ({
+				projectSlug:
+					("projectSlug" in payload ? payload.projectSlug : undefined) ??
+					projects[0]?.slug ??
+					null,
+				sessionSlug: null,
+			}),
+			GetProjects: () => ({ projects, current: projects[0]?.slug }),
 		},
 		streams: {
-			SubscribeShell: ({ projectSlug }) => [
+			SubscribeShell: () => [
 				{
 					_tag: "snapshot",
 					sequence: 1,
-					rows: sessions.filter(
-						(session) => session.projectSlug === projectSlug,
-					),
+					rows: sessions,
 				},
 				{ _tag: "synchronized" },
 			],
@@ -163,22 +165,14 @@ async function openList(
 		initMessages: [{ type: "project_list", projects, current: primary }],
 		responses: new Map(),
 	});
-	rpc.setShellRows(
-		sessions.filter((session) => session.projectSlug === primary),
-	);
+	rpc.setShellRows(sessions);
 	controls.set(page, rpc);
 	await page.goto(
 		`${baseUrl}/${options.scope ? `?${new URLSearchParams({ p: options.scope })}` : ""}`,
 	);
 	await expect(page.locator("#session-list")).toBeVisible();
 	await expect(page.locator("#connect-overlay")).toBeHidden();
-	await expect
-		.poll(
-			() =>
-				rpc.getRequests().filter(({ tag }) => tag === "ListDaemonSessions")
-					.length,
-		)
-		.toBeGreaterThan(0);
+	expect(listRequests(rpc)).toHaveLength(0);
 	return {
 		rpc,
 		sessions,
@@ -187,12 +181,12 @@ async function openList(
 				...project,
 				effectiveGroupingMode: "off",
 			}));
-			rpc.setDaemonList("SubscribeProjects", { projects });
+			rpc.setProjects({ projects });
 			rpc.setProjectSetting({ _tag: "defaultGroupingMode", mode: "off" });
 		},
 		removeScopedProjects: () => {
 			projects = projects.filter(({ slug }) => slug === lone);
-			rpc.setDaemonList("SubscribeProjects", { projects });
+			rpc.setProjects({ projects });
 		},
 	};
 }
@@ -281,10 +275,7 @@ for (const viewport of [
 				.map(({ id }) => id)
 				.sort();
 			await expect.poll(() => ids(page)).toEqual(members);
-			expect(listRequests(rpc).at(-1)?.payload).toMatchObject({
-				_tag: "ListDaemonSessions",
-				scope: groupScope,
-			});
+			expect(listRequests(rpc)).toHaveLength(0);
 			await record(page, "repository");
 			await page.getByTestId("session-scope-chip").click();
 			await page
@@ -302,10 +293,7 @@ for (const viewport of [
 						.map(({ id }) => id)
 						.sort(),
 				);
-			expect(listRequests(rpc).at(-1)?.payload).toMatchObject({
-				_tag: "ListDaemonSessions",
-				scope: secondary,
-			});
+			expect(listRequests(rpc)).toHaveLength(0);
 			await record(page, "project");
 			await page.goBack();
 			await expect(page.getByTestId("session-scope-chip")).toHaveText("Shared");
@@ -347,10 +335,7 @@ for (const viewport of [
 				"Library clone",
 			);
 			await expect.poll(() => ids(page)).toEqual([`scope-${lone}-0`]);
-			expect(listRequests(rpc).at(-1)?.payload).toMatchObject({
-				_tag: "ListDaemonSessions",
-				scope: lone,
-			});
+			expect(listRequests(rpc)).toHaveLength(0);
 		});
 
 		test("cold group links attach a project and a live grouping edit leaves a stale scope empty", async ({
@@ -371,11 +356,8 @@ for (const viewport of [
 			const before = listRequests(rpc).length;
 			turnGroupingOff();
 			await expect(rows(page)).toHaveCount(0);
-			await expect.poll(() => listRequests(rpc).length).toBeGreaterThan(before);
-			expect(listRequests(rpc).at(-1)?.payload).toMatchObject({
-				_tag: "ListDaemonSessions",
-				scope: groupScope,
-			});
+			expect(listRequests(rpc)).toHaveLength(before);
+			expect(listRequests(rpc)).toHaveLength(0);
 			expect(new URL(page.url()).searchParams.get("p")).toBe(groupScope);
 			await expect(page.getByTestId("session-scope-chip")).toHaveText(
 				groupScope,
@@ -425,7 +407,7 @@ for (const viewport of [
 				accountId: null,
 				id: "live-member",
 				title: "Live HTTPS session",
-				status: "idle",
+				status: "idle" as const,
 				projectSlug: secondary,
 				updatedAt: 2_000_000_001_000,
 				messageCount: 0,
@@ -434,7 +416,7 @@ for (const viewport of [
 				accountId: null,
 				id: "live-outside",
 				title: "Live library session",
-				status: "idle",
+				status: "idle" as const,
 				projectSlug: lone,
 				updatedAt: 2_000_000_002_000,
 				messageCount: 0,
@@ -449,7 +431,7 @@ for (const viewport of [
 			await record(page, "live-updates");
 		});
 
-		test("browse and search next pages keep the repository scope", async ({
+		test("search next pages keep the repository scope", async ({
 			page,
 			harness,
 		}) => {
@@ -457,25 +439,11 @@ for (const viewport of [
 				paged: true,
 			});
 			await chooseRepository(page);
-			await page.locator("#session-list-scroller").evaluate((element) => {
-				element.scrollTop = element.scrollHeight;
-			});
-			await expect
-				.poll(() =>
-					listRequests(rpc).some(
-						({ payload }) =>
-							payload["scope"] === groupScope &&
-							payload["cursor"] !== undefined &&
-							payload["search"] === undefined,
-					),
-				)
-				.toBe(true);
 			const expected = sessions
 				.filter((session) => session.projectSlug !== lone)
 				.map(({ id }) => id)
 				.sort();
-			await expect.poll(() => ids(page)).toEqual(expected);
-			await record(page, "browse-next-page");
+			expect(listRequests(rpc)).toHaveLength(0);
 			await page
 				.getByRole("textbox", { name: "Search sessions" })
 				.fill("needle");

@@ -6,10 +6,10 @@
 	import { getAvailableInstances, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
 	import { getInstanceById } from "../../stores/instance.svelte.js";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
-	import { DRAFT_PROJECT_PARAM, getCurrentSearchParams, replaceRoute } from "../../stores/router.svelte.js";
+	import { selection } from "../../stores/selection.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
-	import { showToast } from "../../stores/ui.svelte.js";
-	import { listBranchesRpc, rpc, type resolveSessionModeRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { projectAccent } from "../session/session-list-project.js";
 	import ProjectSquare from "../session/ProjectSquare.svelte";
 	import Button from "../ui/Button.svelte";
@@ -21,19 +21,19 @@
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 
-	let { worktree = $bindable<WorktreeInfo | null>(null), newWorktree = $bindable(false), worktreeBase = $bindable<string | null>(null), modeChosen = $bindable(false), sessionModeDefault, focusComposer, loadWorktrees = (projectSlug: string) => rpc("ListWorktrees", { projectSlug }), loadBranches = listBranchesRpc }: {
+	let { worktree = $bindable<WorktreeInfo | null>(null), newWorktree = $bindable(false), worktreeBase = $bindable<string | null>(null), modeChosen = $bindable(false), sessionModeDefault, focusComposer, loadWorktrees = (projectSlug: string) => rpc("ListWorktrees", { projectSlug }), loadBranches = (projectSlug: string) => rpc("ListBranches", { projectSlug }) }: {
 		worktree?: WorktreeInfo | null;
 		newWorktree?: boolean;
 		worktreeBase?: string | null;
 		modeChosen?: boolean;
-		sessionModeDefault?: Awaited<ReturnType<typeof resolveSessionModeRpc>> | undefined;
+		sessionModeDefault?: Awaited<ReturnType<typeof rpc<"ResolveSessionMode">>> | undefined;
 		focusComposer?: (() => void) | undefined;
-		loadWorktrees?: (projectSlug: string) => Promise<{ readonly worktrees: readonly WorktreeInfo[] }>;
-		loadBranches?: typeof listBranchesRpc;
+		loadWorktrees?: (projectSlug: string) => ReturnType<typeof rpc<"ListWorktrees">>;
+		loadBranches?: (projectSlug: string) => ReturnType<typeof rpc<"ListBranches">>;
 	} = $props();
 	let showWorktrees = $state(false);
 	let worktrees = $state<readonly WorktreeInfo[] | undefined>();
-	let branchList = $state<Awaited<ReturnType<typeof listBranchesRpc>> | undefined>();
+	let branchList = $state<Awaited<ReturnType<typeof rpc<"ListBranches">>> | undefined>();
 
 	const slug = $derived(getDraftProject());
 	const project = $derived(projectState.projects.find((p) => p.slug === slug));
@@ -78,8 +78,9 @@
 		multiFolder && instance?.capabilities?.supportsMultiFolder === false ? explanationId : "",
 		sessionModeDefault?.warning ? warningId : "",
 	].filter(Boolean).join(" ") || undefined);
-	const available = $derived(projectState.projects.filter((p) => !p.missing));
+	const available = $derived(projectState.projects.filter((p) => !p.missing && !p.unavailableReason));
 	const missing = $derived(projectState.projects.filter((p) => p.missing));
+	const unavailable = $derived(projectState.projects.filter((p) => !p.missing && p.unavailableReason));
 	const presentation = $derived(sessionViewState.compact ? "sheet" : "popover");
 
 	const chipClass =
@@ -104,9 +105,7 @@
 		newWorktree = false;
 		worktreeBase = null;
 		modeChosen = false;
-		const params = getCurrentSearchParams();
-		params.set(DRAFT_PROJECT_PARAM, next);
-		replaceRoute(`/new?${params}`);
+		selection.openDraft(next);
 	}
 
 	async function openWorktrees() {
@@ -117,10 +116,10 @@
 		try {
 			const result = await loadWorktrees(slug);
 			if (context === worktreeContext) worktrees = result.worktrees;
-		} catch {
+		} catch (error) {
 			if (context !== worktreeContext) return;
 			worktrees = [];
-			showToast("Could not list worktrees", { variant: "error" });
+			toastFailure("Could not list worktrees")(error);
 		}
 	}
 
@@ -133,10 +132,10 @@
 			if (projectSlug !== slug) return;
 			branchList = result;
 			if (worktreeBase === result.current) worktreeBase = null;
-		} catch {
+		} catch (error) {
 			if (projectSlug !== slug) return;
 			branchList = { branches: [] };
-			showToast("Could not list branches", { variant: "error" });
+			toastFailure("Could not list branches")(error);
 		}
 	}
 </script>
@@ -168,6 +167,14 @@
 			<MenuGroup label="Folder missing">
 				{#each missing as p (p.slug)}
 					<MenuItem disabled class={rowClass}>{p.title || p.slug}</MenuItem>
+				{/each}
+			</MenuGroup>
+		{/if}
+		{#if unavailable.length > 0}
+			<MenuSeparator />
+			<MenuGroup label="History unavailable">
+				{#each unavailable as p (p.slug)}
+					<MenuItem disabled class={rowClass} title={p.unavailableReason}>{p.title || p.slug}</MenuItem>
 				{/each}
 			</MenuGroup>
 		{/if}

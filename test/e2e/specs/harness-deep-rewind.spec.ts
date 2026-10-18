@@ -69,7 +69,7 @@ const seed = (filename: string) =>
 				{ publish: false },
 			);
 		}).pipe(
-			Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+			Effect.provide(makePersistenceEffectLayer(filename, "process-test")),
 		),
 	);
 
@@ -88,7 +88,7 @@ test("deep rewind pages every older message once and undo restores the transcrip
 }, testInfo) => {
 	test.setTimeout(240_000);
 	await harness.terminate();
-	await seed(harness.projectStorePath());
+	await seed(harness.daemonStorePath());
 	await harness.restart({ keepPort: true, skipBrowserProbe: true });
 	const control = await harness.connect(
 		undefined,

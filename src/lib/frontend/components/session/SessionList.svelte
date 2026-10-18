@@ -11,8 +11,9 @@
 		sessionMatchesStatus,
 		isSessionSnoozed,
 		setSearchQuery,
+		DAEMON_SESSION_PAGE_SIZE,
 	} from "../../stores/session.svelte.js";
-	import { currentSearchQuery, refreshListedSessions, refreshSessionList, sessionList } from "../../stores/session-list.svelte.js";
+	import { browsePage, currentSearchQuery, refreshListedSessions, sessionList } from "../../stores/session-list.svelte.js";
 	import {
 		getSessionGrouping,
 		getSessionScope,
@@ -27,9 +28,8 @@
 	import { projectState } from "../../stores/project.svelte.js";
 	import { getProjectGroup } from "../../stores/project-state.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import {
-		deleteSessionRpc,
-	} from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import {
 		dismissToast,
 		showToast,
@@ -91,7 +91,7 @@
 	const statusFilter = $derived(getSessionStatusFilter());
 	const grouping = $derived(getSessionGrouping());
 	const matching = $derived(filtered.filter((session) => statusFilter === null || sessionMatchesStatus(session, statusFilter)));
-	const arrangement = $derived(projectSessionList(
+	const fullArrangement = $derived(projectSessionList(
 		matching,
 		grouping,
 		sessionState.now,
@@ -100,6 +100,25 @@
 			return { key: slug, label: projectDisplayName(slug) };
 		},
 	));
+	// Reveal rows in their rendered order so old pins and urgent sessions retain
+	// their priority over recently changed idle rows.
+	const arrangement = $derived.by(() => {
+		if (currentSearchQuery() !== null) return fullArrangement;
+		let remaining = browsePage.limit;
+		const take = (sessions: SessionInfo[]) => {
+			const visible = sessions.slice(0, remaining);
+			remaining -= visible.length;
+			return visible;
+		};
+		return {
+			pinned: take(fullArrangement.pinned),
+			sections: fullArrangement.sections
+				.map((section) => ({ ...section, sessions: take(section.sessions) }))
+				.filter((section) => section.sessions.length > 0),
+			snoozed: take(fullArrangement.snoozed),
+			settled: take(fullArrangement.settled),
+		};
+	});
 	// Chips count only live rows: settled and snoozed sets grow without bound.
 	const live = $derived(filtered.filter((session) => session.settledAt == null && !isSessionSnoozed(session, sessionState.now)));
 
@@ -121,8 +140,8 @@
 	const scope = $derived(getSessionScope());
 	const scopeLabel = $derived(getSessionScopeLabel(scope));
 	const scopeGroupKey = $derived(getScopeGroupKey(scope));
-	// A group's membership can change without its URL changing. Re-read its
-	// pages and search when projects join, leave or change their grouping mode.
+	// A group's membership can change without its URL changing. Reset browsing
+	// and repeat an active search when its members change.
 	const scopeQueryKey = $derived(JSON.stringify([
 		scope,
 		scopeGroupKey === null ? null : projectState.projects
@@ -149,15 +168,11 @@
 		return filtered.length === 1 ? "1 match" : `${filtered.length} matches`;
 	});
 
-	const pagerLoading = $derived(
-		currentSearchQuery() === null
-			? sessionState.daemonLoading
-			: (currentSearchQuery()?.loading ?? false),
-	);
+	const pagerLoading = $derived(currentSearchQuery()?.loading ?? false);
 	// A run of pages, not one request: between pages the loader is briefly idle,
 	// and a row that unmounts there resizes the list under the user's scroll.
 	const pagerPending = $derived(
-		pagerLoading || (currentSearchQuery()?.hasMore ?? sessionState.daemonHasMore),
+		pagerLoading || (currentSearchQuery()?.hasMore ?? matching.length > browsePage.limit),
 	);
 
 	const selectionCount = $derived(selectedSessionIds.size);
@@ -178,7 +193,7 @@
 	);
 
 	const unavailableProjectLabels = $derived(
-		sessionState.daemonUnavailableProjects.map(projectDisplayName),
+		projectState.projects.filter((project) => project.unavailableReason != null).map((project) => projectDisplayName(project.slug)),
 	);
 
 	// Prune stale selections when the session list changes externally
@@ -191,14 +206,13 @@
 		}
 	});
 
-	// The server scopes its page, so a new scope needs a fresh first page, and a
-	// live search its matches re-fetched. The initial scope is already loaded by
-	// ChatLayout on connect, hence skipping the first run.
+	// Browse scopes filter the complete live collection; search scopes are paged
+	// by the server and need a fresh first page.
 	let loadedScope = untrack(() => scopeQueryKey);
 	$effect(() => {
 		if (scopeQueryKey === loadedScope) return;
 		loadedScope = scopeQueryKey;
-		void refreshSessionList();
+		browsePage.limit = DAEMON_SESSION_PAGE_SIZE;
 		const query = untrack(() => localSearchValue);
 		if (query.trim()) requestRemoteSearch(query);
 	});
@@ -263,6 +277,8 @@
 			debounceTimer = setTimeout(() => {
 				requestRemoteSearch(localSearchValue);
 			}, 300);
+		} else {
+			sessionList.search("");
 		}
 	}
 
@@ -449,19 +465,19 @@
 			// The list is cross-project, so each row deletes in its own project.
 			resetSelectMode();
 			const results = await Promise.allSettled(
-				targets.map((target) => deleteSessionRpc(target)),
+				targets.map((target) => rpc("DeleteSession", target)),
 			);
 			const warnings = results.flatMap((result) => result.status === "fulfilled" ? result.value.worktreeWarnings ?? [] : []);
 			if (warnings.length > 0) showToast(`Sessions deleted. ${warnings.join("; ")}`, { variant: "warn" });
 			void refreshListedSessions();
 			const failed = results.filter((r) => r.status === "rejected").length;
 			if (failed > 0) {
-				showToast(
+				toastFailure(
 					failed === 1
 						? "Couldn't delete 1 session"
 						: `Couldn't delete ${failed} sessions`,
-					{ variant: "warn" },
-				);
+					"warn",
+				)(results.find((result) => result.status === "rejected")?.reason);
 			}
 		}
 		bulkPending = false;
@@ -490,7 +506,7 @@
 			Pick sessions to act on, then choose an action below.
 		</div>
 	{/if}
-	<SessionListRows {arrangement} {isEmpty} {emptyMessage} {statusFilter} {searching} filteredLength={filtered.length} {snoozedShelfOpen} {settledShelfOpen} {pagerPending} {unavailableProjectLabels} {selectMode} {selectedSessionIds} menuOpenId={ctxMenuSession?.id} {renamingSessionId} {getProjectLabel} {getProjectAccent} oncontextmenu={handleContextMenu} ontoggleselection={handleToggleSelection} onrenamestart={handleCtxRename} onrenameend={handleRenameEnd} />
+	<SessionListRows {arrangement} {fullArrangement} {isEmpty} {emptyMessage} {statusFilter} {searching} filteredLength={filtered.length} {snoozedShelfOpen} {settledShelfOpen} {pagerPending} {unavailableProjectLabels} {selectMode} {selectedSessionIds} menuOpenId={ctxMenuSession?.id} {renamingSessionId} {getProjectLabel} {getProjectAccent} oncontextmenu={handleContextMenu} ontoggleselection={handleToggleSelection} onrenamestart={handleCtxRename} onrenameend={handleRenameEnd} />
 	{#if selectMode}
 		<SessionListBulkBar settleCount={settleEligible.length} snoozeCount={snoozeEligible.length} pinCount={pinEligible.length} {selectionCount} {unpinSelected} {bulkPending} onsettle={() => { void handleBulkChange("settle"); }} onsnooze={handleOpenBulkSnooze} onpin={() => { void handleBulkChange("pin"); }} ondelete={handleBulkDelete} />
 	{/if}

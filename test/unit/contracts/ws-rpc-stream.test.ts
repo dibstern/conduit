@@ -32,6 +32,7 @@ import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-s
 import {
 	ReadQueryEffectError,
 	ReadQueryEffectTag,
+	type SessionScope,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { MessageWithParts } from "../../../src/lib/persistence/read-model-types.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
@@ -48,12 +49,14 @@ const advancesFor = (member: Member): readonly ReadModelAdvance[] =>
 		? [
 				{
 					version: 1,
+					projectIds: ["test-project"],
 					sessionIds: [],
 					removedSessionIds: ["session-1"],
 					collections: ["sidebar"],
 				},
 				{
 					version: 2,
+					projectIds: ["test-project"],
 					sessionIds: [],
 					removedSessionIds: ["session-2"],
 					collections: ["sidebar"],
@@ -62,12 +65,14 @@ const advancesFor = (member: Member): readonly ReadModelAdvance[] =>
 		: [
 				{
 					version: 1,
+					projectIds: ["test-project"],
 					sessionIds: ["session-1"],
 					removedSessionIds: [],
 					collections: ["messages"],
 				},
 				{
 					version: 2,
+					projectIds: ["test-project"],
 					sessionIds: ["session-1"],
 					removedSessionIds: [],
 					collections: ["messages"],
@@ -124,6 +129,7 @@ const makeLayer = (options: {
 					getAllSessionStatuses: () => Effect.succeed({}),
 					getAllSessionStatusesWithProviders: () => Effect.succeed([]),
 					listSessions: () => Effect.succeed([]),
+					listPendingClaudeQuestionTools: () => Effect.succeed([]),
 					listSessionInfos: () => Effect.succeed([]),
 					listSessionGitRefreshTargets: () => Effect.succeed([]),
 					getSessionSkillMessages: () => Effect.succeed([]),
@@ -174,7 +180,10 @@ const makeLayer = (options: {
 					readSessionTodos: () => Effect.succeed({ rows: [], version: 0 }),
 					// The same stateless shape for the shell: each ranged read finds
 					// the one family that left at the version after its floor.
-					readSessionList: (range?: { readonly after?: number }) =>
+					readSessionList: (
+						_scope: SessionScope,
+						range?: { readonly after?: number },
+					) =>
 						options.failRead
 							? Effect.fail(readFailure)
 							: Effect.succeed(
@@ -286,19 +295,28 @@ const deltas = (member: Member) =>
 describe("RpcTest subscription stream semantics", () => {
 	for (const member of ["SubscribeShell", "SubscribeSessionDetail"] as const) {
 		const initial = [
+			...(member === "SubscribeShell"
+				? [
+						{
+							_tag: "projects",
+							projects: expect.any(Array),
+							newSessionProject: "test-project",
+						},
+					]
+				: []),
 			{
 				_tag: "snapshot",
 				rows: [],
 				sequence: 0,
-				...(member === "SubscribeSessionDetail"
-					? { hasMore: false, resumePoint: expect.any(String) }
-					: {}),
+				resumePoint: expect.any(String),
+				...(member === "SubscribeSessionDetail" ? { hasMore: false } : {}),
 			},
 			{ _tag: "synchronized" },
 		];
-		// Both handlers preserve the source's opening pair and subsequent chunks.
 		const handlerChunks = [
-			initial,
+			...(member === "SubscribeShell"
+				? initial.map((frame) => [frame])
+				: [initial]),
 			...deltas(member).map((envelope) => [envelope]),
 		];
 		const chunkMessages = handlerChunks.map((values) => ({
@@ -309,7 +327,7 @@ describe("RpcTest subscription stream semantics", () => {
 			client: RpcClient.RpcClient<RpcGroup.Rpcs<typeof WsRpcGroup>>,
 		): Stream.Stream<unknown, WsRpcError> =>
 			member === "SubscribeShell"
-				? client.SubscribeShell({ projectSlug: "project" })
+				? client.SubscribeShell({})
 				: client.SubscribeSessionDetail({ sessionId: "session-1" });
 		it.scoped(`${member} preserves handler chunking`, () =>
 			Effect.gen(function* () {
@@ -378,7 +396,12 @@ describe("RpcTest subscription stream semantics", () => {
 						Stream.runDrain,
 						Effect.exit,
 					);
-					expect(messages).toEqual([{ _tag: "Exit", exit: expected }]);
+					expect(messages).toEqual([
+						...(member === "SubscribeShell"
+							? [{ _tag: "Chunk", values: [initial[0]] }]
+							: []),
+						{ _tag: "Exit", exit: expected },
+					]);
 					expect(observed).toEqual(expected);
 				}).pipe(Effect.provide(makeLayer({ member, failRead: true }))),
 		);
@@ -408,10 +431,7 @@ describe("RpcTest subscription stream semantics", () => {
 								never,
 								Scope.Scope
 							> = member === "SubscribeShell"
-								? client.SubscribeShell(
-										{ projectSlug: "project" },
-										{ asMailbox: true },
-									)
+								? client.SubscribeShell({}, { asMailbox: true })
 								: client.SubscribeSessionDetail(
 										{ sessionId: "session-1" },
 										{ asMailbox: true },
@@ -419,21 +439,36 @@ describe("RpcTest subscription stream semantics", () => {
 							const mailbox = yield* subscription.pipe(
 								Effect.provideService(Scope.Scope, consumerScope),
 							);
-							const [chunk] = yield* mailbox.takeAll;
-							// RpcTest buffers both initial envelopes before this read;
-							// the observed transport yields at its response queue.
-							expect(Array.from(chunk)).toEqual(
-								transport === "RpcTest" ? initial : handlerChunks[0],
-							);
+							const opening: unknown[] = [];
+							while (
+								!opening.some(
+									(frame) =>
+										typeof frame === "object" &&
+										frame !== null &&
+										"_tag" in frame &&
+										frame._tag === "synchronized",
+								)
+							) {
+								const [chunk] = yield* mailbox.takeAll;
+								opening.push(...chunk);
+							}
+							expect(opening).toEqual(initial);
 							expect(released).toEqual([]);
 							yield* Scope.close(consumerScope, Exit.void);
 							yield* TestClock.adjust("1 millis");
 							if (transport === "observed") {
 								expect(
 									messages.filter((message) => message._tag === "Chunk"),
-								).toEqual(chunkMessages.slice(0, 1));
+								).toEqual(
+									chunkMessages.slice(
+										0,
+										member === "SubscribeShell" ? initial.length : 1,
+									),
+								);
 								expect(messages.map((message) => message._tag)).toEqual([
-									"Chunk",
+									...initial
+										.slice(0, member === "SubscribeShell" ? initial.length : 1)
+										.map(() => "Chunk"),
 									"Interrupt",
 									"Exit",
 								]);

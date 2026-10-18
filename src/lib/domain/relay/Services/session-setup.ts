@@ -3,6 +3,10 @@ import { Cause, Context, Deferred, Effect, Layer, Stream } from "effect";
 import type { SessionSetupFinishedPayloadSchema } from "../../../contracts/project-setup.js";
 import { loadDaemonConfigResult } from "../../../daemon/config-persistence.js";
 import { readProjectFile } from "../../../daemon/project-file.js";
+import {
+	allProjects,
+	ProjectRegistryTag,
+} from "../../daemon/Services/project-registry-service.js";
 import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
 import { ConfigTag } from "./services.js";
 import { applySessionCommand, SessionCommandError } from "./session-command.js";
@@ -28,6 +32,7 @@ export const SessionSetupLive = Layer.scoped(
 	SessionSetupTag,
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
+		const registry = yield* Effect.serviceOption(ProjectRegistryTag);
 		const worktrees = yield* Effect.serviceOption(WorktreeServiceTag);
 		const sql = yield* SqlClient.SqlClient;
 		const scope = yield* Effect.scope;
@@ -64,15 +69,19 @@ export const SessionSetupLive = Layer.scoped(
 							),
 						);
 					const run = Effect.gen(function* () {
-						// getProjects reads the live daemon registry, including a just-saved setting.
-						const projects = config.getProjects
-							? yield* Effect.tryPromise(async () => config.getProjects?.())
-							: yield* Effect.suspend(() =>
-									loadDaemonConfigResult(config.configDir),
-								).pipe(
-									Effect.map((loaded) => loaded.projects),
-									Effect.catchTag("NotFound", () => Effect.succeed(undefined)),
-								);
+						const projects =
+							registry._tag === "Some"
+								? yield* allProjects.pipe(
+										Effect.provideService(ProjectRegistryTag, registry.value),
+									)
+								: yield* Effect.suspend(() =>
+										loadDaemonConfigResult(config.configDir),
+									).pipe(
+										Effect.map((loaded) => loaded.projects),
+										Effect.catchTag("NotFound", () =>
+											Effect.succeed(undefined),
+										),
+									);
 						const setting = projects?.find(
 							(project) => project.slug === config.slug,
 						)?.setupScript;
@@ -165,7 +174,9 @@ export const SessionSetupLive = Layer.scoped(
 			// primary-key range avoids parsing every part's metadata at startup.
 			recover: sql<{ session_id: string }>`SELECT m.session_id
 				FROM messages m JOIN message_parts p ON p.message_id = m.id
-				WHERE p.id >= 'setup-' AND p.id < 'setup.'
+				JOIN sessions s ON s.id = m.session_id
+				WHERE s.project_id = ${config.slug}
+					AND p.id >= 'setup-' AND p.id < 'setup.'
 					AND CASE WHEN json_valid(p.metadata)
 					THEN json_extract(p.metadata, '$.setup.status') END = 'running'`.pipe(
 				Effect.mapError(

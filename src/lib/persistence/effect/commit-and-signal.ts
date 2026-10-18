@@ -2,10 +2,9 @@ import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Effect, Option } from "effect";
 import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
-import { SessionDirectory } from "../../domain/daemon/Services/session-directory.js";
 import { observeTurnTimelineCommit } from "../../domain/daemon/Services/turn-timeline.js";
-import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
+import { contentionMetrics } from "../contention-metrics.js";
 import type { CanonicalEvent, StoredEvent } from "../events.js";
 import type { EventStoreError } from "./event-store-effect.js";
 import { EventStoreEffectTag } from "./event-store-effect.js";
@@ -130,12 +129,14 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 		permit = Effect.unsafeMakeSemaphore(1);
 		commitPermits.set(sql, permit);
 	}
-	const withCommitPermit = permit.withPermits(1);
+	const withPermit = permit.withPermits(1);
+	const withCommitPermit = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+		contentionMetrics
+			? contentionMetrics.withCommitPermit(withPermit, effect)
+			: withPermit(effect);
 	const eventStore = yield* EventStoreEffectTag;
 	const projectionRunner = yield* ProjectionRunnerEffectTag;
 	const sessionEventBus = yield* Effect.serviceOption(SessionEventBusTag);
-	const directory = yield* Effect.serviceOption(SessionDirectory);
-	const project = yield* Effect.serviceOption(PersistenceProjectTag);
 
 	const write = <A, E, R>(
 		body: (
@@ -230,6 +231,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 										if (sessionIds.length > 0)
 											advances.push({
 												version,
+												projectIds: [eventStore.projectId],
 												sessionIds: [...sessionIds],
 												removedSessionIds: [],
 												collections: ["sessions", "sidebar"],
@@ -257,12 +259,6 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 								collections: advance.collections,
 							})),
 						);
-						// Ownership follows the committed rows, including direct seeds and
-						// cascaded children, before any caller can observe success.
-						if (Option.isSome(directory) && Option.isSome(project)) {
-							yield* directory.value.record(project.value.projectId, stamped);
-							yield* directory.value.remove(project.value.projectId, removed);
-						}
 						if (Option.isSome(sessionEventBus) && options.publish !== false) {
 							// Post-commit, so a subscriber that re-queries on the advance
 							// cannot read behind the rows it was told about. Keep the permit
@@ -282,6 +278,11 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 										...advances.map((advance) => advance.version),
 									),
 									sessionIds: stamped,
+									projectIds: [
+										...new Set(
+											advances.flatMap((advance) => advance.projectIds),
+										),
+									],
 									removedSessionIds: removed,
 									collections,
 								});

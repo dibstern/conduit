@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
 	existsSync,
 	mkdirSync,
@@ -13,17 +14,17 @@ import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
 import { Cause, Deferred, Effect, Fiber } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	CLAUDE_RUNNER_PROTOCOL_VERSION,
-	ClaudeRunnerSocket,
-	claudeRunnerIdleFailure,
-} from "../../../src/lib/provider/claude/claude-runner-protocol.js";
-import {
-	claudeRunnerDirectory,
-	discoverClaudeRunners,
-	registerClaudeRunner,
-} from "../../../src/lib/provider/claude/claude-runner-registry.js";
+import { ClaudeRunnerSocket } from "../../../src/lib/provider/claude/claude-runner-protocol.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import {
+	RUNNER_PROTOCOL_VERSION,
+	runnerIdleFailure,
+} from "../../../src/lib/provider/runner/runner-protocol.js";
+import {
+	discoverRunners,
+	registerRunner,
+	runnerDirectory,
+} from "../../../src/lib/provider/runner/runner-registry.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import {
@@ -36,7 +37,7 @@ import {
 } from "../../helpers/process-harness.js";
 
 function snapshot(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath(), {
+	const db = new Database(harness.daemonStorePath(), {
 		readonly: true,
 	});
 	try {
@@ -52,6 +53,11 @@ function snapshot(harness: ProcessHarness, sessionId: string) {
 			commands: db
 				.prepare(
 					"SELECT status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
+				)
+				.all(sessionId),
+			receipts: db
+				.prepare(
+					"SELECT receipt.status FROM command_receipts receipt JOIN provider_command_outbox outbox ON outbox.command_id = receipt.command_id WHERE outbox.session_id = ? AND outbox.effect_type = 'send_turn' ORDER BY outbox.request_sequence",
 				)
 				.all(sessionId),
 			approvals: db
@@ -138,12 +144,12 @@ describe("Claude runner admission socket probes", () => {
 		);
 		const sessionId = "socket-probe-session";
 		const runnerId = "abcdefabcdef";
-		const directory = claudeRunnerDirectory(workspaceRoot, configDir);
+		const directory = runnerDirectory(workspaceRoot, configDir);
 		mkdirSync(directory, { recursive: true });
 		const socketPath = join(directory, runnerId);
 		const sockets = new Set<Socket>();
 		const commands: string[] = [];
-		const outputs: import("../../../src/lib/provider/claude/claude-session-runner.js").ClaudeSessionOutput[] =
+		const outputs: import("../../../src/lib/provider/runner/session-runner.js").SessionOutput[] =
 			[];
 		const received = await Effect.runPromise(Deferred.make<void>());
 		let attempts = 0;
@@ -152,7 +158,7 @@ describe("Claude runner admission socket probes", () => {
 		const replyHello = (peer: ClaudeRunnerSocket) =>
 			peer.write({
 				type: "hello",
-				protocolVersion: CLAUDE_RUNNER_PROTOCOL_VERSION,
+				protocolVersion: RUNNER_PROTOCOL_VERSION,
 				buildId: BUILD_ID,
 				runnerId,
 				sessionId,
@@ -160,7 +166,7 @@ describe("Claude runner admission socket probes", () => {
 			});
 		let pending:
 			| Extract<
-					import("../../../src/lib/provider/claude/claude-runner-protocol.js").ClaudeRunnerMessage,
+					import("../../../src/lib/provider/runner/runner-protocol.js").RunnerMessage,
 					{ type: "command" }
 			  >
 			| undefined;
@@ -195,12 +201,12 @@ describe("Claude runner admission socket probes", () => {
 							peer.write({
 								type: "command-reply",
 								commandId: pending.commandId,
-								failure: claudeRunnerIdleFailure(),
+								failure: runnerIdleFailure(),
 							});
 						peer.write({
 							type: "command-reply",
 							commandId: message.commandId,
-							failure: claudeRunnerIdleFailure(),
+							failure: runnerIdleFailure(),
 						});
 					} else if (message.command.type === "shutdown") {
 						void exited.then(() =>
@@ -220,7 +226,7 @@ describe("Claude runner admission socket probes", () => {
 			server.once("error", fail);
 			server.listen(socketPath, done);
 		});
-		registerClaudeRunner({
+		registerRunner({
 			runnerId,
 			sessionId,
 			socketPath,
@@ -285,7 +291,7 @@ describe("Claude runner admission socket probes", () => {
 				},
 			},
 			recordPids() {
-				for (const entry of discoverClaudeRunners(workspaceRoot, configDir))
+				for (const entry of discoverRunners(workspaceRoot, configDir))
 					runnerPids.add(entry.pid);
 			},
 		};
@@ -410,7 +416,7 @@ describe("Claude runner admission socket probes", () => {
 					expect(fixture.commands).toEqual([]);
 					expect(testRunnerAlive(fixture.child.pid ?? 0)).toBe(true);
 					expect(
-						discoverClaudeRunners(fixture.workspaceRoot, fixture.configDir),
+						discoverRunners(fixture.workspaceRoot, fixture.configDir),
 					).toHaveLength(1);
 				}),
 			),
@@ -440,7 +446,7 @@ describe("Claude runner admission socket probes", () => {
 					expect(fixture.commands).toEqual([]);
 					expect(testRunnerAlive(fixture.child.pid ?? 0)).toBe(true);
 					expect(
-						discoverClaudeRunners(fixture.workspaceRoot, fixture.configDir),
+						discoverRunners(fixture.workspaceRoot, fixture.configDir),
 					).toHaveLength(1);
 				}),
 			),
@@ -982,9 +988,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		expect(harness.marks.some((mark) => mark.kind === "query")).toBe(false);
 	}, 30_000);
 
-	// A send queued behind a busy session stays in the inbox, paused once the
-	// turn ahead fails, so a steer is what hands the runner a second turn.
-	it("fails every turn handed to the runner when startup refuses the protocol", async () => {
+	it("fails the owning turn and requeues its unstarted steer when startup refuses the protocol", async () => {
 		const { harness, browser, sessionId } = await start({
 			serverProtocolVersion: 999,
 		});
@@ -992,44 +996,95 @@ describe("built-dist Claude runner lifecycle", () => {
 		await vi.waitFor(() =>
 			expect(snapshot(harness, sessionId).commands).toHaveLength(1),
 		);
-		const turns = await Promise.all([
-			first,
-			browser.send(sessionId, "protocol-steered-second", undefined, "steer"),
-		]);
-		for (const turn of turns)
-			expect(turn.done["lastTurnEndVersion"]).toEqual(expect.any(Number));
+		const steerId = randomUUID();
+		const submitted = await Effect.runPromise(
+			browser.rpc.input.submit({
+				sessionId,
+				inputId: steerId,
+				originId: browser.originId,
+				delivery: "steer",
+				text: "protocol-steered-second",
+			}),
+		);
+		expect(submitted.ok).toBe(true);
+		const turn = await first;
+		expect(turn.done["lastTurnEndVersion"]).toEqual(expect.any(Number));
 		await vi.waitFor(() => {
 			const state = snapshot(harness, sessionId);
 			expect(state.session).toEqual({ status: "idle" });
-			expect(state.turns).toEqual([{ state: "error" }, { state: "error" }]);
+			expect(state.turns).toEqual([{ state: "error" }]);
 			expect(state.commands).toEqual([
 				{ status: "failed" },
 				{ status: "failed" },
 			]);
+			expect(state.receipts).toEqual([
+				{ status: "side_effect_failed" },
+				{ status: "side_effect_failed" },
+			]);
 			expect(
 				state.events.filter((event) => event.type === "turn.error"),
-			).toHaveLength(2);
-			expect(state.queued).toEqual([]);
+			).toHaveLength(1);
+			expect(state.queued).toEqual([{ inputId: steerId }]);
+			expect(
+				state.events.filter((event) => event.type === "input.requeued"),
+			).toEqual([
+				{
+					type: "input.requeued",
+					data: {
+						sessionId,
+						inputId: steerId,
+						sentSequence: expect.any(Number),
+						reason: "failed",
+					},
+				},
+			]);
+			const userMessages = state.events.filter(
+				(event) =>
+					event.type === "message.created" &&
+					isRecord(event.data) &&
+					event.data["role"] === "user",
+			);
+			expect(userMessages).toHaveLength(1);
+			expect(userMessages[0]?.data).not.toMatchObject({ inputId: steerId });
 		});
 	}, 30_000);
 
-	it("persists adapter failures for every turn the runner holds without duplicate errors", async () => {
-		// The slow SDK start leaves room to steer before the approval opens: an
-		// open prompt refuses a steer.
-		const { harness, browser, sessionId } = await start(undefined, 1000);
+	it("persists the adapter failure once and requeues its unstarted steer without a user message", async () => {
+		// Hold initialization until the steer reaches the runner, before an
+		// approval can refuse it.
+		expect(existsSync("dist/src/bin/claude-session-runner.js")).toBe(true);
+		const harness = await ProcessHarness.start({
+			dist: resolve("dist"),
+			restartProof: true,
+		});
+		const fixture: { harness: ProcessHarness; sessionId?: string } = {
+			harness,
+		};
+		fixtures.push(fixture);
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession("Adapter failure with steer");
+		fixture.sessionId = sessionId;
+		writeFileSync(join(harness.root, "hold-next-initialization"), "hold once");
 		const first = browser.send(sessionId, "approval-failure-queued-first");
-		await vi.waitFor(() =>
-			expect(snapshot(harness, sessionId).commands).toHaveLength(1),
+		void first.catch(() => undefined);
+		await vi.waitFor(
+			() =>
+				expect(
+					harness.marks.filter((mark) => mark.kind === "initialization-held"),
+				).toHaveLength(1),
+			{ timeout: 15_000 },
 		);
-		const second = browser.send(
-			sessionId,
-			"stall-steered-second",
-			undefined,
-			"steer",
+		const steerId = randomUUID();
+		const submitted = await Effect.runPromise(
+			browser.rpc.input.submit({
+				sessionId,
+				inputId: steerId,
+				originId: browser.originId,
+				delivery: "steer",
+				text: "stall-steered-second",
+			}),
 		);
-		const approval = await browser.waitFor(
-			(message) => message["type"] === "permission_pending",
-		);
+		expect(submitted.ok).toBe(true);
 		await vi.waitFor(() =>
 			expect(
 				harness.marks.filter(
@@ -1037,20 +1092,49 @@ describe("built-dist Claude runner lifecycle", () => {
 				),
 			).toHaveLength(2),
 		);
+		writeFileSync(join(harness.root, "release-held-initialization"), "release");
+		const approval = await browser.waitFor(
+			(message) => message["type"] === "permission_pending",
+		);
 		await browser.answerApproval(approval, "allow");
-		await Promise.all([first, second]);
+		await first;
 		await vi.waitFor(() => {
 			const state = snapshot(harness, sessionId);
 			expect(state.session).toEqual({ status: "idle" });
-			expect(state.turns).toEqual([{ state: "error" }, { state: "error" }]);
+			expect(state.turns).toEqual([{ state: "error" }]);
 			expect(state.commands).toEqual([
 				{ status: "failed" },
 				{ status: "failed" },
 			]);
+			expect(state.receipts).toEqual([
+				{ status: "side_effect_failed" },
+				{ status: "side_effect_failed" },
+			]);
 			expect(
 				state.events.filter((event) => event.type === "turn.error"),
-			).toHaveLength(2);
-			expect(state.queued).toEqual([]);
+			).toHaveLength(1);
+			expect(state.queued).toEqual([{ inputId: steerId }]);
+			expect(
+				state.events.filter((event) => event.type === "input.requeued"),
+			).toEqual([
+				{
+					type: "input.requeued",
+					data: {
+						sessionId,
+						inputId: steerId,
+						sentSequence: expect.any(Number),
+						reason: "failed",
+					},
+				},
+			]);
+			const userMessages = state.events.filter(
+				(event) =>
+					event.type === "message.created" &&
+					isRecord(event.data) &&
+					event.data["role"] === "user",
+			);
+			expect(userMessages).toHaveLength(1);
+			expect(userMessages[0]?.data).not.toMatchObject({ inputId: steerId });
 		});
 	}, 30_000);
 });

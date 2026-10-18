@@ -53,18 +53,14 @@ import {
 	withCachedProjectGit,
 } from "../../../git/session-git.js";
 import { normalizeProjectTitle } from "../../../handlers/settings.js";
-import {
-	chooseProjectSlug,
-	projectEventsDbPath,
-	projectStorageDir,
-} from "../../../persistence/project-storage.js";
+import { chooseProjectSlug } from "../../../persistence/project-storage.js";
 import {
 	checkFolders,
 	type FolderIssue,
 	isPermissionDenied,
 } from "../../../project-folders.js";
 import { computeProjectGroups } from "../../../project-grouping.js";
-import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
+import { stopRegisteredRunners } from "../../../provider/runner/process-session-runner.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { StoredProject } from "../../../types.js";
 import { isConduitWorktreePath } from "../Layers/worktree-layer.js";
@@ -76,8 +72,8 @@ import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 import { countRunningProjectSessions } from "./daemon-session-reader.js";
 import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
+import { DaemonStoreAvailability } from "./daemon-store-availability.js";
 import { RelayCacheTag } from "./relay-cache.js";
-import { indexProjectSessions, SessionDirectory } from "./session-directory.js";
 
 const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
 
@@ -305,6 +301,7 @@ export const allProjects = Effect.gen(function* () {
 }).pipe(Effect.withSpan("projectRegistry.allProjects"));
 
 export const projectInfos = Effect.gen(function* () {
+	const unavailable = yield* DaemonStoreAvailability;
 	const ref = yield* ProjectRegistryTag;
 	const projects = yield* allProjects;
 	// Cold projects need branches too. Share the relay cache and its refresh interval.
@@ -347,25 +344,29 @@ export const projectInfos = Effect.gen(function* () {
 				.defaultGroupingMode ?? "repository")
 		: "repository";
 	const entries = withCachedProjectGit(
-		(yield* allProjects).map((project) => ({
-			slug: project.slug,
-			folders: project.folders,
-			title: project.title,
-			...(project.setupScript !== undefined && {
-				setupScript: project.setupScript,
-			}),
-			...(project.sessionMode !== undefined && {
-				sessionMode: project.sessionMode,
-			}),
-			...(project.groupingMode !== undefined && {
-				groupingMode: project.groupingMode,
-			}),
-			effectiveGroupingMode: project.groupingMode ?? defaultGroupingMode,
-			...(project.repositoryIdentities !== undefined && {
-				repositoryIdentities: project.repositoryIdentities,
-			}),
-			...(project.lastUsed !== undefined && { lastUsed: project.lastUsed }),
-		})),
+		(yield* allProjects).map((project) => {
+			const unavailableReason = unavailable.get(project.slug);
+			return {
+				slug: project.slug,
+				...(unavailableReason !== undefined && { unavailableReason }),
+				folders: project.folders,
+				title: project.title,
+				...(project.setupScript !== undefined && {
+					setupScript: project.setupScript,
+				}),
+				...(project.sessionMode !== undefined && {
+					sessionMode: project.sessionMode,
+				}),
+				...(project.groupingMode !== undefined && {
+					groupingMode: project.groupingMode,
+				}),
+				effectiveGroupingMode: project.groupingMode ?? defaultGroupingMode,
+				...(project.repositoryIdentities !== undefined && {
+					repositoryIdentities: project.repositoryIdentities,
+				}),
+				...(project.lastUsed !== undefined && { lastUsed: project.lastUsed }),
+			};
+		}),
 	);
 	const groups = computeProjectGroups(
 		entries.map((project) => ({
@@ -440,20 +441,6 @@ export const addWithoutRelay = (
 
 		if (alreadyExists) {
 			return yield* new ProjectAlreadyExists({ slug: project.slug });
-		}
-		const directory = yield* Effect.serviceOption(SessionDirectory);
-		const daemonState = yield* Effect.serviceOption(DaemonStateTag);
-		if (Option.isSome(directory) && Option.isSome(daemonState)) {
-			const { configDir } = yield* Ref.get(daemonState.value);
-			yield* indexProjectSessions(configDir, project).pipe(
-				Effect.provideService(SessionDirectory, directory.value),
-				Effect.catchAll((cause) =>
-					Effect.logWarning(
-						"Session directory could not read registered project",
-						{ projectSlug: project.slug, cause },
-					),
-				),
-			);
 		}
 
 		if (!options?.silent) {
@@ -581,7 +568,7 @@ export const remove = (slug: string) =>
 					// Relay disposal only detaches; removal ends every registered runner afterwards.
 					yield* relayCache.invalidate(slug);
 					const state = yield* Ref.get(yield* DaemonStateTag);
-					yield* stopRegisteredClaudeRunners(
+					yield* stopRegisteredRunners(
 						removed.value.project.folders[0],
 						state.configDir,
 					);
@@ -598,10 +585,6 @@ export const remove = (slug: string) =>
 						).pipe(Effect.andThen(requestConfigSave)),
 					),
 				);
-				const directory = yield* Effect.serviceOption(SessionDirectory);
-				if (Option.isSome(directory))
-					yield* directory.value.removeProject(slug);
-
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.InstanceRemoved({ instanceId: slug }),
@@ -766,9 +749,6 @@ export const removeAll = Effect.gen(function* () {
 		(slug) =>
 			Effect.gen(function* () {
 				yield* relayCache.invalidate(slug);
-				const directory = yield* Effect.serviceOption(SessionDirectory);
-				if (Option.isSome(directory))
-					yield* directory.value.removeProject(slug);
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.InstanceRemoved({ instanceId: slug }),
@@ -1049,20 +1029,17 @@ export const saveProject = (input: SaveProjectInput) =>
 					existing !== undefined &&
 					normalizeProjectDirectory(existing.folders[0]) !== mainFolder;
 				if (mainChanged) {
-					if (
-						projectEventsDbPath({ configDir, ...existing }) !==
-						resolve(projectStorageDir(configDir, existing.slug), "events.db")
-					) {
+					// Startup finds legacy history through the main folder, so moving it
+					// would orphan history that has not been imported yet.
+					const unavailableReason = (yield* DaemonStoreAvailability).get(
+						existing.slug,
+					);
+					if (unavailableReason !== undefined)
 						return yield* new WsRpcError({
-							message:
-								"Project history migration must complete before changing the main folder",
+							message: `Fix this project's history before changing its main folder: ${unavailableReason}`,
 						});
-					}
 					// A send admitted between this check and the relay swap is not blocked.
-					const count = yield* countRunningProjectSessions(
-						existing,
-						configDir,
-					).pipe(
+					const count = yield* countRunningProjectSessions(existing).pipe(
 						Effect.mapError(
 							(cause) =>
 								new WsRpcError({
@@ -1213,10 +1190,7 @@ export const saveProject = (input: SaveProjectInput) =>
 				) {
 					yield* replaceRelay(slug);
 					if (mainChanged) {
-						yield* stopRegisteredClaudeRunners(
-							existing.folders[0],
-							configDir,
-						).pipe(
+						yield* stopRegisteredRunners(existing.folders[0], configDir).pipe(
 							Effect.catchAllCause((cause) =>
 								Effect.logWarning(
 									`Failed to stop old project runners after saving ${slug}: ${formatRelayFailure(cause)}`,

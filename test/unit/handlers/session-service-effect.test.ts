@@ -155,6 +155,7 @@ describe("session handler metadata", () => {
 			parts: [],
 		}));
 		return {
+			listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 			readToolDetails: vi.fn(() => Effect.succeed([])),
 			getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 			getSessionFamilyRoot: vi.fn(() => Effect.succeed(undefined)),

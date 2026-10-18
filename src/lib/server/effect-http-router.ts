@@ -40,6 +40,7 @@ import type {
 	VapidKeyResponse,
 } from "../shared-types.js";
 import { getVersion } from "../version.js";
+import { SERVER_BUILD_ID } from "./build-update.js";
 
 // Service Tags (dependency injection)
 // Each tag represents a capability the router needs. Concrete implementations
@@ -172,10 +173,11 @@ const healthHandler = Effect.gen(function* () {
 	return yield* HttpServerResponse.json(body);
 });
 
-/** GET /info */
+/** GET /info; buildId lets a stale tab check the build without RPC. */
 const infoHandler = Effect.gen(function* () {
 	return yield* HttpServerResponse.json({
 		version: getVersion(),
+		buildId: SERVER_BUILD_ID,
 	} satisfies InfoResponse);
 });
 

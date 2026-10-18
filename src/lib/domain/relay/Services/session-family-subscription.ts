@@ -22,7 +22,11 @@
 
 import type { SqlClient } from "@effect/sql";
 import { Effect, Stream } from "effect";
-import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import { advanceTouchesScope } from "../../../contracts/read-model-advance.js";
+import {
+	ReadQueryEffectTag,
+	type SessionScope,
+} from "../../../persistence/effect/read-query-effect.js";
 import type { SessionInfo } from "../../../shared-types.js";
 import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import type { SessionActivityTag } from "../../daemon/Services/session-activity.js";
@@ -50,6 +54,7 @@ export const subscribeSessionFamily = (options: {
 			const readQuery = yield* ReadQueryEffectTag;
 			const bus = yield* SessionEventBusTag;
 			const config = yield* ConfigTag;
+			const scope: SessionScope = { projectIds: [config.slug] };
 			const rows = yield* makeSessionRows({
 				slug: config.slug,
 				folders: [config.projectDir, ...(config.extraFolders ?? [])],
@@ -64,6 +69,7 @@ export const subscribeSessionFamily = (options: {
 					name: `session-family/${anchor}`,
 					collections: ["sessions"],
 					shareReads: true,
+					shareKey: `session-family/${config.slug}/${anchor}`,
 					read: (range) =>
 						rows.read({
 							...range,
@@ -71,6 +77,8 @@ export const subscribeSessionFamily = (options: {
 							...(range === undefined ? { viewed: options.sessionId } : {}),
 						}),
 					route: (advance) => {
+						if (!advanceTouchesScope(advance, scope))
+							return { moved: false, removed: [] };
 						const removed = advance.removedSessionIds.filter((id) =>
 							held.delete(id),
 						);

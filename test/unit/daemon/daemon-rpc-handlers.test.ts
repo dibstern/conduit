@@ -507,7 +507,7 @@ describe("daemon control through the shared RPC group", () => {
 	it.scoped(
 		"updates the project default agent through the cached relay",
 		() => {
-			const setDefaultAgent = vi.fn(async (_agent: string) => {});
+			const setDefaultAgent = vi.fn((_agent: string) => Effect.void);
 			return Effect.gen(function* () {
 				const client = yield* makeClient;
 				expect(
@@ -562,9 +562,10 @@ describe("daemon control through the shared RPC group", () => {
 							refreshGlobalDefaults: () => Effect.void,
 							...(slug === "rejected"
 								? {
-										setDefaultAgent: async () => {
-											throw new Error("agent unavailable");
-										},
+										setDefaultAgent: () =>
+											Effect.fail(
+												new WsRpcError({ message: "agent unavailable" }),
+											),
 									}
 								: {}),
 							stop: () => {},

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // A subagent tool completes via its own notification and can outlive the
 // parent turn. `done` used to force-complete every running tool, flipping the
 // still-running Task to "Done"; terminal finalization skips subagent tools.
@@ -12,23 +13,23 @@ import {
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	applyTranscriptEnvelope,
 	deriveTranscriptMessages,
 	type TranscriptEntry,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { detailUpserts } from "../../helpers/detail-rows.js";
 
 const sessionId = "sub-parent";
 beforeEach(() => {
 	seedSessions([{ id: sessionId, title: "Parent", status: "idle" }]);
-	sessionState.currentId = sessionId;
+	openSessionForSetup(sessionId, "project-a");
 });
 afterEach(() => {
 	sessionActivity.clear();
 	sessionMessages.clear();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 });
 
 function projectTool(name: "Task" | "Read") {

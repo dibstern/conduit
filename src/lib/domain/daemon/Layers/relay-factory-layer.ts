@@ -1,4 +1,3 @@
-import type { AddAccountInput } from "../../../contracts/account.js";
 // Effect-native factory for creating ProjectRelay instances.
 //
 // RelayFactoryTag — service that creates relays given a StoredProject + URL.
@@ -12,53 +11,76 @@ import type { AddAccountInput } from "../../../contracts/account.js";
 
 import { existsSync, mkdirSync } from "node:fs";
 import type http from "node:http";
-import { join } from "node:path";
 import {
-	Cause,
 	Context,
 	Data,
 	Effect,
-	Exit,
 	Layer,
 	Option,
 	PubSub,
 	Queue,
 	Ref,
-	Runtime,
 } from "effect";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import {
-	projectEventsDbPath,
+	ProjectSaveRejected,
+	type SaveProjectInput,
+} from "../../../contracts/ws-rpc.js";
+import type { PersistenceStore } from "../../../persistence/effect/live.js";
+import {
+	daemonStorePath,
 	projectStorageDir,
 	writeProjectStorageOwner,
 } from "../../../persistence/project-storage.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
-import type { OpenCodeInstance } from "../../../shared-types.js";
-import type { ProjectRelayConfig, StoredProject } from "../../../types.js";
+import type { StoredProject } from "../../../types.js";
+import {
+	DaemonSessionQueryServiceError,
+	DaemonSessionQueryServiceTag,
+} from "../../relay/Services/daemon-session-query-service.js";
+import {
+	InstanceManagementServiceError,
+	InstanceManagementServiceTag,
+} from "../../relay/Services/instance-management-service.js";
+import {
+	ProjectManagementNotSupported,
+	ProjectManagementServiceError,
+	ProjectManagementServiceTag,
+	type SaveProjectResult,
+} from "../../relay/Services/project-management-service.js";
+import { ScanServiceTag } from "../../relay/Services/scan-service.js";
+import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
-import { listDaemonSessions as listEffectDaemonSessions } from "../Services/daemon-session-reader.js";
-import { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
+import {
+	listArchivedSessions,
+	listDaemonSessions as listEffectDaemonSessions,
+} from "../Services/daemon-session-reader.js";
+import { DaemonStoreAvailability } from "../Services/daemon-store-availability.js";
+import type { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
 	addInstance as addEffectInstance,
 	getInstance as getEffectInstance,
 	getInstances as getEffectInstances,
 	InstanceManagerStateTag,
-	PollerFibersTag,
+	type PollerFibersTag,
 	persistConfig as persistEffectInstanceConfig,
 	removeInstance as removeEffectInstance,
 	updateInstance as updateEffectInstance,
 } from "../Services/instance-manager-service.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
+import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
-	broadcastProjectList,
+	type broadcastProjectList,
 	getEffectiveWorktreeCleanup,
 	projectInfos as getEffectProjectInfos,
 	openCodeInstanceFor,
 	ProjectRegistryTag,
+	type removeProjectFromEffectRegistry,
+	type saveProject,
 } from "../Services/project-registry-service.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
 import { SessionDirectory } from "../Services/session-directory.js";
@@ -114,8 +136,20 @@ export interface RelayFactory {
 }
 
 export interface RelayFactoryProjectControls {
-	readonly saveProject: NonNullable<ProjectRelayConfig["saveProject"]>;
-	readonly removeProject: NonNullable<ProjectRelayConfig["removeProject"]>;
+	readonly saveProject: (
+		input: SaveProjectInput,
+	) => Effect.Effect<
+		Omit<SaveProjectResult, "projects">,
+		| Effect.Effect.Error<ReturnType<typeof saveProject>>
+		| Effect.Effect.Error<typeof broadcastProjectList>
+	>;
+	readonly removeProject: (
+		slug: string,
+	) => Effect.Effect<
+		void,
+		| Effect.Effect.Error<ReturnType<typeof removeProjectFromEffectRegistry>>
+		| Effect.Effect.Error<typeof broadcastProjectList>
+	>;
 }
 
 export class RelayFactoryTag extends Context.Tag("RelayFactory")<
@@ -151,16 +185,20 @@ export const RelayFactoryLive = (
 	| InstanceHealthCheckTag
 	| DaemonEventBusTag
 	| SessionActivityTag
+	| SessionEventBusTag
 	| ConfigPersistenceTag
 	| PortScannerTag
 	| PushManagerTag
 	| OpenCodeInstancesTag
+	| PersistenceStore
 > =>
 	Layer.effect(
 		RelayFactoryTag,
 		Effect.gen(function* () {
 			const accounts = yield* AccountDirectory;
 			const sessionDirectory = yield* Effect.serviceOption(SessionDirectory);
+			const storeContext = yield* persistenceStoreContext;
+			const unavailable = yield* DaemonStoreAvailability;
 			const configRef = yield* DaemonConfigRefTag;
 			const envResolver = Option.getOrUndefined(
 				yield* Effect.serviceOption(ProjectShellEnvTag),
@@ -168,10 +206,9 @@ export const RelayFactoryLive = (
 			const httpServerRef = yield* HttpServerRefTag;
 			const projectRegistry = yield* ProjectRegistryTag;
 			const instanceState = yield* InstanceManagerStateTag;
-			const pollerFibers = yield* PollerFibersTag;
-			const healthCheck = yield* InstanceHealthCheckTag;
 			const eventBus = yield* DaemonEventBusTag;
 			const activity = yield* SessionActivityTag;
+			const sessionEventBus = yield* SessionEventBusTag;
 			const cleanupQueue = yield* Effect.serviceOption(WorktreeCleanupQueueTag);
 			const configPersistence = yield* ConfigPersistenceTag;
 			const portScanner = yield* PortScannerTag;
@@ -180,142 +217,134 @@ export const RelayFactoryLive = (
 			const usage = Option.getOrUndefined(yield* Effect.serviceOption(Usage));
 			const worktreeService = yield* Effect.serviceOption(WorktreeServiceTag);
 			const tracer = yield* Effect.tracer;
-			const runtime = yield* Effect.runtime<never>();
+			const baseDaemonContext = yield* Effect.context<
+				| AccountDirectory
+				| ProjectRegistryTag
+				| InstanceManagerStateTag
+				| PollerFibersTag
+				| InstanceHealthCheckTag
+				| DaemonEventBusTag
+				| SessionActivityTag
+				| ConfigPersistenceTag
+			>();
+			const daemonContext = Context.merge(baseDaemonContext, storeContext);
 
-			const runCallback = <A>(effect: Effect.Effect<A, unknown>) =>
-				new Promise<A>((resolve, reject) => {
-					Runtime.runCallback(runtime)(effect, {
-						onExit: (exit) => {
-							if (Exit.isSuccess(exit)) {
-								resolve(exit.value);
-								return;
-							}
-							reject(Cause.squash(exit.cause));
-						},
-					});
-				});
-
-			const getProjects = () =>
-				runCallback(
-					getEffectProjectInfos.pipe(
-						Effect.provideService(ProjectRegistryTag, projectRegistry),
-					),
-				);
-
-			const listDaemonSessions: NonNullable<
-				ProjectRelayConfig["listDaemonSessions"]
-			> = (options) =>
-				runCallback(
-					listEffectDaemonSessions(configDir, options).pipe(
-						Effect.provideService(ProjectRegistryTag, projectRegistry),
-						Effect.provideService(AccountDirectory, accounts),
-						Effect.provideService(SessionActivityTag, activity),
-					),
-				);
-			const broadcastSessionListChanged = () =>
-				runCallback(
-					PubSub.publish(eventBus, DaemonEvent.DaemonSessionsChanged()).pipe(
-						Effect.asVoid,
-					),
-				);
-			const publishProjectList = () =>
-				runCallback(
-					broadcastProjectList.pipe(
-						Effect.provideService(ProjectRegistryTag, projectRegistry),
-						Effect.provideService(DaemonEventBusTag, eventBus),
-					),
-				);
-
-			const getInstances = () =>
-				runCallback(
-					getEffectInstances.pipe(
-						Effect.map((instances) => Array.from(instances)),
-						Effect.provideService(InstanceManagerStateTag, instanceState),
-						Effect.provideService(AccountDirectory, accounts),
-					),
-				);
-
-			const provideInstanceDeps = <A, E>(
-				effect: Effect.Effect<
-					A,
-					E,
-					| AccountDirectory
-					| InstanceManagerStateTag
-					| PollerFibersTag
-					| InstanceHealthCheckTag
-					| DaemonEventBusTag
-					| ConfigPersistenceTag
-				>,
-			) =>
-				effect.pipe(
-					Effect.provideService(InstanceManagerStateTag, instanceState),
-					Effect.provideService(AccountDirectory, accounts),
-					Effect.provideService(PollerFibersTag, pollerFibers),
-					Effect.provideService(InstanceHealthCheckTag, healthCheck),
-					Effect.provideService(DaemonEventBusTag, eventBus),
-					Effect.provideService(ConfigPersistenceTag, configPersistence),
-				);
-
-			const addInstance = (input: AddAccountInput) =>
-				runCallback(provideInstanceDeps(addEffectInstance(input)));
-
-			const removeInstance = (id: string) =>
-				runCallback(provideInstanceDeps(removeEffectInstance(id)));
-
-			// Only server-backed instances have an OpenCode process to start.
-			const startInstance = (id: string) =>
-				runCallback(
-					provideInstanceDeps(getEffectInstance(id)).pipe(
-						Effect.flatMap((instance) =>
-							getProviderDriver(instance.driver ?? "opencode")
-								?.runsOpenCodeServer
-								? Effect.asVoid(Effect.scoped(openCodeInstances.use(id)))
-								: Effect.void,
-						),
-					),
-				);
-
-			const stopInstance = (id: string) =>
-				runCallback(openCodeInstances.stop(id));
-
-			const updateInstance = (
-				id: string,
-				updates: {
-					readonly name?: string;
-					readonly env?: Record<string, string>;
-					readonly port?: number;
-					readonly driver?: import("../../../contracts/provider-instance.js").ProviderDriverKind;
-					readonly configDir?: string;
-				},
-			) =>
-				runCallback(
-					provideInstanceDeps(updateEffectInstance(id, updates)).pipe(
-						Effect.flatMap(() =>
-							getEffectInstances.pipe(
-								Effect.flatMap((instances) => {
-									const instance = Array.from(instances).find(
-										(candidate) => candidate.id === id,
-									);
-									if (instance === undefined) {
-										return Effect.fail(
-											new RelayFactoryError({
-												reason: `Instance "${id}" not found after update`,
-											}),
-										);
-									}
-									return Effect.succeed(instance as OpenCodeInstance);
-								}),
-								Effect.provideService(InstanceManagerStateTag, instanceState),
-								Effect.provideService(AccountDirectory, accounts),
+			const scanAdapter = Context.make(ScanServiceTag, {
+				scanNow: () => portScanner.scanNow(),
+			});
+			const daemonSessionQueryAdapter = Context.make(
+				DaemonSessionQueryServiceTag,
+				{
+					listArchived: (options) =>
+						listArchivedSessions(options).pipe(
+							Effect.provide(daemonContext),
+							Effect.mapError(
+								(cause) => new DaemonSessionQueryServiceError({ cause }),
 							),
 						),
-					),
-				);
-
-			const persistConfig = () =>
-				runCallback(provideInstanceDeps(persistEffectInstanceConfig));
-
-			const triggerScan = () => runCallback(portScanner.scanNow());
+					list: (options) =>
+						listEffectDaemonSessions(configDir, options).pipe(
+							Effect.provide(daemonContext),
+							Effect.mapError(
+								(cause) => new DaemonSessionQueryServiceError({ cause }),
+							),
+						),
+				},
+			);
+			const listInstances = getEffectInstances.pipe(
+				Effect.provide(daemonContext),
+				Effect.mapError(
+					(cause) =>
+						new InstanceManagementServiceError({ operation: "list", cause }),
+				),
+			);
+			const instanceManagementAdapter = Context.make(
+				InstanceManagementServiceTag,
+				{
+					list: () => listInstances,
+					add: (input) =>
+						addEffectInstance(input).pipe(
+							Effect.andThen(persistEffectInstanceConfig),
+							Effect.provide(daemonContext),
+							Effect.mapError(
+								(cause) =>
+									new InstanceManagementServiceError({
+										operation: "add",
+										cause,
+									}),
+							),
+							Effect.andThen(listInstances),
+						),
+					remove: (id) =>
+						removeEffectInstance(id).pipe(
+							Effect.andThen(persistEffectInstanceConfig),
+							Effect.provide(daemonContext),
+							Effect.mapError(
+								(cause) =>
+									new InstanceManagementServiceError({
+										operation: "remove",
+										cause,
+									}),
+							),
+							Effect.andThen(listInstances),
+						),
+					start: (id) =>
+						getEffectInstance(id).pipe(
+							Effect.flatMap((instance) =>
+								getProviderDriver(instance.driver ?? "opencode")
+									?.runsOpenCodeServer
+									? Effect.asVoid(Effect.scoped(openCodeInstances.use(id)))
+									: Effect.void,
+							),
+							Effect.provide(daemonContext),
+							Effect.mapError(
+								(cause) =>
+									new InstanceManagementServiceError({
+										operation: "start",
+										cause,
+									}),
+							),
+							Effect.andThen(listInstances),
+						),
+					stop: (id) =>
+						openCodeInstances.stop(id).pipe(
+							Effect.mapError(
+								(cause) =>
+									new InstanceManagementServiceError({
+										operation: "stop",
+										cause,
+									}),
+							),
+							Effect.andThen(listInstances),
+						),
+					update: (id, input) =>
+						updateEffectInstance(id, input).pipe(
+							Effect.andThen(persistEffectInstanceConfig),
+							Effect.provide(daemonContext),
+							Effect.mapError(
+								(cause) =>
+									new InstanceManagementServiceError({
+										operation: "update",
+										cause,
+									}),
+							),
+							Effect.andThen(listInstances),
+						),
+					rename: (id, name) =>
+						updateEffectInstance(id, { name }).pipe(
+							Effect.andThen(persistEffectInstanceConfig),
+							Effect.provide(daemonContext),
+							Effect.mapError(
+								(cause) =>
+									new InstanceManagementServiceError({
+										operation: "rename",
+										cause,
+									}),
+							),
+							Effect.andThen(listInstances),
+						),
+				},
+			);
 
 			return {
 				create: (
@@ -323,6 +352,78 @@ export const RelayFactoryLive = (
 					projectControls?: RelayFactoryProjectControls,
 				): Effect.Effect<ProjectRelay, RelayFactoryError> =>
 					Effect.gen(function* () {
+						const listProjects = getEffectProjectInfos.pipe(
+							Effect.provide(daemonContext),
+							Effect.map((projects) =>
+								projects.map(({ group, ...project }) => ({
+									...project,
+									...(group === undefined ? {} : { group }),
+								})),
+							),
+							Effect.mapError(
+								(cause) =>
+									new ProjectManagementServiceError({
+										operation: "list",
+										cause,
+									}),
+							),
+						);
+						const projectManagementAdapter = Context.make(
+							ProjectManagementServiceTag,
+							{
+								currentSlug: () => Effect.succeed(project.slug),
+								list: () => listProjects,
+								save: (input) =>
+									Effect.gen(function* () {
+										if (projectControls === undefined) {
+											return yield* new ProjectManagementNotSupported({
+												operation: "save",
+												message:
+													"Saving projects is not supported in this mode",
+											});
+										}
+										const result = yield* projectControls
+											.saveProject(input)
+											.pipe(
+												Effect.mapError((cause) =>
+													cause instanceof ProjectSaveRejected
+														? cause
+														: new ProjectManagementServiceError({
+																operation: "save",
+																cause,
+															}),
+												),
+											);
+										return { ...result, projects: yield* listProjects };
+									}),
+								remove: (slug) =>
+									Effect.gen(function* () {
+										if (projectControls === undefined) {
+											return yield* new ProjectManagementNotSupported({
+												operation: "remove",
+												message:
+													"Removing projects is not supported in this mode",
+											});
+										}
+										yield* projectControls.removeProject(slug).pipe(
+											Effect.mapError(
+												(cause) =>
+													new ProjectManagementServiceError({
+														operation: "remove",
+														cause,
+													}),
+											),
+										);
+										return yield* listProjects;
+									}),
+							},
+						);
+						const daemonServices = Context.mergeAll(
+							scanAdapter,
+							daemonSessionQueryAdapter,
+							projectManagementAdapter,
+							instanceManagementAdapter,
+						);
 						// Read current HTTP server from Ref
 						const httpServer = yield* Ref.get(httpServerRef);
 						if (!httpServer) {
@@ -331,13 +432,19 @@ export const RelayFactoryLive = (
 							});
 						}
 
-						// Create persistence DB directory and open SQLite
+						// Keep storage ownership metadata independently of event-store ownership.
 						if (!existsSync(project.folders[0])) {
 							return yield* new RelayFactoryError({
 								reason: `Project directory does not exist: ${project.folders[0]}`,
 							});
 						}
-						const dbPath = projectEventsDbPath({ configDir, ...project });
+						const unavailableReason = unavailable.get(project.slug);
+						if (unavailableReason !== undefined) {
+							return yield* new RelayFactoryError({
+								reason: unavailableReason,
+							});
+						}
+						const dbPath = daemonStorePath(configDir);
 						const storageDir = projectStorageDir(configDir, project.slug);
 						yield* Effect.try({
 							try: () => {
@@ -353,16 +460,7 @@ export const RelayFactoryLive = (
 									reason: `Failed to prepare project storage at ${storageDir}`,
 									cause,
 								}),
-						}).pipe(
-							Effect.catchAll((error) =>
-								dbPath === join(storageDir, "events.db")
-									? Effect.fail(error)
-									: Effect.logWarning(
-											"Using legacy project history after storage setup failed",
-											{ projectSlug: project.slug, cause: error },
-										),
-							),
-						);
+						});
 
 						// Dynamic import to avoid circular dependency at module load time
 						const { createProjectRelay } = yield* Effect.tryPromise({
@@ -389,7 +487,7 @@ export const RelayFactoryLive = (
 						);
 
 						// Create the relay using the imperative createProjectRelay while
-						// threading Effect-owned daemon read models and instance callbacks.
+						// threading Effect-owned daemon services into the relay runtime.
 						const ac = new AbortController();
 						let creation: Promise<ProjectRelay> | undefined;
 						const relay = yield* Effect.tryPromise({
@@ -403,6 +501,12 @@ export const RelayFactoryLive = (
 										Context.add(ConfigPersistenceTag, configPersistence),
 										Context.add(AccountDirectory, accounts),
 										Context.add(SessionActivityTag, activity),
+										Context.add(SessionEventBusTag, sessionEventBus),
+										Context.add(DaemonEventBusTag, eventBus),
+										Context.add(ProjectRegistryTag, projectRegistry),
+										Context.add(PortScannerTag, portScanner),
+										Context.merge(storeContext),
+										Context.merge(daemonServices),
 										Context.merge(
 											Option.isSome(sessionDirectory)
 												? Context.make(SessionDirectory, sessionDirectory.value)
@@ -435,17 +539,6 @@ export const RelayFactoryLive = (
 									configDir,
 									persistenceDbPath: dbPath,
 									tracer,
-									getProjects,
-									listDaemonSessions,
-									resolveSessionProject: (sessionId) =>
-										runCallback(
-											Option.isSome(sessionDirectory)
-												? sessionDirectory.value
-														.projectOf(sessionId)
-														.pipe(Effect.map(Option.getOrNull))
-												: Effect.succeed(null),
-										),
-									broadcastSessionListChanged,
 									requestWorktreeCleanup: () =>
 										cleanupQueue._tag === "Some"
 											? Queue.offer(cleanupQueue.value, {
@@ -469,23 +562,8 @@ export const RelayFactoryLive = (
 												tag,
 											}),
 										).pipe(Effect.asVoid),
-									refreshSessionGit: async () => {
-										await publishProjectList();
-									},
-									getInstances,
-									addInstance,
-									removeInstance,
-									startInstance,
-									stopInstance,
-									updateInstance,
-									persistConfig,
-									triggerScan,
 									...(relayPushSender != null && {
 										pushManager: relayPushSender,
-									}),
-									...(projectControls != null && {
-										saveProject: projectControls.saveProject,
-										removeProject: projectControls.removeProject,
 									}),
 								});
 								return creation;

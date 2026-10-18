@@ -14,6 +14,7 @@ import {
 	AccountIdSchema,
 	KnownProviderDriverKindSchema,
 } from "../../../src/lib/contracts/provider-instance.js";
+import { InstanceListResponseSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import { dualDriverProviders } from "../../../test/e2e/fixtures/mockup-state.js";
@@ -43,10 +44,13 @@ export function seedUsageLimits(
 	setting: ReturnType<typeof usageLimits>,
 ): void {
 	const rpc = requireRpcControl(page);
-	rpc.setResponse("GetUsageLimitsSetting", setting);
-	rpc.setHandler("SetUsageLimitsSetting", (params) => {
-		rpc.setResponse("GetUsageLimitsSetting", params);
-		return params;
+	rpc.setStubs({
+		GetUsageLimitsSetting: () => setting,
+		SetUsageLimitsSetting: ({ usageLimits }) => {
+			const saved = { usageLimits };
+			rpc.setStubs({ GetUsageLimitsSetting: () => saved });
+			return saved;
+		},
 	});
 }
 
@@ -151,55 +155,52 @@ function seedAccountDirectory(page: Page): void {
 		);
 		const added = change._tag === "Add" ? next.accounts.at(-1) : undefined;
 		if (added?.driver === "claude") publishClaudeCatalog(rpc, added.id);
-		return {
+		return Schema.decodeUnknownSync(InstanceListResponseSchema)({
 			instances,
 			...(added ? { addedInstanceId: added.id } : {}),
-		};
+		});
 	};
-	for (const tag of ["RemoveInstance", "SetDefault"] as const) {
-		rpc.setHandler(tag, (payload) => {
-			const id = payload["instanceId"];
-			if (typeof id !== "string") throw new Error("Missing account id");
+	rpc.setStubs({
+		RemoveInstance: ({ instanceId }) =>
+			mutate({ _tag: "Remove", id: instanceId }),
+		SetDefault: ({ instanceId }) =>
+			mutate({ _tag: "SetDefault", id: instanceId }),
+		AddInstance: (payload) => {
+			const name = payload["name"];
+			if (typeof name !== "string") throw new Error("Missing account name");
 			return mutate({
-				_tag: tag === "RemoveInstance" ? "Remove" : "SetDefault",
-				id,
-			});
-		});
-	}
-	rpc.setHandler("AddInstance", (payload) => {
-		const name = payload["name"];
-		if (typeof name !== "string") throw new Error("Missing account name");
-		return mutate({
-			_tag: "Add",
-			name,
-			driver:
-				typeof payload["driver"] === "string" ? payload["driver"] : undefined,
-			managed:
-				typeof payload["managed"] === "boolean"
-					? payload["managed"]
-					: undefined,
-			port: typeof payload["port"] === "number" ? payload["port"] : undefined,
-			url: typeof payload["url"] === "string" ? payload["url"] : undefined,
-			configDir:
-				typeof payload["configDir"] === "string"
-					? payload["configDir"]
-					: undefined,
-		});
-	});
-	rpc.setHandler("UpdateInstance", (payload) => {
-		const id = payload["instanceId"];
-		if (typeof id !== "string") throw new Error("Missing account id");
-		return mutate({
-			_tag: "Update",
-			id,
-			updates: {
-				name: typeof payload["name"] === "string" ? payload["name"] : undefined,
+				_tag: "Add",
+				name,
+				driver:
+					typeof payload["driver"] === "string" ? payload["driver"] : undefined,
+				managed:
+					typeof payload["managed"] === "boolean"
+						? payload["managed"]
+						: undefined,
+				port: typeof payload["port"] === "number" ? payload["port"] : undefined,
+				url: typeof payload["url"] === "string" ? payload["url"] : undefined,
 				configDir:
 					typeof payload["configDir"] === "string"
 						? payload["configDir"]
 						: undefined,
-			},
-		});
+			});
+		},
+		UpdateInstance: (payload) => {
+			const id = payload["instanceId"];
+			if (typeof id !== "string") throw new Error("Missing account id");
+			return mutate({
+				_tag: "Update",
+				id,
+				updates: {
+					name:
+						typeof payload["name"] === "string" ? payload["name"] : undefined,
+					configDir:
+						typeof payload["configDir"] === "string"
+							? payload["configDir"]
+							: undefined,
+				},
+			});
+		},
 	});
 }
 
@@ -251,24 +252,26 @@ export const providerInstancesHandlers: StepHandler[] = [
 		match: /^I open a new terminal tab$/,
 		run: async ({ world }) => {
 			const rpc = requireRpcControl(world.page);
-			rpc.setHandler("CreatePty", () => {
-				const count = rpc
-					.getRequests()
-					.filter((request) => request.tag === "CreatePty").length;
-				rpc.sendChunk("SubscribePtys", [
-					{
-						_tag: "upsert",
-						item: {
-							id: `terminal-${count}`,
-							title: `Terminal ${count}`,
-							command: "sh",
-							cwd: "/myapp",
-							status: "running",
-							pid: count,
+			rpc.setStubs({
+				CreatePty: () => {
+					const count = rpc
+						.getRequests()
+						.filter((request) => request.tag === "CreatePty").length;
+					rpc.sendChunk("SubscribePtys", [
+						{
+							_tag: "upsert",
+							item: {
+								id: `terminal-${count}`,
+								title: `Terminal ${count}`,
+								command: "sh",
+								cwd: "/myapp",
+								status: "running",
+								pid: count,
+							},
 						},
-					},
-				]);
-				return { ok: true };
+					]);
+					return { ok: true };
+				},
 			});
 			await world.page.getByTestId("views-rail-terminal").click();
 			await expect(world.page.locator("#terminal-panel .term-tab")).toHaveCount(
@@ -514,16 +517,24 @@ export const providerInstancesHandlers: StepHandler[] = [
 				mockInstances.set(world.page, list);
 				rpc.setDaemonList("SubscribeInstances", { instances: list });
 			}
-			rpc.setResponse("GetModels", {
-				projectSlug: "myapp",
-				providers: [],
-				active: { model: "claude-sonnet-4-5", provider: "claude" },
+			rpc.setStubs({
+				GetModels: () => {
+					publishClaudeCatalog(rpc, accountId);
+					return {
+						defaultOpenCodeInstanceId: "opencode",
+						projectSlug: "myapp",
+						providers: [],
+						active: { model: "claude-sonnet-4-5", provider: "claude" },
+					};
+				},
 			});
-			rpc.setResponse("GetAgents", {
-				projectSlug: "myapp",
-				instanceId: accountId,
-				providerScope: { id: "claude", name: "Claude" },
-				agents: [],
+			rpc.setStubs({
+				GetAgents: () => ({
+					projectSlug: "myapp",
+					instanceId: accountId,
+					providerScope: { id: "claude", name: "Claude" },
+					agents: [],
+				}),
 			});
 			rpc.upsertShellRow({
 				...(isRecord(previous) ? previous : {}),
@@ -793,9 +804,11 @@ export const providerInstancesHandlers: StepHandler[] = [
 		name: "seed daemon supervision",
 		match: /^the daemon is (supervised|unsupervised)$/,
 		run: ({ world, match }) => {
-			requireRpcControl(world.page).setResponse("GetStatus", {
-				...MOCK_SERVER_STATUS,
-				supervised: match[1] === "supervised",
+			requireRpcControl(world.page).setStubs({
+				GetStatus: () => ({
+					...MOCK_SERVER_STATUS,
+					supervised: match[1] === "supervised",
+				}),
 			});
 		},
 	},
@@ -897,9 +910,11 @@ export const providerInstancesHandlers: StepHandler[] = [
 				},
 			];
 			mockInstances.set(world.page, list);
-			requireRpcControl(world.page).setResponse("DetectProxy", {
-				found: true,
-				port: 8317,
+			requireRpcControl(world.page).setStubs({
+				DetectProxy: () => ({
+					found: true,
+					port: 8317,
+				}),
 			});
 			await requireRelayControl(world.page).sendMessages([
 				{ type: "instance_list", instances: list },
@@ -1138,12 +1153,44 @@ export const providerInstancesHandlers: StepHandler[] = [
 		match: /^new drafts use a Claude model$/,
 		run: ({ world }) => {
 			const rpc = requireRpcControl(world.page);
-			rpc.setResponse("GetModels", {
-				projectSlug: "myapp",
-				providers: dualDriverProviders.filter(
-					(provider) => provider.id !== "claude",
-				),
-				active: { model: "claude-sonnet-4-5", provider: "claude" },
+			rpc.setStubs({
+				GetModels: (payload) => {
+					const row =
+						"sessionId" in payload
+							? rpc.shellRows?.find(
+									(row) => isRecord(row) && row["id"] === payload.sessionId,
+								)
+							: undefined;
+					const accountId =
+						"sessionId" in payload
+							? isRecord(row)
+								? row["accountId"]
+								: undefined
+							: (payload.instanceId ??
+								mockInstances
+									.get(world.page)
+									?.find(
+										(instance) =>
+											instance["driver"] === "claude" &&
+											instance["isDefault"] === true,
+									)?.["id"]);
+					const account = mockInstances
+						.get(world.page)
+						?.find((instance) => instance["id"] === accountId);
+					if (typeof accountId === "string" && account?.["driver"] === "claude")
+						publishClaudeCatalog(rpc, accountId);
+					return {
+						defaultOpenCodeInstanceId: "opencode",
+						projectSlug: "myapp",
+						providers: dualDriverProviders.filter(
+							(provider) => provider.id !== "claude",
+						),
+						active:
+							account?.["driver"] === "opencode"
+								? { model: "claude-sonnet-4", provider: "anthropic" }
+								: { model: "claude-sonnet-4-5", provider: "claude" },
+					};
+				},
 			});
 			rpc.setProjectSetting({
 				_tag: "defaultModel",

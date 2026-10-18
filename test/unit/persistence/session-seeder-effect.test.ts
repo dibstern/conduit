@@ -1,15 +1,19 @@
 import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { expect } from "vitest";
+import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import { EffectSessionSeeder } from "../../../src/lib/persistence/effect/session-seeder-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 
-const testLayer = EffectSqliteClient.layer({ filename: ":memory:" });
+const testLayer = Layer.mergeAll(
+	EffectSqliteClient.layer({ filename: ":memory:" }),
+	Layer.succeed(PersistenceProjectTag, { projectId: "test-project" }),
+);
 
 describe("EffectSessionSeeder", () => {
 	it.effect(
@@ -60,8 +64,10 @@ describe("EffectSessionSeeder", () => {
 					title: "Child",
 					provider: "opencode",
 				}),
-				canonicalEvent("session.forked", "child", {
+				canonicalEvent("session.created", "child", {
 					sessionId: "child",
+					title: "Child",
+					provider: "opencode",
 					parentId: "parent",
 				}),
 			]);

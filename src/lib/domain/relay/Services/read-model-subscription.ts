@@ -102,10 +102,12 @@ export interface SubscriptionSource<T, E = never> {
 	readonly collections: readonly ReadModelCollection[];
 	/**
 	 * Whether `read` is a pure function of the range and the store, keeping no
-	 * per-subscriber state. Subscribers of a source with this name then share
-	 * its latest live window read.
+	 * per-subscriber state. Subscribers with the same `shareKey` or source name
+	 * then share its latest live window read.
 	 */
 	readonly shareReads?: boolean;
+	/** Read-sharing identity when the diagnostic name covers multiple scopes. */
+	readonly shareKey?: string;
 	/**
 	 * The rows this subscription serves that moved inside `range`, each with the
 	 * version it moved at, and the read-model version the answer is current
@@ -184,7 +186,7 @@ export interface ReadModelRead {
 const readModelReads = channel("conduit:read-model-read");
 
 /**
- * The latest live window read per shareable source name, per bus (its version
+ * The latest live window read per shareable source identity, per bus (its version
  * space), kept while any subscriber of that source is. An answer stays valid
  * once read: a row that moves again moves past `through`, into the next window
  * every reader of this one will ask. So it serves everyone asking the same
@@ -293,7 +295,7 @@ export const stream = <T, E = never>(options: {
 					),
 				);
 			type SourceRead = Effect.Effect.Success<ReturnType<typeof readRequired>>;
-			const name = options.source.name;
+			const name = options.source.shareKey ?? options.source.name;
 			const shared =
 				options.source.shareReads === true
 					? yield* Effect.acquireRelease(
@@ -329,7 +331,7 @@ export const stream = <T, E = never>(options: {
 					Effect.suspend(() => {
 						const latest = shared.latest;
 						if (latest?.through === through && latest.after <= after)
-							// Keyed by this source's name, so it holds this source's answer.
+							// Keyed by this source's identity, so it holds this source's answer.
 							return restore(latest.read as Effect.Effect<SourceRead, E>).pipe(
 								Effect.map((window) => ({
 									...window,
@@ -422,13 +424,15 @@ export const stream = <T, E = never>(options: {
 			});
 
 			// A chunk is every advance already queued, so a burst costs one read.
-			const live = Stream.mapChunksEffect(
-				advances,
+			const envelopeBatches = Stream.mapEffect(
+				Stream.chunks(advances),
 				(chunk): Effect.Effect<Chunk.Chunk<Envelope<T>>, E> =>
 					Effect.gen(function* () {
 						// A publication gap can hide any move or removal. Catch up
 						// through durable tombstones, replacing only when unsupported
 						// or when their coverage does not reach the cursor.
+						// An unrelated surviving advance can carry the gap that lost
+						// an in-scope change, so routing must not hide overflow.
 						const overflow = Chunk.some(
 							chunk,
 							(advance) => advance.dropped === true,
@@ -485,6 +489,8 @@ export const stream = <T, E = never>(options: {
 						);
 					}),
 			);
+			const nonEmptyBatches = Stream.filter(envelopeBatches, Chunk.isNonEmpty);
+			const live = Stream.flattenChunks(nonEmptyBatches);
 
 			return Stream.concat(Stream.fromIterable(opening), live);
 		}),

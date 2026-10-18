@@ -87,6 +87,11 @@ export const DROP_ACTIVITIES_MIGRATION = "0055_drop_activities.sql";
 export const SESSION_PICK_BACKFILL_MIGRATION = "0056_session_pick_backfill.sql";
 export const COMPACT_REDUNDANT_EVENTS_MIGRATION =
 	"0057_compact_redundant_events.sql";
+export const SESSION_PROJECT_SCOPE_MIGRATION = "0058_session_project_scope.sql";
+export const DAEMON_STORE_IMPORTS_MIGRATION = "0059_daemon_store_imports.sql";
+export const SESSIONS_LINEAGE_MIGRATION = "0060_sessions_lineage.sql";
+export const LEGACY_FORKS_MIGRATION = "0061_legacy_forks.sql";
+export const SESSIONS_ARCHIVED_MIGRATION = "0062_sessions_archived.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

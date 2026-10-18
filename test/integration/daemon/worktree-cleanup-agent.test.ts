@@ -278,7 +278,7 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 	}
 
 	function sessionState(fixture: ProcessHarness, sessionId: string) {
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			return db
 				.prepare(
@@ -497,7 +497,7 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 		await vi.waitFor(() => expect(alive(runner.pid)).toBe(false), {
 			timeout: 15_000,
 		});
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			const turns = db
 				.prepare(
@@ -825,7 +825,7 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 		expect(
 			readFileSync(join(fixture.root, "end-session-failures.ndjson"), "utf8"),
 		).toContain(session.sessionId);
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			const events = db
 				.prepare(

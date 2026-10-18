@@ -23,6 +23,10 @@ import type {
 } from "../../../provider/usage-reader.js";
 
 export interface UsageService {
+	readonly setCursorKeychain?: (
+		accountId: string,
+		enabled: boolean,
+	) => Effect.Effect<{ enabled: boolean; reason?: string }>;
 	readonly readings: Stream.Stream<readonly UsageReading[]>;
 	/** The latest completed reading, without probing or starting the sampler. */
 	readonly latest: (
@@ -95,6 +99,9 @@ export function forecastUsage(
 
 export const makeUsage = (options: {
 	readonly accounts: Effect.Effect<readonly UsageAccount[]>;
+	readonly accountHarness?: (
+		accountId: string,
+	) => Effect.Effect<UsageAccount["harness"] | undefined>;
 	readonly order?: Effect.Effect<readonly string[]>;
 	readonly readers: Readonly<
 		Partial<Record<UsageAccount["harness"], UsageReader>>
@@ -385,8 +392,13 @@ export const makeUsage = (options: {
 						(second === -1 ? order.length : second)
 					);
 				});
+				const harness = yield* options.accountHarness?.(excluding) ??
+					Effect.succeed(
+						accounts.find((account) => account.id === excluding)?.harness,
+					);
+				if (harness === undefined) return undefined;
 				for (const account of accounts) {
-					if (account.id === excluding) continue;
+					if (account.id === excluding || account.harness !== harness) continue;
 					const [reading] = yield* refresh([account.id]);
 					if (
 						reading &&

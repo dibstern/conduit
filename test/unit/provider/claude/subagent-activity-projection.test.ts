@@ -143,7 +143,9 @@ function makeTestLayer() {
 /** Exactly the session the sidebar subscription streams, read the same way. */
 const readProcessing = Effect.gen(function* () {
 	const readQuery = yield* makeReadQueryEffect;
-	const { rows } = yield* readQuery.readSessionList();
+	const { rows } = yield* readQuery.readSessionList({
+		projectIds: ["test-project"],
+	});
 	const session = rows.find(({ item }) => item.id === SESSION_ID)?.item;
 	return session?.status === "busy" || session?.status === "retry";
 });

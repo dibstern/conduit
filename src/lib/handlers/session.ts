@@ -1,9 +1,13 @@
-import { Cause, Effect, Either } from "effect";
+import { Cause, Effect, Either, PubSub } from "effect";
 import { accountRefFromSelection } from "../account-directory.js";
 import type { Account, AccountRef } from "../contracts/account.js";
 import type { AccountId } from "../contracts/provider-instance.js";
 import { getProviderDriver } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
+import {
+	DaemonEvent,
+	DaemonEventBusTag,
+} from "../domain/daemon/Services/daemon-pubsub.js";
 import { loadModelCatalog } from "../domain/relay/Services/model-catalog.js";
 import {
 	ProjectSettingsTag,
@@ -429,13 +433,35 @@ export const setSessionSettledForClient = ({
 		const service = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 		if (yield* service.setSessionSettled(sessionId, { settled })) {
-			const config = yield* Effect.serviceOption(ConfigTag);
-			if (config._tag === "Some" && config.value.broadcastSessionListChanged) {
-				yield* Effect.tryPromise(config.value.broadcastSessionListChanged).pipe(
-					Effect.catchAll(() => Effect.void),
-				);
-			}
+			const bus = yield* Effect.serviceOption(DaemonEventBusTag);
+			if (bus._tag === "Some")
+				yield* PubSub.publish(bus.value, DaemonEvent.DaemonSessionsChanged());
 			log.info(`client=${clientId} Set settled=${settled}: ${sessionId}`);
+		}
+	});
+
+export const setSessionArchivedForClient = ({
+	clientId,
+	sessionId,
+	archived,
+}: {
+	readonly clientId: string;
+	readonly sessionId: string;
+	readonly archived: boolean;
+}) =>
+	Effect.gen(function* () {
+		const service = yield* SessionManagerServiceTag;
+		const log = yield* LoggerTag;
+		if (
+			yield* service.setSessionArchived(
+				sessionId,
+				archived ? { archived: true } : { archived: false },
+			)
+		) {
+			const bus = yield* Effect.serviceOption(DaemonEventBusTag);
+			if (bus._tag === "Some")
+				yield* PubSub.publish(bus.value, DaemonEvent.DaemonSessionsChanged());
+			log.info(`client=${clientId} Set archived=${archived}: ${sessionId}`);
 		}
 	});
 
@@ -469,12 +495,9 @@ export const setSessionAutoSettleForClient = ({
 		const service = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 		if (yield* service.setSessionAutoSettleDisabled(sessionId, disabled)) {
-			const config = yield* Effect.serviceOption(ConfigTag);
-			if (config._tag === "Some" && config.value.broadcastSessionListChanged) {
-				yield* Effect.tryPromise(config.value.broadcastSessionListChanged).pipe(
-					Effect.catchAll(() => Effect.void),
-				);
-			}
+			const bus = yield* Effect.serviceOption(DaemonEventBusTag);
+			if (bus._tag === "Some")
+				yield* PubSub.publish(bus.value, DaemonEvent.DaemonSessionsChanged());
 			log.info(
 				`client=${clientId} Set auto-settle disabled=${disabled}: ${sessionId}`,
 			);
@@ -649,7 +672,7 @@ export const forkSessionForClient = ({
 
 		return {
 			id: forked.id,
-			parentId: sessionId,
+			forkedFrom: sessionId,
 			...(forkMessageId && { forkMessageId }),
 			...(forkPointTimestamp != null && { forkPointTimestamp }),
 		};

@@ -8,7 +8,7 @@ import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 function ledger(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath(), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		const column = (sql: string) =>
 			(db.prepare(sql).all(sessionId) as Array<{ value: string }>).map(
@@ -103,7 +103,11 @@ describe("a stale OpenCode status read", () => {
 				delivery: "queue",
 			}),
 		);
-		expect(accepted).toEqual({ ok: true, sessionId: running });
+		expect(accepted).toEqual({
+			ok: true,
+			sessionId: running,
+			handedOff: false,
+		});
 		await vi.waitFor(() =>
 			expect(ledger(fixture, running)).toEqual({
 				status: "busy",

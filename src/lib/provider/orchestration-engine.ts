@@ -10,6 +10,7 @@ import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Deferred, Effect } from "effect";
 
 import type { Account } from "../contracts/account.js";
+import type { SessionScope } from "../contracts/session-scope.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
@@ -112,6 +113,7 @@ export interface DiscoverCommand {
 	readonly providerId: string;
 	readonly account?: Account;
 	readonly workspaceRoot?: string;
+	readonly refresh?: boolean;
 }
 
 export interface EndSessionCommand {
@@ -189,6 +191,7 @@ export interface OrchestrationEngineOptions {
 }
 
 interface DurableCommandRuntime {
+	readonly projectId: string;
 	readonly commit: DurableCommandCommitRepository;
 	readonly receipts: CommandReadModelRepository;
 	readonly reactor: ProviderSideEffectReactor;
@@ -251,6 +254,7 @@ export class OrchestrationEngine {
 		if (options.durableCommands) {
 			const durable = options.durableCommands;
 			this.durable = {
+				projectId: durable.projectKey,
 				commit: new DurableCommandCommitRepository(
 					durable.sql,
 					durable.projectKey,
@@ -264,6 +268,7 @@ export class OrchestrationEngine {
 				// ProviderRuntimeIngestion (no-op sink when none is supplied).
 				reactor: new ProviderSideEffectReactor({
 					sql: durable.sql,
+					projectId: durable.projectKey,
 					registry: this.registry,
 					ingestion: durable.ingestion ?? { ingest: () => Effect.succeed(0) },
 					...(durable.persistHandoffDelivered
@@ -407,6 +412,10 @@ export class OrchestrationEngine {
 				.checkReceipt(command.commandId)
 				.pipe(Effect.orDie);
 			if (existing) {
+				if (existing.projectId !== durable.projectId)
+					return yield* Effect.fail(
+						new CommandFingerprintMismatch({ commandId: command.commandId }),
+					);
 				// The stored hash is only comparable to a freshly computed one within
 				// the same fingerprint scheme version. A version mismatch (a receipt
 				// written under an older scheme) is treated as a fingerprint mismatch:
@@ -438,6 +447,7 @@ export class OrchestrationEngine {
 						UPDATE provider_command_outbox
 						SET status = 'failed', error_code = 'orphaned', updated_at = ${durable.now()}
 						WHERE command_id = ${command.commandId}
+						  AND project_key = ${durable.projectId}
 						  AND status IN ('pending', 'running', 'retryable_failed')`.pipe(
 						Effect.orDie,
 					);
@@ -743,17 +753,20 @@ export class OrchestrationEngine {
 				command.providerId,
 				command.account,
 			);
-			return yield* instance
-				.discoverEffect(command.workspaceRoot, command.account)
-				.pipe(
-					Effect.tapError((error) =>
-						Effect.sync(() =>
-							log.error(
-								`discover failed: provider=${command.providerId}: ${error.message}`,
-							),
+			const discovery = command.refresh
+				? instance.discoverEffect(command.workspaceRoot, command.account, {
+						refresh: true,
+					})
+				: instance.discoverEffect(command.workspaceRoot, command.account);
+			return yield* discovery.pipe(
+				Effect.tapError((error) =>
+					Effect.sync(() =>
+						log.error(
+							`discover failed: provider=${command.providerId}: ${error.message}`,
 						),
 					),
-				);
+				),
+			);
 		});
 	}
 
@@ -833,8 +846,10 @@ export class OrchestrationEngine {
 	}
 
 	/** List all bound sessions with their provider IDs. */
-	listBoundSessionsEffect(): Effect.Effect<SessionBinding[]> {
-		return this.sessionBindingReadModel.listBoundSessions();
+	listBoundSessionsEffect(
+		scope: SessionScope,
+	): Effect.Effect<SessionBinding[]> {
+		return this.sessionBindingReadModel.listBoundSessions(scope);
 	}
 
 	/**

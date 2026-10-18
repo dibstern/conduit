@@ -147,7 +147,6 @@ for (const scenario of [
 		const registry = new ProviderRegistry([
 			{
 				providerId: "claude",
-				steering: true,
 				discoverEffect: () =>
 					Effect.die("Continuation must not discover providers"),
 				sendTurnEffect: () =>
@@ -243,7 +242,9 @@ for (const scenario of [
 				expect(binding).toBe("deleted-claude");
 				expect(sends).toEqual([]);
 				expect(
-					(yield* read.listSessionInfos())[0]?.limitRecovery,
+					(yield* read.listSessionInfos({
+						projectIds: ["effective-continuation"],
+					}))[0]?.limitRecovery,
 				).toMatchObject({
 					instanceId: "deleted-claude",
 					scheduledAt: scenario.at,
@@ -306,6 +307,7 @@ for (const scenario of [
 					}),
 			}),
 			Effect.provideService(SessionInboxTag, {
+				steerDeclined: () => Effect.void,
 				withSession: (sessionId, effect) =>
 					admission.withPermits(1)(
 						Effect.sync(() => admittedSessions.push(sessionId)).pipe(

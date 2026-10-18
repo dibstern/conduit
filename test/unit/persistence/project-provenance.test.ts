@@ -8,7 +8,7 @@
 // - Renumbering provenance loses main's migration order or changes shipped SQL.
 // - Reopening runs UPDATEs despite every row already being stamped.
 // - A failed stamp commits only a prefix of the tables.
-// - Stored event, receipt and cursor contracts omit their project's identity.
+// - Stored event and receipt contracts omit their project's identity.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -109,6 +109,11 @@ describe("Bound project provenance", () => {
 			"0056_drop_activities",
 			"0057_session_pick_backfill",
 			"0058_compact_redundant_events",
+			"0059_session_project_scope",
+			"0060_daemon_store_imports",
+			"0061_sessions_lineage",
+			"0062_legacy_forks",
+			"0063_sessions_archived",
 		]);
 	});
 
@@ -133,7 +138,7 @@ describe("Bound project provenance", () => {
 		);
 	});
 
-	it("binds append, receipt, outbox, metadata and cursor ownership without per-write ids", async () => {
+	it("binds append, receipt, outbox and metadata ownership while cursors remain store-wide", async () => {
 		const runtime = ManagedRuntime.make(
 			makePersistenceEffectLayer(":memory:", "alpha"),
 		);
@@ -150,7 +155,10 @@ describe("Bound project provenance", () => {
 					);
 					const cursors = yield* ProjectorCursorEffectTag;
 					yield* cursors.upsert("session", stored.sequence);
-					expect((yield* cursors.get("session"))?.projectId).toBe("alpha");
+					expect(yield* cursors.get("session")).toMatchObject({
+						projectorName: "session",
+						lastAppliedSeq: stored.sequence,
+					});
 				}),
 			);
 			await runtime.runPromise(

@@ -3,11 +3,9 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Either, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import { DaemonSessionQueryServiceTag } from "../../../src/lib/domain/relay/Services/daemon-session-query-service.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
-import {
-	makeMockConfig,
-	makeTestHandlerLayer,
-} from "../../helpers/mock-factories.js";
+import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 
 const rpcClient = Effect.gen(function* () {
 	return yield* RpcTest.makeClient(WsRpcGroup);
@@ -15,29 +13,30 @@ const rpcClient = Effect.gen(function* () {
 
 describe("WsRpcServerLayer daemon sessions", () => {
 	it.effect("lists daemon sessions through the project-scoped RPC lane", () => {
-		const listDaemonSessions = vi.fn(async () => ({
-			sessions: [
-				{
-					accountId: null,
-					id: "session-1",
-					title: "Session one",
-					status: "idle" as const,
-					updatedAt: 42,
-					projectSlug: "project-b",
-				},
-			],
-			availability: [
-				{ projectSlug: "project-a", available: true as const },
-				{
-					projectSlug: "project-b",
-					available: false as const,
-					error: "unreadable",
-				},
-			],
-			hasMore: true,
-			nextCursor: { updatedAt: 42, id: "session-1" },
-		}));
-		const config = makeMockConfig({ listDaemonSessions });
+		const listDaemonSessions = vi.fn(() =>
+			Effect.succeed({
+				sessions: [
+					{
+						accountId: null,
+						id: "session-1",
+						title: "Session one",
+						status: "idle" as const,
+						updatedAt: 42,
+						projectSlug: "project-b",
+					},
+				],
+				availability: [
+					{ projectSlug: "project-a", available: true as const },
+					{
+						projectSlug: "project-b",
+						available: false as const,
+						error: "unreadable",
+					},
+				],
+				hasMore: true,
+				nextCursor: { updatedAt: 42, id: "session-1" },
+			}),
+		);
 
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
@@ -82,14 +81,28 @@ describe("WsRpcServerLayer daemon sessions", () => {
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ config })),
+					Layer.provideMerge(
+						Layer.merge(
+							makeTestHandlerLayer(),
+							Layer.succeed(DaemonSessionQueryServiceTag, {
+								listArchived: () =>
+									Effect.succeed({
+										sessions: [],
+										availability: [],
+										hasMore: false,
+										nextCursor: null,
+									}),
+								list: listDaemonSessions,
+							}),
+						),
+					),
 				),
 			),
 		);
 	});
 
 	it.effect(
-		"reports daemon session listing as unsupported without a callback",
+		"reports daemon session listing as unsupported without daemon services",
 		() =>
 			Effect.gen(function* () {
 				const client = yield* rpcClient;

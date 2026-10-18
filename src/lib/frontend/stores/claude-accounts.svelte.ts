@@ -3,10 +3,7 @@ import type {
 	LimitRecovery,
 	UsageReading,
 } from "../../contracts/limit-recovery.js";
-import {
-	previewContinuationRpc,
-	quotaForAccountsRpc,
-} from "../transport/ws-rpc-client.js";
+import { rpc } from "../transport/ws-rpc-client.js";
 import {
 	showAccountSwitchRefusal,
 	switchSessionAccount,
@@ -110,7 +107,7 @@ class ClaudeAccounts {
 		let checked: readonly UsageReading[] = [];
 		let refreshed = false;
 		try {
-			checked = await quotaForAccountsRpc({
+			checked = await rpc("QuotaForAccounts", {
 				projectSlug: this.projectSlug,
 				originId: getBrowserClientId(),
 			});
@@ -176,6 +173,7 @@ class ClaudeAccounts {
 			if (
 				reading.accountId === currentId ||
 				!instance ||
+				// driver-dispatch-ok: narrows the usage reading's harness, not a driver.
 				quota?.harness !== "claude" ||
 				quota.status !== "available" ||
 				quotaBlocksSwitch(quota)
@@ -243,7 +241,7 @@ class ClaudeAccounts {
 		};
 		this.handoff = { kind: "previewing", ...context };
 		try {
-			const summary = await previewContinuationRpc({
+			const summary = await rpc("PreviewContinuation", {
 				sessionId,
 				instanceId: targetId,
 				originId: getBrowserClientId(),

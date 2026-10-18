@@ -19,16 +19,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import {
-	type Context,
+	Context,
 	Deferred,
 	Effect,
 	Fiber,
 	Layer,
 	ManagedRuntime,
+	Option,
 } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
 import {
 	ProviderRuntimeIngestionLive,
@@ -42,9 +44,9 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
 import {
-	currentClaudeRunnerOutput,
-	makeClaudeRunnerReceiptStore,
-} from "../../../src/lib/provider/claude/claude-runner-receipts.js";
+	currentRunnerOutput,
+	makeRunnerReceiptStore,
+} from "../../../src/lib/provider/runner/runner-receipts.js";
 import { createProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
@@ -297,7 +299,7 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 		}
 	});
 
-	it("wires relay-stack SSE events through Effect persistence into the read model", async () => {
+	it("wires relay-stack SSE events into the read model and resolves only its stored owner", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-relay-runtime-ingress-"));
 		const projectDir = join(dir, "project");
 		mkdirSync(projectDir, { recursive: true });
@@ -394,6 +396,28 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 					}),
 				]),
 			);
+			await relay.effectRuntime.runtime.runPromise(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, project_id)
+						VALUES ('foreign-owner', 'claude', 'Foreign', 'idle', 1, 1, 'another-project')`;
+				}),
+			);
+			const directory = Option.getOrThrow(
+				Context.getOption(
+					(await relay.effectRuntime.runtime.runtime()).context,
+					SessionDirectory,
+				),
+			);
+			expect(await Effect.runPromise(directory.projectOf("sess-1"))).toEqual(
+				Option.some("runtime-ingress-smoke"),
+			);
+			expect(
+				await Effect.runPromise(directory.projectOf("foreign-owner")),
+			).toEqual(Option.none());
+			expect(await Effect.runPromise(directory.projectOf("missing"))).toEqual(
+				Option.none(),
+			);
 		} finally {
 			if (relay != null) await relay.stop();
 			await closeServer(relayServer);
@@ -440,7 +464,7 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 						{ upstreamAdapter: null },
 					);
 					const sql = yield* SqlClient.SqlClient;
-					const receipts = yield* makeClaudeRunnerReceiptStore(sql);
+					const receipts = yield* makeRunnerReceiptStore(sql);
 					const runnerId = "workspace-race-runner";
 					const attachmentId = "workspace-race-attachment";
 					yield* receipts.attach(runnerId, attachmentId);
@@ -483,7 +507,7 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 										status: "busy",
 									}),
 								])
-								.pipe(Effect.locally(currentClaudeRunnerOutput, receipt)),
+								.pipe(Effect.locally(currentRunnerOutput, receipt)),
 						);
 						yield* Deferred.await(resolved);
 						yield* applySessionCommand(

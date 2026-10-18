@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import {
 	applySessionChange,
 	seedFamilySessions,
@@ -6,7 +7,7 @@ import {
 } from "./session-fixtures.js";
 // Verifies that clearSessionChatState is wired to:
 // 1. shell feed removal
-// 2. shell snapshot omission and its chat cleanup
+// 2. shell snapshot omission preserves chat until deletion
 // 3. Search query results never trigger cleanup
 // 4. Active-session teardown
 
@@ -56,12 +57,13 @@ import {
 	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 beforeEach(() => {
 	sessionActivity.clear();
 	sessionMessages.clear();
 	_resetLRU();
-	sessionState.currentId = "current-session";
+	openSessionForSetup("current-session", "project-a");
 	clearSessionState();
 	sessionState.searchQuery = "";
 	clearSessionState();
@@ -72,7 +74,7 @@ afterEach(() => {
 	sessionActivity.clear();
 	sessionMessages.clear();
 	_resetLRU();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 	clearSessionState();
 });
 
@@ -116,7 +118,7 @@ describe("clearSessionChatState wired to the shell feed", () => {
 });
 
 describe("shell snapshot omission", () => {
-	it("removes membership and evicts cached chat state", () => {
+	it("removes membership and preserves cached chat state", () => {
 		// Pre-populate sessions map with sessions A, B, C
 		seedSessions([
 			...sessionState.sessions.values(),
@@ -166,8 +168,8 @@ describe("shell snapshot omission", () => {
 			],
 		});
 
-		expect(sessionActivity.has("session-B")).toBe(false);
-		expect(sessionMessages.has("session-B")).toBe(false);
+		expect(sessionActivity.has("session-B")).toBe(true);
+		expect(sessionMessages.has("session-B")).toBe(true);
 		expect(sessionState.sessions.has("session-B")).toBe(false);
 		expect(
 			sessionState.rootSessions.some((session) => session.id === "session-B"),
@@ -212,7 +214,7 @@ describe("shell snapshot omission", () => {
 		]);
 	});
 
-	it("an authoritative snapshot triggers cleanup", () => {
+	it("snapshot omission does not establish deletion", () => {
 		// Pre-populate
 		seedSessions([
 			...sessionState.sessions.values(),
@@ -246,15 +248,15 @@ describe("shell snapshot omission", () => {
 			],
 		});
 
-		expect(sessionActivity.has("session-B")).toBe(false);
-		expect(sessionMessages.has("session-B")).toBe(false);
+		expect(sessionActivity.has("session-B")).toBe(true);
+		expect(sessionMessages.has("session-B")).toBe(true);
 	});
 });
 
 describe("active-session teardown", () => {
 	it("feed removal for the active session cleans up state", () => {
 		const activeId = "active-session";
-		sessionState.currentId = activeId;
+		openSessionForSetup(activeId, "project-a");
 		seedSessions([
 			...sessionState.sessions.values(),
 			{ id: activeId, title: "Active", status: "idle" },
@@ -278,7 +280,6 @@ it("switching families preserves the target transcript and removes old family me
 	target.messages.messages = [
 		{ type: "user", uuid: "cached", text: "Keep this transcript" },
 	];
-	sessionState.currentId = "new-child";
 	seedFamilySessions([
 		{ id: "new-root", title: "New", status: "idle" },
 		{
@@ -288,6 +289,7 @@ it("switching families preserves the target transcript and removes old family me
 			parentID: "new-root",
 		},
 	]);
+	openSessionForSetup("new-child", "project-a");
 	expect(getOrCreateSessionSlot("new-child").messages.messages).toEqual(
 		target.messages.messages,
 	);

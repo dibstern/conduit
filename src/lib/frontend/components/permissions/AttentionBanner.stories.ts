@@ -4,11 +4,9 @@ import {
 	applyApprovalEnvelope,
 	clearAllPermissions,
 } from "../../stores/permissions.svelte.js";
-import {
-	clearSessionState,
-	sessionState,
-} from "../../stores/session.svelte.js";
+import { clearSessionState } from "../../stores/session.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import type { PermissionId, SessionInfo } from "../../types.js";
 import NotificationStack from "../overlays/NotificationStack.svelte";
@@ -43,7 +41,7 @@ function setupState(opts: {
 	sessionTitles?: Record<string, string>;
 }) {
 	flushSync(() => {
-		sessionState.currentId = opts.currentId ?? "ses_current";
+		openSessionForSetup(opts.currentId ?? "ses_current", "conduit");
 		seedSessions(
 			Object.entries(opts.sessionTitles ?? {}).map(([id, title]) => ({
 				id,

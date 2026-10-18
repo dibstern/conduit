@@ -11,8 +11,8 @@ import {
 	SCOPE_PARAM,
 } from "./router.svelte.js";
 
-// The project list and the current slug both come from the server. Writers
-// live in project.svelte.ts: `applyProjectList`.
+// The shell feed owns projects and the new-session preference. Project mutation
+// replies may update the attached hint through project.svelte.ts.
 
 export const projectState = $state({
 	projects: [] as ProjectInfo[],
@@ -45,8 +45,11 @@ export function getProjectGroup(slug: string): ProjectGroup | undefined {
 export function getDraftProject(): string | null {
 	const params = getCurrentSearchParams();
 	const picked = params.get(DRAFT_PROJECT_PARAM);
-	if (picked) return picked;
-	const available = projectState.projects.filter((p) => !p.missing);
+	const isAvailable = (p: ProjectInfo) => !p.missing && !p.unavailableReason;
+	// An unknown pick may be a project list that has not loaded yet.
+	const pickedProject = projectState.projects.find((p) => p.slug === picked);
+	if (picked && (!pickedProject || isAvailable(pickedProject))) return picked;
+	const available = projectState.projects.filter(isAvailable);
 	const scope = params.get(SCOPE_PARAM);
 	const scopedProject =
 		getScopeGroupKey(scope) === null

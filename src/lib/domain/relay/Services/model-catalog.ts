@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import type { AccountId } from "../../../contracts/provider-instance.js";
+import type { Account } from "../../../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { formatErrorDetail } from "../../../errors.js";
 import {
@@ -42,11 +42,17 @@ export const cloneContextWindowOptions = (
 				},
 	);
 
-const claudeProviderFromCatalog = (
+const DISCOVERY_PROVIDER_NAMES: Partial<Record<Harness, string>> = {
+	claude: "Anthropic - claude",
+	cursor: "Cursor",
+};
+
+const providerFromCatalog = (
 	models: readonly ModelInfo[],
+	driver: Harness,
 ): ProviderInfo => ({
-	id: "claude",
-	name: "Anthropic - claude",
+	id: driver,
+	name: DISCOVERY_PROVIDER_NAMES[driver] ?? driver,
 	configured: true,
 	models: models
 		.map((model) => {
@@ -54,8 +60,9 @@ const claudeProviderFromCatalog = (
 			return {
 				id: model.id,
 				name: model.name,
-				provider: "claude",
+				provider: driver,
 				...(efforts.length > 0 ? { variants: [...efforts] } : {}),
+				...(model.parameters ? { parameters: model.parameters } : {}),
 				...(model.limit ? { limit: { ...model.limit } } : {}),
 				...(model.contextWindowOptions?.length
 					? {
@@ -76,17 +83,17 @@ const claudeProviderFromCatalog = (
 		),
 });
 
-export const publishClaudeModels = (
+export const publishDiscoveredModels = (
 	models: readonly ModelInfo[],
-	accountId: AccountId,
+	account: Pick<Account, "id" | "driver">,
 ) =>
 	Effect.gen(function* () {
 		const projectSettings = yield* Effect.serviceOption(ProjectSettingsTag);
 		if (projectSettings._tag === "None") return;
-		const provider = claudeProviderFromCatalog(models);
+		const provider = providerFromCatalog(models, account.driver);
 		yield* publishProjectSetting({
 			_tag: "providerModels",
-			accountId,
+			accountId: account.id,
 			providers: models.length > 0 ? [provider] : [],
 		}).pipe(Effect.provideService(ProjectSettingsTag, projectSettings.value));
 		yield* refreshHarnessDefaults;
@@ -117,13 +124,14 @@ export const loadModelCatalog = (
 				}),
 			);
 			if (capsResult._tag === "Left") {
+				yield* publishDiscoveredModels([], account);
 				log.warn(
-					`Failed to fetch Claude model catalog: ${formatErrorDetail(capsResult.left)}`,
+					`Failed to fetch ${account.driver} model catalog: ${formatErrorDetail(capsResult.left)}`,
 				);
 				return [] as ModelInfo[];
 			}
 			const models = capsResult.right.models;
-			yield* publishClaudeModels(models, account.id);
+			yield* publishDiscoveredModels(models, account);
 			return models;
 		}
 

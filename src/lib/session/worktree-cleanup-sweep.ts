@@ -9,6 +9,7 @@ import type {
 } from "../contracts/worktree.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { WorktreeServiceTag } from "../domain/daemon/Services/worktree-service.js";
+import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import {
 	AgentLivenessTag,
 	BackgroundLivenessTag,
@@ -37,10 +38,12 @@ import {
 /** Discovery only: no Git calls and no relay startup for an absent checkout. */
 export const readWorktreeCleanupPaths = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+	const { projectId } = yield* PersistenceProjectTag;
 	return yield* sql<{ session_id: string; path: string }>`
 		SELECT DISTINCT events.session_id, mapping.value AS path
 		FROM events, json_each(events.data, '$.worktrees') AS mapping
-		WHERE events.type = 'session.workspace_changed'
+		WHERE events.project_id = ${projectId}
+			AND events.type = 'session.workspace_changed'
 			AND json_extract(events.data, '$.cause') = 'launch'
 			AND json_extract(events.data, '$.origin') = 'conduit'`;
 });
@@ -49,16 +52,19 @@ export const readWorktreeCleanupPaths = Effect.gen(function* () {
 export const readSessionQuiescence = (now: number, sessionId: string) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		const { projectId } = yield* PersistenceProjectTag;
 		const backgroundOf = yield* BackgroundLivenessTag;
 		const retries = yield* Effect.serviceOption(SessionRetriesTag);
 		return {
-			facts: (yield* readPersistedAutoSettleFacts(now, sessionId)).get(
+			facts: (yield* readPersistedAutoSettleFacts(
+				projectId,
+				now,
 				sessionId,
-			),
+			)).get(sessionId),
 			hasPendingTurn:
 				(yield* sql<{ found: number }>`SELECT EXISTS (
 					SELECT 1 FROM provider_command_outbox
-					WHERE session_id = ${sessionId} AND effect_type = 'send_turn'
+					WHERE project_key = ${projectId} AND session_id = ${sessionId} AND effect_type = 'send_turn'
 					AND status IN ('pending', 'running', 'retryable_failed')
 				) AS found`)[0]?.found === 1,
 			hasLiveBackgroundWork: backgroundOf(sessionId) !== undefined,
@@ -74,6 +80,7 @@ export const cleanUpProjectWorktrees = (
 ) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
+		const { projectId } = yield* PersistenceProjectTag;
 		const worktrees = yield* WorktreeServiceTag;
 		const workspace = yield* SessionWorkspaceTag;
 		const inbox = yield* SessionInboxTag;

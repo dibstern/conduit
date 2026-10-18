@@ -4,7 +4,8 @@
 
 <script lang="ts">
 	import { getDescendantSessionIds, getRemotePermissions } from "../../stores/permissions.svelte.js";
-	import { findSession, getAttentionSessions, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { findSession, getAttentionSessions, sessionState } from "../../stores/session.svelte.js";
+	import { selection } from "../../stores/selection.svelte.js";
 	import Surface from "../ui/Surface.svelte";
 	import Button from "../ui/Button.svelte";
 	import TextButton from "../ui/TextButton.svelte";
@@ -65,7 +66,7 @@
 	function goToSession(sessionId: string) {
 		// Switching is all there is to do: the server records the view and the
 		// session row comes back with its badge already cleared, for every client.
-		switchToSession(sessionId);
+		selection.open(sessionId);
 	}
 
 	function dismiss() {

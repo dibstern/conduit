@@ -4,19 +4,31 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { RpcTest } from "@effect/rpc";
 import { SqlClient } from "@effect/sql";
+import { SqliteClient } from "@effect/sql-sqlite-node";
 import { it } from "@effect/vitest";
 import { Effect, Fiber, Layer, Option } from "effect";
 import { afterEach, describe, expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { makeDaemonSharedStoreLayer } from "../../../src/lib/domain/daemon/Layers/daemon-shared-store-layer.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
-import { listDaemonSessions } from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
+import {
+	findOpenCodeSession,
+	listDaemonSessions,
+	resolveDaemonOpenCodeSession,
+} from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
+import { DaemonStoreAvailability } from "../../../src/lib/domain/daemon/Services/daemon-store-availability.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { createSessionGitCache } from "../../../src/lib/git/session-git.js";
+import {
+	effectMigrationEntries,
+	makeEffectSqlMigrator,
+} from "../../../src/lib/persistence/effect/migrations.js";
 import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
@@ -24,6 +36,57 @@ import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 import { writeEventStore } from "../../helpers/persistence-factories.js";
 
 const temporaryRoots: string[] = [];
+
+describe("project-scoped OpenCode binding lookup", () => {
+	it.effect(
+		"resolves a shared provider session only within the selected project",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`CREATE TABLE sessions (
+				id TEXT PRIMARY KEY, project_id TEXT, provider TEXT, provider_sid TEXT)`;
+				yield* sql`CREATE TABLE session_providers (
+				id TEXT PRIMARY KEY, session_id TEXT, provider TEXT, provider_sid TEXT,
+				status TEXT, activated_at INTEGER)`;
+				yield* sql`INSERT INTO sessions VALUES
+				('session-a', 'project-a', 'opencode', 'shared-provider-session'),
+				('session-b', 'project-b', 'opencode', 'shared-provider-session')`;
+				yield* sql`INSERT INTO session_providers VALUES
+				('binding-a', 'session-a', 'opencode', 'shared-provider-session', 'active', 1),
+				('binding-b', 'session-b', 'opencode', 'shared-provider-session', 'active', 1)`;
+				expect(
+					yield* findOpenCodeSession(
+						{ projectIds: ["project-a"] },
+						"opencode",
+						"shared-provider-session",
+					),
+				).toBe("session-a");
+				expect(
+					yield* findOpenCodeSession(
+						{ projectIds: ["project-b"] },
+						"opencode",
+						"shared-provider-session",
+					),
+				).toBe("session-b");
+				expect(
+					yield* findOpenCodeSession(
+						{ projectIds: ["unrelated"] },
+						"opencode",
+						"shared-provider-session",
+					),
+				).toBeUndefined();
+				expect(
+					yield* findOpenCodeSession(
+						{ projectIds: ["project-a", "project-b"] },
+						"opencode",
+						"shared-provider-session",
+					).pipe(Effect.flip),
+				).toMatchObject({
+					message: "OpenCode session has ambiguous Conduit bindings",
+				});
+			}).pipe(Effect.provide(SqliteClient.layer({ filename: ":memory:" }))),
+	);
+});
 
 const makeTemporaryRoot = (): string => {
 	const root = mkdtempSync(join(tmpdir(), "conduit-daemon-sessions-"));
@@ -55,25 +118,23 @@ const makeProjectStore = (
 		readonly type: "permission" | "question";
 		readonly status: "pending" | "resolved";
 	}> = [],
+	filename = join(dirname(projectDirectory), "events.db"),
 ): void => {
-	const storageDirectory = projectStorageDir(
-		dirname(projectDirectory),
-		basename(projectDirectory),
-	);
+	const projectId = basename(projectDirectory);
 	mkdirSync(projectDirectory, { recursive: true });
-	mkdirSync(storageDirectory, { recursive: true });
+	mkdirSync(dirname(filename), { recursive: true });
 	writeEventStore(
-		join(storageDirectory, "events.db"),
+		filename,
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			for (const session of sessions) {
 				yield* sql`INSERT INTO sessions (
-					id, provider, title, status, parent_id, last_message_at,
+					id, project_id, provider, title, status, parent_id, last_message_at,
 					last_turn_end_version, seen_version, settled_at,
 					pinned_at, snoozed_at, snoozed_until, woken_at, woken_reason,
 					created_at, updated_at
 				) VALUES (
-					${session.id}, 'opencode', ${session.title}, ${session.status ?? "idle"},
+					${session.id}, ${projectId}, 'opencode', ${session.title}, ${session.status ?? "idle"},
 					${session.parentId ?? null}, ${session.lastMessageAt ?? null},
 					${session.lastTurnEndVersion ?? null},
 					${session.seenVersion ?? null}, ${session.settledAt ?? null},
@@ -101,6 +162,69 @@ afterEach(() => {
 });
 
 describe("listDaemonSessions", () => {
+	for (const read of ["list", "binding"] as const) {
+		it.effect(
+			`imports a legacy project store at startup before its scoped ${read} read`,
+			() => {
+				const root = makeTemporaryRoot();
+				const folder = join(root, "legacy-project");
+				const filename = join(
+					projectStorageDir(root, "legacy-project"),
+					"events.db",
+				);
+				mkdirSync(folder, { recursive: true });
+				mkdirSync(dirname(filename), { recursive: true });
+				Effect.runSync(
+					makeEffectSqlMigrator(
+						Object.fromEntries(
+							Object.entries(effectMigrationEntries).filter(
+								([key]) => key < "0059_session_project_scope",
+							),
+						),
+					).pipe(
+						Effect.zipRight(
+							Effect.gen(function* () {
+								const sql = yield* SqlClient.SqlClient;
+								yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+								VALUES ('legacy-session', 'opencode', 'Legacy', 'idle', 1, 1)`;
+							}),
+						),
+						Effect.provide(SqliteClient.layer({ filename })),
+					),
+				);
+				return Effect.gen(function* () {
+					expect([...(yield* DaemonStoreAvailability)]).toEqual([]);
+					if (read === "list") {
+						const result = yield* listDaemonSessions(root, {});
+						expect(result.sessions.map((session) => session.title)).toEqual([
+							"Legacy",
+						]);
+						expect(result.availability).toEqual([
+							{ projectSlug: "legacy-project", available: true },
+						]);
+					} else {
+						expect(
+							yield* resolveDaemonOpenCodeSession("opencode", "legacy-session"),
+						).toEqual({
+							projectSlug: "legacy-project",
+							sessionId: "legacy-session",
+						});
+					}
+				}).pipe(
+					Effect.provide(
+						makeDaemonSharedStoreLayer(root, defaultDaemonConfig()),
+					),
+					Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+					Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
+					Effect.provide(
+						makeProjectRegistryLive([
+							{ slug: "legacy-project", title: "Legacy", folders: [folder] },
+						]),
+					),
+				);
+			},
+		);
+	}
 	it.effect(
 		"awaits fresh foreign git with at most four directory reads per project",
 		() => {
@@ -156,6 +280,7 @@ describe("listDaemonSessions", () => {
 					expect(result.sessions[0]?.git?.branch).toBe("fresh");
 				}),
 			).pipe(
+				Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 				Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 				Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 				Effect.provide(
@@ -207,6 +332,7 @@ describe("listDaemonSessions", () => {
 				result.sessions.find((session) => session.id === "plain-session"),
 			).not.toHaveProperty("git");
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
@@ -267,6 +393,7 @@ describe("listDaemonSessions", () => {
 			expect(result.hasMore).toBe(false);
 			expect(result.nextCursor).toBeNull();
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
@@ -334,6 +461,7 @@ describe("listDaemonSessions", () => {
 				wokeBecause: "turn",
 			});
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
@@ -390,6 +518,7 @@ describe("listDaemonSessions", () => {
 			expect(result.hasMore).toBe(false);
 			expect(result.nextCursor).toBeNull();
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
@@ -456,6 +585,7 @@ describe("listDaemonSessions", () => {
 			expect(rootB).not.toHaveProperty("processing");
 			expect(rootC).toMatchObject({ id: "root-c", processing: true });
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
@@ -533,6 +663,7 @@ describe("listDaemonSessions", () => {
 			expect(result.hasMore).toBe(false);
 			expect(result.nextCursor).toBeNull();
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
@@ -638,6 +769,7 @@ describe("listDaemonSessions", () => {
 				expect(result.hasMore).toBe(true);
 				expect(result.nextCursor).toEqual({ updatedAt: 200, id: "b-mid" });
 			}).pipe(
+				Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 				Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 				Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 				Effect.provide(
@@ -773,6 +905,7 @@ describe("listDaemonSessions", () => {
 			expect(pastEnd.hasMore).toBe(false);
 			expect(pastEnd.nextCursor).toBeNull();
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
@@ -828,6 +961,7 @@ describe("listDaemonSessions", () => {
 			expect(final.hasMore).toBe(false);
 			expect(final.nextCursor).toBeNull();
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
@@ -904,6 +1038,7 @@ describe("listDaemonSessions", () => {
 			}
 			expect(paged).toEqual(expected);
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
@@ -972,6 +1107,7 @@ describe("listDaemonSessions", () => {
 				"a-needle",
 			]);
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
@@ -1003,6 +1139,7 @@ describe("listDaemonSessions", () => {
 				"literal-b",
 			]);
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
@@ -1065,6 +1202,7 @@ describe("listDaemonSessions", () => {
 					]),
 				);
 			}).pipe(
+				Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 				Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 				Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 				Effect.provide(

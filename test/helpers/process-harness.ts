@@ -472,7 +472,12 @@ Object.assign(ClaudeDriver, { create: deps => {
 		this.rememberManagedOpenCode();
 	}
 
-	projectStorePath(slug = "process-test"): string {
+	daemonStorePath(): string {
+		return join(this.configDir, "events.db");
+	}
+
+	/** Offline source for startup-import fixtures, never a daemon runtime store. */
+	legacyProjectStorePath(slug = "process-test"): string {
 		return join(projectStorageDir(this.configDir, slug), "events.db");
 	}
 
@@ -604,10 +609,32 @@ Object.assign(ClaudeDriver, { create: deps => {
 					| "CONDUIT_SERVER_BUILD_ID"
 					| "CONDUIT_SLOW_RPC_MS"
 					| "CONDUIT_TEST_ADVANCE_BUS_CAPACITY"
+					| "CONDUIT_TEST_RPC_DEFECT"
 					| "CONDUIT_TRACE_ENABLED"
 					| "CONDUIT_TRACE_FILE"
 					| "CONDUIT_TRACE_MAX_BYTES"
-					| "CONDUIT_TRACE_SQL_MIN_MS"
+					| "CONDUIT_TRACE_MIN_MS"
+					| "CONDUIT_TRACE_SESSION"
+					| "CONDUIT_CURSOR_SDK_TRACE"
+					| "CONDUIT_CURSOR_SDK_CAPTURE"
+					| "CONDUIT_TEST_CURSOR_CLOSE_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_DISPOSE_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_AUTH_STATE"
+					| "CONDUIT_TEST_CURSOR_LOGIN_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_LOGIN_URL_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_LOGIN_TIMEOUT_MS"
+					| "CURSOR_API_KEY"
+					| "CURSOR_AUTH_TOKEN"
+					| "CONDUIT_TEST_CURSOR_DASHBOARD_URL"
+					| "CONDUIT_TEST_CURSOR_KEYCHAIN"
+					| "CONDUIT_TEST_CURSOR_CATALOG_TTL_MS"
+					| "CONDUIT_TEST_CURSOR_DELTA_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_WAIT_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_CANCEL_TERMINAL_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_CANCEL_NEVER_SETTLES"
+					| "CONDUIT_TEST_CURSOR_SEND_GATE"
+					| "CONDUIT_TEST_CURSOR_STREAM_GATE"
+					| "CONDUIT_CONTENTION_METRICS"
 					| "XPC_SERVICE_NAME"
 				>
 			>;
@@ -1405,7 +1432,11 @@ Object.assign(ClaudeDriver, { create: deps => {
 		await this.stop(signal, 10_000);
 	}
 
-	async runCli(args: string[]): Promise<{
+	async runCli(
+		args: string[],
+		/** A cold CLI start can exceed the default bound on a loaded machine. */
+		options: { timeoutMs?: number } = {},
+	): Promise<{
 		pid: number | undefined;
 		code: number | null;
 		signal: NodeJS.Signals | null;
@@ -1438,7 +1469,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			const timer = setTimeout(() => {
 				timedOut = true;
 				child.kill("SIGKILL");
-			}, TIMEOUT_MS);
+			}, options.timeoutMs ?? TIMEOUT_MS);
 			child.once("error", (cause) => {
 				clearTimeout(timer);
 				fail(cause);
@@ -2129,30 +2160,29 @@ export class ProcessBrowser {
 		if (this.sessionsReady) return this.sessionsReady;
 		this.sessionsReady = (async () => {
 			const cursor = this.frames.length;
-			this.sessions = this.watch(
-				this.rpc.SubscribeShell({ projectSlug: this.projectSlug }),
-				(envelope) =>
-					Effect.gen(this, function* () {
-						this.record({ type: "shell", ...envelope });
-						if (envelope._tag === "snapshot")
-							this.record({ type: "session_snapshot" });
-						const rows =
-							envelope._tag === "snapshot"
-								? envelope.rows
-								: envelope._tag === "upsert"
-									? [envelope.item]
-									: [];
-						for (const row of rows)
-							this.record({ ...row, type: "session_row" });
-						if (this.followRows)
-							yield* Effect.forEach(
-								rows,
-								(row) => Effect.promise(() => this.followSession(row.id)),
-								{ discard: true },
-							);
-						if (envelope._tag === "remove")
-							this.record({ type: "session_removed", id: envelope.id });
-					}),
+			this.sessions = this.watch(this.rpc.SubscribeShell({}), (envelope) =>
+				Effect.gen(this, function* () {
+					this.record({ type: "shell", ...envelope });
+					if (envelope._tag === "snapshot")
+						this.record({ type: "session_snapshot" });
+					const rows =
+						envelope._tag === "snapshot"
+							? envelope.rows
+							: envelope._tag === "upsert"
+								? [envelope.item]
+								: [];
+					for (const row of rows) this.record({ ...row, type: "session_row" });
+					// The feed spans every project; following another project's
+					// rows would tie this browser to that project's lifetime.
+					if (this.followRows)
+						yield* Effect.forEach(
+							rows.filter((row) => row.projectSlug === this.projectSlug),
+							(row) => Effect.promise(() => this.followSession(row.id)),
+							{ discard: true },
+						);
+					if (envelope._tag === "remove")
+						this.record({ type: "session_removed", id: envelope.id });
+				}),
 			);
 			await this.waitFor(
 				(message) =>
@@ -2342,6 +2372,7 @@ export class ProcessBrowser {
 		providerId: ProviderDriverKind = "claude",
 		draft: {
 			draftId?: string;
+			modelProviderId?: string;
 			modelId?: string;
 			variant?: string;
 			contextWindow?: string;
@@ -2385,7 +2416,9 @@ export class ProcessBrowser {
 			originId: this.originId,
 			providerId,
 			model: {
-				providerId: providerId === "opencode" ? "fake" : "claude",
+				providerId:
+					draft.modelProviderId ??
+					(providerId === "opencode" ? "fake" : providerId),
 				modelId:
 					draft.modelId ??
 					(providerId === "opencode" ? "fake-model" : "sonnet"),

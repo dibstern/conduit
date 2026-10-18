@@ -1,18 +1,12 @@
 import { PERMISSION_MODES } from "../permission-modes.js";
-import {
-	getAgentsRpc,
-	switchContextWindowRpc,
-	switchModelRpc,
-	switchPermissionModeRpc,
-	switchVariantRpc,
-} from "../transport/ws-rpc-client.js";
+import { toastFailure } from "../transport/rpc-errors.js";
+import { rpc } from "../transport/ws-rpc-client.js";
 import type {
 	ContextWindowOption,
 	Immutable,
 	SessionPermissionMode,
 } from "../types.js";
 import {
-	applyGetAgentsResponse,
 	chooseContextWindow,
 	chooseModel,
 	choosePermissionMode,
@@ -23,10 +17,10 @@ import {
 	getActiveModelVariants,
 	getEffectiveInstanceId,
 	getProviderGroupsForInstance,
+	refreshCatalogs,
 } from "./discovery.svelte.js";
 import { getCurrentSlug } from "./router.svelte.js";
 import { findSession, sessionState } from "./session.svelte.js";
-import { showToast } from "./ui.svelte.js";
 
 export type ComposerSetting<T> = {
 	readonly options: readonly T[];
@@ -70,11 +64,12 @@ function switchSetting(
 ): void {
 	pending[setting] += 1;
 	void request()
+		.then(() => {
+			void refreshCatalogs();
+		})
 		.catch((error: unknown) => {
 			undo();
-			const reason =
-				error instanceof Error ? error.message : "the daemon rejected it.";
-			showToast({ title: failure, body: reason, variant: "warn" });
+			toastFailure(failure, "warn")(error);
 		})
 		.finally(() => {
 			pending[setting] -= 1;
@@ -124,7 +119,7 @@ export const effort: ComposerSetting<string> = {
 			"effort",
 			undo,
 			() =>
-				switchVariantRpc({ sessionId, variant }).then((response) =>
+				rpc("SwitchVariant", { sessionId, variant }).then((response) =>
 					apply({
 						variant: response.variant,
 						variants: [...response.variants],
@@ -166,7 +161,7 @@ export const approvals: ComposerSetting<ApprovalOption> = {
 		switchSetting(
 			"approvals",
 			undo,
-			() => switchPermissionModeRpc({ sessionId, mode }),
+			() => rpc("SwitchPermissionMode", { sessionId, mode }),
 			`Couldn't switch approval mode to "${value.label}"`,
 		);
 	},
@@ -206,7 +201,7 @@ export const contextWindow: ComposerSetting<Immutable<ContextWindowOption>> = {
 				"contextWindow",
 				undo,
 				() =>
-					switchContextWindowRpc({
+					rpc("SwitchContextWindow", {
 						sessionId,
 						contextWindow: contextWindowValue,
 					}).then((response) =>
@@ -267,7 +262,7 @@ export const model: ComposerSetting<ComposerModel> = {
 			"model",
 			undo,
 			() =>
-				switchModelRpc({ sessionId, ...value }).then((response) => {
+				rpc("SwitchModel", { sessionId, ...value }).then((response) => {
 					apply({
 						modelId: response.model,
 						providerId: response.provider,
@@ -284,16 +279,6 @@ export const model: ComposerSetting<ComposerModel> = {
 								}
 							: {}),
 					});
-					void getAgentsRpc({ sessionId })
-						.then((response) => {
-							// Agents are shared composer state, unlike the per-session pick.
-							if (
-								sessionState.currentId === sessionId &&
-								getCurrentSlug() === projectSlug
-							)
-								applyGetAgentsResponse(response, sessionId);
-						})
-						.catch(() => undefined);
 				}),
 			`Couldn't switch model to "${value.modelId}"`,
 		);

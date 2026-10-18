@@ -11,11 +11,21 @@ import {
 	responseChunks,
 } from "../../helpers/process-harness.js";
 
+const capabilityModels = ["sonnet", "claude-sonnet-4"].map((id) => ({
+	id,
+	name: id,
+	providerId: "claude",
+	contextWindowOptions: [{ value: "200k", label: "200K" }],
+}));
+
 async function sessionSnapshot(browser: ProcessBrowser, sessionId: string) {
 	const envelopes = await Effect.runPromise(
-		browser.rpc
-			.SubscribeShell({ projectSlug: "process-test" })
-			.pipe(Stream.take(1), Stream.runCollect, Effect.timeout("5 seconds")),
+		browser.rpc.SubscribeShell({}).pipe(
+			Stream.filter((frame) => frame._tag !== "projects"),
+			Stream.take(1),
+			Stream.runCollect,
+			Effect.timeout("5 seconds"),
+		),
 	);
 	const snapshot = [...envelopes][0];
 	if (snapshot?._tag !== "snapshot") throw new Error("Missing shell snapshot");
@@ -25,7 +35,7 @@ async function sessionSnapshot(browser: ProcessBrowser, sessionId: string) {
 }
 
 function persisted(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath(), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		return {
 			session: db
@@ -102,6 +112,7 @@ describe("running Claude turn status across restart", () => {
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			foregroundCli: true,
 			restartProof: true,
+			capabilityModels,
 			...(opencodeAvailable && { opencodeRecording: "chat-simple" }),
 		});
 		const browser = await harness.connect();
@@ -225,6 +236,7 @@ describe("Claude turn status before the model streams", () => {
 		harness = await ProcessHarness.start({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			restartProof: true,
+			capabilityModels,
 		});
 		const browser = await harness.connect();
 		const sessionId = await browser.createSession("Local work");
@@ -293,6 +305,7 @@ describe("Claude turn status before the model streams", () => {
 		harness = await ProcessHarness.start({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			restartProof: true,
+			capabilityModels,
 		});
 		const browser = await harness.connect();
 		const sessionId = await browser.createSession("Mode change");
@@ -329,7 +342,7 @@ describe("Claude turn status before the model streams", () => {
 		// that used to read as idle.
 		await vi.waitFor(() => {
 			if (!harness) throw new Error("Missing harness");
-			const db = new Database(harness.projectStorePath(), { readonly: true });
+			const db = new Database(harness.daemonStorePath(), { readonly: true });
 			try {
 				expect(
 					db

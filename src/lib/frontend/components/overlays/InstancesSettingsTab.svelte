@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { AccountChangeRejected } from "../../../contracts/account.js";
 	import { isKnownDriverKind, type KnownProviderDriverKind } from "../../../contracts/provider-instance.js";
 	import { onDestroy } from "svelte";
 	import type { ServerForm } from "./ServerSettingsTab.svelte";
+	import CursorAuthSettings from "./CursorAuthSettings.svelte";
 	import { refreshServerStatus } from "../../stores/server-status.svelte.js";
 	import Button from "../ui/Button.svelte";
 	import Badge from "../ui/Badge.svelte";
@@ -19,7 +19,8 @@
 	import { confirm, showToast } from "../../stores/ui.svelte.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { getProviderPresentation, PROVIDER_PRESENTATION } from "../../utils/provider-presentation.js";
-	import { addInstanceRpc, detectProxyRpc, removeInstanceRpc, scanNowRpc, setDefaultRpc, startInstanceRpc, stopInstanceRpc, updateInstanceRpc } from "../../transport/ws-rpc-client.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 
 	const INSTANCE_KEY_COPY_FEEDBACK_MS = 2_000;
 	let { openForm, onToggleForm, onOpenUsage }: { openForm: ServerForm | null; onToggleForm: (form: ServerForm) => void; onOpenUsage: () => void } = $props();
@@ -39,6 +40,7 @@
 		formPort: "",
 		formUrl: "",
 		formEnv: "",
+		initialFormEnv: "",
 		formEnvOpen: false,
 		formSaving: false,
 		defaultSaving: false,
@@ -46,7 +48,7 @@
 
 	$effect(() => {
 		beginProxyDetection();
-		void detectProxyRpc()
+		void rpc("DetectProxy", {})
 			.then(applyDetectProxyResponse)
 			.catch(() => applyDetectProxyResponse({ found: false, port: 8317 }));
 	});
@@ -69,7 +71,10 @@
 		}
 		return grouped;
 	});
-	const configDirectoryDrivers = $derived(DRIVER_OPTIONS.filter((driver) => getDriverTraits(driver)?.accountKind === "config-directory"));
+	const configDirectoryDrivers = $derived(DRIVER_OPTIONS.filter((driver) => {
+		const traits = getDriverTraits(driver);
+		return traits?.accountKind === "config-directory";
+	}));
 	const serverInstances = $derived(instances.filter((inst) => getProviderPresentation(inst.driver ?? "opencode") && getInstanceTraits(inst.id)?.runsOpenCodeServer));
 	const unknownInstances = $derived(instances.filter((inst) => !getProviderPresentation(inst.driver ?? "opencode")));
 	const formTraits = $derived(getDriverTraits(state.formDriver));
@@ -82,24 +87,24 @@
 		state.expandedInstanceId = state.expandedInstanceId === instanceId ? null : instanceId;
 	}
 	function handleStart(instanceId: string) {
-		void startInstanceRpc({ instanceId })
+		void rpc("StartInstance", { instanceId })
 			.then(applyInstanceListResponse)
 			.then(refreshServerStatus)
-			.catch(() => showToast("Failed to start instance", { variant: "warn" }));
+			.catch(toastFailure("Failed to start instance", "warn"));
 	}
 	function handleStop(instanceId: string) {
-		void stopInstanceRpc({ instanceId })
+		void rpc("StopInstance", { instanceId })
 			.then(applyInstanceListResponse)
 			.then(refreshServerStatus)
-			.catch(() => showToast("Failed to stop instance", { variant: "warn" }));
+			.catch(toastFailure("Failed to stop instance", "warn"));
 	}
 	async function handleMakeDefault(instanceId: string) {
 		if (state.defaultSaving) return;
 		state.defaultSaving = true;
 		try {
-			applyInstanceListResponse(await setDefaultRpc({ instanceId }));
+			applyInstanceListResponse(await rpc("SetDefault", { instanceId }));
 		} catch (error: unknown) {
-			showToast(error instanceof AccountChangeRejected ? error.reason : "Failed to change default account", { variant: "warn" });
+			toastFailure("Failed to change default account", "warn")(error);
 		} finally {
 			state.defaultSaving = false;
 		}
@@ -107,12 +112,10 @@
 	async function handleRemove(instanceId: string, instanceName: string) {
 		const confirmed = await confirm(`Remove instance "${instanceName}"? This cannot be undone.`);
 		if (confirmed) {
-			void removeInstanceRpc({ instanceId })
+			void rpc("RemoveInstance", { instanceId })
 				.then(applyInstanceListResponse)
 				.then(refreshServerStatus)
-				.catch((error: unknown) =>
-					showToast(error instanceof AccountChangeRejected ? error.reason : "Failed to remove instance", { variant: "warn" }),
-				);
+				.catch(toastFailure("Failed to remove instance", "warn"));
 		}
 	}
 	function closeInstanceForm() {
@@ -125,6 +128,7 @@
 		state.formPort = "";
 		state.formUrl = "";
 		state.formEnv = "";
+		state.initialFormEnv = "";
 		state.formEnvOpen = false;
 		state.formSaving = false;
 	}
@@ -157,6 +161,7 @@
 					.map(([k, v]) => `${k}=${v}`)
 					.join("\n")
 			: "";
+		state.initialFormEnv = state.formEnv;
 		onToggleForm(`instance-edit:${inst.id}`);
 	}
 	/** Parse `KEY=VALUE` lines into an env record; blank/`#` lines are ignored. */
@@ -190,26 +195,28 @@
 			showToast("URL is required", { variant: "warn" });
 			return;
 		}
-		const env = formTraits?.runsOpenCodeServer && state.formManaged ? parseEnv(state.formEnv) : undefined;
+		const env = (formTraits?.runsOpenCodeServer && state.formManaged) || formPresentation.environment ? parseEnv(state.formEnv) : undefined;
+		const configEnv = formPresentation.environment && state.formEnv !== state.initialFormEnv ? { env: env ?? {} } : {};
 		const configDir = state.formConfigDir.trim() || undefined;
 		const url = !state.formManaged && port === undefined ? endpoint || undefined : undefined;
 		state.formSaving = true;
 		const request =
 			instanceFormMode === "edit" && editingInstanceId
-				? updateInstanceRpc({
+				? rpc("UpdateInstance", {
 						instanceId: editingInstanceId,
 						name,
 						...(usesConfigDirectory
-							? { configDir: configDir ?? "" }
+							? { configDir: configDir ?? "", ...configEnv }
 							: state.formManaged ? { ...(port !== undefined ? { port } : {}), env: env ?? {} } : {}),
 					})
-				: addInstanceRpc({
+				: rpc("AddInstance", {
 						name,
 						driver: state.formDriver,
 						...(usesConfigDirectory
 							? {
 									managed: false,
 									...(configDir !== undefined ? { configDir } : {}),
+									...configEnv,
 								}
 							: {
 									managed: state.formManaged,
@@ -228,20 +235,17 @@
 			})
 			.catch((error: unknown) => {
 				state.formSaving = false;
-				showToast(
-					error instanceof AccountChangeRejected ? error.reason : `Failed to ${submittedForm?.startsWith("instance-edit:") ? "update" : "add"} instance`,
-					{ variant: "warn" },
-				);
+				toastFailure(`Failed to ${submittedForm?.startsWith("instance-edit:") ? "update" : "add"} instance`, "warn")(error);
 			});
 	}
 	function handleScanNow() {
 		beginScan();
-		void scanNowRpc()
+		void rpc("ScanNow", {})
 			.then(applyScanNowResponse)
 			.then(refreshServerStatus)
-			.catch(() => {
+			.catch((error) => {
 				clearScanInFlight();
-				showToast("Port scan failed", { variant: "warn" });
+				toastFailure("Port scan failed", "warn")(error);
 			});
 	}
 	async function handleCopy(text: string, key: string) {
@@ -330,11 +334,13 @@
 		</div>
 		{#if formTraits?.accountKind === "config-directory"}
 			<p class="text-[11px] text-text-muted">Folder changes apply on the next turn. Leave the folder empty to use the login Conduit was launched with.</p>
-		{:else if state.formManaged}
+		{/if}
+		{#if formPresentation.environment || (formTraits?.runsOpenCodeServer && state.formManaged)}
 			<SettingsGroup title="Environment variables" summary="KEY=VALUE per line" collapsible bind:open={state.formEnvOpen}>
 				<label for="instance-form-env" class="block p-3">
 					<span class="sr-only">Environment variables</span>
-					<Textarea id="instance-form-env" data-testid="instance-form-env" rows={2} class="resize-y font-mono" placeholder="ANTHROPIC_API_KEY=sk-ant-..." bind:value={state.formEnv} disabled={state.formSaving} />
+					<Textarea id="instance-form-env" data-testid="instance-form-env" rows={2} class="resize-y font-mono" placeholder={formPresentation.environment?.placeholder ?? "ANTHROPIC_API_KEY=sk-ant-..."} bind:value={state.formEnv} disabled={state.formSaving} />
+					{#if formPresentation.environment}<p class="mt-2 text-[11px] leading-[1.5] text-text-dimmer">{formPresentation.environment.hint}</p>{/if}
 				</label>
 			</SettingsGroup>
 		{/if}
@@ -349,11 +355,13 @@
 	{#each configDirectoryDrivers as driver (driver)}
 		{@const accounts = instancesByDriver[driver] ?? []}
 		{@const presentation = PROVIDER_PRESENTATION[driver]}
-		{#if accounts.length > 0}
+		{#if presentation.auth}
+			<CursorAuthSettings account={accounts[0]} />
+		{:else if accounts.length > 0}
 			<div class="border border-border-subtle bg-bg-surface rounded-[9px] overflow-hidden" data-testid="{driver}-accounts-list">
 				<div class="flex items-center gap-[8px] bg-[rgba(var(--overlay-rgb),0.015)] px-[12px] py-[7px] text-[10.5px] font-semibold uppercase tracking-[0.07em] text-text-muted flex-wrap">
 					<h4>{presentation.label} accounts</h4>
-					{#if getDriverTraits(driver)?.usageHarness}
+					{#if getDriverTraits(driver)?.usageHarness && accounts.some((account) => account.usageEligible !== false)}
 						<span class="ml-auto flex flex-wrap items-center justify-end gap-1 text-[11px] font-normal normal-case tracking-normal">
 							<span>Usage and switch order: </span>
 							<Button variant="ghost-accent" hoverFill="none" size="content" class="text-[11px] hover:underline" data-testid="{driver}-accounts-usage-link" onclick={onOpenUsage}>Usage ›</Button>
@@ -379,7 +387,7 @@
 									<dt class="text-text-muted">Config dir</dt>
 									<dd class="font-mono text-text">{inst.configDir || "env"}</dd>
 									<dt class="text-text-muted">Used by</dt>
-									<dd class="text-text">{inst.isDefault ? "New sessions, unless you pick another account" : getDriverTraits(driver)?.usageHarness ? "Sessions you move to it, and auto-switch" : "Sessions you move to it"}</dd>
+									<dd class="text-text">{inst.isDefault ? "New sessions, unless you pick another account" : inst.usageEligible !== false && getDriverTraits(driver)?.usageHarness ? "Sessions you move to it, and auto-switch" : "Sessions you move to it"}</dd>
 								</dl>
 								<div class="flex flex-wrap items-center gap-2">
 									<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="edit-instance-btn" disabled={state.formSaving} aria-expanded={openForm === `instance-edit:${inst.id}`} aria-controls="instance-form" onclick={() => openEditInstance(inst)}>Edit</Button>

@@ -50,9 +50,13 @@ it("recovers historical sessions before startup can create a live session", asyn
 					),
 				);
 				const query = yield* ReadQueryEffectTag;
-				expect(yield* query.listSessions()).toEqual([]);
+				expect(
+					yield* query.listSessions({ projectIds: ["startup-recovery"] }),
+				).toEqual([]);
 			}).pipe(
-				Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+				Effect.provide(
+					makePersistenceEffectLayer(filename, "startup-recovery"),
+				),
 			),
 		);
 
@@ -146,7 +150,9 @@ it("rejects Claude permissions a crash left pending and leaves OpenCode's alone"
 	try {
 		await Effect.runPromise(
 			Effect.all([seed("claude"), seed("opencode")]).pipe(
-				Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+				Effect.provide(
+					makePersistenceEffectLayer(filename, "orphaned-permissions"),
+				),
 			),
 		);
 

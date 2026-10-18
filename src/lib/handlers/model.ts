@@ -20,7 +20,7 @@ import { AccountDirectory } from "../domain/daemon/Services/account-directory.js
 import {
 	cloneContextWindowOptions,
 	loadModelCatalog,
-	publishClaudeModels,
+	publishDiscoveredModels,
 } from "../domain/relay/Services/model-catalog.js";
 import {
 	ProjectSettingsTag,
@@ -290,14 +290,15 @@ export const getModelsResponse = (
 						})
 						.pipe(
 							Effect.flatMap((capabilities) =>
-								publishClaudeModels(capabilities.models, claudeAccount.id),
+								publishDiscoveredModels(capabilities.models, claudeAccount),
 							),
 							Effect.catchAll((error) =>
-								Effect.sync(() =>
+								Effect.gen(function* () {
+									yield* publishDiscoveredModels([], claudeAccount);
 									log.warn(
-										`Claude provider discovery failed during model refresh: ${formatErrorDetail(error)}`,
-									),
-								),
+										`${claudeAccount.driver} provider discovery failed during model refresh: ${formatErrorDetail(error)}`,
+									);
+								}),
 							),
 							Effect.asVoid,
 							(effect) =>
@@ -562,11 +563,13 @@ export interface SwitchModelInput {
  */
 export const applyLiveSessionSettings = (sessionId: string) =>
 	Effect.gen(function* () {
-		const registry = yield* ProviderRegistryTag;
-		const instance = registry.getInstance("claude");
-		if (!instance?.applyLiveSettingsEffect) return;
 		const row = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
-		if (!row?.model_id || row.model_provider !== "claude") return;
+		if (!row?.model_id || !row.model_provider) return;
+		const driver = harnessForModelProvider(row.model_provider);
+		if (PROVIDER_DRIVERS[driver].catalogSource !== "discovery") return;
+		const registry = yield* ProviderRegistryTag;
+		const instance = registry.getInstance(driver);
+		if (!instance?.applyLiveSettingsEffect) return;
 
 		const result = yield* Effect.either(
 			instance.applyLiveSettingsEffect(sessionId, {

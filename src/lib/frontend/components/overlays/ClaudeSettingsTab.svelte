@@ -30,12 +30,8 @@
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { findSession, reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
-	import {
-		getClaudeSettingsRpc,
-		resolveClaudeSettingsRpc,
-		setClaudeSettingsRpc,
-		setDefaultPermissionModeRpc,
-	} from "../../transport/ws-rpc-client.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { createFrontendLogger } from "../../utils/logger.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import Button from "../ui/Button.svelte";
@@ -143,7 +139,7 @@
 		const projectSlug = getCurrentSlug();
 		if (!projectSlug) return;
 		let cancelled = false;
-		void getClaudeSettingsRpc({ projectSlug })
+		void rpc("GetClaudeSettings", { projectSlug })
 			.then((response) => {
 				if (!cancelled) applyClaudeSettingsResponse(response);
 			})
@@ -165,7 +161,7 @@
 
 		let cancelled = false;
 		beginClaudeSettingsResolution(projectSlug);
-		void resolveClaudeSettingsRpc({ ...(sessionId ? { sessionId } : { projectSlug }), instanceId })
+		void rpc("ResolveClaudeSettings", { ...(sessionId ? { sessionId } : { projectSlug }), instanceId })
 			.then((response) => {
 				if (!cancelled && workspace === requestedWorkspace) applyResolvedClaudeSettingsResponse(response);
 			})
@@ -194,11 +190,11 @@
 		const undoWrite = proposeClaudeSettingsOverrides(overrides);
 		setClaudeSettingEdited(key, edited);
 		try {
-			await setClaudeSettingsRpc({ projectSlug, overrides });
-		} catch {
+			await rpc("SetClaudeSettings", { projectSlug, overrides });
+		} catch (error) {
 			undoWrite();
 			setClaudeSettingEdited(key, wasEdited);
-			showToast("Failed to save Claude settings", { variant: "warn" });
+			toastFailure("Failed to save Claude settings", "warn")(error);
 		}
 	}
 
@@ -273,11 +269,11 @@
 		const projectSlug = getCurrentSlug();
 		if (!mode || !projectSlug) return;
 		const undoDefaultMode = chooseDefaultPermissionMode(mode);
-		void setDefaultPermissionModeRpc({ projectSlug, mode })
+		void rpc("SetDefaultPermissionMode", { projectSlug, mode })
 			.then((response) => applyDefaultPermissionMode(response.mode))
-			.catch(() => {
+			.catch((error) => {
 				undoDefaultMode();
-				showToast("Failed to save default approval mode", { variant: "warn" });
+				toastFailure("Failed to save default approval mode", "warn")(error);
 			});
 	}
 
@@ -295,15 +291,14 @@
 
 	async function reloadSession(): Promise<void> {
 		const sessionId = sessionState.currentId;
-		const projectSlug = getCurrentSlug();
-		if (!sessionId || !projectSlug || reloadInFlight) return;
+		if (!sessionId || reloadInFlight) return;
 
 		reloadInFlight = true;
 		try {
-			await reloadProviderSession(projectSlug, sessionId);
+			await reloadProviderSession(sessionId);
 			showToast("Session reloaded");
-		} catch {
-			showToast("Failed to reload the session", { variant: "warn" });
+		} catch (error) {
+			toastFailure("Failed to reload the session", "warn")(error);
 		} finally {
 			reloadInFlight = false;
 		}

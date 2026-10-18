@@ -103,7 +103,7 @@ test.describe("Notification → Session Navigation", () => {
 	}) => {
 		// Set up WS mock and respond to ViewSession RPC.
 		const rpc = await mockWsRpc(page, {
-			handlers: {
+			stubs: {
 				ViewSession: () => ({ ok: true }),
 			},
 		});
@@ -141,7 +141,7 @@ test.describe("Notification → Session Navigation", () => {
 		// initSWMessageListener() registers its handler.
 		//
 		// In a real flow: push notification click → SW notificationclick →
-		// SW posts navigate_to_session → frontend listener → switchToSession()
+		// SW posts navigate_to_session → frontend listener → selection.open()
 		await page.evaluate(
 			({ sessionId, slug }) => {
 				if ("serviceWorker" in navigator) {
@@ -174,19 +174,13 @@ test.describe("Notification → Session Navigation", () => {
 		expect(page.url()).toContain(`/s/${SESS_B}`);
 	});
 
-	test("notification click navigates even without service worker", async ({
+	test("sidebar click opens a session without a service worker message", async ({
 		page,
 		baseURL,
 	}) => {
-		// This test verifies the alternative path: when there's no SW,
-		// the browser Notification.onclick handler calls _navigateToSession
-		// directly. We simulate this by clicking a session in the sidebar.
-		//
-		// Since we can't create real Notification objects in Playwright,
-		// we test the onNavigateToSession callback is wired up by
-		// directly calling it via the session list click path.
+		// A sidebar click opens the same target without a service worker message.
 		const rpc = await mockWsRpc(page, {
-			handlers: {
+			stubs: {
 				ViewSession: () => ({ ok: true }),
 			},
 		});
@@ -232,7 +226,7 @@ test.describe("Notification → Session Navigation", () => {
 		// Verify the pipeline handles an alert without sessionId
 		// gracefully (no navigation, no crash).
 		const rpc = await mockWsRpc(page, {
-			handlers: {
+			stubs: {
 				ViewSession: () => ({ ok: true }),
 			},
 		});

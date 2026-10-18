@@ -273,6 +273,7 @@ it.scoped("decides on unknown when a refresh times out after a limit", () =>
 		};
 		const service = yield* makeUsage({
 			accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
+			accountHarness: () => Effect.succeed("claude"),
 			readers: { claude: reader },
 		});
 		const [previous] = yield* service.refresh();

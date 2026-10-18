@@ -17,7 +17,7 @@ test("Claude Attribution collapses, expands and saves an edited part", async ({
 		sessionUrl: true,
 	};
 	const rpc = await mockWsRpc(page, {
-		handlers: {
+		stubs: {
 			GetClaudeSettings: () => ({
 				projectSlug: "e2e-replay",
 				overrides: { cleanupPeriodDays: 45 },

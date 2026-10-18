@@ -636,8 +636,8 @@ describe("wireMonitoring shutdown", () => {
 			await harness.runtime?.runPromise(
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
-					yield* sql`INSERT INTO sessions (id, title, provider, created_at, updated_at)
-						VALUES ('claude-1', 'c', 'claude-sdk', 1, 1)`;
+					yield* sql`INSERT INTO sessions (id, title, provider, created_at, updated_at, project_id)
+						VALUES ('claude-1', 'c', 'claude-sdk', 1, 1, 'test-project')`;
 				}),
 			);
 			// OpenCode answers 404 for sessions it does not own (live: NotFoundError).
@@ -816,6 +816,8 @@ async function createEffectHarness(
 			markSessionUnread: unused,
 			markSessionSeen: unused,
 			setSessionSettled: unused,
+			setSessionArchived: unused,
+			restoreSessionForSend: unused,
 			setSessionAutoSettleDisabled: unused,
 			setSessionPinned: unused,
 			snoozeSession: unused,
@@ -879,12 +881,16 @@ async function createEffectHarness(
 				Effect.gen(function* () {
 					const readQuery = yield* ReadQueryEffectTag;
 					getSessionProviders.mockImplementation(() =>
-						readQuery.getAllSessionStatusesWithProviders().pipe(
-							Effect.map(
-								(rows) => new Map(rows.map((row) => [row.id, row.provider])),
+						readQuery
+							.getAllSessionStatusesWithProviders({
+								projectIds: ["test-project"],
+							})
+							.pipe(
+								Effect.map(
+									(rows) => new Map(rows.map((row) => [row.id, row.provider])),
+								),
+								Effect.orDie,
 							),
-							Effect.orDie,
-						),
 					);
 					if (seedTurn) {
 						const sql = yield* SqlClient.SqlClient;

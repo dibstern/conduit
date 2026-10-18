@@ -8,7 +8,7 @@ import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 function ledger(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath(), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		const column = (sql: string) =>
 			(db.prepare(sql).all(sessionId) as Array<{ value: string }>).map(
@@ -86,7 +86,7 @@ describe("an unanswered OpenCode user message", () => {
 				delivery: "queue",
 			}),
 		);
-		expect(accepted).toEqual({ ok: true, sessionId });
+		expect(accepted).toEqual({ ok: true, sessionId, handedOff: false });
 		await vi.waitFor(() =>
 			expect(ledger(fixture, sessionId).queued).toEqual([inputId]),
 		);

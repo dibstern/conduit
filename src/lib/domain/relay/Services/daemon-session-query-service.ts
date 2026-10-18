@@ -1,9 +1,10 @@
 import { Context, Data, Effect, Layer } from "effect";
 import type {
+	ArchivedSessionQueryOptions,
+	ArchivedSessionQueryResult,
 	DaemonSessionQueryOptions,
 	DaemonSessionQueryResult,
 } from "../../../shared-types.js";
-import { ConfigTag } from "./services.js";
 
 export class DaemonSessionQueryServiceError extends Data.TaggedError(
 	"DaemonSessionQueryServiceError",
@@ -18,6 +19,12 @@ export class DaemonSessionQueryNotSupported extends Data.TaggedError(
 }> {}
 
 export interface DaemonSessionQueryService {
+	readonly listArchived: (
+		options: ArchivedSessionQueryOptions,
+	) => Effect.Effect<
+		ArchivedSessionQueryResult,
+		DaemonSessionQueryServiceError | DaemonSessionQueryNotSupported
+	>;
 	readonly list: (
 		options: DaemonSessionQueryOptions,
 	) => Effect.Effect<
@@ -30,29 +37,20 @@ export class DaemonSessionQueryServiceTag extends Context.Tag(
 	"DaemonSessionQueryService",
 )<DaemonSessionQueryServiceTag, DaemonSessionQueryService>() {}
 
-export const DaemonSessionQueryServiceLive: Layer.Layer<
-	DaemonSessionQueryServiceTag,
-	never,
-	ConfigTag
-> = Layer.effect(
-	DaemonSessionQueryServiceTag,
-	Effect.gen(function* () {
-		const config = yield* ConfigTag;
-		return {
-			list: (options) =>
-				Effect.gen(function* () {
-					const listDaemonSessions = config.listDaemonSessions;
-					if (listDaemonSessions == null) {
-						return yield* new DaemonSessionQueryNotSupported({
-							message:
-								"Cross-project session listing is not supported in this mode",
-						});
-					}
-					return yield* Effect.tryPromise({
-						try: () => Promise.resolve(listDaemonSessions(options)),
-						catch: (cause) => new DaemonSessionQueryServiceError({ cause }),
-					});
+export const DaemonSessionQueryServiceLive: Layer.Layer<DaemonSessionQueryServiceTag> =
+	Layer.succeed(DaemonSessionQueryServiceTag, {
+		listArchived: () =>
+			Effect.fail(
+				new DaemonSessionQueryNotSupported({
+					message:
+						"Cross-project session listing is not supported in this mode",
 				}),
-		};
-	}),
-);
+			),
+		list: () =>
+			Effect.fail(
+				new DaemonSessionQueryNotSupported({
+					message:
+						"Cross-project session listing is not supported in this mode",
+				}),
+			),
+	});

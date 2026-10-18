@@ -4,7 +4,15 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	type Mock,
+	vi,
+} from "vitest";
 import { ClaudeEventPersistEffectError } from "../../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
 import type { ClaudeCapabilitiesService } from "../../../../src/lib/provider/claude/claude-capabilities-service.js";
@@ -14,7 +22,6 @@ import type {
 } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
 import { makeClaudeSessionRunner } from "../../../../src/lib/provider/claude/claude-provider-runtime.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
-import type { ClaudeSessionRunner } from "../../../../src/lib/provider/claude/claude-session-runner.js";
 import {
 	type ClaudeSubagentSdk,
 	claudeSubagentSessionId,
@@ -28,6 +35,7 @@ import type {
 	SessionMessage,
 } from "../../../../src/lib/provider/claude/types.js";
 import { ClaudeBoundaryError } from "../../../../src/lib/provider/event-sink-errors.js";
+import type { SessionRunner } from "../../../../src/lib/provider/runner/session-runner.js";
 import type {
 	ModelInfo,
 	SendTurnInput,
@@ -127,7 +135,9 @@ async function waitForAssertion(assertion: () => void): Promise<void> {
 
 describe("ClaudeProviderInstance.sendTurn()", () => {
 	let workspace: string;
-	let queryFactorySpy: ReturnType<typeof vi.fn>;
+	let queryFactorySpy: Mock<
+		NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>
+	>;
 
 	beforeEach(() => {
 		workspace = join(tmpdir(), `conduit-claude-send-turn-${Date.now()}`);
@@ -1094,7 +1104,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			})(),
 		);
 		query.close = vi.fn(releaseStream);
-		let runner: ClaudeSessionRunner | undefined;
+		let runner: SessionRunner | undefined;
 		const finalized = vi.fn();
 		const onBackgroundTask = vi.fn();
 		const instance = makeTestClaudeProviderInstance({
@@ -1448,7 +1458,8 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(promptText).toBe("Fresh agent prompt.");
 		expect(queryFactorySpy).toHaveBeenCalledTimes(2);
 		expect(oldQuery.close).toHaveBeenCalledOnce();
-		expect(queryFactorySpy.mock.calls[1]?.[0]?.options.resume).toBeUndefined();
+		expect(queryFactorySpy.mock.calls[1]?.[0]?.options).toBeDefined();
+		expect(queryFactorySpy.mock.calls[1]?.[0]?.options?.resume).toBeUndefined();
 
 		await Effect.runPromise(instance.shutdownEffect());
 	});

@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	AccountIdSchema,
+	type ClaudeAccount,
+} from "../../../../src/lib/contracts/account.js";
 import { __setProbeOverrideForTesting } from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { makeClaudeCapabilitiesService } from "../../../../src/lib/provider/claude/claude-capabilities-service.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
@@ -136,6 +140,30 @@ describe("ClaudeProviderInstance.discoverEffect()", () => {
 	});
 
 	describe("with capability probe", () => {
+		it("forwards explicit refreshes to the capabilities service and keeps plain discovers passive", async () => {
+			const account: ClaudeAccount = {
+				driver: "claude",
+				id: AccountIdSchema.make("claude-test"),
+				name: "Test",
+				folder: configuredClaudeConfigDir(join(workspace, ".claude-account")),
+				usageEligible: true,
+			};
+			const get = vi.fn(() =>
+				Effect.succeed({ models: [], commands: [], agents: [] }),
+			);
+			const instance = makeTestClaudeProviderInstance({
+				workspaceRoot: workspace,
+				capabilitiesService: { get },
+			});
+			await Effect.runPromise(
+				instance.discoverEffect(workspace, account, { refresh: true }),
+			);
+			expect(get).toHaveBeenLastCalledWith(workspace, { refresh: true });
+			await Effect.runPromise(instance.discoverEffect(workspace, account));
+			expect(get).toHaveBeenLastCalledWith(workspace);
+			expect(get).toHaveBeenCalledTimes(2);
+		});
+
 		it("returns models from the probe when available", async () => {
 			__setProbeOverrideForTesting(async () => ({
 				models: [

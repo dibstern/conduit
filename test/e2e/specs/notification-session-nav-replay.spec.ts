@@ -1,16 +1,19 @@
 // Notification → Session Navigation (Replay E2E)
-// Full-pipeline test: real relay + MockOpenCodeServer (no WS mock).
+// Real relay alert delivery and notification clicks over the typed RPC mock.
 //
 // Proves the complete path:
 //   SSE event → relay event pipeline → alert on SubscribeAlerts →
-//   frontend receives it → SW message → switchToSession → ViewSession RPC.
+//   frontend receives it → SW message → selection.open → ViewSession RPC.
 //
 // Uses the `chat-simple` recording with `injectSSEEvents()` to inject
 // events that trigger notification broadcasts for unwatched sessions.
 
 import type { OpenCodeRecording } from "../fixtures/recorded/types.js";
+import { createSession } from "../helpers/e2e-harness.js";
 import { loadOpenCodeRecording } from "../helpers/recorded-loader.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { mockWsRpc } from "../helpers/rpc-mock.js";
+import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 /** Extract the session ID used in prompt_async calls from a recording. */
 function findTargetSessionId(recording: OpenCodeRecording): string | undefined {
@@ -45,10 +48,191 @@ function isErrorAlertFor(frame: string, sessionId: string): boolean {
 test.use({ recording: "chat-simple" });
 
 test.describe("Notification → session navigation (replay)", () => {
+	for (const project of ["e2e-replay", "another-project"]) {
+		test(`a service worker notification for ${project} opens its session without URL navigation`, async ({
+			page,
+			harness,
+		}, testInfo) => {
+			const parent = "notification-parent";
+			const target = "notification-target";
+			const rpc = await mockWsRpc(page, {
+				stubs: {
+					AttachProject: (payload) => ({
+						projectSlug:
+							"projectSlug" in payload
+								? (payload.projectSlug ?? "e2e-replay")
+								: "e2e-replay",
+						sessionSlug: "sessionId" in payload ? "e2e-replay" : null,
+					}),
+					ResolveSession: () => ({ projectSlug: project }),
+					ViewSession: ({ sessionId }) => ({
+						ok: true,
+						draft: `Shown ${sessionId}`,
+					}),
+				},
+			});
+			await mockRelayWebSocket(page, {
+				initMessages: [
+					{
+						type: "project_list",
+						projects: ["e2e-replay", "another-project"].map((slug) => ({
+							slug,
+							title: slug,
+							folders: [`/tmp/${slug}`],
+						})),
+						current: "e2e-replay",
+					},
+					{
+						type: "shell_snapshot",
+						roots: true,
+						sessions: [
+							{
+								id: parent,
+								title: "Parent",
+								status: "idle",
+								updatedAt: Date.now(),
+							},
+						],
+					},
+				],
+				responses: new Map(),
+			});
+			await page.goto(`${harness.relayBaseUrl}/s/${parent}`);
+			await expect(page.locator("#input")).toHaveValue(`Shown ${parent}`);
+			const documentNavigations: string[] = [];
+			page.on("request", (request) => {
+				if (request.resourceType() === "document")
+					documentNavigations.push(request.url());
+			});
+			await page.evaluate(
+				({ sessionId, slug }) => {
+					navigator.serviceWorker.dispatchEvent(
+						new MessageEvent("message", {
+							data: {
+								type: "navigate_to_session",
+								sessionId,
+								slug,
+								url: "/?notification-url-must-not-be-used",
+							},
+						}),
+					);
+				},
+				{ sessionId: target, slug: project },
+			);
+			await expect(page).toHaveURL(`${harness.relayBaseUrl}/s/${target}`);
+			await expect(page.locator("#input")).toHaveValue(`Shown ${target}`);
+			const viewed = rpc
+				.getRequests()
+				.filter(
+					(request) =>
+						request.tag === "ViewSession" &&
+						request.payload["sessionId"] === target,
+				);
+			expect(viewed).toHaveLength(1);
+			expect(documentNavigations).toEqual([]);
+			await page.goBack();
+			await expect(page).toHaveURL(`${harness.relayBaseUrl}/s/${parent}`);
+			await testInfo.attach("notification-back-to-parent", {
+				body: await page.screenshot(),
+				contentType: "image/png",
+			});
+		});
+	}
+
+	test("an in-project browser notification click opens the notified session", async ({
+		page,
+		harness,
+	}, testInfo) => {
+		await page.addInitScript(() => {
+			class TestNotification {
+				static permission = "granted";
+				onclick: (() => void) | null = null;
+				constructor() {
+					document.documentElement.dataset["notificationCreated"] = "true";
+					window.addEventListener("click-test-notification", () =>
+						this.onclick?.(),
+					);
+				}
+				close() {}
+			}
+			Object.defineProperty(window, "Notification", {
+				value: TestNotification,
+			});
+			Object.defineProperty(navigator.serviceWorker, "getRegistration", {
+				value: () => Promise.resolve(undefined),
+			});
+		});
+		const rpc = await mockWsRpc(page, {
+			stubs: {
+				ViewSession: ({ sessionId }) => ({
+					ok: true,
+					draft: `Shown ${sessionId}`,
+				}),
+			},
+		});
+		await mockRelayWebSocket(page, {
+			initMessages: [
+				{
+					type: "project_list",
+					projects: [
+						{
+							slug: "e2e-replay",
+							title: "e2e-replay",
+							folders: ["/tmp/e2e-replay"],
+						},
+					],
+					current: "e2e-replay",
+				},
+				{
+					type: "shell_snapshot",
+					roots: true,
+					sessions: ["notification-parent", "notification-target"].map(
+						(id) => ({ id, title: id, status: "idle", updatedAt: Date.now() }),
+					),
+				},
+			],
+			responses: new Map(),
+		});
+		await page.goto(`${harness.relayBaseUrl}/s/notification-parent`);
+		await expect(page.locator("#input")).toHaveValue(
+			"Shown notification-parent",
+		);
+		await expect.poll(() => rpc.hasStream("SubscribeAlerts")).toBe(true);
+		rpc.sendAlert({
+			_tag: "alert",
+			kind: "done",
+			alertId: "browser-click",
+			sessionId: "notification-target",
+		});
+		await expect(page.locator("html")).toHaveAttribute(
+			"data-notification-created",
+			"true",
+		);
+		await page.evaluate(() =>
+			window.dispatchEvent(new Event("click-test-notification")),
+		);
+		await expect(page).toHaveURL(
+			`${harness.relayBaseUrl}/s/notification-target`,
+		);
+		await expect(page.locator("#input")).toHaveValue(
+			"Shown notification-target",
+		);
+		await rpc.waitForRequest(
+			(request) =>
+				request.tag === "ViewSession" &&
+				request.payload["sessionId"] === "notification-target",
+		);
+		await testInfo.attach("browser-notification-target", {
+			body: await page.screenshot(),
+			contentType: "image/png",
+		});
+	});
+
 	test("an alert fires for unwatched session error", async ({
 		page,
 		relayUrl,
 		mockServer,
+		harness,
 	}) => {
 		// Capture all WS frames (received and sent) before navigating.
 		const receivedFrames: string[] = [];
@@ -80,7 +264,8 @@ test.describe("Notification → session navigation (replay)", () => {
 		// { type: "done", error, ... } relay message, which is notification-worthy.
 		// Since no browser client is viewing this session, the pipeline
 		// drops the message and publishes an alert instead.
-		const TARGET = "ses_notification_target";
+		const TARGET = await createSession(harness.relayPort, "opencode");
+		expect(page.url()).not.toContain(`/s/${TARGET}`);
 		mockServer.injectSSEEvents([
 			{
 				type: "session.error",
@@ -104,7 +289,7 @@ test.describe("Notification → session navigation (replay)", () => {
 
 		// Simulate SW notification click → navigate_to_session.
 		// In a real flow: push notification click → SW notificationclick →
-		// SW posts navigate_to_session → frontend listener → switchToSession()
+		// SW posts navigate_to_session → frontend listener → selection.open()
 		await page.evaluate(
 			({ sessionId, slug }) => {
 				if ("serviceWorker" in navigator) {

@@ -41,7 +41,6 @@ describe("StopBackgroundTask RPC", () => {
 		const interruptTurnEffect = vi.fn(() => Effect.void);
 		const provider: ProviderInstance = {
 			providerId,
-			steering: false,
 			discoverEffect: () => Effect.die("unused"),
 			sendTurnEffect: () => Effect.die("unused"),
 			interruptTurnEffect,

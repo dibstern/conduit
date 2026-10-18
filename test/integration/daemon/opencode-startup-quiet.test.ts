@@ -75,7 +75,7 @@ describe("Managed OpenCode starts on first use", () => {
 	};
 
 	function historyComplete(fixture: ProcessHarness, sessionId: string) {
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			return (
 				db
@@ -88,7 +88,7 @@ describe("Managed OpenCode starts on first use", () => {
 	}
 
 	function persistedStatus(fixture: ProcessHarness, sessionId: string) {
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			const row = db
 				.prepare("SELECT status FROM sessions WHERE id = ?")
@@ -442,7 +442,7 @@ describe("Managed OpenCode starts on first use", () => {
 					delivery: "queue",
 				}),
 			);
-			expect(accepted).toEqual({ ok: true, sessionId });
+			expect(accepted).toEqual({ ok: true, sessionId, handedOff: true });
 			const busy = await browser.waitFor(
 				(message) =>
 					message["type"] === "session_row" &&

@@ -7,7 +7,7 @@ import { chmod, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
-import { Data, Effect, Either, Schema } from "effect";
+import { Data, Effect, Either, Record, Schema } from "effect";
 import {
 	type AccountsState,
 	accountsStateFromConfig,
@@ -15,6 +15,7 @@ import {
 	normalizeAccountConfig,
 	resolve as resolveAccount,
 } from "../account-directory.js";
+import { CursorUsageBindingSchema } from "../contracts/account.js";
 import {
 	AccountUnroutable,
 	UsageLimitsSettingSchema,
@@ -28,6 +29,7 @@ import {
 	KnownProviderDriverKindSchema,
 	MANAGED_OPENCODE_ACCOUNT_ID,
 	migrateLegacyDefaultOpencodeInstanceId,
+	PROVIDER_DRIVERS,
 } from "../contracts/provider-instance.js";
 import {
 	DEFAULT_WORKTREE_CLEANUP,
@@ -55,6 +57,7 @@ import {
 
 /** Days of inactivity before automatic settlement when no value is persisted. */
 export const DEFAULT_AUTO_SETTLE_AFTER_DAYS = 3;
+export const DEFAULT_AUTO_ARCHIVE_AFTER_DAYS = 30;
 
 export const CURRENT_CONFIG_VERSION = 2;
 
@@ -188,8 +191,15 @@ const DaemonConfigFields = {
 		Schema.NullOr(Schema.Number.pipe(Schema.int(), Schema.between(1, 90))),
 		{ exact: true },
 	),
+	autoArchiveAfterDays: Schema.optionalWith(
+		Schema.NullOr(Schema.Number.pipe(Schema.int(), Schema.between(1, 90))),
+		{ exact: true },
+	),
 	worktreeCleanup: Schema.optionalWith(WorktreeCleanupSchema, { exact: true }),
 	usageLimits: Schema.optionalWith(UsageLimitsSettingSchema, { exact: true }),
+	cursorUsageBinding: Schema.optionalWith(CursorUsageBindingSchema, {
+		exact: true,
+	}),
 	keepAwakeCommand: Schema.optionalWith(Schema.String, { exact: true }),
 	keepAwakeArgs: Schema.optionalWith(
 		Schema.mutable(Schema.Array(Schema.String)),
@@ -202,14 +212,13 @@ const DaemonConfigFields = {
 		{ exact: true },
 	),
 	accountDefaults: Schema.optionalWith(
-		Schema.Struct({
-			claude: Schema.optionalWith(
-				Schema.suspend(() => AccountIdSchema),
-				{
-					exact: true,
-				},
+		Schema.partial(
+			Schema.Struct(
+				Record.map(PROVIDER_DRIVERS, () =>
+					Schema.suspend(() => AccountIdSchema),
+				),
 			),
-		}),
+		),
 		{ exact: true },
 	),
 	deletedAccounts: Schema.optionalWith(
@@ -409,6 +418,7 @@ export function defaultDaemonConfig(): DaemonConfig {
 		debug: false,
 		keepAwake: false,
 		autoSettleAfterDays: DEFAULT_AUTO_SETTLE_AFTER_DAYS,
+		autoArchiveAfterDays: DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
 		worktreeCleanup: DEFAULT_WORKTREE_CLEANUP,
 		projects: [],
 		instances: [
@@ -528,6 +538,7 @@ function readDaemonConfigResult(
 					(raw["configVersion"] !== CURRENT_CONFIG_VERSION ||
 						raw["claudeConfigDir"] !== undefined ||
 						raw["autoSettleAfterDays"] !== config.autoSettleAfterDays ||
+						raw["autoArchiveAfterDays"] !== config.autoArchiveAfterDays ||
 						!isDeepStrictEqual(raw["instances"], config.instances) ||
 						!isDeepStrictEqual(
 							raw["accountDefaults"],
@@ -553,6 +564,10 @@ function normalizeDaemonConfig(decoded: DaemonConfig): DaemonConfig {
 			decoded.autoSettleAfterDays === undefined
 				? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 				: decoded.autoSettleAfterDays,
+		autoArchiveAfterDays:
+			decoded.autoArchiveAfterDays === undefined
+				? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS
+				: decoded.autoArchiveAfterDays,
 	};
 }
 

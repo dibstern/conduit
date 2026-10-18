@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { seedSessions } from "./session-fixtures.js";
 // The Legacy Badge Path Is Unreachable (ni8.23)
 // The badge used to be client state: a reducer fed by the retired
@@ -24,8 +25,8 @@ import {
 	clearSessionState,
 	getAttentionSessions,
 	getSessionIndicator,
-	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 const REPO_ROOT = process.cwd();
 const FRONTEND = join(REPO_ROOT, "src/lib/frontend");
@@ -106,7 +107,7 @@ describe("the legacy badge path is unreachable", () => {
 describe("a legacy notification broadcast moves no badge", () => {
 	beforeEach(() => {
 		clearSessionState();
-		sessionState.currentId = "ses_current";
+		openSessionForSetup("ses_current", "project-a");
 		seedSessions([
 			{
 				id: "ses_current",

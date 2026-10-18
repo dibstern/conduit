@@ -220,13 +220,11 @@ for (const stale of [false, true]) {
 			);
 			const observed: SessionInfo[] = [];
 			const subscription = Effect.runFork(
-				Stream.runForEach(
-					browser.rpc.SubscribeShell({ projectSlug }),
-					(envelope) =>
-						Effect.sync(() => {
-							if (envelope._tag === "snapshot") observed.push(...envelope.rows);
-							if (envelope._tag === "upsert") observed.push(envelope.item);
-						}),
+				Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+					Effect.sync(() => {
+						if (envelope._tag === "snapshot") observed.push(...envelope.rows);
+						if (envelope._tag === "upsert") observed.push(envelope.item);
+					}),
 				),
 			);
 			const latest = () =>
@@ -422,24 +420,23 @@ for (const dismiss of [false, true]) {
 			if (!slug) throw new Error("No project slug");
 			const observed: { sequence: number; session: SessionInfo }[] = [];
 			const subscription = Effect.runFork(
-				Stream.runForEach(
-					browser.rpc.SubscribeShell({ projectSlug: slug }),
-					(envelope) =>
-						Effect.sync(() => {
-							if (envelope._tag === "snapshot")
-								for (const session of envelope.rows)
-									observed.push({ sequence: envelope.sequence, session });
-							if (envelope._tag === "upsert")
-								observed.push({
-									sequence: envelope.sequence,
-									session: envelope.item,
-								});
-						}),
+				Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+					Effect.sync(() => {
+						if (envelope._tag === "snapshot")
+							for (const session of envelope.rows)
+								observed.push({ sequence: envelope.sequence, session });
+						if (envelope._tag === "upsert")
+							observed.push({
+								sequence: envelope.sequence,
+								session: envelope.item,
+							});
+					}),
 				),
 			);
 			const snapshot = () =>
 				Effect.runPromise(
-					browser.rpc.SubscribeShell({ projectSlug: slug }).pipe(
+					browser.rpc.SubscribeShell({}).pipe(
+						Stream.filter((frame) => frame._tag !== "projects"),
 						Stream.take(1),
 						Stream.runCollect,
 						Effect.map((envelopes) => Array.from(envelopes)[0]),
@@ -715,24 +712,23 @@ for (const decision of [
 		);
 		const observed: { sequence: number; session: SessionInfo }[] = [];
 		const subscription = Effect.runFork(
-			Stream.runForEach(
-				browser.rpc.SubscribeShell({ projectSlug }),
-				(envelope) =>
-					Effect.sync(() => {
-						if (envelope._tag === "snapshot")
-							for (const session of envelope.rows)
-								observed.push({ sequence: envelope.sequence, session });
-						if (envelope._tag === "upsert")
-							observed.push({
-								sequence: envelope.sequence,
-								session: envelope.item,
-							});
-					}),
+			Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+				Effect.sync(() => {
+					if (envelope._tag === "snapshot")
+						for (const session of envelope.rows)
+							observed.push({ sequence: envelope.sequence, session });
+					if (envelope._tag === "upsert")
+						observed.push({
+							sequence: envelope.sequence,
+							session: envelope.item,
+						});
+				}),
 			),
 		);
 		const snapshot = () =>
 			Effect.runPromise(
-				browser.rpc.SubscribeShell({ projectSlug }).pipe(
+				browser.rpc.SubscribeShell({}).pipe(
+					Stream.filter((frame) => frame._tag !== "projects"),
 					Stream.take(1),
 					Stream.runCollect,
 					Effect.map((envelopes) => Array.from(envelopes)[0]),
@@ -1122,13 +1118,11 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 		);
 		const observed: SessionInfo[] = [];
 		const subscription = Effect.runFork(
-			Stream.runForEach(
-				browser.rpc.SubscribeShell({ projectSlug }),
-				(envelope) =>
-					Effect.sync(() => {
-						if (envelope._tag === "snapshot") observed.push(...envelope.rows);
-						if (envelope._tag === "upsert") observed.push(envelope.item);
-					}),
+			Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+				Effect.sync(() => {
+					if (envelope._tag === "snapshot") observed.push(...envelope.rows);
+					if (envelope._tag === "upsert") observed.push(envelope.item);
+				}),
 			),
 		);
 		const latest = () => observed.filter((row) => row.id === sessionId).at(-1);
@@ -1482,19 +1476,17 @@ for (const scenario of [
 		const observed: { sequence: number; session: SessionInfo }[] = [];
 		const subscribe = () =>
 			Effect.runFork(
-				Stream.runForEach(
-					browser.rpc.SubscribeShell({ projectSlug }),
-					(envelope) =>
-						Effect.sync(() => {
-							if (envelope._tag === "snapshot")
-								for (const session of envelope.rows)
-									observed.push({ sequence: envelope.sequence, session });
-							if (envelope._tag === "upsert")
-								observed.push({
-									sequence: envelope.sequence,
-									session: envelope.item,
-								});
-						}),
+				Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+					Effect.sync(() => {
+						if (envelope._tag === "snapshot")
+							for (const session of envelope.rows)
+								observed.push({ sequence: envelope.sequence, session });
+						if (envelope._tag === "upsert")
+							observed.push({
+								sequence: envelope.sequence,
+								session: envelope.item,
+							});
+					}),
 				),
 			);
 		let subscription = subscribe();
@@ -1502,7 +1494,8 @@ for (const scenario of [
 			observed.filter((row) => row.session.id === sessionId).at(-1)?.session;
 		const snapshot = () =>
 			Effect.runPromise(
-				browser.rpc.SubscribeShell({ projectSlug }).pipe(
+				browser.rpc.SubscribeShell({}).pipe(
+					Stream.filter((frame) => frame._tag !== "projects"),
 					Stream.take(1),
 					Stream.runCollect,
 					Effect.map((envelopes) => Array.from(envelopes)[0]),
@@ -1881,19 +1874,17 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 		);
 		const observed: { sequence: number; session: SessionInfo }[] = [];
 		const subscription = Effect.runFork(
-			Stream.runForEach(
-				browser.rpc.SubscribeShell({ projectSlug }),
-				(envelope) =>
-					Effect.sync(() => {
-						if (envelope._tag === "snapshot")
-							for (const session of envelope.rows)
-								observed.push({ sequence: envelope.sequence, session });
-						if (envelope._tag === "upsert")
-							observed.push({
-								sequence: envelope.sequence,
-								session: envelope.item,
-							});
-					}),
+			Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+				Effect.sync(() => {
+					if (envelope._tag === "snapshot")
+						for (const session of envelope.rows)
+							observed.push({ sequence: envelope.sequence, session });
+					if (envelope._tag === "upsert")
+						observed.push({
+							sequence: envelope.sequence,
+							session: envelope.item,
+						});
+				}),
 			),
 		);
 		const latest = () =>
@@ -2518,26 +2509,25 @@ for (const behavior of [
 		);
 		const observed: { sequence: number; session: SessionInfo }[] = [];
 		const subscription = Effect.runFork(
-			Stream.runForEach(
-				browser.rpc.SubscribeShell({ projectSlug }),
-				(envelope) =>
-					Effect.sync(() => {
-						if (envelope._tag === "snapshot")
-							for (const session of envelope.rows)
-								observed.push({ sequence: envelope.sequence, session });
-						if (envelope._tag === "upsert")
-							observed.push({
-								sequence: envelope.sequence,
-								session: envelope.item,
-							});
-					}),
+			Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+				Effect.sync(() => {
+					if (envelope._tag === "snapshot")
+						for (const session of envelope.rows)
+							observed.push({ sequence: envelope.sequence, session });
+					if (envelope._tag === "upsert")
+						observed.push({
+							sequence: envelope.sequence,
+							session: envelope.item,
+						});
+				}),
 			),
 		);
 		const latest = () =>
 			observed.filter((row) => row.session.id === sessionId).at(-1)?.session;
 		const snapshot = () =>
 			Effect.runPromise(
-				browser.rpc.SubscribeShell({ projectSlug }).pipe(
+				browser.rpc.SubscribeShell({}).pipe(
+					Stream.filter((frame) => frame._tag !== "projects"),
 					Stream.take(1),
 					Stream.runCollect,
 					Effect.map((envelopes) => Array.from(envelopes)[0]),
@@ -2874,7 +2864,7 @@ for (const behavior of [
 						originId: browser.originId,
 					}),
 				);
-				expect(fork.parentId).toBe(sessionId);
+				expect(fork.forkedFrom).toBe(sessionId);
 				expect(fork.forkMessageId).toBe(point.id);
 				const expectedAccount = behavior === "fork-before" ? source : target;
 				expect(
@@ -3174,7 +3164,7 @@ test("story 16: composer account cards switch the session, not the project", asy
 	);
 	const observed: SessionInfo[] = [];
 	const subscription = Effect.runFork(
-		Stream.runForEach(browser.rpc.SubscribeShell({ projectSlug }), (envelope) =>
+		Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
 			Effect.sync(() => {
 				if (envelope._tag === "snapshot") observed.push(...envelope.rows);
 				if (envelope._tag === "upsert") observed.push(envelope.item);

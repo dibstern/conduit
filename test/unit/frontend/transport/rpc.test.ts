@@ -87,7 +87,7 @@ it.each([
 	};
 	const value =
 		delivery === "queue"
-			? { ok: true as const, sessionId: "s1" }
+			? { ok: true as const, sessionId: "s1", handedOff: false }
 			: { ok: false as const, reason: "no_steering" as const };
 	wire.stub({ "input.submit": () => value });
 	await expect(rpc("input.submit", payload)).resolves.toEqual(value);
@@ -217,7 +217,7 @@ function contractTypes() {
 		import("../../../../src/lib/contracts/ws-rpc.js").SubmitInputResponse
 	>();
 	// @ts-expect-error Stream tags cannot be called as unary RPCs.
-	rpc("SubscribeShell", { projectSlug: "alpha" });
+	rpc("SubscribeShell", {});
 	// @ts-expect-error The Effect call also accepts only unary tags.
 	rpcEffect("SubscribeInputDraft", { sessionId: "s1" });
 	// @ts-expect-error Contract payload fields are required.

@@ -260,8 +260,8 @@ describe("SessionManager Effect", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* runner.markRecovered();
 				yield* sql`
-					INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-					VALUES (${sessionId}, 'claude', 'Claude Session', 'idle', 1000, 1000)`;
+					INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+					VALUES (${sessionId}, 'test-project', 'claude', 'Claude Session', 'idle', 1000, 1000)`;
 
 				const created = yield* store.append(
 					canonicalEvent(
@@ -358,8 +358,8 @@ describe("SessionManager Effect", () => {
 			const sql = yield* SqlClient.SqlClient;
 			yield* runner.markRecovered();
 			yield* sql`
-				INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-				VALUES (${sessionId}, 'claude', 'Claude Session', 'idle', 1000, 1000)`;
+				INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+				VALUES (${sessionId}, 'test-project', 'claude', 'Claude Session', 'idle', 1000, 1000)`;
 
 			const result = yield* Effect.either(
 				service.renameSession(sessionId, "Useful title"),
@@ -432,8 +432,8 @@ describe("SessionManager Effect", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* runner.markRecovered();
 				yield* sql`
-					INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-					VALUES (${sessionId}, 'work-claude', 'Claude Session', 'idle', 1000, 1000)`;
+					INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+					VALUES (${sessionId}, 'test-project', 'work-claude', 'Claude Session', 'idle', 1000, 1000)`;
 
 				const created = yield* store.append(
 					canonicalEvent(
@@ -511,6 +511,7 @@ describe("SessionManager Effect", () => {
 				const session = yield* service.createSession("New", {
 					account: {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},
@@ -562,8 +563,8 @@ describe("SessionManager Effect", () => {
 				const store = yield* EventStoreEffectTag;
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`
-					INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-					VALUES (${sessionId}, 'opencode', 'OpenCode Session', 'idle', 1000, 1000)`;
+					INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+					VALUES (${sessionId}, 'test-project', 'opencode', 'OpenCode Session', 'idle', 1000, 1000)`;
 
 				yield* service.renameSession(sessionId, "API title");
 
@@ -596,6 +597,7 @@ describe("SessionManager Effect", () => {
 				cause: "read model unavailable",
 			});
 			const readQuery: ReadQueryEffect = {
+				listPendingClaudeQuestionTools: () => Effect.succeed([]),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 				getSession: vi.fn(() => Effect.fail(readQueryFailure)),
@@ -668,8 +670,8 @@ describe("SessionManager Effect", () => {
 				const sessionId = "ses-permission-mode";
 				yield* runner.markRecovered();
 				yield* sql`
-				INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-				VALUES (${sessionId}, 'claude', 'Permission session', 'idle', 1000, 1000)`;
+				INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+				VALUES (${sessionId}, 'test-project', 'claude', 'Permission session', 'idle', 1000, 1000)`;
 
 				yield* persistSessionPermissionMode(sessionId, "full");
 
@@ -702,20 +704,20 @@ describe("SessionManager Effect", () => {
 				yield* runner.markRecovered();
 				yield* sql`
 					INSERT INTO sessions (
-						id, provider, title, status, permission_mode, created_at, updated_at
+						id, project_id, provider, title, status, permission_mode, created_at, updated_at
 					) VALUES
-						('ses-auto', 'claude', 'Auto', 'idle', 'auto', 1000, 1000),
-						('ses-default', 'claude', 'Default', 'idle', NULL, 1000, 1000),
-						('ses-invalid', 'claude', 'Invalid', 'idle', 'broken', 1000, 1000)`;
+						('ses-auto', 'test-project', 'claude', 'Auto', 'idle', 'auto', 1000, 1000),
+						('ses-default', 'test-project', 'claude', 'Default', 'idle', NULL, 1000, 1000),
+						('ses-invalid', 'test-project', 'claude', 'Invalid', 'idle', 'broken', 1000, 1000)`;
 				yield* sql`INSERT INTO sessions (
-					id, provider, title, status, created_at, updated_at,
+					id, project_id, provider, title, status, created_at, updated_at,
 					model_id, model_provider, variant, context_window, permission_mode
 				) VALUES
-					('ses-complete', 'claude', 'Complete', 'idle', 1000, 1000, 'model', 'claude', 'high', '1m', 'full'),
-					('ses-model-only', 'claude', 'Partial', 'idle', 1000, 1000, 'model', NULL, NULL, NULL, NULL),
-					('ses-provider-only', 'claude', 'Partial', 'idle', 1000, 1000, NULL, 'claude', NULL, NULL, NULL),
-					('ses-variant', 'claude', 'Empty', 'idle', 1000, 1000, NULL, NULL, '', NULL, NULL),
-					('ses-context', 'claude', 'Empty', 'idle', 1000, 1000, NULL, NULL, NULL, '', NULL)`;
+					('ses-complete', 'test-project', 'claude', 'Complete', 'idle', 1000, 1000, 'model', 'claude', 'high', '1m', 'full'),
+					('ses-model-only', 'test-project', 'claude', 'Partial', 'idle', 1000, 1000, 'model', NULL, NULL, NULL, NULL),
+					('ses-provider-only', 'test-project', 'claude', 'Partial', 'idle', 1000, 1000, NULL, 'claude', NULL, NULL, NULL),
+					('ses-variant', 'test-project', 'claude', 'Empty', 'idle', 1000, 1000, NULL, NULL, '', NULL, NULL),
+					('ses-context', 'test-project', 'claude', 'Empty', 'idle', 1000, 1000, NULL, NULL, NULL, '', NULL)`;
 				yield* setDefaultPermissionMode("plan");
 				const read = yield* ReadQueryEffectTag;
 				const fullRead = vi.fn(read.listSessions);
@@ -901,8 +903,8 @@ describe("SessionManager Effect", () => {
 				yield* runner.markRecovered();
 				yield* sql`
 					INSERT INTO sessions (
-						id, provider, title, status, created_at, updated_at
-					) VALUES ('ses-doomed', 'claude', 'Doomed', 'idle', 1000, 1000)`;
+						id, provider, title, status, created_at, updated_at, project_id
+					) VALUES ('ses-doomed', 'claude', 'Doomed', 'idle', 1000, 1000, 'test-project')`;
 
 				const before = yield* listSessions("test-project", undefined, {
 					slug: "test-project",
@@ -939,10 +941,10 @@ describe("SessionManager Effect", () => {
 				yield* runner.markRecovered();
 				yield* sql`
 				INSERT INTO sessions (
-					id, provider, title, status, parent_id, created_at, updated_at
+					id, project_id, provider, title, status, parent_id, created_at, updated_at
 				) VALUES
-					('ses-parent', 'claude', 'Parent', 'idle', NULL, 1000, 1000),
-					('ses-child', 'claude', 'Subagent', 'idle', 'ses-parent', 1000, 1000)`;
+					('ses-parent', 'test-project', 'claude', 'Parent', 'idle', NULL, 1000, 1000),
+					('ses-child', 'test-project', 'claude', 'Subagent', 'idle', 'ses-parent', 1000, 1000)`;
 
 				yield* deleteSession("ses-parent");
 

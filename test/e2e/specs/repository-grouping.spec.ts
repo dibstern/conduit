@@ -95,14 +95,26 @@ async function openProjectList(page: Page, baseUrl: string) {
 		accountId: null,
 		id: `grouping-${project.slug}`,
 		title: `Review ${project.title}`,
-		status: "idle",
+		status: "idle" as const,
 		projectSlug: project.slug,
 		updatedAt: 100 - index,
 		messageCount: 0,
 	}));
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			GetProjects: () => ({ projects, current: slug }),
+		stubs: {
+			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
+			GetDefaultGroupingMode: () => ({ mode: defaultMode }),
+			SetDefaultGroupingMode: ({ mode }) => {
+				defaultMode = mode;
+				projects = projects.map((project) => ({
+					...project,
+					effectiveGroupingMode: project.groupingMode ?? defaultMode,
+				}));
+				rpc.setProjectSetting({ _tag: "defaultGroupingMode", mode });
+				rpc.setProjects({ projects });
+				return { mode };
+			},
+			FindFolders: () => ({ home: "/workspace", entries: [] }),
 			ListDaemonSessions: ({ scope }) => ({
 				sessions: sessions.filter(
 					(session) => !scope || session.projectSlug === scope,
@@ -111,9 +123,7 @@ async function openProjectList(page: Page, baseUrl: string) {
 				hasMore: false,
 				nextCursor: null,
 			}),
-			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
-			GetDefaultGroupingMode: () => ({ mode: defaultMode }),
-			FindFolders: () => ({ home: "/workspace", entries: [] }),
+			GetProjects: () => ({ projects, current: slug }),
 			SaveProject: ({ slug: savedSlug, groupingMode }) => {
 				const stored = projects.find((project) => project.slug === savedSlug);
 				if (!stored) throw new Error(`Unknown project: ${savedSlug}`);
@@ -133,24 +143,8 @@ async function openProjectList(page: Page, baseUrl: string) {
 				projects = projects.map((project) =>
 					project.slug === savedSlug ? updated : project,
 				);
-				rpc.setDaemonList("SubscribeProjects", { projects });
-				return { savedSlug, projects, warnings: [] };
-			},
-			SetDefaultGroupingMode: ({ mode }) => {
-				if (
-					mode !== "repository" &&
-					mode !== "repository+subfolder" &&
-					mode !== "off"
-				)
-					throw new Error("Invalid default grouping mode");
-				defaultMode = mode;
-				projects = projects.map((project) => ({
-					...project,
-					effectiveGroupingMode: project.groupingMode ?? defaultMode,
-				}));
-				rpc.setProjectSetting({ _tag: "defaultGroupingMode", mode });
-				rpc.setDaemonList("SubscribeProjects", { projects });
-				return { mode };
+				rpc.setProjects({ projects });
+				return { savedSlug: stored.slug, projects, warnings: [] };
 			},
 		},
 	});
@@ -160,7 +154,7 @@ async function openProjectList(page: Page, baseUrl: string) {
 			{
 				type: "shell_snapshot",
 				roots: true,
-				sessions: sessions.filter((session) => session.projectSlug === slug),
+				sessions,
 			},
 		],
 		responses: new Map(),
@@ -430,7 +424,7 @@ for (const mode of [
 			await expect(projectLabel(page, slug)).toHaveText("myapp");
 			await expect(projectLabel(page, "web-checkout")).toHaveText("myapp");
 			await recordLabels(page, "live-default");
-			rpc.setDaemonList("SubscribeProjects", {
+			rpc.setProjects({
 				projects: fixtureProjects().map((project) =>
 					project.slug === slug ? { ...project, groupingMode: "off" } : project,
 				),
@@ -453,15 +447,25 @@ for (const mode of [
 			const delayedRead = new Promise<{ mode: GroupingMode }>((resolve) => {
 				resolveRead = resolve;
 			});
-			let readRequestId: string | undefined;
-			rpc.setHandler("GetDefaultGroupingMode", (_payload, request) => {
-				readRequestId = String(request.id);
-				return delayedRead;
-			});
+			rpc.setStubs({ GetDefaultGroupingMode: () => delayedRead });
 
 			// Routed sockets do not emit Playwright frame events. Observe their
 			// browser message dispatch and wait for the stale reply's next render.
 			await page.evaluate(() => {
+				const send = WebSocket.prototype.send;
+				WebSocket.prototype.send = function (data) {
+					if (typeof data === "string") {
+						const parsed = JSON.parse(data) as
+							| { tag?: string; id?: string }
+							| Array<{ tag?: string; id?: string }>;
+						for (const frame of Array.isArray(parsed) ? parsed : [parsed]) {
+							if (frame.tag === "GetDefaultGroupingMode" && frame.id)
+								document.documentElement.dataset["groupingReadRequestId"] =
+									frame.id;
+						}
+					}
+					send.call(this, data);
+				};
 				const dispatch = WebSocket.prototype.dispatchEvent;
 				WebSocket.prototype.dispatchEvent = function (event: Event) {
 					const result = dispatch.call(this, event);
@@ -489,13 +493,10 @@ for (const mode of [
 			const field = await openSettings(page);
 			await rpc.waitForRequest(({ tag }) => tag === "GetDefaultGroupingMode");
 			await rpc.waitForRequest(({ tag }) => tag === "SubscribeProjectSettings");
-			if (!readRequestId || !resolveRead)
+			if (!resolveRead)
 				throw new Error("The initial grouping read was not captured");
-			await page.evaluate((requestId) => {
-				document.documentElement.dataset["groupingReadRequestId"] = requestId;
-			}, readRequestId);
 			rpc.setProjectSetting({ _tag: "defaultGroupingMode", mode: "off" });
-			rpc.setDaemonList("SubscribeProjects", {
+			rpc.setProjects({
 				projects: fixtureProjects().map((project) => ({
 					...project,
 					effectiveGroupingMode: project.groupingMode ?? "off",

@@ -55,7 +55,7 @@ function git(directory: string, ...args: string[]) {
 }
 
 function workspaceEvents(fixture: ProcessHarness, sessionId: string) {
-	const db = new Database(fixture.projectStorePath(), { readonly: true });
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
 		return (
 			db
@@ -80,7 +80,7 @@ function recordedWorkspace(
 	fixture: ProcessHarness,
 	sessionId: string,
 ): unknown {
-	const db = new Database(fixture.projectStorePath(), { readonly: true });
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
 		const row = db
 			.prepare("SELECT workspace FROM sessions WHERE id = ?")
@@ -352,7 +352,7 @@ const gate = ${JSON.stringify(gate)};
 		if (!harness) return;
 		const fixture = harness;
 		try {
-			if (existsSync(fixture.projectStorePath())) capture("final", fixture);
+			if (existsSync(fixture.daemonStorePath())) capture("final", fixture);
 			evidence["phases"] = phases;
 			evidence["result"] = task.result?.state;
 			evidence["errors"] =

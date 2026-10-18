@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	resetChatState,
 	restoreContextFromMessages,
@@ -14,11 +14,11 @@ import {
 	applyGetModelsResponse,
 	clearDiscoveryState,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	applyTranscriptEnvelope,
 	type TranscriptEntry,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import type { SDKMessage } from "../../../src/lib/provider/claude/types.js";
 import type { OpenCodeRecording } from "../../e2e/fixtures/recorded/types.js";
@@ -114,12 +114,19 @@ function saveEvidence(name: string, evidence: unknown): void {
 describe("Integration: OpenCode compaction through the relay", () => {
 	let harness: RelayHarness | undefined;
 
+	beforeEach(() => {
+		vi.stubGlobal("window", {
+			history: { pushState: vi.fn(), replaceState: vi.fn() },
+		});
+	});
+
 	afterEach(async () => {
 		await harness?.stop();
 		harness = undefined;
 		resetChatState();
 		clearDiscoveryState();
-		sessionState.currentId = null;
+		openSessionForSetup(null);
+		vi.unstubAllGlobals();
 	});
 
 	it.each([
@@ -310,7 +317,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 				contextWindow: "200k",
 			}),
 		);
-		sessionState.currentId = sessionId;
+		openSessionForSetup(sessionId, "integration-test");
 		applyGetModelsResponse(await client.getModels(sessionId), sessionId);
 		const messages = testMessages(sessionId);
 		const emptyTranscript: TranscriptEntry = {
@@ -752,7 +759,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 				sequence: 1,
 			},
 		);
-		sessionState.currentId = sessionId;
+		openSessionForSetup(sessionId, "integration-test");
 		applyGetModelsResponse(await client.getModels(sessionId), sessionId);
 		const messages = testMessages(sessionId);
 		messages.contextPercent = 85;

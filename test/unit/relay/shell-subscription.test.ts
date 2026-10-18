@@ -17,12 +17,14 @@ import {
 import { expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { decodeProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
+import { ResumePoint } from "../../../src/lib/contracts/ws-rpc.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
+import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	makeProviderRuntimeIngestionLive,
@@ -57,7 +59,10 @@ import { subscribeShell } from "../../../src/lib/domain/relay/Services/shell-sub
 import { forkSessionForClient } from "../../../src/lib/handlers/session.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
-import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import {
+	EventStoreEffectTag,
+	makeEventStoreEffect,
+} from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/provider-state-effect.js";
@@ -155,6 +160,7 @@ const makeShellTestLayer = (
 		Layer.succeed(
 			ConfigTag,
 			makeMockConfig({
+				slug: "test-project",
 				configDir: dir,
 				claudeSdk: {
 					query: () => {
@@ -299,9 +305,9 @@ const countingReadQuery = (
 	requeries: Ref.Ref<number>,
 ): ReadQueryEffect => ({
 	...real,
-	readSessionList: (afterVersion) =>
+	readSessionList: (...args) =>
 		Ref.update(requeries, (n) => n + 1).pipe(
-			Effect.zipRight(real.readSessionList(afterVersion)),
+			Effect.zipRight(real.readSessionList(...args)),
 		),
 });
 
@@ -310,17 +316,13 @@ const countingReadQuery = (
 // counting, mid-read commits) while everything else stays real.
 const openShell = (options?: {
 	readonly resumeFromSequence?: number;
+	readonly resumePoint?: ResumePoint;
 	readonly readQuery?: ReadQueryEffect;
 }) =>
 	Effect.gen(function* () {
 		const q = yield* Queue.unbounded<Envelope<SessionInfo>>();
-		const run = Stream.runForEach(
-			subscribeShell(
-				options?.resumeFromSequence === undefined
-					? {}
-					: { resumeFromSequence: options.resumeFromSequence },
-			),
-			(env) => Queue.offer(q, env),
+		const run = Stream.runForEach(subscribeShell(options), (env) =>
+			env._tag === "projects" ? Effect.void : Queue.offer(q, env),
 		);
 		const fiber = yield* (
 			options?.readQuery === undefined
@@ -336,6 +338,66 @@ const takeN = <A>(q: Queue.Queue<A>, n: number): Effect.Effect<A[]> =>
 const SID = "session-shell";
 
 describe("subscribeShell", () => {
+	it.scoped(
+		"a project's sidebar ignores another project's committed advance",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated(SID, "Project A")]);
+				const real = yield* ReadQueryEffectTag;
+				const reads = yield* Ref.make(0);
+				const { q } = yield* openShell({
+					readQuery: countingReadQuery(real, reads),
+				});
+				yield* takeN(q, 2);
+				const otherStore = yield* makeEventStoreEffect.pipe(
+					Effect.provideService(PersistenceProjectTag, {
+						projectId: "other-project",
+					}),
+				);
+				yield* commit([sessionCreated("other-session", "Project B")]).pipe(
+					Effect.provideService(EventStoreEffectTag, otherStore),
+				);
+				yield* Effect.yieldNow();
+				expect(yield* Ref.get(reads)).toBe(1);
+				expect(yield* Queue.size(q)).toBe(0);
+				yield* commit([sessionRenamed(SID, "Updated A")]);
+				expect(yield* Queue.take(q)).toMatchObject({
+					_tag: "upsert",
+					item: { title: "Updated A" },
+				});
+				expect(yield* Queue.size(q)).toBe(0);
+			}).pipe(Effect.provide(makeShellTestLayer())),
+	);
+	it.scoped(
+		"a resume point from another store replaces the sidebar snapshot",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated(SID, "Original")]);
+				const cursor = yield* readModelVersion;
+				yield* commit([sessionRenamed(SID, "Updated")]);
+				const resumePoint = ResumePoint.make(
+					Schema.encodeSync(Schema.StringFromBase64Url)(
+						JSON.stringify({
+							store: "another-store",
+							project: "test-project",
+							sequence: cursor,
+						}),
+					),
+				);
+				const { q } = yield* openShell({
+					resumeFromSequence: cursor,
+					resumePoint,
+				});
+				const [snapshot, synchronized] = yield* takeN(q, 2);
+				expect(snapshot?._tag).toBe("snapshot");
+				if (snapshot?._tag !== "snapshot") throw new Error("expected snapshot");
+				expect(snapshot.rows.map(({ title }) => title)).toEqual(["Updated"]);
+				expect(snapshot.resumePoint).toBeDefined();
+				expect(synchronized).toEqual({ _tag: "synchronized" });
+			}).pipe(Effect.provide(makeShellTestLayer())),
+	);
 	for (const provider of ["opencode", "claude"] as const) {
 		it.scoped(
 			`${provider} fork commands update an open subscription from the event store`,
@@ -357,15 +419,13 @@ describe("subscribeShell", () => {
 						parentID: "parent",
 						forkMessageId: "fork-point",
 					});
-					// The child leaves the sidebar as it joins its parent's family,
-					// and is not deleted: a device viewing it stays there.
-					const [removal, upsert] = yield* takeN(q, 2);
-					expect(removal).toMatchObject({ _tag: "remove", id: "child" });
-					expect(removal).not.toHaveProperty("deleted");
+					// Recording lineage keeps the Fork in the shell as its own root.
+					const upsert = yield* Queue.take(q);
 					expect(upsert).toMatchObject({
 						_tag: "upsert",
-						item: { id: "parent" },
+						item: { id: "child", forkedFrom: "parent" },
 					});
+					expect(upsert).not.toHaveProperty("item.parentID");
 				}).pipe(
 					Effect.provide(
 						Layer.merge(makeShellTestLayer(), makeSessionManagerStateLive()),
@@ -375,7 +435,7 @@ describe("subscribeShell", () => {
 	}
 	for (const entry of ["command", "handler"] as const) {
 		it.scoped(
-			`a new Claude fork through the ${entry} publishes both lineage fields and resumes the SDK child`,
+			`a new Claude fork through the ${entry} publishes lineage without containment and resumes the SDK child`,
 			() => {
 				const api = makeMockOpenCodeAPI();
 				return Effect.gen(function* () {
@@ -417,12 +477,13 @@ describe("subscribeShell", () => {
 					const read = yield* ReadQueryEffectTag;
 					expect(yield* read.getSession(child.id)).toMatchObject({
 						provider: "claude",
-						parent_id: "claude-parent",
+						parent_id: null,
+						forked_from: "claude-parent",
 						fork_point_event: "ui-boundary",
 					});
 					expect(yield* Queue.take(q)).toMatchObject({
 						_tag: "upsert",
-						item: { id: "claude-parent" },
+						item: { id: child.id, forkedFrom: "claude-parent" },
 					});
 					expect(sdkForkSession).toHaveBeenCalledWith(
 						"sdk-parent",
@@ -502,7 +563,8 @@ describe("subscribeShell", () => {
 				const child = yield* forkSession("claude-parent");
 				const read = yield* ReadQueryEffectTag;
 				expect(yield* read.getSession(child.id)).toMatchObject({
-					parent_id: "claude-parent",
+					parent_id: null,
+					forked_from: "claude-parent",
 					fork_point_event: "ui-tip",
 					fork_point_timestamp: 1000,
 					fork_point_message_id: "ui-tip",
@@ -684,7 +746,7 @@ describe("subscribeShell", () => {
 	for (const messageId of ["fork-message", undefined]) {
 		// OpenCode keeps message identity across a fork.
 		it.scoped(
-			`a new OpenCode fork exposes its parent and fork point ${messageId ?? "at tip"} without a metadata cache`,
+			`a new OpenCode fork exposes its Source and fork point ${messageId ?? "at tip"} without a metadata cache`,
 			() => {
 				const api = makeMockOpenCodeAPI();
 				vi.mocked(api.provider.list).mockResolvedValue({
@@ -726,6 +788,7 @@ describe("subscribeShell", () => {
 						"parent",
 						{
 							driver: "opencode",
+							usageEligible: false,
 							id: AccountIdSchema.make("opencode"),
 							name: "OpenCode",
 						},
@@ -734,7 +797,7 @@ describe("subscribeShell", () => {
 					const envelope = yield* Queue.take(q);
 					expect(envelope).toMatchObject({
 						_tag: "upsert",
-						item: { id: "parent" },
+						item: { id: "new-fork", forkedFrom: "parent" },
 					});
 				}).pipe(
 					Effect.provide(
@@ -772,7 +835,9 @@ describe("subscribeShell", () => {
 			Effect.gen(function* () {
 				yield* recoverProjections;
 				const readQuery = yield* ReadQueryEffectTag;
-				expect(yield* readQuery.readSessionList()).toEqual({
+				expect(
+					yield* readQuery.readSessionList({ projectIds: ["test-project"] }),
+				).toEqual({
 					rows: [],
 					version: yield* readModelVersion,
 				});
@@ -780,7 +845,9 @@ describe("subscribeShell", () => {
 					sessionCreated("shell-old"),
 					sessionCreated("shell-new"),
 				]);
-				const projected = yield* readQuery.readSessionList();
+				const projected = yield* readQuery.readSessionList({
+					projectIds: ["test-project"],
+				});
 				expect(projected.rows.map(({ item }) => item.id)).toEqual([
 					"shell-new",
 					"shell-old",
@@ -790,7 +857,9 @@ describe("subscribeShell", () => {
 				yield* eventStore.appendBatch([
 					sessionRenamed("shell-old", "unprojected"),
 				]);
-				expect(yield* readQuery.readSessionList()).toEqual(projected);
+				expect(
+					yield* readQuery.readSessionList({ projectIds: ["test-project"] }),
+				).toEqual(projected);
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 
@@ -1171,7 +1240,7 @@ describe("subscribeShell", () => {
 				const raced = yield* Ref.make(false);
 				const racingReadQuery: ReadQueryEffect = {
 					...real,
-					readSessionList: (afterVersion) =>
+					readSessionList: (...args) =>
 						Ref.getAndSet(raced, true).pipe(
 							Effect.flatMap((already) =>
 								already
@@ -1182,7 +1251,7 @@ describe("subscribeShell", () => {
 											),
 										),
 							),
-							Effect.zipRight(real.readSessionList(afterVersion)),
+							Effect.zipRight(real.readSessionList(...args)),
 						),
 				};
 
@@ -1210,7 +1279,7 @@ describe("subscribeShell", () => {
 			const scope = yield* Scope.make();
 			const q = yield* Queue.unbounded<Envelope<SessionInfo>>();
 			const fiber = yield* Stream.runForEach(subscribeShell(), (env) =>
-				Queue.offer(q, env),
+				env._tag === "projects" ? Effect.void : Queue.offer(q, env),
 			).pipe(Effect.forkIn(scope));
 
 			yield* takeN(q, 2); // running & subscribed

@@ -116,7 +116,7 @@ const seed = (filename: string) =>
 				{ publish: false },
 			);
 		}).pipe(
-			Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+			Effect.provide(makePersistenceEffectLayer(filename, "process-test")),
 		),
 	);
 
@@ -180,7 +180,7 @@ test("a page holds up to 256 KB of whole messages, and load older reaches the re
 }, testInfo) => {
 	test.setTimeout(120_000);
 	await harness.terminate();
-	await seed(harness.projectStorePath());
+	await seed(harness.daemonStorePath());
 	await harness.restart({ keepPort: true });
 	await page.addInitScript(() => {
 		const metrics = { frameTimes: [] as number[], longTasks: [] as number[] };

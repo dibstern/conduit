@@ -61,6 +61,9 @@ type OperationsOutsideReadModelParity = keyof Pick<
 	| "addToParentMap"
 	| "getSessionParentMap"
 	| "refreshSessionLineage"
+	// Archive's read-model parity is covered by the real-relay session-archive E2E.
+	| "setSessionArchived"
+	| "restoreSessionForSend"
 >;
 
 type ReadModelMutation = Exclude<
@@ -135,6 +138,7 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 				yield* service.createSession(created.title, {
 					account: {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},
@@ -305,7 +309,8 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 
 				expect(yield* readQuery.getSession(forked.id)).toEqual(
 					expect.objectContaining({
-						parent_id: parentId,
+						parent_id: null,
+						forked_from: parentId,
 						fork_point_event: forkMessageId,
 					}),
 				);

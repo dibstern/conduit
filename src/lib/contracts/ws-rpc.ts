@@ -1,5 +1,5 @@
 import { Rpc, RpcGroup } from "@effect/rpc";
-import { Effect, Option, ParseResult, Schema } from "effect";
+import { Effect, Option, ParseResult, Record, Schema } from "effect";
 import { accountRefFromSelection } from "../account-directory.js";
 import type { FolderIssue } from "../project-folders.js";
 import {
@@ -51,6 +51,8 @@ import {
 import {
 	AccountIdSchema,
 	BrowserDriverTraitsSchema,
+	KnownProviderDriverKindSchema,
+	PROVIDER_DRIVERS,
 	ProviderDriverKindSchema,
 	ProviderSessionCapabilitiesSchema,
 } from "./provider-instance.js";
@@ -79,10 +81,10 @@ export const ResumeBase = Schema.Struct({
 export type ResumeBase = typeof ResumeBase.Type;
 
 /**
- * Where a saved snapshot can resume from, named by the store and session that
+ * Where a saved snapshot can resume from, named by its store and subscription scope
  * sent it (conduit-test-y7eo.14). Opaque to the browser, which only keeps it
  * and hands it back; it is not tamper-proof. The server validates it, refusing
- * one from another store or session with a fresh snapshot, and the resume
+ * one from another store or scope with a fresh snapshot, and the resume
  * checksum backs whatever it accepts.
  */
 export const ResumePoint = NonEmptyString.pipe(Schema.brand("ResumePoint"));
@@ -131,6 +133,8 @@ export const EnvelopeSchema = <A, I, R>(itemSchema: Schema.Schema<A, I, R>) =>
 			sequence: Schema.Number,
 			hasMore: Schema.optional(Schema.Boolean),
 			cursor: Schema.optional(NonEmptyString),
+			/** The opaque store and scope identity this snapshot resumes from. */
+			resumePoint: Schema.optional(ResumePoint),
 		}),
 		Schema.Struct({
 			_tag: Schema.Literal("synchronized"),
@@ -174,6 +178,26 @@ export const ModelInfoSchema = Schema.Struct({
 		}),
 	),
 	variants: Schema.optional(Schema.Array(Schema.String)),
+	parameters: Schema.optional(
+		Schema.Struct({
+			rows: Schema.Array(
+				Schema.Struct({
+					id: Schema.String,
+					label: Schema.String,
+					values: Schema.Array(
+						Schema.Struct({ value: Schema.String, label: Schema.String }),
+					),
+				}),
+			),
+			combinations: Schema.Array(
+				Schema.Struct({
+					variant: Schema.String,
+					values: Schema.Record({ key: Schema.String, value: Schema.String }),
+					isDefault: Schema.optional(Schema.Boolean),
+				}),
+			),
+		}),
+	),
 	contextWindowOptions: Schema.optional(
 		Schema.Array(ContextWindowOptionSchema),
 	),
@@ -260,6 +284,7 @@ export const ProjectInfoSchema = Schema.Struct({
 		Schema.Record({ key: Schema.String, value: RepositoryIdentitySchema }),
 	),
 	missing: Schema.optional(Schema.Boolean),
+	unavailableReason: Schema.optional(Schema.String),
 	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),
 });
@@ -279,6 +304,12 @@ export const OpenCodeInstanceSchema = Schema.Struct({
 	driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
 	isDefault: Schema.optional(Schema.Boolean),
 	usageEligible: Schema.optional(Schema.Boolean),
+	cursorUsageSource: Schema.optional(
+		Schema.Literal("token", "keychain", "can_enable", "unsupported"),
+	),
+	available: Schema.optional(Schema.Boolean),
+	unavailableReason: Schema.optional(Schema.String),
+	unavailableCode: Schema.optional(Schema.Literal("auth_required")),
 	capabilities: Schema.optional(
 		Schema.suspend(() => ProviderSessionCapabilitiesSchema),
 	),
@@ -450,14 +481,7 @@ const TextSuffixSchema = Schema.Struct({
 });
 const DetailEnvelope = EnvelopeSchema(SessionDetailItemSchema);
 export const SessionDetailEnvelopeSchema = Schema.Union(
-	DetailEnvelope.members[0].pipe(
-		Schema.extend(
-			Schema.Struct({
-				// What a client that saves this snapshot resumes it from.
-				resumePoint: Schema.optional(ResumePoint),
-			}),
-		),
-	),
+	DetailEnvelope.members[0],
 	DetailEnvelope.members[1],
 	DetailEnvelope.members[2].pipe(
 		Schema.extend(
@@ -518,7 +542,7 @@ export type HarnessDefaultState = typeof HarnessDefaultStateSchema.Type;
 
 export const SetHarnessDefaultResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
-	harness: Schema.Literal("claude", "opencode"),
+	harness: Schema.suspend(() => KnownProviderDriverKindSchema),
 	state: HarnessDefaultStateSchema,
 });
 export type SetHarnessDefaultResponse =
@@ -627,6 +651,18 @@ export const ListDaemonSessionsResponseSchema = Schema.Struct({
 	nextCursor: Schema.NullOr(DaemonSessionCursorSchema),
 });
 
+export const ArchivedSessionCursorSchema = Schema.Struct({
+	archivedAt: Schema.Number,
+	id: Schema.String,
+});
+
+export const ListArchivedSessionsResponseSchema = Schema.Struct({
+	sessions: Schema.Array(SessionInfoSchema),
+	availability: Schema.Array(ProjectSessionAvailabilitySchema),
+	hasMore: Schema.Boolean,
+	nextCursor: Schema.NullOr(ArchivedSessionCursorSchema),
+});
+
 export const CreateSessionResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	sessionId: Schema.String,
@@ -644,7 +680,11 @@ const SteerRefusedSchema = Schema.Struct({
 
 /** Ok, or a refused steer: nothing was admitted, so the browser keeps the text. */
 export const SubmitInputResponseSchema = Schema.Union(
-	Schema.Struct({ ok: Schema.Literal(true), sessionId: Schema.String }),
+	Schema.Struct({
+		ok: Schema.Literal(true),
+		sessionId: Schema.String,
+		handedOff: Schema.Boolean,
+	}),
 	SteerRefusedSchema,
 );
 
@@ -671,7 +711,7 @@ export const ForkSessionResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	sessionId: Schema.String,
 	/** Lineage for the forking tab until the fork's family row arrives. */
-	parentId: Schema.String,
+	forkedFrom: Schema.String,
 	forkMessageId: Schema.optional(Schema.String),
 	forkPointTimestamp: Schema.optional(Schema.Number),
 });
@@ -1005,6 +1045,8 @@ export type ProjectSessionAvailability =
 	typeof ProjectSessionAvailabilitySchema.Type;
 export type ListDaemonSessionsResponse =
 	typeof ListDaemonSessionsResponseSchema.Type;
+export type ListArchivedSessionsResponse =
+	typeof ListArchivedSessionsResponseSchema.Type;
 export type CreateSessionResponse = typeof CreateSessionResponseSchema.Type;
 export type ViewSessionResponse = typeof ViewSessionResponseSchema.Type;
 export type SubmitInputResponse = typeof SubmitInputResponseSchema.Type;
@@ -1019,7 +1061,7 @@ export type RpcLogLevel = typeof RpcLogLevelSchema.Type;
 
 export class WsRpcError extends Schema.TaggedError<WsRpcError>()("WsRpcError", {
 	message: Schema.String,
-	code: Schema.optional(Schema.Literal("unknown-session", "ambiguous-session")),
+	code: Schema.optional(Schema.Literal("unknown-session")),
 }) {}
 
 export class GetStatus extends Schema.TaggedRequest<GetStatus>()("GetStatus", {
@@ -1098,6 +1140,49 @@ export class RestartWithConfig extends Schema.TaggedRequest<RestartWithConfig>()
 		success: OkResponseSchema,
 		payload: {},
 	},
+) {}
+
+export const CursorAuthStateSchema = Schema.Struct({
+	source: Schema.Literal("environment", "sdk-login", "none"),
+	status: Schema.Literal("logged-in", "logged-out", "error"),
+	email: Schema.optional(Schema.String),
+	apiKeyExpiresAtMs: Schema.optional(Schema.Number),
+	expiresSoon: Schema.Boolean,
+	error: Schema.optional(Schema.String),
+	login: Schema.Struct({
+		state: Schema.Literal(
+			"idle",
+			"pending",
+			"complete",
+			"cancelled",
+			"timed-out",
+			"error",
+		),
+		url: Schema.optional(Schema.String),
+		deadlineAtMs: Schema.optional(Schema.Number),
+		error: Schema.optional(Schema.String),
+	}),
+});
+export type CursorAuthState = typeof CursorAuthStateSchema.Type;
+
+export class GetCursorAuth extends Schema.TaggedRequest<GetCursorAuth>()(
+	"GetCursorAuth",
+	{ failure: WsRpcError, success: CursorAuthStateSchema, payload: {} },
+) {}
+
+export class StartCursorLogin extends Schema.TaggedRequest<StartCursorLogin>()(
+	"StartCursorLogin",
+	{ failure: WsRpcError, success: CursorAuthStateSchema, payload: {} },
+) {}
+
+export class CancelCursorLogin extends Schema.TaggedRequest<CancelCursorLogin>()(
+	"CancelCursorLogin",
+	{ failure: WsRpcError, success: CursorAuthStateSchema, payload: {} },
+) {}
+
+export class LogoutCursor extends Schema.TaggedRequest<LogoutCursor>()(
+	"LogoutCursor",
+	{ failure: WsRpcError, success: CursorAuthStateSchema, payload: {} },
 ) {}
 
 export class GetInstances extends Schema.TaggedRequest<GetInstances>()(
@@ -1394,6 +1479,28 @@ const UsageLimitsSettingResponseSchema = Schema.Struct({
 	usageLimits: UsageLimitsSettingSchema,
 });
 
+const AutoArchiveSettingResponseSchema = Schema.Struct({
+	autoArchiveAfterDays: Schema.NullOr(Schema.Number),
+});
+
+export class GetAutoArchiveSetting extends Schema.TaggedRequest<GetAutoArchiveSetting>()(
+	"GetAutoArchiveSetting",
+	{
+		failure: WsRpcError,
+		success: AutoArchiveSettingResponseSchema,
+		payload: {},
+	},
+) {}
+
+export class SetAutoArchiveSetting extends Schema.TaggedRequest<SetAutoArchiveSetting>()(
+	"SetAutoArchiveSetting",
+	{
+		failure: WsRpcError,
+		success: AutoArchiveSettingResponseSchema,
+		payload: { autoArchiveAfterDays: Schema.NullOr(Schema.Number) },
+	},
+) {}
+
 export class GetUsageLimitsSetting extends Schema.TaggedRequest<GetUsageLimitsSetting>()(
 	"GetUsageLimitsSetting",
 	{
@@ -1409,6 +1516,18 @@ export class SetUsageLimitsSetting extends Schema.TaggedRequest<SetUsageLimitsSe
 		failure: WsRpcError,
 		success: UsageLimitsSettingResponseSchema,
 		payload: { usageLimits: UsageLimitsSettingSchema },
+	},
+) {}
+
+export class SetCursorUsageKeychain extends Schema.TaggedRequest<SetCursorUsageKeychain>()(
+	"SetCursorUsageKeychain",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({
+			enabled: Schema.Boolean,
+			reason: Schema.optional(Schema.String),
+		}),
+		payload: { accountId: NonEmptyString, enabled: Schema.Boolean },
 	},
 ) {}
 
@@ -1573,7 +1692,7 @@ export class SetHarnessDefault extends Schema.TaggedRequest<SetHarnessDefault>()
 		success: SetHarnessDefaultResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
-			harness: Schema.Literal("claude", "opencode"),
+			harness: Schema.suspend(() => KnownProviderDriverKindSchema),
 			providerId: NonEmptyString,
 			modelId: NonEmptyString,
 			/** Omitted: the effort last saved for this model, if still offered. */
@@ -1937,6 +2056,19 @@ export class SetSessionPinned extends Schema.TaggedRequest<SetSessionPinned>()(
 		payload: {
 			sessionId: NonEmptyString,
 			pinned: Schema.Boolean,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class SetSessionArchived extends Schema.TaggedRequest<SetSessionArchived>()(
+	"SetSessionArchived",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			sessionId: NonEmptyString,
+			archived: Schema.Boolean,
 			originId: Schema.optional(NonEmptyString),
 		},
 	},
@@ -2320,10 +2452,23 @@ export class ListDaemonSessions extends Schema.TaggedRequest<ListDaemonSessions>
 			limit: Schema.optional(Schema.Number),
 			roots: Schema.optional(Schema.Boolean),
 			search: Schema.optional(Schema.String),
+			includeArchived: Schema.optional(Schema.Boolean),
 			cursor: Schema.optional(DaemonSessionCursorSchema),
 			// A project slug or encodeGroupScope's reserved /group/<key> value.
 			scope: Schema.optional(NonEmptyString),
 			exclude: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class ListArchivedSessions extends Schema.TaggedRequest<ListArchivedSessions>()(
+	"ListArchivedSessions",
+	{
+		failure: WsRpcError,
+		success: ListArchivedSessionsResponseSchema,
+		payload: {
+			limit: Schema.optional(Schema.Number),
+			cursor: Schema.optional(ArchivedSessionCursorSchema),
 		},
 	},
 ) {}
@@ -2777,6 +2922,10 @@ const wsRpcRequests = [
 	SetAgent,
 	RestartWithConfig,
 	GetInstances,
+	GetCursorAuth,
+	StartCursorLogin,
+	CancelCursorLogin,
+	LogoutCursor,
 	GetInstanceStatus,
 	{
 		requests: [AttachProjectForSession, AttachProject],
@@ -2923,6 +3072,7 @@ const wsRpcRequests = [
 	MarkSessionRead,
 	MarkSessionSeen,
 	SetSessionSettled,
+	SetSessionArchived,
 	SetSessionPinned,
 	SetSessionAutoSettle,
 	SnoozeSession,
@@ -3033,6 +3183,8 @@ const wsRpcRequests = [
 	SetDefault,
 	GetAutoSettleSetting,
 	SetAutoSettleSetting,
+	GetAutoArchiveSetting,
+	SetAutoArchiveSetting,
 	GetWorktreeCleanupSetting,
 	{
 		requests: [SetProjectWorktreeCleanupSetting, SetWorktreeCleanupSetting],
@@ -3054,6 +3206,7 @@ const wsRpcRequests = [
 	CleanUpWorktreesNow,
 	GetUsageLimitsSetting,
 	SetUsageLimitsSetting,
+	SetCursorUsageKeychain,
 	ScanNow,
 	DetectProxy,
 	ListPtys,
@@ -3078,6 +3231,7 @@ const wsRpcRequests = [
 	ClosePty,
 	PtyInput,
 	ListDaemonSessions,
+	ListArchivedSessions,
 	CreateSession,
 	ViewSession,
 	PreWarmSession,
@@ -3140,13 +3294,27 @@ type WsRpcRequestRpc<Entry = WsRpcRequestEntry> = Entry extends {
 		? Rpc.From<Entry>
 		: never;
 
+export const ShellProjectsFrameSchema = Schema.Struct({
+	_tag: Schema.Literal("projects"),
+	projects: Schema.Array(ProjectInfoSchema),
+	/** The project a new session prefills, on every client. */
+	newSessionProject: Schema.optional(Schema.String),
+});
+export type ShellProjectsFrame = typeof ShellProjectsFrameSchema.Type;
+
+export const ShellEnvelopeSchema = Schema.Union(
+	EnvelopeSchema(SessionInfoSchema),
+	ShellProjectsFrameSchema,
+);
+export type ShellEnvelope = typeof ShellEnvelopeSchema.Type;
+
 export const SubscribeShell = Rpc.make("SubscribeShell", {
 	payload: {
-		projectSlug: NonEmptyString,
 		resumeFromSequence: Schema.optional(Schema.Number),
 		resumeBase: Schema.optional(ResumeBase),
+		resumePoint: Schema.optional(ResumePoint),
 	},
-	success: EnvelopeSchema(SessionInfoSchema),
+	success: ShellEnvelopeSchema,
 	error: WsRpcError,
 	stream: true,
 });
@@ -3286,17 +3454,6 @@ export const SubscribeUsage = Rpc.make("SubscribeUsage", {
 	stream: true,
 });
 
-export const SubscribeProjects = Rpc.make("SubscribeProjects", {
-	payload: {},
-	success: Schema.Struct({
-		projects: Schema.Array(ProjectInfoSchema),
-		/** The project a new session prefills, on every client. */
-		newSessionProject: Schema.optional(Schema.String),
-	}),
-	error: WsRpcError,
-	stream: true,
-});
-
 /**
  * The daemon's own facts (conduit-test-ni8.16.2), daemon-global like the
  * lists above: its protocol and build, whether a newer build is ready to
@@ -3371,10 +3528,14 @@ export const ProjectSettingSchema = Schema.Union(
 		providers: Schema.Array(ProviderInfoSchema),
 		accountId: Schema.optional(Schema.String),
 	}),
-	Schema.TaggedStruct("harnessDefaults", {
-		claude: HarnessDefaultStateSchema,
-		opencode: HarnessDefaultStateSchema,
-	}),
+	Schema.suspend(() =>
+		Schema.TaggedStruct(
+			"harnessDefaults",
+			Record.map(PROVIDER_DRIVERS, () =>
+				Schema.optionalWith(HarnessDefaultStateSchema, { exact: true }),
+			),
+		),
+	),
 );
 export type ProjectSetting = typeof ProjectSettingSchema.Type;
 /** Persisted settings shared by all projects; live facts stay per relay. */
@@ -3473,7 +3634,6 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribeInstances,
 	SubscribeUsage,
 	SubscribeServerStatus,
-	SubscribeProjects,
 	// Array.map loses the correlation between each tag and its request schema.
 	...(wsRpcRequests.map((entry) =>
 		"rpc" in entry ? entry.rpc : Rpc.fromTaggedRequest(entry),

@@ -42,11 +42,13 @@ export interface SendMessageToSessionInput {
 	readonly delivery?: InputDelivery;
 }
 
-export interface SendMessageToSessionResult {
+export type SendMessageToSessionResult = {
 	readonly sessionId: string | undefined;
+} & (
+	| { readonly handedOff: boolean; readonly refused?: never }
 	/** Why the steer was refused; nothing was admitted. */
-	readonly refused?: SteerBlocker;
-}
+	| { readonly refused: SteerBlocker; readonly handedOff?: never }
+);
 
 export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 	Effect.gen(function* () {
@@ -57,10 +59,17 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		const imageList =
 			images && images.length > 0 ? Array.from(images) : undefined;
 		let activeId = input.sessionId;
-		if (!text) return { sessionId: activeId } as SendMessageToSessionResult;
+		if (!text)
+			return {
+				sessionId: activeId,
+				handedOff: false,
+			} satisfies SendMessageToSessionResult;
 		if (!activeId) {
 			log.warn(`client=${clientId} send_turn dropped: no active session`);
-			return { sessionId: activeId } as SendMessageToSessionResult;
+			return {
+				sessionId: activeId,
+				handedOff: false,
+			} satisfies SendMessageToSessionResult;
 		}
 		const originalActiveId = activeId;
 		const read = yield* ReadQueryEffectTag;
@@ -80,28 +89,17 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			...(sessionModel ? { model: sessionModel } : {}),
 			...(input.delivery === "steer" ? { delivery: input.delivery } : {}),
 		});
-		// Talking to a settled or snoozed session brings it back. Triage bookkeeping must
-		// never stop the message itself, so a failure here is only logged.
-		yield* Effect.gen(function* () {
-			yield* sessionManagerService
-				.unsnoozeSession(activeId)
-				.pipe(
-					Effect.catchAll((error) =>
-						Effect.sync(() =>
-							log.warn(`Failed to un-snooze ${activeId}: ${String(error)}`),
-						),
+		// Restore all triage state under one lock. Bookkeeping failures are logged
+		// inside the service so they never prevent delivery of the message.
+		yield* sessionManagerService
+			.restoreSessionForSend(activeId)
+			.pipe(
+				Effect.catchAll((error) =>
+					Effect.sync(() =>
+						log.warn(`Failed to restore ${activeId} on send: ${String(error)}`),
 					),
-				);
-			yield* sessionManagerService.setSessionSettled(activeId, {
-				settled: false,
-			});
-		}).pipe(
-			Effect.catchAll((error) =>
-				Effect.sync(() =>
-					log.warn(`Failed to un-settle ${activeId}: ${String(error)}`),
 				),
-			),
-		);
+			);
 		log.info(
 			`client=${clientId} session=${activeId} → ${text.slice(0, 80)}${text.length > 80 ? "…" : ""}`,
 		);
@@ -141,10 +139,13 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			return {
 				sessionId: activeId,
 				refused: submitted.refused,
-			} as SendMessageToSessionResult;
+			} satisfies SendMessageToSessionResult;
 		if (originalActiveId !== activeId) clearSessionInputDraft(originalActiveId);
 		clearSessionInputDraft(activeId);
-		return { sessionId: activeId } as SendMessageToSessionResult;
+		return {
+			sessionId: activeId,
+			handedOff: submitted.handedOff,
+		} satisfies SendMessageToSessionResult;
 	});
 
 export const handleMessage = (

@@ -3,10 +3,8 @@ import { createConnection } from "node:net";
 import { join } from "node:path";
 import { Effect, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	type ClaudeRunnerMessage,
-	ClaudeRunnerSocket,
-} from "../../../src/lib/provider/claude/claude-runner-protocol.js";
+import { ClaudeRunnerSocket } from "../../../src/lib/provider/claude/claude-runner-protocol.js";
+import type { RunnerMessage } from "../../../src/lib/provider/runner/runner-protocol.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import {
 	type ProcessBrowser,
@@ -16,9 +14,12 @@ import {
 
 async function sessionBackground(browser: ProcessBrowser, sessionId: string) {
 	const envelopes = await Effect.runPromise(
-		browser.rpc
-			.SubscribeShell({ projectSlug: "process-test" })
-			.pipe(Stream.take(1), Stream.runCollect, Effect.timeout("5 seconds")),
+		browser.rpc.SubscribeShell({}).pipe(
+			Stream.filter((frame) => frame._tag !== "projects"),
+			Stream.take(1),
+			Stream.runCollect,
+			Effect.timeout("5 seconds"),
+		),
 	);
 	const snapshot = [...envelopes][0];
 	const session =
@@ -66,6 +67,7 @@ describe("foreground daemon process harness", () => {
 		expect(harness.generations[0]?.pid).not.toBe(process.pid);
 		expect(harness.generations[0]?.instances).toEqual([
 			{ managed: false, url: "http://127.0.0.1:0" },
+			{ managed: false },
 		]);
 		expect(harness.generations[0]?.projects).toEqual([harness.projectDir]);
 	});
@@ -155,8 +157,11 @@ describe("foreground daemon process harness", () => {
 					type: "tool",
 					state: expect.objectContaining({
 						status: "completed",
-						output:
-							decision === "allow" ? "harness-approved" : "harness-denied",
+						output: {
+							_tag: "whole",
+							text:
+								decision === "allow" ? "harness-approved" : "harness-denied",
+						},
 					}),
 				}),
 			]),
@@ -290,7 +295,7 @@ describe("foreground daemon process harness", () => {
 		if (runner?.kind !== "runner-started")
 			throw new Error("Missing background runner proof");
 		await harness.kill();
-		const frames: ClaudeRunnerMessage[] = [];
+		const frames: RunnerMessage[] = [];
 		const { projectDir, configDir } = harness;
 		const socket = createConnection(runner.socketPath);
 		const peer = new ClaudeRunnerSocket(
@@ -355,7 +360,7 @@ describe("foreground daemon process harness", () => {
 						.trim()
 						.split("\n")
 						.filter(Boolean)
-						.map((line) => JSON.parse(line) as ClaudeRunnerMessage);
+						.map((line) => JSON.parse(line) as RunnerMessage);
 					sequences = retained.flatMap((frame) =>
 						frame.type === "output" && frame.output.type === "background-task"
 							? [frame.sequence]
@@ -423,7 +428,7 @@ describe("foreground daemon process harness", () => {
 						.trim()
 						.split("\n")
 						.filter(Boolean)
-						.map((line) => JSON.parse(line) as ClaudeRunnerMessage);
+						.map((line) => JSON.parse(line) as RunnerMessage);
 					expect(
 						frames
 							.reverse()
@@ -457,7 +462,7 @@ describe("foreground daemon process harness", () => {
 				async () => {
 					after = await sessionBackground(browser, sessionId);
 					expect(after).toEqual({
-						backgroundWork: change === "replace" ? "working" : null,
+						backgroundWork: change === "replace" ? "monitoring" : null,
 						backgroundTasks: tasks.map((task) => ({
 							...task,
 							firstSeenAt: expect.any(Number),

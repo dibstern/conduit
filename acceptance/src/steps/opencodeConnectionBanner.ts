@@ -4,7 +4,6 @@ import { dualDriverProviders } from "../../../test/e2e/fixtures/mockup-state.js"
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
-	mockInstances,
 	openModelPicker,
 	requireRelayControl,
 	requireRpcControl,
@@ -116,18 +115,21 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 					variant: "",
 				});
 			}
-			rpc.setResponse("GetModels", {
-				projectSlug: "myapp",
-				instanceId: match[3] ?? (claude ? "claude" : "opencode"),
-				providers: dualDriverProviders.filter(
-					(provider) => provider.id !== "claude",
-				),
-				active: {
-					model: claude ? "claude-opus-4-1" : "claude-sonnet-4",
-					provider: claude ? "claude" : "anthropic",
-				},
-				variant: { variant: "", variants: [] },
-				contextWindow: { contextWindow: "", options: [] },
+			rpc.setStubs({
+				GetModels: () => ({
+					defaultOpenCodeInstanceId: "opencode",
+					projectSlug: "myapp",
+					instanceId: match[3] ?? (claude ? "claude" : "opencode"),
+					providers: dualDriverProviders.filter(
+						(provider) => provider.id !== "claude",
+					),
+					active: {
+						model: claude ? "claude-opus-4-1" : "claude-sonnet-4",
+						provider: claude ? "claude" : "anthropic",
+					},
+					variant: { variant: "", variants: [] },
+					contextWindow: { contextWindow: "", options: [] },
+				}),
 			});
 			const agents = {
 				projectSlug: "myapp",
@@ -137,17 +139,19 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 			};
 			let rejected = false;
 			if (match[4]) {
-				rpc.setHandler("GetAgents", (payload) => {
-					if (payload["sessionId"] === sessionId) {
-						rejected = true;
-						throw new WsRpcError({
-							message: "OpenCode agent discovery is unavailable",
-						});
-					}
-					return agents;
+				rpc.setStubs({
+					GetAgents: (payload) => {
+						if ("sessionId" in payload && payload.sessionId === sessionId) {
+							rejected = true;
+							throw new WsRpcError({
+								message: "OpenCode agent discovery is unavailable",
+							});
+						}
+						return agents;
+					},
 				});
 			} else {
-				rpc.setResponse("GetAgents", agents);
+				rpc.setStubs({ GetAgents: () => agents });
 			}
 			await world.page
 				.locator(`[data-session-id="${sessionId}"]`)
@@ -187,9 +191,11 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 					},
 				],
 			});
-			rpc.setHandler("CreateSession", (payload) => {
-				expect(payload["instanceId"]).toBe(instanceId);
-				throw new WsRpcError({ message: match[2] ?? "" });
+			rpc.setStubs({
+				CreateSession: (payload) => {
+					expect(payload["instanceId"]).toBe(instanceId);
+					throw new WsRpcError({ message: match[2] ?? "" });
+				},
 			});
 			await openModelPicker(world.page);
 			await world.page.getByTestId("picker-harness-opencode").click();

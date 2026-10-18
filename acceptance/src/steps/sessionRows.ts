@@ -144,19 +144,16 @@ export const sessionRowsHandlers: StepHandler[] = [
 				},
 			];
 			const rpc = requireRpcControl(world.page);
-			rpc.setResponse("GetProjects", { projects, current: "myapp" });
-			rpc.setDaemonList("SubscribeProjects", { projects, current: "myapp" });
-			rpc.setHandler("ListDaemonSessions", ({ scope, exclude }) => ({
-				sessions: rows.filter(
-					(row) =>
-						row.projectSlug !== exclude &&
-						(!scope || row.projectSlug === scope),
-				),
-				availability: [],
-				hasMore: false,
-				nextCursor: null,
-			}));
-			rpc.setShellRows(rows.filter((row) => row.projectSlug === "myapp"));
+			rpc.setProjects({ projects });
+			rpc.setStubs({
+				ListDaemonSessions: ({ scope }) => ({
+					sessions: rows.filter((row) => !scope || row.projectSlug === scope),
+					availability: [],
+					hasMore: false,
+					nextCursor: null,
+				}),
+			});
+			rpc.setShellRows(rows);
 		},
 	},
 	{

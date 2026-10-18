@@ -1,5 +1,18 @@
 # Conduit project model
 
+## Project
+
+A **Project** is a named, saved set of one or more Project Folders and the only
+way sessions are grouped (ADR-0011). Its first folder is the main folder, which
+no other project may use as its main folder; other folders can be shared.
+Every session belongs to one project for life, and projects never merge.
+Conduit is never "in" a project: the `?p=<slug>` Scope names a project but is
+not app state.
+
+The **Scratch Project** is the hidden project behind New Session's "No
+project". Each scratch session runs in its own `<configDir>/scratch/<session
+id>/` folder. Only an unsent draft can switch between it and a real project.
+
 ## Project Provenance
 
 A stored event or durable command belongs to the project's stable slug, its
@@ -10,7 +23,8 @@ the slug, never a workspace path. Opening a per-project store stamps legacy
 events and rewrites legacy command keys to its slug without changing ids, order
 or payloads. Converging command metadata keeps the highest applied sequence.
 Event sequences, command receipts and projector cursors carry that owner in
-their in-memory contracts. Reads and projections remain per-store.
+their in-memory contracts. List reads filter by Scope. Session-keyed reads,
+projections, projector cursors and the version counter stay store-wide.
 
 ## Repository Identity
 
@@ -40,6 +54,10 @@ HTTP/RPC consumers start, so remote changes are reflected after restart. Identit
 discovery is best-effort and never rejects a project save or daemon startup.
 
 ## Project Group
+
+Retired by ADR-0011: the Scope becomes one project or all, and projects that
+shared a group stay separate projects. This section describes the code until
+that lands.
 
 A **Project Group** contains the projects sharing a grouping key under their
 effective grouping mode. The primary Project Folder alone determines the group;

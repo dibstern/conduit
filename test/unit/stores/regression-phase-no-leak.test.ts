@@ -5,6 +5,25 @@ import { seedSessions } from "./session-fixtures.js";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock(
+	"../../../src/lib/frontend/stores/router.svelte.js",
+	async (importOriginal) => {
+		const router =
+			await importOriginal<
+				typeof import("../../../src/lib/frontend/stores/router.svelte.js")
+			>();
+		return {
+			...router,
+			navigate: (path: string) => {
+				router.routerState.path = path;
+			},
+			replaceRoute: (path: string) => {
+				router.routerState.path = path;
+			},
+		};
+	},
+);
+
 // Must mock localStorage BEFORE any store modules are loaded.
 vi.hoisted(() => {
 	let store: Record<string, string> = {};
@@ -50,10 +69,11 @@ import {
 	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 beforeEach(() => {
 	clearMessages();
-	sessionState.currentId = "session-a";
+	openSessionForSetup("session-a", "project-a");
 	// Register sessions
 	seedSessions([
 		...sessionState.sessions.values(),
@@ -94,7 +114,7 @@ describe("Phase does not leak between sessions", () => {
 		const slotA = getOrCreateSessionSlot("session-a");
 		slotA.activity.phase = "streaming";
 
-		sessionState.currentId = "session-a";
+		openSessionForSetup("session-a", "project-a");
 		// currentChat() composes activity + messages for the current session
 		expect(currentChat().phase).toBe("streaming");
 	});

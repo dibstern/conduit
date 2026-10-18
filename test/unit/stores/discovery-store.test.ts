@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { assert, beforeEach, describe, expect, it } from "vitest";
 import {
 	applyGetAgentsResponse,
@@ -33,7 +34,7 @@ import {
 	clearInstanceState,
 } from "../../../src/lib/frontend/stores/instance.svelte.js";
 import { applyProjectSetting } from "../../../src/lib/frontend/stores/project-settings.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { GetModelsResponse } from "../../../src/lib/frontend/transport/ws-rpc.js";
 import type {
 	AgentInfo,
@@ -59,7 +60,7 @@ beforeEach(() => {
 	clearInstanceState();
 	applyInstanceListResponse({ instances: [] });
 	handleDefaultModelInfo({});
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 });
 
 describe("formatAgentLabel", () => {
@@ -575,7 +576,7 @@ describe("applyGetModelsResponse", () => {
 
 describe("handlePermissionModeInfo", () => {
 	it("sets the session permission mode", () => {
-		sessionState.currentId = "session-permission";
+		openSessionForSetup("session-permission", "project-a");
 		handlePermissionModeInfo({ mode: "auto" });
 		expect(discoveryState.permissionMode).toBe("auto");
 	});
@@ -583,7 +584,7 @@ describe("handlePermissionModeInfo", () => {
 
 describe("an undo only undoes its own choice", () => {
 	beforeEach(() => {
-		sessionState.currentId = "session-undo";
+		openSessionForSetup("session-undo", "project-a");
 		applyGetModelsResponse(
 			{
 				projectSlug: "project-a",
@@ -807,7 +808,7 @@ describe("handleDefaultModelInfo", () => {
 
 describe("session context-window reads", () => {
 	beforeEach(() => {
-		sessionState.currentId = "session-context";
+		openSessionForSetup("session-context", "project-a");
 	});
 
 	it("sets the session context window and options from its response", () => {
@@ -858,7 +859,7 @@ describe("session context-window reads", () => {
 describe("getActiveContextWindowOptions", () => {
 	beforeEach(() => applyInstanceListResponse({ instances: defaultInstances }));
 	it("returns the server-provided context window options", () => {
-		sessionState.currentId = "session-context";
+		openSessionForSetup("session-context", "project-a");
 		applyGetModelsResponse(
 			{
 				projectSlug: "project-a",
