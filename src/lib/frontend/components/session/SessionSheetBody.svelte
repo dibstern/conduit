@@ -116,7 +116,7 @@
 		<MenuCloseItem label="Close session sheet" data-testid="session-sheet-close" />
 	</div>
 	{#if views}<div data-hold-menu-dim class="mt-[18px]">{@render views()}</div>{/if}
-	<LabelledGridGroup label="Triage">
+	<LabelledGridGroup label="Triage" columns={triage.length > 4 ? 5 : 4}>
 		{#each triage as item (item.testId)}{@render tile(item)}{/each}
 	</LabelledGridGroup>
 	<SwitchRow data-testid="session-ctx-auto-settle" aria-label="Auto-settle when idle" label="Auto-settle" {checked} {saving} controlled showState={outlook !== undefined} description={outlook && describeAutoSettle(outlook, now)} oncheckedchange={() => void toggleAutoSettle()} />

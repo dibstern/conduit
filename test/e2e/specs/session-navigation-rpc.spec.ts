@@ -1368,7 +1368,7 @@ test("ForkSession response selects the fork and restores its draft", async ({
 	const { rpc } = await setup(page);
 	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
-	const item = page.locator(`[data-session-id="${seed}"]`);
+	const item = page.locator(`#session-list [data-session-id="${seed}"]`);
 	await item.hover();
 	await item.locator(".session-more-btn").click();
 	await page.getByTestId("session-ctx-fork").click();
@@ -1401,13 +1401,13 @@ test("a fork reply after opening another session leaves its route and composer a
 	});
 	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
-	const item = page.locator(`[data-session-id="${seed}"]`);
+	const item = page.locator(`#session-list [data-session-id="${seed}"]`);
 	await item.hover();
 	await item.locator(".session-more-btn").click();
 	await page.getByTestId("session-ctx-fork").click();
 	await rpc.waitForRequest((request) => request.tag === "ForkSession");
 	await page
-		.locator(`[data-session-id="${survivor}"]`)
+		.locator(`#session-list [data-session-id="${survivor}"]`)
 		.click({ position: { x: 48, y: 12 } });
 	await expect(page.locator("#input")).toHaveValue(`Draft for ${survivor}`);
 	await page.locator("#input").fill("Keep the other session open");
@@ -1581,9 +1581,9 @@ test("input.submit response selects a materialized OpenCode session", async ({
 		lastTurnEndVersion: 200,
 		lastTurnEndInputId: "older-input",
 	});
-	await expect(page.locator(`[data-session-id="${seed}"]`)).toContainText(
-		"Source with history",
-	);
+	await expect(
+		page.locator(`#session-list [data-session-id="${seed}"]`),
+	).toContainText("Source with history");
 	await page.locator("#send").click();
 	const submitted = await rpc.waitForRequest(
 		(request) => request.tag === "input.submit",

@@ -166,8 +166,8 @@ describe("session triage menu", () => {
 						"session-ctx-snooze",
 						"session-ctx-pin",
 						"session-ctx-mark-unread",
-						"session-ctx-auto-settle",
 						"session-ctx-archive",
+						"session-ctx-auto-settle",
 						"session-ctx-rename",
 						"session-ctx-fork",
 						"session-ctx-copy-resume",
@@ -180,8 +180,8 @@ describe("session triage menu", () => {
 						"session-ctx-snooze",
 						"session-ctx-pin",
 						"session-ctx-mark-unread",
-						"divider",
 						"session-ctx-archive",
+						"divider",
 						"session-ctx-rename",
 						"session-ctx-fork",
 						"session-ctx-copy-resume",
@@ -285,10 +285,10 @@ describe("session triage menu", () => {
 		const archiveIndex = entries.indexOf(
 			screen.getByTestId("session-ctx-archive"),
 		);
-		expect(entries[archiveIndex - 1]?.getAttribute("role")).toBe("separator");
-		expect(entries[archiveIndex + 1]).toBe(
-			screen.getByTestId("session-ctx-rename"),
+		expect(entries[archiveIndex - 1]).toBe(
+			screen.getByTestId("session-ctx-mark-unread"),
 		);
+		expect(entries[archiveIndex + 1]?.getAttribute("role")).toBe("separator");
 		await fireEvent.click(screen.getByTestId("session-ctx-settle"));
 		expect(rpc).toHaveBeenCalledWith(
 			"SetSessionSettled",

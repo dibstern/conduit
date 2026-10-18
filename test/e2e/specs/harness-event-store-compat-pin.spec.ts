@@ -57,7 +57,7 @@ const SESSIONS = [
 	},
 ];
 const RENDERED_HISTORY_HASH =
-	"ae0540eba9fb10939378eb42a82c0149c5550b97c9e81e0e6c64cb2025c312cb";
+	"297147da1b2a22984147227ecb6441969b8537df6cf184efb9b0c864ae9d8182";
 /** The fixture's history rows; its other tables are recorded, not pinned. */
 const FIXTURE_ROWS = {
 	sessions: 3,
@@ -69,6 +69,7 @@ const FIXTURE_ROWS = {
 const NEW_PROMPT = "compat-new-turn";
 
 // Times of day, dates and relative times vary with the clock and time zone.
+// The avatar initial above "You" comes from the host's git or account name.
 const normalize = (text: string) =>
 	text
 		.replace(/\b\d{1,2}:\d{2}(?::\d{2})?(?:\s?[AP]M)?\b/gi, "<time>")
@@ -83,7 +84,8 @@ const normalize = (text: string) =>
 		.split("\n")
 		.map((line) => line.trim())
 		.filter((line) => line !== "")
-		.join("\n");
+		.join("\n")
+		.replace(/^.{1,2}\nYou$/gmu, "You");
 
 const sha256 = (value: string) =>
 	createHash("sha256").update(value).digest("hex");
@@ -181,11 +183,13 @@ test("an event store from an earlier build opens, renders identically and takes 
 		expect(evidence.rows.fixture).toMatchObject(FIXTURE_ROWS);
 		copyFileSync(fixture, harness.daemonStorePath());
 		// The fixture's sessions are old; idle policies would settle and
-		// archive them on startup and change what the pin observes.
+		// archive them on startup and change what the pin observes. The
+		// avatar answer keeps the first-run dialog off the composer.
 		writeFileSync(
 			join(harness.configDir, "daemon.json"),
 			JSON.stringify({
 				...defaultDaemonConfig(),
+				avatar: { kind: "initial" },
 				autoSettleAfterDays: null,
 				autoArchiveAfterDays: null,
 			}),

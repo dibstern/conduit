@@ -110,9 +110,9 @@
 	const arrangement = $derived.by(() => {
 		if (currentSearchQuery() !== null) return fullArrangement;
 		let remaining = browsePage.limit;
-		const take = (sessions: SessionInfo[]) => {
-			const visible = sessions.slice(0, remaining);
-			remaining -= visible.length;
+		const take = (sessions: SessionInfo[], floor = 0) => {
+			const visible = sessions.slice(0, Math.max(remaining, floor));
+			remaining = Math.max(remaining - visible.length, 0);
 			return visible;
 		};
 		return {
@@ -120,7 +120,8 @@
 			sections: fullArrangement.sections
 				.map((section) => ({ ...section, sessions: take(section.sessions) }))
 				.filter((section) => section.sessions.length > 0),
-			settled: take(fullArrangement.settled),
+			// The shelf previews two rows even when live rows fill the page.
+			settled: take(fullArrangement.settled, 2),
 			snoozed: take(fullArrangement.snoozed),
 		};
 	});

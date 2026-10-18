@@ -190,7 +190,7 @@ export const sessionSheetsHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert shared session sheet layout",
-		match: /^the session sheet has the shared grids and (5|6) Session tiles$/,
+		match: /^the session sheet has the shared grids and (4|5) Session tiles$/,
 		run: async ({ world, match }) => {
 			const sheet = world.page.locator(sheetSelector);
 			await expect(sheet.getByTestId("session-sheet-header")).toBeVisible();
@@ -204,26 +204,21 @@ export const sessionSheetsHandlers: StepHandler[] = [
 			await expect(auto).toBeVisible();
 			await expect(session).toBeVisible();
 			const tiles = session.locator("[data-menu-tile]");
-			const tileCount = Number(match[1]);
-			await expect(tiles).toHaveCount(tileCount);
-			expect(
-				await tiles.evaluateAll((nodes) =>
-					nodes.map((node) => node.getAttribute("data-testid")),
-				),
-			).toEqual([
-				...(tileCount === 6 ? ["session-ctx-select"] : []),
-				"session-ctx-archive",
-				"session-ctx-rename",
-				"session-ctx-fork",
-				"session-ctx-copy-resume",
-				"session-ctx-delete",
-			]);
+			await expect(tiles).toHaveCount(Number(match[1]));
 			await expect(tiles.first()).toHaveCSS("height", "72px");
 			const tops = await tiles.evaluateAll((nodes) =>
 				nodes.map((node) => node.getBoundingClientRect().top),
 			);
-			expect(new Set(tops.slice(0, 5)).size).toBe(1);
-			expect(new Set(tops).size).toBe(tileCount === 6 ? 2 : 1);
+			expect(new Set(tops).size).toBe(1);
+			const triageTiles = triage.locator("[data-menu-tile]");
+			await expect(triageTiles.last()).toHaveAttribute(
+				"data-testid",
+				"session-ctx-archive",
+			);
+			const triageTops = await triageTiles.evaluateAll((nodes) =>
+				nodes.map((node) => node.getBoundingClientRect().top),
+			);
+			expect(new Set(triageTops).size).toBe(1);
 			const triageBox = await triage.boundingBox();
 			const autoBox = await auto.boundingBox();
 			const sessionBox = await session.boundingBox();

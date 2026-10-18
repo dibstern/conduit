@@ -493,6 +493,15 @@ export function getSessionCommands(
 				void toggleSessionRead(session);
 			},
 		});
+	items.push({
+		testId: "session-ctx-archive",
+		label: session.archivedAt != null ? "Unarchive" : "Archive",
+		section: "triage",
+		icon: "archive",
+		run: () => {
+			void archive(session, session.archivedAt == null);
+		},
+	});
 	items.push(
 		...(host.select
 			? [
@@ -505,15 +514,6 @@ export function getSessionCommands(
 					},
 				]
 			: []),
-		{
-			testId: "session-ctx-archive",
-			label: session.archivedAt != null ? "Unarchive" : "Archive",
-			section: "manage",
-			icon: "archive",
-			run: () => {
-				void archive(session, session.archivedAt == null);
-			},
-		},
 		{
 			testId: "session-ctx-rename",
 			label: "Rename",

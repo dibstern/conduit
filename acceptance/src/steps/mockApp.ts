@@ -559,6 +559,13 @@ export const mockAppHandlers: StepHandler[] = [
 				? modelExecutionProviders
 				: dualDriverProviders;
 
+			// A real daemon answers /info. Under vite preview it is the SPA's HTML,
+			// so the redial build check would retry forever and a dropped socket
+			// would never reconnect. No buildId means "older server": dial at once.
+			await world.page.route(
+				(url) => url.pathname === "/info",
+				(route) => route.fulfill({ json: {} }),
+			);
 			const relayControl = await mockRelayWebSocket(world.page, {
 				initMessages: modelExecutionMockup?.initMessages ?? unboundInitMessages,
 				responses: new Map(),

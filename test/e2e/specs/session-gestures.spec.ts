@@ -364,8 +364,9 @@ test.describe("phone", () => {
 			.split("·")[0]
 			?.trim();
 
-		// 40% across lands on the Snooze tile rather than a gap between tiles.
-		const finger = await longPress(page, row, 0.4);
+		// 30% across lands on the Snooze tile of the five-tile triage row
+		// rather than a gap between tiles.
+		const finger = await longPress(page, row, 0.3);
 		const sheet = page.getByTestId("session-action-sheet");
 		await expect(sheet).toBeVisible();
 		await expect(page.getByTestId("session-ctx-menu")).toHaveCount(0);
@@ -391,16 +392,17 @@ test.describe("phone", () => {
 			await expect(page.getByTestId("session-sheet-header")).toContainText(
 				project,
 			);
-		const firstFive = await sheet
+		const leading = await sheet
 			.locator('[data-testid^="session-ctx-"]')
 			.evaluateAll((items) =>
-				items.slice(0, 5).map((item) => item.getAttribute("data-testid")),
+				items.slice(0, 6).map((item) => item.getAttribute("data-testid")),
 			);
-		expect(firstFive).toEqual([
+		expect(leading).toEqual([
 			"session-ctx-settle",
 			"session-ctx-snooze",
 			"session-ctx-pin",
 			"session-ctx-mark-unread",
+			"session-ctx-archive",
 			"session-ctx-auto-settle",
 		]);
 		await page.getByTestId("session-ctx-pin").click();
