@@ -3,7 +3,7 @@
 // one lives in persistence/tool-wire-projection.ts; a preview's partial state
 // is its tag, so it cannot disagree with the sizes it carries.
 
-import { Effect, Option, Schema, SchemaGetter } from "effect";
+import { Schema } from "effect";
 
 /** Tools that hand work to a subagent (Claude's Task and Agent, OpenCode's
  *  task): their reply is the point, and their run outlives the turn. */
@@ -51,19 +51,8 @@ export const ToolText = Schema.Union([
 ]);
 export type ToolText = typeof ToolText.Type;
 
-/** A tool's input: always present when decoded, possibly undefined. The wire
- *  omits an undefined value because JSON has no undefined. */
-const InputValue = Schema.Unknown.pipe(
-	Schema.encodeTo(Schema.optionalKey(Schema.Unknown), {
-		decode: SchemaGetter.withDefault<unknown>(Effect.succeed(undefined)),
-		encode: SchemaGetter.transformOptional(
-			Option.filter((value) => value !== undefined),
-		),
-	}),
-);
-
 export const WholeInput = Schema.TaggedStruct("whole", {
-	value: InputValue,
+	value: Schema.optionalKey(Schema.Unknown),
 });
 export type WholeInput = typeof WholeInput.Type;
 
@@ -77,7 +66,7 @@ export type InputCut = typeof InputCut.Type;
 export const ToolInput = Schema.Union([
 	WholeInput,
 	Schema.TaggedStruct("preview", {
-		value: InputValue,
+		value: Schema.optionalKey(Schema.Unknown),
 		cuts: Schema.NonEmptyArray(InputCut),
 	}),
 ]);
