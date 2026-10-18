@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import {
-	Chunk,
 	Deferred,
 	Effect,
 	Exit,
@@ -15,6 +14,7 @@ import {
 	Stream,
 } from "effect";
 import { RpcClientError } from "effect/rpc/RpcClientError";
+import { SocketCloseError } from "effect/socket/Socket";
 import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { accountsStateFromConfig } from "../../../src/lib/account-directory.js";
@@ -366,7 +366,7 @@ describe("subscribeSessionDetail", () => {
 				expect(snapshot.hasMore).toBe(true);
 				expect(snapshot.cursor).toBe("m05");
 				expect(yield* Queue.take(q)).toEqual({ _tag: "synchronized" });
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	it.effect("cold start emits the transcript snapshot then synchronized", () =>
@@ -395,7 +395,7 @@ describe("subscribeSessionDetail", () => {
 			expect(message.id).toBe("m1");
 			expect(message.role).toBe("assistant");
 			expect(textOf(message)).toBe("Hello world");
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -438,7 +438,7 @@ describe("subscribeSessionDetail", () => {
 				expect(namesOf(streamed)).toEqual(["m1/m1-0", "m1"]);
 				expect(textOf(expectMessage(streamed))).toBe("Hello world!");
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	it.effect("the sequence on every envelope is the read-model version", () =>
@@ -468,7 +468,7 @@ describe("subscribeSessionDetail", () => {
 			expect(first.sequence).toBeGreaterThan(snapshot.sequence);
 			expect(second.sequence).toBeGreaterThan(first.sequence);
 			expect(second.sequence).toBe(yield* readModelVersion);
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -535,7 +535,7 @@ describe("subscribeSessionDetail", () => {
 				// The transcript is durable, so what a subscriber receives outlives
 				// event eviction — it is the projection, not the log.
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(Effect.provide(makeDetailIngestionTestLayer())),
+			}).pipe(Effect.provide(makeDetailIngestionTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -573,7 +573,7 @@ describe("subscribeSessionDetail", () => {
 				expect(message.id).toBe("m1");
 				expect(textOf(message)).toBe("Hello world");
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	// Over-limit resumes must choose a snapshot before reading bodies; exactly
@@ -592,7 +592,6 @@ describe("subscribeSessionDetail", () => {
 				const [base] = yield* subscribeSessionDetail({ sessionId: SID }).pipe(
 					Stream.take(2),
 					Stream.runCollect,
-					Effect.map(Chunk.toReadonlyArray),
 				);
 				if (base?._tag !== "snapshot") throw new Error("expected snapshot");
 				yield* commit(
@@ -610,13 +609,12 @@ describe("subscribeSessionDetail", () => {
 				}).pipe(
 					Stream.takeUntil((envelope) => envelope._tag === "synchronized"),
 					Stream.runCollect,
-					Effect.map(Chunk.toReadonlyArray),
 				);
 				expect(envelopes.some((envelope) => envelope._tag === "snapshot")).toBe(
 					scenario.snapshot,
 				);
 				expect(envelopes.at(-1)?._tag).toBe("synchronized");
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	it.effect.each([
@@ -641,7 +639,7 @@ describe("subscribeSessionDetail", () => {
 				const read = yield* ReadQueryEffectTag;
 				const result = yield* read.readSessionTranscriptCatchUp(SID, after, 50);
 				expect(result === "snapshot").toBe(scenario.snapshot);
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	it.effect("resume catches up from the cursor with no base envelope", () =>
@@ -693,7 +691,7 @@ describe("subscribeSessionDetail", () => {
 			// And live continues from there.
 			yield* commit([textDelta(SID, "m2", "m2-0", "!")]);
 			expect(textOf(expectMessage(yield* takeN(q, 2)))).toBe("also missed!");
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -724,7 +722,7 @@ describe("subscribeSessionDetail", () => {
 				expect((yield* readQuery.readSessionTranscript(SID)).messages).toEqual(
 					[],
 				);
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	it.effect("live removal emits a remove at the committed version", () =>
@@ -742,7 +740,7 @@ describe("subscribeSessionDetail", () => {
 				id: "gone",
 				sequence: yield* readModelVersion,
 			});
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -802,7 +800,7 @@ describe("subscribeSessionDetail", () => {
 					...removed,
 					{ _tag: "synchronized" },
 				]);
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	for (const separateBatches of [false, true]) {
@@ -834,8 +832,10 @@ describe("subscribeSessionDetail", () => {
 								Stream.concat(
 									Stream.fail(
 										new RpcClientError({
-											reason: "Protocol",
-											message: "socket dropped after m1",
+											reason: new SocketCloseError({
+												code: 1006,
+												closeReason: "socket dropped after m1",
+											}),
 										}),
 									),
 								),
@@ -912,6 +912,7 @@ describe("subscribeSessionDetail", () => {
 							SessionEventBusLive,
 							detailAccountsLayer(),
 						),
+						{ local: true },
 					),
 				),
 		);
@@ -940,7 +941,7 @@ describe("subscribeSessionDetail", () => {
 				// source's.
 				expect(envelope._tag).toBe("upsert");
 			}
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	it.effect("delivers only the subscribed session's messages", () =>
@@ -965,7 +966,7 @@ describe("subscribeSessionDetail", () => {
 			expect(message.id).toBe("a1");
 			expect(textOf(message)).toBe("mine");
 			expect(yield* Queue.size(q)).toBe(0);
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	it.effect("closing the scope tears down the advance subscription", () =>
@@ -987,7 +988,7 @@ describe("subscribeSessionDetail", () => {
 			yield* Scope.close(scope, Exit.void);
 
 			expect(Exit.hasInterrupts(yield* Fiber.await(fiber))).toBe(true);
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -1022,7 +1023,7 @@ describe("subscribeSessionDetail", () => {
 						SUM(CASE WHEN type = 'session.created' THEN 1 ELSE 0 END) AS creation_count
 					FROM events WHERE session_id = ${SID}`;
 				expect(counts[0]).toEqual({ event_count: 3, creation_count: 1 });
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -1052,7 +1053,7 @@ describe("subscribeSessionDetail", () => {
 						.sort(),
 				).toEqual(["SENTINEL", "silent"]);
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -1106,6 +1107,7 @@ describe("subscribeSessionDetail", () => {
 							},
 						],
 					}),
+					{ local: true },
 				),
 			),
 	);
@@ -1148,7 +1150,7 @@ describe("subscribeSessionDetail", () => {
 					expect(rows).toHaveLength(1);
 
 					// Interrupt while the publish is held open at the gate…
-					yield* Fiber.interruptFork(fiber);
+					yield* Effect.sync(() => fiber.interruptUnsafe());
 					yield* Deferred.succeed(publishGate, undefined);
 					yield* Fiber.await(fiber);
 
@@ -1163,6 +1165,7 @@ describe("subscribeSessionDetail", () => {
 						makeDetailTestLayer({
 							busLayer: Layer.succeed(SessionEventBusTag)(probeBus),
 						}),
+						{ local: true },
 					),
 				);
 			}),
@@ -1222,7 +1225,7 @@ describe("transcript states carried by the detail feed alone", () => {
 				expect(chatOf([...opening, ...ended])).toMatchObject([
 					{ type: "thinking", done: true, duration: endedAt - startedAt },
 				]);
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	it.effect("an interrupted turn closes thinking that never ended", () =>
@@ -1238,7 +1241,7 @@ describe("transcript states carried by the detail feed alone", () => {
 			expect(chatOf(yield* takeN(q, 2))).toMatchObject([
 				{ type: "thinking", done: true },
 			]);
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	it.effect("a tool's input refreshed after tool.started reaches the row", () =>
@@ -1279,7 +1282,7 @@ describe("transcript states carried by the detail feed alone", () => {
 			expect(chatOf([...opening, ...running, ...completed])).toMatchObject([
 				{ type: "tool", input: { command: "ls -la" } },
 			]);
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	it.effect("a turn error is transcript content and survives a reload", () =>
@@ -1322,7 +1325,7 @@ describe("transcript states carried by the detail feed alone", () => {
 			// A fresh subscriber (a reload) sees the same thing from the store.
 			const reload = yield* openDetail({ sessionId: SID });
 			expect(chatOf(yield* takeN(reload.q, 2))).toMatchObject(expected);
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -1353,7 +1356,7 @@ describe("transcript states carried by the detail feed alone", () => {
 						text: "Compaction failed: too large",
 					}),
 				]);
-			}).pipe(Effect.provide(makeDetailIngestionTestLayer())),
+			}).pipe(Effect.provide(makeDetailIngestionTestLayer(), { local: true })),
 	);
 
 	it.effect("a failed compaction is an error notice, not a boundary", () =>
@@ -1376,6 +1379,6 @@ describe("transcript states carried by the detail feed alone", () => {
 					text: "Compaction failed",
 				},
 			]);
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 });

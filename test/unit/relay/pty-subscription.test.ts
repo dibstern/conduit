@@ -3,7 +3,7 @@
 // whose discovery is faked, read through `subscribePtys`.
 
 import { describe, it } from "@effect/vitest";
-import { Chunk, Effect, Fiber, Layer, Stream } from "effect";
+import { Effect, Fiber, Layer, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import type { PtyEnvelope } from "../../../src/lib/contracts/ws-rpc.js";
@@ -160,7 +160,6 @@ describe("subscribePtys", () => {
 			const subscriber = subscribePtys().pipe(
 				Stream.take(4),
 				Stream.runCollect,
-				Effect.map(Chunk.toReadonlyArray),
 				Effect.forkChild,
 			);
 			const a = yield* subscriber;

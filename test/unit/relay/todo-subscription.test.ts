@@ -289,7 +289,7 @@ describe("subscribeSessionTodos", () => {
 					expect(todoChanged["todos/fanout"]).toBe(1);
 					expect(todoUnchanged["todos/fanout"]).toBe(1);
 				}
-			}).pipe(Effect.provide(makeTodoTestLayer())),
+			}).pipe(Effect.provide(makeTodoTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -349,7 +349,7 @@ describe("subscribeSessionTodos", () => {
 					throw new Error("expected upserts");
 				expect(second.sequence).toBeGreaterThan(first.sequence);
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(Effect.provide(makeTodoTestLayer())),
+			}).pipe(Effect.provide(makeTodoTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -382,7 +382,7 @@ describe("subscribeSessionTodos", () => {
 						items: [{ id: "t1", subject: "Ship", status: "in_progress" }],
 					},
 				});
-			}).pipe(Effect.provide(makeTodoTestLayer())),
+			}).pipe(Effect.provide(makeTodoTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -404,7 +404,7 @@ describe("subscribeSessionTodos", () => {
 					item: { sessionId: "B", items: [{ subject: "B's" }] },
 				});
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(Effect.provide(makeTodoTestLayer())),
+			}).pipe(Effect.provide(makeTodoTestLayer(), { local: true })),
 	);
 
 	it.effect("a fresh subscription (a reload) starts from the stored list", () =>
@@ -427,6 +427,6 @@ describe("subscribeSessionTodos", () => {
 					},
 				],
 			});
-		}).pipe(Effect.provide(makeTodoTestLayer())),
+		}).pipe(Effect.provide(makeTodoTestLayer(), { local: true })),
 	);
 });

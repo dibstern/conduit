@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Queue } from "effect";
+import { Effect, Layer, PubSub } from "effect";
 import { expect } from "vitest";
 import {
 	ConfigPersistenceNoopLive,
@@ -106,7 +106,7 @@ describe("InstanceManager — missing methods", () => {
 				expect(inst.status).toBe("starting");
 
 				// Verify event was published (InstanceStatusChanged)
-				const event = yield* Queue.take(sub);
+				const event = yield* PubSub.take(sub);
 				expect(event._tag).toBe("InstanceStatusChanged");
 			}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);
@@ -174,7 +174,7 @@ describe("InstanceManager — missing methods", () => {
 				expect(inst.status).toBe("stopped");
 
 				// Verify event was published
-				const event = yield* Queue.take(sub);
+				const event = yield* PubSub.take(sub);
 				expect(event._tag).toBe("InstanceStatusChanged");
 			}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);
@@ -206,7 +206,7 @@ describe("InstanceManager — missing methods", () => {
 
 				yield* updateInstance("inst-1", { name: "New Name" });
 
-				const event = yield* Queue.take(sub);
+				const event = yield* PubSub.take(sub);
 				expect(event._tag).toBe("InstanceStatusChanged");
 			}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);
@@ -252,10 +252,10 @@ describe("InstanceManager — missing methods", () => {
 				const sub = yield* subscribeToDaemonEvents;
 
 				yield* addInstance(sampleInput);
-				expect((yield* Queue.take(sub))._tag).toBe("DaemonSessionsChanged");
+				expect((yield* PubSub.take(sub))._tag).toBe("DaemonSessionsChanged");
 				yield* startInstance("inst-1");
 
-				const event = yield* Queue.take(sub);
+				const event = yield* PubSub.take(sub);
 				expect(event._tag).toBe("InstanceStatusChanged");
 			}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);

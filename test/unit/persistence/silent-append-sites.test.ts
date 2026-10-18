@@ -15,7 +15,7 @@ import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Chunk, Effect, Layer, Stream } from "effect";
+import { Effect, Layer, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, it } from "vitest";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
@@ -81,10 +81,9 @@ const announcedDuring = <A, E, R>(action: Effect.Effect<A, E, R>) =>
 		const advances = yield* bus.subscribeAdvances();
 		yield* action;
 		const seen = yield* Stream.runCollect(Stream.take(advances, 1)).pipe(
-			Effect.timeoutTo({
+			Effect.timeoutOrElse({
 				duration: "2 seconds",
-				onTimeout: () => Chunk.empty<ReadModelAdvance>(),
-				onSuccess: (chunk) => chunk,
+				orElse: () => Effect.succeed<Array<ReadModelAdvance>>([]),
 			}),
 		);
 		return [...seen].flatMap((advance) => [...advance.sessionIds]);
@@ -173,7 +172,7 @@ it("establishOpenCodeSession advances the version of the session it seeds", asyn
 					);
 					expect(yield* versionOf("established")).toBeGreaterThan(0);
 					expect(announced).toContain("established");
-				}).pipe(Effect.provide(layer), Effect.orDie),
+				}).pipe(Effect.provide(layer, { local: true }), Effect.orDie),
 			),
 		);
 	});
@@ -225,7 +224,7 @@ it("local session creation advances its row version and announces its session", 
 					);
 					expect(yield* versionOf(sessionId)).toBeGreaterThan(0);
 					expect(announced).toContain(sessionId);
-				}).pipe(Effect.provide(layer), Effect.orDie),
+				}).pipe(Effect.provide(layer, { local: true }), Effect.orDie),
 			),
 		);
 	});
@@ -279,7 +278,7 @@ it("session-manager rename advances its row version and announces its session", 
 					).toEqual([{ title: "After rename" }]);
 					expect(yield* versionOf(session.id)).toBeGreaterThan(before);
 					expect(announced).toContain(session.id);
-				}).pipe(Effect.provide(layer), Effect.orDie),
+				}).pipe(Effect.provide(layer, { local: true }), Effect.orDie),
 			),
 		);
 	});
@@ -315,6 +314,7 @@ it("persistSessionPermissionMode advances the version of the session it edits", 
 								bus,
 							),
 						),
+						{ local: true },
 					),
 					Effect.orDie,
 				),
@@ -341,7 +341,7 @@ it("the status poller's staleness write advances the version", async () => {
 
 					expect(yield* versionOf("stale")).toBeGreaterThan(0);
 					expect(announced).toContain("stale");
-				}).pipe(Effect.provide(layer), Effect.orDie),
+				}).pipe(Effect.provide(layer, { local: true }), Effect.orDie),
 			),
 		);
 	});
@@ -388,7 +388,7 @@ it("the auto-title rename advances the version of the session it renames", async
 
 					expect(yield* versionOf("titled")).toBeGreaterThan(0);
 					expect(announced).toContain("titled");
-				}).pipe(Effect.provide(layer), Effect.orDie),
+				}).pipe(Effect.provide(layer, { local: true }), Effect.orDie),
 			),
 		);
 	});
@@ -467,6 +467,7 @@ it("ensureClaudeSubagentSession announces the subagent session it creates", asyn
 								bus,
 							),
 						),
+						{ local: true },
 					),
 					Effect.orDie,
 				),
@@ -549,6 +550,7 @@ it("Claude transcript persistence announces the child session it writes messages
 								bus,
 							),
 						),
+						{ local: true },
 					),
 					Effect.orDie,
 				),

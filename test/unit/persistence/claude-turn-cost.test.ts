@@ -866,7 +866,7 @@ describe("Claude turn economics through SQLite persistence", () => {
 	it("handles missing, zero, equal and backwards totals without losing the durable baseline", async () => {
 		const warnings: unknown[] = [];
 		const logger = Logger.make<unknown, void>((options) => {
-			if (options.logLevel._tag === "Warning") warnings.push(options.message);
+			if (options.logLevel === "Warn") warnings.push(options.message);
 		});
 		await runtime.runPromise(
 			Effect.gen(function* () {
@@ -894,7 +894,7 @@ describe("Claude turn economics through SQLite persistence", () => {
 				expect((yield* costs).turns).toEqual([{ id: "u1", cost: 1.25 }]);
 				expect(warnings).toHaveLength(1);
 				expect(String(warnings[0])).toMatch(/s1.*sdk-session|sdk-session.*s1/);
-			}).pipe(Effect.provide(Logger.replace(Logger.defaultLogger, logger))),
+			}).pipe(Effect.provide(Logger.layer([Logger.tracerLogger, logger]))),
 		);
 	});
 

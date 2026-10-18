@@ -39,7 +39,7 @@ describe("retired stored events", () => {
 					data,
 				})),
 			).toEqual(rows);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -113,6 +113,6 @@ describe("retired stored events", () => {
 					"session.unread",
 				])
 					expect(forkHistory.map((event) => event.type)).not.toContain(type);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });

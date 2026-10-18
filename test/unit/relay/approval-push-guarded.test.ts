@@ -127,7 +127,9 @@ const run = async (
 					VALUES ('turn-1', ${SESSION}, 'completed', 1000, 1001)`;
 				yield* body(pushed);
 			}).pipe(
-				Effect.provide(Layer.provideMerge(AlertLedgerLive, layer)),
+				Effect.provide(Layer.provideMerge(AlertLedgerLive, layer), {
+					local: true,
+				}),
 				Effect.orDie,
 			),
 		);

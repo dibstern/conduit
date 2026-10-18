@@ -9,6 +9,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { NodePath } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
 import {
 	Deferred,
@@ -117,7 +118,8 @@ const waitForTraceRecord = (
 	});
 
 describe("makeDaemonLive wiring", () => {
-	const makeDaemonLayer = () => Layer.fresh(makeDaemonLive(makeMockOptions()));
+	const makeDaemonLayer = (options: DaemonLiveOptions = makeMockOptions()) =>
+		Layer.fresh(makeDaemonLive(options).pipe(Layer.provide(NodePath.layer)));
 
 	it.effect("provides DaemonEventBusTag (Tier 0)", () =>
 		Effect.gen(function* () {
@@ -168,7 +170,7 @@ describe("makeDaemonLive wiring", () => {
 				expect(config.keepAwakeCommand).toBe("printf");
 				expect(config.keepAwakeArgs).toEqual(["awake"]);
 				expect(config.persistedSessionCounts.get("persisted")).toBe(3);
-			}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
+			}).pipe(Effect.provide(makeDaemonLayer(options)));
 		},
 	);
 
@@ -207,7 +209,7 @@ describe("makeDaemonLive wiring", () => {
 			} finally {
 				rmSync(dir, { recursive: true, force: true });
 			}
-		}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
+		}).pipe(Effect.provide(makeDaemonLayer(options)));
 	});
 
 	it.effect(
@@ -291,7 +293,7 @@ describe("makeDaemonLive wiring", () => {
 			if (externalUrl._tag === "Some") {
 				expect(externalUrl.value).toBe("http://127.0.0.1:4567");
 			}
-		}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
+		}).pipe(Effect.provide(makeDaemonLayer(options)));
 	});
 
 	it.effect("provides RelayFactoryTag and HttpServerRefTag (Tier 2)", () =>
@@ -315,7 +317,7 @@ describe("makeDaemonLive wiring", () => {
 			const server = yield* Ref.get(serverRef);
 			expect(server).not.toBeNull();
 			expect(server?.listening).toBe(true);
-		}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
+		}).pipe(Effect.provide(makeDaemonLayer(options)));
 	});
 
 	it.effect("provides DaemonStateTag (Tier 2)", () =>
@@ -366,7 +368,7 @@ describe("makeDaemonLive wiring", () => {
 			yield* PubSub.publish(bus, DaemonEvent.StatusChanged({ statuses: {} }));
 
 			// Should receive it — proves single bus instance
-			const msg = yield* sub.take;
+			const msg = yield* PubSub.take(sub);
 			expect(msg._tag).toBe("StatusChanged");
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
@@ -404,7 +406,7 @@ describe("makeDaemonLive wiring", () => {
 					projects: Array<{ slug: string; sessionCount?: number }>;
 					instances: Array<{ id: string; url?: string }>;
 				};
-			}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
+			}).pipe(Effect.provide(makeDaemonLayer(options)));
 
 			expect(persisted.port).toBeGreaterThan(0);
 			expect(persisted.projects).toEqual([]);
@@ -463,7 +465,7 @@ describe("makeDaemonLive wiring", () => {
 						projects: Array<{ slug: string; sessionCount?: number }>;
 						instances: Array<{ id: string; url?: string }>;
 					};
-				}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
+				}).pipe(Effect.provide(makeDaemonLayer(options)));
 
 				expect(persisted.projects).toEqual([
 					expect.objectContaining({ slug: "alpha" }),
@@ -531,7 +533,9 @@ describe("makeDaemonLive wiring", () => {
 					...base,
 					configDir,
 					socketPath,
-					persistedConfig: yield* loadDaemonConfigResult(configDir),
+					persistedConfig: yield* Effect.fromResult(
+						loadDaemonConfigResult(configDir),
+					),
 					initialConfig: makeDaemonConfigFromOptions({
 						port: 0,
 						host: "127.0.0.1",
@@ -552,7 +556,7 @@ describe("makeDaemonLive wiring", () => {
 						projects: Array<{ slug: string; sessionCount?: number }>;
 						instances: Array<{ id: string; url?: string }>;
 					};
-				}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
+				}).pipe(Effect.provide(makeDaemonLayer(options)));
 
 				expect(persisted.projects).toEqual([
 					expect.objectContaining({

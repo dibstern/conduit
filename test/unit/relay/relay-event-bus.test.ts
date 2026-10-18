@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Queue } from "effect";
+import { Effect, Layer, PubSub } from "effect";
 import { expect } from "vitest";
 import type { RelayEvent } from "../../../src/lib/domain/relay/Services/relay-domain-model.js";
 import {
@@ -26,7 +26,7 @@ describe("RelayEventBus", () => {
 			const sub = yield* subscribeToRelayEvents;
 			yield* publishRelayEvent(accepted("cmd-a"));
 
-			const event = yield* Queue.take(sub);
+			const event = yield* PubSub.take(sub);
 
 			expect(event).toMatchObject({
 				_tag: "ClientCommandAccepted",
@@ -42,8 +42,8 @@ describe("RelayEventBus", () => {
 			const sub2 = yield* subscribeToRelayEvents;
 			yield* publishRelayEvent(accepted("cmd-a"));
 
-			const first = yield* Queue.take(sub1);
-			const second = yield* Queue.take(sub2);
+			const first = yield* PubSub.take(sub1);
+			const second = yield* PubSub.take(sub2);
 
 			expect(first._tag).toBe("ClientCommandAccepted");
 			expect(second._tag).toBe("ClientCommandAccepted");
@@ -58,8 +58,8 @@ describe("RelayEventBus", () => {
 			yield* publishRelayEvent(accepted("cmd-b"));
 			yield* publishRelayEvent(accepted("cmd-c"));
 
-			const first = yield* Queue.take(sub);
-			const second = yield* Queue.take(sub);
+			const first = yield* PubSub.take(sub);
+			const second = yield* PubSub.take(sub);
 
 			expect(first).toMatchObject({
 				_tag: "ClientCommandAccepted",

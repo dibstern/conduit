@@ -2,7 +2,7 @@
 // is recoverable from its payload. Migration 0013 reconstructs those rows; this
 // pins its shape against the projector's and its behaviour on a second run.
 
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	BACKFILL_COMPACTION_MESSAGES_MIGRATION,
@@ -15,25 +15,25 @@ const BACKFILL_SQL = readMigrationSql(BACKFILL_COMPACTION_MESSAGES_MIGRATION);
 const SESSION = "sess-backfill";
 const T0 = 1_700_000_000_000;
 
-interface PartRow {
+type PartRow = {
 	id: string;
 	message_id: string;
 	text: string;
 	metadata: string | null;
 	sort_order: number;
-}
+};
 
 describe("0013 compaction backfill", () => {
-	let client: Database.Database;
+	let client: DatabaseSync;
 
 	const seed = () => {
-		client = new Database(":memory:");
+		client = new DatabaseSync(":memory:");
 		seedLegacyEventStore(client, 12);
 		client
 			.prepare(
 				"INSERT INTO sessions (id, provider, title, created_at, updated_at) VALUES (?, 'claude', 'Backfill', ?, ?)",
 			)
-			.run([SESSION, T0, T0]);
+			.run(SESSION, T0, T0);
 	};
 
 	const appendCompaction = (
@@ -44,14 +44,14 @@ describe("0013 compaction backfill", () => {
 		client
 			.prepare(`INSERT INTO events (sequence, event_id, session_id, stream_version, type, data, provider, created_at)
 			 VALUES (?, ?, ?, ?, 'session.compaction', ?, 'claude', ?)`)
-			.run([
+			.run(
 				sequence,
 				`evt-${sequence}`,
 				SESSION,
 				sequence,
 				JSON.stringify(data),
 				createdAt,
-			]);
+			);
 	};
 
 	const addMessage = (id: string, createdAt: number) => {
@@ -59,17 +59,17 @@ describe("0013 compaction backfill", () => {
 			.prepare(
 				"INSERT INTO messages (id, session_id, role, text, is_streaming, created_at, updated_at) VALUES (?, ?, 'assistant', 'hi', 0, ?, ?)",
 			)
-			.run([id, SESSION, createdAt, createdAt]);
+			.run(id, SESSION, createdAt, createdAt);
 	};
 
 	const backfill = () => client.exec(BACKFILL_SQL);
 
 	const parts = () =>
 		client
-			.prepare<unknown[], PartRow>(
+			.prepare(
 				"SELECT id, message_id, text, metadata, sort_order FROM message_parts WHERE type = 'compaction' ORDER BY id",
 			)
-			.all();
+			.all() as PartRow[];
 
 	afterEach(() => {
 		client?.close();
@@ -87,11 +87,10 @@ describe("0013 compaction backfill", () => {
 
 		backfill();
 
-		const messages = client
-			.prepare<unknown[], { id: string; role: string }>(
-				"SELECT id, role FROM messages",
-			)
-			.all();
+		const messages = client.prepare("SELECT id, role FROM messages").all() as {
+			id: string;
+			role: string;
+		}[];
 		expect(messages).toEqual([{ id: "compaction-7", role: "assistant" }]);
 
 		const [part] = parts();
@@ -137,12 +136,11 @@ describe("0013 compaction backfill", () => {
 
 		backfill();
 
-		const order = client
-			.prepare<unknown[], { id: string }>(
-				"SELECT id FROM messages ORDER BY created_at ASC, id ASC",
-			)
-			.all()
-			.map((r) => r.id);
+		const order = (
+			client
+				.prepare("SELECT id FROM messages ORDER BY created_at ASC, id ASC")
+				.all() as { id: string }[]
+		).map((r) => r.id);
 		expect(order).toEqual(["msg-a", "msg-b", "compaction-11", "msg-c"]);
 	});
 

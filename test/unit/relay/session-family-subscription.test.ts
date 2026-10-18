@@ -153,7 +153,7 @@ describe("subscribeSessionFamily", () => {
 					snapshot.rows.find((row) => row.id === "grandchild")?.parentID,
 				).toBe("child");
 				expect(synchronized).toEqual({ _tag: "synchronized" });
-			}).pipe(Effect.provide(makeFamilyTestLayer())),
+			}).pipe(Effect.provide(makeFamilyTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -190,7 +190,7 @@ describe("subscribeSessionFamily", () => {
 						model: { model: "claude-opus", provider: "anthropic" },
 					},
 				});
-			}).pipe(Effect.provide(makeFamilyTestLayer())),
+			}).pipe(Effect.provide(makeFamilyTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -205,7 +205,7 @@ describe("subscribeSessionFamily", () => {
 				yield* commit([deleted("grandchild")]);
 				const removed = yield* Queue.take(q);
 				expect(removed).toMatchObject({ _tag: "remove", id: "grandchild" });
-			}).pipe(Effect.provide(makeFamilyTestLayer())),
+			}).pipe(Effect.provide(makeFamilyTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -226,7 +226,7 @@ describe("subscribeSessionFamily", () => {
 					_tag: "upsert",
 					item: { id: "root", title: "Renamed root" },
 				});
-			}).pipe(Effect.provide(makeFamilyTestLayer())),
+			}).pipe(Effect.provide(makeFamilyTestLayer(), { local: true })),
 	);
 
 	it.effect("a resume is a fresh snapshot for the viewed member", () =>
@@ -242,6 +242,6 @@ describe("subscribeSessionFamily", () => {
 				"root",
 			]);
 			expect(synchronized).toEqual({ _tag: "synchronized" });
-		}).pipe(Effect.provide(makeFamilyTestLayer())),
+		}).pipe(Effect.provide(makeFamilyTestLayer(), { local: true })),
 	);
 });

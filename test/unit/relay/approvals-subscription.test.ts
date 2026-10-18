@@ -200,7 +200,7 @@ describe("subscribeApprovals", () => {
 				expect(sequences).toEqual([...sequences].sort((a, b) => a - b));
 				expect(new Set(sequences).size).toBe(3);
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(Effect.provide(makeLayer())),
+			}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -219,7 +219,7 @@ describe("subscribeApprovals", () => {
 					_tag: "upsert",
 					item: { requestId: "perm-child", sessionId: "child" },
 				});
-			}).pipe(Effect.provide(makeLayer())),
+			}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 
 	it.effect("deleting a session removes the approvals it was holding", () =>
@@ -240,6 +240,6 @@ describe("subscribeApprovals", () => {
 				_tag: "remove",
 				id: "que-d",
 			});
-		}).pipe(Effect.provide(makeLayer())),
+		}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 });

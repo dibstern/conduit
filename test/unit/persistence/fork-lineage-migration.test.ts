@@ -9,8 +9,8 @@ import fs, {
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import Database from "better-sqlite3";
 import { Effect, Result as Either, Layer } from "effect";
 import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
@@ -35,7 +35,7 @@ const migrateWithConfig = (dir: string) =>
 		const config = yield* Either.isFailure(loaded) &&
 		loaded.failure._tag === "NotFound"
 			? Effect.succeed(defaultDaemonConfig())
-			: loaded;
+			: Effect.fromResult(loaded);
 		if (
 			existsSync(join(dir, "projects")) ||
 			existsSync(join(dir, "events.db"))
@@ -398,7 +398,7 @@ it("imports all known projects before deleting the sidecar, without appending hi
 				),
 			);
 		}
-		const prepared = vi.spyOn(Database.prototype, "prepare");
+		const prepared = vi.spyOn(DatabaseSync.prototype, "prepare");
 		try {
 			await Effect.runPromise(migrateWithConfig(dir));
 			expect(
@@ -437,7 +437,7 @@ it("imports all known projects before deleting the sidecar, without appending hi
 			);
 		}
 		expect(existsSync(sidecar)).toBe(false);
-		const clean = vi.spyOn(Database.prototype, "prepare");
+		const clean = vi.spyOn(DatabaseSync.prototype, "prepare");
 		try {
 			await Effect.runPromise(migrateWithConfig(dir));
 			expect(

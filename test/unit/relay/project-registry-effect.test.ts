@@ -1,16 +1,7 @@
 // test/unit/relay/project-registry-effect.test.ts
 import { mkdtempSync, rmSync } from "node:fs";
 import { describe, it } from "@effect/vitest";
-import {
-	Deferred,
-	Effect,
-	Fiber,
-	Layer,
-	Option,
-	PubSub,
-	Queue,
-	Ref,
-} from "effect";
+import { Deferred, Effect, Fiber, Layer, Option, PubSub, Ref } from "effect";
 import { afterAll, expect, vi } from "vitest";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
@@ -139,7 +130,7 @@ describe("ProjectRegistry Effect - addWithoutRelay", () => {
 
 			yield* addWithoutRelay(makeProject("alpha"), { silent: true });
 
-			const isEmpty = yield* Queue.isEmpty(sub);
+			const isEmpty = (yield* PubSub.takeUpTo(sub, 1)).length === 0;
 			expect(isEmpty).toBe(true);
 		}).pipe(Effect.provide(TestLayer)),
 	);

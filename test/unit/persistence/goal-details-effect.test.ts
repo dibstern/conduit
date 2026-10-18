@@ -58,7 +58,7 @@ describe("persisted goal details", () => {
 				checks: [],
 				tokensSinceStart: 0,
 			});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("excludes checks from a previous goal with a different setAt", () =>
@@ -77,7 +77,7 @@ describe("persisted goal details", () => {
 				checks: [],
 				tokensSinceStart: 0,
 			});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -101,7 +101,7 @@ describe("persisted goal details", () => {
 					{ iteration: 1, at: 400, reason: null },
 					{ iteration: 2, at: 300, reason: "One failure remains" },
 				]);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -127,7 +127,7 @@ describe("persisted goal details", () => {
 				expect((yield* read.getGoalDetails("selected")).checks).toEqual([
 					{ iteration: 1, at: 200, reason: "Still failing" },
 				]);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("retains met-goal checks using endedGoal.setAt", () =>
@@ -150,7 +150,7 @@ describe("persisted goal details", () => {
 				checks: [{ iteration: 1, at: 200, reason: "All green" }],
 				tokensSinceStart: 0,
 			});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("returns null tokens and no stale checks without a goal", () =>
@@ -170,7 +170,7 @@ describe("persisted goal details", () => {
 				checks: [],
 				tokensSinceStart: null,
 			});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -204,7 +204,7 @@ describe("persisted goal details", () => {
 				expect((yield* read.getGoalDetails("selected")).tokensSinceStart).toBe(
 					150,
 				);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("uses zero cumulative usage for empty history", () =>
@@ -213,6 +213,6 @@ describe("persisted goal details", () => {
 			yield* changeGoal({ sessionId: "selected", goal }, 100);
 			const read = yield* ReadQueryEffectTag;
 			expect((yield* read.getGoalDetails("selected")).tokensSinceStart).toBe(0);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });

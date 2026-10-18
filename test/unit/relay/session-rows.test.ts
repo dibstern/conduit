@@ -195,7 +195,7 @@ describe("Session Rows read paths", () => {
 								workspaceHint: undefined,
 							});
 						}
-					}).pipe(Effect.provide(layer));
+					}).pipe(Effect.provide(layer, { local: true }));
 				});
 			},
 		);

@@ -92,7 +92,7 @@ describe("Schema Migration", () => {
 				"tool_content",
 				"turns",
 			]);
-		}).pipe(Effect.provide(migratedStore)),
+		}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
 	it.effect(
@@ -122,7 +122,7 @@ describe("Schema Migration", () => {
 				expect(
 					(yield* sql`SELECT method FROM daemon_store_imports WHERE project_id = 'alpha'`)[0],
 				).toEqual({ method: "seeded" });
-			}).pipe(Effect.provide(migratedStore)),
+			}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
 	it.effect("creates the full production index inventory", () =>
@@ -313,7 +313,7 @@ describe("Schema Migration", () => {
 					unique: false,
 				},
 			]);
-		}).pipe(Effect.provide(migratedStore)),
+		}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
 	it.effect("creates events table with correct columns", () =>
@@ -334,7 +334,7 @@ describe("Schema Migration", () => {
 				"created_at",
 				"project_id",
 			]);
-		}).pipe(Effect.provide(migratedStore)),
+		}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
 	it.effect("enforces unique event_id", () =>
@@ -349,7 +349,7 @@ describe("Schema Migration", () => {
 				VALUES ('evt-1', 's1', 1, 'session.created', '{}', 'opencode', ${T})`,
 			);
 			expect(duplicate._tag).toBe("Failure");
-		}).pipe(Effect.provide(migratedStore)),
+		}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
 	it.effect(
@@ -366,7 +366,7 @@ describe("Schema Migration", () => {
 				VALUES ('evt-2', 's1', 0, 'text.delta', '{}', 'opencode', ${T})`,
 				);
 				expect(conflict._tag).toBe("Failure");
-			}).pipe(Effect.provide(migratedStore)),
+			}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
 	it.effect("creates command_receipts table with correct columns", () =>
@@ -391,7 +391,7 @@ describe("Schema Migration", () => {
 				"error_code",
 				"updated_at",
 			]);
-		}).pipe(Effect.provide(migratedStore)),
+		}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
 	it.effect("creates projector_cursors table", () =>
@@ -405,13 +405,13 @@ describe("Schema Migration", () => {
 				"last_applied_seq",
 				"updated_at",
 			]);
-		}).pipe(Effect.provide(migratedStore)),
+		}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
 	it.effect("is idempotent — running twice applies nothing", () =>
 		Effect.gen(function* () {
 			expect(yield* makeEffectSqlMigrator()).toEqual([]);
-		}).pipe(Effect.provide(migratedStore)),
+		}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
 	it.effect(
@@ -424,7 +424,7 @@ describe("Schema Migration", () => {
 				expect(
 					yield* sql`SELECT session_id FROM events WHERE event_id = 'evt-1'`,
 				).toEqual([{ session_id: "s1" }]);
-			}).pipe(Effect.provide(migratedStore)),
+			}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
 	it.effect(
@@ -443,6 +443,6 @@ describe("Schema Migration", () => {
 				expect(
 					yield* sql`SELECT event_id FROM events WHERE session_id = 's1'`,
 				).toEqual([{ event_id: "evt-1" }]);
-			}).pipe(Effect.provide(migratedStore)),
+			}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 });

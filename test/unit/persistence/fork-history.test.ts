@@ -219,7 +219,7 @@ describe("readForkSource", () => {
 				expect(events[0]?.eventId).toBe(`${history[2].eventId}_ses_fork_a`);
 				expect(events[0]).not.toHaveProperty("sequence");
 				expect(events[0]).not.toHaveProperty("streamVersion");
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("refuses an unknown point without copying", () =>
@@ -238,7 +238,7 @@ describe("readForkSource", () => {
 					reason: "message_not_found",
 					messageId: "missing",
 				});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -262,7 +262,7 @@ describe("readForkSource", () => {
 				expect(missing._tag).toBe("Failure");
 				if (missing._tag === "Failure")
 					expect(missing.failure).toMatchObject({ reason: "point_not_found" });
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -304,7 +304,7 @@ describe("readForkSource", () => {
 				expect(first.map((event) => event.createdAt)).toEqual(
 					history.slice(2).map((event) => event.createdAt),
 				);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("excludes a prompt queued before the target's last event", () =>
@@ -350,7 +350,7 @@ describe("readForkSource", () => {
 					"messageId" in event.data ? event.data.messageId : undefined,
 				),
 			).toEqual(["msg_a_ses_fork", "msg_a_ses_fork", "msg_a_ses_fork"]);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("keeps completed compactions before the cut", () =>
@@ -384,7 +384,7 @@ describe("readForkSource", () => {
 				sessionId: "ses_fork",
 				data: { sessionId: "ses_fork", preTokens: 900, postTokens: 100 },
 			});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -433,7 +433,7 @@ describe("readForkSource", () => {
 				expect((yield* source.copy("child")).at(-1)?.data).toEqual({
 					actualModel: "adjacent",
 				});
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -473,7 +473,7 @@ describe("readForkSource", () => {
 				expect(
 					(yield* source.copy("child")).map((event) => event.type),
 				).toEqual(["turn.completed", "message.created", "text.delta"]);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -522,7 +522,7 @@ describe("readForkSource", () => {
 					data: { text: "AB" },
 				});
 				expect(events[2]?.data).toMatchObject({ text: "CD" });
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -563,7 +563,7 @@ describe("readForkSource", () => {
 					expect(removed.failure).toMatchObject({
 						reason: "message_not_found",
 					});
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -595,7 +595,7 @@ describe("readForkSource", () => {
 				const moved = yield* readForkSource("parent", { sideThread: false });
 				expect(moved.retained.map((message) => message.id)).toEqual(["a", "c"]);
 				expect(moved.historyMessageId).toBe("c");
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -629,7 +629,7 @@ describe("readForkSource", () => {
 						.filter((event) => event.type === "message.created")
 						.map((event) => event.data.messageId),
 				).toEqual(["msg_user_1_child", "msg_assistant_1_child"]);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -660,7 +660,7 @@ describe("readForkSource", () => {
 					"claude-sdk",
 				]);
 				expect(source.boundary.sequence).toBe(5);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -682,7 +682,7 @@ describe("readForkSource", () => {
 				});
 				const invalid = yield* Effect.result(later.copy("child"));
 				expect(invalid._tag).toBe("Failure");
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it("copies a bounded prefix of the heavy session-load fixture", async () => {
@@ -772,7 +772,7 @@ describe("Side Thread boundary reads", () => {
 				const idle = yield* readForkSource("parent", { sideThread: true });
 				expect(idle.historyMessageId).toBeUndefined();
 				expect(idle.boundary.messageId).toBe("msg_assistant_2");
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -801,7 +801,7 @@ describe("Side Thread boundary reads", () => {
 				expect(yield* readSideThreadForkBoundary("parent")).toBe(
 					"msg_assistant_1",
 				);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -837,6 +837,6 @@ describe("Side Thread boundary reads", () => {
 					}),
 				]);
 				expect(yield* readSideThreadForkBoundary("empty")).toBeUndefined();
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });

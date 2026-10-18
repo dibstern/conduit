@@ -422,7 +422,7 @@ describe("RelayCache", () => {
 		Effect.gen(function* () {
 			const messages: unknown[] = [];
 			const logger = Logger.make<unknown, void>((options) => {
-				if (options.logLevel._tag === "Error") {
+				if (options.logLevel === "Error") {
 					messages.push(options.message);
 				}
 			});
@@ -437,7 +437,7 @@ describe("RelayCache", () => {
 			const exit = yield* Effect.gen(function* () {
 				yield* cache.get("my-project");
 				return yield* Effect.exit(cache.invalidate("my-project"));
-			}).pipe(Effect.provide(Logger.replace(Logger.defaultLogger, logger)));
+			}).pipe(Effect.provide(Logger.layer([logger, Logger.tracerLogger])));
 
 			const renderedMessages = messages
 				.flatMap((message) =>
