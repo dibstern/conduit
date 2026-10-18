@@ -1088,11 +1088,13 @@ export function makeTestHandlerLayer(
 		makePersistenceEffectLayer(":memory:", "test-project");
 	const seedEvents = opts?.seedEvents;
 	const persistenceLayer = seedEvents
-		? basePersistenceLayer.pipe(
-				Layer.tap((context) =>
-					Effect.flatMap(makeCommitAndSignal, (commit) =>
-						commit(seedEvents),
-					).pipe(Effect.provide(context), Effect.orDie),
+		? Layer.suspend(() =>
+				basePersistenceLayer.pipe(
+					Layer.tap((context) =>
+						Effect.flatMap(makeCommitAndSignal, (commit) =>
+							commit(seedEvents),
+						).pipe(Effect.provide(context), Effect.orDie),
+					),
 				),
 			)
 		: basePersistenceLayer;
