@@ -51,7 +51,7 @@ it.each([
 					}),
 				),
 				Effect.provideService(LoggerTag, createSilentLogger()),
-				Effect.provide(AlertsLive),
+				Effect.provide(AlertsLive, { local: true }),
 			),
 		);
 		expect(result).toEqual({
@@ -93,7 +93,7 @@ it("preserves main's launch-folder order, paths and duplicates for an unmoved se
 					makeMockConfig({ projectDir: alias, extraFolders: [extra, alias] }),
 				),
 				Effect.provideService(LoggerTag, createSilentLogger()),
-				Effect.provide(AlertsLive),
+				Effect.provide(AlertsLive, { local: true }),
 			),
 		);
 		expect(result).toEqual({

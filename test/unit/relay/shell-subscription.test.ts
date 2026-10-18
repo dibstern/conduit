@@ -364,7 +364,7 @@ describe("subscribeShell", () => {
 					item: { title: "Updated A" },
 				});
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(Effect.provide(makeShellTestLayer())),
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	it.effect(
 		"a resume point from another store replaces the sidebar snapshot",
@@ -393,7 +393,7 @@ describe("subscribeShell", () => {
 				expect(snapshot.rows.map(({ title }) => title)).toEqual(["Updated"]);
 				expect(snapshot.resumePoint).toBeDefined();
 				expect(synchronized).toEqual({ _tag: "synchronized" });
-			}).pipe(Effect.provide(makeShellTestLayer())),
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	for (const provider of ["opencode", "claude"] as const) {
 		it.effect(
@@ -426,6 +426,7 @@ describe("subscribeShell", () => {
 				}).pipe(
 					Effect.provide(
 						Layer.merge(makeShellTestLayer(), makeSessionManagerStateLive()),
+						{ local: true },
 					),
 				),
 		);
@@ -495,6 +496,7 @@ describe("subscribeShell", () => {
 				}).pipe(
 					Effect.provide(
 						makeShellTestLayer(entry === "handler" ? api : undefined),
+						{ local: true },
 					),
 				);
 			},
@@ -529,7 +531,7 @@ describe("subscribeShell", () => {
 				);
 				expect(result._tag).toBe("Failure");
 				expect(sdkForkSession).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(makeShellTestLayer())),
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	it.effect(
 		"a Claude tip fork records the actual parent transcript boundary",
@@ -570,7 +572,7 @@ describe("subscribeShell", () => {
 					"sdk-parent",
 					expect.not.objectContaining({ dir: expect.any(String) }),
 				);
-			}).pipe(Effect.provide(makeShellTestLayer())),
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	// hk9m.7: the imported turns were the parent's to read, so the fork has no dot.
 	it.effect("a Claude fork starts seen up to its last imported turn end", () =>
@@ -611,7 +613,7 @@ describe("subscribeShell", () => {
 				seen_version: row?.last_turn_end_version,
 				unread: 0,
 			});
-		}).pipe(Effect.provide(makeShellTestLayer())),
+		}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	it.effect(
 		"rejects a Claude UI boundary that continues through tool rounds",
@@ -660,7 +662,7 @@ describe("subscribeShell", () => {
 				);
 				expect(result._tag).toBe("Failure");
 				expect(sdkForkSession).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(makeShellTestLayer())),
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	it.effect(
 		"a Claude fork is not published if its resume state cannot be saved",
@@ -692,7 +694,7 @@ describe("subscribeShell", () => {
 				expect(result._tag).toBe("Failure");
 				const read = yield* ReadQueryEffectTag;
 				expect(yield* read.getSession("unresumable-child")).toBeUndefined();
-			}).pipe(Effect.provide(makeShellTestLayer())),
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	it.effect(
 		"rejects a Claude fork whose transcript store differs from the SDK process",
@@ -738,7 +740,7 @@ describe("subscribeShell", () => {
 						path: expect.any(String),
 					},
 				});
-			}).pipe(Effect.provide(makeShellTestLayer())),
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	for (const messageId of ["fork-message", undefined]) {
 		// OpenCode keeps message identity across a fork.
@@ -802,6 +804,7 @@ describe("subscribeShell", () => {
 							makeShellTestLayer(api),
 							Layer.succeed(OpenCodeAPITag)(api),
 						),
+						{ local: true },
 					),
 				);
 			},
@@ -823,7 +826,7 @@ describe("subscribeShell", () => {
 			expect(second.item.title).toBe("Second");
 			expect(second.sequence).toBeGreaterThan(first.sequence);
 			expect(yield* Queue.size(q)).toBe(0);
-		}).pipe(Effect.provide(makeShellTestLayer())),
+		}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -857,7 +860,7 @@ describe("subscribeShell", () => {
 				expect(
 					yield* readQuery.readSessionList({ projectIds: ["test-project"] }),
 				).toEqual(projected);
-			}).pipe(Effect.provide(makeShellTestLayer())),
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -891,6 +894,7 @@ describe("subscribeShell", () => {
 						Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 						makeSessionManagerStateLive(),
 					),
+					{ local: true },
 				),
 			),
 	);
@@ -923,7 +927,7 @@ describe("subscribeShell", () => {
 					sequence: yield* readModelVersion,
 					deleted: true,
 				});
-			}).pipe(Effect.provide(makeShellTestLayer())),
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -961,7 +965,7 @@ describe("subscribeShell", () => {
 				// The sequence is the read-model version, not an event sequence.
 				expect(delta.sequence).toBe(yield* readModelVersion);
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(Effect.provide(makeShellTestLayer())),
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 
 	it.effect("two sessions moved by one commit arrive as one upsert each", () =>
@@ -991,7 +995,7 @@ describe("subscribeShell", () => {
 			expect(first.sequence).toBe(version);
 			expect(second.sequence).toBe(version);
 			expect(yield* Queue.size(q)).toBe(0);
-		}).pipe(Effect.provide(makeShellTestLayer())),
+		}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 
 	it.effect("traffic that moves no session row emits nothing", () =>
@@ -1025,7 +1029,7 @@ describe("subscribeShell", () => {
 			// one commit are one advance, and a re-query that overtakes a later
 			// advance spends it, so two reads is also a correct outcome here.
 			expect(yield* Ref.get(requeries)).toBeLessThanOrEqual(3);
-		}).pipe(Effect.provide(makeShellTestLayer())),
+		}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -1055,7 +1059,7 @@ describe("subscribeShell", () => {
 				// the advance's own version — the number the client resumes from.
 				expect(delta.sequence).toBe(yield* readModelVersion);
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(Effect.provide(makeShellTestLayer())),
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -1083,6 +1087,7 @@ describe("subscribeShell", () => {
 						Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 						makeSessionManagerStateLive(),
 					),
+					{ local: true },
 				),
 			),
 	);
@@ -1129,6 +1134,7 @@ describe("subscribeShell", () => {
 						Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 						makeSessionManagerStateLive(),
 					),
+					{ local: true },
 				),
 			),
 	);
@@ -1162,7 +1168,7 @@ describe("subscribeShell", () => {
 				// A covered cursor is still caught up.
 				const { q } = yield* openShell({ resumeFromSequence: version });
 				expect(yield* takeN(q, 1)).toEqual([{ _tag: "synchronized" }]);
-			}).pipe(Effect.provide(makeShellTestLayer())),
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -1211,6 +1217,7 @@ describe("subscribeShell", () => {
 						Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 						makeSessionManagerStateLive(),
 					),
+					{ local: true },
 				),
 			),
 	);
@@ -1265,7 +1272,7 @@ describe("subscribeShell", () => {
 				const delta = yield* Queue.take(q);
 				if (delta._tag !== "upsert") throw new Error("expected upsert");
 				expect(delta.item.title).toBe("Fresh");
-			}).pipe(Effect.provide(makeShellTestLayer())),
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 
 	it.effect("closing the scope tears down the advance subscription", () =>
@@ -1283,7 +1290,7 @@ describe("subscribeShell", () => {
 			yield* Scope.close(scope, Exit.void);
 
 			expect(Exit.hasInterrupts(yield* Fiber.await(fiber))).toBe(true);
-		}).pipe(Effect.provide(makeShellTestLayer())),
+		}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	// Unread is a turn end past the seen marker, and only SessionAttention
 	// moves the marker (ADR-0004, Scope; conduit-test-hk9m.3).
@@ -1321,7 +1328,7 @@ describe("subscribeShell", () => {
 				expect(delta.sequence).toBeGreaterThan(baseVersion);
 				expect(delta.sequence).toBe(yield* readModelVersion);
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(Effect.provide(makeShellTestLayer())),
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 
 	// Background work outlives the turn that started it, so the session row
@@ -1359,7 +1366,7 @@ describe("subscribeShell", () => {
 				expect(yield* attentionAfter(["local_bash"])).toBe("monitoring");
 				expect(yield* attentionAfter([])).toBe("idle");
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(Effect.provide(makeShellTestLayer()));
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true }));
 		},
 	);
 
@@ -1378,7 +1385,7 @@ describe("subscribeShell", () => {
 				).toBe(false);
 				yield* Effect.yieldNow;
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(Effect.provide(makeShellTestLayer())),
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 
 	it.effect("a message-only advance does not re-emit the session row", () =>
@@ -1399,7 +1406,7 @@ describe("subscribeShell", () => {
 			yield* Effect.yieldNow;
 
 			expect(yield* Queue.size(q)).toBe(0);
-		}).pipe(Effect.provide(makeShellTestLayer())),
+		}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 
 	it.effect("a projection and its advance still produce ONE upsert", () =>
@@ -1424,7 +1431,7 @@ describe("subscribeShell", () => {
 			expect(delta.item.title).toBe("Renamed");
 			expect(yield* Ref.get(requeries)).toBe(2);
 			expect(yield* Queue.size(q)).toBe(0);
-		}).pipe(Effect.provide(makeShellTestLayer())),
+		}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	// ni8.12 group 2: the session's approval mode rides the shell row, so every
 	// open subscriber (every tab) follows a switch with no refetch.
@@ -1449,7 +1456,7 @@ describe("subscribeShell", () => {
 					if (delta._tag !== "upsert") throw new Error("expected upsert");
 					expect(delta.item).toMatchObject({ id: SID, permissionMode: "plan" });
 				}
-			}).pipe(Effect.provide(makeShellTestLayer())),
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -1490,6 +1497,7 @@ describe("subscribeShell", () => {
 						ProviderRuntimeIngestionLive,
 						makeShellTestLayer(),
 					),
+					{ local: true },
 				),
 			),
 	);
@@ -1569,6 +1577,7 @@ describe("subscribeShell", () => {
 					),
 					makeShellTestLayer(),
 				),
+				{ local: true },
 			),
 		);
 	});

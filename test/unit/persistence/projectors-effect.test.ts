@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { Effect, HashMap, Layer, Logger } from "effect";
+import { Effect, Layer, Logger, References } from "effect";
 import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
 import { describe, expect, it } from "vitest";
@@ -3034,12 +3034,12 @@ describe("ProjectionRunnerEffect", () => {
 			annotations: Record<string, unknown>;
 		}> = [];
 		const logger = Logger.make<unknown, void>((options) => {
-			if (options.logLevel._tag !== "Error") return;
+			if (options.logLevel !== "Error") return;
 			errorLogs.push({
 				message: Array.isArray(options.message)
 					? options.message.map(String).join(" ")
 					: String(options.message),
-				annotations: Object.fromEntries(HashMap.toEntries(options.annotations)),
+				annotations: options.fiber.getRef(References.CurrentLogAnnotations),
 			});
 		});
 
@@ -3090,7 +3090,7 @@ describe("ProjectionRunnerEffect", () => {
 					partialProjectionWrites,
 					cursors,
 				};
-			}).pipe(Effect.provide(Logger.replace(Logger.defaultLogger, logger))),
+			}).pipe(Effect.provide(Logger.layer([Logger.tracerLogger, logger]))),
 		);
 
 		expect(result.recovery).toMatchObject({
@@ -3202,10 +3202,10 @@ describe("ProjectionRunnerEffect", () => {
 				};
 			}).pipe(
 				Effect.provide(
-					Logger.replace(
-						Logger.defaultLogger,
+					Logger.layer([
+						Logger.tracerLogger,
 						Logger.make<unknown, void>(() => undefined),
-					),
+					]),
 				),
 			),
 		);
@@ -3292,10 +3292,10 @@ describe("ProjectionRunnerEffect", () => {
 				};
 			}).pipe(
 				Effect.provide(
-					Logger.replace(
-						Logger.defaultLogger,
+					Logger.layer([
+						Logger.tracerLogger,
 						Logger.make<unknown, void>(() => undefined),
-					),
+					]),
 				),
 			),
 		);

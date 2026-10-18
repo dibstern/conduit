@@ -38,7 +38,7 @@ describe("PendingInteractionService", () => {
 			expect(forSession).toHaveLength(1);
 			expect(all).toHaveLength(1);
 			expect(otherSession).toHaveLength(0);
-		}).pipe(Effect.provide(PendingInteractionServiceLive)),
+		}).pipe(Effect.provide(PendingInteractionServiceLive, { local: true })),
 	);
 
 	it.effect(
@@ -71,7 +71,7 @@ describe("PendingInteractionService", () => {
 				);
 				expect(Option.isNone(duplicate)).toBe(true);
 				expect(yield* service.listPendingPermissions()).toHaveLength(0);
-			}).pipe(Effect.provide(PendingInteractionServiceLive)),
+			}).pipe(Effect.provide(PendingInteractionServiceLive, { local: true })),
 	);
 
 	it.effect(
@@ -108,7 +108,7 @@ describe("PendingInteractionService", () => {
 					"deny",
 				);
 				expect(Option.isNone(duplicate)).toBe(true);
-			}).pipe(Effect.provide(PendingInteractionServiceLive)),
+			}).pipe(Effect.provide(PendingInteractionServiceLive, { local: true })),
 	);
 
 	it.effect(
@@ -155,7 +155,7 @@ describe("PendingInteractionService", () => {
 					decision: "always",
 					permissionUpdates: [localSuggestion],
 				});
-			}).pipe(Effect.provide(PendingInteractionServiceLive)),
+			}).pipe(Effect.provide(PendingInteractionServiceLive, { local: true })),
 	);
 
 	it.effect("takes timed-out permissions and removes them from state", () =>
@@ -259,7 +259,7 @@ describe("PendingInteractionService", () => {
 			expect(yield* service.markQuestionResolved("question-1")).toBe(true);
 			expect(yield* service.markQuestionResolved("question-1")).toBe(false);
 			expect(yield* service.listPendingQuestions("session-1")).toHaveLength(0);
-		}).pipe(Effect.provide(PendingInteractionServiceLive)),
+		}).pipe(Effect.provide(PendingInteractionServiceLive, { local: true })),
 	);
 
 	it.effect("resolves active question waiters through the service owner", () =>
@@ -296,7 +296,7 @@ describe("PendingInteractionService", () => {
 				},
 			);
 			expect(Option.isNone(duplicate)).toBe(true);
-		}).pipe(Effect.provide(PendingInteractionServiceLive)),
+		}).pipe(Effect.provide(PendingInteractionServiceLive, { local: true })),
 	);
 
 	it.effect("returns the owner session when resolving question waiters", () =>
@@ -330,7 +330,7 @@ describe("PendingInteractionService", () => {
 				},
 			);
 			expect(Option.isNone(duplicate)).toBe(true);
-		}).pipe(Effect.provide(PendingInteractionServiceLive)),
+		}).pipe(Effect.provide(PendingInteractionServiceLive, { local: true })),
 	);
 
 	it.effect("cancels active session interactions and clears replay state", () =>
@@ -365,7 +365,7 @@ describe("PendingInteractionService", () => {
 				0,
 			);
 			expect(yield* service.listPendingQuestions("session-1")).toHaveLength(0);
-		}).pipe(Effect.provide(PendingInteractionServiceLive)),
+		}).pipe(Effect.provide(PendingInteractionServiceLive, { local: true })),
 	);
 
 	it.effect(
@@ -407,7 +407,7 @@ describe("PendingInteractionService", () => {
 				expect(yield* service.listPendingQuestions("session-1")).toHaveLength(
 					0,
 				);
-			}).pipe(Effect.provide(PendingInteractionServiceLive)),
+			}).pipe(Effect.provide(PendingInteractionServiceLive, { local: true })),
 	);
 
 	it.effect(
@@ -436,6 +436,6 @@ describe("PendingInteractionService", () => {
 					"0": "Yes",
 				});
 				expect(Option.isSome(resolved)).toBe(true);
-			}).pipe(Effect.provide(PendingInteractionServiceLive)),
+			}).pipe(Effect.provide(PendingInteractionServiceLive, { local: true })),
 	);
 });

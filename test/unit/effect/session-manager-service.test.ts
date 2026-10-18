@@ -12,7 +12,7 @@ import {
 	HashMap,
 	Layer,
 	Option,
-	Queue,
+	PubSub,
 	Ref,
 	Stream,
 } from "effect";
@@ -455,7 +455,10 @@ describe("SessionManagerService", () => {
 			expect(yield* service.sessionExists("missing")).toBe(false);
 			expect(readQuery.getSession).toHaveBeenCalledTimes(2);
 			expect(api.session.get).not.toHaveBeenCalled();
-		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
+		}).pipe(
+			Effect.provide(layer),
+			Effect.provide(requiredSessionServices, { local: true }),
+		);
 	});
 
 	it.effect("cascade delete forgets every descendant it removed", () => {
@@ -551,13 +554,13 @@ describe("SessionManagerService", () => {
 
 				expect(session.id).toBe("created-session");
 				expect(api.session.create).toHaveBeenCalledWith({ title: "Created" });
-				const event = yield* Queue.poll(sub);
-				expect(Option.getOrNull(event)).toMatchObject({
+				const event = (yield* PubSub.takeUpTo(sub, 1))[0] ?? null;
+				expect(event).toMatchObject({
 					_tag: "SessionCreated",
 					sessionId: "created-session",
 				});
-				const extra = yield* Queue.poll(sub);
-				expect(Option.isNone(extra)).toBe(true);
+				const extra = yield* PubSub.takeUpTo(sub, 1);
+				expect(extra).toHaveLength(0);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
@@ -614,7 +617,7 @@ describe("SessionManagerService", () => {
 				]);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
-				Effect.provide(requiredSessionServices),
+				Effect.provide(requiredSessionServices, { local: true }),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		},
@@ -726,7 +729,7 @@ describe("SessionManagerService", () => {
 				]);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
-				Effect.provide(requiredSessionServices),
+				Effect.provide(requiredSessionServices, { local: true }),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		},
@@ -852,7 +855,7 @@ describe("SessionManagerService", () => {
 				});
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
-				Effect.provide(requiredSessionServices),
+				Effect.provide(requiredSessionServices, { local: true }),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		},
@@ -1484,7 +1487,7 @@ describe("SessionManagerService", () => {
 				const events = yield* eventStore.readAllBySession(sessionId);
 				const projected = readProjectedDeleteState(dbFile, sessionId);
 				const state = yield* Ref.get(stateRef);
-				const daemonEvent = Option.getOrNull(yield* Queue.poll(sub));
+				const daemonEvent = (yield* PubSub.takeUpTo(sub, 1))[0] ?? null;
 
 				expect({
 					deleteSucceeded: Exit.isSuccess(deleteExit),
@@ -1681,7 +1684,7 @@ describe("SessionManagerService", () => {
 				const eventStore = yield* EventStoreEffectTag;
 				const persistedEvents = yield* eventStore.readAllBySession(sessionId);
 				const state = yield* Ref.get(stateRef);
-				const publishedEvents = yield* Queue.takeAll(daemonEvents);
+				const publishedEvents = yield* PubSub.takeUpTo(daemonEvents, Infinity);
 
 				expect(outcomes).toEqual([true, false]);
 				expect(
@@ -2441,7 +2444,10 @@ describe("SessionManagerService", () => {
 			expect(
 				(yield* (yield* ReadQueryEffectTag).getSession("session-1"))?.title,
 			).toBe("New Title");
-		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
+		}).pipe(
+			Effect.provide(layer),
+			Effect.provide(requiredSessionServices, { local: true }),
+		);
 	});
 
 	it.effect("projects persisted sessions into frontend session info", () => {
@@ -2496,7 +2502,10 @@ describe("SessionManagerService", () => {
 			expect(Array.from(HashMap.toEntries(state.cachedParentMap))).toEqual([
 				["child-1", "root-1"],
 			]);
-		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
+		}).pipe(
+			Effect.provide(layer),
+			Effect.provide(requiredSessionServices, { local: true }),
+		);
 	});
 
 	it.effect("prefers the Effect SQLite read path when available", () => {
@@ -2554,7 +2563,10 @@ describe("SessionManagerService", () => {
 					resumes: [],
 				},
 			]);
-		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
+		}).pipe(
+			Effect.provide(layer),
+			Effect.provide(requiredSessionServices, { local: true }),
+		);
 	});
 
 	it.effect("reads durable pending question and permission counts", () => {
@@ -2684,7 +2696,7 @@ describe("SessionManagerService", () => {
 				).toBe(true);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
-				Effect.provide(requiredSessionServices),
+				Effect.provide(requiredSessionServices, { local: true }),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		},
@@ -2804,7 +2816,7 @@ describe("SessionManagerService", () => {
 				expect(api.session.delete).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
-				Effect.provide(requiredSessionServices),
+				Effect.provide(requiredSessionServices, { local: true }),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		},
@@ -2863,7 +2875,7 @@ describe("SessionManagerService", () => {
 			expect((yield* service.listSessions())[0]?.unread).toBe(true);
 		}).pipe(
 			Effect.provide(Layer.fresh(layer)),
-			Effect.provide(requiredSessionServices),
+			Effect.provide(requiredSessionServices, { local: true }),
 			Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 		);
 	});
@@ -2892,7 +2904,10 @@ describe("SessionManagerService", () => {
 			});
 
 			expect(sessions[0]?.pendingQuestionCount).toBe(1);
-		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
+		}).pipe(
+			Effect.provide(layer),
+			Effect.provide(requiredSessionServices, { local: true }),
+		);
 	});
 
 	it.effect("keeps the parent map when fetching roots only", () => {
@@ -2934,7 +2949,10 @@ describe("SessionManagerService", () => {
 				},
 			);
 			expect(api.session.list).not.toHaveBeenCalled();
-		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
+		}).pipe(
+			Effect.provide(layer),
+			Effect.provide(requiredSessionServices, { local: true }),
+		);
 	});
 
 	it.effect("exposes parent map reads and writes through service state", () => {
@@ -2961,7 +2979,7 @@ describe("SessionManagerService", () => {
 		}).pipe(
 			Effect.provide(SessionManagerServiceLive),
 			Effect.provide(layer),
-			Effect.provide(requiredSessionServices),
+			Effect.provide(requiredSessionServices, { local: true }),
 		);
 	});
 
@@ -2976,7 +2994,10 @@ describe("SessionManagerService", () => {
 			const state = yield* Ref.get(stateRef);
 
 			expect(HashMap.get(state.lastMessageAt, "s1")).toEqual(Option.some(300));
-		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
+		}).pipe(
+			Effect.provide(layer),
+			Effect.provide(requiredSessionServices, { local: true }),
+		);
 	});
 
 	it.effect("refreshes the lineage caches", () => {
@@ -3016,7 +3037,7 @@ describe("SessionManagerService", () => {
 		}).pipe(
 			Effect.provide(SessionManagerServiceLive),
 			Effect.provide(layer),
-			Effect.provide(requiredSessionServices),
+			Effect.provide(requiredSessionServices, { local: true }),
 		);
 	});
 
@@ -3064,7 +3085,10 @@ describe("SessionManagerService", () => {
 					status: "busy",
 				},
 			]);
-		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
+		}).pipe(
+			Effect.provide(layer),
+			Effect.provide(requiredSessionServices, { local: true }),
+		);
 	});
 });
 
@@ -3123,7 +3147,7 @@ describe("snooze session commands", () => {
 				expect(yield* store.readAllBySession("s1")).toEqual([]);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
-				Effect.provide(requiredSessionServices),
+				Effect.provide(requiredSessionServices, { local: true }),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		});
@@ -3147,7 +3171,7 @@ describe("snooze session commands", () => {
 			).toEqual(["session.snoozed", "session.snoozed", "session.unsnoozed"]);
 		}).pipe(
 			Effect.provide(Layer.fresh(layer)),
-			Effect.provide(requiredSessionServices),
+			Effect.provide(requiredSessionServices, { local: true }),
 			Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 		);
 	});
@@ -3173,7 +3197,7 @@ describe("snooze session commands", () => {
 				]);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
-				Effect.provide(requiredSessionServices),
+				Effect.provide(requiredSessionServices, { local: true }),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		});

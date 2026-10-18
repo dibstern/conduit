@@ -80,6 +80,7 @@ describe("managed OpenCode stop confirmation", () => {
 			).pipe(
 				Effect.provide(
 					OpenCodeInstancesLive.pipe(Layer.provideMerge(dependencies)),
+					{ local: true },
 				),
 			),
 		);
@@ -131,6 +132,7 @@ describe("managed OpenCode stop confirmation", () => {
 			).pipe(
 				Effect.provide(
 					OpenCodeInstancesLive.pipe(Layer.provideMerge(dependencies)),
+					{ local: true },
 				),
 			),
 		);
@@ -176,7 +178,7 @@ describe("managed OpenCode stop confirmation", () => {
 		const lifecycle = Layer.effect(
 			ManagedOpenCodeLifecycleTag,
 			Effect.map(
-				Effect.context<Layer.Layer.Success<typeof dependencies>>(),
+				Effect.context<Layer.Success<typeof dependencies>>(),
 				(context) => ({
 					start: () =>
 						scheduleRestart("opencode").pipe(
@@ -222,6 +224,7 @@ describe("managed OpenCode stop confirmation", () => {
 					OpenCodeInstancesLive.pipe(
 						Layer.provideMerge(Layer.merge(dependencies, lifecycle)),
 					),
+					{ local: true },
 				),
 			),
 		);

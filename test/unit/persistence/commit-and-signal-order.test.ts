@@ -83,7 +83,9 @@ describe("commit advance ordering", () => {
 					).toBe("Some");
 					releaseRefresh?.();
 					yield* Fiber.join(call);
-				}).pipe(Effect.provide(Layer.merge(testLayer, notifier)));
+				}).pipe(
+					Effect.provide(Layer.merge(testLayer, notifier), { local: true }),
+				);
 			}),
 	);
 	it.effect("publishes committed events before invoking the notifier", () =>
@@ -106,7 +108,7 @@ describe("commit advance ordering", () => {
 				}),
 			);
 			expect(order).toEqual(["publish", "notify"]);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 	it.effect("does not notify while recover replays the event log", () => {
 		const sessionStateProjected = vi.fn(() => Effect.void);
@@ -120,7 +122,7 @@ describe("commit advance ordering", () => {
 			Effect.provideService(SessionStateProjectionNotifierTag, {
 				sessionStateProjected,
 			}),
-			Effect.provide(testLayer),
+			Effect.provide(testLayer, { local: true }),
 		);
 	});
 
@@ -151,7 +153,7 @@ describe("commit advance ordering", () => {
 					"committed",
 					"session.created",
 				);
-			}).pipe(Effect.provide(testLayer));
+			}).pipe(Effect.provide(testLayer, { local: true }));
 		},
 	);
 
@@ -170,7 +172,7 @@ describe("commit advance ordering", () => {
 				Effect.provideService(SessionStateProjectionNotifierTag, {
 					sessionStateProjected,
 				}),
-				Effect.provide(testLayer),
+				Effect.provide(testLayer, { local: true }),
 			);
 		},
 	);
@@ -183,7 +185,7 @@ describe("commit advance ordering", () => {
 			const rows = yield* sql<{ title: string }>`
 				SELECT title FROM sessions WHERE id = 'without-notifier'`;
 			expect(rows).toEqual([{ title: "without-notifier" }]);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -202,7 +204,7 @@ describe("commit advance ordering", () => {
 				expect(Array.from(received, (advance) => advance.version)).toEqual([
 					1, 2,
 				]);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -231,6 +233,6 @@ describe("commit advance ordering", () => {
 				expect(Array.from(received, (advance) => advance.version)).toEqual([
 					1, 2,
 				]);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });

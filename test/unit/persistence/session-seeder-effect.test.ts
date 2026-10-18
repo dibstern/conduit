@@ -108,7 +108,7 @@ describe("EffectSessionSeeder", () => {
 			expect(row?.created_at).toBeGreaterThanOrEqual(before);
 			expect(row?.created_at).toBeLessThanOrEqual(after);
 			expect(row?.updated_at).toBe(row?.created_at);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("is idempotent and never overwrites existing session data", () =>
@@ -126,7 +126,7 @@ describe("EffectSessionSeeder", () => {
 				provider: string;
 			}>`SELECT title, provider FROM sessions WHERE id = 'sess-1'`;
 			expect(rows).toEqual([{ title: "Custom Title", provider: "opencode" }]);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("creates sessions with different providers", () =>
@@ -145,7 +145,7 @@ describe("EffectSessionSeeder", () => {
 				{ id: "sess-1", provider: "opencode" },
 				{ id: "sess-2", provider: "claude" },
 			]);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("stores optional parent and provider session ids", () =>
@@ -166,7 +166,7 @@ describe("EffectSessionSeeder", () => {
 			expect(rows).toEqual([
 				{ parent_id: "parent-session", provider_sid: "sdk-subagent-1" },
 			]);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("skips SQL for a cached session until reset()", () =>
@@ -186,6 +186,6 @@ describe("EffectSessionSeeder", () => {
 			seeder.reset();
 			expect(yield* seeder.ensureSession("sess-1", "opencode")).toBe(true);
 			expect((yield* countRows)[0]?.n).toBe(1);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });

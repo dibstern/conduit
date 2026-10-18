@@ -2,8 +2,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Chunk, Effect, Layer, Queue, Schema, Stream } from "effect";
+import { Effect, Layer, Queue, Schema, Stream } from "effect";
 import { RpcClientError } from "effect/rpc/RpcClientError";
+import { SocketCloseError } from "effect/socket/Socket";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { accountsStateFromConfig } from "../../../src/lib/account-directory.js";
 import type { SessionDetailEnvelope } from "../../../src/lib/contracts/ws-rpc.js";
@@ -273,9 +274,9 @@ describe("session detail wire", () => {
 					{ _tag: "synchronized" },
 					{ _tag: "upsert", item: row("Hello world"), sequence: 8 },
 				]).pipe(encodeSessionDetail, Stream.runCollect);
-				const staleSuffix = Chunk.last(sent);
-				if (staleSuffix._tag !== "Some") throw new Error("missing suffix");
-				expect(staleSuffix.value).toMatchObject({
+				const staleSuffix = sent.at(-1);
+				if (staleSuffix === undefined) throw new Error("missing suffix");
+				expect(staleSuffix).toMatchObject({
 					textSuffix: { from: 5, total: 11 },
 				});
 				const requests: (number | undefined)[] = [];
@@ -292,7 +293,7 @@ describe("session detail wire", () => {
 										},
 										{ _tag: "synchronized" },
 									]
-								: [{ _tag: "synchronized" }, staleSuffix.value],
+								: [{ _tag: "synchronized" }, staleSuffix],
 						).pipe(Stream.map(wireRoundTrip), decodeSessionDetail);
 					},
 					{ from: 7 },
@@ -336,8 +337,10 @@ describe("session detail wire", () => {
 									source,
 									Stream.fail(
 										new RpcClientError({
-											reason: "Unknown",
-											message: "disconnect",
+											reason: new SocketCloseError({
+												code: 1006,
+												closeReason: "disconnect",
+											}),
 										}),
 									),
 								)
@@ -466,7 +469,7 @@ describe("session detail wire", () => {
 					_tag: "upsert",
 					item: { _tag: "message", message: { id: "m" } },
 				});
-			}).pipe(Effect.provide(testLayer())),
+			}).pipe(Effect.provide(testLayer(), { local: true })),
 	);
 	it.effect(
 		"delivers linear UTF-8 bytes across N persisted streaming part writes",
@@ -551,6 +554,6 @@ describe("session detail wire", () => {
 					);
 					expect(current.deliveredBytes).toBeLessThan(current.finalBytes * 10);
 				}
-			}).pipe(Effect.provide(testLayer())),
+			}).pipe(Effect.provide(testLayer(), { local: true })),
 	);
 });

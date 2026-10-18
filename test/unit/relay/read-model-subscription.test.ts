@@ -6,6 +6,7 @@ import {
 	Fiber,
 	Queue,
 	Ref,
+	References,
 	Scope,
 	Stream,
 } from "effect";
@@ -157,7 +158,7 @@ const subscribe = <T>(options: {
 	});
 
 const withBus = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-	Effect.provide(effect, SessionEventBusLive);
+	Effect.provide(effect, SessionEventBusLive, { local: true });
 
 describe("ReadModelSubscription", () => {
 	it.effect("replays a tombstone at its own version on catch-up resume", () =>
@@ -893,7 +894,7 @@ describe("ReadModelSubscription shared windows", () => {
 				_tag: "upsert",
 				item: { title: "Project B" },
 			});
-		}).pipe(Effect.provide(SessionEventBusLive)),
+		}).pipe(Effect.provide(SessionEventBusLive, { local: true })),
 	);
 	it.live("an asker interrupted mid-read never strands a joiner", () =>
 		Effect.gen(function* () {
@@ -928,7 +929,7 @@ describe("ReadModelSubscription shared windows", () => {
 							yield* pullB;
 							yield* bus.publishAdvance(advance(1));
 							const asker = yield* Effect.forkChild(
-								Effect.withMaxOpsBeforeYield(pullA, ops),
+								Effect.provideService(pullA, References.MaxOpsBeforeYield, ops),
 							);
 							for (let i = 0; i < yields; i++) yield* Effect.yieldNow;
 							yield* Fiber.interrupt(asker);
@@ -936,7 +937,7 @@ describe("ReadModelSubscription shared windows", () => {
 								Effect.timeout("200 millis"),
 								Effect.option,
 							);
-						}).pipe(Effect.provide(SessionEventBusLive)),
+						}).pipe(Effect.provide(SessionEventBusLive, { local: true })),
 					);
 					if (joined._tag === "None") stranded.push({ ops, yields });
 				}

@@ -34,8 +34,7 @@ describe("SessionStateProjectionNotifier", () => {
 				const finished = yield* Deferred.make<void>();
 				const errors: string[] = [];
 				const logger = Logger.make<unknown, void>((entry) => {
-					if (entry.logLevel._tag === "Error")
-						errors.push(String(entry.message));
+					if (entry.logLevel === "Error") errors.push(String(entry.message));
 				});
 				const sessionManagerService = makeMockSessionManagerService({
 					refreshSessionLineage: () =>
@@ -76,7 +75,7 @@ describe("SessionStateProjectionNotifier", () => {
 					yield* Deferred.succeed(release, undefined);
 					yield* Deferred.await(finished);
 					expect(errors).toEqual([]);
-				}).pipe(Effect.provide(Logger.replace(Logger.defaultLogger, logger)));
+				}).pipe(Effect.provide(Logger.layer([logger, Logger.tracerLogger])));
 			}),
 	);
 
@@ -84,7 +83,7 @@ describe("SessionStateProjectionNotifier", () => {
 		Effect.gen(function* () {
 			const errors: string[] = [];
 			const logger = Logger.make<unknown, void>((entry) => {
-				if (entry.logLevel._tag === "Error") errors.push(String(entry.message));
+				if (entry.logLevel === "Error") errors.push(String(entry.message));
 			});
 			const sessionManagerService = makeMockSessionManagerService({
 				refreshSessionLineage: () =>
@@ -110,8 +109,8 @@ describe("SessionStateProjectionNotifier", () => {
 				yield* TestClock.adjust("150 millis");
 				expect(errors.join("\n")).toContain("SQLite query failed");
 			}).pipe(
-				Effect.provide(layer),
-				Effect.provide(Logger.replace(Logger.defaultLogger, logger)),
+				Effect.provide(layer, { local: true }),
+				Effect.provide(Logger.layer([logger, Logger.tracerLogger])),
 			);
 		}),
 	);
@@ -148,7 +147,7 @@ describe("SessionStateProjectionNotifier", () => {
 				).toBe("Some");
 				releaseRefresh?.();
 				yield* Fiber.join(call);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		}),
 	);
 	it.effect(
@@ -180,7 +179,7 @@ describe("SessionStateProjectionNotifier", () => {
 					expect(order).toEqual(["refresh"]);
 					yield* TestClock.adjust("150 millis");
 					expect(order).toEqual(["refresh", "lineage"]);
-				}).pipe(Effect.provide(layer));
+				}).pipe(Effect.provide(layer, { local: true }));
 			}),
 	);
 	it.effect("refreshes lineage after a git refresh failure", () =>
@@ -203,9 +202,10 @@ describe("SessionStateProjectionNotifier", () => {
 			yield* Effect.gen(function* () {
 				const notifier = yield* SessionStateProjectionNotifierTag;
 				yield* notifier.sessionStateProjected("session-1", "turn.error");
+				yield* Effect.yieldNow;
 				yield* TestClock.adjust("150 millis");
 				expect(refreshSessionLineage).toHaveBeenCalledTimes(1);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		}),
 	);
 	it.effect(
@@ -234,7 +234,7 @@ describe("SessionStateProjectionNotifier", () => {
 					yield* TestClock.adjust("150 millis");
 
 					expect(refreshSessionLineage).toHaveBeenCalledTimes(1);
-				}).pipe(Effect.provide(layer));
+				}).pipe(Effect.provide(layer, { local: true }));
 			}),
 	);
 
@@ -280,7 +280,7 @@ describe("SessionStateProjectionNotifier", () => {
 				expect(refreshSessionLineage).toHaveBeenCalledTimes(2);
 
 				yield* Deferred.succeed(release, undefined);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		}),
 	);
 
@@ -312,7 +312,7 @@ describe("SessionStateProjectionNotifier", () => {
 
 				yield* TestClock.adjust("150 millis");
 				expect(markSessionRead).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		}),
 	);
 });

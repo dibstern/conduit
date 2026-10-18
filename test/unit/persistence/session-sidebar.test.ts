@@ -107,13 +107,13 @@ type Store = ReturnType<typeof openStore>;
 /** Records the text of every SQL statement run under it. */
 const recordQueries = (queries: string[]): Tracer.Tracer =>
 	Tracer.make({
-		span: (name, parent, context, links, startTime, kind) => ({
+		span: ({ name, parent, annotations, links, startTime, kind }) => ({
 			_tag: "Span",
 			name,
 			spanId: "query",
 			traceId: "query",
 			parent,
-			context,
+			annotations,
 			status: { _tag: "Started", startTime },
 			attributes: new Map(),
 			links,
@@ -127,7 +127,6 @@ const recordQueries = (queries: string[]): Tracer.Tracer =>
 			event: () => {},
 			addLinks: () => {},
 		}),
-		context: (f) => f(),
 	});
 
 /** A read of whole families, one row per member. */
@@ -1178,7 +1177,7 @@ describe("sidebar upkeep in a large family", () => {
 			);
 		/** Family reads, each one of every member row, made by one write. */
 		const familyReads = async <A, E>(
-			write: Effect.Effect<A, E, ManagedRuntime.ManagedRuntime.Context<Store>>,
+			write: Effect.Effect<A, E, ManagedRuntime.ManagedRuntime.Services<Store>>,
 		) => {
 			const queries: string[] = [];
 			await store.runPromise(

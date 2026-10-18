@@ -405,7 +405,7 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 			);
 			const directory = Option.getOrThrow(
 				Context.getOption(
-					(await relay.effectRuntime.runtime.runtime()).context,
+					await relay.effectRuntime.runtime.context(),
 					SessionDirectory,
 				),
 			);
@@ -507,7 +507,7 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 										status: "busy",
 									}),
 								])
-								.pipe(Effect.locally(currentRunnerOutput, receipt)),
+								.pipe(Effect.provideService(currentRunnerOutput, receipt)),
 						);
 						yield* Deferred.await(resolved);
 						yield* applySessionCommand(
@@ -536,8 +536,10 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 				}),
 			);
 			// fullBaseLayers supplies these services; the public runtime exposes a narrower facade.
-			const context = (await relay.effectRuntime.runtime.runtime())
-				.context as Context.Context<Effect.Services<typeof program>>;
+			const context =
+				(await relay.effectRuntime.runtime.context()) as Context.Context<
+					Effect.Services<typeof program>
+				>;
 			const result = await relay.effectRuntime.runtime.runPromise(
 				Effect.provide(program, context),
 			);

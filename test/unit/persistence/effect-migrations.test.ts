@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
-import Database from "better-sqlite3";
 import { Effect, Result as Either, Exit, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
@@ -942,7 +942,7 @@ describe("Effect migration lineage", () => {
 				}).pipe(
 					Effect.provide(
 						makeFileSqlLayer((filename) => {
-							const db = new Database(filename);
+							const db = new DatabaseSync(filename);
 							try {
 								seedLegacyEventStore(db, legacyId);
 							} finally {
@@ -970,7 +970,7 @@ describe("Effect migration lineage", () => {
 			}).pipe(
 				Effect.provide(
 					makeFileSqlLayer((filename) => {
-						const db = new Database(filename);
+						const db = new DatabaseSync(filename);
 						try {
 							seedLegacyEventStore(db, 8);
 						} finally {
@@ -999,7 +999,7 @@ describe("Effect migration lineage", () => {
 			}).pipe(
 				Effect.provide(
 					makeFileSqlLayer((filename) => {
-						const db = new Database(filename);
+						const db = new DatabaseSync(filename);
 						try {
 							seedLegacyEventStore(db, 8);
 							db.exec("ALTER TABLE sessions ADD COLUMN permission_mode TEXT");

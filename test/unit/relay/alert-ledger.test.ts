@@ -57,10 +57,13 @@ const withStore = async <A>(
 		);
 	const reopen = <B>(
 		second: Effect.Effect<B, unknown, PersistenceEffectContext>,
-	) => Effect.runPromise(second.pipe(Effect.provide(layer()), Effect.orDie));
+	) =>
+		Effect.runPromise(
+			second.pipe(Effect.provide(layer(), { local: true }), Effect.orDie),
+		);
 	try {
 		return await Effect.runPromise(
-			body(reopen).pipe(Effect.provide(layer()), Effect.orDie),
+			body(reopen).pipe(Effect.provide(layer(), { local: true }), Effect.orDie),
 		);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });

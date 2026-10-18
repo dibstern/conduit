@@ -56,8 +56,10 @@ it("pushes canonical terminal alerts, preserves replay identity, and suppresses 
 			];
 		}).pipe(
 			Effect.scoped,
-			Effect.provide(AlertsLive),
-			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			Effect.provide(AlertsLive, { local: true }),
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project"), {
+				local: true,
+			}),
 		),
 	);
 	expect(sendToAll).toHaveBeenCalledTimes(2);

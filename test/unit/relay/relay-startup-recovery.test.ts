@@ -56,6 +56,7 @@ it("recovers historical sessions before startup can create a live session", asyn
 			}).pipe(
 				Effect.provide(
 					makePersistenceEffectLayer(filename, "startup-recovery"),
+					{ local: true },
 				),
 			),
 		);
@@ -152,6 +153,7 @@ it("rejects Claude permissions a crash left pending and leaves OpenCode's alone"
 			Effect.all([seed("claude"), seed("opencode")]).pipe(
 				Effect.provide(
 					makePersistenceEffectLayer(filename, "orphaned-permissions"),
+					{ local: true },
 				),
 			),
 		);
