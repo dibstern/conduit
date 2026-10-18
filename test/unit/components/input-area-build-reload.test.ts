@@ -12,6 +12,7 @@ import {
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import { connectionState } from "../../../src/lib/frontend/transport/connection-status.svelte.js";
 import { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import {
 	seedDaemonSessions,
@@ -86,6 +87,7 @@ describe("InputArea build reload recovery", () => {
 		sessionStorage.clear();
 		openSessionForSetup(sessionId, "test");
 		attachedProjectState.slug = "test";
+		connectionState.status = "connected";
 		phaseToIdle(getOrCreateSessionActivity(sessionId));
 		Object.assign(inputSyncState, {
 			text: "",
@@ -107,6 +109,7 @@ describe("InputArea build reload recovery", () => {
 		vi.unstubAllGlobals();
 		openSessionForSetup(null);
 		attachedProjectState.slug = null;
+		connectionState.status = "";
 		seedDaemonSessions([]);
 		seedSessions([]);
 		sessionStorage.clear();

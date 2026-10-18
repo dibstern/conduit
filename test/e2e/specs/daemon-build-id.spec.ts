@@ -247,11 +247,12 @@ test("mismatching builds reload once, preserve the latest composer draft, and re
 	await expect(
 		page.locator(".banner-text", { hasText: "different builds" }),
 	).toBeVisible();
-	// Before and after the reload. The reloaded page subscribes again when it
-	// attaches its project, so the count can exceed two; reloads stays one.
+	// Only after the reload: the stale tab learns build B over plain HTTP and
+	// reloads without an RPC handshake. The reloaded page subscribes again when
+	// it attaches its project, so the count can exceed one; reloads stays one.
 	await expect
 		.poll(() => handshakes.filter((id) => id === buildB).length)
-		.toBeGreaterThanOrEqual(2);
+		.toBeGreaterThanOrEqual(1);
 	await expect
 		.poll(() => page.evaluate(() => caches.keys()))
 		.not.toContain("conduit-legacy-shell");

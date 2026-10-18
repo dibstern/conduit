@@ -1431,7 +1431,11 @@ Object.assign(ClaudeDriver, { create: deps => {
 		await this.stop(signal, 10_000);
 	}
 
-	async runCli(args: string[]): Promise<{
+	async runCli(
+		args: string[],
+		/** A cold CLI start can exceed the default bound on a loaded machine. */
+		options: { timeoutMs?: number } = {},
+	): Promise<{
 		pid: number | undefined;
 		code: number | null;
 		signal: NodeJS.Signals | null;
@@ -1464,7 +1468,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			const timer = setTimeout(() => {
 				timedOut = true;
 				child.kill("SIGKILL");
-			}, TIMEOUT_MS);
+			}, options.timeoutMs ?? TIMEOUT_MS);
 			child.once("error", (cause) => {
 				clearTimeout(timer);
 				fail(cause);

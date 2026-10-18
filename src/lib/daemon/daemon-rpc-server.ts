@@ -1,15 +1,16 @@
 import { lstatSync, unlinkSync } from "node:fs";
-import { chmod, lstat } from "node:fs/promises";
+import { chmod, lstat, rename, rm, writeFile } from "node:fs/promises";
 import type { Socket as NetSocket } from "node:net";
 import { SocketServer } from "@effect/platform";
 import { NodeSocket, NodeSocketServer } from "@effect/platform-node";
 import { RpcSerialization, RpcServer } from "@effect/rpc";
 import { Context, Effect, Layer, Option } from "effect";
 import { WsRpcGroup } from "../contracts/ws-rpc.js";
+import { SERVER_BUILD_ID } from "../server/build-update.js";
 import type { WsRpcServerLayer } from "../server/ws-rpc.js";
 import { RpcCaller } from "../server/ws-rpc.js";
 import { isRecord } from "../utils.js";
-import { isDaemonRunning } from "./daemon-utils.js";
+import { daemonBuildPath, isDaemonRunning } from "./daemon-utils.js";
 
 type ShutdownTag = "Shutdown" | "RestartWithConfig";
 
@@ -122,6 +123,24 @@ export const makeDaemonRpcSocketLayer = <R>(
 					catch: (cause) => cause,
 				});
 			}
+			// The CLI reads this before any RPC to refuse a mismatched build, so it
+			// lands atomically before the socket listens; the pid covers a crash.
+			const buildPath = daemonBuildPath(socketPath);
+			const buildTmpPath = `${buildPath}.${process.pid}.tmp`;
+			yield* Effect.tryPromise({
+				try: async () => {
+					await writeFile(
+						buildTmpPath,
+						JSON.stringify({ buildId: SERVER_BUILD_ID, pid: process.pid }),
+						{ mode: 0o600 },
+					);
+					await rename(buildTmpPath, buildPath);
+				},
+				catch: (cause) => cause,
+			});
+			yield* Effect.addFinalizer(() =>
+				Effect.promise(() => rm(buildPath, { force: true }).catch(() => {})),
+			);
 			const server = yield* NodeSocketServer.make({ path: socketPath });
 			const clients = new Set<NetSocket>();
 			const drain = Effect.sync(() => {
