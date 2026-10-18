@@ -413,6 +413,75 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "seed the session's delete inspection",
+		match: /^that session's worktree inspection says "(ask|remove)" on delete$/,
+		run: ({ world, match }) => {
+			requireRpcControl(world.page).setResponse("InspectSessionWorktrees", {
+				worktrees: [
+					{
+						folder: "/myapp",
+						path: "/worktrees/delete-session/myapp",
+						reasons: [],
+						inUse: false,
+					},
+				],
+				removeWorktrees: true,
+				onDelete: match[1],
+			});
+		},
+	},
+	{
+		name: "open the session's delete dialog without reading global rules",
+		match: /^I open that session's delete dialog$/,
+		run: async ({ world }) => {
+			const rpc = requireRpcControl(world.page);
+			const globalReads = rpc
+				.getRequests()
+				.filter(({ tag }) => tag === "GetWorktreeCleanupSetting").length;
+			await world.page
+				.locator('#session-list [data-session-id="row-opencode"]')
+				.click({ button: "right" });
+			await world.page.getByTestId("session-ctx-delete").click();
+			await expect(world.page.locator("#confirm-modal")).toBeVisible();
+			expect(
+				rpc
+					.getRequests()
+					.filter(({ tag }) => tag === "GetWorktreeCleanupSetting"),
+			).toHaveLength(globalReads);
+		},
+	},
+	{
+		name: "assert the session's worktree choice",
+		match: /^the delete dialog (offers|omits) a worktree choice$/,
+		run: async ({ world, match }) => {
+			const dialog = world.page.locator("#confirm-modal");
+			if (match[1] === "offers") {
+				await expect(dialog).toContainText("/worktrees/delete-session/myapp");
+				await expect(
+					dialog.getByRole("radio", { name: "Remove worktrees", exact: true }),
+				).toBeChecked();
+			} else {
+				await expect(dialog.getByRole("radio")).toHaveCount(0);
+				await expect(dialog).not.toContainText(
+					"/worktrees/delete-session/myapp",
+				);
+			}
+		},
+	},
+	{
+		name: "cancel the session's deletion",
+		match: /^I cancel deleting that session$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("confirm-modal-cancel").click();
+			await expect(world.page.locator("#confirm-modal")).not.toBeVisible();
+			expect(
+				requireRpcControl(world.page)
+					.getRequests()
+					.filter(({ tag }) => tag === "DeleteSession"),
+			).toEqual([]);
+		},
+	},
+	{
 		name: "seed the delete rule",
 		match:
 			/^worktree cleanup (asks about|removes) worktrees of deleted sessions$/,

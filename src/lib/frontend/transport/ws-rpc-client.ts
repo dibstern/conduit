@@ -616,10 +616,10 @@ export async function setDefaultSessionModeRpc(input: {
 
 export async function inspectSessionWorktreesRpc(input: {
 	readonly sessionId: string;
-}) {
+}): Promise<Success<"InspectSessionWorktrees">> {
 	return runTransportEffect(
 		callControl(undefined, (client) =>
-			client("InspectSessionWorktrees", input),
+			client("InspectSessionWorktrees", { sessionId: input.sessionId }),
 		),
 	);
 }

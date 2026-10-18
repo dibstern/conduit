@@ -217,6 +217,10 @@ export interface ProjectRelayConfig {
 	broadcastSessionListChanged?: () => Promise<void>;
 	/** Request the daemon's serialized worktree sweep after a session settles. */
 	requestWorktreeCleanup?: () => import("effect").Effect.Effect<void>;
+	/** Read this project's current effective cleanup rules from the daemon. */
+	getWorktreeCleanup?: () => import("effect").Effect.Effect<
+		import("./contracts/worktree.js").WorktreeCleanup | "off"
+	>;
 	/** Notify the daemon's other live relays; standalone relays use a no-op. */
 	publishGlobalSetting: (
 		tag: import("./contracts/ws-rpc.js").GlobalSettingTag,

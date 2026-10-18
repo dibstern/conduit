@@ -33,6 +33,7 @@ import {
 	CreateSession,
 	DeleteSession,
 	GetWorktreeCleanupSetting,
+	InspectSessionWorktrees,
 	ListDaemonSessions,
 	ListPtys,
 	MoveSessionWorkspace,
@@ -972,6 +973,84 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		expect(
 			git(fixture.projectDir, "rev-parse", `refs/heads/${session.branch}`),
 		).toBe(head);
+	}, 300_000);
+
+	it("inspects and deletes sessions across Custom and Off projects using each session's current rule", async () => {
+		const { fixture, socket, create, setProject, setting, sessions, sweep } =
+			await start();
+		const directory = join(fixture.root, "off-project");
+		mkdirSync(directory);
+		git(directory, "init", "-b", "main");
+		writeFileSync(join(directory, "base.txt"), "Off project base\n");
+		git(directory, "add", "base.txt");
+		commit(directory, "Off project base");
+		const { savedSlug: slug } = await sendRpcRequest(
+			socket,
+			new SaveProject({ folders: [directory] }),
+		);
+		const remove = await create("Custom delete rule");
+		const ask = await create("Off delete rule", true, { slug, directory });
+		const inspect = (sessionId: string) =>
+			sendRpcRequest(socket, new InspectSessionWorktrees({ sessionId }));
+		// Both relays are already loaded. Changes must be read at inspection time.
+		for (const session of [remove, ask]) {
+			expect((await inspect(session.id)).onDelete).toBe("ask");
+		}
+		await setProject({ ...defaults, onSettle: "keep", onDelete: true });
+		await setProject("off", slug);
+		expect((await setting()).global.onDelete).toBe(false);
+		const inspections = await Promise.all([
+			inspect(remove.id),
+			inspect(ask.id),
+		]);
+		expect(inspections[0]).toMatchObject({
+			onDelete: "remove",
+			removeWorktrees: true,
+			worktrees: [{ path: remove.path }],
+		});
+		expect(inspections[1]).toMatchObject({
+			onDelete: "ask",
+			removeWorktrees: true,
+			worktrees: [{ path: ask.path }],
+		});
+		const payloads = [remove, ask].map(({ id }) => ({
+			sessionId: id,
+			removeWorktrees: false,
+		}));
+		const deletions = await Promise.all(
+			payloads.map((payload) =>
+				sendRpcRequest(socket, new DeleteSession(payload)),
+			),
+		);
+		for (const deletion of deletions) {
+			expect(deletion.ok).toBe(true);
+			expect(deletion.worktreeWarnings ?? []).toEqual([]);
+		}
+		await vi.waitFor(() => expect(existsSync(remove.path)).toBe(false), {
+			timeout: 30_000,
+		});
+		expect(existsSync(ask.path)).toBe(true);
+		// Drain all queued deletion runs before asserting that Off remains untouched.
+		await sweep("cross-project deletion completed");
+		expect(existsSync(ask.path)).toBe(true);
+		for (const projectSlug of ["process-test", slug]) {
+			expect((await sessions(projectSlug)).sessions).toEqual([]);
+		}
+		for (const [projectDir, session] of [
+			[fixture.projectDir, remove],
+			[directory, ask],
+		] as const) {
+			expect(
+				git(projectDir, "rev-parse", `refs/heads/${session.branch}`),
+			).toBeTruthy();
+		}
+		evidence["crossProjectDelete"] = {
+			inspections,
+			payloads,
+			deletions,
+			customRemoved: !existsSync(remove.path),
+			offKept: existsSync(ask.path),
+		};
 	}, 300_000);
 
 	it("requests cleanup after deletion without a cleanup RPC", async () => {

@@ -1,7 +1,8 @@
 /*
  * Prompt failure cases, written before the UI implementation:
- * - With onDelete on, ordinary confirmation leaves removal to background cleanup.
- * - With onDelete off or unreadable, clean worktrees default to Remove and unfinished work to Keep.
+ * - Each inspection's onDelete decides whether removal belongs to the sweep or dialog.
+ * - Mixed batches show only ask worktrees; Off projects ask even when global rules remove.
+ * - Ask inspections default clean worktrees to Remove and unfinished work to Keep.
  * - Explicit Keep/Remove reaches DeleteSession, including bulk and foreign rows.
  * - In-use checkouts say they are kept and cannot be selected for removal.
  * - Existing/non-worktree sessions retain the ordinary confirmation.
@@ -29,11 +30,13 @@ type Inspection = {
 		inUse: boolean;
 	}[];
 	removeWorktrees: boolean;
+	onDelete: "ask" | "remove";
 };
 
 const clean: Inspection = {
 	worktrees: [{ folder, path: worktree, reasons: [], inUse: false }],
 	removeWorktrees: true,
+	onDelete: "ask",
 };
 
 async function setup(
@@ -42,8 +45,9 @@ async function setup(
 	inspection: Inspection,
 	options: {
 		failInspection?: boolean;
-		onDelete?: boolean;
-		failCleanupSetting?: boolean;
+		globalOnDelete?: boolean;
+		projectOff?: boolean;
+		localInspection?: Inspection;
 		warnings?: string[];
 		bulk?: boolean;
 		foreign?: boolean;
@@ -82,25 +86,27 @@ async function setup(
 						id: "local-session",
 						title: "Local session",
 						status: "idle",
-						projectSlug,
+						projectSlug: "e2e-replay",
 					},
 				]
 			: []),
 	];
+	// The scoped shell covers the current project; the daemon list covers the rest.
+	const shellRows = () =>
+		options.foreign
+			? sessions.filter((session) => session.projectSlug === "e2e-replay")
+			: sessions;
 	const rpc = await mockWsRpc(page, {
 		handlers: {
 			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
-			GetWorktreeCleanupSetting: () => {
-				if (options.failCleanupSetting)
-					throw new WsRpcError({ message: "Could not read cleanup setting" });
-				return {
-					global: {
-						...DEFAULT_WORKTREE_CLEANUP,
-						onDelete: options.onDelete ?? false,
-					},
-				};
-			},
+			GetWorktreeCleanupSetting: () => ({
+				global: {
+					...DEFAULT_WORKTREE_CLEANUP,
+					onDelete: options.globalOnDelete ?? false,
+				},
+				...(options.projectOff ? { project: "off" } : {}),
+			}),
 			ListDaemonSessions: () => ({
 				sessions: options.foreign ? sessions : [],
 				availability: [],
@@ -112,12 +118,16 @@ async function setup(
 				if (options.failInspection)
 					throw new WsRpcError({ message: "Could not inspect worktrees" });
 				return sessionId === "local-session"
-					? { worktrees: [], removeWorktrees: false }
+					? (options.localInspection ?? {
+							worktrees: [],
+							removeWorktrees: false,
+							onDelete: "ask",
+						})
 					: inspection;
 			},
 			DeleteSession: ({ sessionId }) => {
 				sessions = sessions.filter(({ id }) => id !== sessionId);
-				rpc.setShellRows(options.foreign ? [] : sessions);
+				rpc.setShellRows(shellRows());
 				return { ok: true, worktreeWarnings: options.warnings ?? [] };
 			},
 		},
@@ -128,12 +138,12 @@ async function setup(
 			{
 				type: "shell_snapshot",
 				roots: true,
-				sessions: options.foreign ? [] : sessions,
+				sessions: shellRows(),
 			},
 		],
 		responses: new Map(),
 	});
-	rpc.setShellRows(options.foreign ? [] : sessions);
+	rpc.setShellRows(shellRows());
 	controls.set(page, rpc);
 	await page.goto(`${baseUrl}/?p=e2e-replay`);
 	if (options.foreign)
@@ -175,7 +185,11 @@ test.afterEach(async ({ page }, info) => {
 			.get(page)
 			?.getRequests()
 			.filter(({ tag }) =>
-				["InspectSessionWorktrees", "DeleteSession"].includes(tag),
+				[
+					"InspectSessionWorktrees",
+					"DeleteSession",
+					"GetWorktreeCleanupSetting",
+				].includes(tag),
 			)
 			.map(({ tag, payload }) => ({
 				tag,
@@ -192,6 +206,9 @@ test.afterEach(async ({ page }, info) => {
 		path: artifact,
 		contentType: "application/json",
 	});
+	expect(
+		requests.filter(({ tag }) => tag === "GetWorktreeCleanupSetting"),
+	).toEqual([]);
 });
 
 test("a pending inspection cannot replace another deletion confirmation", async ({
@@ -241,8 +258,9 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await setup(page, harness.relayBaseUrl, clean, {
-				onDelete: true,
+			const rpc = await setup(page, harness.relayBaseUrl, {
+				...clean,
+				onDelete: "remove",
 			});
 			const prompt = await openDelete(page, mode.mobile);
 			await expect(prompt).toContainText(
@@ -265,12 +283,13 @@ for (const mode of [
 				.toEqual([false]);
 		});
 
-		test("an unreadable cleanup setting keeps the worktree choice and inspection default", async ({
+		test("an Off project asks even when the global delete rule removes worktrees", async ({
 			page,
 			harness,
 		}) => {
 			const rpc = await setup(page, harness.relayBaseUrl, clean, {
-				failCleanupSetting: true,
+				globalOnDelete: true,
+				projectOff: true,
 			});
 			const prompt = await openDelete(page, mode.mobile);
 			await expect(
@@ -327,6 +346,7 @@ for (const mode of [
 						{ folder, path: worktree, reasons: [reason], inUse: false },
 					],
 					removeWorktrees: false,
+					onDelete: "ask",
 				});
 				const prompt = await openDelete(page, mode.mobile);
 				await expect(prompt).toContainText(folder);
@@ -370,6 +390,7 @@ for (const mode of [
 						},
 					],
 					removeWorktrees: false,
+					onDelete: "ask",
 				},
 				{ warnings: [warning] },
 			);
@@ -421,15 +442,19 @@ for (const mode of [
 						.getRequests()
 						.filter(({ tag }) => tag === "DeleteSession")
 						.map(({ payload }) => ({
-							projectSlug: payload["projectSlug"],
+							sessionId: payload["sessionId"],
 							removeWorktrees: payload["removeWorktrees"],
 						})),
 				)
-				.toEqual([{ projectSlug: "second-project", removeWorktrees: false }]);
+				.toEqual([{ sessionId: "delete-session", removeWorktrees: false }]);
+			// The daemon routes by session id, so the browser sends no project.
 			expect(
 				rpc.getRequests().find(({ tag }) => tag === "InspectSessionWorktrees")
-					?.payload["projectSlug"],
-			).toBe("second-project");
+					?.payload,
+			).toEqual({
+				_tag: "InspectSessionWorktrees",
+				sessionId: "delete-session",
+			});
 		});
 
 		test("in-use worktrees say they are kept and disable Remove", async ({
@@ -439,6 +464,7 @@ for (const mode of [
 			const rpc = await setup(page, harness.relayBaseUrl, {
 				worktrees: [{ folder, path: worktree, reasons: [], inUse: true }],
 				removeWorktrees: false,
+				onDelete: "ask",
 			});
 			const prompt = await openDelete(page, mode.mobile);
 			await expect(prompt).toContainText("another session");
@@ -470,6 +496,7 @@ for (const mode of [
 			const rpc = await setup(page, harness.relayBaseUrl, {
 				worktrees: [],
 				removeWorktrees: false,
+				onDelete: "ask",
 			});
 			const prompt = await openDelete(page, mode.mobile);
 			await expect(prompt).toContainText(
@@ -499,6 +526,93 @@ for (const mode of [
 			).toEqual([]);
 		});
 
+		test("a mixed-project batch shows only ask worktrees and leaves remove sessions to the sweep", async ({
+			page,
+			harness,
+		}) => {
+			const automaticWorktree =
+				"/conduit/worktrees/e2e-replay/local-session/app";
+			const rpc = await setup(page, harness.relayBaseUrl, clean, {
+				bulk: true,
+				foreign: true,
+				localInspection: {
+					worktrees: [
+						{ folder, path: automaticWorktree, reasons: [], inUse: false },
+					],
+					removeWorktrees: false,
+					onDelete: "remove",
+				},
+			});
+			const prompt = await openDelete(page, mode.mobile, true);
+			await expect(prompt).toContainText(worktree);
+			await expect(prompt).not.toContainText(automaticWorktree);
+			await expect(
+				prompt.getByRole("radio", { name: "Remove worktrees", exact: true }),
+			).toBeChecked();
+			await page.getByTestId("confirm-modal-action").click();
+			await expect
+				.poll(() =>
+					rpc
+						.getRequests()
+						.filter(({ tag }) => tag === "DeleteSession")
+						.map(({ payload }) => ({
+							sessionId: payload["sessionId"],
+							removeWorktrees: payload["removeWorktrees"],
+						}))
+						.sort((a, b) =>
+							String(a.sessionId).localeCompare(String(b.sessionId)),
+						),
+				)
+				.toEqual([
+					{ sessionId: "delete-session", removeWorktrees: true },
+					{ sessionId: "local-session", removeWorktrees: false },
+				]);
+			expect(
+				rpc
+					.getRequests()
+					.filter(({ tag }) => tag === "InspectSessionWorktrees")
+					.map(({ payload }) => payload["sessionId"])
+					.sort(),
+			).toEqual(["delete-session", "local-session"]);
+		});
+
+		test("a batch of only remove sessions has no worktree choice", async ({
+			page,
+			harness,
+		}) => {
+			const rpc = await setup(
+				page,
+				harness.relayBaseUrl,
+				{ ...clean, onDelete: "remove" },
+				{
+					bulk: true,
+					foreign: true,
+					localInspection: { ...clean, onDelete: "remove" },
+				},
+			);
+			const prompt = await openDelete(page, mode.mobile, true);
+			await expect(prompt.getByRole("radio")).toHaveCount(0);
+			await expect(prompt).not.toContainText(worktree);
+			await page.getByTestId("confirm-modal-action").click();
+			await expect
+				.poll(() =>
+					rpc
+						.getRequests()
+						.filter(({ tag }) => tag === "DeleteSession")
+						.map(({ payload }) => ({
+							sessionId: payload["sessionId"],
+							removeWorktrees: payload["removeWorktrees"],
+						}))
+						.sort((a, b) =>
+							String(a.sessionId).localeCompare(String(b.sessionId)),
+						),
+				)
+				.toEqual([
+					{ sessionId: "delete-session", removeWorktrees: false },
+					{ sessionId: "local-session", removeWorktrees: false },
+				]);
+		});
+
 		test("bulk deletion inspects every target and keeps unfinished work", async ({
 			page,
 			harness,
@@ -516,6 +630,7 @@ for (const mode of [
 						},
 					],
 					removeWorktrees: false,
+					onDelete: "ask",
 				},
 				{ bulk: true },
 			);

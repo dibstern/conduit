@@ -119,16 +119,21 @@ Scenario Outline: Deleting a session asks about its worktree unless the rule rem
   Given the conduit app is served with the connected mockup
   And the viewport is a desktop
   And worktree cleanup <current_rule> worktrees of deleted sessions
-  When I open settings to the General section
+  And the sidebar has an OpenCode session titled "Delete this session"
+  And that session's worktree inspection says "<on_delete>" on delete
+  When I open that session's delete dialog
+  Then the delete dialog <choice> a worktree choice
+  When I cancel deleting that session
+  And I open settings to the General section
   And I expand Worktree cleanup
   Then deleting a session is set to "<current_label>"
   When I set deleting a session to "<next_label>"
   Then the worktree cleanup delete rule is saved as <saved>
 
 Examples:
-  | current_rule | current_label | next_label | saved |
-  | asks about   | Ask           | Remove     | true  |
-  | removes      | Remove        | Ask        | false |
+  | current_rule | current_label | next_label | saved | on_delete | choice |
+  | asks about   | Ask           | Remove     | true  | remove    | omits  |
+  | removes      | Remove        | Ask        | false | ask       | offers |
 
 Scenario Outline: Project cleanup inherits the global rules
   Given the conduit app is served with the connected mockup

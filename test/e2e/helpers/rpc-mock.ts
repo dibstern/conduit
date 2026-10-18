@@ -731,7 +731,11 @@ function defaultHandler(
 					: tag === "ViewSession"
 						? () => ({ ok: true })
 						: tag === "InspectSessionWorktrees"
-							? () => ({ worktrees: [], removeWorktrees: false })
+							? () => ({
+									worktrees: [],
+									removeWorktrees: false,
+									onDelete: "ask",
+								})
 							: tag === "input.submit"
 								? ({ sessionId }) => ({ ok: true, sessionId })
 								: undefined)

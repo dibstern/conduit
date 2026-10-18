@@ -1799,6 +1799,7 @@ export class InspectSessionWorktrees extends Schema.TaggedRequest<InspectSession
 		success: Schema.Struct({
 			worktrees: Schema.Array(SessionWorktreeInspectionSchema),
 			removeWorktrees: Schema.Boolean,
+			onDelete: Schema.Literal("ask", "remove"),
 		}),
 		payload: { sessionId: NonEmptyString },
 	},
