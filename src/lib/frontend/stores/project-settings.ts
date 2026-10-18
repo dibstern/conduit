@@ -46,6 +46,10 @@ export const applyProjectSetting = (
 			projectState.defaultGroupingMode = setting.mode;
 			projectState.defaultGroupingRevision++;
 			break;
+		case "terminalKeys":
+			projectState.terminalKeys = setting.terminalKeys;
+			projectState.terminalKeysRevision++;
+			break;
 		case "claudeSettings":
 			handleClaudeSettingsInfo(setting);
 			break;

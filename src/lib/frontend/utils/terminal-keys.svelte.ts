@@ -14,8 +14,10 @@
 
 import type { Terminal } from "@xterm/xterm";
 import {
+	DEFAULT_TERMINAL_KEYS,
 	TERMINAL_MODIFIERS,
 	type TerminalKeyAction,
+	type TerminalKeysSetting,
 	type TerminalModifier,
 } from "../../contracts/terminal-keys.js";
 import { replaceScrollback, terminalState } from "../stores/terminal.svelte.js";
@@ -129,7 +131,7 @@ function charKey(char: string): KeyEncoding {
 /** How a key shows each action: a short label, an icon where one reads
  *  better on the key face, and the name it's announced by. */
 export const TERMINAL_KEY_LABELS: Record<
-	TerminalKeyAction,
+	TerminalKeyAction | TerminalArrow,
 	{ text: string; name: string; icon?: string }
 > = {
 	paste: { text: "paste", name: "Paste", icon: "clipboard" },
@@ -140,6 +142,10 @@ export const TERMINAL_KEY_LABELS: Record<
 	opt: { text: "⌥", name: "Option" },
 	cmd: { text: "⌘", name: "Command" },
 	shift: { text: "⇧", name: "Shift" },
+	left: { text: "", name: "Left arrow", icon: "arrow-left" },
+	up: { text: "", name: "Up arrow", icon: "arrow-up" },
+	down: { text: "", name: "Down arrow", icon: "arrow-down" },
+	right: { text: "", name: "Right arrow", icon: "arrow-right" },
 };
 /** The Mac's order for naming a combination. */
 const COMBO_ORDER: readonly TerminalModifier[] = [
@@ -184,9 +190,11 @@ const lineCount = (text: string) =>
 
 export function createTerminalKeys({
 	openFind,
+	settings = () => DEFAULT_TERMINAL_KEYS,
 }: {
 	/** Open the find bar on this terminal. */
 	openFind: (terminal: Terminal) => void;
+	settings?: () => TerminalKeysSetting;
 }) {
 	const terminals = new Map<string, Terminal>();
 	const modifiers = $state<Record<TerminalModifier, ModifierState>>({
@@ -235,7 +243,7 @@ export function createTerminalKeys({
 	function guardedPaste(terminal: Terminal, text: string) {
 		const lines = lineCount(text);
 		if (lines < 2) return paste(terminal, text);
-		if (!terminal.modes.bracketedPasteMode) {
+		if (settings().pasteAsOneBlock && !terminal.modes.bracketedPasteMode) {
 			pending = { terminal, text, lines };
 			return;
 		}
@@ -341,10 +349,10 @@ export function createTerminalKeys({
 			const terminal = activeTerminal();
 			if (!terminal) return;
 			if (isTerminalModifier(key)) {
-				// Off, then waiting for the next key, then locked, then off again.
+				// A second tap either locks the modifier or releases it.
 				const next = {
 					off: "waiting",
-					waiting: "locked",
+					waiting: settings().tapTwiceToLock ? "locked" : "off",
 					locked: "off",
 				} as const;
 				modifiers[key] = next[modifiers[key]];
@@ -375,6 +383,14 @@ export function createTerminalKeys({
 			send: (data: string) => void,
 		): () => void {
 			terminals.set(ptyId, terminal);
+			terminal.options.macOptionIsMeta = settings().optionKey === "meta";
+			// connect can run outside component setup. Its subscription lives
+			// exactly as long as this terminal's data listeners.
+			const stopOptions = $effect.root(() => {
+				$effect(() => {
+					terminal.options.macOptionIsMeta = settings().optionKey === "meta";
+				});
+			});
 			const commands: Record<string, () => void> = {
 				v: () => void pasteClipboard(terminal),
 				f: () => openFind(terminal),
@@ -412,6 +428,7 @@ export function createTerminalKeys({
 			terminal.textarea?.addEventListener("focus", onFocus);
 			terminal.textarea?.addEventListener("blur", onFocus);
 			return () => {
+				stopOptions();
 				data.dispose();
 				selection.dispose();
 				terminal.element?.removeEventListener("paste", onPaste, true);

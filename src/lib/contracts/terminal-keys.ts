@@ -1,3 +1,27 @@
+import { Schema } from "effect";
+
+const TerminalKeysBar = Schema.Struct({
+	show: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+	paste: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+	escTab: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+	modifiers: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+	arrows: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+});
+
+export const TerminalKeysSetting = Schema.Struct({
+	bar: Schema.optionalWith(TerminalKeysBar, {
+		default: () => Schema.decodeSync(TerminalKeysBar)({}),
+	}),
+	optionKey: Schema.optionalWith(Schema.Literal("characters", "meta"), {
+		default: () => "characters" as const,
+	}),
+	tapTwiceToLock: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+	pasteAsOneBlock: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+});
+export type TerminalKeysSetting = typeof TerminalKeysSetting.Type;
+
+export const DEFAULT_TERMINAL_KEYS = Schema.decodeSync(TerminalKeysSetting)({});
+
 /** The sticky modifiers, in the order the bar shows them. */
 export const TERMINAL_MODIFIERS = ["ctrl", "opt", "cmd", "shift"] as const;
 export type TerminalModifier = (typeof TERMINAL_MODIFIERS)[number];

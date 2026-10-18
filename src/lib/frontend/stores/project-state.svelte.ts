@@ -1,6 +1,7 @@
 // The project list and draft-project lookup, kept free of other stores so
 // low-level stores (discovery) can read them without an import cycle.
 
+import { DEFAULT_TERMINAL_KEYS } from "../../contracts/terminal-keys.js";
 import { computeProjectGroups } from "../../project-grouping.js";
 import { getScopeGroupKey } from "../../session-scope.js";
 import type { GroupingMode, ProjectGroup } from "../../shared-types.js";
@@ -19,6 +20,8 @@ export const projectState = $state({
 	currentSlug: null as string | null,
 	defaultGroupingMode: "repository" as GroupingMode,
 	defaultGroupingRevision: 0,
+	terminalKeys: DEFAULT_TERMINAL_KEYS,
+	terminalKeysRevision: 0,
 	/** The project the daemon says a new session prefills, on every client. */
 	newSessionProject: null as string | null,
 });

@@ -30,6 +30,8 @@ export const daemonOnlyHandlers = {
 		daemonRequired("SetDefaultGroupingMode"),
 	GetDefaultGroupingMode: (_request) =>
 		daemonRequired("GetDefaultGroupingMode"),
+	SetTerminalKeys: (_request) => daemonRequired("SetTerminalKeys"),
+	GetTerminalKeys: (_request) => daemonRequired("GetTerminalKeys"),
 	GetCategorySet: (_request) => daemonRequired("GetCategorySet"),
 	GetSurfacingFeedback: (_request) => daemonRequired("GetSurfacingFeedback"),
 	ReplaceCategorySet: (_request) => daemonRequired("ReplaceCategorySet"),
@@ -55,6 +57,8 @@ export const daemonOnlyHandlers = {
 	| "ResolveSessionMode"
 	| "SetDefaultGroupingMode"
 	| "GetDefaultGroupingMode"
+	| "SetTerminalKeys"
+	| "GetTerminalKeys"
 	| "GetCategorySet"
 	| "GetSurfacingFeedback"
 	| "ReplaceCategorySet"

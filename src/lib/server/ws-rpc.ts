@@ -249,6 +249,8 @@ export type DaemonRpcName =
 	| "CleanUpWorktreesNow"
 	| "SetDefaultGroupingMode"
 	| "GetDefaultGroupingMode"
+	| "SetTerminalKeys"
+	| "GetTerminalKeys"
 	| "GetUsageLimitsSetting"
 	| "SetUsageLimitsSetting"
 	| "SetCursorUsageKeychain"

@@ -48,6 +48,7 @@ import { surfacingMarksHandlers } from "./steps/surfacingMarks.js";
 import { surfacingRecapHandlers } from "./steps/surfacingRecap.js";
 import { taskDrillInHandlers } from "./steps/taskDrillIn.js";
 import { terminalKeysHandlers } from "./steps/terminalKeys.js";
+import { terminalSettingsHandlers } from "./steps/terminalSettings.js";
 import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
 import { usageFooterMeterHandlers } from "./steps/usageFooterMeter.js";
 import { usageLimitStripHandlers } from "./steps/usageLimitStrip.js";
@@ -69,6 +70,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...launchingRowsHandlers,
 	...taskDrillInHandlers,
 	...terminalKeysHandlers,
+	...terminalSettingsHandlers,
 	...sideThreadsHandlers,
 	...surfacingCardHandlers,
 	...surfacingMarksHandlers,

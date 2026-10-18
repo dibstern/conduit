@@ -26,11 +26,11 @@
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import type { GetFileTreeResponse } from "../../transport/ws-rpc.js";
 	import type { Terminal } from "@xterm/xterm";
-	import { TERMINAL_MODIFIERS } from "../../../contracts/terminal-keys.js";
+	import { projectState } from "../../stores/project-state.svelte.js";
 	import {
 		createTerminalKeys,
+		isTerminalModifier,
 		TERMINAL_KEY_LABELS,
-		type TerminalArrow,
 	} from "../../utils/terminal-keys.svelte.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -52,18 +52,29 @@
 	let find = $state<{ terminal: Terminal; tab: string | null } | null>(null);
 	const keys = createTerminalKeys({
 		openFind: (terminal) => (find = { terminal, tab: terminalState.activeTabId }),
+		settings: () => projectState.terminalKeys,
 	});
 	// Input type, not width: a fine pointer gets the tab-bar keys, touch gets
 	// the row under the terminal, phones and tablets alike.
 	// jsdom has no matchMedia; real browsers always do.
 	const finePointer =
 		typeof matchMedia === "function" ? new MediaQuery("(pointer: fine)") : { current: true };
-	const ARROWS: readonly (readonly [TerminalArrow, string])[] = [
-		["left", "Left arrow"],
-		["up", "Up arrow"],
-		["down", "Down arrow"],
-		["right", "Right arrow"],
-	];
+	const BAR_KEYS = [
+		{ key: "paste", group: "paste" },
+		{ key: "esc", group: "escTab" },
+		{ key: "tab", group: "escTab" },
+		{ key: "ctrl", group: "modifiers" },
+		{ key: "opt", group: "modifiers" },
+		{ key: "cmd", group: "modifiers" },
+		{ key: "shift", group: "modifiers" },
+		{ key: "left", group: "arrows" },
+		{ key: "up", group: "arrows" },
+		{ key: "down", group: "arrows" },
+		{ key: "right", group: "arrows" },
+	] as const;
+	const visibleBarKeys = $derived(BAR_KEYS.filter(({ group }) =>
+		projectState.terminalKeys.bar.show && projectState.terminalKeys.bar[group],
+	));
 
 	const tabs = $derived(getTabList());
 	const pendingTitle = $derived(getPendingTabTitle());
@@ -444,33 +455,26 @@
 
 			<!-- Keys and font size controls (right-aligned) -->
 			<div class="flex items-center gap-0 ml-auto shrink-0">
-				{#if finePointer.current}
+				{#if finePointer.current && visibleBarKeys.length > 0}
 					<div
 						class="term-keys flex items-center h-[32px] px-[3px] mr-[6px] rounded-full bg-chip"
 						role="toolbar"
 						aria-label="Terminal keys"
 					>
-						<TerminalKey label="Paste" onpress={() => keys.press("paste")}>
-							<Icon name="clipboard" size={13} />Paste
-						</TerminalKey>
-						<span class="w-px h-[18px] mx-[5px] bg-border" aria-hidden="true"></span>
-						<TerminalKey label="Escape" onpress={() => keys.press("esc")}>esc</TerminalKey>
-						<TerminalKey label="Tab" onpress={() => keys.press("tab")}>tab</TerminalKey>
-						<span class="w-px h-[18px] mx-[5px] bg-border" aria-hidden="true"></span>
-						{#each TERMINAL_MODIFIERS as modifier (modifier)}
+						{#each visibleBarKeys as { key, group }, i (key)}
+							{@const label = TERMINAL_KEY_LABELS[key]}
+							{#if i > 0 && visibleBarKeys[i - 1]?.group !== group}
+								<span class="w-px h-[18px] mx-[5px] bg-border" aria-hidden="true"></span>
+							{/if}
 							<TerminalKey
-								label={TERMINAL_KEY_LABELS[modifier].name}
-								glyph
-								state={keys.modifiers[modifier]}
-								onpress={() => keys.press(modifier)}
+								label={label.name}
+								glyph={group === "modifiers" || group === "arrows"}
+								repeat={group === "arrows"}
+								{...(isTerminalModifier(key) ? { state: keys.modifiers[key] } : {})}
+								onpress={(repeated) => keys.press(key, repeated)}
 							>
-								{TERMINAL_KEY_LABELS[modifier].text}
-							</TerminalKey>
-						{/each}
-						<span class="w-px h-[18px] mx-[5px] bg-border" aria-hidden="true"></span>
-						{#each ARROWS as [arrow, label] (arrow)}
-							<TerminalKey {label} glyph repeat onpress={(repeated) => keys.press(arrow, repeated)}>
-								<Icon name="arrow-{arrow}" size={14} />
+								{#if label.icon}<Icon name={label.icon} size={key === "paste" ? 13 : 14} />{/if}
+								{key === "paste" ? label.name : label.text}
 							</TerminalKey>
 						{/each}
 					</div>
