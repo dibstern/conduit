@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { SqlClient } from "@effect/sql";
 import {
-	Cause,
 	Context,
 	Deferred,
 	Effect,
@@ -28,6 +27,7 @@ import {
 	MissingWorktreeError,
 	WorktreeRecoveryError,
 } from "../../../contracts/worktree.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail, RelayError } from "../../../errors.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
@@ -900,7 +900,7 @@ const dispatchEngineTurn = (
 					Effect.catchAllCause((cause) =>
 						Effect.logWarning("Could not request cleanup after turn", {
 							sessionId: resolvedInput.sessionId,
-							cause: Cause.pretty(cause),
+							cause: Failure.renderCause(cause),
 						}),
 					),
 				),

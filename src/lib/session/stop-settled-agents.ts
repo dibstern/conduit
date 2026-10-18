@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
-import { Cause, Effect } from "effect";
+import { Effect } from "effect";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import {
 	AgentLivenessTag,
 	OrchestrationEngineTag,
 } from "../domain/relay/Services/services.js";
 import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
+import * as Failure from "../effect/failure-classification.js";
 import { isSessionQuiescent } from "./worktree-cleanup-rules.js";
 import { readSessionQuiescence } from "./worktree-cleanup-sweep.js";
 
@@ -46,11 +47,11 @@ export const stopQuiescentSettledAgents = (now: number) =>
 				);
 			}).pipe(
 				Effect.catchAllCause((cause) =>
-					Cause.isInterruptedOnly(cause)
+					Failure.isInterruptedOnly(cause)
 						? Effect.failCause(cause)
 						: Effect.logWarning("Could not stop settled session agent", {
 								sessionId,
-								cause: Cause.pretty(cause),
+								cause: Failure.renderCause(cause),
 							}),
 				),
 			);

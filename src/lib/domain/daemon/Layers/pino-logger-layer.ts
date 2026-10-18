@@ -4,8 +4,9 @@
 // so entity IDs (sessionId, cmd, component, etc.) appear in structured output.
 // Effect log spans are forwarded as a "span" binding.
 
-import { Cause, HashMap, type Layer, List, Logger, Option } from "effect";
+import { HashMap, type Layer, List, Logger, Option } from "effect";
 import type { Logger as PinoLogger } from "pino";
+import * as Failure from "../../../effect/failure-classification.js";
 
 /**
  * Create a Layer that replaces Effect's default logger with one that routes
@@ -69,8 +70,8 @@ export const makePinoLoggerLive = (pino: PinoLogger): Layer.Layer<never> =>
 					break;
 				case "Error":
 				case "Fatal":
-					if (!Cause.isEmpty(cause)) {
-						target.error({ err: Cause.pretty(cause) }, text);
+					if (!Failure.isEmpty(cause)) {
+						target.error({ err: Failure.renderCause(cause) }, text);
 					} else {
 						target.error(text);
 					}

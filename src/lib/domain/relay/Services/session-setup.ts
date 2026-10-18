@@ -3,6 +3,7 @@ import { Cause, Context, Deferred, Effect, Layer, Stream } from "effect";
 import type { SessionSetupFinishedPayloadSchema } from "../../../contracts/project-setup.js";
 import { loadDaemonConfigResult } from "../../../daemon/config-persistence.js";
 import { readProjectFile } from "../../../daemon/project-file.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import {
 	allProjects,
 	ProjectRegistryTag,
@@ -139,11 +140,11 @@ export const SessionSetupLive = Layer.scoped(
 							started && !finished
 								? finish({
 										status: "failed",
-										message: Cause.isInterruptedOnly(
+										message: Failure.isInterruptedOnly(
 											exit._tag === "Failure" ? exit.cause : Cause.empty,
 										)
 											? "Setup interrupted by daemon shutdown."
-											: `Setup could not finish: ${exit._tag === "Failure" ? Cause.pretty(exit.cause) : "runner ended without an outcome"}`,
+											: `Setup could not finish: ${exit._tag === "Failure" ? Failure.renderCause(exit.cause) : "runner ended without an outcome"}`,
 									}).pipe(
 										Effect.catchAllCause((cause) =>
 											Effect.logError("Failed to record setup outcome", cause),
@@ -152,7 +153,7 @@ export const SessionSetupLive = Layer.scoped(
 								: Effect.void,
 						),
 						Effect.catchAllCause((cause) =>
-							Cause.isInterruptedOnly(cause)
+							Failure.isInterruptedOnly(cause)
 								? Effect.void
 								: Effect.logError("Project setup failed", cause),
 						),

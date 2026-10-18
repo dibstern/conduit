@@ -2,9 +2,10 @@ import { createConnection, type Socket as NetSocket } from "node:net";
 import { Socket } from "@effect/platform";
 import { NodeSocket } from "@effect/platform-node";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
-import { Cause, Effect, Exit, Option, Schedule } from "effect";
+import { Effect, Exit, Option, Schedule } from "effect";
 import type { Request } from "effect/Request";
 import { WsRpcGroup, type WsRpcRequest } from "../contracts/ws-rpc.js";
+import * as Failure from "../effect/failure-classification.js";
 
 export type SendRPC = <R extends WsRpcRequest>(
 	request: R,
@@ -108,8 +109,8 @@ export const sendRpcRequest = <R extends WsRpcRequest>(
 	).then((exit) =>
 		Exit.match(exit, {
 			onFailure: (cause) => {
-				throw Option.getOrElse(Cause.failureOption(cause), () =>
-					Cause.squash(cause),
+				throw Option.getOrElse(Failure.firstFailure(cause), () =>
+					Failure.squashCause(cause),
 				);
 			},
 			onSuccess: (value) => value,

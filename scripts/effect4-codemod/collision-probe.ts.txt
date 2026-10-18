@@ -1,0 +1,60 @@
+import { Effect as Fx, Either as EE, Option as EO, Schema } from "effect";
+import {
+	catchAll as importedCatchAll,
+	catchSome as importedCatchSome,
+} from "effect/Effect";
+import {
+	Union as ImportedUnion,
+	Literal as ImportedLiteral,
+	String as ImportedString,
+	Number as ImportedNumber,
+} from "effect/Schema";
+import type * as SchemaTypes from "effect/Schema";
+
+export function collidingLocalNames() {
+	// COLLISION BLOCK BEGIN
+	const catchAll = (value: string) => value;
+	const Either = { left: (value: string) => value, right: (value: number) => value };
+	const Literal = (value: string) => value;
+	const Schema = { Union: (left: string, right: string) => [left, right] };
+	const local = { left: "left", right: 1, _tag: "Left" };
+	return [
+		catchAll("local"),
+		Either.left("local"),
+		Either.right(1),
+		Literal("local"),
+		Schema.Union("left", "right"),
+		local.left,
+		local.right,
+		local._tag === "Left",
+	];
+	// COLLISION BLOCK END
+}
+
+export const actualUnion = ImportedUnion(ImportedString, ImportedNumber);
+export const actualLiteral = ImportedLiteral("ready", "running");
+export const namespacedUnion = Schema.Union(Schema.String, Schema.Number);
+export const actualCatch = Fx["catchAll"](Fx.fail("problem"), () => Fx.succeed(1));
+export const aliasedCatch = importedCatchAll(Fx.fail("problem"), () => Fx.succeed(1));
+
+export function actualEither(example: EE.Either<number, string>) {
+	const constructed = [EE.left("problem"), EE.right(1)];
+	return [constructed, example._tag === "Left" ? example.left : example.right];
+}
+
+export type LeftVariant = EE.Left<string, number>;
+export type RightVariant = EE.Right<string, number>;
+export type SchemaOnly = SchemaTypes.Schema<string>;
+
+export function nullLiteralWithShadowedNamespace(Schema: { Null: string }) {
+	return [Schema.Null, ImportedLiteral(null)];
+}
+
+export declare const mixed: EE.Left<string, never> & { right: number };
+export const localIntersectionProperty = mixed.right;
+
+export type UnsupportedEitherImport = import("effect/Either").Either<number, string>;
+export const unsupportedPartialHandler = importedCatchSome(
+	Fx.fail("problem"),
+	(error) => error === "recover" ? EO.some(Fx.succeed(1)) : EO.none(),
+);

@@ -1,5 +1,4 @@
 import {
-	Cause,
 	Context,
 	Data,
 	type Effect,
@@ -9,6 +8,7 @@ import {
 	type Stream,
 } from "effect";
 import type { OpenCodeConnectionStatus } from "../../../contracts/ws-rpc.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { OpenCodeConnectionError } from "../../../errors.js";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import type { ConnectionHealth } from "../../../types.js";
@@ -52,7 +52,7 @@ export const isOpenCodeNotRunningError = (error: unknown): boolean => {
 	const cause = error instanceof OpenCodeConnectionError ? error.cause : error;
 	const failure = Runtime.isFiberFailure(cause)
 		? Option.getOrUndefined(
-				Cause.failureOption(cause[Runtime.FiberFailureCauseId]),
+				Failure.firstFailure(cause[Runtime.FiberFailureCauseId]),
 			)
 		: cause;
 	return (

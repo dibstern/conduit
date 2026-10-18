@@ -44,3 +44,6 @@ media/_test_output/
 
 # pnpm content-addressable store created by local installs
 /.pnpm-store/
+
+# Privileged Linux service E2E evidence, one directory per run.
+/test/e2e/linux-service/artifacts/

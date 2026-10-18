@@ -3,12 +3,13 @@
 // The feed re-sends the whole status on every change, so each part acts only
 // when its own value moves; that keeps a dismissed banner dismissed.
 
-import { Cause, Stream } from "effect";
+import { Stream } from "effect";
 import { BUILD_ID } from "../../build-id.js";
 import type {
 	GetStatusResponse,
 	ServerStatus,
 } from "../../contracts/ws-rpc.js";
+import * as Failure from "../../effect/failure-classification.js";
 import { WS_PROTOCOL_VERSION } from "../../shared-types.js";
 import { failureLine, toastFailure } from "../transport/rpc-errors.js";
 import {
@@ -153,7 +154,7 @@ export const serverStatusFeed = (
 		});
 	}).pipe(
 		Stream.catchAllCause((cause) => {
-			if (!Cause.pretty(cause).includes("Unknown request tag"))
+			if (!Failure.renderCause(cause).includes("Unknown request tag"))
 				return Stream.failCause(cause);
 			showStaleDaemonBanner();
 			return Stream.never;
