@@ -1,4 +1,4 @@
-import { expect } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
@@ -6,6 +6,32 @@ import { requireRpcControl, setSessionRowStatus } from "./shared.js";
 
 const sheetSelector =
 	'[data-testid="session-bar-island-menu"], [data-testid="session-action-sheet"]';
+
+/** Holds a touch on a session-list row until its phone sheet opens. */
+export async function longPressSessionRow(
+	page: Page,
+	sessionId: string,
+): Promise<void> {
+	const row = page.locator(
+		`#session-list .session-item[data-session-id="${sessionId}"]`,
+	);
+	const box = await row.boundingBox();
+	if (!box) throw new Error("Session row is not visible");
+	const cdp = await page.context().newCDPSession(page);
+	try {
+		await cdp.send("Input.dispatchTouchEvent", {
+			type: "touchStart",
+			touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }],
+		});
+		await expect(page.locator(sheetSelector)).toBeVisible();
+		await cdp.send("Input.dispatchTouchEvent", {
+			type: "touchEnd",
+			touchPoints: [],
+		});
+	} finally {
+		await cdp.detach();
+	}
+}
 
 export const sessionSheetsHandlers: StepHandler[] = [
 	{
@@ -120,6 +146,18 @@ export const sessionSheetsHandlers: StepHandler[] = [
 			} satisfies Partial<SessionInfo>;
 			setSessionRowStatus(world.page, sessionId, "idle", fields);
 			requireRpcControl(world.page).setStubs({
+				GetSessionAutoSettleOutlook: () => {
+					if (state === "auto_off") return { kind: "off" as const };
+					if (state === "settled") return { kind: "settled" as const };
+					if (state === "pinned" || state === "unread")
+						return { kind: "paused" as const, reason: state };
+					if (state === "snoozed" || state === "forever")
+						return { kind: "paused" as const, reason: "snoozed" as const };
+					return {
+						kind: "scheduled" as const,
+						at: PINNED_CLOCK_MS + 2 * 86_400_000,
+					};
+				},
 				SetSessionAutoSettle: ({ disabled }) => {
 					setSessionRowStatus(world.page, sessionId, "idle", {
 						autoSettleDisabled: disabled,
@@ -136,27 +174,8 @@ export const sessionSheetsHandlers: StepHandler[] = [
 			if (match[1] === "list") {
 				const sessionId = new URL(world.page.url()).pathname.split("/")[2];
 				await world.page.getByTestId("session-bar-back").click();
-				const row = world.page.locator(
-					`#session-list .session-item[data-session-id="${sessionId}"]`,
-				);
-				const box = await row.boundingBox();
-				if (!box) throw new Error("Session row is not visible");
-				const cdp = await world.page.context().newCDPSession(world.page);
-				try {
-					await cdp.send("Input.dispatchTouchEvent", {
-						type: "touchStart",
-						touchPoints: [
-							{ x: box.x + box.width / 2, y: box.y + box.height / 2 },
-						],
-					});
-					await expect(world.page.locator(sheetSelector)).toBeVisible();
-					await cdp.send("Input.dispatchTouchEvent", {
-						type: "touchEnd",
-						touchPoints: [],
-					});
-				} finally {
-					await cdp.detach();
-				}
+				if (!sessionId) throw new Error("No session is open");
+				await longPressSessionRow(world.page, sessionId);
 			} else {
 				await world.page
 					.getByTestId(

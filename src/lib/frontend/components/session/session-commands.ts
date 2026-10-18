@@ -183,10 +183,15 @@ async function autoSettle(session: SessionInfo, disabled: boolean) {
 	const input = rpcInput(session);
 	if (!input) return;
 	try {
-		await rpc("SetSessionAutoSettle", { ...input, disabled });
-		await refreshIfForeign(session);
+		const outlook = await rpc("SetSessionAutoSettle", { ...input, disabled });
+		// The switch settles from the write reply, without waiting for the list.
+		void refreshIfForeign(session).catch(
+			toastFailure("Couldn't change auto-settle"),
+		);
+		return outlook;
 	} catch (error) {
 		toastFailure("Couldn't change auto-settle")(error);
+		return undefined;
 	}
 }
 

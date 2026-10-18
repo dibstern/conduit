@@ -2,8 +2,21 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import { showToast } from "../../stores/ui.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
+import { connectedSocket, replyRpc } from "../../stories/sockets.js";
 import type { SessionInfo } from "../../types.js";
 import SessionContextMenuHarness from "./__fixtures__/SessionContextMenuHarness.svelte";
+
+const sheetNow = Date.UTC(2026, 9, 16, 12);
+
+async function phoneMenu() {
+	const menu = await within(document.body).findByTestId("session-action-sheet");
+	await waitFor(() =>
+		expect(
+			menu.querySelector("[data-switch-status]"),
+		).not.toBeEmptyDOMElement(),
+	);
+	return menu;
+}
 
 const meta = {
 	title: "Session/SessionContextMenu",
@@ -14,12 +27,38 @@ const meta = {
 		layout: "fullscreen",
 		docs: { story: { inline: false, height: "340px" } },
 	},
-	args: { session: mockSession },
+	args: { session: mockSession, now: sheetNow },
+	beforeEach: ({ args }) => {
+		const restoreSocket = connectedSocket();
+		const restoreOutlook = replyRpc("GetSessionAutoSettleOutlook", () => {
+			const session = args["session"] as SessionInfo;
+			if (session.autoSettleDisabled) return { kind: "off" };
+			if (session.pinnedAt != null) return { kind: "paused", reason: "pinned" };
+			if (session.settledAt != null) return { kind: "settled" };
+			if (session.snoozedAt != null)
+				return { kind: "paused", reason: "snoozed" };
+			if (session.unread) return { kind: "paused", reason: "unread" };
+			return { kind: "scheduled", at: sheetNow + 2 * 86_400_000 };
+		});
+		const guardedFetch = globalThis.fetch;
+		globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) =>
+			String(input instanceof Request ? input.url : input).endsWith(
+				"/api/status",
+			)
+				? Promise.resolve(Response.json({ status: "ready" }))
+				: guardedFetch(input, init);
+		return () => {
+			restoreOutlook();
+			restoreSocket();
+			globalThis.fetch = guardedFetch;
+		};
+	},
 	play: async () => {
 		const menu = await within(document.body).findByRole("menu", {
 			name: "Session actions",
 		});
 		await expect(within(menu).getByTestId("session-ctx-rename")).toBeVisible();
+		if (menu.querySelector("[data-switch-status]")) await phoneMenu();
 	},
 } satisfies Meta<typeof SessionContextMenuHarness>;
 
@@ -64,7 +103,6 @@ export const PhoneSheet: Story = {
 	parameters: { viewport: { defaultViewport: "mobile1" } },
 };
 
-const sheetNow = Date.UTC(2026, 9, 16, 12);
 function phoneSheet(state: Partial<SessionInfo> = {}): Story {
 	return {
 		args: {
@@ -77,9 +115,7 @@ function phoneSheet(state: Partial<SessionInfo> = {}): Story {
 		},
 		parameters: { viewport: { defaultViewport: "mobile1" } },
 		play: async () => {
-			const menu = await within(document.body).findByTestId(
-				"session-action-sheet",
-			);
+			const menu = await phoneMenu();
 			await expect(
 				within(menu).getByTestId("session-sheet-header"),
 			).toBeVisible();
@@ -117,9 +153,7 @@ export const PhoneUnknownBranch: Story = {
 	...PhoneDefault,
 	args: { ...PhoneDefault.args, branch: "" },
 	play: async () => {
-		const menu = await within(document.body).findByTestId(
-			"session-action-sheet",
-		);
+		const menu = await phoneMenu();
 		await expect(
 			within(menu).getByTestId("session-sheet-header"),
 		).toHaveTextContent(mockSession.title);
@@ -133,9 +167,7 @@ export const PhoneUnknownBranchLight: Story = {
 export const PhoneCloseReturnsFocus: Story = {
 	...PhoneDefault,
 	play: async () => {
-		const menu = await within(document.body).findByTestId(
-			"session-action-sheet",
-		);
+		const menu = await phoneMenu();
 		await userEvent.click(within(menu).getByTestId("session-sheet-close"));
 		await waitFor(() =>
 			expect(
@@ -191,9 +223,7 @@ export const PhoneWithFooter: Story = {
 	...PhoneDefault,
 	args: { ...PhoneDefault.args, selectable: false, withFooter: true },
 	play: async () => {
-		const menu = await within(document.body).findByTestId(
-			"session-action-sheet",
-		);
+		const menu = await phoneMenu();
 		await expect(within(menu).getByTestId("session-title-share")).toBeVisible();
 		await expect(
 			within(menu).getByTestId("session-title-settings"),
@@ -214,6 +244,7 @@ export const PhoneDebugFooter: Story = {
 	...PhoneWithFooter,
 	args: { ...PhoneWithFooter.args, debug: true },
 	play: async () => {
+		await phoneMenu();
 		const debug = await within(document.body).findByTestId(
 			"session-title-debug",
 		);
@@ -228,9 +259,7 @@ export const PhoneDebugFooterLight: Story = {
 export const PhoneDisabledReason: Story = {
 	...PhonePinned,
 	play: async () => {
-		const menu = await within(document.body).findByTestId(
-			"session-action-sheet",
-		);
+		const menu = await phoneMenu();
 		const snooze = within(menu).getByTestId("session-ctx-snooze");
 		await expect(snooze).toHaveAttribute("aria-disabled", "true");
 		await userEvent.click(snooze);
@@ -260,9 +289,7 @@ export const PhoneNotifications: Story = {
 		],
 	},
 	play: async () => {
-		const menu = await within(document.body).findByTestId(
-			"session-action-sheet",
-		);
+		const menu = await phoneMenu();
 		await expect(
 			within(menu).getByRole("menuitem", { name: "Undo" }),
 		).toBeVisible();

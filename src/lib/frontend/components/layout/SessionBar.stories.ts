@@ -38,6 +38,7 @@ import {
 } from "../../stores/terminal.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
+import { connectedSocket, replyRpc } from "../../stories/sockets.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import type { rpc } from "../../transport/ws-rpc-client.js";
 import type {
@@ -49,6 +50,30 @@ import { sideThreadsPanel } from "../session/side-threads.svelte.js";
 import SessionBarPhoneFrame from "./__fixtures__/SessionBarPhoneFrame.svelte";
 
 let sequence = 0;
+
+// Only stories that open a session sheet answer its auto-settle read: a
+// connected socket also turns the bar's connection dot green.
+const answerAutoSettle = () => {
+	const restoreSocket = connectedSocket();
+	const restoreOutlook = replyRpc("GetSessionAutoSettleOutlook", () => ({
+		kind: "paused",
+		reason: "awaiting-activity",
+	}));
+	return () => {
+		restoreOutlook();
+		restoreSocket();
+	};
+};
+
+async function sessionSheet(testId: string) {
+	const sheet = await within(document.body).findByTestId(testId);
+	await waitFor(() =>
+		expect(sheet.querySelector("[data-switch-status]")).toHaveTextContent(
+			"On · waits for new activity",
+		),
+	);
+	return sheet;
+}
 
 type Row = Pick<SessionInfo, "id" | "title"> & Partial<SessionInfo>;
 
@@ -532,12 +557,11 @@ export const GoalDetailsEmptyLight: Story = {
 
 export const ViewsSheetOpen: Story = {
 	tags: ["viewport-capture"],
+	beforeEach: answerAutoSettle,
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByTestId("session-bar-island-overflow"));
-		const sheet = await within(document.body).findByTestId(
-			"session-bar-island-menu",
-		);
+		const sheet = await sessionSheet("session-bar-island-menu");
 		await expect(sheet).toBeVisible();
 		// Accessible names, in order: the shortcut hints are aria-hidden.
 		const items = ["Chat", "Terminal", "Diff", "Files"].map((name) =>
@@ -597,7 +621,7 @@ export const WithViewBadge: Story = {
 
 export const OpeningTerminalClearsBadge: Story = {
 	tags: ["viewport-capture"],
-	beforeEach: emitOutputFromTwoTerminals,
+	beforeEach: [answerAutoSettle, emitOutputFromTwoTerminals],
 	play: async ({ canvasElement }) => {
 		const button = within(canvasElement).getByTestId(
 			"session-bar-island-overflow",
@@ -607,9 +631,7 @@ export const OpeningTerminalClearsBadge: Story = {
 		await tick();
 		await expect(button).not.toHaveTextContent("2");
 		await userEvent.click(button);
-		const sheet = await within(document.body).findByTestId(
-			"session-bar-island-menu",
-		);
+		const sheet = await sessionSheet("session-bar-island-menu");
 		await expect(
 			within(sheet).getByTestId("overflow-view-terminal"),
 		).toHaveAttribute("aria-checked", "true");
@@ -795,18 +817,19 @@ export const OverflowMenuOpen: Story = {
 	args: { island: true },
 	// The menu portals to <body>, so the capture has to frame the page.
 	tags: ["viewport-capture"],
-	beforeEach: () => {
-		sessionViewState.compact = true;
-		sessionViewState.atBottom = true;
-		sessionViewState.barOpen = false;
-	},
+	beforeEach: [
+		answerAutoSettle,
+		() => {
+			sessionViewState.compact = true;
+			sessionViewState.atBottom = true;
+			sessionViewState.barOpen = false;
+		},
+	],
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByTestId("session-bar-island-overflow"));
 
-		const menu = await within(document.body).findByTestId(
-			"session-bar-island-menu",
-		);
+		const menu = await sessionSheet("session-bar-island-menu");
 		for (const name of ["Chat", "Terminal", "Diff", "Files"]) {
 			await expect(
 				within(menu).getByRole("menuitemradio", { name }),
@@ -827,15 +850,16 @@ export const OverflowMenuOpen: Story = {
 
 export const TitleChevronSheet: Story = {
 	tags: ["viewport-capture"],
-	beforeEach: () => {
-		sessionViewState.compact = true;
-	},
+	beforeEach: [
+		answerAutoSettle,
+		() => {
+			sessionViewState.compact = true;
+		},
+	],
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByTestId("session-bar-title-menu"));
-		const menu = await within(document.body).findByTestId(
-			"session-action-sheet",
-		);
+		const menu = await sessionSheet("session-action-sheet");
 		await expect(menu).toHaveClass(/bottom-0/);
 		await expect(within(menu).getByTestId("session-ctx-settle")).toBeVisible();
 		await expect(within(menu).getByTestId("session-title-share")).toBeVisible();
@@ -846,19 +870,20 @@ export const OverflowMenuDebug: Story = {
 	...OverflowMenuOpen,
 	// The indexer reads tags statically, so a spread does not carry them.
 	tags: ["viewport-capture"],
-	beforeEach: () => {
-		sessionViewState.compact = true;
-		sessionViewState.atBottom = true;
-		sessionViewState.barOpen = false;
-		featureFlags.debug = true;
-	},
+	beforeEach: [
+		answerAutoSettle,
+		() => {
+			sessionViewState.compact = true;
+			sessionViewState.atBottom = true;
+			sessionViewState.barOpen = false;
+			featureFlags.debug = true;
+		},
+	],
 	play: async ({ canvasElement }) => {
 		await userEvent.click(
 			within(canvasElement).getByTestId("session-bar-island-overflow"),
 		);
-		const menu = await within(document.body).findByTestId(
-			"session-bar-island-menu",
-		);
+		const menu = await sessionSheet("session-bar-island-menu");
 		await expect(
 			within(menu).getByTestId("overflow-debug"),
 		).toHaveAccessibleName("Debug panel");
