@@ -1,8 +1,8 @@
 /*
  * Failure modes: cleanup loses a branch or prevents the next turn; a policy
- * removes unmerged work, local files, a shared checkout or a viewed session;
+ * removes unsettled work, local files, a shared checkout or a viewed session;
  * deleted ownership disappears or deletion never requests cleanup; deferred
- * removal becomes a permanent Keep; inactivity reads the wrong clock; defaults or
+ * removal becomes a permanent Keep; settled age reads the wrong clock; defaults or
  * settings disappear across restart; automatic requests race the manual result.
  * Exercise the daemon RPCs, real owned checkouts and the next provider turn.
  */
@@ -18,6 +18,7 @@ import {
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { WorktreeCleanup } from "../../../src/lib/contracts/worktree.js";
 import {
 	CleanUpWorktreesNow,
 	ClosePty,
@@ -68,21 +69,12 @@ function commit(directory: string, message: string) {
 	);
 }
 
-type CleanupSetting = {
-	onSettle: "off" | "merged" | "any";
-	onDelete: boolean;
-	afterInactiveDays: number | null;
-	whenMerged: boolean;
-	noCommitsBeyondDefault: boolean;
-	keepWhen: "any-local-files" | "uncommitted-changes" | "tracked-changes";
-};
+type CleanupSetting = WorktreeCleanup;
 
 const defaults: CleanupSetting = {
-	onSettle: "merged",
+	onSettle: "nothing-missing",
 	onDelete: false,
-	afterInactiveDays: null,
-	whenMerged: false,
-	noCommitsBeyondDefault: false,
+	settledAfterDays: null,
 	keepWhen: "uncommitted-changes",
 };
 const timestamp = new Date().toISOString().replaceAll(/[:.]/g, "-");
@@ -98,12 +90,18 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 	>();
 
 	async function start(
-		worktreeCleanup: Partial<CleanupSetting> | null = { onSettle: "off" },
+		worktreeCleanup: Partial<CleanupSetting> | null = { onSettle: "keep" },
+		legacy?: {
+			version: 1 | undefined;
+			rules: Record<string, unknown> | undefined;
+		},
 	) {
 		for (const key of gitOverrides) vi.stubEnv(key, undefined);
 		evidence = { sweeps: [] };
 		owned.clear();
-		const fixture = ProcessHarness.create();
+		const fixture = ProcessHarness.create({
+			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
+		});
 		harness = fixture;
 		git(fixture.projectDir, "init", "-b", "main");
 		writeFileSync(join(fixture.projectDir, "base.txt"), "committed base\n");
@@ -116,6 +114,11 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		writeFileSync(
 			join(fixture.configDir, "daemon.json"),
 			JSON.stringify({
+				...(legacy
+					? legacy.version === undefined
+						? {}
+						: { configVersion: legacy.version }
+					: { configVersion: 2 }),
 				pid: 0,
 				port: 0,
 				pinHash: null,
@@ -124,7 +127,24 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 				keepAwake: false,
 				autoSettleAfterDays: null,
 				projects: [],
-				...(worktreeCleanup === null ? {} : { worktreeCleanup }),
+				instances: [
+					{
+						id: "claude",
+						name: "Test Claude",
+						driver: "claude",
+						port: 0,
+						managed: false,
+						configDir: join(fixture.root, "claude"),
+					},
+				],
+				accountDefaults: { claude: "claude" },
+				...(legacy
+					? legacy.rules === undefined
+						? {}
+						: { worktreeCleanup: legacy.rules }
+					: worktreeCleanup === null
+						? {}
+						: { worktreeCleanup }),
 			}),
 		);
 		await fixture.restart({ startupTimeoutMs: 120_000 });
@@ -275,14 +295,14 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		commit(session.path, "Feature work");
 		const head = git(session.path, "rev-parse", "HEAD");
 		await settle(session.id);
-		await enable(session, { onSettle: "merged" });
+		await enable(session, { onSettle: "nothing-missing" });
 		git(fixture.projectDir, "merge", "--ff-only", session.branch);
 		const result = await sweep("settled and merged", "process-test");
 		expect(result.removed).toContainEqual({
 			projectSlug: "process-test",
 			sessionId: session.id,
 			path: session.path,
-			reason: expect.stringMatching(/settled.*merged/i),
+			reason: expect.stringMatching(/nothing.*missing/i),
 		});
 		expect(existsSync(session.path)).toBe(false);
 		expect(
@@ -321,14 +341,14 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		};
 	}, 300_000);
 
-	it("keeps settled unmerged work under merged and removes it under any", async () => {
+	it("keeps settled unmerged work under nothing-missing and removes it right away", async () => {
 		const { fixture, create, settle, enable, sweep } = await start();
 		const session = await create("unmerged policies");
 		writeFileSync(join(session.path, "base.txt"), "unmerged commit\n");
 		commit(session.path, "Unmerged work");
 		const head = git(session.path, "rev-parse", "HEAD");
 		await settle(session.id);
-		await enable(session, { onSettle: "merged" });
+		await enable(session, { onSettle: "nothing-missing" });
 		const kept = await sweep("unmerged policy");
 		expect(kept.kept).toContainEqual({
 			projectSlug: "process-test",
@@ -337,8 +357,8 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			reason: expect.stringMatching(/merged|rule/i),
 		});
 		expect(existsSync(session.path)).toBe(true);
-		await enable(session, { onSettle: "any" });
-		const removed = await sweep("any policy");
+		await enable(session, { onSettle: "keep", settledAfterDays: 0 });
+		const removed = await sweep("right away");
 		expect(removed.removed).toContainEqual({
 			projectSlug: "process-test",
 			sessionId: session.id,
@@ -351,12 +371,109 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		).toBe(head);
 	}, 300_000);
 
+	it.each([
+		"origin-default",
+		"zero-commit",
+	] as const)("removes settled %s work when nothing is missing", async (kind) => {
+		const { fixture, create, settle, enable, sweep } = await start();
+		const session = await create(kind);
+		if (kind === "origin-default") {
+			writeFileSync(join(session.path, "base.txt"), "remote feature\n");
+			commit(session.path, "Remote feature");
+			git(
+				fixture.projectDir,
+				"update-ref",
+				"refs/remotes/origin/trunk",
+				git(session.path, "rev-parse", "HEAD"),
+			);
+			git(
+				fixture.projectDir,
+				"symbolic-ref",
+				"refs/remotes/origin/HEAD",
+				"refs/remotes/origin/trunk",
+			);
+			expect(git(fixture.projectDir, "rev-parse", "main")).not.toBe(
+				git(session.path, "rev-parse", "HEAD"),
+			);
+		}
+		const head = git(session.path, "rev-parse", "HEAD");
+		await settle(session.id);
+		await enable(session, { onSettle: "nothing-missing" });
+		const result = await sweep(kind);
+		expect(result.removed).toContainEqual({
+			projectSlug: "process-test",
+			sessionId: session.id,
+			path: session.path,
+			reason: expect.stringMatching(/nothing.*missing/i),
+		});
+		expect(existsSync(session.path)).toBe(false);
+		expect(
+			git(fixture.projectDir, "rev-parse", `refs/heads/${session.branch}`),
+		).toBe(head);
+	}, 300_000);
+
+	it.each([
+		"dirty-zero-commit",
+		"squash-merged",
+		"untracked-only",
+	] as const)("keeps settled %s work under nothing-missing even with tracked-changes", async (kind) => {
+		const { fixture, create, settle, enable, sweep } = await start();
+		const session = await create(kind);
+		if (kind === "squash-merged") {
+			writeFileSync(join(session.path, "base.txt"), "squashed feature\n");
+			commit(session.path, "Feature before squash");
+			git(fixture.projectDir, "merge", "--squash", session.branch);
+			commit(fixture.projectDir, "Squashed feature");
+		} else if (kind === "untracked-only") {
+			writeFileSync(join(session.path, "untracked.txt"), "untracked work\n");
+		}
+		await settle(session.id);
+		await enable(session, {
+			onSettle: "nothing-missing",
+			keepWhen: "tracked-changes",
+		});
+		if (kind === "dirty-zero-commit")
+			writeFileSync(join(session.path, "base.txt"), "uncommitted work\n");
+		const result = await sweep(kind);
+		expect(result.kept).toContainEqual({
+			projectSlug: "process-test",
+			sessionId: session.id,
+			path: session.path,
+			reason: expect.stringMatching(
+				kind === "squash-merged" ? /rule|missing|ancestor/i : /uncommitted/i,
+			),
+		});
+		expect(existsSync(session.path)).toBe(true);
+		if (kind === "untracked-only")
+			expect(readFileSync(join(session.path, "untracked.txt"), "utf8")).toBe(
+				"untracked work\n",
+			);
+	}, 300_000);
+
+	it("nothing-missing respects the stricter any-local-files level", async () => {
+		const { create, settle, enable, sweep } = await start();
+		const session = await create("ignored local work");
+		await settle(session.id);
+		writeFileSync(join(session.path, "ignored.txt"), "ignored local work\n");
+		await enable(session, {
+			onSettle: "nothing-missing",
+			keepWhen: "any-local-files",
+		});
+		const result = await sweep("nothing-missing with ignored local files");
+		expect(result.kept.some(({ sessionId }) => sessionId === session.id)).toBe(
+			true,
+		);
+		expect(readFileSync(join(session.path, "ignored.txt"), "utf8")).toBe(
+			"ignored local work\n",
+		);
+	}, 300_000);
+
 	it("keeps uncommitted files under the default keepWhen and reports the count", async () => {
 		const { create, settle, enable, sweep } = await start();
 		const session = await create("uncommitted files");
 		await settle(session.id);
 		writeFileSync(join(session.path, "untracked.txt"), "local work\n");
-		await enable(session, { onSettle: "any" });
+		await enable(session, { onSettle: "keep", settledAfterDays: 0 });
 		const result = await sweep("local edits");
 		expect(result.kept).toContainEqual({
 			projectSlug: "process-test",
@@ -380,7 +497,11 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			await settle(session.id);
 			mkdirSync(join(session.path, "node_modules"), { recursive: true });
 			writeFileSync(join(session.path, file), "ignored local data\n");
-			await enable(session, { onSettle: "any", keepWhen });
+			await enable(session, {
+				onSettle: "keep",
+				settledAfterDays: 0,
+				keepWhen,
+			});
 			const result = await sweep("ignored files");
 			const entry = {
 				projectSlug: "process-test",
@@ -406,7 +527,11 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		await settle(session.id);
 		writeFileSync(join(session.path, "untracked.txt"), "disposable\n");
 		writeFileSync(join(session.path, "ignored.txt"), "ignored disposable\n");
-		await enable(session, { onSettle: "any", keepWhen: "tracked-changes" });
+		await enable(session, {
+			onSettle: "keep",
+			settledAfterDays: 0,
+			keepWhen: "tracked-changes",
+		});
 		const result = await sweep("tracked-only policy");
 		expect(result.removed).toContainEqual({
 			projectSlug: "process-test",
@@ -436,7 +561,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const { create, settle, enable, sweep } = await start();
 		const session = await create("hidden tracked changes");
 		await settle(session.id);
-		await enable(session, { onSettle: "any", keepWhen });
+		await enable(session, { onSettle: "keep", settledAfterDays: 0, keepWhen });
 		git(session.path, "update-index", `--${flag}`, "base.txt");
 		writeFileSync(
 			join(session.path, "base.txt"),
@@ -479,7 +604,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			git(source, "worktree", "add", "-b", "nested", nested);
 		const head = git(nested, "rev-parse", "HEAD");
 		await settle(session.id);
-		await enable(session, { onSettle: "any", keepWhen });
+		await enable(session, { onSettle: "keep", settledAfterDays: 0, keepWhen });
 		const result = await sweep("nested Git data");
 		expect(result.kept).toContainEqual({
 			projectSlug: "process-test",
@@ -516,7 +641,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			startupTimeoutMs: 120_000,
 			skipBrowserProbe: true,
 		});
-		await enable(session, { onSettle: "any" });
+		await enable(session, { onSettle: "keep", settledAfterDays: 0 });
 		const kept = await sweep("hosted terminal survives restart");
 		expect(kept.kept).toContainEqual({
 			projectSlug: "process-test",
@@ -544,7 +669,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const { fixture, create, settle, enable, sweep } = await start();
 		const session = await create("admitted handoff");
 		await settle(session.id);
-		await enable(session, { onSettle: "any" });
+		await enable(session, { onSettle: "keep", settledAfterDays: 0 });
 		const db = new Database(
 			join(fixture.configDir, "projects", "process-test", "events.db"),
 		);
@@ -613,7 +738,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 				},
 			});
 			await settle(session.id);
-			await enable(session, { onSettle: "any" });
+			await enable(session, { onSettle: "keep", settledAfterDays: 0 });
 			const kept = await sweep("another project's terminal");
 			expect(kept.kept).toContainEqual({
 				projectSlug: "process-test",
@@ -645,7 +770,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			}),
 		);
 		await settle(owner.id);
-		await enable(owner, { onSettle: "any" });
+		await enable(owner, { onSettle: "keep", settledAfterDays: 0 });
 		const result = await sweep("shared checkout");
 		expect(result.kept).toContainEqual({
 			projectSlug: "process-test",
@@ -712,7 +837,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			workspace: row?.workspace ?? null,
 		};
 		await settle(owner.id);
-		await enable(owner, { onSettle: "any" });
+		await enable(owner, { onSettle: "keep", settledAfterDays: 0 });
 		const result = await sweep("registered project checkout", "process-test");
 		expect(result.kept).toContainEqual({
 			projectSlug: "process-test",
@@ -725,41 +850,51 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		expect(existsSync(owner.path)).toBe(true);
 	}, 300_000);
 
-	it("uses persisted activity for afterInactiveDays and keeps recent activity", async () => {
-		const { fixture, create, enable, sweep } = await start();
-		const old = await create("inactive");
-		const recent = await create("recent");
-		await enable(old, { onSettle: "off", afterInactiveDays: 7 });
+	it("counts N days from persisted settled_at rather than activity and keeps unmerged branches", async () => {
+		const { fixture, create, settle, enable, sweep } = await start();
+		const old = await create("settled eight days ago");
+		const recent = await create("settled today");
+		for (const session of [old, recent]) {
+			writeFileSync(
+				join(session.path, "base.txt"),
+				`${session.id} unmerged work\n`,
+			);
+			commit(session.path, "Unmerged work");
+			await settle(session.id);
+		}
+		const oldHead = git(old.path, "rev-parse", "HEAD");
+		await enable(old, { onSettle: "keep", settledAfterDays: 7 });
 		const now = Date.now();
 		const db = new Database(fixture.projectStorePath());
 		try {
-			db.prepare("UPDATE sessions SET last_message_at = ? WHERE id = ?").run(
-				now - 8 * 86_400_000,
-				old.id,
-			);
-			db.prepare("UPDATE sessions SET last_message_at = ? WHERE id = ?").run(
-				now,
-				recent.id,
-			);
+			db.prepare(
+				"UPDATE sessions SET settled_at = ?, last_message_at = ? WHERE id = ?",
+			).run(now - 8 * 86_400_000, now, old.id);
+			db.prepare(
+				"UPDATE sessions SET settled_at = ?, last_message_at = ? WHERE id = ?",
+			).run(now, now - 30 * 86_400_000, recent.id);
 		} finally {
 			db.close();
 		}
-		evidence["seededActivity"] = { old: now - 8 * 86_400_000, recent: now };
-		const result = await sweep("persisted inactivity");
+		evidence["seededSettledAt"] = { old: now - 8 * 86_400_000, recent: now };
+		const result = await sweep("persisted settled age");
 		expect(result.removed).toContainEqual({
 			projectSlug: "process-test",
 			sessionId: old.id,
 			path: old.path,
-			reason: expect.stringMatching(/inactiv|activity/i),
+			reason: expect.stringMatching(/settled for the set time/i),
 		});
 		expect(result.kept).toContainEqual({
 			projectSlug: "process-test",
 			sessionId: recent.id,
 			path: recent.path,
-			reason: expect.stringMatching(/rule|inactiv|recent/i),
+			reason: expect.stringMatching(/rule|settled|recent/i),
 		});
 		expect(existsSync(old.path)).toBe(false);
 		expect(existsSync(recent.path)).toBe(true);
+		expect(
+			git(fixture.projectDir, "rev-parse", `refs/heads/${old.branch}`),
+		).toBe(oldHead);
 	}, 300_000);
 
 	it("retains deleted ownership and only removes a deleted session through onDelete", async () => {
@@ -775,7 +910,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			}),
 		);
 		expect(existsSync(session.path)).toBe(true);
-		await enable(session, { onSettle: "any", noCommitsBeyondDefault: true });
+		await enable(session, { onSettle: "nothing-missing", settledAfterDays: 0 });
 		const kept = await sweep("deleted without onDelete");
 		expect(kept.kept).toContainEqual({
 			projectSlug: "process-test",
@@ -783,7 +918,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			path: session.path,
 			reason: expect.stringMatching(/deleted|onDelete|rule/i),
 		});
-		await enable(session, { onSettle: "off", onDelete: true });
+		await enable(session, { onSettle: "keep", onDelete: true });
 		const removed = await sweep("deleted with onDelete");
 		expect(removed.removed).toContainEqual({
 			projectSlug: "process-test",
@@ -799,7 +934,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 
 	it("requests cleanup after deletion without a cleanup RPC", async () => {
 		const { fixture, socket, create, sessions } = await start({
-			onSettle: "off",
+			onSettle: "keep",
 			onDelete: true,
 		});
 		const session = await create("delete trigger");
@@ -833,7 +968,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 
 	it("retries requested deletion cleanup once a dirty checkout is clean", async () => {
 		const { fixture, socket, create, sweep } = await start({
-			onSettle: "off",
+			onSettle: "keep",
 			onDelete: true,
 		});
 		const session = await create("deferred removal");
@@ -864,42 +999,92 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		).toBe(head);
 	}, 300_000);
 
-	it("removes merged work while unsettled when whenMerged is enabled", async () => {
-		const { fixture, create, enable, sweep } = await start();
-		const session = await create("merged while unsettled");
-		writeFileSync(join(session.path, "base.txt"), "merged feature\n");
-		commit(session.path, "Merged feature");
-		await enable(session, { onSettle: "off", whenMerged: true });
-		git(fixture.projectDir, "merge", "--ff-only", session.branch);
-		const result = await sweep("merged unsettled");
-		expect(result.removed).toContainEqual({
-			projectSlug: "process-test",
-			sessionId: session.id,
-			path: session.path,
-			reason: expect.stringMatching(/merged/i),
-		});
-		expect(existsSync(session.path)).toBe(false);
-	}, 300_000);
-
-	it("removes a fresh branch only when noCommitsBeyondDefault is enabled", async () => {
-		const { fixture, create, enable, sweep } = await start();
-		const session = await create("ancestor of default");
+	it.each(
+		(
+			["any-local-files", "uncommitted-changes", "tracked-changes"] as const
+		).flatMap((keepWhen) =>
+			(["base.txt", "untracked.txt", "ignored.txt"] as const).map((file) => ({
+				keepWhen,
+				file,
+			})),
+		),
+	)("delete cleanup with $keepWhen handles $file", async ({
+		keepWhen,
+		file,
+	}) => {
+		const { fixture, socket, create, enable, sweep } = await start();
+		const session = await create("delete keep level");
 		const head = git(session.path, "rev-parse", "HEAD");
-		const kept = await sweep("no matching rule");
-		expect(kept).toEqual({ removed: [], kept: [], failed: [] });
-		expect(existsSync(session.path)).toBe(true);
-		await enable(session, { onSettle: "off", noCommitsBeyondDefault: true });
-		const removed = await sweep("default ancestor");
-		expect(removed.removed).toContainEqual({
+		await sendRpcRequest(
+			socket,
+			new DeleteSession({ sessionId: session.id, removeWorktrees: false }),
+		);
+		await enable(session, { onSettle: "keep", onDelete: true, keepWhen });
+		writeFileSync(join(session.path, file), "local work\n");
+		const keep =
+			file === "base.txt" ||
+			keepWhen === "any-local-files" ||
+			(file === "untracked.txt" && keepWhen === "uncommitted-changes");
+		const result = await sweep("delete keep level");
+		expect(keep ? result.kept : result.removed).toContainEqual({
 			projectSlug: "process-test",
 			sessionId: session.id,
 			path: session.path,
-			reason: expect.stringMatching(/commits.*default|ancestor/i),
+			reason: expect.stringMatching(
+				keep ? /uncommitted|ignored|local files/i : /deleted/i,
+			),
 		});
-		expect(existsSync(session.path)).toBe(false);
+		expect(existsSync(session.path)).toBe(keep);
+		if (keep)
+			expect(readFileSync(join(session.path, file), "utf8")).toBe(
+				"local work\n",
+			);
 		expect(
 			git(fixture.projectDir, "rev-parse", `refs/heads/${session.branch}`),
 		).toBe(head);
+	}, 300_000);
+
+	it("keeps unsettled merged and zero-commit work with both settle rules enabled", async () => {
+		const { fixture, create, enable, sweep } = await start();
+		const merged = await create("unsettled merged");
+		writeFileSync(join(merged.path, "base.txt"), "merged feature\n");
+		commit(merged.path, "Merged feature");
+		git(fixture.projectDir, "merge", "--ff-only", merged.branch);
+		const zero = await create("unsettled zero commits");
+		await enable(merged, { onSettle: "nothing-missing", settledAfterDays: 0 });
+		const result = await sweep("unsettled sessions");
+		for (const session of [merged, zero]) {
+			expect(result.kept).toContainEqual({
+				projectSlug: "process-test",
+				sessionId: session.id,
+				path: session.path,
+				reason: expect.stringMatching(/rule/i),
+			});
+			expect(existsSync(session.path)).toBe(true);
+		}
+	}, 300_000);
+
+	it("Never keeps settled unmerged work regardless of settled age", async () => {
+		const { fixture, create, settle, sweep } = await start({
+			onSettle: "nothing-missing",
+			settledAfterDays: null,
+		});
+		const session = await create("Never");
+		writeFileSync(join(session.path, "base.txt"), "unmerged work\n");
+		commit(session.path, "Unmerged work");
+		await settle(session.id);
+		const db = new Database(fixture.projectStorePath());
+		try {
+			db.prepare("UPDATE sessions SET settled_at = ? WHERE id = ?").run(
+				Date.now() - 3_000 * 86_400_000,
+				session.id,
+			);
+		} finally {
+			db.close();
+		}
+		const result = await sweep("Never after 3000 days");
+		expect(result.removed).toEqual([]);
+		expect(existsSync(session.path)).toBe(true);
 	}, 300_000);
 
 	it("keeps a checkout while the session has a viewer", async () => {
@@ -907,7 +1092,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const session = await create("viewed session");
 		await settle(session.id);
 		const browser = await fixture.connect(session.id);
-		await enable(session, { onSettle: "any" });
+		await enable(session, { onSettle: "keep", settledAfterDays: 0 });
 		const kept = await sweep("viewer guard");
 		expect(kept.kept).toContainEqual({
 			projectSlug: "process-test",
@@ -933,7 +1118,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const { create, settle, enable, sweep } = await start();
 		const session = await create("branch mismatch");
 		await settle(session.id);
-		await enable(session, { onSettle: "any" });
+		await enable(session, { onSettle: "keep", settledAfterDays: 0 });
 		git(session.path, "checkout", "-b", "fixture/replacement");
 		const result = await sweep("branch guard");
 		expect(result.kept).toContainEqual({
@@ -948,7 +1133,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 	it("requests cleanup after a manual settle without a cleanup RPC", async () => {
 		const { fixture, create, enable, settle, sessions } = await start();
 		const session = await create("settle trigger");
-		await enable(session, { onSettle: "any" });
+		await enable(session, { onSettle: "keep", settledAfterDays: 0 });
 		await settle(session.id);
 		const row = (await sessions()).sessions.find(({ id }) => id === session.id);
 		expect(row?.settledAt).toBeDefined();
@@ -970,7 +1155,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const { fixture, create, settle, set } = await start();
 		const session = await create("setting trigger");
 		await settle(session.id);
-		await set({ onSettle: "any" });
+		await set({ onSettle: "keep", settledAfterDays: 0 });
 		await vi.waitFor(() => expect(existsSync(session.path)).toBe(false), {
 			timeout: 15_000,
 		});
@@ -994,7 +1179,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			configPath,
 			JSON.stringify({
 				...config,
-				worktreeCleanup: { ...defaults, onSettle: "any" },
+				worktreeCleanup: { ...defaults, onSettle: "keep", settledAfterDays: 0 },
 			}),
 		);
 		await fixture.restart({ startupTimeoutMs: 120_000 });
@@ -1008,13 +1193,69 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 	}, 300_000);
 
 	it.each([
+		"disabled",
+		"too-young",
+		"unsettled",
+	] as const)("does not boot a cold project whose session is %s", async (kind) => {
+		const { fixture, create, settle, sweep } = await start();
+		const session = await create(`cold ${kind}`);
+		if (kind !== "unsettled") await settle(session.id);
+		await fixture.shutdown();
+		const configPath = join(fixture.configDir, "daemon.json");
+		const config = JSON.parse(readFileSync(configPath, "utf8")) as Record<
+			string,
+			unknown
+		>;
+		writeFileSync(
+			configPath,
+			JSON.stringify({
+				...config,
+				worktreeCleanup: {
+					...defaults,
+					onSettle: "keep",
+					settledAfterDays: kind === "disabled" ? null : 7,
+				},
+			}),
+		);
+		await fixture.restart({
+			startupTimeoutMs: 120_000,
+			skipBrowserProbe: true,
+		});
+		expect(await sweep(`cold ${kind}`)).toEqual({
+			removed: [],
+			kept: [],
+			failed: [],
+		});
+		expect(fixture.generations.at(-1)?.fakeSdkActive).toBe(false);
+		expect(existsSync(session.path)).toBe(true);
+		evidence["coldGeneration"] = fixture.generations.at(-1);
+		if (kind === "too-young") {
+			const db = new Database(fixture.projectStorePath());
+			try {
+				db.prepare("UPDATE sessions SET settled_at = ? WHERE id = ?").run(
+					Date.now() - 8 * 86_400_000,
+					session.id,
+				);
+			} finally {
+				db.close();
+			}
+			const result = await sweep("cold session now old enough");
+			expect(
+				result.removed.some(({ sessionId }) => sessionId === session.id),
+			).toBe(true);
+			expect(fixture.generations.at(-1)?.fakeSdkActive).toBe(true);
+			expect(existsSync(session.path)).toBe(false);
+		}
+	}, 300_000);
+
+	it.each([
 		"symlink",
 		"git-directory",
 	] as const)("keeps an owned path replaced with a %s", async (replacement) => {
 		const { create, settle, enable, sweep } = await start();
 		const session = await create("path guard");
 		await settle(session.id);
-		await enable(session, { onSettle: "any" });
+		await enable(session, { onSettle: "keep", settledAfterDays: 0 });
 		if (replacement === "symlink") {
 			const destination = `${session.path}-moved`;
 			renameSync(session.path, destination);
@@ -1039,11 +1280,9 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const { fixture, setting, set } = await start(null);
 		expect(await setting()).toEqual({ worktreeCleanup: defaults });
 		const saved = await set({
-			onSettle: "any",
+			onSettle: "keep",
 			onDelete: true,
-			afterInactiveDays: 42,
-			whenMerged: true,
-			noCommitsBeyondDefault: true,
+			settledAfterDays: 42,
 			keepWhen: "tracked-changes",
 		});
 		await fixture.shutdown();
@@ -1068,6 +1307,113 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			defaults,
 			saved,
 			partial: { ...defaults, onDelete: true },
+		};
+	}, 300_000);
+
+	it.each(
+		(
+			[
+				{ name: "missing cleanup", rules: undefined, expected: {} },
+				{ name: "empty cleanup", rules: {}, expected: {} },
+				{ name: "old merged", rules: { onSettle: "merged" }, expected: {} },
+				{
+					name: "old off",
+					rules: { onSettle: "off" },
+					expected: { onSettle: "keep" },
+				},
+				{
+					name: "old any",
+					rules: { onSettle: "any" },
+					expected: { settledAfterDays: 0 },
+				},
+				{
+					name: "idle only",
+					rules: { onSettle: "off", afterInactiveDays: 42 },
+					expected: { onSettle: "keep", settledAfterDays: 42 },
+				},
+				{
+					name: "idle with default settle",
+					rules: { afterInactiveDays: 3650 },
+					expected: { settledAfterDays: 3650 },
+				},
+				{
+					name: "merged switch",
+					rules: { onSettle: "off", whenMerged: true },
+					expected: {},
+				},
+				{
+					name: "zero-commit switch",
+					rules: { onSettle: "off", noCommitsBeyondDefault: true },
+					expected: {},
+				},
+				{
+					name: "only delete",
+					rules: { onDelete: true },
+					expected: { onDelete: true },
+				},
+				{
+					name: "all local files",
+					rules: { keepWhen: "any-local-files" },
+					expected: { keepWhen: "any-local-files" },
+				},
+				{
+					name: "all old fields",
+					rules: {
+						onSettle: "any",
+						onDelete: true,
+						afterInactiveDays: 42,
+						whenMerged: true,
+						noCommitsBeyondDefault: true,
+						keepWhen: "tracked-changes",
+					},
+					expected: {
+						settledAfterDays: 0,
+						onDelete: true,
+						keepWhen: "tracked-changes",
+					},
+				},
+				{
+					name: "version chooses old defaults",
+					rules: { onSettle: "off", settledAfterDays: 0 },
+					expected: { onSettle: "keep" },
+				},
+			] satisfies Array<{
+				name: string;
+				rules: Record<string, unknown> | undefined;
+				expected: Partial<CleanupSetting>;
+			}>
+		).flatMap((scenario) =>
+			([undefined, 1] as const).map((version) => ({
+				...scenario,
+				version,
+				versionName: version === undefined ? "legacy" : "version 1",
+			})),
+		),
+	)("migrates $versionName $name once across daemon restart", async ({
+		rules,
+		expected,
+		version,
+	}) => {
+		const { fixture, setting } = await start(null, { rules, version });
+		const migrated = { ...defaults, ...expected };
+		expect(await setting()).toEqual({ worktreeCleanup: migrated });
+		const configPath = join(fixture.configDir, "daemon.json");
+		await fixture.shutdown();
+		const persisted = readFileSync(configPath, "utf8");
+		const config = JSON.parse(persisted) as Record<string, unknown>;
+		expect(config["configVersion"]).toBe(2);
+		expect(config["worktreeCleanup"]).toEqual(migrated);
+		await fixture.restart({
+			startupTimeoutMs: 120_000,
+			skipBrowserProbe: true,
+		});
+		expect(await setting()).toEqual({ worktreeCleanup: migrated });
+		expect(readFileSync(configPath, "utf8")).toBe(persisted);
+		evidence["migration"] = {
+			version: version ?? "legacy",
+			rules,
+			migrated,
+			unchangedOnSecondStart: true,
 		};
 	}, 300_000);
 });

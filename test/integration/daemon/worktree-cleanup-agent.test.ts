@@ -47,11 +47,9 @@ function git(directory: string, ...args: string[]) {
 }
 
 const cleanup = {
-	onSettle: "any" as const,
+	onSettle: "keep" as const,
 	onDelete: false,
-	afterInactiveDays: null,
-	whenMerged: false,
-	noCommitsBeyondDefault: false,
+	settledAfterDays: 0,
 	keepWhen: "uncommitted-changes" as const,
 };
 const command =
@@ -113,8 +111,23 @@ describe("Worktree cleanup guards live agents through the built daemon", () => {
 			configPath,
 			JSON.stringify({
 				...existing,
+				instances: [
+					...(Array.isArray(existing["instances"])
+						? existing["instances"]
+						: []),
+					{
+						id: "claude",
+						name: "Test Claude",
+						driver: "claude",
+						port: 0,
+						managed: false,
+						configDir: join(fixture.root, "claude"),
+					},
+				],
+				accountDefaults: { claude: "claude" },
 				autoSettleAfterDays: null,
-				worktreeCleanup: { ...cleanup, onSettle: "off" },
+				configVersion: 2,
+				worktreeCleanup: { ...cleanup, settledAfterDays: null },
 			}),
 		);
 		writeFileSync(

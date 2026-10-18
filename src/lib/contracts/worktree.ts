@@ -1,18 +1,14 @@
 import { Schema } from "effect";
 
 export const WorktreeCleanupSchema = Schema.Struct({
-	onSettle: Schema.optionalWith(Schema.Literal("off", "merged", "any"), {
-		default: () => "merged" as const,
+	onSettle: Schema.optionalWith(Schema.Literal("keep", "nothing-missing"), {
+		default: () => "nothing-missing" as const,
 	}),
 	onDelete: Schema.optionalWith(Schema.Boolean, { default: () => false }),
-	afterInactiveDays: Schema.optionalWith(
-		Schema.NullOr(Schema.Number.pipe(Schema.int(), Schema.between(1, 3650))),
+	settledAfterDays: Schema.optionalWith(
+		Schema.NullOr(Schema.Number.pipe(Schema.int(), Schema.between(0, 3650))),
 		{ default: () => null },
 	),
-	whenMerged: Schema.optionalWith(Schema.Boolean, { default: () => false }),
-	noCommitsBeyondDefault: Schema.optionalWith(Schema.Boolean, {
-		default: () => false,
-	}),
 	keepWhen: Schema.optionalWith(
 		Schema.Literal("any-local-files", "uncommitted-changes", "tracked-changes"),
 		{ default: () => "uncommitted-changes" as const },
@@ -21,11 +17,9 @@ export const WorktreeCleanupSchema = Schema.Struct({
 export type WorktreeCleanup = typeof WorktreeCleanupSchema.Type;
 
 export const DEFAULT_WORKTREE_CLEANUP: WorktreeCleanup = {
-	onSettle: "merged",
+	onSettle: "nothing-missing",
 	onDelete: false,
-	afterInactiveDays: null,
-	whenMerged: false,
-	noCommitsBeyondDefault: false,
+	settledAfterDays: null,
 	keepWhen: "uncommitted-changes",
 };
 

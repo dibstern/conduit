@@ -18,6 +18,7 @@ import {
 	type WorktreeCleanupReport,
 } from "../../../contracts/worktree.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
+import { worktreeCleanupCandidateFilter } from "../../../session/worktree-cleanup-rules.js";
 import { cleanUpProjectWorktrees } from "../../../session/worktree-cleanup-sweep.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
@@ -26,10 +27,7 @@ import {
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
-import {
-	isWorktreeCleanupEnabled,
-	readColdWorktreeCleanupCandidates,
-} from "../Services/worktree-cleanup-reader.js";
+import { readColdWorktreeCleanupCandidates } from "../Services/worktree-cleanup-reader.js";
 import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js";
 
 export const WorktreeCleanupLive = (configDir: string) =>
@@ -69,13 +67,16 @@ export const WorktreeCleanupLive = (configDir: string) =>
 						kept: [],
 						failed: [],
 					};
-					if (!isWorktreeCleanupEnabled(yield* getSetting)) return report;
+					const now = yield* Clock.currentTimeMillis;
+					if (
+						worktreeCleanupCandidateFilter(yield* getSetting, now) === undefined
+					)
+						return report;
 					const projects = (yield* allProjects.pipe(
 						Effect.provideService(ProjectRegistryTag, registry),
 					)).filter(
 						(project) => slugs === undefined || slugs.has(project.slug),
 					);
-					const now = yield* Clock.currentTimeMillis;
 					for (const project of projects) {
 						yield* Effect.gen(function* () {
 							let relay = Option.getOrUndefined(

@@ -11,6 +11,165 @@ const heldCleanups = new WeakMap<Page, () => void>();
 
 export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 	{
+		name: "seed cleanup rules",
+		match:
+			/^worktree cleanup starts with settle (keep|nothing-missing), settled age (never|\d+) and delete (true|false)$/,
+		run: ({ world, match }) => {
+			requireRpcControl(world.page).setResponse("GetWorktreeCleanupSetting", {
+				worktreeCleanup: {
+					...DEFAULT_WORKTREE_CLEANUP,
+					onSettle: match[1],
+					settledAfterDays: match[2] === "never" ? null : Number(match[2]),
+					onDelete: match[3] === "true",
+				},
+			});
+		},
+	},
+	{
+		name: "assert the global cleanup rows",
+		match: /^worktree cleanup offers only the settle-driven rows$/,
+		run: async ({ world }) => {
+			const group = cleanupGroup(world.page);
+			await expect(group.locator("label > span:first-child")).toHaveText([
+				"When a session settles",
+				"Remove settled worktrees after",
+				"When a session is deleted",
+				"Keep worktrees with",
+			]);
+			for (const label of [
+				"Remove idle worktrees after",
+				"Remove once merged",
+				"Remove if its branch has no new commits",
+			]) {
+				await expect(group.getByText(label, { exact: true })).toHaveCount(0);
+			}
+		},
+	},
+	{
+		name: "assert the settle options",
+		match: /^the settle rule offers "([^"]+)" and "([^"]+)"$/,
+		run: async ({ world, match }) => {
+			await expect(
+				cleanupGroup(world.page)
+					.getByTestId("settings-cleanup-on-settle")
+					.locator("option"),
+			).toHaveText([match[1] ?? "", match[2] ?? ""]);
+		},
+	},
+	{
+		name: "assert cleanup rule help",
+		match: /^the (settle|settled age) rule explains "([^"]+)"$/,
+		run: async ({ world, match }) => {
+			const id = match[1] === "settle" ? "on-settle" : "settled-after";
+			await expect(
+				cleanupGroup(world.page).locator(`label[for="settings-cleanup-${id}"]`),
+			).toContainText(match[2] ?? "");
+		},
+	},
+	{
+		name: "assert settled age presets",
+		match: /^the settled age presets are (.+)$/,
+		run: async ({ world, match }) => {
+			const select = cleanupGroup(world.page).getByTestId(
+				"settings-cleanup-settled-after",
+			);
+			await expect(select.locator("option")).toHaveText(
+				(match[1] ?? "").split(", "),
+			);
+			// Frame the rule rows for the visual baseline that follows.
+			await select.scrollIntoViewIfNeeded();
+		},
+	},
+	{
+		name: "assert idle settling precedes cleanup",
+		match: /^Settle idle sessions after appears above Worktree cleanup$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByRole("combobox", {
+					name: "Settle idle sessions after",
+				}),
+			).toBeVisible();
+			expect(
+				await world.page
+					.getByTestId("settings-auto-settle-select")
+					.evaluate((element) => {
+						const cleanup = document.querySelector(
+							"#settings-worktree-cleanup",
+						);
+						return (
+							cleanup !== null &&
+							Boolean(
+								element.compareDocumentPosition(cleanup) &
+									Node.DOCUMENT_POSITION_FOLLOWING,
+							)
+						);
+					}),
+			).toBe(true);
+		},
+	},
+	{
+		name: "choose a settle-driven rule",
+		match: /^I set the (settle|settled age) rule to "([^"]+)"$/,
+		run: async ({ world, match }) => {
+			const id = match[1] === "settle" ? "on-settle" : "settled-after";
+			await cleanupGroup(world.page)
+				.getByTestId(`settings-cleanup-${id}`)
+				.selectOption({ label: match[2] ?? "" });
+		},
+	},
+	{
+		name: "assert saved settle action",
+		match:
+			/^the worktree cleanup settle rule is saved as (keep|nothing-missing)$/,
+		run: async ({ world, match }) => {
+			await requireRpcControl(world.page).waitForRequest(
+				({ tag, payload }) =>
+					tag === "SetWorktreeCleanupSetting" &&
+					(payload["worktreeCleanup"] as { onSettle?: unknown } | undefined)
+						?.onSettle === match[1],
+			);
+		},
+	},
+	{
+		name: "assert saved settled age",
+		match: /^the worktree cleanup settled age is saved as (never|\d+)$/,
+		run: async ({ world, match }) => {
+			await requireRpcControl(world.page).waitForRequest(
+				({ tag, payload }) =>
+					tag === "SetWorktreeCleanupSetting" &&
+					(
+						payload["worktreeCleanup"] as
+							| { settledAfterDays?: unknown }
+							| undefined
+					)?.settledAfterDays ===
+						(match[1] === "never" ? null : Number(match[1])),
+			);
+		},
+	},
+	{
+		name: "assert the settled age selection",
+		match: /^the settled age rule is set to "([^"]+)"$/,
+		run: async ({ world, match }) => {
+			await expect(
+				cleanupGroup(world.page)
+					.getByTestId("settings-cleanup-settled-after")
+					.locator("option:checked"),
+			).toHaveText(match[1] ?? "");
+		},
+	},
+	{
+		name: "assert cleanup rule summary",
+		match: /^the worktree cleanup summary reads "([^"]+)"$/,
+		run: async ({ world, match }) => {
+			await expect(
+				cleanupGroup(world.page)
+					.getByRole("button", { name: /^Worktree cleanup/ })
+					.locator("span")
+					.last(),
+			).toHaveText(match[1] ?? "");
+		},
+	},
+	{
 		name: "seed a cleanup report",
 		match:
 			/^cleaning up now removes that session's worktree because "([^"]+)", keeps (\S+) because "([^"]+)" and fails (\S+) because "([^"]+)"$/,

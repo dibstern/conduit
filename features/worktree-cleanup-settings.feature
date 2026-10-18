@@ -1,5 +1,74 @@
 Feature: Worktree cleanup says what a removal loses and reports what a cleanup did
 
+Scenario Outline: Global cleanup explains the settle-driven rules
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  When I open settings to the General section
+  And I expand Worktree cleanup
+  Then worktree cleanup offers only the settle-driven rows
+  And the settle rule offers "Remove if nothing is missing" and "Keep"
+  And the settle rule explains "Nothing is missing when every commit is already in the default branch and there are no uncommitted or untracked files. The branch is kept."
+  And the settled age rule explains "Counted from when the session settled, even if its commits aren't merged. The branch is kept."
+  And Settle idle sessions after appears above Worktree cleanup
+  And the worktree cleanup summary reads "When nothing is missing"
+  And the settled age presets are Never, Right away, 1 week, 2 weeks, 30 days, 90 days
+  And the settings-panel region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline                       | threshold |
+  | desktop  | worktree-cleanup-rules-desktop | 98        |
+  | phone    | worktree-cleanup-rules-phone   | 98        |
+
+Scenario Outline: The settle rule saves its selected action
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  When I open settings to the General section
+  And I expand Worktree cleanup
+  And I set the settle rule to "<label>"
+  Then the worktree cleanup settle rule is saved as <value>
+
+Examples:
+  | label                        | value           |
+  | Keep                         | keep            |
+  | Remove if nothing is missing | nothing-missing |
+
+Scenario Outline: Settled age presets save the selected delay
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  When I open settings to the General section
+  And I expand Worktree cleanup
+  And I set the settled age rule to "<label>"
+  Then the worktree cleanup settled age is saved as <days>
+
+Examples:
+  | label      | days  |
+  | Never      | never |
+  | Right away | 0     |
+  | 1 week     | 7     |
+  | 2 weeks    | 14    |
+  | 30 days    | 30    |
+  | 90 days    | 90    |
+
+Scenario Outline: The summary names the enabled cleanup rules
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And worktree cleanup starts with settle <settle_rule>, settled age <days> and delete <delete_rule>
+  When I open settings to the General section
+  And I expand Worktree cleanup
+  Then the worktree cleanup summary reads "<summary>"
+  And the settled age rule is set to "<age_label>"
+
+Examples:
+  | settle_rule     | days  | delete_rule | summary                 | age_label  |
+  | keep            | never | false       | Off                     | Never      |
+  | nothing-missing | never | false       | When nothing is missing | Never      |
+  | keep            | 0     | false       | When settled            | Right away |
+  | keep            | 7     | false       | Settled 7+ days         | 1 week     |
+  | keep            | 12    | false       | Settled 12+ days        | 12 days    |
+  | keep            | never | true        | When deleted            | Never      |
+  | nothing-missing | 30    | false       | 2 rules                 | 30 days    |
+  | nothing-missing | 90    | true        | 3 rules                 | 90 days    |
+
 Scenario Outline: The keep rule names the files a removal loses
   Given the conduit app is served with the connected mockup
   And the viewport is a desktop

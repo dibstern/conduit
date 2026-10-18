@@ -25,10 +25,7 @@ import {
 	worktreeUsers,
 } from "../domain/relay/Services/session-worktree-deletion.js";
 import { LocalPtyServiceTag } from "../domain/relay/Services/terminal-service.js";
-import {
-	daemonSessionGitCache,
-	hasNoCommitsBeyondDefault,
-} from "../git/session-git.js";
+import { hasNoCommitsBeyondDefault } from "../git/session-git.js";
 import { realWorkspacePath } from "../git/worktrees.js";
 import { readPersistedAutoSettleFacts } from "./auto-settle-reader.js";
 import {
@@ -220,20 +217,13 @@ export const cleanUpProjectWorktrees = (
 							for (const check of decision.gitChecks) {
 								if (gitChecks[check] !== undefined) continue;
 								switch (check) {
-									case "merged": {
-										const git = yield* Effect.tryPromise(() =>
-											daemonSessionGitCache.refresh(checkout.path),
+									case "nothing-missing": {
+										const inspectedHead = inspection.head;
+										gitChecks[check] = yield* Effect.tryPromise(() =>
+											hasNoCommitsBeyondDefault(checkout.path, inspectedHead),
 										);
-										gitChecks[check] =
-											git?.merged === true &&
-											git.mergedHead === inspection.head;
 										break;
 									}
-									case "no-commits-beyond-default":
-										gitChecks[check] = yield* Effect.tryPromise(() =>
-											hasNoCommitsBeyondDefault(checkout.path),
-										);
-										break;
 								}
 							}
 							if (decision.gitChecks.every((check) => gitChecks[check])) break;

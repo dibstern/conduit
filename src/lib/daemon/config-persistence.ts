@@ -55,7 +55,23 @@ import {
 /** Days of inactivity before automatic settlement when no value is persisted. */
 export const DEFAULT_AUTO_SETTLE_AFTER_DAYS = 3;
 
-export const CURRENT_CONFIG_VERSION = 1;
+export const CURRENT_CONFIG_VERSION = 2;
+
+const LegacyWorktreeCleanupSchema = Schema.Struct({
+	onSettle: Schema.optionalWith(Schema.Literal("off", "merged", "any"), {
+		default: () => "merged" as const,
+	}),
+	onDelete: WorktreeCleanupSchema.fields.onDelete,
+	afterInactiveDays: Schema.optionalWith(
+		Schema.NullOr(Schema.Number.pipe(Schema.int(), Schema.between(1, 3650))),
+		{ default: () => null },
+	),
+	whenMerged: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+	noCommitsBeyondDefault: Schema.optionalWith(Schema.Boolean, {
+		default: () => false,
+	}),
+	keepWhen: WorktreeCleanupSchema.fields.keepWhen,
+});
 
 const ProjectSchema = Schema.Struct({
 	path: Schema.String,
@@ -211,21 +227,51 @@ const CurrentDaemonConfigSchema = Schema.mutable(
 
 export type DaemonConfig = Schema.Schema.Type<typeof CurrentDaemonConfigSchema>;
 
-export const DaemonConfigSchema = Schema.transform(
+export const DaemonConfigSchema = Schema.transformOrFail(
 	Schema.mutable(
 		Schema.Struct({
 			...DaemonConfigFields,
+			worktreeCleanup: Schema.optionalWith(Schema.Unknown, { exact: true }),
 			claudeConfigDir: Schema.optionalWith(Schema.String, { exact: true }),
 		}),
 	).annotations({ identifier: "PersistedDaemonConfig" }),
 	Schema.typeSchema(CurrentDaemonConfigSchema),
 	{
 		strict: true,
-		decode: ({ claudeConfigDir, ...config }): DaemonConfig =>
-			normalizeDaemonConfig(
-				migrateLegacyClaudeAccount(config, claudeConfigDir),
-			),
-		encode: (config) => config,
+		decode: ({ claudeConfigDir, worktreeCleanup, ...config }) =>
+			Effect.gen(function* () {
+				const persistedCleanup =
+					worktreeCleanup === undefined ? {} : worktreeCleanup;
+				const cleanup =
+					config.configVersion === CURRENT_CONFIG_VERSION
+						? yield* Schema.decodeUnknown(WorktreeCleanupSchema)(
+								persistedCleanup,
+							)
+						: yield* Schema.decodeUnknown(LegacyWorktreeCleanupSchema)(
+								persistedCleanup,
+							).pipe(
+								Effect.map((old) => ({
+									onSettle:
+										old.onSettle === "merged" ||
+										old.onSettle === "any" ||
+										old.whenMerged ||
+										old.noCommitsBeyondDefault
+											? ("nothing-missing" as const)
+											: ("keep" as const),
+									settledAfterDays:
+										old.onSettle === "any" ? 0 : old.afterInactiveDays,
+									onDelete: old.onDelete,
+									keepWhen: old.keepWhen,
+								})),
+							);
+				return normalizeDaemonConfig(
+					migrateLegacyClaudeAccount(
+						{ ...config, worktreeCleanup: cleanup },
+						claudeConfigDir,
+					),
+				);
+			}).pipe(Effect.mapError((error) => error.issue)),
+		encode: (config) => Effect.succeed(config),
 	},
 ).annotations({ identifier: "DaemonConfig" });
 

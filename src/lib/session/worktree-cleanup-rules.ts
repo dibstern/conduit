@@ -3,7 +3,7 @@ import type { AutoSettleFacts } from "./auto-settle-policy.js";
 
 const DAY_MS = 86_400_000;
 
-export type WorktreeCleanupGitCheck = "merged" | "no-commits-beyond-default";
+export type WorktreeCleanupGitCheck = "nothing-missing";
 
 type WorktreeCleanupDecision = {
 	readonly keepWhen: WorktreeCleanup["keepWhen"];
@@ -21,67 +21,91 @@ type WorktreeCleanupDecision = {
 	  }
 );
 
+type RuleCandidate =
+	| { readonly lifecycle: "deleted" }
+	| { readonly lifecycle: "settled"; readonly latestSettledAt: number | null };
+
 interface RuleContext {
 	readonly rules: WorktreeCleanup;
-	readonly facts: AutoSettleFacts | undefined;
 	readonly now: number;
-	readonly lastActivity: number;
 }
 
-// First matching row wins: delete, settle-any, inactivity, merged, no commits.
-// A failed Git check falls through to the next row. Deleted sessions only use
-// the delete row. Every row currently uses the user's keep level.
+// First matching row wins. Deleted sessions only match the delete row.
+// Settled-after accepts everything nothing-missing can remove, so it takes
+// precedence and applies the user's keep level without an ancestor check.
 const cleanupRules: readonly {
-	readonly applies: (context: RuleContext) => boolean;
-	readonly reason: (context: RuleContext) => string | undefined;
+	readonly candidate: (context: RuleContext) => RuleCandidate | undefined;
+	readonly reason: string;
 	readonly keepWhen: (context: RuleContext) => WorktreeCleanup["keepWhen"];
 	readonly gitChecks: readonly WorktreeCleanupGitCheck[];
 }[] = [
 	{
-		applies: ({ rules, facts }) => facts === undefined && rules.onDelete,
-		reason: () => "Session was deleted",
+		candidate: ({ rules }) =>
+			rules.onDelete ? { lifecycle: "deleted" } : undefined,
+		reason: "Session was deleted",
 		keepWhen: ({ rules }) => rules.keepWhen,
 		gitChecks: [],
 	},
 	{
-		applies: ({ rules, facts }) =>
-			facts?.settledAt != null && rules.onSettle === "any",
-		reason: () => "Session is settled",
-		keepWhen: ({ rules }) => rules.keepWhen,
-		gitChecks: [],
-	},
-	{
-		applies: ({ rules, facts }) =>
-			facts !== undefined && rules.afterInactiveDays !== null,
-		reason: ({ rules, now, lastActivity }) =>
-			rules.afterInactiveDays !== null &&
-			Number.isFinite(lastActivity) &&
-			lastActivity < now - rules.afterInactiveDays * DAY_MS
-				? `Inactive for ${Math.floor((now - lastActivity) / DAY_MS)} days`
+		candidate: ({ rules, now }) =>
+			rules.settledAfterDays !== null
+				? {
+						lifecycle: "settled",
+						latestSettledAt: now - rules.settledAfterDays * DAY_MS,
+					}
 				: undefined,
+		reason: "Settled for the set time",
 		keepWhen: ({ rules }) => rules.keepWhen,
 		gitChecks: [],
 	},
 	{
-		applies: ({ rules, facts }) =>
-			facts !== undefined &&
-			(rules.whenMerged ||
-				(facts.settledAt !== null && rules.onSettle === "merged")),
-		reason: ({ rules, facts }) =>
-			facts?.settledAt != null && rules.onSettle === "merged"
-				? "Settled and merged"
-				: "Branch is merged",
-		keepWhen: ({ rules }) => rules.keepWhen,
-		gitChecks: ["merged"],
-	},
-	{
-		applies: ({ rules, facts }) =>
-			facts !== undefined && rules.noCommitsBeyondDefault,
-		reason: () => "No commits beyond the default branch",
-		keepWhen: ({ rules }) => rules.keepWhen,
-		gitChecks: ["no-commits-beyond-default"],
+		candidate: ({ rules }) =>
+			rules.onSettle === "nothing-missing"
+				? { lifecycle: "settled", latestSettledAt: null }
+				: undefined,
+		reason: "Settled with nothing missing",
+		keepWhen: ({ rules }) =>
+			rules.keepWhen === "tracked-changes"
+				? "uncommitted-changes"
+				: rules.keepWhen,
+		gitChecks: ["nothing-missing"],
 	},
 ];
+
+export interface WorktreeCleanupCandidateFilter {
+	readonly lifecycleStates: readonly RuleCandidate["lifecycle"][];
+	/** Null means any settled age, when settled is an eligible lifecycle. */
+	readonly latestSettledAt: number | null;
+}
+
+/** The cold reader and enabled short-circuit derive eligibility from the rule rows. */
+export function worktreeCleanupCandidateFilter(
+	rules: WorktreeCleanup,
+	now: number,
+): WorktreeCleanupCandidateFilter | undefined {
+	const candidates = cleanupRules.flatMap((rule) => {
+		const candidate = rule.candidate({ rules, now });
+		return candidate ? [candidate] : [];
+	});
+	if (candidates.length === 0) return undefined;
+	const settled = candidates.filter(
+		(candidate) => candidate.lifecycle === "settled",
+	);
+	return {
+		lifecycleStates: [
+			...new Set(candidates.map((candidate) => candidate.lifecycle)),
+		],
+		latestSettledAt:
+			settled.length === 0 ||
+			settled.some((candidate) => candidate.latestSettledAt === null)
+				? null
+				: Math.max(
+						...settled.map(
+							(candidate) => candidate.latestSettledAt ?? -Infinity,
+						),
+					),
+	};
+}
 
 /** Unknown Git checks are returned to the caller; failed checks skip their row. */
 export function decideWorktreeCleanup(
@@ -90,29 +114,22 @@ export function decideWorktreeCleanup(
 	now: number,
 	gitChecks: Partial<Readonly<Record<WorktreeCleanupGitCheck, boolean>>> = {},
 ): WorktreeCleanupDecision {
-	const turn = facts?.latestTurn;
-	const context: RuleContext = {
-		rules,
-		facts,
-		now,
-		lastActivity: Math.max(
-			facts?.lastMessageAt ?? -Infinity,
-			facts?.latestUserMessageAt ?? -Infinity,
-			turn?.requestedAt ?? -Infinity,
-			turn?.startedAt ?? -Infinity,
-			turn?.completedAt ?? -Infinity,
-		),
-	};
-	const applicable = cleanupRules.filter((rule) => rule.applies(context));
+	const context: RuleContext = { rules, now };
+	const applicable = cleanupRules.filter((rule) => {
+		const candidate = rule.candidate(context);
+		if (candidate === undefined) return false;
+		if (candidate.lifecycle === "deleted") return facts === undefined;
+		return (
+			facts?.settledAt != null &&
+			(candidate.latestSettledAt === null ||
+				facts.settledAt <= candidate.latestSettledAt)
+		);
+	});
 	for (const rule of applicable) {
-		const reason = rule.reason(context);
-		if (
-			reason !== undefined &&
-			!rule.gitChecks.some((check) => gitChecks[check] === false)
-		)
+		if (!rule.gitChecks.some((check) => gitChecks[check] === false))
 			return {
 				_tag: "Remove",
-				reason,
+				reason: rule.reason,
 				keepWhen: rule.keepWhen(context),
 				gitChecks: rule.gitChecks,
 			};
@@ -123,7 +140,7 @@ export function decideWorktreeCleanup(
 			facts === undefined
 				? "No rule matched for deleted session"
 				: "No rule matched",
-		keepWhen: rules.keepWhen,
+		keepWhen: applicable[0]?.keepWhen(context) ?? rules.keepWhen,
 		inspectCheckout: applicable.length > 0,
 	};
 }

@@ -84,10 +84,11 @@ const defaultRefs = async (directory: string): Promise<string[]> => {
 /** Local default refs only, sharing merge detection's candidates. Never fetch. */
 export async function hasNoCommitsBeyondDefault(
 	directory: string,
+	head: string,
 ): Promise<boolean> {
 	for (const ref of await defaultRefs(directory))
 		if (
-			(await git(directory, "merge-base", "--is-ancestor", "HEAD", ref)) !==
+			(await git(directory, "merge-base", "--is-ancestor", head, ref)) !==
 			undefined
 		)
 			return true;

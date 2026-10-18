@@ -32,12 +32,10 @@
 	} as const;
 	const keepNote = $derived(keepNotes[state.cleanup.keepWhen]);
 	const cleanupSummary = $derived.by(() => {
-		const { onSettle, whenMerged, afterInactiveDays, noCommitsBeyondDefault, onDelete } = state.cleanup;
+		const { onSettle, settledAfterDays, onDelete } = state.cleanup;
 		const rules = [
-			onSettle === "merged" ? "Settled and merged" : onSettle === "any" ? "When settled" : undefined,
-			whenMerged ? "When merged" : undefined,
-			afterInactiveDays === null ? undefined : `Idle ${afterInactiveDays}+ days`,
-			noCommitsBeyondDefault ? "No new commits" : undefined,
+			onSettle === "nothing-missing" ? "When nothing is missing" : undefined,
+			settledAfterDays === null ? undefined : settledAfterDays === 0 ? "When settled" : `Settled ${settledAfterDays}+ days`,
 			onDelete ? "When deleted" : undefined,
 		].filter((rule) => rule !== undefined);
 		return rules.length > 1 ? `${rules.length} rules` : (rules[0] ?? "Off");
@@ -156,7 +154,7 @@
 	<SettingsRow
 		label="Settle idle sessions after"
 		labelFor="settings-auto-settle-select"
-		description="Moves to the Settled shelf. Nothing is deleted."
+		description="Moves idle sessions to the Settled shelf, where the worktree cleanup rules below apply."
 	>
 		{#snippet control()}
 			<Select
@@ -197,15 +195,32 @@
 	<p class="px-3 py-2 text-[11px] leading-[1.35] text-text-muted">
 		Runs every hour, right after a session settles or is deleted, and when you change a rule or press Run. It skips sessions that are running, waiting on you, open in a tab or sharing a worktree, and worktrees with an open terminal. Branches are kept, so a removed worktree is rebuilt on the session's next message.
 	</p>
-	<SettingsRow label="When a session settles" labelFor="settings-cleanup-on-settle" description="Merged means its branch is in the default branch.">
+	<SettingsRow label="When a session settles" labelFor="settings-cleanup-on-settle" description="Nothing is missing when every commit is already in the default branch and there are no uncommitted or untracked files. The branch is kept.">
 		{#snippet control()}
 			<Select id="settings-cleanup-on-settle" data-testid="settings-cleanup-on-settle" value={state.cleanup.onSettle} disabled={state.cleanupSaving} onchange={(event) => {
 				const onSettle = event.currentTarget.value;
-				if (onSettle === "merged" || onSettle === "any" || onSettle === "off") saveCleanup({ onSettle });
+				if (onSettle === "nothing-missing" || onSettle === "keep") saveCleanup({ onSettle });
 			}}>
-				<option value="merged">Remove if merged</option>
-				<option value="any">Remove</option>
-				<option value="off">Keep</option>
+				<option value="nothing-missing">Remove if nothing is missing</option>
+				<option value="keep">Keep</option>
+			</Select>
+		{/snippet}
+	</SettingsRow>
+	<SettingsRow label="Remove settled worktrees after" labelFor="settings-cleanup-settled-after" description="Counted from when the session settled, even if its commits aren't merged. The branch is kept.">
+		{#snippet control()}
+			<Select id="settings-cleanup-settled-after" data-testid="settings-cleanup-settled-after" value={String(state.cleanup.settledAfterDays ?? "never")} disabled={state.cleanupSaving} onchange={(event) => {
+				const value = event.currentTarget.value;
+				saveCleanup({ settledAfterDays: value === "never" ? null : Number(value) });
+			}}>
+				<option value="never">Never</option>
+				<option value="0">Right away</option>
+				<option value="7">1 week</option>
+				<option value="14">2 weeks</option>
+				<option value="30">30 days</option>
+				<option value="90">90 days</option>
+				{#if state.cleanup.settledAfterDays !== null && state.cleanup.settledAfterDays !== 0 && !idlePresets.includes(state.cleanup.settledAfterDays)}
+					<option value={String(state.cleanup.settledAfterDays)}>{state.cleanup.settledAfterDays} days</option>
+				{/if}
 			</Select>
 		{/snippet}
 	</SettingsRow>
@@ -217,25 +232,6 @@
 			</Select>
 		{/snippet}
 	</SettingsRow>
-	<SettingsRow label="Remove idle worktrees after" labelFor="settings-cleanup-idle" description="Settled or not, counted from the session's last activity.">
-		{#snippet control()}
-			<Select id="settings-cleanup-idle" data-testid="settings-cleanup-idle" value={String(state.cleanup.afterInactiveDays ?? "never")} disabled={state.cleanupSaving} onchange={(event) => {
-				const value = event.currentTarget.value;
-				saveCleanup({ afterInactiveDays: value === "never" ? null : Number(value) });
-			}}>
-				{#if state.cleanup.afterInactiveDays !== null && !idlePresets.includes(state.cleanup.afterInactiveDays)}
-					<option value={String(state.cleanup.afterInactiveDays)}>{state.cleanup.afterInactiveDays} days</option>
-				{/if}
-				<option value="7">1 week</option>
-				<option value="14">2 weeks</option>
-				<option value="30">30 days</option>
-				<option value="90">90 days</option>
-				<option value="never">Never</option>
-			</Select>
-		{/snippet}
-	</SettingsRow>
-	<SettingsRow label="Remove once merged" description="Settled or not, as soon as its branch is in the default branch." checked={state.cleanup.whenMerged} disabled={state.cleanupSaving} onchange={() => saveCleanup({ whenMerged: !state.cleanup.whenMerged })} />
-	<SettingsRow label="Remove if its branch has no new commits" description="Settled or not. Covers sessions that committed nothing, like a quick question." checked={state.cleanup.noCommitsBeyondDefault} disabled={state.cleanupSaving} onchange={() => saveCleanup({ noCommitsBeyondDefault: !state.cleanup.noCommitsBeyondDefault })} />
 	<div>
 		<SettingsRow label="Keep worktrees with" labelFor="settings-cleanup-keep-when">
 			{#snippet control()}
