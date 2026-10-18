@@ -32,10 +32,10 @@ interface PushService {
 	getLegacyManager: Effect.Effect<Option.Option<PushNotificationSender>>;
 }
 
-export class PushManagerTag extends Context.Tag("PushManager")<
+export class PushManagerTag extends Context.Service<
 	PushManagerTag,
 	PushService
->() {}
+>()("PushManager") {}
 
 interface PushManagerConfig {
 	sendPush: (
@@ -45,7 +45,7 @@ interface PushManagerConfig {
 }
 
 export const PushManagerLive = (config: PushManagerConfig) =>
-	Layer.scoped(
+	Layer.effect(
 		PushManagerTag,
 		Effect.gen(function* () {
 			const subscriptions = yield* Ref.make<Map<string, PushSubscription>>(
@@ -76,7 +76,7 @@ export const PushManagerLive = (config: PushManagerConfig) =>
 								config
 									.sendPush(sub, payload)
 									.pipe(
-										Effect.catchAll((e) =>
+										Effect.catch((e) =>
 											Effect.logWarning(`Push send failed for ${sub.id}: ${e}`),
 										),
 									),
@@ -112,7 +112,7 @@ export const PushManagerLive = (config: PushManagerConfig) =>
 								config
 									.sendPush(sub, payload)
 									.pipe(
-										Effect.catchAll((e) =>
+										Effect.catch((e) =>
 											Effect.logWarning(`Push send failed for ${sub.id}: ${e}`),
 										),
 									),
@@ -171,7 +171,7 @@ export const PushNotificationManagerLive = (configDir: string) =>
 				broadcast: (payload: PushPayload) =>
 					Effect.tryPromise(() => manager.sendToAll(payload)).pipe(
 						Effect.asVoid,
-						Effect.catchAll((cause) =>
+						Effect.catch((cause) =>
 							Effect.logWarning(`Push broadcast failed: ${String(cause)}`),
 						),
 					),
@@ -183,7 +183,7 @@ export const PushNotificationManagerLive = (configDir: string) =>
 				sendToAll: (payload) =>
 					Effect.tryPromise(() => manager.sendToAll(payload)).pipe(
 						Effect.asVoid,
-						Effect.catchAll((cause) =>
+						Effect.catch((cause) =>
 							Effect.logWarning(`Push send failed: ${String(cause)}`),
 						),
 					),

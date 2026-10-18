@@ -20,12 +20,12 @@ export type OnSuccessfulShutdownResponse = (
 
 /** Share the response boundary between the Unix and browser RPC transports. */
 export const withRpcShutdownResponse = (
-	protocol: RpcServer.Protocol["Type"],
+	protocol: RpcServer.Protocol["Service"],
 	onSuccessfulShutdownResponse: OnSuccessfulShutdownResponse,
-): RpcServer.Protocol["Type"] => {
+): RpcServer.Protocol["Service"] => {
 	const shutdownRequests = new Map<string, ShutdownTag>();
-	const key = (clientId: number, requestId: string) =>
-		`${clientId}:${requestId}`;
+	const key = (clientId: number, requestId: string | number) =>
+		`${clientId}:${typeof requestId}:${requestId}`;
 	return {
 		...protocol,
 		run: (handle) =>
@@ -48,7 +48,7 @@ export const withRpcShutdownResponse = (
 						const tag = shutdownRequests.get(requestKey);
 						shutdownRequests.delete(requestKey);
 						return tag && response.exit._tag === "Success"
-							? Effect.forkDaemon(onSuccessfulShutdownResponse(tag)).pipe(
+							? Effect.forkDetach(onSuccessfulShutdownResponse(tag)).pipe(
 									Effect.asVoid,
 								)
 							: Effect.void;
@@ -63,32 +63,28 @@ export interface DaemonRpcSocket {
 	readonly drain: Effect.Effect<void>;
 }
 
-export class DaemonRpcSocketTag extends Context.Tag("DaemonRpcSocket")<
+export class DaemonRpcSocketTag extends Context.Service<
 	DaemonRpcSocketTag,
 	DaemonRpcSocket
->() {}
+>()("DaemonRpcSocket") {}
 
 /** Acquires one local Unix listener and its RPC loop in the parent scope. */
 export const makeDaemonRpcSocketLayer = <R>(
 	socketPath: string,
-	handlerLayer: Layer.Layer<
-		Layer.Layer.Success<typeof WsRpcServerLayer>,
-		never,
-		R
-	>,
+	handlerLayer: Layer.Layer<Layer.Success<typeof WsRpcServerLayer>, never, R>,
 	options: {
 		readonly onSuccessfulShutdownResponse?: OnSuccessfulShutdownResponse;
 		readonly onClientCountChange?: (count: number) => void;
 	} = {},
 ): Layer.Layer<DaemonRpcSocketTag, unknown, Exclude<R, RpcCaller>> =>
-	Layer.scoped(
+	Layer.effect(
 		DaemonRpcSocketTag,
 		Effect.gen(function* () {
 			const existing = yield* Effect.tryPromise({
 				try: () => lstat(socketPath),
 				catch: (cause) => cause,
 			}).pipe(
-				Effect.catchAll((cause) =>
+				Effect.catch((cause) =>
 					isRecord(cause) && cause["code"] === "ENOENT"
 						? Effect.succeed(null)
 						: Effect.fail(cause),
@@ -180,7 +176,10 @@ export const makeDaemonRpcSocketLayer = <R>(
 				Effect.provideService(SocketServer.SocketServer, trackedServer),
 				Effect.provide(RpcSerialization.layerNdjson),
 			);
-			yield* RpcServer.make(WsRpcGroup, { concurrency: 32 }).pipe(
+			yield* RpcServer.make(WsRpcGroup, {
+				concurrency: 32,
+				spanPrefix: "RpcServer",
+			}).pipe(
 				Effect.provideService(
 					RpcServer.Protocol,
 					options.onSuccessfulShutdownResponse

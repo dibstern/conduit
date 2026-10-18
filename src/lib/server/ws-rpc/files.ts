@@ -7,6 +7,7 @@ import { resolveSessionRequestFolders } from "../../domain/relay/Services/provid
 import { ConfigTag } from "../../domain/relay/Services/services.js";
 import { SessionWorkspaceTag } from "../../domain/relay/Services/session-workspace.js";
 import { ToolContentServiceTag } from "../../domain/relay/Services/tool-content-service.js";
+import * as Failure from "../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../errors.js";
 import {
 	getFileContentResponse,
@@ -60,12 +61,16 @@ export const filesHandlers = {
 			const directoryListing = yield* DirectoryListingServiceTag;
 			return yield* directoryListing.find(request.query);
 		}).pipe(
-			Effect.mapError((error) =>
-				error instanceof ProjectSaveRejected
-					? error
-					: new WsRpcError({
-							message: `FindFolders failed: ${formatErrorDetail(error)}`,
-						}),
+			Effect.catchCause((cause) =>
+				Effect.failCause(
+					Failure.mapFailures(cause, (error) =>
+						error instanceof ProjectSaveRejected
+							? error
+							: new WsRpcError({
+									message: `FindFolders failed: ${formatErrorDetail(error)}`,
+								}),
+					),
+				),
 			),
 		),
 	GetFileTree: (request) =>
@@ -91,7 +96,7 @@ export const filesHandlers = {
 						};
 					}),
 				),
-				Effect.catchAll((error) =>
+				Effect.catch((error) =>
 					Effect.fail(
 						new WsRpcError({
 							message: `GetFileTree failed: ${String(error)}`,
@@ -112,7 +117,7 @@ export const filesHandlers = {
 					path: result.path,
 					entries: result.entries,
 				})),
-				Effect.catchAll((error) =>
+				Effect.catch((error) =>
 					Effect.fail(
 						new WsRpcError({
 							message: `GetFileList failed: ${String(error)}`,
@@ -134,7 +139,7 @@ export const filesHandlers = {
 					content: result.content,
 					...(result.binary != null ? { binary: result.binary } : {}),
 				})),
-				Effect.catchAll((error) =>
+				Effect.catch((error) =>
 					Effect.fail(
 						new WsRpcError({
 							message: `GetFileContent failed: ${String(error)}`,
@@ -151,7 +156,7 @@ export const filesHandlers = {
 				projectSlug: config.slug,
 				tools: yield* toolContent.details(request.sessionId, request.toolIds),
 			};
-		}).pipe(Effect.catchAll(mapRpcFailure("GetToolDetails"))),
+		}).pipe(Effect.catch(mapRpcFailure("GetToolDetails"))),
 	GetSkillContent: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
@@ -171,7 +176,7 @@ export const filesHandlers = {
 				name: request.name,
 				...result,
 			};
-		}).pipe(Effect.catchAll(mapRpcFailure("GetSkillContent"))),
+		}).pipe(Effect.catch(mapRpcFailure("GetSkillContent"))),
 } satisfies Pick<
 	WsRpcHandlerMap,
 	| "FindFolders"
