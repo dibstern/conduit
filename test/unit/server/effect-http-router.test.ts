@@ -1,5 +1,5 @@
 // Tests for the Effect-based HTTP router (effect-http-router.ts).
-// Uses HttpApp.toWebHandlerLayer to run route handlers against
+// Uses HttpRouter.toWebHandler to run route handlers against
 // the Web Fetch API Request/Response, avoiding a real HTTP server.
 
 import { mkdtemp, rm } from "node:fs/promises";
@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { Effect, Layer } from "effect";
-import { HttpEffect as HttpApp } from "effect/http";
+import { HttpRouter } from "effect/http";
 import { afterAll, assert, beforeAll, describe, expect, it } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
@@ -75,9 +75,10 @@ const baseRouterLayer = () =>
  */
 // biome-ignore lint/suspicious/noExplicitAny: Layer type params vary per test — `any` is intentional
 function makeHandler(layer: Layer.Layer<any, any, never>) {
-	return HttpApp.toWebHandlerLayer(
-		effectRouter,
-		Layer.merge(layer, baseRouterLayer()),
+	return HttpRouter.toWebHandler(
+		effectRouter.pipe(
+			Layer.provideMerge(Layer.merge(layer, baseRouterLayer())),
+		),
 	);
 }
 
@@ -285,16 +286,19 @@ describe("Effect HTTP Router", () => {
 
 	describe("CORS middleware", () => {
 		it("effectRouterWithCors adds CORS headers to responses", async () => {
-			const { handler, dispose } = HttpApp.toWebHandlerLayer(
-				effectRouterWithCors,
-				Layer.mergeAll(
-					TestProjectsLayer,
-					baseRouterLayer(),
-					Layer.succeed(SetupInfoProvider)({
-						getPort: () => Effect.succeed(2633),
-						getIsTls: () => Effect.succeed(false),
-						getPublicUrl: () => Effect.succeed(null),
-					}),
+			const { handler, dispose } = HttpRouter.toWebHandler(
+				effectRouterWithCors.pipe(
+					Layer.provideMerge(
+						Layer.mergeAll(
+							TestProjectsLayer,
+							baseRouterLayer(),
+							Layer.succeed(SetupInfoProvider)({
+								getPort: () => Effect.succeed(2633),
+								getIsTls: () => Effect.succeed(false),
+								getPublicUrl: () => Effect.succeed(null),
+							}),
+						),
+					),
 				),
 			);
 			disposers.push(dispose);

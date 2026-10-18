@@ -92,19 +92,24 @@ describe("getCommandsForSession active provider", () => {
 		);
 
 		return getCommandsForSession("session-1").pipe(
-			Effect.provide(layer),
-			Effect.tap((commands) => {
-				expect(engine.dispatchEffect).toHaveBeenCalledWith({
-					type: "discover",
-					providerId: "claude",
-					account: expect.objectContaining({ driver: "claude", id: "claude" }),
-					workspaceRoot: "/session-worktree",
-				});
-				expect(client.app.commands).not.toHaveBeenCalled();
-				expect(commands).toEqual([
-					{ name: "init", description: "Init Claude", args: "[path]" },
-				]);
-			}),
+			Effect.provide(layer, { local: true }),
+			Effect.tap((commands) =>
+				Effect.sync(() => {
+					expect(engine.dispatchEffect).toHaveBeenCalledWith({
+						type: "discover",
+						providerId: "claude",
+						account: expect.objectContaining({
+							driver: "claude",
+							id: "claude",
+						}),
+						workspaceRoot: "/session-worktree",
+					});
+					expect(client.app.commands).not.toHaveBeenCalled();
+					expect(commands).toEqual([
+						{ name: "init", description: "Init Claude", args: "[path]" },
+					]);
+				}),
+			),
 		);
 	});
 
@@ -126,12 +131,14 @@ describe("getCommandsForSession active provider", () => {
 			);
 
 			return getCommandsForSession("session-1").pipe(
-				Effect.provide(layer),
-				Effect.tap((commands) => {
-					expect(engine.dispatchEffect).not.toHaveBeenCalled();
-					expect(client.app.commands).toHaveBeenCalledOnce();
-					expect(commands).toEqual(opencodeCommands);
-				}),
+				Effect.provide(layer, { local: true }),
+				Effect.tap((commands) =>
+					Effect.sync(() => {
+						expect(engine.dispatchEffect).not.toHaveBeenCalled();
+						expect(client.app.commands).toHaveBeenCalledOnce();
+						expect(commands).toEqual(opencodeCommands);
+					}),
+				),
 			);
 		},
 	);
@@ -148,11 +155,13 @@ describe("getCommandsForSession active provider", () => {
 		);
 
 		return getCommandsForSession(undefined).pipe(
-			Effect.provide(layer),
-			Effect.tap((commands) => {
-				expect(client.app.commands).toHaveBeenCalledOnce();
-				expect(commands).toEqual(opencodeCommands);
-			}),
+			Effect.provide(layer, { local: true }),
+			Effect.tap((commands) =>
+				Effect.sync(() => {
+					expect(client.app.commands).toHaveBeenCalledOnce();
+					expect(commands).toEqual(opencodeCommands);
+				}),
+			),
 		);
 	});
 
@@ -194,22 +203,24 @@ describe("getCommandsForSession active provider", () => {
 			);
 
 			return getCommandsForSession(undefined).pipe(
-				Effect.provide(layer),
-				Effect.tap((commands) => {
-					expect(client.app.commands).toHaveBeenCalledOnce();
-					expect(engine.dispatchEffect).toHaveBeenCalledWith({
-						type: "discover",
-						providerId: "claude",
-						account: expect.objectContaining({
-							driver: "claude",
-							id: "claude",
-						}),
-						workspaceRoot: "/primary-folder",
-					});
-					expect(commands).toEqual([
-						{ name: "init", description: "Init Claude", args: "[path]" },
-					]);
-				}),
+				Effect.provide(layer, { local: true }),
+				Effect.tap((commands) =>
+					Effect.sync(() => {
+						expect(client.app.commands).toHaveBeenCalledOnce();
+						expect(engine.dispatchEffect).toHaveBeenCalledWith({
+							type: "discover",
+							providerId: "claude",
+							account: expect.objectContaining({
+								driver: "claude",
+								id: "claude",
+							}),
+							workspaceRoot: "/primary-folder",
+						});
+						expect(commands).toEqual([
+							{ name: "init", description: "Init Claude", args: "[path]" },
+						]);
+					}),
+				),
 			);
 		},
 	);
@@ -233,14 +244,16 @@ describe("getCommandsForSession active provider", () => {
 		);
 
 		return getCommandsForSession("session-1").pipe(
-			Effect.provide(layer),
-			Effect.tap((commands) => {
-				expect(client.app.commands).not.toHaveBeenCalled();
-				expect(log.warn).toHaveBeenCalledWith(
-					expect.stringContaining("Failed to discover Claude commands"),
-				);
-				expect(commands).toEqual([]);
-			}),
+			Effect.provide(layer, { local: true }),
+			Effect.tap((commands) =>
+				Effect.sync(() => {
+					expect(client.app.commands).not.toHaveBeenCalled();
+					expect(log.warn).toHaveBeenCalledWith(
+						expect.stringContaining("Failed to discover Claude commands"),
+					);
+					expect(commands).toEqual([]);
+				}),
+			),
 		);
 	});
 });

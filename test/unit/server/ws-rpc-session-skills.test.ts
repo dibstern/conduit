@@ -121,11 +121,14 @@ const runTest = <E>(
 						),
 					),
 				),
+				{ local: true },
 			),
 		);
 	}).pipe(
 		Effect.scoped,
-		Effect.provide(SqliteClient.layer({ filename: ":memory:" })),
+		Effect.provide(SqliteClient.layer({ filename: ":memory:" }), {
+			local: true,
+		}),
 	);
 
 const seedMessage = (
@@ -540,7 +543,7 @@ describe("WsRpcServerLayer GetSessionSkills with SQLite", () => {
 								expect(result.failure.message).toContain(
 									provider === "claude"
 										? "discovery unavailable"
-										: "UnknownException",
+										: "UnknownError",
 								);
 							}
 						}),

@@ -97,6 +97,7 @@ describe("WsRpcServerLayer daemon sessions", () => {
 						),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -120,6 +121,7 @@ describe("WsRpcServerLayer daemon sessions", () => {
 				Effect.scoped,
 				Effect.provide(
 					WsRpcServerLayer.pipe(Layer.provideMerge(makeTestHandlerLayer())),
+					{ local: true },
 				),
 			),
 	);

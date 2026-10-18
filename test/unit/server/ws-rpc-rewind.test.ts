@@ -55,6 +55,7 @@ describe("WsRpcServerLayer RewindSession", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -108,6 +109,7 @@ describe("WsRpcServerLayer RewindSession", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});

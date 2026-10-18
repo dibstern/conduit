@@ -104,7 +104,7 @@ describe("StopBackgroundTask RPC", () => {
 			expect(state.stopTaskEffect).toHaveBeenCalledWith("session-1", "shell");
 			expect(state.interruptTurnEffect).not.toHaveBeenCalled();
 			expect(state.engine.dispatchEffect).not.toHaveBeenCalled();
-		}).pipe(Effect.scoped, Effect.provide(state.layer));
+		}).pipe(Effect.scoped, Effect.provide(state.layer, { local: true }));
 	});
 
 	it.effect(
@@ -119,7 +119,7 @@ describe("StopBackgroundTask RPC", () => {
 				expect(first).toEqual({ ok: true });
 				expect(second).toEqual({ ok: true });
 				expect(state.stopTaskEffect).not.toHaveBeenCalled();
-			}).pipe(Effect.scoped, Effect.provide(state.layer));
+			}).pipe(Effect.scoped, Effect.provide(state.layer, { local: true }));
 		},
 	);
 
@@ -143,7 +143,7 @@ describe("StopBackgroundTask RPC", () => {
 				});
 				const finished = yield* client.StopBackgroundTask(request);
 				expect(finished).toEqual({ ok: true });
-			}).pipe(Effect.scoped, Effect.provide(state.layer));
+			}).pipe(Effect.scoped, Effect.provide(state.layer, { local: true }));
 		},
 	);
 
@@ -157,7 +157,7 @@ describe("StopBackgroundTask RPC", () => {
 				expect(result._tag).toBe("Failure");
 				expect(state.stopTaskEffect).not.toHaveBeenCalled();
 				expect(state.interruptTurnEffect).not.toHaveBeenCalled();
-			}).pipe(Effect.scoped, Effect.provide(state.layer));
+			}).pipe(Effect.scoped, Effect.provide(state.layer, { local: true }));
 		},
 	);
 });

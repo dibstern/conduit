@@ -36,6 +36,7 @@ describe("WsRpcServerLayer CancelSession", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ api })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -82,6 +83,7 @@ describe("WsRpcServerLayer CancelSession", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});

@@ -35,6 +35,7 @@ describe("WsRpcServerLayer RenameSession", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ sessionManagerService })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -61,6 +62,7 @@ describe("WsRpcServerLayer RenameSession", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ sessionManagerService })),
 				),
+				{ local: true },
 			),
 		);
 	});

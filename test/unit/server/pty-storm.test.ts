@@ -80,7 +80,9 @@ describe("PTY output storm", () => {
 				Effect.gen(function* () {
 					const connection = yield* makeFakeSocketServer;
 					yield* RpcServer.make(WsRpcGroup, { concurrency: 32 }).pipe(
-						Effect.provide(RpcServer.layerProtocolSocketServer),
+						Effect.provide(RpcServer.layerProtocolSocketServer, {
+							local: true,
+						}),
 						Effect.provideService(
 							SocketServer.SocketServer,
 							connection.socketServer,

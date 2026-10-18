@@ -12,7 +12,6 @@ import {
 	Option,
 	PubSub,
 	Stream,
-	Supervisor,
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
@@ -129,8 +128,8 @@ describe("model handlers with Effect-native model service", () => {
 					sessionId: "session-1",
 				});
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap((response) => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap((response) => Effect.sync(() => {
 					expect(modelService.listProviders).toHaveBeenCalledOnce();
 					expect(response.active).toEqual({
 						model: "gpt-4",
@@ -140,7 +139,7 @@ describe("model handlers with Effect-native model service", () => {
 						variant: "",
 						variants: ["standard", "fast"],
 					});
-				}),
+				})),
 			);
 		},
 	);
@@ -236,7 +235,7 @@ describe("model handlers with Effect-native model service", () => {
 							],
 						},
 				]);
-			}).pipe(Effect.provide(Layer.merge(layer, ProjectSettingsLive)));
+			}).pipe(Effect.provide(Layer.merge(layer, ProjectSettingsLive), { local: true }));
 		},
 	);
 
@@ -268,14 +267,14 @@ describe("model handlers with Effect-native model service", () => {
 			);
 			return yield* Effect.gen(function* () {
 				const updates = yield* PubSub.subscribe((yield* ProjectSettingsTag).changes);
-				const supervisor = yield* Supervisor.track;
+				const { modelDiscovery } = yield* ProjectSettingsTag;
 				const responses = yield* Effect.forEach(Array.from({ length: 25 }), () => getModelsResponse(), {
 					concurrency: "unbounded",
-				}).pipe(Effect.supervised(supervisor));
+				});
 				expect(responses).toHaveLength(25);
 				for (const response of responses) expect(response.providers.map(({ id }) => id)).toEqual(["fake"]);
 				expect(yield* Deferred.isDone(pending)).toBe(false);
-				const fibers = yield* supervisor.value;
+				const fibers = Array.from(modelDiscovery, ([, fiber]) => fiber);
 				expect(fibers).toHaveLength(1);
 				expect(discoveries).toBe(1);
 				if (fails) yield* Deferred.fail(pending, new Error("Claude discovery failed"));
@@ -286,16 +285,16 @@ describe("model handlers with Effect-native model service", () => {
 				expect(firstModels).toHaveLength(1);
 				if (fails) expect(firstModels[0]?.item).toMatchObject({ providers: [] });
 				pending = yield* Deferred.make<ProviderCapabilities, Error>();
-				yield* getModelsResponse().pipe(Effect.supervised(supervisor));
+				yield* getModelsResponse();
 				expect(discoveries).toBe(2);
-				const refresh = yield* supervisor.value;
+				const refresh = Array.from(modelDiscovery, ([, fiber]) => fiber);
 				expect(refresh).toHaveLength(1);
 				yield* Deferred.succeed(pending, { ...capabilities, models: [{ id: "opus", name: "Opus", providerId: "claude" }] });
 				yield* Effect.forEach(refresh, Fiber.join);
 				expect(Array.from(yield* PubSub.takeUpTo(updates, Number.POSITIVE_INFINITY)).filter(({ item }) => item._tag === "providerModels")).toMatchObject([
 					{ item: { _tag: "providerModels", providers: [{ id: "claude", models: [{ id: "opus" }] }] } },
 				]);
-			}).pipe(Effect.provide(deps), Effect.scoped);
+			}).pipe(Effect.provide(deps, { local: true }), Effect.scoped);
 		}));
 	}
 
@@ -367,7 +366,7 @@ describe("model handlers with Effect-native model service", () => {
 				const refreshedSnapshot = yield* subscribeProjectSettings().pipe(Stream.runHead);
 				expect(Option.isSome(refreshedSnapshot) && refreshedSnapshot.value._tag === "snapshot" &&
 					refreshedSnapshot.value.rows.some((row) => row._tag === "providerModels" && row.providers[0]?.models[0]?.id === "opus")).toBe(true);
-			}).pipe(Effect.provide(deps));
+			}).pipe(Effect.provide(deps, { local: true }));
 		});
 	});
 
@@ -429,7 +428,7 @@ describe("model handlers with Effect-native model service", () => {
 					variant: "fast",
 					variants: ["standard", "fast"],
 				});
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -487,8 +486,8 @@ describe("model handlers with Effect-native model service", () => {
 					providerId: "openai",
 				});
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap((result) => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap((result) => Effect.sync(() => {
 					expect(modelService.listProviders).toHaveBeenCalledOnce();
 					expect(result).toEqual({
 						model: "gpt-4",
@@ -497,7 +496,7 @@ describe("model handlers with Effect-native model service", () => {
 						variants: ["standard", "fast"],
 						contextWindow: { contextWindow: "", options: [] },
 					});
-				}),
+				})),
 			);
 		},
 	);
@@ -563,7 +562,7 @@ describe("model handlers with Effect-native model service", () => {
 					variant: "",
 					variants: ["standard", "fast"],
 				});
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -593,7 +592,7 @@ describe("model handlers with Effect-native model service", () => {
 			Layer.succeed(OpenCodeInstancesTag)(instances),
 			Layer.succeed(ConfigTag)(makeMockConfig()),
 			Layer.succeed(LoggerTag)(makeMockLogger()),
-		)))));
+		))), { local: true }));
 	});
 
 	it.effect("honours the harness's native default for drafts independently of project defaults and session picks", () => {
@@ -661,7 +660,7 @@ describe("model handlers with Effect-native model service", () => {
 			expect((yield* getModelsResponse({ instanceId: "opencode" })).active).toEqual({ provider: "fake", model: "model-b" });
 			expect(instances.use).not.toHaveBeenCalled();
 			expect(api.config.get).toHaveBeenCalledTimes(5);
-		}).pipe(Effect.provide(Layer.merge(deps, models)));
+		}).pipe(Effect.provide(Layer.merge(deps, models), { local: true }));
 	});
 
 	it.effect(
@@ -713,8 +712,8 @@ describe("model handlers with Effect-native model service", () => {
 				const modelService = yield* OpenCodeModelServiceTag;
 				yield* modelService.persistDefaultModel("openai", "gpt-4");
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(api.config.update).toHaveBeenCalledWith({
 						model: "openai/gpt-4",
 					});
@@ -729,7 +728,7 @@ describe("model handlers with Effect-native model service", () => {
 					expect(logger.info).toHaveBeenCalledWith(
 						expect.stringContaining("Merged config.json"),
 					);
-				}),
+				})),
 			);
 		},
 	);

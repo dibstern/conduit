@@ -116,7 +116,7 @@ it("releases a claim after the endpoint closes without response or error", async
 				expect(warnings).toHaveLength(1);
 			}).pipe(
 				Effect.timeout("1 second"),
-				Effect.provide(AlertLedgerLive),
+				Effect.provide(AlertLedgerLive, { local: true }),
 				Effect.provide(
 					Layer.merge(
 						makePersistenceEffectLayer(
@@ -127,6 +127,7 @@ it("releases a claim after the endpoint closes without response or error", async
 						),
 						bus,
 					),
+					{ local: true },
 				),
 			),
 		);

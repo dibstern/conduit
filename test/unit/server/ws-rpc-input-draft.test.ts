@@ -51,7 +51,7 @@ describe("SubscribeInputDraft", () => {
 					from: "tab-a",
 				});
 			expect(Option.isNone(yield* Queue.poll(elsewhere))).toBe(true);
-		}).pipe(Effect.provide(makeLayer())),
+		}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 
 	it.effect("a cleared draft reaches open tabs as empty text", () =>
@@ -65,7 +65,7 @@ describe("SubscribeInputDraft", () => {
 			});
 
 			expect(yield* Queue.take(q)).toEqual({ _tag: "draft", text: "" });
-		}).pipe(Effect.provide(makeLayer())),
+		}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 
 	it.effect("opens live-only: an earlier draft is not replayed", () =>
@@ -79,6 +79,6 @@ describe("SubscribeInputDraft", () => {
 			const q = yield* subscribe("s1");
 
 			expect(Option.isNone(yield* Queue.poll(q))).toBe(true);
-		}).pipe(Effect.provide(makeLayer())),
+		}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 });

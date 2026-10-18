@@ -4,11 +4,7 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Stream } from "effect";
 import { RpcTest } from "effect/rpc";
 import { afterEach, expect, vi } from "vitest";
-import {
-	CreateSession,
-	WsRpcError,
-	WsRpcGroup,
-} from "../../../src/lib/contracts/ws-rpc.js";
+import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
@@ -36,14 +32,15 @@ describe("daemon RPC handlers", () => {
 				).pipe(
 					Effect.provide(
 						makeRoutedWsRpcServerLayer(resolve, handlers, "conduit"),
+						{ local: true },
 					),
 				);
-				const malformed = new CreateSession(
-					// @ts-expect-error CreateSession requires an explicit projectSlug.
-					{ originId: "daemon-client" },
-					{ disableValidation: true },
-				);
+				const malformed = {
+					_tag: "CreateSession" as const,
+					originId: "daemon-client",
+				};
 				const result = yield* Effect.result(
+					// @ts-expect-error CreateSession requires an explicit projectSlug.
 					createSession(malformed, Headers.empty),
 				);
 				expect(result).toMatchObject({
@@ -51,7 +48,7 @@ describe("daemon RPC handlers", () => {
 					failure: { message: "projectSlug is required" },
 				});
 				expect(resolve).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(makeDaemonRpcTestLayer())),
+			}).pipe(Effect.provide(makeDaemonRpcTestLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -63,7 +60,9 @@ describe("daemon RPC handlers", () => {
 			return Effect.gen(function* () {
 				const handlers = yield* DaemonWsRpcHandlersTag;
 				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
-					Effect.provide(makeRoutedWsRpcServerLayer(resolve, handlers)),
+					Effect.provide(makeRoutedWsRpcServerLayer(resolve, handlers), {
+						local: true,
+					}),
 				);
 				expect((yield* client.GetProjects({})).projects).toEqual([]);
 				const added = yield* client.SaveProject({
@@ -161,7 +160,7 @@ describe("daemon RPC handlers", () => {
 						.instances,
 				).toEqual([]);
 				expect(resolve).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(makeDaemonRpcTestLayer()));
+			}).pipe(Effect.provide(makeDaemonRpcTestLayer(), { local: true }));
 		},
 	);
 
@@ -178,6 +177,7 @@ describe("daemon RPC handlers", () => {
 							() => Effect.die("Unexpected routing"),
 							handlers,
 						),
+						{ local: true },
 					),
 				);
 				yield* client.RemoveProject({ slug: "gone" });
@@ -191,6 +191,7 @@ describe("daemon RPC handlers", () => {
 					makeDaemonRpcTestLayer([
 						{ slug: "gone", title: "gone", folders: [directory] },
 					]),
+					{ local: true },
 				),
 			);
 		},
@@ -233,6 +234,7 @@ describe("daemon RPC handlers", () => {
 							() => Effect.die("Unexpected routing"),
 							handlers,
 						),
+						{ local: true },
 					),
 				);
 				const projectLists: (readonly { slug: string; title: string }[])[] = [];
@@ -275,7 +277,11 @@ describe("daemon RPC handlers", () => {
 				expect(firstRelay.stop).not.toHaveBeenCalled();
 				expect(factory).not.toHaveBeenCalled();
 				expect((yield* cache.peek("a"))._tag).toBe("Some");
-			}).pipe(Effect.provide(makeDaemonRpcTestLayer(projects, factory)));
+			}).pipe(
+				Effect.provide(makeDaemonRpcTestLayer(projects, factory), {
+					local: true,
+				}),
+			);
 		},
 	);
 });

@@ -67,6 +67,7 @@ describe("WsRpcServerLayer instance management", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ instanceMgmt, wsHandler })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -101,6 +102,7 @@ describe("WsRpcServerLayer instance management", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ instanceMgmt, wsHandler })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -130,6 +132,7 @@ describe("WsRpcServerLayer instance management", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ instanceMgmt, wsHandler })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -166,6 +169,7 @@ describe("WsRpcServerLayer instance management", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ instanceMgmt, wsHandler })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -200,6 +204,7 @@ describe("WsRpcServerLayer instance management", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ instanceMgmt, wsHandler })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -231,6 +236,7 @@ describe("WsRpcServerLayer instance management", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ instanceMgmt, wsHandler })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -266,6 +272,7 @@ describe("WsRpcServerLayer instance management", () => {
 						),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -291,6 +298,7 @@ describe("WsRpcServerLayer instance management", () => {
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(Layer.provideMerge(makeTestHandlerLayer())),
+				{ local: true },
 			),
 		);
 	});

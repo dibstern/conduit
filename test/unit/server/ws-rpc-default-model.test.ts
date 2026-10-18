@@ -86,6 +86,7 @@ describe("WsRpcServerLayer SetDefaultModel", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},

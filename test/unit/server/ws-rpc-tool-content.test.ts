@@ -51,7 +51,7 @@ describe("WsRpcServerLayer GetToolDetails", () => {
 			});
 			expect(details).toHaveBeenCalledWith("session-a", ["tool-1", "missing"]);
 			expect(result).toEqual({ projectSlug: "test-project", tools: [detail] });
-		}).pipe(Effect.scoped, Effect.provide(serve(details)));
+		}).pipe(Effect.scoped, Effect.provide(serve(details), { local: true }));
 	});
 
 	it.effect("fails the request when the read fails", () =>
@@ -77,6 +77,7 @@ describe("WsRpcServerLayer GetToolDetails", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		),
 	);

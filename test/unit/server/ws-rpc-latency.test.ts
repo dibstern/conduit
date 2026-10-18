@@ -7,15 +7,20 @@ import {
 	Deferred,
 	Effect,
 	Fiber,
-	HashMap,
 	Logger,
-	Mailbox,
 	Option,
 	Queue,
+	References,
 	Schema,
 	Stream,
 } from "effect";
-import { Rpc, RpcGroup, type RpcMessage, RpcServer } from "effect/rpc";
+import {
+	Rpc,
+	RpcGroup,
+	type RpcMessage,
+	RpcSerialization,
+	RpcServer,
+} from "effect/rpc";
 import { SqlClient, Statement } from "effect/sql";
 import { describe, expect, it } from "vitest";
 import { withSlowRpcLogging } from "../../../src/lib/server/ws-rpc-handler.js";
@@ -51,12 +56,12 @@ const connect = (
 		const warnings = yield* Queue.unbounded<Record<string, unknown>>();
 		const records: Record<string, unknown>[] = [];
 		const ready = yield* Deferred.make<void>();
-		const disconnects = yield* Mailbox.make<number>();
-		const logger = Logger.make(({ message, annotations }) => {
+		const disconnects = yield* Queue.make<number>();
+		const logger = Logger.make(({ message, fiber }) => {
 			if (!Array.isArray(message) || message[0] !== "slow rpc") return;
-			const record = Object.fromEntries(HashMap.toEntries(annotations));
+			const record = { ...fiber.getRef(References.CurrentLogAnnotations) };
 			records.push(record);
-			warnings.unsafeOffer(record);
+			Queue.offerUnsafe(warnings, record);
 		});
 		const protocol = RpcServer.Protocol.of({
 			run: (handle) =>
@@ -78,9 +83,12 @@ const connect = (
 			supportsAck: false,
 			supportsTransferables: false,
 			supportsSpanPropagation: false,
+			supportsNotifications: false,
+			codecFor: RpcSerialization.json.codecFor,
 		});
 		yield* RpcServer.make(group, {
 			concurrency: options.concurrency ?? 32,
+			spanPrefix: "RpcServer",
 			disableFatalDefects: true,
 		}).pipe(
 			Effect.provideService(
@@ -93,7 +101,7 @@ const connect = (
 					SubscribeProbe: () => Rpc.fork(options.stream ?? Stream.never),
 				}),
 			),
-			Effect.provide(Logger.replace(Logger.defaultLogger, logger)),
+			Effect.provide(Logger.layer([logger])),
 			Effect.forkScoped,
 		);
 		yield* Deferred.await(ready);
@@ -168,7 +176,7 @@ describe("slow browser RPC warnings", () => {
 					expect(transformed).toBe(8);
 				}),
 			).pipe(
-				Statement.withTransformer((statement) =>
+				Effect.provideService(Statement.CurrentTransformer, (statement) =>
 					Effect.sync(() => {
 						transformed++;
 						return statement;

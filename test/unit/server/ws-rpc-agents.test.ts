@@ -59,6 +59,7 @@ describe("WsRpcServerLayer GetAgents", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -183,6 +184,7 @@ describe("WsRpcServerLayer GetAgents", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},

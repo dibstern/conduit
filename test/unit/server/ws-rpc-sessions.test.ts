@@ -85,7 +85,11 @@ describe("WsRpcServerLayer ResolveSession", () => {
 			});
 			expect(sessionExists).toHaveBeenCalledWith("existing");
 			expect(sessionExists).toHaveBeenCalledWith("missing");
-		}).pipe(Effect.provide(WsRpcServerLayer.pipe(Layer.provideMerge(layer))));
+		}).pipe(
+			Effect.provide(WsRpcServerLayer.pipe(Layer.provideMerge(layer)), {
+				local: true,
+			}),
+		);
 	});
 });
 
@@ -126,7 +130,9 @@ describe("WsRpcServerLayer ListSessions", () => {
 				removedSince: 0,
 			});
 		}).pipe(
-			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project"), {
+				local: true,
+			}),
 		),
 	);
 
@@ -189,6 +195,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 						makeTestHandlerLayer({ api, wsHandler, sessionManagerService }),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -235,6 +242,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -314,7 +322,9 @@ describe("WsRpcServerLayer ListSessions", () => {
 					/Authorization|private-auth-header|private-instance-password/,
 				);
 			}).pipe(
-				Effect.provide(WsRpcServerLayer.pipe(Layer.provideMerge(layer))),
+				Effect.provide(WsRpcServerLayer.pipe(Layer.provideMerge(layer)), {
+					local: true,
+				}),
 				Effect.ensuring(
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 				),
@@ -348,6 +358,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ wsHandler })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -374,6 +385,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ sessionManagerService })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -400,6 +412,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ sessionManagerService })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -496,6 +509,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 					),
 					Layer.provideMerge(persistenceLayer),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -969,7 +983,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				if (usesCanonicalHistory) expect(readTranscript).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.scoped,
-				Effect.provide(layer),
+				Effect.provide(layer, { local: true }),
 				Effect.ensuring(
 					Effect.sync(() => {
 						readTranscript.mockRestore();
@@ -1025,6 +1039,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 						makeTestHandlerLayer({ api, wsHandler, providerRegistry }),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -1056,6 +1071,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ api, wsHandler })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -1082,6 +1098,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ api, wsHandler })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -1131,6 +1148,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 					Layer.provideMerge(makeTestHandlerLayer({ persistenceLayer })),
 					Layer.provideMerge(persistenceLayer),
 				),
+				{ local: true },
 			),
 		);
 	});

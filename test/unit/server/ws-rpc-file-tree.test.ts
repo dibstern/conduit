@@ -54,6 +54,7 @@ describe("WsRpcServerLayer GetFileTree", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});

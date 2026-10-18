@@ -1,11 +1,6 @@
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
-import {
-	HttpEffect as HttpApp,
-	HttpRouter,
-	HttpServerRequest,
-	HttpServerResponse,
-} from "effect/http";
+import { Effect, Layer, Option } from "effect";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { expect } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import {
@@ -23,15 +18,15 @@ const requestLayer = (url: string, headers?: HeadersInit) =>
 			new Request(`http://localhost${url}`, {
 				...(headers !== undefined && { headers }),
 			}),
-		).modify({ remoteAddress: "127.0.0.1" }),
+		).modify({ remoteAddress: Option.some("127.0.0.1") }),
 	);
 
 function makeHandler(auth: AuthManager) {
-	const router = HttpRouter.empty.pipe(
-		HttpRouter.concat(authRoute),
-		HttpRouter.concat(authStatusRoute),
+	return HttpRouter.toWebHandler(
+		Layer.merge(authRoute, authStatusRoute).pipe(
+			Layer.provideMerge(authLayer(auth)),
+		),
 	);
-	return HttpApp.toWebHandlerLayer(router, authLayer(auth));
 }
 
 describe("Auth middleware", () => {

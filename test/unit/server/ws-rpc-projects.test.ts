@@ -69,6 +69,7 @@ describe("WsRpcServerLayer project management", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -106,6 +107,7 @@ describe("WsRpcServerLayer project management", () => {
 						makeTestHandlerLayer({ config, projectManagementService: service }),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -143,6 +145,7 @@ describe("WsRpcServerLayer project management", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -183,6 +186,7 @@ describe("WsRpcServerLayer project management", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});

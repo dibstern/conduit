@@ -69,6 +69,7 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		);
 
@@ -234,6 +235,7 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 					makeRoutedWsRpcServerLayer(resolve, undefined, "project-a").pipe(
 						Layer.provide(directoryLayer),
 					),
+					{ local: true },
 				),
 			);
 			const realpath = vi.spyOn(fs, "realpath");

@@ -21,7 +21,9 @@ describe("Push Notifications Effect", () => {
 				keys: { p256dh: "", auth: "" },
 			});
 			// No error = success
-		}).pipe(Effect.provide(PushManagerLive({ sendPush: mockSend })));
+		}).pipe(
+			Effect.provide(PushManagerLive({ sendPush: mockSend }), { local: true }),
+		);
 	});
 
 	it.effect("broadcast sends to all", () => {
@@ -40,7 +42,9 @@ describe("Push Notifications Effect", () => {
 			});
 			yield* push.broadcast({ title: "Test", body: "Hello" });
 			expect(mockSend).toHaveBeenCalledTimes(2);
-		}).pipe(Effect.provide(PushManagerLive({ sendPush: mockSend })));
+		}).pipe(
+			Effect.provide(PushManagerLive({ sendPush: mockSend }), { local: true }),
+		);
 	});
 
 	it.effect("individual failure does not block others", () => {
@@ -62,7 +66,9 @@ describe("Push Notifications Effect", () => {
 			});
 			yield* push.broadcast({ title: "Test", body: "Hello" });
 			expect(mockSend).toHaveBeenCalledTimes(2);
-		}).pipe(Effect.provide(PushManagerLive({ sendPush: mockSend })));
+		}).pipe(
+			Effect.provide(PushManagerLive({ sendPush: mockSend }), { local: true }),
+		);
 	});
 
 	it.effect(
@@ -80,7 +86,7 @@ describe("Push Notifications Effect", () => {
 					expect(legacy.value.getPublicKey()).toBe(publicKey);
 				}
 			}).pipe(
-				Effect.provide(PushNotificationManagerLive(configDir)),
+				Effect.provide(PushNotificationManagerLive(configDir), { local: true }),
 				Effect.ensuring(
 					Effect.sync(() =>
 						rmSync(configDir, { recursive: true, force: true }),

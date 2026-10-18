@@ -37,13 +37,15 @@ describe("WsRpcServerLayer input.submit", () => {
 					commandId: "cmd-no-handoff",
 				}).pipe(
 					Effect.tap((result) =>
-						expect(result).toEqual({
-							sessionId: input.sessionId,
-							handedOff: false,
+						Effect.sync(() => {
+							expect(result).toEqual({
+								sessionId: input.sessionId,
+								handedOff: false,
+							});
 						}),
 					),
 					Effect.scoped,
-					Effect.provide(makeTestHandlerLayer()),
+					Effect.provide(makeTestHandlerLayer(), { local: true }),
 				),
 		);
 	}
@@ -111,6 +113,7 @@ describe("WsRpcServerLayer input.submit", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -179,6 +182,7 @@ describe("WsRpcServerLayer input.submit", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -240,6 +244,7 @@ describe("WsRpcServerLayer input.submit", () => {
 						),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});

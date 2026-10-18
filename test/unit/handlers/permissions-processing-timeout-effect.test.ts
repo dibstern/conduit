@@ -92,7 +92,10 @@ describe("permission/question processing timeouts through Effect state", () => {
 				});
 
 				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(true);
-			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+			}).pipe(
+				Effect.provide(PassThroughSessionInbox, { local: true }),
+				Effect.provide(layer, { local: true }),
+			);
 		},
 	);
 
@@ -119,7 +122,7 @@ describe("permission/question processing timeouts through Effect state", () => {
 				yield* handleQuestionReject("client-1", { toolId: "que-1" });
 
 				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(true);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 });

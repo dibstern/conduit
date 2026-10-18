@@ -206,6 +206,7 @@ describe("WsRpcServerLayer GetModels", () => {
 							),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -239,6 +240,7 @@ describe("WsRpcServerLayer GetModels", () => {
 						),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -273,6 +275,7 @@ describe("WsRpcServerLayer GetModels", () => {
 							),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -446,6 +449,7 @@ describe("WsRpcServerLayer GetModels", () => {
 							),
 						),
 					),
+					{ local: true },
 				),
 				Effect.ensuring(
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
@@ -594,6 +598,7 @@ describe("WsRpcServerLayer GetModels", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -739,6 +744,7 @@ describe("WsRpcServerLayer GetModels", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -775,6 +781,7 @@ describe("WsRpcServerLayer GetModels", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -860,6 +867,7 @@ describe("WsRpcServerLayer GetModels", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},

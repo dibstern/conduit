@@ -37,6 +37,7 @@ describe("session triage RPCs", () => {
 					makeRoutedWsRpcServerLayer(resolve).pipe(
 						Layer.provide(sessionDirectory),
 					),
+					{ local: true },
 				),
 			);
 			for (const value of [true, false]) {
@@ -98,6 +99,7 @@ describe("session triage RPCs", () => {
 					makeRoutedWsRpcServerLayer(() => Effect.succeed(context)).pipe(
 						Layer.provide(sessionDirectory),
 					),
+					{ local: true },
 				),
 			);
 			const result = yield* Effect.result(
@@ -126,6 +128,7 @@ describe("session triage RPCs", () => {
 					makeRoutedWsRpcServerLayer(() => Effect.succeed(context)).pipe(
 						Layer.provide(sessionDirectory),
 					),
+					{ local: true },
 				),
 			);
 			expect(
@@ -178,6 +181,7 @@ describe("session triage RPCs", () => {
 						makeRoutedWsRpcServerLayer(() => Effect.succeed(context)).pipe(
 							Layer.provide(sessionDirectory),
 						),
+						{ local: true },
 					),
 				);
 				const result = yield* Effect.result(

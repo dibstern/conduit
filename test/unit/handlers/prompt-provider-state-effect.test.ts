@@ -214,8 +214,8 @@ describe("handleMessage with Effect provider state persistence", () => {
 					deliveredThrough: expect.any(Number),
 				});
 			}).pipe(
-				Effect.provide(PassThroughSessionInbox),
-				Effect.provide(layer),
+				Effect.provide(PassThroughSessionInbox, { local: true }),
+				Effect.provide(layer, { local: true }),
 				Effect.ensuring(
 					Effect.sync(() => {
 						rmSync(dir, { recursive: true, force: true });
@@ -319,8 +319,8 @@ describe("handleMessage with Effect provider state persistence", () => {
 				}),
 			);
 		}).pipe(
-			Effect.provide(PassThroughSessionInbox),
-			Effect.provide(layer),
+			Effect.provide(PassThroughSessionInbox, { local: true }),
+			Effect.provide(layer, { local: true }),
 			Effect.ensuring(
 				Effect.sync(() => {
 					rmSync(dir, { recursive: true, force: true });
@@ -424,8 +424,8 @@ describe("handleMessage with Effect provider state persistence", () => {
 					}),
 				]);
 			}).pipe(
-				Effect.provide(PassThroughSessionInbox),
-				Effect.provide(layer),
+				Effect.provide(PassThroughSessionInbox, { local: true }),
+				Effect.provide(layer, { local: true }),
 				Effect.ensuring(
 					Effect.sync(() => {
 						rmSync(dir, { recursive: true, force: true });
@@ -557,8 +557,8 @@ describe("handleMessage with Effect provider state persistence", () => {
 					}),
 				]);
 			}).pipe(
-				Effect.provide(PassThroughSessionInbox),
-				Effect.provide(layer),
+				Effect.provide(PassThroughSessionInbox, { local: true }),
+				Effect.provide(layer, { local: true }),
 				Effect.ensuring(
 					Effect.sync(() => {
 						rmSync(dir, { recursive: true, force: true });

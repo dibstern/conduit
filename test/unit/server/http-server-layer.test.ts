@@ -18,12 +18,7 @@ import {
 } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
-import {
-	HttpEffect as HttpApp,
-	HttpClient,
-	HttpClientRequest,
-	HttpServer,
-} from "effect/http";
+import { HttpClient, HttpClientRequest, HttpRouter } from "effect/http";
 import { afterAll, beforeAll, expect } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
@@ -92,9 +87,10 @@ const disposers: Array<() => Promise<void>> = [];
 
 // biome-ignore lint/suspicious/noExplicitAny: Layer type params vary per test
 function tracked(layer: Layer.Layer<any, any, never>) {
-	const h = HttpApp.toWebHandlerLayer(
-		effectRouter,
-		Layer.merge(layer, baseRouterLayer()),
+	const h = HttpRouter.toWebHandler(
+		effectRouter.pipe(
+			Layer.provideMerge(Layer.merge(layer, baseRouterLayer())),
+		),
 	);
 	disposers.push(h.dispose);
 	return h.handler;
@@ -252,7 +248,7 @@ describe("HTTP Server Layer", () => {
 	// 2. An HttpClient with the server URL prepended
 	// 3. Platform context (FileSystem, Etag, Path)
 	//
-	// We combine this with HttpServer.serve(router) and our test service layers.
+	// We combine this with HttpRouter.serve(router) and our test service layers.
 
 	const AllTestLayers = Layer.mergeAll(
 		TestProjectsLayer,
@@ -262,8 +258,8 @@ describe("HTTP Server Layer", () => {
 	);
 
 	// Build a test layer: layerTest provides HttpServer + HttpClient,
-	// HttpServer.serve wires the router into the server.
-	const TestServerLayer = HttpServer.serve(effectRouterWithCors).pipe(
+	// HttpRouter.serve wires the router into the server.
+	const TestServerLayer = HttpRouter.serve(effectRouterWithCors).pipe(
 		Layer.provideMerge(NodeHttpServer.layerTest),
 		Layer.provideMerge(AllTestLayers),
 	);
@@ -276,7 +272,7 @@ describe("HTTP Server Layer", () => {
 			const data = (yield* response.json) as Record<string, unknown>;
 			expect(data).toHaveProperty("ok", true);
 			expect(data).toHaveProperty("projects", 1);
-		}).pipe(Effect.provide(TestServerLayer)),
+		}).pipe(Effect.provide(TestServerLayer, { local: true })),
 	);
 
 	it.effect("info endpoint responds via real HTTP server", () =>
@@ -286,7 +282,7 @@ describe("HTTP Server Layer", () => {
 			expect(response.status).toBe(200);
 			const data = (yield* response.json) as Record<string, unknown>;
 			expect(data).toHaveProperty("version");
-		}).pipe(Effect.provide(TestServerLayer)),
+		}).pipe(Effect.provide(TestServerLayer, { local: true })),
 	);
 
 	it.effect("projects endpoint responds via real HTTP server", () =>
@@ -300,7 +296,7 @@ describe("HTTP Server Layer", () => {
 			};
 			expect(data.projects).toHaveLength(1);
 			expect(data.projects[0]).toHaveProperty("slug", "test-project");
-		}).pipe(Effect.provide(TestServerLayer)),
+		}).pipe(Effect.provide(TestServerLayer, { local: true })),
 	);
 
 	it.effect("CORS headers present on responses", () =>
@@ -309,7 +305,7 @@ describe("HTTP Server Layer", () => {
 			const response = yield* client.get("/info");
 			expect(response.status).toBe(200);
 			expect(response.headers["access-control-allow-origin"]).toBe("*");
-		}).pipe(Effect.provide(TestServerLayer)),
+		}).pipe(Effect.provide(TestServerLayer, { local: true })),
 	);
 
 	it.effect("push subscribe works via real HTTP server", () =>
@@ -329,7 +325,7 @@ describe("HTTP Server Layer", () => {
 			expect(response.status).toBe(200);
 			const body = yield* response.json;
 			expect(body).toEqual({ ok: true });
-		}).pipe(Effect.provide(TestServerLayer)),
+		}).pipe(Effect.provide(TestServerLayer, { local: true })),
 	);
 
 	it.effect("push unsubscribe works via real HTTP server", () =>
@@ -346,7 +342,7 @@ describe("HTTP Server Layer", () => {
 			expect(response.status).toBe(200);
 			const body = yield* response.json;
 			expect(body).toEqual({ ok: true });
-		}).pipe(Effect.provide(TestServerLayer)),
+		}).pipe(Effect.provide(TestServerLayer, { local: true })),
 	);
 });
 
