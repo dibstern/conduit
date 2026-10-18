@@ -56,16 +56,40 @@ export function failRpc(tag: string): () => void {
 	return () => failingRequests.delete(tag);
 }
 
+// Opens for sockets dialed while `opens` was false, run by the next connectedSocket().
+const waiting = new Set<() => void>();
+let opens = true;
+
 /**
  * Replaces `globalThis.WebSocket` with a socket that opens on the next tick and
- * stays open. Returns a cleanup that restores the original, suitable for
- * returning straight from a story's `beforeEach`. `project` is the
- * project AttachProject reports for a session route, whose transcript then
- * opens empty and settled; null means the session does not exist.
+ * stays open, and opens any socket `connectingSocket()` left dialing. Returns a
+ * cleanup that restores the original, suitable for returning straight from a
+ * story's `beforeEach`. `project` is the project AttachProject reports for a
+ * session route, whose transcript then opens empty and settled; null means the
+ * session does not exist.
  */
 export function connectedSocket(project: string | null = null): () => void {
+	const restore = fakeSocket(project, true);
+	for (const open of waiting) setTimeout(open, 0);
+	return restore;
+}
+
+/**
+ * Replaces `globalThis.WebSocket` with a socket that stays connecting until a
+ * later `connectedSocket()` opens it. The RPC client keeps the first socket a
+ * story file dials, so a file whose components dial on mount, but only some of
+ * whose stories connect, needs this: a real socket to the Vitest server never
+ * opens nor closes, and would pin every later story in the file to it.
+ */
+export function connectingSocket(): () => void {
+	return fakeSocket(null, false);
+}
+
+function fakeSocket(project: string | null, opensNow: boolean): () => void {
 	const RealWebSocket = globalThis.WebSocket;
+	const previouslyOpens = opens;
 	sessionProject = project;
+	opens = opensNow;
 
 	class OpenSocket {
 		static readonly CONNECTING = 0;
@@ -80,12 +104,15 @@ export function connectedSocket(project: string | null = null): () => void {
 
 		constructor(url: string | URL) {
 			this.url = String(url);
-			// Open after the RPC transport has attached its listeners.
-			setTimeout(() => {
+			const open = () => {
+				waiting.delete(open);
 				if (this.readyState !== OpenSocket.CONNECTING) return;
 				this.readyState = OpenSocket.OPEN;
 				this.emit("open");
-			}, 0);
+			};
+			// Open after the RPC transport has attached its listeners.
+			if (opens) setTimeout(open, 0);
+			else waiting.add(open);
 		}
 
 		addEventListener(event: string, listener: Listener): void {
@@ -245,5 +272,6 @@ export function connectedSocket(project: string | null = null): () => void {
 	return () => {
 		globalThis.WebSocket = RealWebSocket;
 		sessionProject = null;
+		opens = previouslyOpens;
 	};
 }
