@@ -25,11 +25,13 @@
 		open = $bindable(false),
 		onCamera,
 		onPhotos,
+		onFiles,
 		onSetGoal,
 	}: {
 		open?: boolean;
 		onCamera: () => void;
 		onPhotos: () => void;
+		onFiles: () => void;
 		onSetGoal: () => void;
 	} = $props();
 	const canSetGoal = $derived(discoveryState.currentTraits?.supportsGoalState);
@@ -77,6 +79,11 @@
 	<MenuItem id="attach-photos" density="touch" onselect={onPhotos}>
 		<Icon name="image" size={18} class="shrink-0" />
 		<span>Add Photos</span>
+	</MenuItem>
+
+	<MenuItem id="attach-files" density="touch" onselect={onFiles}>
+		<Icon name="file" size={18} class="shrink-0" />
+		<span>Add Files</span>
 	</MenuItem>
 
 	<MenuSeparator />

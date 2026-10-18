@@ -53,6 +53,7 @@ const meta = {
 		open: false,
 		onCamera: fn(),
 		onPhotos: fn(),
+		onFiles: fn(),
 		onSetGoal: fn(),
 	},
 } satisfies Meta<typeof AttachMenu>;

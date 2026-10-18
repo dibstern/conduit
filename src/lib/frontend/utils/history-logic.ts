@@ -1,6 +1,7 @@
 // Pure functions with no DOM or framework dependencies.
 // Extracted for unit testing without a browser environment.
 
+import { base64ByteLength } from "../../attachment-data-url.js";
 import { SUBAGENT_TOOL_NAMES } from "../../contracts/tool-wire.js";
 import {
 	endsOpenCodeTurn,
@@ -420,11 +421,35 @@ export function historyToChatMessages(
 					?.filter((p) => p.type === "text")
 					.map((p) => p.text ?? "")
 					.join("\n") ?? "";
+			const attachments = msg.parts?.flatMap((part) => {
+				if (
+					part.type !== "file" ||
+					typeof part["mime"] !== "string" ||
+					typeof part["url"] !== "string"
+				)
+					return [];
+				const data = /^data:[^,]*;base64,([A-Za-z0-9+/]*={0,2})$/.exec(
+					part["url"],
+				)?.[1];
+				return [
+					{
+						id: part.id,
+						mime: part["mime"],
+						name:
+							typeof part["filename"] === "string"
+								? part["filename"]
+								: "Attachment",
+						url: part["url"],
+						...(data !== undefined ? { size: base64ByteLength(data) } : {}),
+					},
+				];
+			});
 			result.push({
 				type: "user",
 				uuid: uuidFor ? uuidFor(msg.id, "user") : generateUuid(),
 				messageId: msg.id,
 				text: extractDisplayText(text),
+				...(attachments?.length ? { attachments } : {}),
 				...(msg.time?.created != null && { createdAt: msg.time.created }),
 				...(msg.modelExecution != null
 					? { modelExecution: msg.modelExecution }

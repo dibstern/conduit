@@ -103,6 +103,13 @@ export interface UserMessage {
 	uuid: string;
 	messageId?: string;
 	text: string;
+	attachments?: {
+		id: string;
+		mime: string;
+		name: string;
+		url: string;
+		size?: number;
+	}[];
 	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
 	createdAt?: number;
 	modelExecution?: ModelExecution;
@@ -420,7 +427,7 @@ export interface SplitRow {
 
 // ProjectInfo is re-exported from shared-types.ts above.
 
-export interface PendingImage {
+export interface PendingAttachment {
 	id: string;
 	dataUrl: string;
 	name: string;

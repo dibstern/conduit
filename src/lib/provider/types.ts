@@ -262,6 +262,7 @@ export interface SendTurnInput {
 	readonly sideThread?: boolean;
 	readonly variant?: string;
 	readonly contextWindow?: string;
+	/** Base64 data URLs for images, plain text and PDFs. Retains the wire field name. */
 	readonly images?: readonly string[];
 	readonly agent?: string;
 }
