@@ -3,6 +3,8 @@
      Resting on the turn prefetches tool details; a strip tap opens its log row. -->
 <script lang="ts">
 	import { onDestroy, tick, untrack } from "svelte";
+	import type { AskExplanation } from "../../../contracts/ask-explanation.js";
+	import SurfacingAskContext from "./SurfacingAskContext.svelte";
 	import { MediaQuery } from "svelte/reactivity";
 	import type { CategorySet } from "../../../contracts/category-set.js";
 	import type { MessageSurfacingStatus, MessageSurfacingPreferences } from "../../../contracts/message-surfacing.js";
@@ -49,7 +51,7 @@
 	import TurnEconomics from "./TurnEconomics.svelte";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, hasRecap = false }: {
+	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false }: {
 		turn: Turn;
 		segment: Segment;
 		final: boolean;
@@ -69,6 +71,7 @@
 		hasRecap?: boolean;
 		onSurfacingShortcut?: (key: string) => boolean | undefined;
 		onMessagesRead?: (partIds: readonly string[], read: boolean) => Promise<void>;
+		onReplyToAsk?: (part: SurfacePart, text?: string) => void;
 	} = $props();
 
 	let expanded = $state(false);
@@ -124,7 +127,40 @@
 	const override = $derived(sessionSurfaceLevel(sessionId));
 	const level = $derived(override ?? surfacingConfig.status.defaultLevel);
 	const recap = new TurnRecapState();
-	const recapTurnId = $derived(turn.id);
+	let askExplanations = $state<Record<string, AskExplanation>>({});
+	let generatingAsk = $state<string | null>(null);
+	let askError = $state<{ uuid: string; message: string } | null>(null);
+	/** The Ask a citation left, offered back on the cited message's card. */
+	let askReturn = $state<{ ask: SurfacePin; cited: string } | null>(null);
+	const askIdentity = $derived(`${sessionId}/${turn.id}`);
+	$effect(() => {
+		void askIdentity;
+		askExplanations = {};
+		generatingAsk = null;
+		askError = null;
+		askReturn = null;
+	});
+	function setupFor(pin: SurfacePin): SurfacePart | null {
+		const parts = turn.segments.flatMap((block) => [...block.activity, ...block.reply]);
+		const index = parts.findIndex((part) => part.uuid === pin.part.uuid);
+		return parts.slice(0, Math.max(0, index)).reverse().find((part): part is SurfacePart => part.type === "assistant" && !!part.rawText.trim()) ?? null;
+	}
+	async function explainAsk(pin: SurfacePin) {
+		if (!sessionId || !pin.part.partId || generatingAsk || askExplanations[pin.part.uuid]) return;
+		const identity = askIdentity;
+		generatingAsk = pin.part.uuid;
+		askError = null;
+		try {
+			const explanation = await rpc("ExplainAsk", { sessionId, turnId: storeTurnId, partId: pin.part.partId });
+			if (identity === askIdentity) askExplanations = { ...askExplanations, [pin.part.uuid]: explanation };
+		} catch (error) {
+			if (identity === askIdentity) askError = { uuid: pin.part.uuid, message: error instanceof Error ? error.message : String(error) };
+		} finally {
+			if (identity === askIdentity) generatingAsk = null;
+		}
+	}
+	/** The event store keys a turn by its user message id; turn.id is that row's transcript uuid. */
+	const storeTurnId = $derived(turn.user?.messageId ?? turn.id);
 	// jsdom has no matchMedia; real browsers always do.
 	const phone = typeof matchMedia === "function" ? new MediaQuery("(max-width: 599px)") : { current: false };
 	let summaryOpen = $state<boolean | null>(null);
@@ -135,7 +171,7 @@
 	const summaryEnabled = $derived(surfacingActive && final && !!sessionId && summarySettings.model !== "off");
 	const summaryLabel = $derived(recap.generating ? "✦ Summarising…" : recap.versions.length ? "✦ Summary" : "✦ Summarize");
 	$effect(() => {
-		const id = recapTurnId;
+		const id = storeTurnId;
 		const session = sessionId;
 		const active = summaryEnabled;
 		const watch = latestTurn;
@@ -144,7 +180,7 @@
 		return;
 	});
 	$effect(() => {
-		void recapTurnId;
+		void storeTurnId;
 		void sessionId;
 		summaryOpen = null;
 	});
@@ -239,7 +275,7 @@
 	function generateSummary(scope: "whole" | "new", sourceVersion?: number) {
 		if (!sessionId || !summaryEnabled) return;
 		summaryOpen = true;
-		void recap.generate(sessionId, turn.id, scope, sourceVersion);
+		void recap.generate(sessionId, storeTurnId, scope, sourceVersion);
 	}
 	async function updateSummarySettings(patch: Partial<MessageSurfacingPreferences["recap"]>) {
 		summarySaving = true;
@@ -389,6 +425,20 @@
 	{@render surfacingRegions.cardFoot?.(pin)}
 	<SurfacingMarkActions {pin} {feedback} canSave={!!sessionId} />
 {/snippet}
+{#snippet askContext(pin: SurfacePin)}
+	{@render surfacingRegions.cardContext?.(pin)}
+	{#if pin.category === "ask" && !pin.pending}
+		<SurfacingAskContext setup={setupFor(pin)} view={surface} start={turn.user?.createdAt ?? 0}
+			explanation={askExplanations[pin.part.uuid]} generating={generatingAsk === pin.part.uuid}
+			error={askError?.uuid === pin.part.uuid ? askError.message : ""}
+			enabled={!!sessionId && !!pin.part.partId && summarySettings.model !== "off"}
+			onexplain={() => { void explainAsk(pin); }} oncite={(part) => { askReturn = { ask: pin, cited: part.uuid }; revealMessage(part); }}
+			onReplyToAsk={(text) => onReplyToAsk?.(pin.part, text)} />
+	{:else if askReturn?.cited === pin.part.uuid && surface.openAsk?.uuid === askReturn.ask.part.uuid}
+		{@const ask = askReturn.ask}
+		<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="mt-[8px] h-[24px] rounded-full px-[9px] text-[12px] font-medium bg-status-ask/18 text-status-ask" data-testid="ask-back" onclick={() => { pick(ask); askReturn = null; }}>↩ Back to ? #{ask.part.surfacingOrdinal}</Button>
+	{/if}
+{/snippet}
 {#snippet markWhy(pin: SurfacePin)}
 	{@render surfacingRegions.why?.(pin)}
 	<SurfacingMarkWhy {pin} {feedback} categorySet={surfacingConfig.categorySet} />
@@ -464,7 +514,7 @@
 					{#snippet strip()}<ActivityStrip {turn} {segment} {final} {now} {running} interactive={false} />{/snippet}
 				</MinimisedTurn>
 			{:else if surfacingActive}
-				<SurfacingCard view={surface} {live} {level} overridden={override !== undefined} regions={{ ...surfacingRegions, cardHead: markHead, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
+				<SurfacingCard view={surface} {live} {level} overridden={override !== undefined} regions={{ ...surfacingRegions, cardHead: markHead, cardContext: askContext, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
 					{readSaving} {readError} canAutoRead={autoReadAttempt !== readTarget} onread={readMessage} onautoread={(pin) => readMessage(pin, true)}
 					markReadInAxis={!summaryEnabled} onmarkread={() => { void writeRead(surface.unreadPartIds, true); }}
 					startTime={surfaceTime((segment.activity[0]?.createdAt ?? turn.user?.createdAt ?? 0) - (turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0))}

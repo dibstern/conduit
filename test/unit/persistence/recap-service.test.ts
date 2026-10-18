@@ -36,6 +36,7 @@ const layer = (
 		when?: "turn-end" | "on-request";
 		active?: boolean;
 		model?: "sonnet" | "opus" | "off";
+		response?: string;
 	} = {},
 ) => {
 	const settings: MessageSurfacingStatus = {
@@ -56,7 +57,9 @@ const layer = (
 	) {
 		yield {
 			type: "result",
-			result: `Generation ${++calls} changed [#1]. Valid [#4]. Invalid [#999] [#-1] [#NaN] [#1.5].`,
+			result:
+				options.response ??
+				`Generation ${++calls} changed [#1]. Valid [#4]. Invalid [#999] [#-1] [#NaN] [#1.5].`,
 		};
 	});
 	const deps = Layer.mergeAll(
@@ -114,6 +117,138 @@ const complete = Effect.gen(function* () {
 });
 
 describe("RecapService persisted versions", () => {
+	// Ask failures: opening spends money; another turn/project leaks into the
+	// prompt; later messages change the question's meaning; invalid citations
+	// survive; Off still calls Claude; an explanation overwrites a turn recap
+	// or drops automatic generation when the turn completes during Explain.
+	it.scoped("automatically recaps a turn that completes during Explain", () => {
+		const fixture = layer({ when: "turn-end" });
+		let releaseExplanation = () => {};
+		const held = new Promise<void>((resolve) => {
+			releaseExplanation = resolve;
+		});
+		let explanationStarted = () => {};
+		const started = new Promise<void>((resolve) => {
+			explanationStarted = resolve;
+		});
+		fixture.query.mockImplementationOnce(async function* () {
+			explanationStarted();
+			await held;
+			yield {
+				type: "result",
+				result: JSON.stringify({
+					soFar: "The review is underway. [#1]",
+					whatCameUp: "A choice is needed. [#2]",
+					options: [],
+					unanswered: "",
+				}),
+			};
+		});
+		return Effect.gen(function* () {
+			yield* seed;
+			const service = yield* RecapServiceTag;
+			const explanation = yield* service
+				.explainAsk({ ...target, partId: "part-2" })
+				.pipe(Effect.forkScoped);
+			yield* Effect.promise(() => started);
+			const recapped = yield* service.subscribe(target).pipe(
+				Stream.filter((snapshot) => snapshot.versions.length === 1),
+				Stream.take(1),
+				Stream.runHead,
+				Effect.forkScoped,
+			);
+			yield* complete;
+			yield* Effect.tryPromise(() =>
+				vi.waitFor(() => expect(fixture.query).toHaveBeenCalledTimes(2)),
+			);
+			yield* Fiber.join(recapped);
+			expect(yield* service.list(target)).toMatchObject([
+				{ version: 1, scope: "whole", lastOrdinal: 4 },
+			]);
+			releaseExplanation();
+			expect((yield* Fiber.join(explanation)).soFar).toContain("[#1]");
+			expect(yield* service.list(target)).toHaveLength(1);
+			expect(fixture.query).toHaveBeenCalledTimes(2);
+		}).pipe(
+			Effect.ensuring(Effect.sync(releaseExplanation)),
+			Effect.provide(fixture.live),
+		);
+	});
+	it.scoped(
+		"explains an Ask with the summary model and only its preceding context",
+		() => {
+			const fixture = layer({
+				model: "opus",
+				response: JSON.stringify({
+					soFar: "The review is underway. [#1] [#4] [#999]",
+					whatCameUp: "A choice is needed. [#2]",
+					options: [
+						{
+							label: "Keep it",
+							explanation: "Preserves the spacing.",
+							recommended: true,
+						},
+					],
+					unanswered: "The agent continues elsewhere. [#-1]",
+				}),
+			});
+			return Effect.gen(function* () {
+				yield* seed;
+				const service = yield* RecapServiceTag;
+				expect(fixture.query).not.toHaveBeenCalled();
+				const result = yield* service.explainAsk({
+					...target,
+					partId: "part-2",
+				});
+				expect(result).toMatchObject({
+					model: "opus",
+					whatCameUp: "A choice is needed. [#2]",
+				});
+				expect(result.soFar).toContain("[#1]");
+				expect(result.soFar).not.toMatch(/\[#(?:4|999)\]/);
+				expect(result.unanswered).not.toContain("[#-1]");
+				expect(fixture.query).toHaveBeenCalledTimes(1);
+				const call = fixture.query.mock.calls[0]?.[0];
+				expect(call?.options?.model).toBe("opus");
+				expect(call?.prompt).toContain("Update 1");
+				expect(call?.prompt).toContain("Update 2");
+				expect(call?.prompt).not.toContain("Update 3");
+				expect(yield* service.list(target)).toEqual([]);
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`UPDATE sessions SET project_id = 'other-project' WHERE id = 'session-1'`;
+				expect(
+					(yield* Effect.either(
+						service.explainAsk({ ...target, partId: "part-2" }),
+					))._tag,
+				).toBe("Left");
+				expect(fixture.query).toHaveBeenCalledTimes(1);
+			}).pipe(Effect.provide(fixture.live));
+		},
+	);
+	it.scoped(
+		"rejects disabled summaries and unknown Ask parts without a paid call",
+		() => {
+			return Effect.forEach(
+				[
+					{ model: "off", partId: "part-2" },
+					{ model: "sonnet", partId: "missing" },
+				] as const,
+				({ model, partId }) => {
+					const fixture = layer({ model });
+					return Effect.gen(function* () {
+						yield* seed;
+						const service = yield* RecapServiceTag;
+						expect(
+							(yield* Effect.either(service.explainAsk({ ...target, partId })))
+								._tag,
+						).toBe("Left");
+						expect(fixture.query).not.toHaveBeenCalled();
+					}).pipe(Effect.provide(fixture.live));
+				},
+				{ discard: true },
+			);
+		},
+	);
 	it.scoped("rejects overlapping requests before preparing a long turn", () => {
 		const fixture = layer();
 		return Effect.gen(function* () {

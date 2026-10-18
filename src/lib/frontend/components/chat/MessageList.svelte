@@ -19,6 +19,7 @@
 		getSessionPhase,
 		isLlmActive,
 		isProcessing,
+		insertInputDraft,
 		sessionMessages,
 	} from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
@@ -574,6 +575,7 @@
 			{#if segment.activity.length > 0 || (final && turn.live)}
 				{@const reply = segment.reply[0]}
 				<TurnActivity latestTurn={turn.id === latestTurnId} newestSettledTurn={turn.id === newestEndedTurnId} {turn} {segment} {final} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
+					onReplyToAsk={(part, text) => insertInputDraft(`Re: Ask #${part.surfacingOrdinal}${text ? ` — ${text}` : ""}`)}
 					forkMessageId={reply ? forkMessageIdAtReply(turn, reply) : undefined}
 					model={turn.user?.modelExecution?.actualModel ?? turn.user?.modelExecution?.requestedModel} />
 			{/if}
