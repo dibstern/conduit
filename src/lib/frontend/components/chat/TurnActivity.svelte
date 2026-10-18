@@ -50,7 +50,7 @@
 	import TurnEconomics from "./TurnEconomics.svelte";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, hasRecap = false }: {
+	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, hasRecap = false }: {
 		turn: Turn;
 		segment: Segment;
 		final: boolean;
@@ -62,6 +62,7 @@
 		model?: string | undefined;
 		providerId?: string | undefined;
 		onsummarize?: (() => void) | undefined;
+		onjump?: (() => void) | undefined;
 		numbered?: boolean;
 		latestTurn?: boolean;
 		newestSettledTurn?: boolean;
@@ -390,6 +391,7 @@
 	async function jumpTo(i: number) {
 		const part = segment.activity[i];
 		if (!part) return;
+		onjump?.();
 		openTurn();
 		expanded = true;
 		focusUuid = part.uuid;
