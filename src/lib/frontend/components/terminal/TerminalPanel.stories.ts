@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import {
 	beginCreateTab,
 	destroyAll,
@@ -113,6 +113,13 @@ export const MultiFolderPickerOpen: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const body = within(canvasElement.ownerDocument.body);
+		// The active tab focuses its terminal once the font loads. Open the menu
+		// after that, or the late focus takes it back from the open menu.
+		await waitFor(() =>
+			expect(
+				canvasElement.querySelector(".xterm-helper-textarea"),
+			).toHaveFocus(),
+		);
 		await userEvent.click(
 			canvas.getByRole("button", { name: "New terminal in folder" }),
 		);
