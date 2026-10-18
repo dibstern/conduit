@@ -26,20 +26,24 @@ import {
 
 // Failure modes: reads spend money; New repeats old messages or loses its prior
 // text; citations name nonexistent/final/other-turn messages; versions overwrite;
-// Off/inactive/on-request/short completion generates; stale completion makes a
+// Off/on-request/short completion generates; stale completion makes a
 // second Whole; reload loses cache; deletion races resurrect recaps; subscribers
 // miss the commit; overlapping requests pay twice during input preparation or
 // generation; interrupted preparation leaves the turn reserved forever.
+// Jev disabled or missing/rejected keys must not block summaries. Unclassified
+// text must receive the same numbers as the log, excluding trailing replies.
 const target = { sessionId: "session-1", turnId: "user-1" };
 const layer = (
 	options: {
 		when?: "turn-end" | "on-request";
 		active?: boolean;
+		summariesEnabled?: boolean;
 		model?: "sonnet" | "opus" | "off";
 	} = {},
 ) => {
 	const settings: MessageSurfacingStatus = {
 		enabled: true,
+		summariesEnabled: options.summariesEnabled ?? true,
 		active: options.active ?? true,
 		defaultLevel: "balanced",
 		turnsOpen: "auto",
@@ -114,6 +118,38 @@ const complete = Effect.gen(function* () {
 });
 
 describe("RecapService persisted versions", () => {
+	it.scoped(
+		"summarizes unclassified log messages with Jev off and no key",
+		() => {
+			const fixture = layer({ active: false });
+			Object.assign(fixture.settings, {
+				enabled: false,
+				key: { source: "none", rejected: false },
+			});
+			return Effect.gen(function* () {
+				yield* seed;
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`UPDATE message_parts SET surfacing_ordinal = NULL, surfacing_probabilities = NULL`;
+				yield* sql`INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at) VALUES ('thinking-step', 'assistant-1', 'thinking', 'Check changes', 50, 8, 8)`;
+				const recap = yield* (yield* RecapServiceTag).generate({
+					...target,
+					scope: "whole",
+				});
+				expect(recap).toMatchObject({ firstOrdinal: 1, lastOrdinal: 4 });
+				expect(fixture.query.mock.calls[0]?.[0].prompt).toContain(
+					'"ordinal":4',
+				);
+				expect(fixture.query.mock.calls[0]?.[0].prompt).not.toContain(
+					'"text":"Final response"',
+				);
+				Object.assign(fixture.settings, {
+					key: { source: "stored", rejected: true },
+				});
+				yield* (yield* RecapServiceTag).generate({ ...target, scope: "whole" });
+				expect(fixture.query).toHaveBeenCalledTimes(2);
+			}).pipe(Effect.provide(fixture.live));
+		},
+	);
 	it.scoped("rejects overlapping requests before preparing a long turn", () => {
 		const fixture = layer();
 		return Effect.gen(function* () {
@@ -239,7 +275,10 @@ describe("RecapService persisted versions", () => {
 			}).pipe(Effect.provide(fixture.live));
 		},
 	);
-	for (const options of [{ active: false }, { model: "off" as const }])
+	for (const options of [
+		{ summariesEnabled: false },
+		{ model: "off" as const },
+	])
 		it.scoped(`never calls Claude with ${JSON.stringify(options)}`, () => {
 			const fixture = layer(options);
 			return Effect.gen(function* () {

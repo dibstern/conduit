@@ -32,6 +32,8 @@ import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 // stay read-only, while stored keys remain editable and missing keys have no owner.
 // Turns open must survive restart and partial patches. Pre-minimise snapshots
 // must default to Auto without dropping their existing preferences or key.
+// Split flags must survive restart and independent patches. Legacy snapshots
+// retain the effective summary state, including missing/rejected keys and Off.
 const directories: string[] = [];
 const directory = () => {
 	const dir = mkdtempSync("/tmp/message-surfacing-");
@@ -46,8 +48,110 @@ const validTransport = () =>
 	vi.fn(async () => new Response("{}", { status: 200 }));
 
 describe("message surfacing settings", () => {
+	it.effect("persists summaries independently of Jev and its key", () =>
+		Effect.gen(function* () {
+			const dir = directory();
+			const transport = validTransport();
+			const settings = yield* makeMessageSurfacingSettings(dir, {
+				env: {},
+				transport,
+			});
+			yield* settings.update({
+				summariesEnabled: true,
+				recap: { model: "opus" },
+			});
+			yield* settings.update({ enabled: true });
+			yield* settings.update({ enabled: false });
+			const restarted = yield* makeMessageSurfacingSettings(dir, {
+				env: {},
+				transport,
+			});
+			expect(yield* restarted.get).toMatchObject({
+				enabled: false,
+				active: false,
+				summariesEnabled: true,
+				recap: { model: "opus" },
+				key: { source: "none" },
+			});
+			yield* restarted.update({ summariesEnabled: false });
+			expect(yield* restarted.get).toMatchObject({
+				enabled: false,
+				summariesEnabled: false,
+				recap: { model: "opus" },
+			});
+			expect(transport).not.toHaveBeenCalled();
+		}),
+	);
+	for (const legacy of [
+		{
+			enabled: true,
+			key: true,
+			rejected: false,
+			model: "opus",
+			summaries: true,
+		},
+		{
+			enabled: false,
+			key: true,
+			rejected: false,
+			model: "sonnet",
+			summaries: false,
+		},
+		{
+			enabled: true,
+			key: false,
+			rejected: false,
+			model: "sonnet",
+			summaries: false,
+		},
+		{
+			enabled: true,
+			key: true,
+			rejected: true,
+			model: "sonnet",
+			summaries: false,
+		},
+		{
+			enabled: true,
+			key: true,
+			rejected: false,
+			model: "off",
+			summaries: false,
+		},
+	] as const) {
+		it.effect(`migrates legacy summary state ${JSON.stringify(legacy)}`, () =>
+			Effect.gen(function* () {
+				const dir = directory();
+				const settings = yield* makeMessageSurfacingSettings(dir, {
+					env: {},
+					transport: validTransport(),
+				});
+				yield* settings.update({
+					enabled: legacy.enabled,
+					...(legacy.key ? { apiKey: "fake-legacy-key" } : {}),
+					recap: { model: legacy.model, when: "turn-end" },
+				});
+				const filename = join(dir, "credentials/typesafe");
+				const saved: { settings: Record<string, unknown>; keyState: string } =
+					JSON.parse(readFileSync(filename, "utf8"));
+				delete saved.settings["summariesEnabled"];
+				if (legacy.rejected) saved.keyState = "invalid";
+				writeFileSync(filename, JSON.stringify(saved));
+				const restarted = yield* makeMessageSurfacingSettings(dir, { env: {} });
+				expect(yield* restarted.get).toMatchObject({
+					enabled: legacy.enabled,
+					summariesEnabled: legacy.summaries,
+					recap: { model: legacy.model, when: "turn-end" },
+				});
+				yield* restarted.update({ defaultLevel: "key" });
+				expect(
+					JSON.parse(readFileSync(filename, "utf8")).settings.summariesEnabled,
+				).toBe(legacy.summaries);
+			}),
+		);
+	}
 	it.effect(
-		"defaults off and merges nested and concurrent patches durably",
+		"defaults Jev off and summaries on without a key and merges patches durably",
 		() =>
 			Effect.gen(function* () {
 				const dir = directory();
@@ -58,11 +162,12 @@ describe("message surfacing settings", () => {
 				});
 				expect(yield* settings.get).toEqual({
 					enabled: false,
+					summariesEnabled: true,
 					active: false,
 					key: { source: "none", rejected: false },
 					defaultLevel: "balanced",
 					turnsOpen: "auto",
-					recap: { model: "sonnet", when: "turn-end" },
+					recap: { model: "sonnet", when: "on-request" },
 					tuningModel: "opus",
 				});
 				yield* Effect.all(
@@ -489,7 +594,7 @@ describe("message surfacing settings", () => {
 				).toMatchObject({
 					enabled: true,
 					active: false,
-					recap: { model: "opus", when: "turn-end" },
+					recap: { model: "opus", when: "on-request" },
 				});
 				const denied = yield* Effect.either(
 					handlers

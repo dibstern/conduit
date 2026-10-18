@@ -656,6 +656,11 @@ export const mockAppHandlers: StepHandler[] = [
 						const next = {
 							...previous,
 							enabled: patch.enabled ?? previous.enabled,
+							summariesEnabled:
+								patch.summariesEnabled ??
+								(patch.recap?.model === "off"
+									? false
+									: previous.summariesEnabled),
 							defaultLevel: patch.defaultLevel ?? previous.defaultLevel,
 							tuningModel: patch.tuningModel ?? previous.tuningModel,
 							recap: {

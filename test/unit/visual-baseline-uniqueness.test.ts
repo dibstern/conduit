@@ -48,6 +48,20 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 	"overlays-settingspanel--default | overlays-settingspanel--hover":
 		"on phone Default and Hover both end on the section list, whose rows have no hover style; desktop still differs on the rail's hover colour",
 
+	// conduit-test-ahu8.19: turn summaries do not depend on Jev or its key.
+	"chat-surfacing-switches--jev-off-summaries-on | chat-surfacing-switches--no-key":
+		"with Jev off a missing key changes nothing in the turn, so matching JevOffSummariesOn is the assertion; NoKey's play proves the summary still opens",
+	"chat-surfacing-switches--jev-off-summaries-on-light | chat-surfacing-switches--no-key-light":
+		"the light pair of JevOffSummariesOn and NoKey, identical for the same reason",
+	"overlays-surfacingsettings--general | overlays-surfacingsettings--no-key-summaries":
+		"General already has no key and summaries on by default; NoKeySummaries asserts in play() that Jev's switch is disabled while Turn summaries stays enabled",
+	"overlays-surfacingsettings--general-light | overlays-surfacingsettings--no-key-summaries-light":
+		"the light pair of General and NoKeySummaries, identical for the same reason",
+	"overlays-surfacingsettings--jev-off-summaries-on | overlays-surfacingsettings--valid-key":
+		"a valid key with Jev off is the summaries-only default; JevOffSummariesOn asserts in play() that Turn summaries is on",
+	"overlays-surfacingsettings--jev-off-summaries-on-light | overlays-surfacingsettings--valid-key-light":
+		"the light pair of JevOffSummariesOn and ValidKey, identical for the same reason",
+
 	// Verified legitimate (conduit-test-732b). Each of these was traced to the
 	// source; the two stories genuinely produce the same frame.
 	"model-contextwindowselector--premium-default | model-contextwindowselector--selected-1-m":

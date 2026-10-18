@@ -274,6 +274,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 				...DEFAULT_MESSAGE_SURFACING_SETTINGS,
 				defaultLevel: level,
 				enabled: match[1] !== "inactive",
+				summariesEnabled: match[1] === "active",
 				active: match[1] === "active",
 				key: {
 					source:

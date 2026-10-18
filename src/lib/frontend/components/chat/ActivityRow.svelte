@@ -237,8 +237,8 @@
 		<span class="h-px flex-1 bg-border" aria-hidden="true"></span>
 	</div>
 {:else}
-	<div data-part={part.uuid}>
-		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
+	<div data-part={part.uuid} data-message-number={messageNumber} data-highlighted={highlight || undefined}>
+		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" class={highlight ? "bg-selection" : ""} aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
 			{#if messageNumber !== undefined}<span class="shrink-0 font-mono text-[12px] text-text-dimmer">#{messageNumber}</span>
 			{:else}<span class="shrink-0 text-text-dimmer"><Icon name={style.icon} size={14} /></span>{/if}
 			<span class="flex-1 truncate italic text-text-secondary">{firstLine(part.rawText, 120)}</span>
