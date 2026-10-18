@@ -3,7 +3,7 @@ import { sdkDefaultClaudeConfigDir } from "../../src/lib/provider/claude/claude-
 // and key services work end-to-end.
 
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Queue, Schema } from "effect";
+import { Effect, Layer, PubSub, Schema } from "effect";
 import { expect } from "vitest";
 import { WsRpcRequest } from "../../src/lib/contracts/ws-rpc.js";
 import { DaemonWsRpcHandlersTag } from "../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
@@ -117,7 +117,7 @@ describe("Integration: Full Layer Composition", () => {
 		Effect.gen(function* () {
 			const sub = yield* subscribeToDaemonEvents;
 			yield* publishStatusChanged({ s1: "busy", s2: "idle" });
-			const event = yield* Queue.take(sub);
+			const event = yield* PubSub.take(sub);
 
 			expect(event._tag).toBe("StatusChanged");
 			if (event._tag === "StatusChanged") {

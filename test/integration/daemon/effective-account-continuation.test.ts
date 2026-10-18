@@ -15,7 +15,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "@effect/vitest";
-import { Effect, Result as Either, Stream } from "effect";
+import { Effect, Result as Either, Semaphore, Stream } from "effect";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
@@ -138,7 +138,7 @@ for (const scenario of [
 	it.effect(scenario.name, () => {
 		const targetAccount = "at" in scenario ? "personal" : "work";
 		const admittedSessions: string[] = [];
-		const admission = Effect.unsafeMakeSemaphore(1);
+		const admission = Semaphore.makeUnsafe(1);
 		const sends: Array<{
 			accountId: string;
 			folder: string;

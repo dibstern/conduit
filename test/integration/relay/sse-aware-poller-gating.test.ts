@@ -23,7 +23,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
-import { Effect, Stream } from "effect";
+import { Effect, Option, Stream } from "effect";
 import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { getCurrentStatuses } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
@@ -441,7 +441,7 @@ async function waitForIdle(
 					.pipe(
 						Stream.filter((envelope) => envelope._tag === "snapshot"),
 						Stream.runHead,
-						Effect.flatten,
+						Effect.map(Option.getOrThrow),
 					),
 			);
 			if (snapshot._tag !== "snapshot")

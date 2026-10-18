@@ -13,7 +13,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Layer, ManagedRuntime } from "effect";
 import {
 	afterEach,
 	assert,
@@ -74,8 +74,8 @@ describe("daemon project readiness and socket routing", () => {
 				makeWsTransportLive({ noServer: true }),
 			),
 		);
-		const rpcWsHandler = await Effect.runPromise(
-			makeWsRpcWebSocketHandler({ runtime }).pipe(Effect.provide(runtime)),
+		const rpcWsHandler = await runtime.runPromise(
+			makeWsRpcWebSocketHandler({ runtime }),
 		);
 		const relay = createMockProjectRelay({ rpcWsHandler });
 

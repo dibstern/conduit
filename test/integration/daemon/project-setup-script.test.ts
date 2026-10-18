@@ -150,6 +150,7 @@ describe("Project setup scripts through the built daemon", () => {
 				projectSlug: "process-test",
 				originId: "project-setup-test",
 				providerId: "claude",
+				model: { providerId: "claude", modelId: "sonnet" },
 				title,
 				...(newWorktree ? { newWorktree: true } : {}),
 			});

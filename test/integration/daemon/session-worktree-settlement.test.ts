@@ -211,6 +211,7 @@ describe("Worktree branch settlement through the built daemon", () => {
 				projectSlug: "process-test",
 				originId: "settlement-test",
 				providerId: "claude",
+				model: { providerId: "claude", modelId: "sonnet" },
 				title,
 				...options,
 			});

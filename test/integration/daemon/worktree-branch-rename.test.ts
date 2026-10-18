@@ -30,10 +30,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	RenameSessionBranch,
-	type SessionInfo,
-} from "../../../src/lib/contracts/ws-rpc.js";
+import type { SessionInfo } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -196,6 +193,7 @@ process.exit(result.status ?? 1);
 				projectSlug: "process-test",
 				originId: "worktree-branch-rename-test",
 				providerId: "claude",
+				model: { providerId: "claude", modelId: "sonnet" },
 				title,
 				...(newWorktree ? { newWorktree: true } : {}),
 			});
@@ -298,11 +296,9 @@ process.exit(result.status ?? 1);
 				`${JSON.stringify(manifest, null, 2)}\n`,
 			);
 			try {
-				const response = await sendRpcRequest(
-					socket,
-					new RenameSessionBranch(manifest.payload),
-					{ requestTimeoutMs: 30_000 },
-				);
+				const response = await sendRpcRequest(socket, manifest.payload, {
+					requestTimeoutMs: 30_000,
+				});
 				manifest.response = response;
 				return response;
 			} catch (error) {

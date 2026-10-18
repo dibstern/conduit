@@ -3,6 +3,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import Database from "better-sqlite3";
 import { Effect, Layer, ManagedRuntime, Ref, Stream } from "effect";
 import { SqlClient } from "effect/sql";
@@ -1114,7 +1115,7 @@ describe("shared-store relay project scope", () => {
 					yield* sql`INSERT INTO scope_writer_probe (id, value) VALUES (1, 0)`;
 				}),
 			);
-			const competitor = new Database(store.filename, { timeout: 0 });
+			const competitor = new DatabaseSync(store.filename, { timeout: 0 });
 			let attempted = false;
 			let competitorBlocked = false;
 			let ownershipLookups = 0;
@@ -1157,7 +1158,7 @@ describe("shared-store relay project scope", () => {
 								});
 							}
 						}).pipe(
-							Statement.withTransformer((statement) =>
+							Effect.provideService(Statement.CurrentTransformer, (statement) =>
 								Effect.sync(() => {
 									const [query] = statement.compile();
 									if (
@@ -1182,8 +1183,8 @@ describe("shared-store relay project scope", () => {
 											if (
 												typeof error !== "object" ||
 												error === null ||
-												!("code" in error) ||
-												error.code !== "SQLITE_BUSY"
+												!("errcode" in error) ||
+												error.errcode !== 5
 											)
 												throw error;
 											competitorBlocked = true;

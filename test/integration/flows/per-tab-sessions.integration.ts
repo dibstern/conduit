@@ -200,6 +200,23 @@ describe("Integration: Per-Tab Sessions", () => {
 		);
 
 		client2.clearReceived();
+		harness.mock.setExactResponse("GET", "/provider", 200, {
+			all: [
+				{
+					id: "per-tab-test-provider",
+					name: "Per-tab test provider",
+					models: {
+						"per-tab-test-model": {
+							id: "per-tab-test-model",
+							name: "Per-tab test model",
+							limit: { context: 200_000, output: 8_192 },
+						},
+					},
+				},
+			],
+			default: { "per-tab-test-provider": "per-tab-test-model" },
+			connected: ["per-tab-test-provider"],
+		});
 		await client1.switchModel(
 			"per-tab-test-model",
 			"per-tab-test-provider",

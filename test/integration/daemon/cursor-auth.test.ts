@@ -414,7 +414,7 @@ describe("Cursor authentication through the built daemon and detached runners", 
 			{ _tag: "GetCursorAuth" },
 			{ _tag: "StartCursorLogin" },
 			{ _tag: "LogoutCursor" },
-		]) {
+		] as const) {
 			const state = await fixture.requestRpc(request);
 			expect(state).toMatchObject({
 				source: "environment",

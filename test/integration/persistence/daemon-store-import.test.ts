@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import Database from "better-sqlite3";
 import { Effect, Result as Either, ManagedRuntime } from "effect";
 import { expect, it } from "vitest";
@@ -79,7 +80,7 @@ it("imports complete projects without changing sources and rolls back rejected p
 		passed: false,
 	};
 	let walWriter: Database.Database | undefined;
-	const symlinkWriters: Database.Database[] = [];
+	const symlinkWriters: DatabaseSync[] = [];
 	writeImportArtifact(artifact, evidence);
 	try {
 		const configDir = join(root, "daemon");
@@ -446,9 +447,9 @@ it("imports complete projects without changing sources and rolls back rejected p
 			const source = await fixture(root, projectId, {
 				large: projectId === "symlink-seed",
 			});
-			const writer = new Database(source.sourcePath);
+			const writer = new DatabaseSync(source.sourcePath);
 			symlinkWriters.push(writer);
-			writer.pragma("wal_autocheckpoint = 0");
+			writer.exec("PRAGMA wal_autocheckpoint = 0");
 			writer.exec("BEGIN");
 			writer.prepare("SELECT COUNT(*) FROM events").get();
 			const runtime = ManagedRuntime.make(
@@ -477,9 +478,13 @@ it("imports complete projects without changing sources and rolls back rejected p
 			// Empty optimizer statistics force optimize to consider this attached
 			// source. An importer must never try to ANALYZE a read-only source.
 			writer.exec("COMMIT");
-			writer.exec(
-				"ANALYZE; DELETE FROM sqlite_stat1; DELETE FROM sqlite_stat4;",
-			);
+			writer.exec("ANALYZE; DELETE FROM sqlite_stat1;");
+			if (
+				writer
+					.prepare("SELECT 1 FROM sqlite_master WHERE name = 'sqlite_stat4'")
+					.get()
+			)
+				writer.exec("DELETE FROM sqlite_stat4;");
 			expect(statSync(`${source.sourcePath}-wal`).size).toBeGreaterThan(0);
 			const mainOnlyPath = join(root, `${projectId}-main-only.db`);
 			copyFileSync(source.sourcePath, mainOnlyPath);

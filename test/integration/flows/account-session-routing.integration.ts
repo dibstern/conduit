@@ -24,7 +24,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AccountRef } from "../../../src/lib/contracts/account.js";
 import { AccountUnroutable } from "../../../src/lib/contracts/limit-recovery.js";
@@ -39,7 +39,7 @@ import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/accoun
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
-	type DaemonConfigRefTag,
+	DaemonConfigRefTag,
 	makeDaemonConfigFromOptions,
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
@@ -700,7 +700,15 @@ describe("Integration: account session routing", () => {
 		const daemonConfigContext = await runtime.runPromise(
 			Effect.context<
 				AccountDirectory | DaemonConfigRefTag | ConfigPersistenceTag
-			>(),
+			>().pipe(
+				Effect.map(
+					Context.pick(
+						AccountDirectory,
+						DaemonConfigRefTag,
+						ConfigPersistenceTag,
+					),
+				),
+			),
 		);
 		__setProbeOverrideForTesting(async () => ({
 			models: [{ id: "shared", name: "Shared Sonnet", providerId: "claude" }],

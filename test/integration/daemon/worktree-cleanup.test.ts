@@ -18,7 +18,6 @@ import {
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CleanUpWorktreesNow } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { PtyHostClient } from "../../../src/lib/terminal/pty-host-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -152,9 +151,10 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const sweep = async (label: string, projectSlug?: string) => {
 			const result = await sendRpcRequest(
 				socket,
-				new CleanUpWorktreesNow(
-					projectSlug === undefined ? {} : { projectSlug },
-				),
+				{
+					_tag: "CleanUpWorktreesNow",
+					...(projectSlug === undefined ? {} : { projectSlug }),
+				},
 				{ requestTimeoutMs: 30_000 },
 			);
 			(evidence["sweeps"] as unknown[]).push({ label, ...result });

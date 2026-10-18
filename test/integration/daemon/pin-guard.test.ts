@@ -51,7 +51,9 @@ describe("browser PIN guard over the shared daemon RPC", () => {
 	}
 
 	function browserProtocol(port: number, headers: Record<string, string>) {
-		return RpcClient.layerProtocolSocket({ retrySchedule: Schedule.stop }).pipe(
+		return RpcClient.layerProtocolSocket({
+			retryPolicy: Schedule.recurs(0),
+		}).pipe(
 			Layer.provide(Socket.layerWebSocket(`ws://127.0.0.1:${port}/rpc`)),
 			Layer.provide(
 				Layer.succeed(Socket.WebSocketConstructor)((url) => {

@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import { Deferred, Effect, Fiber, Option, TestContext } from "effect";
-import { TestClock } from "effect/testing";
+import { Deferred, Effect, Fiber, Option } from "effect";
+import { TestClock, TestConsole } from "effect/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	makeOpenCodeInstancesLive,
@@ -126,7 +126,7 @@ describe("OpenCode Instances use during an idle stop", () => {
 					const second = yield* Fiber.join(during);
 					return { first, pendingDuringStop, second };
 				}).pipe(Effect.provide(layer));
-			}).pipe(Effect.provide(TestContext.TestContext)),
+			}).pipe(Effect.provide([TestConsole.layer, TestClock.layer()])),
 		);
 		const evidence = {
 			scenario: "use-during-idle-stop",

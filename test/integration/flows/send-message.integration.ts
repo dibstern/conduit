@@ -2,7 +2,7 @@
 // prompt_async endpoint. If this test passes, messages actually work.
 
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -11,16 +11,13 @@ import {
 describe("Integration: Send Message", () => {
 	let harness: RelayHarness;
 
-	beforeAll(async () => {
+	beforeEach(async () => {
 		harness = await createRelayHarness();
+		harness.mock.resetQueues();
 	}, 30_000);
 
-	afterAll(async () => {
+	afterEach(async () => {
 		if (harness) await harness.stop();
-	});
-
-	beforeEach(() => {
-		harness.mock.resetQueues();
 	});
 
 	it("reports handed off when sending to an idle session", async () => {

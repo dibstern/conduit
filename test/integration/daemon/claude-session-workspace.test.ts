@@ -1009,16 +1009,21 @@ exec '${realGit}' "$@"
 		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		let nativeSessionId: unknown;
 		try {
-			nativeSessionId = db
-				.prepare(
-					"SELECT json_extract(value, '$.resumeSessionId') FROM provider_state WHERE session_id = ? AND key = ?",
-				)
-				.pluck()
-				.get(sessionId, `nativeThread:${addedInstanceId}`);
+			await vi.waitFor(
+				() => {
+					nativeSessionId = db
+						.prepare(
+							"SELECT json_extract(value, '$.resumeSessionId') FROM provider_state WHERE session_id = ? AND key = ?",
+						)
+						.pluck()
+						.get(sessionId, `nativeThread:${addedInstanceId}`);
+					expect(nativeSessionId).toEqual(expect.any(String));
+				},
+				{ timeout: 15_000 },
+			);
 		} finally {
 			db.close();
 		}
-		expect(nativeSessionId).toEqual(expect.any(String));
 		await sendRpcRequest(socket, {
 			_tag: "MoveSessionWorkspace",
 			sessionId,
