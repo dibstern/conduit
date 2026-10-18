@@ -69,10 +69,10 @@ type SessionProjection = Omit<SessionInfo, "projectSlug" | "accountId">;
 
 const isSessionPermissionMode = Schema.is(SessionPermissionModeSchema);
 const decodeGoalState = Schema.decodeUnknownSync(
-	Schema.parseJson(SessionGoalChangedPayloadSchema),
+	Schema.fromJsonString(SessionGoalChangedPayloadSchema),
 );
 const decodeTurnWaits = Schema.decodeUnknownSync(
-	Schema.parseJson(
+	Schema.fromJsonString(
 		Schema.Array(
 			Schema.Struct({
 				id: Schema.String,
@@ -264,7 +264,7 @@ export const sessionRowsToSessionInfoList = (
 				? {}
 				: {
 						workspace: Schema.decodeUnknownSync(
-							Schema.parseJson(SessionWorkspaceSchema),
+							Schema.fromJsonString(SessionWorkspaceSchema),
 						)(row.workspace),
 					}),
 			workspaceMismatch: row.claude_worktree_state
@@ -312,14 +312,14 @@ export const sessionRowsToSessionInfoList = (
 			limitRecovery:
 				row.limit_recovery == null
 					? null
-					: Schema.decodeUnknownSync(Schema.parseJson(LimitRecoverySchema))(
-							row.limit_recovery,
-						),
+					: Schema.decodeUnknownSync(
+							Schema.fromJsonString(LimitRecoverySchema),
+						)(row.limit_recovery),
 			resumes:
 				row.resumes == null
 					? []
 					: Schema.decodeUnknownSync(
-							Schema.parseJson(Schema.Array(SessionResumeSchema)),
+							Schema.fromJsonString(Schema.Array(SessionResumeSchema)),
 						)(row.resumes),
 			...(row.settled_automatically === 1
 				? { settledAutomatically: true }
@@ -335,7 +335,7 @@ export const sessionRowsToSessionInfoList = (
 };
 
 const decodeSidebarRow = Schema.decodeUnknownSync(
-	Schema.parseJson(SidebarRowSchema),
+	Schema.fromJsonString(SidebarRowSchema),
 );
 
 /**
@@ -792,14 +792,14 @@ export interface PendingInputRow {
 	readonly version: number;
 }
 
-const decodeInputRequest = Schema.decodeUnknown(
-	Schema.parseJson(InputRequestSchema),
+const decodeInputRequest = Schema.decodeUnknownEffect(
+	Schema.fromJsonString(InputRequestSchema),
 );
 
-export class ReadQueryEffectTag extends Context.Tag("ReadQueryEffect")<
+export class ReadQueryEffectTag extends Context.Service<
 	ReadQueryEffectTag,
 	ReadQueryEffect
->() {}
+>()("ReadQueryEffect") {}
 
 type MessageWithTurnModelRow = MessageRow & {
 	turn_cost: number | null;
@@ -1289,7 +1289,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						? {}
 						: {
 								workspace: Schema.decodeUnknownSync(
-									Schema.parseJson(SessionWorkspaceSchema),
+									Schema.fromJsonString(SessionWorkspaceSchema),
 								)(row.workspace),
 							}),
 				}));

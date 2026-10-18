@@ -22,8 +22,10 @@ import {
 	sessionRowsToSessionInfoList,
 } from "./read-query-effect.js";
 
-const decodeRow = Schema.decodeUnknownSync(Schema.parseJson(SidebarRowSchema));
-const encodeRow = Schema.encodeSync(Schema.parseJson(SidebarRowSchema));
+const decodeRow = Schema.decodeUnknownSync(
+	Schema.fromJsonString(SidebarRowSchema),
+);
+const encodeRow = Schema.encodeSync(Schema.fromJsonString(SidebarRowSchema));
 
 /** What a family member contributes to its root's row. */
 export type FamilyMember = Pick<

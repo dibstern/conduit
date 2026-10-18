@@ -123,7 +123,7 @@ export const rewriteStore = (
 				return { beforeBytes, afterBytes };
 			});
 		}).pipe(
-			Effect.catchAllCause((cause) =>
+			Effect.catchCause((cause) =>
 				Failure.isInterruptedOnly(cause)
 					? Effect.interrupt
 					: Effect.fail(
@@ -140,7 +140,7 @@ export const rewriteStore = (
 							unlinkSync(`${temporary}${suffix}`);
 					}
 				}).pipe(
-					Effect.catchAll((cause) =>
+					Effect.catch((cause) =>
 						Effect.logWarning("Failed to remove store rewrite temporary file", {
 							temporary,
 							cause,
@@ -202,7 +202,7 @@ export const reclaimStore = (filename: string): Effect.Effect<void> =>
 			...sizes,
 		});
 	}).pipe(
-		Effect.catchAllCause((cause) =>
+		Effect.catchCause((cause) =>
 			Failure.isInterruptedOnly(cause)
 				? Effect.interrupt
 				: Effect.logWarning("Event store reclaim failed; keeping original", {

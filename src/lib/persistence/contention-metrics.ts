@@ -17,6 +17,8 @@ function isSqliteBusy(error: unknown, seen = new Set<object>()): boolean {
 		("code" in error &&
 			(error.code === "SQLITE_BUSY" ||
 				error.code === "SQLITE_BUSY_SNAPSHOT")) ||
+		// node:sqlite exposes SQLITE_BUSY and SQLITE_BUSY_SNAPSHOT numerically.
+		("errcode" in error && (error.errcode === 5 || error.errcode === 517)) ||
 		("cause" in error && isSqliteBusy(error.cause, seen))
 	);
 }
@@ -74,7 +76,7 @@ function makeContentionMetrics(file: string) {
 						);
 					}).pipe(Effect.andThen(effect)),
 				).pipe(
-					Effect.tapErrorCause((cause) =>
+					Effect.tapCause((cause) =>
 						Effect.sync(() => {
 							if (
 								[...Failure.failures(cause), ...Failure.defects(cause)].some(

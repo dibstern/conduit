@@ -440,7 +440,7 @@ const migrationKeyPattern = /^(\d+)_(.+)$/;
 
 function migrationRegistryError(message: string): Migrator.MigrationError {
 	return new Migrator.MigrationError({
-		reason: "bad-state",
+		kind: "BadState",
 		message,
 	});
 }
@@ -1374,7 +1374,7 @@ export function makeEffectSqlMigrator(
 								(cause) =>
 									new Migrator.MigrationError({
 										cause,
-										reason: "failed",
+										kind: "Failed",
 										message: `Migration "${id}_${name}" failed`,
 									}),
 							),
