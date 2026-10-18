@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from "svelte";
 	import { formatSnoozeTime } from "../../utils/format.js";
 	import { getSnoozePresets } from "../../utils/snooze.js";
 	import Button from "../ui/Button.svelte";
@@ -13,6 +14,7 @@
 		onclose,
 		onsnooze,
 		returnFocus,
+		initialPicking = false,
 	}: {
 		open: boolean;
 		placement?: "center" | "sheet";
@@ -21,9 +23,10 @@
 		onclose: () => void;
 		onsnooze: (until: number | null) => void;
 		returnFocus?: (() => HTMLElement | null) | undefined;
+		initialPicking?: boolean;
 	} = $props();
 
-	let picking = $state(false);
+	let picking = $state(untrack(() => initialPicking));
 	let pickedValue = $state("");
 	const pickedUntil = $derived(new Date(pickedValue).getTime());
 	const canPick = $derived(Number.isFinite(pickedUntil) && pickedUntil > now);

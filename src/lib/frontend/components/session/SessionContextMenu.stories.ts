@@ -240,6 +240,123 @@ export const PhoneWithFooterLight: Story = {
 	...PhoneWithFooter,
 	globals: { theme: "light" },
 };
+
+export const PhoneSnoozeOpen: Story = {
+	...PhoneWithFooter,
+	play: async () => {
+		const menu = await phoneMenu();
+		const tile = within(menu).getByTestId("session-ctx-snooze");
+		await expect(within(tile).getByText("hold")).toBeVisible();
+		await userEvent.click(tile);
+		const list = await within(document.body).findByRole("menu", {
+			name: "Snooze until",
+		});
+		await expect(list).toBeVisible();
+		await expect(tile).toHaveAttribute("data-hold-menu-phase", "open");
+		await expect(
+			within(list).getByRole("menuitem", { name: /In 1 hour/ }),
+		).toBeVisible();
+		await expect(
+			getComputedStyle(within(menu).getByTestId("session-sheet-header"))
+				.opacity,
+		).toBe("1");
+		await expect(menu.querySelector("[data-sheet-footer]")).toHaveStyle({
+			opacity: "0.28",
+		});
+	},
+};
+export const PhoneSnoozeOpenLight: Story = {
+	...PhoneSnoozeOpen,
+	globals: { theme: "light" },
+};
+
+export const PhoneSnoozeHolding: Story = {
+	...PhoneWithFooter,
+	play: async () => {
+		const menu = await phoneMenu();
+		const tile = within(menu).getByTestId("session-ctx-snooze");
+		const box = tile.getBoundingClientRect();
+		// Stories stage the visual state; acceptance uses native CDP touch events.
+		const pointer = (type: string, x: number, y: number) =>
+			tile.dispatchEvent(
+				new PointerEvent(type, {
+					bubbles: true,
+					cancelable: true,
+					isPrimary: true,
+					pointerId: 79,
+					pointerType: "touch",
+					button: 0,
+					clientX: x,
+					clientY: y,
+				}),
+			);
+		pointer("pointerdown", box.left + box.width / 2, box.top + box.height / 2);
+		await waitFor(() =>
+			expect(tile).toHaveAttribute("data-hold-menu-phase", "following"),
+		);
+		const list = await within(document.body).findByRole("menu", {
+			name: "Snooze until",
+		});
+		const time = within(list).getByRole("menuitem", { name: /In 3 hours/ });
+		await waitFor(() => {
+			const target = time.getBoundingClientRect();
+			pointer("pointermove", target.left + 20, target.top + target.height / 2);
+			expect(time).toHaveAttribute("data-followed", "true");
+		});
+		await expect(
+			within(list).getByText("slide to a time, let go"),
+		).toBeVisible();
+	},
+};
+export const PhoneSnoozeHoldingLight: Story = {
+	...PhoneSnoozeHolding,
+	globals: { theme: "light" },
+};
+
+export const PhoneChangeSnooze: Story = {
+	...PhoneSnoozed,
+	play: async () => {
+		const menu = await phoneMenu();
+		const tile = within(menu).getByTestId("session-ctx-snooze");
+		await expect(tile).toHaveAccessibleName("Change snooze…");
+		await expect(tile).toHaveTextContent("until");
+		// The sub-line takes the tile while snoozed: no hold hint (Final · session menu).
+		await expect(within(tile).queryByText("hold")).not.toBeInTheDocument();
+		await userEvent.click(tile);
+		await expect(
+			await within(document.body).findByRole("menu", { name: "Snooze until" }),
+		).toBeVisible();
+	},
+};
+export const PhoneChangeSnoozeLight: Story = {
+	...PhoneChangeSnooze,
+	globals: { theme: "light" },
+};
+
+export const PhonePickSnoozeDate: Story = {
+	...PhoneWithFooter,
+	play: async () => {
+		const menu = await phoneMenu();
+		await userEvent.click(within(menu).getByTestId("session-ctx-snooze"));
+		const list = await within(document.body).findByRole("menu", {
+			name: "Snooze until",
+		});
+		await userEvent.click(
+			within(list).getByRole("menuitem", { name: /Pick a date & time/ }),
+		);
+		await expect(
+			await within(document.body).findByTestId("snooze-pick-input"),
+		).toBeVisible();
+		await expect(
+			within(document.body).getByTestId("snooze-pick-submit"),
+		).toBeDisabled();
+		await waitFor(() => expect(menu).not.toBeInTheDocument());
+	},
+};
+export const PhonePickSnoozeDateLight: Story = {
+	...PhonePickSnoozeDate,
+	globals: { theme: "light" },
+};
 export const PhoneDebugFooter: Story = {
 	...PhoneWithFooter,
 	args: { ...PhoneWithFooter.args, debug: true },
@@ -262,6 +379,8 @@ export const PhoneDisabledReason: Story = {
 		const menu = await phoneMenu();
 		const snooze = within(menu).getByTestId("session-ctx-snooze");
 		await expect(snooze).toHaveAttribute("aria-disabled", "true");
+		await expect(snooze).not.toHaveAttribute("data-hold-menu-trigger");
+		await expect(within(snooze).queryByText("hold")).not.toBeInTheDocument();
 		await userEvent.click(snooze);
 		await expect(menu).toBeVisible();
 		await expect(

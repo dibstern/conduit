@@ -8,6 +8,7 @@
 	import { dismissToast, showToast, uiState } from "../../stores/ui.svelte.js";
 	import DitherGlyph from "../ui/DitherGlyph.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import HoldMenuTile from "../ui/HoldMenuTile.svelte";
 	import LabelledGridGroup from "../ui/LabelledGridGroup.svelte";
 	import MenuCloseItem from "../ui/MenuCloseItem.svelte";
 	import ProjectMark from "../ui/ProjectMark.svelte";
@@ -74,17 +75,31 @@
 </script>
 
 {#snippet tile(item: SessionCommandEntry)}
-	<Tile
-		data-testid={item.testId}
-		aria-label={item.label}
-		label={item.shortLabel ?? item.label}
-		icon={item.icon}
-		subLine={item.detail ?? undefined}
-		variant={item.danger ? "danger" : item.emphasis ?? "default"}
-		disabledReason={item.disabledReason}
-		ondisabledselect={() => { if (item.disabledReason) showToast(item.disabledReason, { variant: "pinned" }); }}
-		onselect={() => onselect(item.run)}
-	/>
+	{#if item.options && !item.disabledReason}
+		<HoldMenuTile
+			data-testid={item.testId}
+			aria-label={item.label}
+			label={item.shortLabel ?? item.label}
+			icon={item.icon}
+			subLine={item.detail ?? undefined}
+			tag={item.detail ? undefined : "hold"}
+			title={item.options.title}
+			hint={item.options.hint}
+			items={item.options.items.map((option) => ({ ...option, action: () => onselect(option.run) }))}
+		/>
+	{:else}
+		<Tile
+			data-testid={item.testId}
+			aria-label={item.label}
+			label={item.shortLabel ?? item.label}
+			icon={item.icon}
+			subLine={item.detail ?? undefined}
+			variant={item.danger ? "danger" : item.emphasis ?? "default"}
+			disabledReason={item.disabledReason}
+			ondisabledselect={() => { if (item.disabledReason) showToast(item.disabledReason, { variant: "pinned" }); }}
+			onselect={() => onselect(item.run)}
+		/>
+	{/if}
 {/snippet}
 
 <div class="px-[16px]" data-session-sheet-body>
@@ -100,7 +115,7 @@
 		</div>
 		<MenuCloseItem label="Close session sheet" data-testid="session-sheet-close" />
 	</div>
-	{#if views}<div class="mt-[18px]">{@render views()}</div>{/if}
+	{#if views}<div data-hold-menu-dim class="mt-[18px]">{@render views()}</div>{/if}
 	<LabelledGridGroup label="Triage">
 		{#each triage as item (item.testId)}{@render tile(item)}{/each}
 	</LabelledGridGroup>
