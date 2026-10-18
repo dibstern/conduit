@@ -61,16 +61,12 @@ export const filesHandlers = {
 			const directoryListing = yield* DirectoryListingServiceTag;
 			return yield* directoryListing.find(request.query);
 		}).pipe(
-			Effect.catchCause((cause) =>
-				Effect.failCause(
-					Failure.mapFailures(cause, (error) =>
-						error instanceof ProjectSaveRejected
-							? error
-							: new WsRpcError({
-									message: `FindFolders failed: ${formatErrorDetail(error)}`,
-								}),
-					),
-				),
+			Failure.mapEffectFailures((error) =>
+				error instanceof ProjectSaveRejected
+					? error
+					: new WsRpcError({
+							message: `FindFolders failed: ${formatErrorDetail(error)}`,
+						}),
 			),
 		),
 	GetFileTree: (request) =>

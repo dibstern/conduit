@@ -175,16 +175,12 @@ export const wsRpcHandlers = WsRpcGroup.of({
 					handler(request);
 				return Rpc.fork(
 					stream.pipe(
-						Stream.catchCause((cause) =>
-							Stream.failCause(
-								Failure.mapFailures(cause, (error) =>
-									error instanceof WsRpcError
-										? error
-										: new WsRpcError({
-												message: `${name} failed: ${String(error)}`,
-											}),
-								),
-							),
+						Failure.mapStreamFailures((error) =>
+							error instanceof WsRpcError
+								? error
+								: new WsRpcError({
+										message: `${name} failed: ${String(error)}`,
+									}),
 						),
 					),
 				);
@@ -318,16 +314,11 @@ export const makeRoutedWsRpcServerLayer = <
 				Effect.gen(function* () {
 					if ("sessionId" in payload && typeof payload.sessionId === "string") {
 						const owner = yield* directory.projectOf(payload.sessionId).pipe(
-							Effect.catchCause((cause) =>
-								Effect.failCause(
-									Failure.mapFailures(
-										cause,
-										(error) =>
-											new WsRpcError({
-												message: error.message,
-											}),
-									),
-								),
+							Failure.mapEffectFailures(
+								(error) =>
+									new WsRpcError({
+										message: error.message,
+									}),
 							),
 						);
 						if (Option.isNone(owner))
@@ -486,16 +477,11 @@ export const makeRoutedWsRpcServerLayer = <
 							);
 							return Stream.fromQueue(queue).pipe(
 								Stream.flattenArray,
-								Stream.catchCause((cause) =>
-									Stream.failCause(
-										Failure.mapFailures(
-											cause,
-											(error) =>
-												new WsRpcError({
-													message: `Subscription failed: ${String(error)}`,
-												}),
-										),
-									),
+								Failure.mapStreamFailures(
+									(error) =>
+										new WsRpcError({
+											message: `Subscription failed: ${String(error)}`,
+										}),
 								),
 							);
 						}),

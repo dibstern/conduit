@@ -12,7 +12,7 @@ import { WsRpcGroup, type WsRpcRequest } from "../contracts/ws-rpc.js";
 import * as Failure from "../effect/failure-classification.js";
 
 type RpcSuccess<R extends WsRpcRequest> = Rpc.Success<
-	Rpc.ExtractTag<RpcGroup.Rpcs<typeof WsRpcGroup>, R["_tag"]>
+	Extract<RpcGroup.Rpcs<typeof WsRpcGroup>, { readonly _tag: R["_tag"] }>
 >;
 
 export type SendRPC = <R extends WsRpcRequest>(

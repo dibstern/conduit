@@ -215,16 +215,12 @@ export const settingsHandlers = {
 				projectSlug: request.projectSlug,
 				overrides,
 			})),
-			Effect.catchCause((cause) =>
-				Effect.failCause(
-					Failure.mapFailures(cause, (error) =>
-						error instanceof ClaudeSettingsTrustBoundaryError
-							? error
-							: new WsRpcError({
-									message: `SetClaudeSettings failed: ${String(error)}`,
-								}),
-					),
-				),
+			Failure.mapEffectFailures((error) =>
+				error instanceof ClaudeSettingsTrustBoundaryError
+					? error
+					: new WsRpcError({
+							message: `SetClaudeSettings failed: ${String(error)}`,
+						}),
 			),
 		),
 	ResolveClaudeSettings: (request) =>
@@ -235,17 +231,13 @@ export const settingsHandlers = {
 					instanceId: request.instanceId,
 					resolved,
 				})),
-				Effect.catchCause((cause) =>
-					Effect.failCause(
-						Failure.mapFailures(cause, (error) =>
-							error instanceof ClaudeSettingsResolveError ||
-							error instanceof AccountUnroutable
-								? error
-								: new WsRpcError({
-										message: `ResolveClaudeSettings failed: ${String(error)}`,
-									}),
-						),
-					),
+				Failure.mapEffectFailures((error) =>
+					error instanceof ClaudeSettingsResolveError ||
+					error instanceof AccountUnroutable
+						? error
+						: new WsRpcError({
+								message: `ResolveClaudeSettings failed: ${String(error)}`,
+							}),
 				),
 			),
 		),

@@ -88,9 +88,7 @@ function seedAccountDirectory(page: Page): void {
 				name: Schema.String,
 				driver: KnownProviderDriverKindSchema,
 				configDir: Schema.optional(Schema.String),
-				env: Schema.optional(
-					Schema.Record({ key: Schema.String, value: Schema.String }),
-				),
+				env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 				url: Schema.optional(Schema.String),
 				port: Schema.optional(Schema.Number),
 				managed: Schema.optional(Schema.Boolean),

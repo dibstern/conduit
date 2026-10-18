@@ -14,11 +14,16 @@ type Rpcs = RpcGroup.Rpcs<typeof WsRpcGroup>;
 type UnaryTag = {
 	[T in Rpcs["_tag"]]: [Rpc.IsStream<Rpcs, T>] extends [never] ? T : never;
 }[Rpcs["_tag"]];
-type Payload<T extends UnaryTag> = Rpc.PayloadConstructor<
-	Rpc.ExtractTag<Rpcs, T>
+type Payloads = {
+	[T in UnaryTag]: Rpc.PayloadConstructor<Extract<Rpcs, { readonly _tag: T }>>;
+};
+type Payload<T extends UnaryTag> = Payloads[T];
+type Success<T extends UnaryTag> = Rpc.Success<
+	Extract<Rpcs, { readonly _tag: T }>
 >;
-type Success<T extends UnaryTag> = Rpc.Success<Rpc.ExtractTag<Rpcs, T>>;
-type Declared<T extends UnaryTag> = Rpc.Error<Rpc.ExtractTag<Rpcs, T>>;
+type Declared<T extends UnaryTag> = Rpc.Error<
+	Extract<Rpcs, { readonly _tag: T }>
+>;
 
 class RpcCallFailed extends RpcClientError {
 	override get message(): string {

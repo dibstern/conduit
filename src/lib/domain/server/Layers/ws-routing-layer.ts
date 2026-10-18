@@ -308,13 +308,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 
 		const resolveRpcRelay = (slug: string) =>
 			resolveRelay(slug).pipe(
-				Effect.catchCause((cause) =>
-					Effect.failCause(
-						Failure.mapFailures(cause, (error) =>
-							toRpcUnavailable(slug, error),
-						),
-					),
-				),
+				Failure.mapEffectFailures((error) => toRpcUnavailable(slug, error)),
 				Effect.catchDefect((cause) =>
 					Effect.fail(toRpcUnavailable(slug, cause)),
 				),
@@ -349,16 +343,12 @@ export const WebSocketRoutingLive: Layer.Layer<
 
 		const attachProject: AttachDaemonProject = (payload) =>
 			resolveAttachSlug(payload).pipe(
-				Effect.catchCause((cause) =>
-					Effect.failCause(
-						Failure.mapFailures(cause, (error) =>
-							error instanceof WsRpcError
-								? error
-								: new WsRpcError({
-										message: `AttachProject failed: ${formatCause(error)}`,
-									}),
-						),
-					),
+				Failure.mapEffectFailures((error) =>
+					error instanceof WsRpcError
+						? error
+						: new WsRpcError({
+								message: `AttachProject failed: ${formatCause(error)}`,
+							}),
 				),
 				Effect.tap(({ slug }) =>
 					slug === null ? Effect.void : resolveRpcRelay(slug),

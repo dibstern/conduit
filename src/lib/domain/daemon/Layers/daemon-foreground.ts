@@ -1,7 +1,8 @@
 import { mkdirSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
+import { NodePath } from "@effect/platform-node";
 import {
 	Data,
 	Deferred,
@@ -434,17 +435,24 @@ export async function startForegroundDaemon(
 		Effect.acquireRelease(
 			Effect.try({
 				try: () => {
-					const lease = new Database(join(configDir, "server.lock.sqlite"), {
-						timeout: 0,
-					});
+					const lease = new DatabaseSync(
+						join(configDir, "server.lock.sqlite"),
+						{
+							timeout: 0,
+						},
+					);
 					try {
 						lease.exec("BEGIN IMMEDIATE");
 						return lease;
 					} catch (cause) {
 						lease.close();
+						// node:sqlite reports the SQLite result code as errcode; the primary
+						// code (low byte) is SQLITE_BUSY (5) or SQLITE_LOCKED (6).
 						if (
-							cause instanceof Database.SqliteError &&
-							cause.code === "SQLITE_BUSY"
+							cause instanceof Error &&
+							"errcode" in cause &&
+							typeof cause.errcode === "number" &&
+							[5, 6].includes(cause.errcode & 0xff)
 						) {
 							throw new ForegroundDaemonStartError({
 								reason: `a server is already running for ${configDir}`,
@@ -479,7 +487,10 @@ export async function startForegroundDaemon(
 		),
 	);
 	runtime = ManagedRuntime.make(
-		makeDaemonLive(liveOptions).pipe(Layer.provide(serverLease)),
+		makeDaemonLive(liveOptions).pipe(
+			Layer.provide(NodePath.layer),
+			Layer.provide(serverLease),
+		),
 	);
 	try {
 		handle = await runRuntimeEffect(runtime, DaemonHandleTag);

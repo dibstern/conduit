@@ -26,16 +26,11 @@ export const projectsHandlers = {
 			};
 			return response;
 		}).pipe(
-			Effect.catchCause((cause) =>
-				Effect.failCause(
-					Failure.mapFailures(
-						cause,
-						(cause) =>
-							new WsRpcError({
-								message: `AttachProject failed: ${String(cause)}`,
-							}),
-					),
-				),
+			Failure.mapEffectFailures(
+				(cause) =>
+					new WsRpcError({
+						message: `AttachProject failed: ${String(cause)}`,
+					}),
 			),
 		),
 	GetProjects: (request) =>

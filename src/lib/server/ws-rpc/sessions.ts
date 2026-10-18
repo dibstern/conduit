@@ -296,16 +296,11 @@ export const sessionsHandlers = {
 			settled: request.settled,
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchCause((cause) =>
-				Effect.failCause(
-					Failure.mapFailures(
-						cause,
-						(error) =>
-							new WsRpcError({
-								message: `SetSessionSettled failed: ${String(error.cause)}`,
-							}),
-					),
-				),
+			Failure.mapEffectFailures(
+				(error) =>
+					new WsRpcError({
+						message: `SetSessionSettled failed: ${String(error.cause)}`,
+					}),
 			),
 		),
 	SetSessionArchived: (request) =>
@@ -315,16 +310,11 @@ export const sessionsHandlers = {
 			archived: request.archived,
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchCause((cause) =>
-				Effect.failCause(
-					Failure.mapFailures(
-						cause,
-						(error) =>
-							new WsRpcError({
-								message: `SetSessionArchived failed: ${String(error.cause)}`,
-							}),
-					),
-				),
+			Failure.mapEffectFailures(
+				(error) =>
+					new WsRpcError({
+						message: `SetSessionArchived failed: ${String(error.cause)}`,
+					}),
 			),
 		),
 	SetSessionPinned: (request) =>
@@ -334,16 +324,11 @@ export const sessionsHandlers = {
 			pinned: request.pinned,
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchCause((cause) =>
-				Effect.failCause(
-					Failure.mapFailures(
-						cause,
-						(error) =>
-							new WsRpcError({
-								message: `SetSessionPinned failed: ${String(error.cause)}`,
-							}),
-					),
-				),
+			Failure.mapEffectFailures(
+				(error) =>
+					new WsRpcError({
+						message: `SetSessionPinned failed: ${String(error.cause)}`,
+					}),
 			),
 		),
 	SetSessionAutoSettle: (request) =>
@@ -362,16 +347,11 @@ export const sessionsHandlers = {
 			until: request.until,
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchCause((cause) =>
-				Effect.failCause(
-					Failure.mapFailures(
-						cause,
-						(error) =>
-							new WsRpcError({
-								message: `SnoozeSession failed: ${String(error.cause)}`,
-							}),
-					),
-				),
+			Failure.mapEffectFailures(
+				(error) =>
+					new WsRpcError({
+						message: `SnoozeSession failed: ${String(error.cause)}`,
+					}),
 			),
 		),
 	DismissCutOff: (request) =>
@@ -468,16 +448,11 @@ export const sessionsHandlers = {
 			sessionId: request.sessionId,
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchCause((cause) =>
-				Effect.failCause(
-					Failure.mapFailures(
-						cause,
-						(error) =>
-							new WsRpcError({
-								message: `UnsnoozeSession failed: ${String(error.cause)}`,
-							}),
-					),
-				),
+			Failure.mapEffectFailures(
+				(error) =>
+					new WsRpcError({
+						message: `UnsnoozeSession failed: ${String(error.cause)}`,
+					}),
 			),
 		),
 	MarkSessionUnread: (request) =>

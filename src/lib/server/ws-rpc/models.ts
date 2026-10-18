@@ -275,15 +275,10 @@ export const subscribeDraftModels = (request: {
 			return Stream.concat(Stream.fromArray(first), rest);
 		}),
 	).pipe(
-		Stream.catchCause((cause) =>
-			Stream.failCause(
-				Failure.mapFailures(
-					cause,
-					(error) =>
-						new WsRpcError({
-							message: `OpenCode model discovery failed: ${String(error)}`,
-						}),
-				),
-			),
+		Failure.mapStreamFailures(
+			(error) =>
+				new WsRpcError({
+					message: `OpenCode model discovery failed: ${String(error)}`,
+				}),
 		),
 	);

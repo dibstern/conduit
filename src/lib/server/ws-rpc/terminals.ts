@@ -49,16 +49,11 @@ export const terminalsHandlers = {
 			);
 			return { ok: true as const };
 		}).pipe(
-			Effect.catchCause((cause) =>
-				Effect.failCause(
-					Failure.mapFailures(
-						cause,
-						(error) =>
-							new WsRpcError({
-								message: `Failed to create terminal: ${formatErrorDetail(error)}`,
-							}),
-					),
-				),
+			Failure.mapEffectFailures(
+				(error) =>
+					new WsRpcError({
+						message: `Failed to create terminal: ${formatErrorDetail(error)}`,
+					}),
 			),
 		),
 	ResizePty: (request) =>
@@ -84,17 +79,12 @@ export const terminalsHandlers = {
 			yield* terminal.sendInput(request.ptyId, request.data);
 			return { ok: true as const };
 		}).pipe(
-			Effect.catchCause((cause) =>
-				Effect.failCause(
-					Failure.mapFailures(
-						cause,
-						() =>
-							new WsRpcError({
-								message:
-									"Terminal is unavailable; reconnect or create a new terminal",
-							}),
-					),
-				),
+			Failure.mapEffectFailures(
+				() =>
+					new WsRpcError({
+						message:
+							"Terminal is unavailable; reconnect or create a new terminal",
+					}),
 			),
 		),
 } satisfies Pick<

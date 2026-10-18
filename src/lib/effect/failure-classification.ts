@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit, Option } from "effect";
+import { Cause, Effect, Exit, Option, Stream } from "effect";
 import type { RpcMessage } from "effect/rpc";
 
 // Keep Effect-version-specific failure semantics here, shared by server and browser.
@@ -18,6 +18,21 @@ export const isTimeoutException = Cause.isTimeoutError;
 export const renderCause = Cause.pretty;
 export const squashCause = Cause.squash;
 export const mapFailures = Cause.map;
+export const unknownError = (cause: unknown): Cause.UnknownError =>
+	new Cause.UnknownError(cause, "An unknown error occurred");
+
+/** Map every typed failure without dropping sibling defects or interruptions. */
+export const mapEffectFailures =
+	<E, E2>(f: (error: E) => E2) =>
+	<A, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E2, R> =>
+		Effect.catchCause(self, (cause) => Effect.failCause(Cause.map(cause, f)));
+
+/** Map every typed stream failure while preserving the rest of its cause. */
+export const mapStreamFailures =
+	<E, E2>(f: (error: E) => E2) =>
+	<A, R>(self: Stream.Stream<A, E, R>): Stream.Stream<A, E2, R> =>
+		Stream.catchCause(self, (cause) => Stream.failCause(Cause.map(cause, f)));
+
 export const withoutFailures = <E>(cause: Cause.Cause<E>): Cause.Cause<never> =>
 	Cause.fromReasons(
 		cause.reasons.filter((reason) => !Cause.isFailReason(reason)),

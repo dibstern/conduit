@@ -5,8 +5,9 @@
 // For importable classes/interfaces the concrete type is used directly.
 // For inline/structural types a Shape interface is defined here.
 
-import { Cause, Context, Effect, Layer, Option } from "effect";
+import { type Cause, Context, Effect, Layer, Option } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
+import * as Failure from "../../../effect/failure-classification.js";
 
 import type {
 	HandlerDeps,
@@ -280,25 +281,14 @@ export const OpenCodeModelServiceLive: Layer.Layer<
 						? Option.some(
 								yield* instances
 									.use(targetId, config.projectDir)
-									.pipe(
-										Effect.mapError(
-											(error) =>
-												new Cause.UnknownError(
-													error,
-													"An unknown error occurred",
-												),
-										),
-									),
+									.pipe(Failure.mapEffectFailures(Failure.unknownError)),
 							)
 						: yield* instances.ifRunning(targetId, config.projectDir);
 					if (Option.isSome(running))
 						return yield* refresh(running.value, targetId, requireFresh);
 					if (requireFresh)
 						return yield* Effect.fail(
-							new Cause.UnknownError(
-								"OpenCode is not running",
-								"An unknown error occurred",
-							),
+							Failure.unknownError("OpenCode is not running"),
 						);
 					return (
 						catalogs.get(targetId) ?? {
