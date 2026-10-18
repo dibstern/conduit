@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
-import { Cause, Deferred, Effect, Exit, Layer, Option } from "effect";
+import { Deferred, Effect, Exit, Layer, Option } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { PtyManager } from "../../../relay/pty-manager.js";
 import { connectPtyUpstream } from "../../../relay/pty-upstream.js";
@@ -38,7 +39,7 @@ export const PtyManagerLive: Layer.Layer<PtyManagerTag, never, LoggerTag> =
 					Effect.catchAllCause((cause) =>
 						Effect.sync(() =>
 							ptyLog.warn(
-								`Defect while closing PTY sessions during shutdown: ${Cause.pretty(cause)}`,
+								`Defect while closing PTY sessions during shutdown: ${Failure.renderCause(cause)}`,
 							),
 						),
 					),

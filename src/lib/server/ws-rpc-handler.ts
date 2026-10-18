@@ -3,9 +3,8 @@ import type { Duplex } from "node:stream";
 import { Socket, SocketServer } from "@effect/platform";
 import { RpcSerialization, RpcServer } from "@effect/rpc";
 import { Statement } from "@effect/sql";
-import type { ManagedRuntime, Schema } from "effect";
+import type { ManagedRuntime } from "effect";
 import {
-	Cause,
 	Context,
 	Effect,
 	FiberRef,
@@ -30,6 +29,7 @@ import {
 	type WsTransport,
 	WsTransportTag,
 } from "../domain/relay/Layers/ws-transport-layer.js";
+import * as Failure from "../effect/failure-classification.js";
 import { ENV } from "../env.js";
 import { isRecord } from "../utils.js";
 import { getClientIp } from "./http-utils.js";
@@ -66,13 +66,6 @@ interface SlowRpcRequest {
 const requestSqlStats = FiberRef.unsafeMake<SlowRpcRequest | undefined>(
 	undefined,
 );
-
-const containsInterrupt = (
-	cause: Schema.CauseEncoded<unknown, unknown>,
-): boolean =>
-	cause._tag === "Interrupt" ||
-	((cause._tag === "Sequential" || cause._tag === "Parallel") &&
-		(containsInterrupt(cause.left) || containsInterrupt(cause.right)));
 
 export const withSlowRpcLogging = (
 	protocol: RpcServer.Protocol["Type"],
@@ -209,7 +202,7 @@ export const withSlowRpcLogging = (
 						`${clientId}:${response.requestId}`,
 						response._tag === "Chunk" || response.exit._tag === "Success"
 							? "success"
-							: containsInterrupt(response.exit.cause)
+							: Failure.isEncodedInterrupted(response.exit.cause)
 								? "interrupt"
 								: "failure",
 					);
@@ -572,7 +565,10 @@ export class WsRpcWebSocketHandler implements RpcWebSocketHandlerShape {
 			effect.pipe(
 				Effect.catchAllCause((cause) =>
 					Effect.sync(() =>
-						console.error(`[ws-rpc-bridge] ${op} failed:`, Cause.pretty(cause)),
+						console.error(
+							`[ws-rpc-bridge] ${op} failed:`,
+							Failure.renderCause(cause),
+						),
 					),
 				),
 			),

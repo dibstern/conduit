@@ -1,5 +1,5 @@
 import { SqlClient } from "@effect/sql";
-import { Cause, Effect, Exit, Option, Runtime } from "effect";
+import { Effect, Exit, Option, Runtime } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
@@ -41,6 +41,7 @@ import {
 } from "../domain/relay/Services/session-status-poller.js";
 import { SSEStreamTag } from "../domain/relay/Services/sse-stream-service.js";
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
+import * as Failure from "../effect/failure-classification.js";
 import { formatErrorDetail } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
@@ -472,7 +473,7 @@ export async function startProjectRelay(inputs: StartupInputs) {
 								Effect.catchAllCause((cause) =>
 									Effect.sync(() =>
 										log.warn(
-											`Failed to announce background work: ${Cause.pretty(cause)}`,
+											`Failed to announce background work: ${Failure.renderCause(cause)}`,
 										),
 									),
 								),

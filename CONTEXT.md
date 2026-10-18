@@ -5,18 +5,9 @@
 A **Project** is a named, saved set of one or more Project Folders and the only
 way sessions are grouped (ADR-0011). Its first folder is the main folder, which
 no other project may use as its main folder; other folders can be shared.
-Every session belongs to one project for life. Conduit is never "in" a project:
-the slug in `/p/<slug>` names a project but is not app state.
-
-A **Project Merge** moves every session of an absorbed project into a target
-and cannot be undone. Each moved session's workspace maps the target's main
-folder to where the session ran, with origin `existing`. Folders only the
-absorbed project had join the target, and the target's settings win.
-
-A **Slug Alias** is what a merge leaves behind: the absorbed slug and main
-folder, pointing at the target. Old links redirect through it, provider
-sessions found in its folder import into the target, and session reads for a
-project include its aliases' slugs. Stored events keep their original slug.
+Every session belongs to one project for life, and projects never merge.
+Conduit is never "in" a project: the `?p=<slug>` Scope names a project but is
+not app state.
 
 The **Scratch Project** is the hidden project behind New Session's "No
 project". Each scratch session runs in its own `<configDir>/scratch/<session
@@ -62,38 +53,23 @@ save. The daemon's project registry layer refreshes every stored folder before
 HTTP/RPC consumers start, so remote changes are reflected after restart. Identity
 discovery is best-effort and never rejects a project save or daemon startup.
 
-## Project Group
+## Session list Scope
 
-Retired by ADR-0011: Project Merge replaces it, and the cutover merges copies
-of one folder automatically. This section describes the code until that lands.
+The session list's **Scope** is one project or all projects. The URL's `p`
+parameter selects a project by slug; omitting it shows all projects. Each scope
+selection adds a browser history entry. `project:` search tokens select one
+project. Unknown project slugs show an empty list without widening the scope.
+Search, paging and live rows all filter by the project's slug alone.
 
-A **Project Group** contains the projects sharing a grouping key under their
-effective grouping mode. The primary Project Folder alone determines the group;
-attaching another folder does not change it. The daemon stores an optional
-`groupingMode` override on each project. Unset overrides inherit the global
-`defaultGroupingMode` in persisted settings, which defaults to `repository`.
+Projects whose main folders share a Repository Identity remain separate projects.
+Session rows show their project title. The sidebar's arrangement can group rows
+by status, project or time; project arrangement has one heading per project,
+titled with that project's title. Repository Identity remains a folder fact and
+appears in the project dialog.
 
-`repository` keys on Repository Identity, `repository+subfolder` adds the primary
-folder's path relative to its repository root, and `off` gives the project its
-own group. A primary folder without an identity also stands alone. Repository
-groups use one repository display name; standalone projects use their title.
-Session rows add the project title only when the group has multiple projects,
-even when those titles are identical.
-
-The shared pure `computeProjectGroups` function derives group keys, labels and
-qualifier decisions for the daemon and frontend. It leaves ordering to the
-daemon. Project and global grouping edits publish a fresh project list so rows
-relabel on every client without a reload.
-
-The session list's **Scope** is one project or one Project Group. Its only state
-is the URL's `p` parameter: a plain slug selects that project, while
-`/group/<group key>` selects every project with that key. Only groups with more
-than one project get a repository choice in the chip's menu; their projects
-remain available for further narrowing. Each selection adds a browser history
-entry. `project:` search tokens select projects only. A missing group key has
-the same empty result as an unknown project slug, without widening the scope.
-Daemon search and paging select projects by the computed groups before reading
-sessions; frontend live rows use those same computed memberships.
+Old repository-group scope links are replaced with the unscoped URL when the
+router reads them. Retired grouping settings in existing configuration are
+ignored on load and dropped on the next save. No projects or sessions merge.
 
 ## Session Workspace
 

@@ -15,7 +15,7 @@ import type {
 	SessionStatusFilter,
 } from "../../../src/lib/frontend/stores/session-scope.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
-import { seedDaemonSessions, seedRootSessions } from "./session-fixtures.js";
+import { applySessionSnapshot, seedRootSessions } from "./session-fixtures.js";
 
 const now = new Date(2030, 9, 7, 12).getTime();
 const at = (day: number, hour: number) =>
@@ -165,23 +165,26 @@ describe("projectSessionList", () => {
 		attachedProjectState.slug = "local";
 		routerState.search = "?p=a";
 		seedRootSessions([]);
-		seedDaemonSessions([
-			row("wanted", {
-				title: "Fix sidebar",
-				projectSlug: "a",
-				attention: "working",
-			}),
-			row("wrong-project", {
-				title: "Fix elsewhere",
-				projectSlug: "b",
-				attention: "working",
-			}),
-			row("wrong-title", {
-				title: "Review",
-				projectSlug: "a",
-				attention: "working",
-			}),
-		]);
+		applySessionSnapshot(
+			[
+				row("wanted", {
+					title: "Fix sidebar",
+					projectSlug: "a",
+					attention: "working",
+				}),
+				row("wrong-project", {
+					title: "Fix elsewhere",
+					projectSlug: "b",
+					attention: "working",
+				}),
+				row("wrong-title", {
+					title: "Review",
+					projectSlug: "a",
+					attention: "working",
+				}),
+			],
+			"partial",
+		);
 		sessionState.searchQuery = "Fix";
 		expect(
 			ids(
@@ -191,7 +194,7 @@ describe("projectSessionList", () => {
 			),
 		).toEqual(["wanted"]);
 		sessionState.searchQuery = "";
-		seedDaemonSessions([]);
+
 		routerState.search = "";
 	});
 });

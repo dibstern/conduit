@@ -57,3 +57,8 @@
 dolt.shared-server: true
 sync:
     remote: "git+https://github.com/dibstern/conduit.git"
+
+# Worktrees share the main checkout's Dolt database, so a backup per
+# worktree duplicates ~200 MB. Off by default; the main checkout's untracked
+# .beads/config.local.yaml turns it back on and points it at one shared dir.
+backup.enabled: false

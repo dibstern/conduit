@@ -196,8 +196,7 @@ export const cursorModelParametersHandlers: StepHandler[] = [
 					await expect(option).toBeVisible();
 					if (kind === "fast" || kind === "thinking")
 						await expect(option).toHaveText(value === "true" ? "On" : "Off");
-					if (kind === "effort")
-						await expect(option).toHaveText(value === "medium" ? "med" : value);
+					if (kind === "effort") await expect(option).toHaveText(value);
 					if (kind === "context")
 						await expect(option).toHaveText(
 							[...grokContexts, ...gptContexts].find(

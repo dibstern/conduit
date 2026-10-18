@@ -157,8 +157,8 @@ export const WithBranch: Story = {
 	},
 };
 
-export const RepositoryWithProjectQualifier: Story = {
-	name: "Repository with project qualifier",
+export const WithCheckoutProject: Story = {
+	name: "Checkout project and branch",
 	args: {
 		session: {
 			...mockSessionProcessing,
@@ -166,18 +166,18 @@ export const RepositoryWithProjectQualifier: Story = {
 			title: "Review API changes",
 		},
 		active: false,
-		projectLabel: "myapp · Main checkout",
+		projectLabel: "Main checkout",
 		branch: "main",
 	},
 	play: async ({ canvasElement }) => {
 		await expect(
-			within(canvasElement).getByText("myapp · Main checkout · main"),
+			within(canvasElement).getByText("Main checkout · main"),
 		).toBeVisible();
 	},
 };
 
-export const RepositoryWithoutProjectQualifier: Story = {
-	name: "Repository without project qualifier",
+export const WithProject: Story = {
+	name: "Project title",
 	args: {
 		session: {
 			...mockSessionIdle,

@@ -1,6 +1,7 @@
 import { statSync } from "node:fs";
 import { SqlClient } from "@effect/sql";
-import { Cause, Data, Effect, Exit, Layer, Option } from "effect";
+import { Data, Effect, Exit, Layer, Option } from "effect";
+import * as Failure from "../../../effect/failure-classification.js";
 import {
 	type createSessionGitCache,
 	daemonSessionGitCache,
@@ -12,13 +13,10 @@ import {
 	ReadQueryEffectTag,
 	type SessionScope,
 } from "../../../persistence/effect/read-query-effect.js";
-import { computeProjectGroups } from "../../../project-grouping.js";
-import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import { shouldArchiveIdleSession } from "../../../session/auto-archive-policy.js";
 import { readPersistedAutoArchiveFacts } from "../../../session/auto-archive-sweep.js";
 import { shouldSettleIdleSession } from "../../../session/auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "../../../session/auto-settle-reader.js";
-import { getScopeGroupKey } from "../../../session-scope.js";
 import type {
 	ArchivedSessionQueryOptions,
 	ArchivedSessionQueryResult,
@@ -239,7 +237,7 @@ const listProjectSessions = (
 						availability: {
 							projectSlug: project.slug,
 							available: false as const,
-							error: String(Cause.squash(exit.cause)),
+							error: String(Failure.squashCause(exit.cause)),
 						},
 					};
 				}),
@@ -271,7 +269,6 @@ const listProjectSessions = (
 	});
 
 export const listDaemonSessions = (
-	configDir: string,
 	options: DaemonSessionQueryOptions = {},
 	gitCache: ReturnType<typeof createSessionGitCache> = daemonSessionGitCache,
 ): Effect.Effect<
@@ -281,26 +278,10 @@ export const listDaemonSessions = (
 > =>
 	Effect.gen(function* () {
 		const registered = yield* allProjects;
-		const groupKey = getScopeGroupKey(options.scope);
-		const defaultMode =
-			loadRelaySettings(configDir).defaultGroupingMode ?? "repository";
-		const groups =
-			groupKey === null
-				? null
-				: computeProjectGroups(
-						registered.map((project) => ({
-							...project,
-							groupingMode: project.groupingMode ?? defaultMode,
-						})),
-					);
-		// Scope before querying or merging any project pages. The same pure
-		// function owns membership in the registry and in the frontend.
+		// Scope before querying or merging any project pages.
 		const projects = registered.filter(
 			(project) =>
-				(options.scope === undefined ||
-					(groupKey === null
-						? project.slug === options.scope
-						: groups?.[project.slug]?.key === groupKey)) &&
+				(options.scope === undefined || project.slug === options.scope) &&
 				project.slug !== options.exclude,
 		);
 		const result = yield* listProjectSessions(

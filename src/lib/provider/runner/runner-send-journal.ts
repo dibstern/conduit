@@ -11,7 +11,8 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { Cause, Data, Effect } from "effect";
+import { Data, Effect } from "effect";
+import * as Failure from "../../effect/failure-classification.js";
 import { isRecord } from "../../utils.js";
 import type { TurnResult } from "../types.js";
 import { runnerFailure } from "./runner-protocol.js";
@@ -271,7 +272,10 @@ export class RunnerSendJournal {
 							? { result: exit.value }
 							: {}
 						: {
-								failure: runnerFailure("send-turn", Cause.squash(exit.cause)),
+								failure: runnerFailure(
+									"send-turn",
+									Failure.squashCause(exit.cause),
+								),
 							}),
 				};
 				this.write(filename, record);

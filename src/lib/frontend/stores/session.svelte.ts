@@ -3,7 +3,6 @@
 
 import { SvelteMap } from "svelte/reactivity";
 import { busySessionIds as calculateBusySessionIds } from "../../session-busy.js";
-import { getScopeGroupKey } from "../../session-scope.js";
 import type { BackgroundTask } from "../../shared-types.js";
 import {
 	isBusy,
@@ -45,7 +44,6 @@ import {
 	refreshCatalogs,
 } from "./discovery.svelte.js";
 import { goalDetails, sessionGoals } from "./goal.svelte.js";
-import { getProjectGroup } from "./project-state.svelte.js";
 import { attachedProjectState, getCurrentSlug } from "./router.svelte.js";
 import { markSessionDeleted, selection } from "./selection.svelte.js";
 import { restoreServerUpdateBanner } from "./server-status.svelte.js";
@@ -141,11 +139,6 @@ const clientSession = $state({
 	} | null,
 	searchQuery: "",
 	searchIncludeArchived: false,
-	daemonSessions: [] as SessionInfo[],
-	daemonUnavailableProjects: [] as string[],
-	daemonCursor: null as ListDaemonSessionsResponse["nextCursor"],
-	daemonHasMore: false,
-	daemonLoading: false,
 	searchResults: null as SessionInfo[] | null,
 	searchCursor: null as ListDaemonSessionsResponse["nextCursor"],
 	searchHasMore: false,
@@ -178,21 +171,6 @@ export const sessionState = {
 	},
 	get familySessions(): readonly Immutable<SessionInfo>[] {
 		return familySessions;
-	},
-	get daemonSessions(): readonly SessionInfo[] {
-		return clientSession.daemonSessions;
-	},
-	get daemonUnavailableProjects(): readonly string[] {
-		return clientSession.daemonUnavailableProjects;
-	},
-	get daemonCursor() {
-		return clientSession.daemonCursor;
-	},
-	get daemonHasMore() {
-		return clientSession.daemonHasMore;
-	},
-	get daemonLoading() {
-		return clientSession.daemonLoading;
 	},
 	get searchResults(): readonly SessionInfo[] | null {
 		return clientSession.searchResults;
@@ -243,9 +221,6 @@ export const sessionState = {
 
 /** A deletion owns only its id; selection follows the tombstone. */
 export function leaveDeletedSession(id: string): void {
-	clientSession.daemonSessions = clientSession.daemonSessions.filter(
-		(row) => row.id !== id,
-	);
 	if (clientSession.searchResults)
 		clientSession.searchResults = clientSession.searchResults.filter(
 			(row) => row.id !== id,
@@ -358,7 +333,6 @@ $effect.root(() => {
 	$effect(() => {
 		const rows = [
 			...sessionState.rootSessions,
-			...sessionState.daemonSessions,
 			...(sessionState.searchResults ?? []),
 		];
 		const now = sessionState.now;
@@ -607,106 +581,8 @@ export function resetSessionFamily(): void {
 	familyApplied = emptySubscription();
 }
 
-/** How many cross-project rows one page asks for. Exported so the caller that
- *  fetches the first page uses the same size as the sentinel that fetches the
- *  rest -- a first page smaller than the viewport would never scroll, and so
- *  would never ask for a second. */
+/** Rows shown per browse page and requested per search page. */
 export const DAEMON_SESSION_PAGE_SIZE = 30;
-
-/** Bumped by anything that invalidates in-flight browse pages. A response
- *  carrying a stale token is dropped rather than appended, so a project switch
- *  cannot splice another project's page onto the new list. */
-let daemonBrowseToken = 0;
-
-/** Fetches the first cross-project page for the current scope, replacing
- *  whatever was listed. Run on connect and again whenever the scope changes. */
-export async function loadDaemonSessions(): Promise<void> {
-	const projectSlug = getCurrentSlug();
-	if (!projectSlug) return;
-	daemonBrowseToken += 1;
-	const token = daemonBrowseToken;
-	const scope = getSessionScope();
-	try {
-		const response = await rpc("ListDaemonSessions", {
-			projectSlug,
-			limit: DAEMON_SESSION_PAGE_SIZE,
-			// The sidebar shows other projects' roots only; this project's roots
-			// come from the shell feed. Pages of rows that never render keep the
-			// scroll sentinel in view, so the pager would walk the whole store.
-			roots: true,
-			exclude: projectSlug,
-			...(scope === null ? {} : { scope }),
-		});
-		if (token === daemonBrowseToken) applyListDaemonSessionsResponse(response);
-	} catch {
-		// The local project's rows arrive separately; the list stays usable.
-	}
-}
-
-/** Applies a FIRST page: replaces the accumulator rather than appending. */
-export function applyListDaemonSessionsResponse(
-	response: ListDaemonSessionsResponse,
-): void {
-	daemonBrowseToken += 1;
-	clientSession.daemonSessions = [...response.sessions];
-	clientSession.daemonCursor = response.nextCursor;
-	clientSession.daemonHasMore = response.hasMore;
-	clientSession.daemonLoading = false;
-	clientSession.daemonUnavailableProjects = response.availability
-		.filter((entry) => !entry.available)
-		.map((entry) => entry.projectSlug);
-}
-
-/** Appends the next cross-project page. No-ops at the end of the list and while
- *  a page is already in flight, which is what stops the scroll sentinel from
- *  re-requesting an exhausted cursor forever. */
-export async function loadMoreDaemonSessions(): Promise<void> {
-	const projectSlug = getCurrentSlug();
-	const cursor = sessionState.daemonCursor;
-	if (
-		!projectSlug ||
-		cursor === null ||
-		!sessionState.daemonHasMore ||
-		sessionState.daemonLoading
-	) {
-		return;
-	}
-	const token = daemonBrowseToken;
-	clientSession.daemonLoading = true;
-	try {
-		const scope = getSessionScope();
-		const response = await rpc("ListDaemonSessions", {
-			projectSlug,
-			limit: DAEMON_SESSION_PAGE_SIZE,
-			cursor,
-			roots: true,
-			exclude: projectSlug,
-			...(scope === null ? {} : { scope }),
-		});
-		if (token !== daemonBrowseToken) return;
-		// Dedupe by id. The keyset cursor does not re-emit rows, but a session
-		// whose updated_at moves between two requests can land on both pages, and
-		// a repeated key throws out of Svelte's keyed {#each}.
-		const seen = new Set(sessionState.daemonSessions.map((row) => row.id));
-		const incoming = response.sessions.filter(
-			(session) => !seen.has(session.id),
-		);
-		clientSession.daemonSessions = [
-			...sessionState.daemonSessions,
-			...incoming,
-		];
-		clientSession.daemonCursor = response.nextCursor;
-		clientSession.daemonHasMore = response.hasMore;
-		clientSession.daemonUnavailableProjects = response.availability
-			.filter((entry) => !entry.available)
-			.map((entry) => entry.projectSlug);
-	} catch {
-		// Keep the rows already on screen and leave hasMore alone, so scrolling
-		// again retries rather than declaring the list finished.
-	} finally {
-		if (token === daemonBrowseToken) clientSession.daemonLoading = false;
-	}
-}
 
 /** The query the server is currently answering. Distinct from
  *  sessionState.searchQuery, which is what the user has typed this instant:
@@ -796,7 +672,7 @@ async function runSearchPage(token: number, replace: boolean): Promise<void> {
 		if (token !== daemonSearchToken) return;
 		applySearchResultsResponse(response, replace);
 	} catch {
-		// Same as browse paging: keep what is shown, allow a retry.
+		// Keep the previous search page visible and allow a retry.
 	} finally {
 		if (token === daemonSearchToken) clientSession.searchLoading = false;
 	}
@@ -851,7 +727,6 @@ export function findSession(id: string): Immutable<SessionInfo> | undefined {
 		serverSessions.get(id) ??
 		familySessions.find((row) => row.id === id) ??
 		rootSessions.find((row) => row.id === id) ??
-		sessionState.daemonSessions.find((row) => row.id === id) ??
 		sessionState.searchResults?.find((row) => row.id === id)
 	);
 }
@@ -919,48 +794,25 @@ function lastChangedAt(session: Immutable<SessionInfo>): number {
 /** The sidebar and its search show root sessions only. */
 export function getFilteredSessions(): SessionInfo[] {
 	const scope = getSessionScope();
-	const groupKey = getScopeGroupKey(scope);
-	const currentSlug = getCurrentSlug();
-	const inScope = (session: SessionInfo) => {
-		const slug = session.projectSlug;
-		return (
-			scope === null ||
-			(groupKey === null
-				? slug === scope
-				: getProjectGroup(slug)?.key === groupKey)
-		);
-	};
+	const inScope = (session: SessionInfo) =>
+		scope === null || session.projectSlug === scope;
 	let sessions: SessionInfo[];
 	if (sessionState.searchResults !== null) {
-		const searchSlug = currentSlug;
-		// Root rows carry the subtree rollup, so local search hits use the
-		// current shell row rather than a possibly older search result.
+		// The live feed holds every visible unarchived root, so a hit uses its live
+		// row, and an unarchived hit missing from the feed was hidden or removed
+		// after the search ran. Archived hits only exist in search results.
 		const liveRoots = new Map(
 			sessionState.rootSessions.map((session) => [session.id, session]),
 		);
 		sessions = sessionState.searchResults.flatMap((session) => {
 			if (!isFamilyRoot(session) || !inScope(session)) return [];
-			if (session.projectSlug !== searchSlug) {
-				return [session];
-			}
-			const liveSession = liveRoots.get(session.id);
-			return liveSession
-				? [liveSession]
-				: session.archivedAt != null
-					? [session]
-					: [];
+			const live = liveRoots.get(session.id);
+			if (live) return [live];
+			return session.archivedAt === undefined ? [] : [session];
 		});
 	} else {
-		const localSessions = sessionState.rootSessions;
 		const query = sessionState.searchQuery.toLowerCase().trim();
-		// Foreign rows stay in while a query is active and get title-filtered with
-		// the rest. The server search they will be replaced by now covers every
-		// project too, so the local filter and the landing results agree -- which is
-		// why these no longer have to stand down to avoid flashing in and out.
-		const foreignSessions = sessionState.daemonSessions.filter(
-			(session) => session.projectSlug !== currentSlug && isFamilyRoot(session),
-		);
-		sessions = [...localSessions, ...foreignSessions].filter(inScope);
+		sessions = sessionState.rootSessions.filter(inScope);
 		if (query)
 			sessions = sessions.filter((s) => s.title.toLowerCase().includes(query));
 	}
@@ -1057,11 +909,5 @@ export function clearSessionState(): void {
 	setSearchQuery("");
 	resetSessionFamily();
 	readMarks.clear();
-	clientSession.daemonSessions = [];
-	clientSession.daemonUnavailableProjects = [];
-	clientSession.daemonCursor = null;
-	clientSession.daemonHasMore = false;
-	clientSession.daemonLoading = false;
-	daemonBrowseToken++;
 	clearSessionSearch();
 }

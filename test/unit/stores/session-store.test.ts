@@ -1,19 +1,17 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
 	getOrCreateSessionSlot,
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { clearDiscoveryState } from "../../../src/lib/frontend/stores/discovery.svelte.js";
-import { projectState } from "../../../src/lib/frontend/stores/project.svelte.js";
 import {
 	attachedProjectState,
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	applyFamilyChange,
-	applyListDaemonSessionsResponse,
 	clearSessionState,
 	findSession,
 	getFilteredSessions,
@@ -37,7 +35,6 @@ import {
 	applySessionRemoved,
 	applySessionSnapshot,
 	applySessionUpsert,
-	seedDaemonSessions,
 	seedSearchResults,
 	seedSessions,
 } from "./session-fixtures.js";
@@ -88,7 +85,7 @@ beforeEach(() => {
 });
 
 it.each([
-	"daemon",
+	"shell",
 	"search",
 ] as const)("keeps project ownership for a loaded %s row before attachment changes", (source) => {
 	attachedProjectState.slug = "conduit";
@@ -97,7 +94,7 @@ it.each([
 		projectSlug: "dotfiles",
 	});
 	openSessionForSetup(foreign.id, foreign.projectSlug);
-	if (source === "daemon") seedDaemonSessions([foreign]);
+	if (source === "shell") applySessionSnapshot([foreign], "partial");
 	else seedSearchResults([foreign]);
 	expect(findSession(foreign.id)?.projectSlug).toBe("dotfiles");
 });
@@ -531,50 +528,6 @@ describe("attention placement and daemon rows", () => {
 		expect(isSessionWoken(timed, 100)).toBe(true);
 	});
 
-	it("combines local roots with foreign daemon roots without duplicating local rows", () => {
-		projectState.projects = [];
-		seedSessions([
-			makeSession({ id: "local", title: "Warm title", updatedAt: 100 }),
-		]);
-		applyListDaemonSessionsResponse({
-			projectSlug: "project-a",
-			sessions: [
-				makeSession({
-					id: "local",
-					title: "Cold title",
-					projectSlug: "project-a",
-				}),
-				makeSession({
-					id: "foreign",
-					projectSlug: "project-b",
-					updatedAt: 400,
-				}),
-				makeSession({
-					id: "foreign-created",
-					projectSlug: "project-b",
-					createdAt: 300,
-				}),
-				makeSession({
-					id: "foreign-child",
-					parentID: "foreign",
-					projectSlug: "project-b",
-					updatedAt: 500,
-				}),
-			],
-			availability: [{ projectSlug: "project-b", available: true }],
-			hasMore: false,
-			nextCursor: null,
-		});
-		expect(getFilteredSessions().map((row) => row.id)).toEqual([
-			"foreign",
-			"foreign-created",
-			"local",
-		]);
-		expect(getFilteredSessions().find((row) => row.id === "local")?.title).toBe(
-			"Warm title",
-		);
-	});
-
 	it("returns only reconciled root search results, never family children", () => {
 		const root = makeSession({ id: "root", title: "Match" });
 		const child = makeSession({
@@ -584,19 +537,6 @@ describe("attention placement and daemon rows", () => {
 		});
 		seedSessions([root]);
 		applyFamilyChange({ _tag: "snapshot", sequence: 1, rows: [root, child] });
-		applyListDaemonSessionsResponse({
-			projectSlug: "project-a",
-			sessions: [
-				makeSession({
-					id: "foreign-match",
-					title: "Match abroad",
-					projectSlug: "project-b",
-				}),
-			],
-			availability: [{ projectSlug: "project-b", available: true }],
-			hasMore: false,
-			nextCursor: null,
-		});
 		sessionState.searchQuery = "match";
 		seedSearchResults([root, child]);
 		expect(getFilteredSessions().map((row) => row.id)).toEqual(["root"]);

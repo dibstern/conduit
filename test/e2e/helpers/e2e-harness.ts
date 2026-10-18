@@ -354,7 +354,7 @@ export async function createReplayHarness(
 									Effect.tryPromise({
 										try: () =>
 											stack.effectRuntime.runtime.runPromise(
-												listDaemonSessions(configDir, query).pipe(
+												listDaemonSessions(query).pipe(
 													Effect.provide(daemonReadContext),
 												),
 											),

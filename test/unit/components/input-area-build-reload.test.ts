@@ -12,9 +12,10 @@ import {
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import { connectionState } from "../../../src/lib/frontend/transport/connection-status.svelte.js";
 import { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import {
-	seedDaemonSessions,
+	applySessionSnapshot,
 	seedSessions,
 } from "../stores/session-fixtures.js";
 
@@ -86,6 +87,7 @@ describe("InputArea build reload recovery", () => {
 		sessionStorage.clear();
 		openSessionForSetup(sessionId, "test");
 		attachedProjectState.slug = "test";
+		connectionState.status = "connected";
 		phaseToIdle(getOrCreateSessionActivity(sessionId));
 		Object.assign(inputSyncState, {
 			text: "",
@@ -107,15 +109,16 @@ describe("InputArea build reload recovery", () => {
 		vi.unstubAllGlobals();
 		openSessionForSetup(null);
 		attachedProjectState.slug = null;
-		seedDaemonSessions([]);
+		connectionState.status = "";
 		seedSessions([]);
 		sessionStorage.clear();
 	});
 
 	it("syncs a loaded foreign session draft by session id", async () => {
-		seedDaemonSessions([
-			{ id: sessionId, title: "Foreign session", projectSlug: "dotfiles" },
-		]);
+		applySessionSnapshot(
+			[{ id: sessionId, title: "Foreign session", projectSlug: "dotfiles" }],
+			"partial",
+		);
 		const { getByRole } = render(InputArea);
 		const textarea = getByRole("textbox", {
 			name: "Message",

@@ -609,6 +609,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 					| "CONDUIT_SERVER_BUILD_ID"
 					| "CONDUIT_SLOW_RPC_MS"
 					| "CONDUIT_TEST_ADVANCE_BUS_CAPACITY"
+					| "CONDUIT_TEST_RPC_DEFECT"
 					| "CONDUIT_TRACE_ENABLED"
 					| "CONDUIT_TRACE_FILE"
 					| "CONDUIT_TRACE_MAX_BYTES"
@@ -1431,7 +1432,11 @@ Object.assign(ClaudeDriver, { create: deps => {
 		await this.stop(signal, 10_000);
 	}
 
-	async runCli(args: string[]): Promise<{
+	async runCli(
+		args: string[],
+		/** A cold CLI start can exceed the default bound on a loaded machine. */
+		options: { timeoutMs?: number } = {},
+	): Promise<{
 		pid: number | undefined;
 		code: number | null;
 		signal: NodeJS.Signals | null;
@@ -1464,7 +1469,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			const timer = setTimeout(() => {
 				timedOut = true;
 				child.kill("SIGKILL");
-			}, TIMEOUT_MS);
+			}, options.timeoutMs ?? TIMEOUT_MS);
 			child.once("error", (cause) => {
 				clearTimeout(timer);
 				fail(cause);
@@ -2155,30 +2160,29 @@ export class ProcessBrowser {
 		if (this.sessionsReady) return this.sessionsReady;
 		this.sessionsReady = (async () => {
 			const cursor = this.frames.length;
-			this.sessions = this.watch(
-				this.rpc.SubscribeShell({ projectSlug: this.projectSlug }),
-				(envelope) =>
-					Effect.gen(this, function* () {
-						this.record({ type: "shell", ...envelope });
-						if (envelope._tag === "snapshot")
-							this.record({ type: "session_snapshot" });
-						const rows =
-							envelope._tag === "snapshot"
-								? envelope.rows
-								: envelope._tag === "upsert"
-									? [envelope.item]
-									: [];
-						for (const row of rows)
-							this.record({ ...row, type: "session_row" });
-						if (this.followRows)
-							yield* Effect.forEach(
-								rows,
-								(row) => Effect.promise(() => this.followSession(row.id)),
-								{ discard: true },
-							);
-						if (envelope._tag === "remove")
-							this.record({ type: "session_removed", id: envelope.id });
-					}),
+			this.sessions = this.watch(this.rpc.SubscribeShell({}), (envelope) =>
+				Effect.gen(this, function* () {
+					this.record({ type: "shell", ...envelope });
+					if (envelope._tag === "snapshot")
+						this.record({ type: "session_snapshot" });
+					const rows =
+						envelope._tag === "snapshot"
+							? envelope.rows
+							: envelope._tag === "upsert"
+								? [envelope.item]
+								: [];
+					for (const row of rows) this.record({ ...row, type: "session_row" });
+					// The feed spans every project; following another project's
+					// rows would tie this browser to that project's lifetime.
+					if (this.followRows)
+						yield* Effect.forEach(
+							rows.filter((row) => row.projectSlug === this.projectSlug),
+							(row) => Effect.promise(() => this.followSession(row.id)),
+							{ discard: true },
+						);
+					if (envelope._tag === "remove")
+						this.record({ type: "session_removed", id: envelope.id });
+				}),
 			);
 			await this.waitFor(
 				(message) =>

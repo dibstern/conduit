@@ -1,6 +1,6 @@
 import { SqlClient } from "@effect/sql";
 import {
-	Cause,
+	type Cause,
 	Duration,
 	Effect,
 	HashMap,
@@ -9,6 +9,7 @@ import {
 	PubSub,
 	Ref,
 } from "effect";
+import * as Failure from "../../../effect/failure-classification.js";
 import type { SessionStatus } from "../../../instance/sdk-types.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
@@ -168,10 +169,10 @@ export const StatusPollerLive: Layer.Layer<
 		const started = yield* Ref.make(false);
 		const statusLog = log.child("status-poller");
 		const reportFailure = (prefix: string, cause: Cause.Cause<unknown>) =>
-			Cause.isInterruptedOnly(cause)
+			Failure.isInterruptedOnly(cause)
 				? Effect.interrupt
 				: Effect.sync(() =>
-						statusLog.warn(`${prefix}: ${Cause.pretty(cause)}`),
+						statusLog.warn(`${prefix}: ${Failure.renderCause(cause)}`),
 					);
 		const updateStatusSnapshot = Effect.gen(function* () {
 			const statuses = yield* pollerState(getCurrentStatuses);

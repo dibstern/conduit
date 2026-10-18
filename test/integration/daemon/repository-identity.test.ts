@@ -141,7 +141,7 @@ describe("repository identities through the daemon", () => {
 			"remote",
 			"add",
 			"origin",
-			"ssh://git@gitlab.com/Group/Sub/Legacy.git",
+			"ssh://git@gitlab.com/Team/Sub/Legacy.git",
 		);
 		const config: DaemonConfig = {
 			pid: 0,
@@ -209,7 +209,7 @@ describe("repository identities through the daemon", () => {
 		).toEqual({});
 		expect(bySlug(before, "legacy").repositoryIdentities).toEqual({
 			[legacy]: {
-				key: "gitlab.com/group/sub/legacy",
+				key: "gitlab.com/team/sub/legacy",
 				name: "Legacy",
 				root: legacy,
 			},

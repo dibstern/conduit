@@ -28,8 +28,8 @@ import {
 	formatTimeAgo,
 } from "../../../src/lib/frontend/utils/format.js";
 import {
+	applySessionSnapshot,
 	clearSessionSearch,
-	seedDaemonSessions,
 	seedFamilySessions,
 	seedRootSessions,
 	seedSearchResults,
@@ -93,7 +93,7 @@ beforeEach(() => {
 		},
 	]);
 	seedFamilySessions([...sessionState.rootSessions]);
-	seedDaemonSessions([]);
+
 	sessionState.searchQuery = "";
 	clearSessionSearch();
 	openSessionForSetup(null);
@@ -461,14 +461,17 @@ describe("session triage list", () => {
 	});
 
 	it("addresses another project's row by its session", async () => {
-		seedDaemonSessions([
-			{
-				id: "foreign",
-				title: "Foreign work",
-				projectSlug: "other-project",
-				pinnedAt: 1,
-			},
-		]);
+		applySessionSnapshot(
+			[
+				{
+					id: "foreign",
+					title: "Foreign work",
+					projectSlug: "other-project",
+					pinnedAt: 1,
+				},
+			],
+			"partial",
+		);
 		render(SessionList);
 		const row = screen.getByText("Foreign work").closest("a");
 		if (!row) throw new Error("Missing foreign row");

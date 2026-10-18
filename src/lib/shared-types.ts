@@ -379,7 +379,7 @@ export interface DaemonSessionQueryOptions {
 	readonly search?: string;
 	readonly includeArchived?: boolean;
 	readonly cursor?: DaemonSessionCursor;
-	/** Read one project slug or an encoded repository group scope. Filter projects
+	/** Read one project slug. Filter projects
 	 *  before merging their pages, so scoped search and paging remain complete. */
 	readonly scope?: string;
 	/** Skip one project. The browser already holds its own project's roots
@@ -565,20 +565,6 @@ export const RepositoryIdentitySchema = Schema.Struct({
 });
 export type RepositoryIdentity = typeof RepositoryIdentitySchema.Type;
 
-export const GroupingModeSchema = Schema.Literal(
-	"repository",
-	"repository+subfolder",
-	"off",
-);
-export type GroupingMode = typeof GroupingModeSchema.Type;
-
-export const ProjectGroupSchema = Schema.Struct({
-	key: Schema.String,
-	label: Schema.String,
-	needsProjectQualifier: Schema.Boolean,
-});
-export type ProjectGroup = typeof ProjectGroupSchema.Type;
-
 /** A project in the project list */
 export interface ProjectInfo {
 	slug: string;
@@ -587,10 +573,6 @@ export interface ProjectInfo {
 	folders: readonly [string, ...string[]];
 	setupScript?: string | undefined;
 	sessionMode?: SessionMode | undefined;
-	/** Unset inherits the daemon's global default. */
-	groupingMode?: GroupingMode | undefined;
-	effectiveGroupingMode?: GroupingMode;
-	group?: ProjectGroup;
 	/** Keys are Project Folder paths; absent entries have no Repository Identity. */
 	repositoryIdentities?: Readonly<Record<string, RepositoryIdentity>>;
 	missing?: boolean;
@@ -916,6 +898,7 @@ export interface HealthResponse {
 
 export interface InfoResponse {
 	version: string;
+	buildId: string;
 }
 
 export interface DashboardProjectResponse {

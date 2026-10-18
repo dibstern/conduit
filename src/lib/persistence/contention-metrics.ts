@@ -4,7 +4,8 @@ import {
 	monitorEventLoopDelay,
 	performance,
 } from "node:perf_hooks";
-import { Cause, Effect } from "effect";
+import { Effect } from "effect";
+import * as Failure from "../effect/failure-classification.js";
 
 function isSqliteBusy(error: unknown, seen = new Set<object>()): boolean {
 	if (typeof error === "string")
@@ -76,7 +77,7 @@ function makeContentionMetrics(file: string) {
 					Effect.tapErrorCause((cause) =>
 						Effect.sync(() => {
 							if (
-								[...Cause.failures(cause), ...Cause.defects(cause)].some(
+								[...Failure.failures(cause), ...Failure.defects(cause)].some(
 									(error) => isSqliteBusy(error),
 								)
 							)

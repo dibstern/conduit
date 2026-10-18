@@ -365,8 +365,10 @@ describe("SaveProject through the built daemon", () => {
 		folders.add(directory);
 		const lists: (readonly ProjectInfo[])[] = [];
 		const following = Effect.runFork(
-			Stream.runForEach(observer.rpc.SubscribeProjects({}), ({ projects }) =>
-				Effect.sync(() => lists.push(projects)),
+			Stream.runForEach(observer.rpc.SubscribeShell({}), (frame) =>
+				Effect.sync(() => {
+					if (frame._tag === "projects") lists.push(frame.projects);
+				}),
 			),
 		);
 		const latest = () => lists.at(-1) ?? [];

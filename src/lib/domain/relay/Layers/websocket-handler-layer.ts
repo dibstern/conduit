@@ -1,4 +1,5 @@
-import { Cause, Effect, Layer } from "effect";
+import { Effect, Layer } from "effect";
+import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { makeEffectWsHandler } from "../../../server/effect-ws-handler.js";
 import { LoggerTag, WebSocketHandlerTag } from "../Services/services.js";
@@ -29,7 +30,7 @@ export const WebSocketHandlerLive: Layer.Layer<
 				Effect.catchAllCause((cause) =>
 					Effect.sync(() =>
 						wsLog.warn(
-							`Defect while draining websocket handler during shutdown: ${Cause.pretty(cause)}`,
+							`Defect while draining websocket handler during shutdown: ${Failure.renderCause(cause)}`,
 						),
 					),
 				),

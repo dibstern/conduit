@@ -1,12 +1,9 @@
 <script lang="ts">
-	import { untrack } from "svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
 	import Select from "../ui/Select.svelte";
 	import { Schema } from "effect";
-	import { GroupingModeSchema } from "../../../shared-types.js";
 	import { DefaultSessionModeSchema } from "../../../contracts/project-file.js";
-	import { projectState } from "../../stores/project-state.svelte.js";
 	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
@@ -17,7 +14,7 @@
 	import { DEFAULT_WORKTREE_CLEANUP, type WorktreeCleanup, type WorktreeCleanupReport } from "../../../contracts/worktree.js";
 	import Button from "../ui/Button.svelte";
 	import Disclosure from "../ui/Disclosure.svelte";
-	let state = $state({ autoSettleDays: 3 as number | null, autoSettleSaving: false, autoArchiveDays: 30 as number | null, autoArchiveSaving: false, sessionModeSaving: false, groupingSaving: false, cleanup: DEFAULT_WORKTREE_CLEANUP as WorktreeCleanup, cleanupSaving: false, cleanupOpen: false, cleanupDetailsOpen: false, cleanupRun: { status: "idle" } as { status: "idle" | "running" | "failed" } | { status: "done"; report: WorktreeCleanupReport } });
+	let state = $state({ autoSettleDays: 3 as number | null, autoSettleSaving: false, autoArchiveDays: 30 as number | null, autoArchiveSaving: false, sessionModeSaving: false, cleanup: DEFAULT_WORKTREE_CLEANUP as WorktreeCleanup, cleanupSaving: false, cleanupOpen: false, cleanupDetailsOpen: false, cleanupRun: { status: "idle" } as { status: "idle" | "running" | "failed" } | { status: "done"; report: WorktreeCleanupReport } });
 
 	const idlePresets = [7, 14, 30, 90];
 	const outcomes = [
@@ -78,7 +75,6 @@
 		const route = getCurrentRoute();
 		if (route.page === "chat" && route.sessionId && !getCurrentSlug()) return;
 		let current = true;
-		const groupingReadRevision = untrack(() => projectState.defaultGroupingRevision);
 		void rpc("GetAutoArchiveSetting", {})
 			.then(({ autoArchiveAfterDays: days }) => {
 				if (current && !state.autoArchiveSaving) state.autoArchiveDays = days;
@@ -93,13 +89,6 @@
 			.catch((error) => {
 				if (current) toastFailure("Couldn't load auto-settle setting")(error);
 			});
-		void rpc("GetDefaultGroupingMode", {})
-			.then(({ mode }) => {
-				if (current && groupingReadRevision === projectState.defaultGroupingRevision) projectState.defaultGroupingMode = mode;
-			})
-			.catch((error) => {
-				if (current) toastFailure("Couldn't load grouping setting")(error);
-			});
 		void rpc("GetWorktreeCleanupSetting", {})
 			.then(({ worktreeCleanup: cleanup }) => {
 				if (current && !state.cleanupSaving) state.cleanup = cleanup;
@@ -112,26 +101,6 @@
 </script>
 
 <SettingsGroup id="settings-sessions" title="Sessions">
-	<SettingsRow label="Default repository grouping" labelFor="settings-grouping-mode-select" description="Projects inherit this unless they choose their own mode.">
-		{#snippet control()}
-			<Select id="settings-grouping-mode-select" value={projectState.defaultGroupingMode} disabled={state.groupingSaving} onchange={(event) => {
-				const mode = event.currentTarget.value;
-				if (!Schema.is(GroupingModeSchema)(mode)) return;
-				const groupingSaveRevision = ++projectState.defaultGroupingRevision;
-				state.groupingSaving = true;
-				void rpc("SetDefaultGroupingMode", { mode })
-					.then(({ mode: saved }) => {
-						if (groupingSaveRevision === projectState.defaultGroupingRevision) projectState.defaultGroupingMode = saved;
-					})
-					.catch(toastFailure("Couldn't save grouping setting"))
-					.finally(() => { state.groupingSaving = false; });
-			}}>
-				<option value="repository">By repository</option>
-				<option value="repository+subfolder">By repository and subfolder</option>
-				<option value="off">Off</option>
-			</Select>
-		{/snippet}
-	</SettingsRow>
 	<SettingsRow
 		label="Default session mode"
 		labelFor="settings-default-session-mode"

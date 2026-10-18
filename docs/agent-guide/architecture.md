@@ -234,6 +234,14 @@ preserves default-session bootstrap when attaching to its initial relay.
 `test/unit/server/`. Browser project lists and project removal use daemon RPC.
 The dashboard's `DELETE /api/projects/:slug` endpoint has been removed.
 
+The sidebar Scope is one project selected by `?p=<slug>`, or all projects when
+`p` is absent. Search, paging and live rows filter by project slug. Project
+arrangement shows one heading per project using its title, even when projects
+share Repository Identity. Identity belongs to folders and remains visible in
+the project dialog. Project Groups and their settings have retired; old group
+scope URLs are replaced with an unscoped URL at the router boundary. Existing
+configuration ignores retired settings and drops them on the next save.
+
 ## Provider Runtime Notes
 
 - Do not assume a fixed OpenCode HTTP server or debug port. Managed OpenCode test instances can run on dynamic ports, and the active base URL should come from daemon/project config, logs, or test output.

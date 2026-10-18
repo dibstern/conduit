@@ -1,170 +1,45 @@
-// Shell Subscription (delta source #2)
-// The concrete SubscriptionSource for the shell — the sidebar session list
-// (root session summaries: title, attention, status, recency).
-//
-// It is two answers and a policy (ni8.5 §7). The sidebar table carries a
-// read-model version per family, so "what changed" is `WHERE version >
-// lastSeen` and nothing else: no event-type allowlist to drift out of step with
-// the session projector, no per-session coalesce window, no replay out of the
-// durable log, no per-row re-query. A burst that does not touch a sidebar row
-// costs one indexed range scan returning nothing.
-//
-// Removals come from the same scan. A family that leaves the sidebar (its root
-// deleted, archived, or given a parent) keeps a tombstone at the version it left
-// (conduit-test-y7eo.3), so a ranged read returns it as a `remove`. A deleted
-// session, child included, leaves one marked `deleted`, which is what tells a
-// device to leave it; a root given a parent only drops out of the list.
-//
-// Resume is therefore a CATCH-UP: a reconnecting device is sent the families
-// that moved or left past its cursor, not the whole list again. A cursor from
-// before the tombstones began, or past the current version, gets a snapshot.
-
-import { channel } from "node:diagnostics_channel";
-import type { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
-import { Duration, Effect, Option, Schema, Stream } from "effect";
-import { advanceTouchesScope } from "../../../contracts/read-model-advance.js";
-import { type ResumeBase, ResumePoint } from "../../../contracts/ws-rpc.js";
-import {
-	type ReadQueryEffectError,
-	ReadQueryEffectTag,
-	type SessionScope,
-} from "../../../persistence/effect/read-query-effect.js";
-import type { SessionInfo } from "../../../shared-types.js";
-import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
-import type { SessionActivityTag } from "../../daemon/Services/session-activity.js";
-import { makeSessionRows } from "../../daemon/Services/session-rows.js";
-import { type Envelope, stream } from "./read-model-subscription.js";
+import { Effect, Stream } from "effect";
+import type {
+	ResumeBase,
+	ResumePoint,
+	ShellProjectsFrame,
+} from "../../../contracts/ws-rpc.js";
+import { readProjectFile } from "../../../daemon/project-file.js";
+import { withCachedProjectGit } from "../../../git/session-git.js";
+import { subscribeShellProjects } from "../../daemon/Services/shell-subscription.js";
 import { ConfigTag } from "./services.js";
-import { SessionEventBusTag } from "./session-event-bus.js";
 
-export type ShellSubscriptionError = ReadQueryEffectError | SqlError;
+export type {
+	ShellSubscriptionError,
+	SidebarRead,
+} from "../../daemon/Services/shell-subscription.js";
 
-/** What one sidebar read cost the server, for load tests. */
-export interface SidebarRead {
-	readonly ms: number;
-	readonly rows: number;
-}
-
-const sidebarReads = channel("conduit:sidebar-read");
-
-const ResumePointBody = Schema.compose(
-	Schema.StringFromBase64Url,
-	Schema.parseJson(
-		Schema.Struct({
-			store: Schema.String,
-			project: Schema.String,
-			sequence: Schema.Number,
-		}),
-	),
-);
-
-/**
- * Subscribe to the shell (session-list) stream. Cold start emits the
- * recency-ordered session set and resume the families changed or removed past
- * its cursor, then a `synchronized` boundary, then whole-session upserts and
- * removes as the read model advances. Lifecycle is the ambient
- * Scope: closing it releases the advance subscription.
- *
- * The read-query service and SessionEventBus are taken from context so the
- * transport (ni8.5) provides them once at the composition root.
- */
+/** Standalone relays retain their local store and bus, and serve only their project. */
 export const subscribeShell = (
 	options: {
 		readonly resumeFromSequence?: number;
 		readonly resumeBase?: ResumeBase;
 		readonly resumePoint?: ResumePoint;
 	} = {},
-): Stream.Stream<
-	Envelope<SessionInfo>,
-	ShellSubscriptionError,
-	| ReadQueryEffectTag
-	| SessionEventBusTag
-	| SessionActivityTag
-	| ConfigTag
-	| AccountDirectory
-	| SqlClient.SqlClient
-> =>
+) =>
 	Stream.unwrap(
 		Effect.gen(function* () {
-			const bus = yield* SessionEventBusTag;
 			const config = yield* ConfigTag;
-			const readQuery = yield* ReadQueryEffectTag;
-			const scope: SessionScope = { projectIds: [config.slug] };
-			const store = yield* readQuery.readStoreIdentity();
-			const point = Option.getOrUndefined(
-				Option.filter(
-					Option.fromNullable(options.resumePoint).pipe(
-						Option.flatMap(Schema.decodeOption(ResumePointBody)),
-					),
-					(body) => body.store === store && body.project === config.slug,
-				),
-			);
-			const resume =
-				options.resumePoint === undefined
-					? options
-					: point === undefined
-						? {}
-						: {
-								resumeFromSequence: options.resumeFromSequence,
-								resumeBase: { sequence: point.sequence },
-							};
-			const rows = yield* makeSessionRows({
-				slug: config.slug,
-				folders: [config.projectDir, ...(config.extraFolders ?? [])],
+			const file = yield* readProjectFile(config.projectDir);
+			const frame: ShellProjectsFrame = {
+				_tag: "projects",
+				projects: withCachedProjectGit([
+					{
+						slug: config.slug,
+						title: config.slug,
+						folders: [config.projectDir, ...(config.extraFolders ?? [])],
+						...(file._tag === "parsed" ? file.file : {}),
+					},
+				]),
+				newSessionProject: config.slug,
+			};
+			return subscribeShellProjects(options, Stream.succeed(frame), {
+				standalone: true,
 			});
-			return stream<SessionInfo, ShellSubscriptionError>({
-				bus,
-				source: {
-					name: "shell",
-					collections: ["sidebar"],
-					shareReads: true,
-					shareKey: `shell/${config.slug}`,
-					// The sidebar is never paged, so a resume base is the whole list.
-					read: (range, base) =>
-						rows
-							.read({
-								...range,
-								...(base === undefined ? {} : { listing: true }),
-							})
-							.pipe(
-								Effect.timed,
-								Effect.map(([elapsed, list]) => {
-									if (sidebarReads.hasSubscribers)
-										sidebarReads.publish({
-											ms: Duration.toMillis(elapsed),
-											rows: list.rows.length,
-										} satisfies SidebarRead);
-									return list;
-								}),
-							),
-					route: (advance) => ({
-						moved: advanceTouchesScope(advance, scope),
-						removed: [],
-					}),
-					resume: "catchUp",
-				},
-				...(resume.resumeFromSequence === undefined
-					? {}
-					: { resumeFromSequence: resume.resumeFromSequence }),
-				...(resume.resumeBase === undefined
-					? {}
-					: { resumeBase: resume.resumeBase }),
-			}).pipe(
-				Stream.map((envelope) =>
-					envelope._tag === "snapshot" && store !== undefined
-						? {
-								...envelope,
-								resumePoint: ResumePoint.make(
-									Schema.encodeSync(ResumePointBody)({
-										store,
-										project: config.slug,
-										sequence: envelope.sequence,
-									}),
-								),
-							}
-						: envelope,
-				),
-			);
 		}),
 	);
