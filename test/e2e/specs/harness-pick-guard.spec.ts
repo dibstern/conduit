@@ -99,9 +99,9 @@ type GuardCase = {
 };
 type RpcFrame = {
 	readonly _tag?: string;
-	readonly id?: string;
+	readonly id?: string | number;
 	readonly tag?: string;
-	readonly requestId?: string;
+	readonly requestId?: string | number;
 	readonly payload?: Readonly<Record<string, unknown>>;
 	readonly exit?: { readonly _tag: string; readonly value?: unknown };
 	readonly values?: readonly unknown[];
@@ -200,10 +200,13 @@ async function editRpc(
 			async (message: string | Buffer) => {
 				if (typeof message !== "string") return send(message);
 				const frame = JSON.parse(message) as RpcFrame;
-				if (frame._tag === "Request" && frame.id) requests.set(frame.id, frame);
+				if (frame._tag === "Request" && frame.id !== undefined)
+					requests.set(String(frame.id), frame);
 				const edited = await edit(
 					frame,
-					frame.requestId ? requests.get(frame.requestId) : undefined,
+					frame.requestId !== undefined
+						? requests.get(String(frame.requestId))
+						: undefined,
 				);
 				if (edited !== null) send(JSON.stringify(edited));
 			};
@@ -692,9 +695,9 @@ async function observeSessionRpc(
 					const frame = JSON.parse(event.data) as RpcFrame;
 					if (
 						(frame._tag === "Exit" || frame._tag === "Chunk") &&
-						frame.requestId
+						frame.requestId !== undefined
 					)
-						receipts.add(frame.requestId);
+						receipts.add(String(frame.requestId));
 				});
 			}
 		};
@@ -704,9 +707,9 @@ async function observeSessionRpc(
 		replies,
 		async received(frames: readonly RpcFrame[]) {
 			const requestIds = frames.map((frame) => {
-				if (!frame.requestId)
+				if (frame.requestId === undefined)
 					throw new Error("Held RPC reply omitted requestId");
-				return frame.requestId;
+				return String(frame.requestId);
 			});
 			await page.waitForFunction(
 				(ids) =>
@@ -2376,7 +2379,11 @@ test.describe("draft owns one complete pick", () => {
 								contextWindow: undefined,
 							}
 						: response;
-					delivered.push({ requestId: request.id, response: value });
+					delivered.push({
+						requestId:
+							request.id === undefined ? undefined : String(request.id),
+						response: value,
+					});
 					return value;
 				});
 			},
@@ -2566,7 +2573,7 @@ test.describe("draft owns one complete pick", () => {
 			);
 			if (!ownReply) throw new Error("B did not receive its own catalog");
 			const frame = observed.replies.find(
-				({ request }) => request.id === ownReply.requestId,
+				({ request }) => String(request.id) === ownReply.requestId,
 			)?.frame;
 			if (!frame) throw new Error("B's catalog reply omitted its frame");
 			await observed.received([frame]);

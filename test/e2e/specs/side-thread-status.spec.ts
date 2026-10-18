@@ -44,25 +44,25 @@ function watchPushes(page: Page) {
 			for (const line of String(payload).split("\n").filter(Boolean)) {
 				const request = JSON.parse(line) as {
 					_tag?: string;
-					id?: string;
+					id?: string | number;
 					tag?: string;
 				};
 				if (
 					request._tag === "Request" &&
 					request.tag?.startsWith("Subscribe") &&
-					request.id
+					request.id !== undefined
 				)
-					subscriptions.set(request.id, request.tag);
+					subscriptions.set(String(request.id), request.tag);
 			}
 		});
 		socket.on("framereceived", ({ payload }) => {
 			for (const line of String(payload).split("\n").filter(Boolean)) {
 				const chunk = JSON.parse(line) as {
 					_tag?: string;
-					requestId?: string;
+					requestId?: string | number;
 					values?: readonly unknown[];
 				};
-				const subscription = subscriptions.get(chunk.requestId ?? "");
+				const subscription = subscriptions.get(String(chunk.requestId));
 				if (chunk._tag !== "Chunk" || !subscription) continue;
 				for (const envelope of chunk.values ?? []) {
 					feeds.push({ subscription, envelope });
@@ -355,7 +355,7 @@ test.describe("OpenCode child family idle", () => {
 			socket.on("framesent", ({ payload }) => {
 				const frame = JSON.parse(String(payload)) as {
 					_tag?: string;
-					id?: string;
+					id?: string | number;
 					tag?: string;
 				};
 				if (
@@ -364,16 +364,21 @@ test.describe("OpenCode child family idle", () => {
 					(frame.tag === "SubscribeSessionFamily" ||
 						frame.tag === "SubscribeShell")
 				)
-					subscriptions.set(frame.id, frame.tag);
+					subscriptions.set(String(frame.id), frame.tag);
 			});
 			socket.on("framereceived", ({ payload }) => {
 				const frame = JSON.parse(String(payload)) as {
 					_tag?: string;
-					requestId?: string;
+					requestId?: string | number;
 					values?: Envelope<SessionInfo>[];
 				};
-				if (frame._tag !== "Chunk" || !frame.requestId || !frame.values) return;
-				const tag = subscriptions.get(frame.requestId);
+				if (
+					frame._tag !== "Chunk" ||
+					frame.requestId === undefined ||
+					!frame.values
+				)
+					return;
+				const tag = subscriptions.get(String(frame.requestId));
 				if (tag === "SubscribeSessionFamily") family.push(...frame.values);
 				if (tag === "SubscribeShell") shell.push(...frame.values);
 			});

@@ -54,7 +54,7 @@ function observeRpc(page: Page) {
 			const parsed: unknown = JSON.parse(String(frame.payload));
 			const messages = (Array.isArray(parsed) ? parsed : [parsed]) as Array<{
 				_tag: string;
-				id: string;
+				id: string | number;
 				tag: string;
 				payload: Record<string, unknown>;
 			}>;
@@ -62,19 +62,19 @@ function observeRpc(page: Page) {
 				if (message._tag !== "Request") continue;
 				const call = { tag: message.tag, payload: message.payload };
 				calls.push(call);
-				pending.set(message.id, call);
+				pending.set(String(message.id), call);
 			}
 		});
 		socket.on("framereceived", (frame) => {
 			const parsed: unknown = JSON.parse(String(frame.payload));
 			const messages = (Array.isArray(parsed) ? parsed : [parsed]) as Array<{
 				_tag: string;
-				requestId: string;
+				requestId: string | number;
 				exit: { _tag: string; value?: unknown };
 			}>;
 			for (const message of messages) {
 				if (message._tag !== "Exit") continue;
-				const call = pending.get(message.requestId);
+				const call = pending.get(String(message.requestId));
 				if (call) call.exit = message.exit;
 			}
 		});

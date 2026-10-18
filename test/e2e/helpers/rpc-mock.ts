@@ -969,7 +969,11 @@ export async function mockWsRpc(
 	await page.routeWebSocket(/\/rpc/, (ws: WebSocketRoute) => {
 		const scope = Effect.runSync(Scope.make());
 		const onClose = () => control.unregisterSocket(ws);
+		// Closing the scope makes the Effect 4 server reply to every pending call
+		// with an interrupt. A dropped connection delivers nothing, so mute it.
+		let closed = false;
 		const cleanup = () => {
+			closed = true;
 			page.off("close", onClose);
 			void Effect.runPromise(Scope.close(scope, Exit.void));
 		};
@@ -981,6 +985,7 @@ export async function mockWsRpc(
 		const ready = Effect.runPromise(
 			serveRpc(socketTable(ws, options, control, requests), (json) =>
 				Effect.sync(() => {
+					if (closed) return;
 					ws.send(json);
 					if (submissions.size === 0) return;
 					const frame: unknown = JSON.parse(json);

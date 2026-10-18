@@ -65,11 +65,12 @@ function observeStatus(page: Page) {
 			for (const message of Array.isArray(parsed) ? parsed : [parsed]) {
 				if (!isRecord(message) || message["_tag"] !== "Request") continue;
 				if (
-					typeof message["id"] !== "string" ||
+					(typeof message["id"] !== "string" &&
+						typeof message["id"] !== "number") ||
 					typeof message["tag"] !== "string"
 				)
 					continue;
-				requests.set(message["id"], message["tag"]);
+				requests.set(String(message["id"]), message["tag"]);
 				if (isRecord(message["payload"]))
 					calls.push({ tag: message["tag"], payload: message["payload"] });
 			}
@@ -80,10 +81,12 @@ function observeStatus(page: Page) {
 				if (
 					!isRecord(message) ||
 					message["_tag"] !== "Exit" ||
-					typeof message["requestId"] !== "string"
+					(typeof message["requestId"] !== "string" &&
+						typeof message["requestId"] !== "number")
 				)
 					continue;
-				if (requests.get(message["requestId"]) !== "GetStatus") continue;
+				if (requests.get(String(message["requestId"])) !== "GetStatus")
+					continue;
 				const exit = message["exit"];
 				if (isRecord(exit) && exit["_tag"] === "Success") {
 					reads.push(

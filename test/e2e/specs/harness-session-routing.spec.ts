@@ -92,10 +92,10 @@ test("session RPCs use the owner even when the page attaches to another project"
 					const receive = (event: MessageEvent<string>) => {
 						const frame = JSON.parse(event.data) as {
 							_tag: string;
-							requestId?: string;
+							requestId?: string | number;
 							exit?: { _tag: string; value: Record<string, unknown> };
 						};
-						if (frame._tag !== "Exit" || frame.requestId !== id) return;
+						if (frame._tag !== "Exit" || String(frame.requestId) !== id) return;
 						clearTimeout(timer);
 						socket.removeEventListener("message", receive);
 						if (frame.exit?._tag === "Success") resolve(frame.exit.value);
