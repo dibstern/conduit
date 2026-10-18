@@ -406,8 +406,17 @@ export const makeContinuation = Effect.gen(function* () {
 								resetTimes.length > 0 &&
 								resetTimes.every((at) => Number.isFinite(at) && at <= due.now);
 							const turns = yield* ProviderTurnServiceTag;
-							if (source.id !== account.id)
-								yield* turns.holdUserTurnsForAccountSwitch(sessionId);
+							// The inbox constructs this service's scheduling context before
+							// it exists. Actual resumes run in the completed relay context.
+							const inbox = yield* Effect.serviceOption(SessionInboxTag);
+							if (source.id !== account.id) {
+								const hold = turns.holdUserTurnsForAccountSwitch(sessionId);
+								// Under the inbox permit, so no handoff is mid-decision when the
+								// switch starts. A scheduled request may come from inside it.
+								yield* options.at === undefined && inbox._tag === "Some"
+									? inbox.value.withSession(sessionId, hold)
+									: hold;
+							}
 							const continued = yield* commit.write((project) =>
 								Effect.gen(function* () {
 									// A probe can take five seconds; selection and turn state must
@@ -586,9 +595,6 @@ export const makeContinuation = Effect.gen(function* () {
 							const agent = yield* getAgent(sessionId);
 							const variant = row?.variant ?? "";
 							const contextWindow = row?.context_window ?? "";
-							// The inbox constructs this service's scheduling context before
-							// it exists. Actual resumes run in the completed relay context.
-							const inbox = yield* Effect.serviceOption(SessionInboxTag);
 							if (inbox._tag === "None")
 								return yield* Effect.dieMessage(
 									"Continuation admission requires the session inbox",
