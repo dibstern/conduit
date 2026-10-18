@@ -271,6 +271,7 @@ export class OrchestrationEngine {
 					projectId: durable.projectKey,
 					registry: this.registry,
 					ingestion: durable.ingestion ?? { ingest: () => Effect.succeed(0) },
+					...(durable.write ? { write: durable.write } : {}),
 					...(durable.persistHandoffDelivered
 						? { persistHandoffDelivered: durable.persistHandoffDelivered }
 						: {}),
