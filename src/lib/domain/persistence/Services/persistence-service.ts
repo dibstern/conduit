@@ -117,6 +117,20 @@ export const preparePersistenceStore: Effect.Effect<
 	yield* migrate.pipe(
 		Effect.ensuring(sql.unsafe("PRAGMA foreign_keys = ON").pipe(Effect.ignore)),
 	);
+	// Session deletes rely on ON DELETE CASCADE. Enforcement must come from the
+	// pragma above, not better-sqlite3's SQLITE_DEFAULT_FOREIGN_KEYS build flag,
+	// and a SQLite that ignores the pragma must not open the store.
+	const [enforcement] = yield* sql<{ foreign_keys: number }>`
+		PRAGMA foreign_keys`.pipe(
+		Effect.mapError(
+			(e) => new PersistenceError({ operation: "foreignKeys", cause: e }),
+		),
+	);
+	if (enforcement?.foreign_keys !== 1)
+		return yield* new PersistenceError({
+			operation: "foreignKeys",
+			cause: "PRAGMA foreign_keys = ON did not enable enforcement",
+		});
 
 	// Boot diagnostic: if the 0010 purge circuit breaker tripped, the cohort is still
 	// present and must stay noticeable on every boot, not just the boot that tripped it.

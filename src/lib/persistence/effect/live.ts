@@ -118,6 +118,8 @@ export function makePersistenceStoreLayer(
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			// SQLite maps at most the file's size; this is an address-space ceiling.
+			// WAL's NORMAL sync, explicit rather than better-sqlite3's build default.
+			yield* sql`PRAGMA synchronous = NORMAL`;
 			yield* sql`PRAGMA mmap_size = 1073741824`;
 			yield* sql`PRAGMA analysis_limit = 400`;
 			yield* sql`PRAGMA optimize = 0x10002`;
