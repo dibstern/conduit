@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
 	import { MediaQuery } from "svelte/reactivity";
+	import { splitCitations } from "../../utils/citations.js";
 	import type { MessageSurfacingPreferences } from "../../../contracts/message-surfacing.js";
 	import type { TurnRecap } from "../../../contracts/turn-recap.js";
 	import { SURFACE_LABELS, surfaceTime, type SurfaceLevel, type SurfaceTurn } from "../../utils/surface-turn.js";
@@ -69,7 +70,7 @@
 	const preceding = $derived(selected ? versions.filter(({ version, lastOrdinal }) => version < selected.version && lastOrdinal < selected.firstOrdinal).at(-1) : undefined);
 	const previous = $derived(versions[index - 1]);
 	const next = $derived(versions[index + 1]);
-	const chunks = $derived(selected?.text.split(/(\[#\d+\])/g) ?? []);
+	const chunks = $derived(splitCitations(selected?.text ?? "", view.numbers));
 	function cite(ordinal: number) {
 		if (plainCitations) {
 			if (phone) onclose();
@@ -166,8 +167,7 @@
 		{#if selected}
 			<p class="summary-prose select-text" class:regenerating={generating} bind:this={proseEl}>
 				{#each chunks as chunk}
-					{@const ordinal = /^\[#(\d+)\]$/.exec(chunk)?.[1]}
-					{@const message = ordinal ? view.numbers.find(({ number }) => number === Number(ordinal)) : undefined}
+					{@const message = chunk.message}
 					{#if message}
 						{#if citationPopover && !plainCitations}
 							<Popover open={readingOrdinal === message.number} onopenchange={(nextOpen) => nextOpen ? cite(message.number) : closeCitation()} ariaLabel={`Cited message #${message.number}`} side="top" class="max-w-[380px]" onCloseAutoFocus={(event) => { if (handedOff) event.preventDefault(); handedOff = false; }}>
@@ -177,7 +177,7 @@
 						{:else}
 							{@render citationButton(message, { onclick: (event: MouseEvent) => { citationTrigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null; cite(message.number); } })}
 						{/if}
-					{:else if !ordinal}{chunk}{/if}
+					{:else if chunk.code}<code>{chunk.text}</code>{:else}{chunk.text}{/if}
 				{/each}
 			</p>
 			<div class="summary-foot">
@@ -220,6 +220,7 @@
 	.phone-stamp { display:none; }
 	.summary-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
 	.summary-prose { margin:10px 0 0; font-size:14px; line-height:1.65; white-space:pre-wrap; overflow-wrap:anywhere; }
+	.summary-prose code { padding:1px 5px; border-radius:5px; background:var(--color-chip); font:12px var(--font-mono); }
 	.regenerating { opacity:.45; }
 	.summary-prose :global(.recap-cite) { display:inline-flex; align-items:center; justify-content:center; margin-left:2px; padding:0 6px; border-radius:999px; background:var(--color-chip); color:var(--color-text-secondary); font:500 11px/18px var(--font-mono); vertical-align:1px; }
 	.summary-prose :global([data-ask="true"]) { background:color-mix(in srgb,var(--color-status-ask) 18%,transparent); color:var(--color-status-ask); }

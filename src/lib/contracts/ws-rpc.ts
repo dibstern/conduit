@@ -42,6 +42,7 @@ export { SessionInfoSchema, SessionStatusSchema };
 export type { SessionInfo };
 
 import { AccountRefSchema } from "./account.js";
+import { AskExplanationSchema } from "./ask-explanation.js";
 import {
 	ClaudeSettingsOverridesSchema,
 	ClaudeSettingsResolveError,
@@ -1871,6 +1872,19 @@ export class GenerateRecap extends Schema.TaggedRequest<GenerateRecap>()(
 	},
 ) {}
 
+export class ExplainAsk extends Schema.TaggedRequest<ExplainAsk>()(
+	"ExplainAsk",
+	{
+		failure: WsRpcError,
+		success: AskExplanationSchema,
+		payload: {
+			sessionId: NonEmptyString,
+			turnId: NonEmptyString,
+			partId: NonEmptyString,
+		},
+	},
+) {}
+
 export class ReplaceCategorySet extends Schema.TaggedRequest<ReplaceCategorySet>()(
 	"ReplaceCategorySet",
 	{
@@ -3069,6 +3083,7 @@ const wireTag = <Tag extends string>(tag: Tag) =>
 const wsRpcRequests = [
 	ListRecaps,
 	GenerateRecap,
+	ExplainAsk,
 	GetMessageSurfacing,
 	UpdateMessageSurfacing,
 	GetStatus,

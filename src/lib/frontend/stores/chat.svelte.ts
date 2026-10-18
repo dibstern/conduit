@@ -444,21 +444,31 @@ export const inputSyncState = $state({
 	reloadPending: false,
 });
 
-let persistInputDraftHook: (() => Promise<boolean>) | undefined;
+let inputDraftHook:
+	| {
+			persist: () => Promise<boolean>;
+			insert: (text: string) => void;
+	  }
+	| undefined;
 
-/** The mounted composer flushes its latest text through existing draft sync. */
-export function registerInputDraftPersistence(
-	persist: () => Promise<boolean>,
+/** The mounted composer owns draft insertion and persistence. */
+export function registerInputDraft(
+	draft: NonNullable<typeof inputDraftHook>,
 ): () => void {
-	persistInputDraftHook = persist;
+	inputDraftHook = draft;
 	return () => {
-		if (persistInputDraftHook === persist) persistInputDraftHook = undefined;
+		if (inputDraftHook === draft) inputDraftHook = undefined;
 	};
+}
+
+/** Append text using the composer's normal edit, focus, and draft-sync path. */
+export function insertInputDraft(text: string): void {
+	inputDraftHook?.insert(text);
 }
 
 /** False defers reload to keep pending attachments in the mounted composer. */
 export async function persistInputDraft(): Promise<boolean> {
-	return (await persistInputDraftHook?.()) ?? true;
+	return (await inputDraftHook?.persist()) ?? true;
 }
 
 /** Apply a draft typed in another tab, or the one read at session switch. */

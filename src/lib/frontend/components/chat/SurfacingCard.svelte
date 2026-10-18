@@ -8,6 +8,7 @@
 		stripOverlay?: Snippet<[SurfaceTurn, (pin: SurfacePin) => void]>;
 		cardHead?: Snippet<[SurfacePin]>;
 		cardFoot?: Snippet<[SurfacePin]>;
+		cardContext?: Snippet<[SurfacePin]>;
 		why?: Snippet<[SurfacePin]>;
 		/** Report the citation's part UUID while its footnote is hovered or focused. */
 		belowStrip?: Snippet<[SurfaceTurn, (partId: string | null) => void]>;
@@ -178,7 +179,7 @@
 {#if view.card}
 	{@const card = view.card}
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-	<section bind:this={cardEl} class="surfacing-msg-card" style:--surface-colour={card.colour} data-testid="surfacing-msg-card" data-part={card.part.uuid} data-ordinal={card.number} aria-label={card.name} tabindex="-1" onkeydown={oncommand}>
+	<section bind:this={cardEl} class="surfacing-msg-card" class:ask={card.category === "ask" && !card.pending} style:--surface-colour={card.colour} data-testid="surfacing-msg-card" data-part={card.part.uuid} data-ordinal={card.number} aria-label={card.name} tabindex="-1" onkeydown={oncommand}>
 		<div class="card-head" data-surfacing-region="card-head">
 			<span class="type-label"><span>{card.glyph}</span> {card.label}</span>
 			{#if view.openAsk?.uuid === card.part.uuid}<span class="needs-reply">Needs reply</span>{/if}
@@ -188,6 +189,7 @@
 		</div>
 		{#if view.cardNote}<div class="card-note">{view.cardNote}</div>{/if}
 		<div class="card-body md-content select-text" bind:this={cardBodyEl}>{@html card.part.html}</div>
+		{@render regions.cardContext?.(card)}
 		{@render regions.why?.(card)}
 		<div class="card-foot" data-surfacing-region="card-foot">
 			{#if onreply}<SurfacingReplyActions source={card.part.uuid} within={cardBodyEl} {replied} disabled={card.number === undefined} onreply={(excerpt) => onreply(card, excerpt)} />{/if}
@@ -244,6 +246,8 @@
 
 <style>
 	.surfacing-msg-card { margin-top:9px; padding:10px 12px 8px; border-radius:12px; background:var(--color-bg); outline:none; }
+	.surfacing-msg-card.ask { margin-top:10px; padding:11px 13px 12px; box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--color-status-ask) 40%,transparent); }
+	.ask .card-body { margin-top:6px; font-size:14px; line-height:1.55; }
 	.card-head { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
 	.type-label,.needs-reply { padding:2px 7px; border-radius:999px; font-size:11px; font-weight:600; background:color-mix(in srgb,var(--surface-colour) 16%,transparent); color:var(--surface-colour); }
 	.needs-reply { color:var(--color-status-ask); background:color-mix(in srgb,var(--color-status-ask) 16%,transparent); }

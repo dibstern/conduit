@@ -42,7 +42,7 @@
 	import PastePreview from "../chat/PastePreview.svelte";
 	import PendingInputTray from "./PendingInputTray.svelte";
 	import { openSideThreads } from "../session/side-threads.svelte.js";
-	import { currentChat, draftSend, inputSyncState, isProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
+	import { currentChat, draftSend, inputSyncState, isProcessing, registerInputDraft, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
 	import { send, stop, turn as readTurn } from "../../stores/turn.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { approvals } from "../../stores/composer-settings.svelte.js";
@@ -372,7 +372,7 @@
 	/** Timer for debounced outgoing input sync. */
 	let inputSyncTimer: ReturnType<typeof setTimeout> | null = null;
 
-	$effect(() => registerInputDraftPersistence(async () => {
+	$effect(() => registerInputDraft({ insert: addToDraft, persist: async () => {
 		if (inputSyncTimer) {
 			clearTimeout(inputSyncTimer);
 			inputSyncTimer = null;
@@ -391,7 +391,7 @@
 		inputDrafts.set(sessionState.currentId ?? "", inputText);
 		sessionStorage.setItem(reloadDraftKey, JSON.stringify([...inputDrafts]));
 		return true;
-	}));
+	}}));
 
 	const commandMatch = $derived(extractCommandQuery(inputText, cursorPos));
 	const commandMenuVisible = $derived(commandMatch !== null);
@@ -1076,9 +1076,9 @@
 		}
 	}
 
-	/** Edit on a queued row: its text and attachments come back to the composer. */
-	function takeBackQueuedInput(text: string, images: readonly string[]) {
-		inputText = inputText.trim() ? `${inputText}\n\n${text}` : text;
+	/** Ask replies and queued edits use the same unsent composer draft. */
+	function addToDraft(text: string, images: readonly string[] = []) {
+		inputText = inputText.trim() ? `${inputText.trimEnd()}\n\n${text}` : text;
 		handleInput();
 		cursorPos = inputText.length;
 		pendingAttachments = [
@@ -1355,7 +1355,7 @@
 			sessionId={currentSession?.id}
 			projectSlug={currentSession?.projectSlug}
 			{steer}
-			onEdit={takeBackQueuedInput}
+			onEdit={addToDraft}
 			onSteerRefused={(reason) => { if (sessionState.currentId) steerRefusal = { sessionId: sessionState.currentId, reason }; }}
 		/>
 
