@@ -26,14 +26,19 @@
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import type { GetFileTreeResponse } from "../../transport/ws-rpc.js";
 	import type { Terminal } from "@xterm/xterm";
-	import type { TerminalModifier } from "../../../contracts/terminal-keys.js";
-	import { createTerminalKeys, type TerminalArrow } from "../../utils/terminal-keys.svelte.js";
+	import { TERMINAL_MODIFIERS } from "../../../contracts/terminal-keys.js";
+	import {
+		createTerminalKeys,
+		TERMINAL_KEY_LABELS,
+		type TerminalArrow,
+	} from "../../utils/terminal-keys.svelte.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import TerminalKey from "../ui/TerminalKey.svelte";
+	import TerminalKeyRow from "./TerminalKeyRow.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
@@ -48,7 +53,8 @@
 	const keys = createTerminalKeys({
 		openFind: (terminal) => (find = { terminal, tab: terminalState.activeTabId }),
 	});
-	// Input type, not width: a fine pointer gets the tab-bar keys.
+	// Input type, not width: a fine pointer gets the tab-bar keys, touch gets
+	// the row under the terminal, phones and tablets alike.
 	// jsdom has no matchMedia; real browsers always do.
 	const finePointer =
 		typeof matchMedia === "function" ? new MediaQuery("(pointer: fine)") : { current: true };
@@ -57,12 +63,6 @@
 		["up", "Up arrow"],
 		["down", "Down arrow"],
 		["right", "Right arrow"],
-	];
-	const MODIFIERS: readonly (readonly [TerminalModifier, string, string])[] = [
-		["ctrl", "⌃", "Control"],
-		["opt", "⌥", "Option"],
-		["cmd", "⌘", "Command"],
-		["shift", "⇧", "Shift"],
 	];
 
 	const tabs = $derived(getTabList());
@@ -450,21 +450,21 @@
 						role="toolbar"
 						aria-label="Terminal keys"
 					>
-						<TerminalKey label="Paste" onpress={() => keys.pasteClipboard()}>
+						<TerminalKey label="Paste" onpress={() => keys.press("paste")}>
 							<Icon name="clipboard" size={13} />Paste
 						</TerminalKey>
 						<span class="w-px h-[18px] mx-[5px] bg-border" aria-hidden="true"></span>
 						<TerminalKey label="Escape" onpress={() => keys.press("esc")}>esc</TerminalKey>
 						<TerminalKey label="Tab" onpress={() => keys.press("tab")}>tab</TerminalKey>
 						<span class="w-px h-[18px] mx-[5px] bg-border" aria-hidden="true"></span>
-						{#each MODIFIERS as [modifier, glyph, label] (modifier)}
+						{#each TERMINAL_MODIFIERS as modifier (modifier)}
 							<TerminalKey
-								{label}
+								label={TERMINAL_KEY_LABELS[modifier].name}
 								glyph
 								state={keys.modifiers[modifier]}
-								onpress={() => keys.tap(modifier)}
+								onpress={() => keys.press(modifier)}
 							>
-								{glyph}
+								{TERMINAL_KEY_LABELS[modifier].text}
 							</TerminalKey>
 						{/each}
 						<span class="w-px h-[18px] mx-[5px] bg-border" aria-hidden="true"></span>
@@ -617,6 +617,9 @@
 				{/each}
 			{/await}
 		</div>
+		{#if !finePointer.current && tabs.length > 0}
+			<TerminalKeyRow {keys} />
+		{/if}
 
 		<!-- Status message -->
 		{#if statusMessage}

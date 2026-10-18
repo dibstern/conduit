@@ -2,7 +2,7 @@
 // Each test opens a fresh terminal, runs one byte dump and groups many presses
 // inside it. Artifacts: a screenshot and bytes.log per test.
 
-import type { Page } from "@playwright/test";
+import type { Locator, Page, TestInfo } from "@playwright/test";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { startByteDump } from "../helpers/terminal-bytes.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -32,6 +32,8 @@ test.describe("Terminal keys on desktop", () => {
 		relayUrl,
 	}, testInfo) => {
 		await openTerminal(page, relayUrl);
+		// A fine pointer gets the tab-bar keys and never the touch row.
+		await expect(page.locator(".term-key-row")).toHaveCount(0);
 		const dump = await startByteDump(page, testInfo);
 
 		await key(page, "Escape").click();
@@ -90,34 +92,6 @@ test.describe("Terminal keys on desktop", () => {
 		expect(held?.replaceAll(up, "").trim()).toBe("");
 		expect(clicked).toBe(up);
 	});
-});
-
-test("a touch-primary device gets no tab-bar keys", async ({
-	browser,
-	relayUrl,
-}) => {
-	const context = await browser.newContext({
-		viewport: { width: 390, height: 844 },
-		isMobile: true,
-		hasTouch: true,
-	});
-	const page = await context.newPage();
-	try {
-		await new AppPage(page).goto(relayUrl);
-		expect(
-			await page.evaluate(() => matchMedia("(pointer: coarse)").matches),
-		).toBe(true);
-		await page.getByTestId("session-bar-island-overflow").click();
-		await page.getByTestId("overflow-view-terminal").click();
-		await expect(page.locator("#terminal-panel .xterm-screen")).toBeVisible({
-			timeout: 10_000,
-		});
-		await expect(
-			page.getByRole("toolbar", { name: "Terminal keys" }),
-		).toHaveCount(0);
-	} finally {
-		await context.close();
-	}
 });
 
 /** Count each confirmation shown, so a test can tell one from one per repeat. */
@@ -645,5 +619,310 @@ test.describe("Find on desktop", () => {
 		await expect(findBar(page)).toContainText("No results");
 		await field(page).fill("SECONDTAB");
 		await expect(findBar(page)).toContainText("1 of 1");
+	});
+});
+
+test.describe("Phone row", () => {
+	test.use({
+		viewport: { width: 390, height: 844 },
+		isMobile: true,
+		hasTouch: true,
+		permissions: ["clipboard-read", "clipboard-write"],
+	});
+
+	const row = (page: Page) => page.locator(".term-key-row");
+	const rowKey = (page: Page, name: string) =>
+		row(page).getByRole("button", { name, exact: true });
+	const textarea = (page: Page) =>
+		page.locator("#terminal-panel .xterm-helper-textarea");
+
+	async function openPhoneTerminal(page: Page, relayUrl: string) {
+		await new AppPage(page).goto(relayUrl);
+		// Touch emulation alone must read as touch-primary, or the row never shows.
+		expect(
+			await page.evaluate(() => matchMedia("(pointer: coarse)").matches),
+		).toBe(true);
+		await page.getByTestId("session-bar-island-overflow").click();
+		await page.getByTestId("overflow-view-terminal").click();
+		await expect(page.locator("#terminal-panel .xterm-screen")).toBeVisible({
+			timeout: 10_000,
+		});
+		await expect(textarea(page)).toBeFocused();
+	}
+
+	/** A real finger: CDP touch events, which the page sees as touch pointer
+	 *  events. It starts at the target's centre, offset by `at` as a fraction
+	 *  of its size. */
+	async function finger(
+		page: Page,
+		target: Locator,
+		at: { x: number; y: number } = { x: 0, y: 0 },
+	) {
+		const box = await target.boundingBox();
+		if (!box) throw new Error("touch target is not visible");
+		const x0 = box.x + box.width * (0.5 + at.x);
+		const y0 = box.y + box.height * (0.5 + at.y);
+		let [x, y] = [x0, y0];
+		const cdp = await page.context().newCDPSession(page);
+		const touch = (
+			type: "touchStart" | "touchMove" | "touchEnd",
+			points: { x: number; y: number }[],
+		) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: points });
+		await touch("touchStart", [{ x, y }]);
+		return {
+			/** Move to (dx, dy) from the start, in small steps like a real drag. */
+			async moveTo(dx: number, dy: number) {
+				const [fromX, fromY] = [x, y];
+				for (let step = 1; step <= 6; step++) {
+					x = fromX + ((x0 + dx - fromX) * step) / 6;
+					y = fromY + ((y0 + dy - fromY) * step) / 6;
+					await touch("touchMove", [{ x, y }]);
+				}
+			},
+			async lift() {
+				await touch("touchEnd", []);
+				await cdp.detach();
+			},
+		};
+	}
+
+	async function tap(
+		page: Page,
+		target: Locator,
+		at?: { x: number; y: number },
+	) {
+		await (await finger(page, target, at)).lift();
+	}
+
+	async function flick(page: Page, target: Locator) {
+		const touch = await finger(page, target);
+		await touch.moveTo(0, -30);
+		await touch.lift();
+	}
+
+	async function attachScreen(page: Page, testInfo: TestInfo) {
+		const path = testInfo.outputPath("screen.png");
+		await page.screenshot({ path });
+		await testInfo.attach("screen", { path, contentType: "image/png" });
+	}
+
+	test("a touch-primary device gets the row instead of tab-bar keys, each key named for both its actions", async ({
+		page,
+		relayUrl,
+	}, testInfo) => {
+		await openPhoneTerminal(page, relayUrl);
+
+		await expect(page.locator(".term-tab-bar [role=toolbar]")).toHaveCount(0);
+		await expect(row(page)).toBeVisible();
+		for (const [tap, up] of [
+			["Paste", "Copy"],
+			["Escape", "Tab"],
+			["Control", "Command"],
+			["Option", "Shift"],
+		]) {
+			await expect(rowKey(page, `${tap}, flick up for ${up}`)).toBeVisible();
+			await expect(rowKey(page, up ?? "")).toBeVisible();
+		}
+		await expect(rowKey(page, "Keyboard")).toHaveAttribute(
+			"aria-pressed",
+			"true",
+		);
+		await attachScreen(page, testInfo);
+	});
+
+	test("tapping and flicking each key sends its action, and a waiting modifier applies to the software keyboard", async ({
+		page,
+		relayUrl,
+	}, testInfo) => {
+		await openPhoneTerminal(page, relayUrl);
+		await page.evaluate(() => navigator.clipboard.writeText("echo hi"));
+		const dump = await startByteDump(page, testInfo);
+		const paste = rowKey(page, "Paste, flick up for Copy");
+		const esc = rowKey(page, "Escape, flick up for Tab");
+		const ctrl = rowKey(page, "Control, flick up for Command");
+		const opt = rowKey(page, "Option, flick up for Shift");
+
+		await tap(page, paste);
+		await clipboardRead(page);
+		await dump.group();
+		await flick(page, paste);
+		await expect(
+			page.locator("#terminal-panel").getByText("Nothing selected"),
+		).toBeVisible();
+		await tap(page, esc);
+		await flick(page, esc);
+		await dump.group();
+		// insertText is how a software keyboard types: an input event, no keydown.
+		await tap(page, ctrl);
+		await expect(ctrl).toHaveAttribute("aria-pressed", "mixed");
+		await page.keyboard.insertText("c");
+		await dump.group();
+		await flick(page, ctrl);
+		await expect(rowKey(page, "Command")).toHaveAttribute(
+			"aria-pressed",
+			"mixed",
+		);
+		await page.keyboard.insertText("x");
+		await dump.group();
+		await tap(page, opt);
+		await page.keyboard.insertText("b");
+		await dump.group();
+		await flick(page, opt);
+		await page.keyboard.insertText("a");
+
+		expect(await dump.finish()).toEqual([
+			"65 63 68 6f 20 68 69",
+			"1b 09",
+			"03",
+			"1b 78",
+			"1b 62",
+			"41",
+		]);
+	});
+
+	test("the bubble shows the flick, sliding back cancels to the tap, and the corner label sends the flick", async ({
+		page,
+		relayUrl,
+	}, testInfo) => {
+		await openPhoneTerminal(page, relayUrl);
+		const dump = await startByteDump(page, testInfo);
+		const esc = rowKey(page, "Escape, flick up for Tab");
+		const bubble = row(page).locator(".flick-bubble");
+
+		const touch = await finger(page, esc);
+		await touch.moveTo(0, -30);
+		await expect(bubble).toHaveText(/tab\s*Tab/);
+		await touch.moveTo(0, 0);
+		await expect(bubble).toHaveCount(0);
+		await touch.lift();
+		await dump.group();
+		await tap(page, rowKey(page, "Tab"));
+		await dump.group();
+		await rowKey(page, "Tab").press("Enter");
+		await textarea(page).focus();
+
+		expect(await dump.finish()).toEqual(["1b", "09", "09"]);
+	});
+
+	test("the keyboard toggle hides the keyboard, the row stays and still sends, and a second tap brings it back", async ({
+		page,
+		relayUrl,
+	}, testInfo) => {
+		await openPhoneTerminal(page, relayUrl);
+		const dump = await startByteDump(page, testInfo);
+		const toggle = rowKey(page, "Keyboard");
+
+		await tap(page, toggle);
+		await expect(textarea(page)).not.toBeFocused();
+		await expect(toggle).toHaveAttribute("aria-pressed", "false");
+		await expect(row(page)).toBeVisible();
+		await tap(page, rowKey(page, "Escape, flick up for Tab"));
+		await tap(page, toggle);
+		await expect(textarea(page)).toBeFocused();
+		await expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+		expect(await dump.finish()).toEqual(["1b"]);
+	});
+
+	test("when the software keyboard shrinks the viewport, the row sits at its bottom under the prompt line", async ({
+		page,
+		relayUrl,
+	}, testInfo) => {
+		await openPhoneTerminal(page, relayUrl);
+		await page.keyboard.type("PROMPT-LINE");
+		const prompt = page
+			.locator("#terminal-panel .xterm-rows")
+			.getByText("PROMPT-LINE");
+		await expect(prompt).toBeVisible();
+
+		await page.setViewportSize({ width: 390, height: 480 });
+		// Inside the panel's 1px bottom border.
+		await expect
+			.poll(async () => {
+				const box = await row(page).boundingBox();
+				return box && 480 - Math.round(box.y + box.height);
+			})
+			.toBe(1);
+		const rowTop = (await row(page).boundingBox())?.y ?? 0;
+		const promptBox = await prompt.boundingBox();
+		expect(promptBox?.y).toBeGreaterThanOrEqual(0);
+		expect((promptBox?.y ?? 0) + (promptBox?.height ?? 0)).toBeLessThanOrEqual(
+			rowTop,
+		);
+		await attachScreen(page, testInfo);
+	});
+
+	const pad = (page: Page) => row(page).getByRole("group", { name: "Arrows" });
+	const ARROW = {
+		up: "1b 5b 41",
+		down: "1b 5b 42",
+		right: "1b 5b 43",
+		left: "1b 5b 44",
+	};
+	/** A drag of `steps` 14px pad steps, plus half a step of slack. */
+	const stepPx = (steps: number) => steps * 14 + 7;
+
+	test("dragging the arrow pad sends one arrow per step in the dominant direction, and tapping a side sends that arrow once", async ({
+		page,
+		relayUrl,
+	}, testInfo) => {
+		await openPhoneTerminal(page, relayUrl);
+		const dump = await startByteDump(page, testInfo);
+
+		// Released without pausing, with a wobble across the drag.
+		let touch = await finger(page, pad(page));
+		await touch.moveTo(stepPx(3), 8);
+		await touch.lift();
+		await dump.group();
+		touch = await finger(page, pad(page));
+		await touch.moveTo(-5, -stepPx(2));
+		await touch.lift();
+		await dump.group();
+		await tap(page, pad(page), { x: -0.4, y: 0 });
+		await dump.group();
+		await tap(page, pad(page), { x: 0, y: 0.4 });
+		await attachScreen(page, testInfo);
+
+		expect(await dump.finish()).toEqual([
+			Array(3).fill(ARROW.right).join(" "),
+			Array(2).fill(ARROW.up).join(" "),
+			ARROW.left,
+			ARROW.down,
+		]);
+	});
+
+	test("holding still after a drag repeats its direction", async ({
+		page,
+		relayUrl,
+	}, testInfo) => {
+		await openPhoneTerminal(page, relayUrl);
+		const dump = await startByteDump(page, testInfo);
+
+		const touch = await finger(page, pad(page));
+		await touch.moveTo(stepPx(2), 0);
+		await page.waitForTimeout(1_000);
+		await touch.lift();
+
+		const [bytes = ""] = await dump.finish();
+		const arrows = bytes.match(/1b 5b \w\w/g) ?? [];
+		expect(new Set(arrows)).toEqual(new Set([ARROW.right]));
+		// Two drag steps, then at least as many repeats.
+		expect(arrows.length).toBeGreaterThanOrEqual(4);
+	});
+
+	test("with ⌃ waiting, the pad sends the ⌃ arrow and the modifier is spent", async ({
+		page,
+		relayUrl,
+	}, testInfo) => {
+		await openPhoneTerminal(page, relayUrl);
+		const dump = await startByteDump(page, testInfo);
+		const ctrl = rowKey(page, "Control, flick up for Command");
+
+		await tap(page, ctrl);
+		await expect(ctrl).toHaveAttribute("aria-pressed", "mixed");
+		await tap(page, pad(page), { x: 0.4, y: 0 });
+		await expect(ctrl).toHaveAttribute("aria-pressed", "false");
+
+		expect(await dump.finish()).toEqual(["1b 5b 31 3b 35 43"]);
 	});
 });

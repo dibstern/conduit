@@ -1,7 +1,7 @@
 // The terminal keys module: everything on-screen keys do to a terminal.
 //
-// One per terminal panel, dying with it. The bar calls press and tap; each
-// tab only calls connect. On-screen keys go in through the emulator's own
+// One per terminal panel, dying with it. The bar and the phone row only call
+// press; each tab only calls connect. On-screen keys go in through the emulator's own
 // input call, so they arrive on the same data stream as typed keys and queue
 // behind them in the tab's one-in-flight send: they can never reorder.
 //
@@ -24,7 +24,13 @@ export type TerminalArrow = "left" | "up" | "down" | "right";
 type PlainKey =
 	| Exclude<TerminalKeyAction, TerminalModifier | "paste" | "copy">
 	| TerminalArrow;
+/** Everything an on-screen key can do. The keyboard toggle shows or hides
+ *  the software keyboard by focusing or blurring the terminal's input. */
+export type TerminalKeyPress = TerminalKeyAction | TerminalArrow | "keyboard";
 export type ModifierState = "off" | "waiting" | "locked";
+
+export const isTerminalModifier = (key: string): key is TerminalModifier =>
+	(TERMINAL_MODIFIERS as readonly string[]).includes(key);
 
 const ARROW_FINAL: Record<TerminalArrow, string> = {
 	up: "A",
@@ -120,11 +126,20 @@ function charKey(char: string): KeyEncoding {
 	};
 }
 
-const GLYPHS: Record<TerminalModifier, string> = {
-	ctrl: "⌃",
-	opt: "⌥",
-	shift: "⇧",
-	cmd: "⌘",
+/** How a key shows each action: a short label, an icon where one reads
+ *  better on the key face, and the name it's announced by. */
+export const TERMINAL_KEY_LABELS: Record<
+	TerminalKeyAction,
+	{ text: string; name: string; icon?: string }
+> = {
+	paste: { text: "paste", name: "Paste", icon: "clipboard" },
+	copy: { text: "copy", name: "Copy", icon: "copy" },
+	esc: { text: "esc", name: "Escape" },
+	tab: { text: "tab", name: "Tab" },
+	ctrl: { text: "⌃", name: "Control" },
+	opt: { text: "⌥", name: "Option" },
+	cmd: { text: "⌘", name: "Command" },
+	shift: { text: "⇧", name: "Shift" },
 };
 /** The Mac's order for naming a combination. */
 const COMBO_ORDER: readonly TerminalModifier[] = [
@@ -194,6 +209,8 @@ export function createTerminalKeys({
 	// The emulator clears its selection on the keypress itself, before the c
 	// of ⌘ then C arrives, so ⌘ copies the selection kept while it was held.
 	let cmdSelection = "";
+	// Hidden tabs can't hold focus, so a focused input is the active tab's.
+	let inputFocused = $state(false);
 
 	function show(body: NoticeBody, ms = NOTICE_MS) {
 		clearTimeout(noticeTimer);
@@ -282,7 +299,7 @@ export function createTerminalKeys({
 		);
 		if (!repeating && NON_PRINTING.test(bytes)) {
 			const glyphs = COMBO_ORDER.filter((m) => held.includes(m)).map(
-				(m) => GLYPHS[m],
+				(m) => TERMINAL_KEY_LABELS[m].text,
 			);
 			const combo = glyphs.join("") + key.label;
 			show({ kind: "sent", combo, hint: HINTS[combo] });
@@ -304,16 +321,10 @@ export function createTerminalKeys({
 			return pending?.lines ?? null;
 		},
 
-		/** Paste the clipboard into the active tab. Must run in a user gesture. */
-		async pasteClipboard(): Promise<void> {
-			const terminal = activeTerminal();
-			if (terminal) await pasteClipboard(terminal);
-		},
-
-		/** Copy the active tab's live selection: the Copy key never goes
-		 *  through the emulator's input, so nothing has cleared it. */
-		async copySelection(): Promise<void> {
-			await copy(activeTerminal()?.getSelection() ?? "");
+		/** Whether the active terminal's input has focus, which on a touch
+		 *  device is whether the software keyboard is up. */
+		get keyboard(): boolean {
+			return inputFocused;
 		},
 
 		resolvePaste(confirmed: boolean): void {
@@ -324,26 +335,36 @@ export function createTerminalKeys({
 			resolved.terminal.focus();
 		},
 
-		/** Send an on-screen key to the active tab's terminal. */
-		press(key: PlainKey, repeated = false): void {
+		/** Run an on-screen key on the active tab. Paste reads the clipboard, so
+		 *  it, like the keyboard toggle, must run in a user gesture. */
+		press(key: TerminalKeyPress, repeated = false): void {
 			const terminal = activeTerminal();
 			if (!terminal) return;
+			if (isTerminalModifier(key)) {
+				// Off, then waiting for the next key, then locked, then off again.
+				const next = {
+					off: "waiting",
+					waiting: "locked",
+					locked: "off",
+				} as const;
+				modifiers[key] = next[modifiers[key]];
+				if (key === "cmd" && modifiers.cmd === "waiting")
+					cmdSelection = terminal.getSelection();
+				return;
+			}
+			if (key === "paste") return void pasteClipboard(terminal);
+			// The Copy key never goes through the emulator's input, so nothing
+			// has cleared the live selection.
+			if (key === "copy") return void copy(terminal.getSelection());
+			if (key === "keyboard") {
+				if (inputFocused) terminal.textarea?.blur();
+				else terminal.focus();
+				return;
+			}
 			repeating = repeated;
 			// input fires onData synchronously, so the flag covers exactly this key.
 			terminal.input(encode(terminal, key));
 			repeating = false;
-		},
-
-		/** Off, then waiting for the next key, then locked, then off again. */
-		tap(modifier: TerminalModifier): void {
-			const next = {
-				off: "waiting",
-				waiting: "locked",
-				locked: "off",
-			} as const;
-			modifiers[modifier] = next[modifiers[modifier]];
-			if (modifier === "cmd" && modifiers.cmd === "waiting")
-				cmdSelection = activeTerminal()?.getSelection() ?? "";
 		},
 
 		/** Called by each tab on mount. Takes over the terminal's data stream,
@@ -386,10 +407,17 @@ export function createTerminalKeys({
 				if (text) guardedPaste(terminal, text);
 			};
 			terminal.element?.addEventListener("paste", onPaste, true);
+			const onFocus = (event: FocusEvent) =>
+				(inputFocused = event.type === "focus");
+			terminal.textarea?.addEventListener("focus", onFocus);
+			terminal.textarea?.addEventListener("blur", onFocus);
 			return () => {
 				data.dispose();
 				selection.dispose();
 				terminal.element?.removeEventListener("paste", onPaste, true);
+				terminal.textarea?.removeEventListener("focus", onFocus);
+				terminal.textarea?.removeEventListener("blur", onFocus);
+				if (terminal.textarea === document.activeElement) inputFocused = false;
 				if (terminals.get(ptyId) === terminal) terminals.delete(ptyId);
 			};
 		},

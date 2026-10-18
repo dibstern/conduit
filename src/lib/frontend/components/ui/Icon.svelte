@@ -107,6 +107,7 @@
     Server,
     Timer,
     Keyboard,
+    KeyboardOff,
   } from '@lucide/svelte';
   import ClaudeMark from './marks/ClaudeMark.svelte';
   import OpenCodeMark from './marks/OpenCodeMark.svelte';
@@ -230,6 +231,7 @@
     'server': Server,
     'timer': Timer,
     'keyboard': Keyboard,
+    'keyboard-off': KeyboardOff,
 
     // Harness brand marks (not lucide).
     'claude': ClaudeMark,
