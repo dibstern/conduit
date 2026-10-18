@@ -18,31 +18,34 @@
 -->
 <script lang="ts">
 	import { tokenizeSkills } from "../../../skill-recognition.js";
+	import { referenceLabel } from "../../../composer-references.js";
 	import ComposerToken from "../ui/ComposerToken.svelte";
+	import ComposerReferenceToken from "../ui/ComposerReferenceToken.svelte";
 
 	interface Props {
 		text: string;
 		commandNames: ReadonlySet<string>;
 		builtinNames?: ReadonlySet<string>;
 		dimmed?: boolean;
+		onremove?: (start: number) => void;
 	}
-	let { text, commandNames, builtinNames, dimmed = false }: Props = $props();
+	let { text, commandNames, builtinNames, dimmed = false, onremove }: Props = $props();
 
 	const segments = $derived(tokenizeSkills(text, commandNames, builtinNames));
 </script>
 
 <div
 	aria-hidden="true"
-	class="composer-text-metrics mirror pointer-events-none relative z-0 text-text"
+	class="composer-text-metrics mirror pointer-events-none relative text-text"
 	class:opacity-0={dimmed}
->{#each segments as seg (seg.key)}{#if seg.kind === "skill"}<ComposerToken goal={/^[/$]goal$/.test(seg.text)}>{seg.text}</ComposerToken>{:else if seg.kind === "unknown"}<span class="skill-unknown">{seg.text}</span>{:else}{seg.text}{/if}{/each}</div>
+>{#each segments as seg (seg.key)}{#if seg.kind === "reference" && seg.reference}<ComposerReferenceToken label={referenceLabel(seg.reference)} ask={"ordinal" in seg.reference && seg.reference.category === "Ask"} title={seg.reference.text} onremove={() => onremove?.(seg.start ?? 0)} />{:else if seg.kind === "skill"}<ComposerToken goal={/^[/$]goal$/.test(seg.text)}>{seg.text}</ComposerToken>{:else if seg.kind === "unknown"}<span class="skill-unknown">{seg.text}</span>{:else}{seg.text}{/if}{/each}</div>
 
 <style>
 	/* A zero-width space forcing a final line box, which the row's height depends
 	   on: an empty draft would otherwise collapse to its padding, and one ending in
 	   a newline would come up a line short of the textarea. It lives in a pseudo
 	   element so the mirror's own text stays byte-for-byte the draft — anything
-	   stray in there shifts the glyphs out from under the caret. */
+	   stray in the projected text shifts glyphs out from under the caret. */
 	.mirror::after {
 		content: "\200b";
 	}

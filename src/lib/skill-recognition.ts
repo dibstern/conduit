@@ -7,7 +7,12 @@
 // lighting up. Each sigil is checked only against its own names, so a hand-typed
 // `/compact` stays plain rather than reading as a typo of `$compact`.
 
-export type SkillSegmentKind = "text" | "skill" | "unknown";
+import {
+	projectReferences,
+	type ReplyReference,
+} from "./composer-references.js";
+
+export type SkillSegmentKind = "text" | "skill" | "unknown" | "reference";
 
 export interface SkillSegment {
 	readonly text: string;
@@ -18,6 +23,8 @@ export interface SkillSegment {
 	 * (a node is only recreated when the token itself changes).
 	 */
 	readonly key: string;
+	readonly reference?: ReplyReference;
+	readonly start?: number;
 }
 
 // Bare absolute-path roots are common in prose but otherwise look exactly like
@@ -123,6 +130,41 @@ function isTypoOfKnownCommand(
 const COMMAND_TOKEN = /(^|\s)([/$][A-Za-z0-9][A-Za-z0-9_:-]*)(?![\w:/-])/g;
 
 export function tokenizeSkills(
+	text: string,
+	skillNames: ReadonlySet<string>,
+	builtinNames: ReadonlySet<string> = new Set(),
+): SkillSegment[] {
+	const references = projectReferences(text).references;
+	if (!references.length)
+		return tokenizeCommands(text, skillNames, builtinNames);
+	const segments: SkillSegment[] = [];
+	let last = 0;
+	for (const span of references) {
+		segments.push(
+			...tokenizeCommands(
+				text.slice(last, span.start),
+				skillNames,
+				builtinNames,
+			).map((seg) => ({ ...seg, key: `${last}:${seg.key}` })),
+		);
+		segments.push({
+			kind: "reference",
+			text: text.slice(span.start, span.end),
+			key: `ref:${span.start}`,
+			start: span.start,
+			reference: span.reference,
+		});
+		last = span.end;
+	}
+	segments.push(
+		...tokenizeCommands(text.slice(last), skillNames, builtinNames).map(
+			(seg) => ({ ...seg, key: `${last}:${seg.key}` }),
+		),
+	);
+	return segments;
+}
+
+function tokenizeCommands(
 	text: string,
 	skillNames: ReadonlySet<string>,
 	builtinNames: ReadonlySet<string> = new Set(),

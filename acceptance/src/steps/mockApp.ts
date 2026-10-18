@@ -600,6 +600,9 @@ export const mockAppHandlers: StepHandler[] = [
 			 *  GetAgents afterwards returns that harness's agents (mirrors the
 			 *  real server, where the created session is bound to the instance). */
 			let createdSessionInstance: string | undefined;
+			/** Drafts the composer synced, returned when the session is viewed
+			 *  again, the way the daemon restores a draft across a reload. */
+			const syncedDrafts = new Map<string, string>();
 			const sessionInstance = (sessionId: string | undefined) => {
 				const row = rpcControls
 					.get(page)
@@ -672,7 +675,10 @@ export const mockAppHandlers: StepHandler[] = [
 						return next;
 					},
 					ResolveSession: async () => ({ projectSlug: "myapp" }),
-					ViewSession: async () => ({ ok: true }),
+					ViewSession: async ({ sessionId }) => ({
+						ok: true,
+						draft: syncedDrafts.get(String(sessionId)),
+					}),
 					CreateSession: async (payload) => {
 						await new Promise((resolve) =>
 							setTimeout(resolve, createSessionDelays.get(page) ?? 0),
@@ -696,12 +702,19 @@ export const mockAppHandlers: StepHandler[] = [
 						sessionId,
 						...mockDetailPage(page, sessionId, before),
 					}),
-					"input.submit": async ({ sessionId }) => ({
-						ok: true,
-						sessionId,
-						handedOff: true,
-					}),
-					SyncInputDraft: async () => ({ ok: true }),
+					"input.submit": async ({ sessionId }) => {
+						syncedDrafts.delete(String(sessionId));
+						return {
+							ok: true,
+							sessionId,
+							handedOff: true,
+						};
+					},
+					SyncInputDraft: async ({ sessionId, text }) => {
+						if (text) syncedDrafts.set(String(sessionId), String(text));
+						else syncedDrafts.delete(String(sessionId));
+						return { ok: true };
+					},
 					SetDefaultPermissionMode: async (payload) => ({
 						projectSlug: "myapp",
 						mode: payload["mode"],
