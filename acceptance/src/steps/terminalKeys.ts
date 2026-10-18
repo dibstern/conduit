@@ -50,6 +50,63 @@ const PRESSED = { off: "false", waiting: "mixed", locked: "true" } as const;
 
 export const terminalKeysHandlers: StepHandler[] = [
 	{
+		name: "narrow the desktop terminal panel",
+		match: /^I narrow the terminal panel$/,
+		run: async ({ world }) => {
+			await world.page.locator("#terminal-panel").evaluate((panel) => {
+				panel.style.width = "420px";
+				panel.style.maxWidth = "420px";
+			});
+		},
+	},
+	{
+		name: "assert the folded terminal keys",
+		match: /^the terminal keys are folded into the Keys menu$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("terminal-keys-menu-trigger"),
+			).toBeVisible();
+			await expect(
+				world.page.getByRole("toolbar", { name: "Terminal keys" }),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "open the terminal Keys menu",
+		match: /^I open the terminal Keys menu$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("terminal-keys-menu-trigger").click();
+		},
+	},
+	{
+		name: "assert the desktop terminal Keys menu",
+		match:
+			/^the terminal Keys menu contains paste, esc, tab, the four modifiers and the four arrows$/,
+		run: async ({ world }) => {
+			const items = world.page
+				.getByRole("menu", { name: "Terminal keys", exact: true })
+				.getByRole("menuitem");
+			await expect(items).toHaveCount(11);
+			expect(
+				await items.evaluateAll((elements) =>
+					elements.map((element) => element.getAttribute("aria-label")),
+				),
+			).toEqual([
+				"Paste",
+				"Escape",
+				"Tab",
+				"Control",
+				"Option",
+				"Command",
+				"Shift",
+				"Left arrow",
+				"Up arrow",
+				"Down arrow",
+				"Right arrow",
+			]);
+		},
+	},
+	{
 		name: "set touch phone viewport",
 		match: /^the viewport is a touch phone$/,
 		run: async ({ world }) => {

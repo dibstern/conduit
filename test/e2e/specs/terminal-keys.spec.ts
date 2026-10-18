@@ -13,6 +13,7 @@ import {
 	openPhoneTerminal,
 	row,
 	rowKey,
+	setTerminalPanelWidth,
 	tap,
 	textarea,
 } from "../helpers/terminal-keys.js";
@@ -36,6 +37,127 @@ const key = (page: Page, name: string) =>
 	});
 
 const ARROWS = ["Left arrow", "Up arrow", "Down arrow", "Right arrow"];
+
+const keysMenu = (page: Page) =>
+	page.getByRole("menu", { name: "Terminal keys", exact: true });
+const keysMenuTrigger = (page: Page) =>
+	page.getByTestId("terminal-keys-menu-trigger");
+
+async function chooseMenuKey(page: Page, name: string): Promise<void> {
+	await keysMenuTrigger(page).click();
+	await keysMenu(page).getByRole("menuitem", { name, exact: true }).click();
+	await expect(keysMenu(page)).toBeHidden();
+}
+
+test.describe("Terminal keys menu on desktop", () => {
+	test("the panel's own width folds and unfolds the keys without changing the viewport", async ({
+		page,
+		relayUrl,
+	}, testInfo) => {
+		await openTerminal(page, relayUrl);
+		const viewport = page.viewportSize();
+		const toolbar = page.getByRole("toolbar", { name: "Terminal keys" });
+		await expect(toolbar).toBeVisible();
+		await expect(keysMenuTrigger(page)).toHaveCount(0);
+		await setTerminalPanelWidth(page, 420);
+		await expect(keysMenuTrigger(page)).toBeVisible();
+		await expect(toolbar).toHaveCount(0);
+		// Let several observer deliveries pass, so a fit/fold loop cannot pass.
+		await page.waitForTimeout(250);
+		await expect(keysMenuTrigger(page)).toBeVisible();
+		expect(page.viewportSize()).toEqual(viewport);
+		await testInfo.attach("narrow terminal tab bar", {
+			body: await page.screenshot(),
+			contentType: "image/png",
+		});
+		await setTerminalPanelWidth(page, null);
+		await expect(toolbar).toBeVisible();
+		await expect(keysMenuTrigger(page)).toHaveCount(0);
+		await page.waitForTimeout(250);
+		await expect(toolbar).toBeVisible();
+		expect(page.viewportSize()).toEqual(viewport);
+		await testInfo.attach("wide terminal tab bar restored", {
+			body: await page.screenshot(),
+			contentType: "image/png",
+		});
+	});
+
+	test("menu escape, arrow and Control-arrow send the inline keys' exact bytes", async ({
+		page,
+		relayUrl,
+	}, testInfo) => {
+		await openTerminal(page, relayUrl);
+		const dump = await startByteDump(page, testInfo);
+		await key(page, "Escape").click();
+		await key(page, "Right arrow").click();
+		await key(page, "Control").click();
+		await key(page, "Right arrow").click();
+		await dump.group();
+		await setTerminalPanelWidth(page, 420);
+		await chooseMenuKey(page, "Escape");
+		await chooseMenuKey(page, "Right arrow");
+		await chooseMenuKey(page, "Control");
+		await chooseMenuKey(page, "Right arrow");
+		expect(await dump.finish()).toEqual([
+			"1b 1b 5b 43 1b 5b 31 3b 35 43",
+			"1b 1b 5b 43 1b 5b 31 3b 35 43",
+		]);
+	});
+
+	test("choosing Control and dismissing the menu both return focus to the terminal", async ({
+		page,
+		relayUrl,
+	}, testInfo) => {
+		await openTerminal(page, relayUrl);
+		const dump = await startByteDump(page, testInfo);
+		await setTerminalPanelWidth(page, 420);
+		await chooseMenuKey(page, "Control");
+		await expect(textarea(page)).toBeFocused();
+		await page.keyboard.press("c");
+		await dump.group();
+		await keysMenuTrigger(page).click();
+		await expect(keysMenu(page)).toBeVisible();
+		await page.keyboard.press("Escape");
+		await expect(keysMenu(page)).toBeHidden();
+		await expect(textarea(page)).toBeFocused();
+		await page.keyboard.press("x");
+		expect(await dump.finish()).toEqual(["03", "78"]);
+	});
+
+	test("the Keys button and menu expose waiting and locked modifiers", async ({
+		page,
+		relayUrl,
+	}, testInfo) => {
+		await openTerminal(page, relayUrl);
+		await setTerminalPanelWidth(page, 420);
+		const trigger = keysMenuTrigger(page);
+		await chooseMenuKey(page, "Control");
+		await expect(trigger).toHaveAccessibleDescription("Control waiting");
+		await trigger.click();
+		const control = keysMenu(page).getByRole("menuitem", {
+			name: "Control",
+			exact: true,
+		});
+		await expect(control).toHaveAttribute("data-modifier-state", "waiting");
+		await expect(control).toHaveAccessibleDescription("waiting");
+		await testInfo.attach("Control waiting in Keys menu", {
+			body: await page.screenshot(),
+			contentType: "image/png",
+		});
+		await control.click();
+		await expect(keysMenu(page)).toBeHidden();
+		await expect(trigger).toHaveAccessibleDescription("Control locked");
+		await trigger.click();
+		await expect(control).toHaveAttribute("data-modifier-state", "locked");
+		await expect(control).toHaveAccessibleDescription("locked");
+		await testInfo.attach("Control locked in Keys menu", {
+			body: await page.screenshot(),
+			contentType: "image/png",
+		});
+		await control.click();
+		await expect(trigger).not.toHaveAccessibleDescription(/Control/);
+	});
+});
 
 test.describe("Terminal keys on desktop", () => {
 	test("esc, tab and arrows send what the physical keys send, and typing keeps its place", async ({

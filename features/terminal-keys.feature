@@ -11,6 +11,21 @@ Examples:
   | baseline              | threshold |
   | terminal-keys-desktop | 98        |
 
+Scenario Outline: a narrow desktop terminal panel folds the keys into a menu
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  When I open a new terminal tab
+  And I narrow the terminal panel
+  Then the terminal keys are folded into the Keys menu
+  And the terminal-tab-bar region visually matches <bar_baseline> at <threshold> percent
+  When I open the terminal Keys menu
+  Then the terminal Keys menu contains paste, esc, tab, the four modifiers and the four arrows
+  And the terminal-keys-menu region visually matches <menu_baseline> at <threshold> percent
+
+Examples:
+  | bar_baseline                 | menu_baseline              | threshold |
+  | terminal-keys-folded-desktop | terminal-keys-menu-desktop | 98        |
+
 Scenario Outline: a waiting ⌥ or ⌘ explains what its next key does
   Given the conduit app is served with the connected mockup
   And the viewport is a desktop

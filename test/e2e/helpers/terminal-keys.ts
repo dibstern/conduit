@@ -31,6 +31,14 @@ export const rowKey = (page: Page, name: string) =>
 export const textarea = (page: Page) =>
 	page.locator("#terminal-panel .xterm-helper-textarea");
 
+/** Resize the panel independently of the desktop viewport. */
+export async function setTerminalPanelWidth(page: Page, width: number | null) {
+	await page.locator("#terminal-panel").evaluate((panel, value) => {
+		panel.style.width = value === null ? "" : `${value}px`;
+		panel.style.maxWidth = value === null ? "" : `${value}px`;
+	}, width);
+}
+
 export async function openPhoneTerminal(page: Page, url: string) {
 	await new AppPage(page).goto(url);
 	// Touch emulation alone must read as touch-primary, or the row never shows.

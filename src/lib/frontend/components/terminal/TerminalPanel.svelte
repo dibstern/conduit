@@ -27,6 +27,7 @@
 	import type { GetFileTreeResponse } from "../../transport/ws-rpc.js";
 	import type { Terminal } from "@xterm/xterm";
 	import { projectState } from "../../stores/project-state.svelte.js";
+	import { TERMINAL_MODIFIERS } from "../../../contracts/terminal-keys.js";
 	import {
 		createTerminalKeys,
 		isTerminalModifier,
@@ -36,6 +37,7 @@
 	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
+	import MenuSeparator from "../ui/MenuSeparator.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import TerminalKey from "../ui/TerminalKey.svelte";
 	import TerminalKeyRow from "./TerminalKeyRow.svelte";
@@ -75,6 +77,55 @@
 	const visibleBarKeys = $derived(BAR_KEYS.filter(({ group }) =>
 		projectState.terminalKeys.bar.show && projectState.terminalKeys.bar[group],
 	));
+	const heldModifiers = $derived(
+		TERMINAL_MODIFIERS.filter((key) => keys.modifiers[key] !== "off"),
+	);
+	const lockedModifier = $derived(
+		heldModifiers.some((key) => keys.modifiers[key] === "locked"),
+	);
+	const modifierDescription = $derived(
+		heldModifiers.map((key) => `${TERMINAL_KEY_LABELS[key].name} ${keys.modifiers[key]}`).join(", "),
+	);
+	const keysDescriptionId = $props.id();
+	let keysFolded = $state(false);
+	let tabBarEl = $state<HTMLDivElement>();
+	let inlineKeysEl = $state<HTMLDivElement>();
+	let keysSlotEl = $state<HTMLDivElement>();
+
+	$effect(() => {
+		const bar = tabBarEl;
+		const inline = inlineKeysEl;
+		const slot = keysSlotEl;
+		// Reobserve the bar's children when its optional controls change.
+		canCreate;
+		folders.length;
+		if (!bar || !inline || !slot || typeof ResizeObserver === "undefined") return;
+		const measure = () => {
+			const style = getComputedStyle(bar);
+			let required =
+				Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
+			for (const child of bar.children) {
+				required += child.getBoundingClientRect().width;
+				// The right controls' auto margin fills spare space, not natural width.
+				if (child !== slot.parentElement) {
+					const childStyle = getComputedStyle(child);
+					required +=
+						Number.parseFloat(childStyle.marginLeft) + Number.parseFloat(childStyle.marginRight);
+				}
+			}
+			// Keep the same inline bar off-layout while folded, so its natural
+			// width stays measurable as settings change and cannot cause oscillation.
+			required +=
+				inline.getBoundingClientRect().width +
+				Number.parseFloat(getComputedStyle(inline).marginRight) -
+				slot.getBoundingClientRect().width;
+			keysFolded = required > bar.clientWidth;
+		};
+		const observer = new ResizeObserver(measure);
+		for (const element of [bar, ...bar.children, inline]) observer.observe(element);
+		measure();
+		return () => observer.disconnect();
+	});
 
 	const tabs = $derived(getTabList());
 	const pendingTitle = $derived(getPendingTabTitle());
@@ -309,6 +360,7 @@
 		<!-- Tab bar -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
+			bind:this={tabBarEl}
 			class="term-tab-bar flex items-center gap-0 px-1 bg-bg border-b border-border shrink-0 overflow-x-auto min-h-9"
 			ontouchstart={onTabBarTouchStart}
 		>
@@ -456,27 +508,87 @@
 			<!-- Keys and font size controls (right-aligned) -->
 			<div class="flex items-center gap-0 ml-auto shrink-0">
 				{#if finePointer.current && visibleBarKeys.length > 0}
-					<div
-						class="term-keys flex items-center h-[32px] px-[3px] mr-[6px] rounded-full bg-chip"
-						role="toolbar"
-						aria-label="Terminal keys"
-					>
-						{#each visibleBarKeys as { key, group }, i (key)}
-							{@const label = TERMINAL_KEY_LABELS[key]}
-							{#if i > 0 && visibleBarKeys[i - 1]?.group !== group}
-								<span class="w-px h-[18px] mx-[5px] bg-border" aria-hidden="true"></span>
-							{/if}
-							<TerminalKey
-								label={label.name}
-								glyph={group === "modifiers" || group === "arrows"}
-								repeat={group === "arrows"}
-								{...(isTerminalModifier(key) ? { state: keys.modifiers[key] } : {})}
-								onpress={(repeated) => keys.press(key, repeated)}
+					<div bind:this={keysSlotEl} class="relative flex items-center shrink-0">
+						<span id={keysDescriptionId} class="sr-only">{modifierDescription}</span>
+						<div
+							bind:this={inlineKeysEl}
+							class="term-keys flex items-center shrink-0 w-max h-[32px] px-[3px] mr-[6px] rounded-full bg-chip"
+							class:absolute={keysFolded}
+							class:right-0={keysFolded}
+							class:invisible={keysFolded}
+							inert={keysFolded}
+							role="toolbar"
+							aria-label="Terminal keys"
+						>
+							{#each visibleBarKeys as { key, group }, i (key)}
+								{@const label = TERMINAL_KEY_LABELS[key]}
+								{#if i > 0 && visibleBarKeys[i - 1]?.group !== group}
+									<span class="w-px h-[18px] mx-[5px] bg-border" aria-hidden="true"></span>
+								{/if}
+								<TerminalKey
+									label={label.name}
+									glyph={group === "modifiers" || group === "arrows"}
+									repeat={group === "arrows"}
+									{...(isTerminalModifier(key) ? { state: keys.modifiers[key] } : {})}
+									onpress={(repeated) => keys.press(key, repeated)}
+								>
+									{#if label.icon}<Icon name={label.icon} size={key === "paste" ? 13 : 14} />{/if}
+									{key === "paste" ? label.name : label.text}
+								</TerminalKey>
+							{/each}
+						</div>
+						{#if keysFolded}
+							<Menu
+								ariaLabel="Terminal keys"
+								side="top"
+								align="end"
+								onCloseAutoFocus={(event) => {
+									event.preventDefault();
+									tabBarEl?.parentElement?.querySelector<HTMLTextAreaElement>(
+										".term-tab-content:not(.hidden) .xterm-helper-textarea",
+									)?.focus();
+								}}
 							>
-								{#if label.icon}<Icon name={label.icon} size={key === "paste" ? 13 : 14} />{/if}
-								{key === "paste" ? label.name : label.text}
-							</TerminalKey>
-						{/each}
+								{#snippet trigger({ props })}
+									<Button
+										{...props}
+										variant="ghost"
+										size="content"
+										tone={heldModifiers.length ? "accent" : "secondary"}
+										hoverFill="none"
+										ariaLabel="Keys"
+										aria-describedby={modifierDescription ? keysDescriptionId : undefined}
+										data-testid="terminal-keys-menu-trigger"
+										class="h-[32px] px-3 mr-[6px] rounded-full font-sans text-xs font-medium
+											{heldModifiers.length ? 'bg-accent/[18%]' : 'bg-chip hover:bg-hover'}
+											{lockedModifier ? 'shadow-[inset_0_0_0_1.5px_var(--color-accent)]' : ''}"
+									>
+										Keys
+									</Button>
+								{/snippet}
+								{#each visibleBarKeys as { key, group }, i (key)}
+									{@const label = TERMINAL_KEY_LABELS[key]}
+									{@const state = isTerminalModifier(key) ? keys.modifiers[key] : undefined}
+									{#if i > 0 && visibleBarKeys[i - 1]?.group !== group}
+										<MenuSeparator />
+									{/if}
+									<MenuItem
+										aria-label={label.name}
+										aria-describedby={state ? `${keysDescriptionId}-${key}` : undefined}
+										data-modifier-state={state}
+										onselect={() => keys.press(key)}
+									>
+										<span class="w-5 text-center" aria-hidden="true">
+											{#if label.icon}<Icon name={label.icon} size={14} />{:else}{label.text}{/if}
+										</span>
+										{label.name}
+										{#if state}
+											<span id={`${keysDescriptionId}-${key}`} class="ml-auto text-xs text-accent" class:sr-only={state === "off"}>{state}</span>
+										{/if}
+									</MenuItem>
+								{/each}
+							</Menu>
+						{/if}
 					</div>
 				{/if}
 				<Button

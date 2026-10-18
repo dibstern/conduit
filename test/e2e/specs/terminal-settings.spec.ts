@@ -16,6 +16,7 @@ import {
 	openPhoneTerminal,
 	row,
 	rowKey,
+	setTerminalPanelWidth,
 	tap,
 	textarea,
 } from "../helpers/terminal-keys.js";
@@ -149,6 +150,62 @@ test("Terminal settings hide each desktop key group and the entire bar", async (
 	await closeSettings(page);
 	await expect(keys(page).getByRole("button")).toHaveCount(0);
 	await testInfo.attach("hidden desktop keys", {
+		body: await page.screenshot(),
+		contentType: "image/png",
+	});
+});
+
+test("the folded Keys menu follows the same groups and separators as the inline bar", async ({
+	page,
+	sessionUrl,
+}, testInfo) => {
+	await new AppPage(page).goto(sessionUrl);
+	await showTerminal(page);
+	await openTerminalSettings(page);
+	await toggle(page, "Arrows").click();
+	await closeSettings(page);
+	await expect(terminalKey(page, "Right arrow")).toHaveCount(0);
+	const inline = await keys(page)
+		.locator(":scope > button, :scope > span")
+		.evaluateAll((items) =>
+			items.map((item) => item.getAttribute("aria-label") ?? "separator"),
+		);
+	expect(inline).toEqual([
+		"Paste",
+		"separator",
+		"Escape",
+		"Tab",
+		"separator",
+		"Control",
+		"Option",
+		"Command",
+		"Shift",
+	]);
+	await setTerminalPanelWidth(page, 420);
+	const trigger = page.getByTestId("terminal-keys-menu-trigger");
+	await expect(trigger).toBeVisible();
+	await trigger.click();
+	const menu = page.getByRole("menu", { name: "Terminal keys", exact: true });
+	await expect(menu).toBeVisible();
+	expect(
+		await menu
+			.locator('[role="menuitem"], [role="separator"]')
+			.evaluateAll((items) =>
+				items.map((item) => item.getAttribute("aria-label") ?? "separator"),
+			),
+	).toEqual(inline);
+	await testInfo.attach("Keys menu with Arrows hidden", {
+		body: await page.screenshot(),
+		contentType: "image/png",
+	});
+	await page.keyboard.press("Escape");
+	await openTerminalSettings(page);
+	await toggle(page, "Paste, esc and tab").click();
+	await toggle(page, "Modifiers").click();
+	await closeSettings(page);
+	await expect(trigger).toHaveCount(0);
+	await expect(keys(page).getByRole("button")).toHaveCount(0);
+	await testInfo.attach("no Keys button when all groups are hidden", {
 		body: await page.screenshot(),
 		contentType: "image/png",
 	});
