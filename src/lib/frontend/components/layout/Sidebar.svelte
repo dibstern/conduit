@@ -245,7 +245,7 @@
 				iconOnly
 				icon="plus"
 				iconSize={20}
-				class="absolute right-[11px] bottom-[calc(11px+env(safe-area-inset-bottom))] z-[var(--z-raised)] size-[44px] justify-center rounded-full bg-fill-brand text-on-brand shadow-[0_4px_14px_var(--color-backdrop-subtle)]"
+				class="absolute right-[11px] bottom-[calc(11px+max(env(safe-area-inset-bottom),var(--toast-clearance,0px)))] z-[var(--z-raised)] size-[44px] justify-center rounded-full bg-fill-brand text-on-brand shadow-[0_4px_14px_var(--color-backdrop-subtle)]"
 				title="New session"
 				ariaLabel="New session"
 				onclick={handleNewSession}
@@ -276,7 +276,7 @@
 	/* The usage dock sits below the list and takes the home-indicator inset,
 	   so the new-session button rides above it and the list only clears the button. */
 	.phone-list.usage-docked :global(#new-session-btn) {
-		bottom: calc(var(--phone-usage-height) + 12px);
+		bottom: calc(max(var(--phone-usage-height), var(--toast-clearance, 0px)) + 12px);
 	}
 	.phone-list.usage-docked :global(#session-list-scroller) {
 		padding-bottom: 68px;
