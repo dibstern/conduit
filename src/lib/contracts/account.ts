@@ -90,21 +90,15 @@ export const AccountAddInputSchema = Schema.Union([
 	Schema.Struct({
 		...addFields,
 		driver: Schema.Literal("claude"),
-		managed: Schema.optional(
-			Schema.Literal(false).annotate({
-				message: "InstanceAdd: Claude instances must not be managed",
-			}),
-		),
-		port: Schema.optional(
-			Schema.Never.annotate({
-				message: "InstanceAdd: Claude instances must not include 'port'",
-			}),
-		),
-		url: Schema.optional(
-			Schema.Never.annotate({
-				message: "InstanceAdd: Claude instances must not include 'url'",
-			}),
-		),
+		managed: Schema.optional(Schema.Literal(false)).annotate({
+			message: "InstanceAdd: Claude instances must not be managed",
+		}),
+		port: Schema.optional(Schema.Never).annotate({
+			message: "InstanceAdd: Claude instances must not include 'port'",
+		}),
+		url: Schema.optional(Schema.Never).annotate({
+			message: "InstanceAdd: Claude instances must not include 'url'",
+		}),
 	}),
 	Schema.Struct({
 		...addFields,
