@@ -424,8 +424,8 @@ export const stream = <T, E = never>(options: {
 			});
 
 			// A chunk is every advance already queued, so a burst costs one read.
-			const live = Stream.mapChunksEffect(
-				advances,
+			const envelopeBatches = Stream.mapEffect(
+				Stream.chunks(advances),
 				(chunk): Effect.Effect<Chunk.Chunk<Envelope<T>>, E> =>
 					Effect.gen(function* () {
 						// A publication gap can hide any move or removal. Catch up
@@ -489,6 +489,8 @@ export const stream = <T, E = never>(options: {
 						);
 					}),
 			);
+			const nonEmptyBatches = Stream.filter(envelopeBatches, Chunk.isNonEmpty);
+			const live = Stream.flattenChunks(nonEmptyBatches);
 
 			return Stream.concat(Stream.fromIterable(opening), live);
 		}),

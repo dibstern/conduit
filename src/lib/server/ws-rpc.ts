@@ -1,5 +1,7 @@
 import { Rpc, type RpcGroup, RpcSchema } from "@effect/rpc";
 import {
+	type Cause,
+	type Chunk,
 	Context,
 	Effect,
 	Fiber,
@@ -8,7 +10,6 @@ import {
 	Queue,
 	type Scope,
 	Stream,
-	type Take,
 } from "effect";
 import type { UsageReading } from "../contracts/limit-recovery.js";
 import {
@@ -451,17 +452,26 @@ export const makeRoutedWsRpcServerLayer = <
 						Effect.gen(function* () {
 							const projectSlug = yield* projectSlugFor(payload);
 							const context = yield* resolveContext(projectSlug);
+							type Signal =
+								| { readonly _tag: "Batch"; readonly values: Chunk.Chunk<A> }
+								| { readonly _tag: "Failure"; readonly cause: Cause.Cause<E> }
+								| { readonly _tag: "End" };
 							const queue = yield* Effect.acquireRelease(
-								Queue.bounded<Take.Take<A, E>>(2),
+								Queue.bounded<Signal>(2),
 								Queue.shutdown,
 							);
 							// Project removal and browser cancellation both await this producer
 							// before SQLite closes. Queue shutdown ends the consumer cleanly.
 							yield* Effect.acquireRelease(
-								Stream.runIntoQueue(
+								Stream.runForEachChunk(
 									Stream.provideContext(make(), context),
-									queue,
+									(values) => Queue.offer(queue, { _tag: "Batch", values }),
 								).pipe(
+									Effect.matchCauseEffect({
+										onFailure: (cause) =>
+											Queue.offer(queue, { _tag: "Failure", cause }),
+										onSuccess: () => Queue.offer(queue, { _tag: "End" }),
+									}),
 									Effect.interruptible,
 									Effect.onInterrupt(() => Queue.shutdown(queue)),
 									Effect.forkIn(Context.get(context, RpcSubscriptionScopeTag)),
@@ -469,7 +479,12 @@ export const makeRoutedWsRpcServerLayer = <
 								Fiber.interrupt,
 							);
 							return Stream.fromQueue(queue).pipe(
-								Stream.flattenTake,
+								Stream.takeWhile((signal) => signal._tag !== "End"),
+								Stream.flatMap((signal) =>
+									signal._tag === "Batch"
+										? Stream.fromChunk(signal.values)
+										: Stream.failCause(signal.cause),
+								),
 								Stream.mapError(
 									(error) =>
 										new WsRpcError({
