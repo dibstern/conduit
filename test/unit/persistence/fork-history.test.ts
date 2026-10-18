@@ -560,7 +560,9 @@ describe("readForkSource", () => {
 				);
 				expect(removed._tag).toBe("Left");
 				if (removed._tag === "Failure")
-					expect(removed.failure).toMatchObject({ reason: "message_not_found" });
+					expect(removed.failure).toMatchObject({
+						reason: "message_not_found",
+					});
 			}).pipe(Effect.provide(testLayer)),
 	);
 

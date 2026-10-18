@@ -17,7 +17,6 @@ import {
 } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "effect/sql";
 import {
 	Context,
 	Deferred,
@@ -27,6 +26,7 @@ import {
 	ManagedRuntime,
 	Option,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { describe, expect, it, vi } from "vitest";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";

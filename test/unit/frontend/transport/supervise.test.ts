@@ -4,7 +4,6 @@
 // only what a consumer sees: the envelopes, the statuses, and when the
 // subscription is asked for again.
 
-import type { Rpc } from "effect/rpc";
 import { describe, it } from "@effect/vitest";
 import {
 	Chunk,
@@ -18,6 +17,7 @@ import {
 	Stream,
 	TestClock,
 } from "effect";
+import type { Rpc } from "effect/rpc";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import {
 	type SubscribeShell,

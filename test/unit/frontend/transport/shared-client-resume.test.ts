@@ -1,5 +1,5 @@
-import type { Rpc } from "effect/rpc";
 import { Effect, Fiber, Layer, ManagedRuntime, Schema, Stream } from "effect";
+import type { Rpc } from "effect/rpc";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
 	SubscribeShell,

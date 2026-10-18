@@ -1,7 +1,5 @@
 import { createHash } from "node:crypto";
 import { channel } from "node:diagnostics_channel";
-import type { SqlClient } from "effect/sql";
-import type { SqlError } from "effect/sql/SqlError";
 import {
 	type Cause,
 	Duration,
@@ -13,6 +11,8 @@ import {
 	Stream,
 	Take,
 } from "effect";
+import type { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { advanceTouchesScope } from "../../../contracts/read-model-advance.js";
 import {
 	type ResumeBase,

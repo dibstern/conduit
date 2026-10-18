@@ -341,7 +341,9 @@ describe("Claude runner admission socket probes", () => {
 				Effect.gen(function* () {
 					const runner = yield* fixture.make;
 					yield* runner.recoverEffect;
-					const send = yield* Effect.forkChild(runner.executeEffect(fixture.send));
+					const send = yield* Effect.forkChild(
+						runner.executeEffect(fixture.send),
+					);
 					yield* Deferred.await(fixture.received);
 					const end = yield* Effect.forkChild(
 						Effect.result(

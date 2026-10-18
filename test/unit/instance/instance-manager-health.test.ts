@@ -1,7 +1,17 @@
 // test/unit/instance/instance-manager-health.test.ts
 // Tests for health polling and restart scheduling in InstanceManager Effect service.
 import { describe, it } from "@effect/vitest";
-import { Duration, Effect, FiberMap, HashMap, Layer, Option, PubSub, Queue, Ref } from "effect";
+import {
+	Duration,
+	Effect,
+	FiberMap,
+	HashMap,
+	Layer,
+	Option,
+	PubSub,
+	Queue,
+	Ref,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";

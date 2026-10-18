@@ -6,8 +6,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcTest } from "effect/rpc";
-import { SqlClient } from "effect/sql";
 import {
 	Effect,
 	Fiber,
@@ -18,6 +16,8 @@ import {
 	Ref,
 	Stream,
 } from "effect";
+import { RpcTest } from "effect/rpc";
+import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type ShellEnvelope,

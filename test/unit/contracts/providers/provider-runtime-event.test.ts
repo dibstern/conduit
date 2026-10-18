@@ -116,7 +116,9 @@ describe("ProviderRuntimeEvent contracts", () => {
 		] as const) {
 			const { [field]: _removed, ...eventWithoutRequiredField } = baseEvent;
 
-			expect(Either.isFailure(decodeEither(eventWithoutRequiredField))).toBe(true);
+			expect(Either.isFailure(decodeEither(eventWithoutRequiredField))).toBe(
+				true,
+			);
 		}
 	});
 
@@ -209,14 +211,16 @@ describe("ProviderRuntimeEvent contracts", () => {
 			),
 		).toBe(true);
 		expect(
-			Either.isFailure(decodeEither({ ...baseEvent, type: "tool.input_updated" })),
+			Either.isFailure(
+				decodeEither({ ...baseEvent, type: "tool.input_updated" }),
+			),
 		).toBe(true);
 	});
 
 	it("rejects unknown runtime event type", () => {
-		expect(Either.isFailure(decodeEither({ ...baseEvent, type: "made.up" }))).toBe(
-			true,
-		);
+		expect(
+			Either.isFailure(decodeEither({ ...baseEvent, type: "made.up" })),
+		).toBe(true);
 	});
 
 	it("rejects raw payload fields in rawSource", () => {
@@ -347,9 +351,9 @@ describe("ProviderRuntimeEvent contracts", () => {
 					),
 				),
 			).toBe(true);
-			expect(Either.isFailure(decodeEither({ ...baseEvent, providerRefs }))).toBe(
-				true,
-			);
+			expect(
+				Either.isFailure(decodeEither({ ...baseEvent, providerRefs })),
+			).toBe(true);
 		}
 	});
 
@@ -365,9 +369,9 @@ describe("ProviderRuntimeEvent contracts", () => {
 					),
 				),
 			).toBe(true);
-			expect(Either.isFailure(decodeEither({ ...baseEvent, providerRefs }))).toBe(
-				true,
-			);
+			expect(
+				Either.isFailure(decodeEither({ ...baseEvent, providerRefs })),
+			).toBe(true);
 		}
 	});
 

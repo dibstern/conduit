@@ -1,7 +1,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "effect/sql";
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
 import {
 	Chunk,
@@ -13,6 +12,7 @@ import {
 	Queue,
 	Scope,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
 import type { Alert } from "../../../src/lib/contracts/ws-rpc.js";

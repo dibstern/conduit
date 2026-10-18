@@ -280,7 +280,9 @@ it("imports complete projects without changing sources and rolls back rejected p
 		const seedTail = await Effect.runPromise(
 			Effect.result(seedDaemonStore(seedConfig, lagging)),
 		);
-		expect(Either.isSuccess(seedTail) && seedTail.success.outcome).toBe("seeded");
+		expect(Either.isSuccess(seedTail) && seedTail.success.outcome).toBe(
+			"seeded",
+		);
 
 		for (const mutation of [
 			"UPDATE provider_command_sessions SET last_sequence = 1",
@@ -305,7 +307,9 @@ it("imports complete projects without changing sources and rolls back rejected p
 				);
 				expect(storeTableCounts(destination)).toEqual(stableCounts);
 			} else {
-				expect(Either.isSuccess(failed) && failed.success.outcome).toBe("imported");
+				expect(Either.isSuccess(failed) && failed.success.outcome).toBe(
+					"imported",
+				);
 				stableCounts = storeTableCounts(destination);
 			}
 		}

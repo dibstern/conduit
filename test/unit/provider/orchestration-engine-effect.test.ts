@@ -1,6 +1,6 @@
-import { SqlClient } from "effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";

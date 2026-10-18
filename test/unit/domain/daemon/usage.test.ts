@@ -214,7 +214,9 @@ it.scoped("keeps five-minute sample times independent of read duration", () =>
 				},
 			},
 		});
-		const subscriber = yield* Effect.forkChild(Stream.runDrain(service.readings));
+		const subscriber = yield* Effect.forkChild(
+			Stream.runDrain(service.readings),
+		);
 		yield* TestClock.adjust("4 seconds");
 		expect(startedAt).toEqual([0]);
 		yield* TestClock.adjust("296 seconds");

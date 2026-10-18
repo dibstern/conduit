@@ -243,7 +243,9 @@ describe("ConfigPersistenceLive", () => {
 				const firstSave = yield* Effect.forkChild(persistence.flush);
 				yield* TestClock.adjust(Duration.zero);
 				expect(pendingWrites).toHaveLength(1);
-				const interruption = yield* Effect.forkChild(Fiber.interrupt(firstSave));
+				const interruption = yield* Effect.forkChild(
+					Fiber.interrupt(firstSave),
+				);
 				yield* Ref.update(configRef, (config) => ({ ...config, port: 7777 }));
 				yield* persistence.requestSave;
 				const secondSave = yield* Effect.forkChild(persistence.flush);

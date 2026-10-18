@@ -2,10 +2,21 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "effect/sql";
 import { describe, it } from "@effect/vitest";
 import Database from "better-sqlite3";
-import { Deferred, Effect, Exit, Fiber, HashMap, Layer, Option, Queue, Ref, Stream } from "effect";
+import {
+	Deferred,
+	Effect,
+	Exit,
+	Fiber,
+	HashMap,
+	Layer,
+	Option,
+	Queue,
+	Ref,
+	Stream,
+} from "effect";
+import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { assert, expect, vi } from "vitest";
 import { accountsStateFromConfig } from "../../../src/lib/account-directory.js";
@@ -1671,9 +1682,13 @@ describe("SessionManagerService", () => {
 					lastKnownSessionCount: 2,
 				}));
 
-				const winner = yield* Effect.forkChild(service.deleteSession(sessionId));
+				const winner = yield* Effect.forkChild(
+					service.deleteSession(sessionId),
+				);
 				yield* Deferred.await(cleanupStarted);
-				const follower = yield* Effect.forkChild(service.deleteSession(sessionId));
+				const follower = yield* Effect.forkChild(
+					service.deleteSession(sessionId),
+				);
 				yield* Effect.yieldNow();
 				yield* Deferred.succeed(releaseCleanup, undefined);
 
@@ -2234,7 +2249,9 @@ describe("SessionManagerService", () => {
 						saveDaemonConfig(makeNamedOpenCodeDaemonConfig(), tmpDir),
 					);
 					const service = yield* SessionManagerServiceTag;
-					const fiber = yield* Effect.forkChild(service.deleteSession(sessionId));
+					const fiber = yield* Effect.forkChild(
+						service.deleteSession(sessionId),
+					);
 					yield* Deferred.await(cleanupStarted);
 					engine.bindSession(sessionId, "claude");
 					yield* TestClock.adjust("1999 millis");

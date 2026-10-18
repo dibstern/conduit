@@ -3,7 +3,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
-import { Deferred, Effect, Result as Either, Fiber, Layer, Stream } from "effect";
+import {
+	Deferred,
+	Effect,
+	Result as Either,
+	Fiber,
+	Layer,
+	Stream,
+} from "effect";
 import { expect, it } from "vitest";
 import {
 	makeAlertLedger,
@@ -259,7 +266,9 @@ it("keeps ownership while an interrupted network send is still in flight", async
 				)
 				.pipe(Effect.forkChild);
 			yield* Deferred.await(started);
-			const interrupting = yield* Fiber.interrupt(sending).pipe(Effect.forkChild);
+			const interrupting = yield* Fiber.interrupt(sending).pipe(
+				Effect.forkChild,
+			);
 			yield* Effect.sleep("10 millis");
 			const raced = yield* ledger.deliver(doneFor("s1"), Effect.void);
 			finishNetwork();

@@ -6,7 +6,18 @@ import {
 	RpcTest,
 } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Cause, Chunk, Effect, Exit, Fiber, Layer, type Mailbox, Queue, Scope, Stream } from "effect";
+import {
+	Cause,
+	Chunk,
+	Effect,
+	Exit,
+	Fiber,
+	Layer,
+	type Mailbox,
+	Queue,
+	Scope,
+	Stream,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";

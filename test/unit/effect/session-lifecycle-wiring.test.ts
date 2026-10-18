@@ -2,9 +2,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Option, PubSub } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { makePinoLoggerLive } from "../../../src/lib/domain/daemon/Layers/pino-logger-layer.js";
@@ -338,7 +338,9 @@ describe("SessionLifecycleWiringLive", () => {
 
 			expect(result._tag).toBe("Left");
 			if (result._tag === "Failure") {
-				expect(result.failure).toBeInstanceOf(SessionLifecycleHistoryRebuildError);
+				expect(result.failure).toBeInstanceOf(
+					SessionLifecycleHistoryRebuildError,
+				);
 				expect(result.failure._tag).toBe("SessionLifecycleHistoryRebuildError");
 				expect(result.failure.sessionId).toBe("s-reject");
 				expect(result.failure.operation).toBe("rebuildTranslatorFromHistory");

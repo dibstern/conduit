@@ -13,7 +13,18 @@
 import type { Rpc } from "@effect/rpc";
 import { RpcClientError } from "@effect/rpc/RpcClientError";
 import { describe, it } from "@effect/vitest";
-import { Cause, Channel, Chunk, Deferred, Effect, Exit, Fiber, Queue, Ref, Stream } from "effect";
+import {
+	Cause,
+	Channel,
+	Chunk,
+	Deferred,
+	Effect,
+	Exit,
+	Fiber,
+	Queue,
+	Ref,
+	Stream,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { beforeAll, expect } from "vitest";
 import {

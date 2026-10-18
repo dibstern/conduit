@@ -444,7 +444,9 @@ describe("in-process Claude session runner", () => {
 								? Deferred.succeed(shutdown, undefined).pipe(Effect.as({}))
 								: Effect.succeed({}),
 					);
-					const turn = yield* Effect.forkChild(runner.executeEffect(send("turn-1")));
+					const turn = yield* Effect.forkChild(
+						runner.executeEffect(send("turn-1")),
+					);
 					yield* Deferred.await(started);
 					yield* runner.executeEffect({
 						type: "shutdown-after-turn",

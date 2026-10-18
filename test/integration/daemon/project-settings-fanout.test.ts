@@ -10,8 +10,8 @@ import { once } from "node:events";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
-import type { RpcMessage } from "effect/rpc";
 import { Effect, Fiber, Stream } from "effect";
+import type { RpcMessage } from "effect/rpc";
 import { expect, it } from "vitest";
 import { WebSocket } from "ws";
 import {

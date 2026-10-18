@@ -1655,7 +1655,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		expect(result._tag).toBe("Left");
 		if (result._tag === "Failure") {
-			expect(result.failure.message).toContain("Claude SDK options decode failed");
+			expect(result.failure.message).toContain(
+				"Claude SDK options decode failed",
+			);
 		}
 		expect(queryFactorySpy).not.toHaveBeenCalled();
 	});

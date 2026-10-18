@@ -347,7 +347,9 @@ describe("PendingInteractionService", () => {
 				sessionId: "session-1",
 				questions: [{ question: "Continue?" }],
 			});
-			const permissionWaiter = yield* Effect.forkChild(permission.awaitResponse);
+			const permissionWaiter = yield* Effect.forkChild(
+				permission.awaitResponse,
+			);
 			const questionWaiter = yield* Effect.forkChild(question.awaitAnswers);
 
 			yield* service.cancelSessionInteractions("session-1", "Turn interrupted");

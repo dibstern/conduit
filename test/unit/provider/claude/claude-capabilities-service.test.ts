@@ -11,7 +11,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setImmediate } from "node:timers/promises";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Result as Either, Fiber, Layer, Logger, Option } from "effect";
+import {
+	Deferred,
+	Effect,
+	Result as Either,
+	Fiber,
+	Layer,
+	Logger,
+	Option,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { afterEach, expect, vi } from "vitest";
 import {
@@ -363,7 +371,9 @@ describe("ClaudeCapabilitiesService", () => {
 					cacheDir,
 				});
 				yield* Effect.gen(function* () {
-					const stale = yield* Effect.forkChild(restarted.get("/tmp/workspace"));
+					const stale = yield* Effect.forkChild(
+						restarted.get("/tmp/workspace"),
+					);
 					yield* waitUntil(Fiber.poll(stale).pipe(Effect.map(Option.isSome)));
 					expect(yield* Fiber.join(stale)).toEqual(original);
 					yield* waitUntil(Effect.sync(() => probe.mock.calls.length === 1));

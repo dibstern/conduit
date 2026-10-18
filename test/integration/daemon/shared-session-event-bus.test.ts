@@ -11,7 +11,17 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Clock, Context, Effect, Fiber, Layer, ManagedRuntime, Option, PubSub, Stream } from "effect";
+import {
+	Clock,
+	Context,
+	Effect,
+	Fiber,
+	Layer,
+	ManagedRuntime,
+	Option,
+	PubSub,
+	Stream,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { makeDaemonLive } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";

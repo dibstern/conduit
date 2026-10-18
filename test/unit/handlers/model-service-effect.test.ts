@@ -2,7 +2,6 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "effect/sql";
 import { describe, layer } from "@effect/vitest";
 import {
 	Deferred,
@@ -16,6 +15,7 @@ import {
 	Stream,
 	Supervisor,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import {
 	AccountDirectory,

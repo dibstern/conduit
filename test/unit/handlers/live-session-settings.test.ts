@@ -3,9 +3,9 @@
 // already has, so sending only the field that changed reads as "cleared" and
 // silently resets the other two.
 
-import { SqlClient } from "effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { applyLiveSessionSettings } from "../../../src/lib/handlers/model.js";

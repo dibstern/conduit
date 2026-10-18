@@ -35,8 +35,8 @@ const ToolDelta = Schema.Struct({
 	type: Schema.Literals([
 		"tool-call-started",
 		"tool-call-completed",
-		"partial-tool-call",]
-	),
+		"partial-tool-call",
+	]),
 	callId: Schema.String,
 	toolCall: Schema.Struct({
 		type: Schema.String,
@@ -74,10 +74,10 @@ const decodeDelta = Schema.decodeUnknownEither(
 				"user-message-appended",
 				"summary-started",
 				"summary-completed",
-				"summary",]
-			),
-		}),]
-	),
+				"summary",
+			]),
+		}),
+	]),
 );
 const decodeStream = Schema.decodeUnknownEither(
 	Schema.Union([
@@ -109,10 +109,10 @@ const decodeStream = Schema.decodeUnknownEither(
 				"system",
 				"user",
 				"error",
-				"result",]
-			),
-		}),]
-	),
+				"result",
+			]),
+		}),
+	]),
 );
 
 const decodeUsage = Schema.decodeUnknownEither(

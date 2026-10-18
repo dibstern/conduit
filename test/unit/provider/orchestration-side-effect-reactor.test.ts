@@ -818,7 +818,9 @@ describe("ProviderSideEffectReactor", () => {
 					outcomePollTimeout: "500 millis",
 				});
 
-				const winner = yield* Effect.forkChild(winnerReactor.runCommand("cmd-1"));
+				const winner = yield* Effect.forkChild(
+					winnerReactor.runCommand("cmd-1"),
+				);
 				yield* Deferred.await(winnerStarted);
 				const loser = yield* Effect.forkChild(loserReactor.runCommand("cmd-1"));
 				yield* Effect.yieldNow();

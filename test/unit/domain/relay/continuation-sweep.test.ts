@@ -24,9 +24,18 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "effect/sql";
 import { it as effectIt } from "@effect/vitest";
-import { Context, Effect, Fiber, Layer, Queue, Schedule, Schema, Stream } from "effect";
+import {
+	Context,
+	Effect,
+	Fiber,
+	Layer,
+	Queue,
+	Schedule,
+	Schema,
+	Stream,
+} from "effect";
+import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { accountsStateFromConfig } from "../../../../src/lib/account-directory.js";

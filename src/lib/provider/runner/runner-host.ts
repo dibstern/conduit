@@ -445,9 +445,7 @@ export const runSessionRunner = (
 								},
 								catch: (cause) => runnerFailure("prune runner sends", cause),
 							}).pipe(
-								Effect.catch((failure) =>
-									Effect.logWarning(failure.message),
-								),
+								Effect.catch((failure) => Effect.logWarning(failure.message)),
 							),
 						);
 					} else if (message.type === "upgrade-retire") {

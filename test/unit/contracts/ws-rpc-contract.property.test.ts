@@ -1,5 +1,12 @@
+import {
+	Arbitrary,
+	Effect,
+	type Result as Either,
+	FastCheck as fc,
+	Schema,
+	Stream,
+} from "effect";
 import { RpcSchema } from "effect/rpc";
-import { Arbitrary, Effect, type Result as Either, FastCheck as fc, Schema, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { WsRpcGroup, WsRpcRequest } from "../../../src/lib/contracts/ws-rpc.js";
 import { makeRpcWire } from "../../helpers/rpc-wire.js";
