@@ -203,7 +203,7 @@ async function ptySnapshot() {
 					return Option.getOrThrow(snapshot);
 				}).pipe(
 					Effect.provide(
-						RpcClient.layerProtocolSocket({ retrySchedule: Schedule.stop }),
+						RpcClient.layerProtocolSocket({ retryPolicy: Schedule.recurs(0) }),
 					),
 					Effect.provideService(Socket.Socket, connection),
 					Effect.provide(RpcSerialization.layerNdjson),

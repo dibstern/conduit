@@ -14,7 +14,6 @@ import { describe, it } from "@effect/vitest";
 import {
 	Cause,
 	Channel,
-	Chunk,
 	Deferred,
 	Effect,
 	Exit,
@@ -24,7 +23,7 @@ import {
 	Stream,
 } from "effect";
 import type { Rpc } from "effect/rpc";
-import { RpcClientError } from "effect/rpc/RpcClientError";
+import { RpcClientDefect, RpcClientError } from "effect/rpc/RpcClientError";
 import { TestClock } from "effect/testing";
 import { beforeAll, expect } from "vitest";
 import {
@@ -50,7 +49,7 @@ beforeAll(() => {
 
 interface RequestFrame {
 	readonly tag: string;
-	readonly id: string;
+	readonly id: string | number;
 	readonly payload: unknown;
 }
 
@@ -178,8 +177,10 @@ const fakeTransport = () => {
 												Effect.andThen(
 													Effect.fail(
 														new RpcClientError({
-															reason: "Protocol",
-															message: "socket is down",
+															reason: new RpcClientDefect({
+																message: "socket is down",
+																cause: undefined,
+															}),
 														}),
 													),
 												),
@@ -254,7 +255,7 @@ const withSockets = <A, E>(
 					return yield* Effect.die(new Error("the pair did not open"));
 				}
 				return yield* use(sockets, { control, stream });
-			}).pipe(Effect.provide(makeWsRpcClientsLayer(connect))),
+			}).pipe(Effect.provide(makeWsRpcClientsLayer(connect), { local: true })),
 		);
 	});
 
@@ -475,11 +476,16 @@ describe("client-side resume at the shared client", () => {
 					yield* links.stream.takeRequest;
 					yield* links.stream.failRequest("no such session");
 
-					const exit = yield* ended.await;
+					const exit = yield* Fiber.await(ended);
 					expect(Exit.isFailure(exit)).toBe(true);
 					expect(exit).toMatchObject({
 						cause: {
-							error: { _tag: "WsRpcError", message: "no such session" },
+							reasons: [
+								{
+									_tag: "Fail",
+									error: { _tag: "WsRpcError", message: "no such session" },
+								},
+							],
 						},
 					});
 					expect(yield* links.stream.requestCount).toBe(1);
@@ -513,9 +519,11 @@ describe("client-side resume at the shared client", () => {
 			expect(yield* Ref.get(issued)).toBe(1);
 			expect(Exit.isFailure(exit)).toBe(true);
 			if (Exit.isFailure(exit)) {
-				expect(Chunk.toReadonlyArray(Cause.defects(exit.cause))).toContain(
-					"the projector blew up",
-				);
+				expect(
+					exit.cause.reasons
+						.filter(Cause.isDieReason)
+						.map((reason) => reason.defect),
+				).toContain("the projector blew up");
 			}
 		}),
 	);
@@ -534,11 +542,13 @@ describe("client-side resume at the shared client", () => {
 							Ref.update(issued, (n) => n + 1),
 							Stream.fromChannel(
 								Channel.failCause(
-									Cause.sequential(
+									Cause.combine(
 										Cause.fail(
 											new RpcClientError({
-												reason: "Protocol",
-												message: "socket is down",
+												reason: new RpcClientDefect({
+													message: "socket is down",
+													cause: undefined,
+												}),
 											}),
 										),
 										Cause.die("the projector blew up"),
@@ -553,9 +563,11 @@ describe("client-side resume at the shared client", () => {
 			expect(yield* Ref.get(issued)).toBe(1);
 			expect(Exit.isFailure(exit)).toBe(true);
 			if (Exit.isFailure(exit)) {
-				expect(Chunk.toReadonlyArray(Cause.defects(exit.cause))).toContain(
-					"the projector blew up",
-				);
+				expect(
+					exit.cause.reasons
+						.filter(Cause.isDieReason)
+						.map((reason) => reason.defect),
+				).toContain("the projector blew up");
 			}
 		}),
 	);

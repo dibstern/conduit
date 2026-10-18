@@ -1,4 +1,12 @@
-import { Effect, Fiber, Layer, ManagedRuntime, Schema, Stream } from "effect";
+import {
+	Effect,
+	Fiber,
+	Layer,
+	ManagedRuntime,
+	Schema,
+	Scope,
+	Stream,
+} from "effect";
 import type { Rpc } from "effect/rpc";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -13,7 +21,7 @@ import { makeRpcStream, serveRpc } from "../../../helpers/rpc-wire.js";
 
 const Request = Schema.Struct({
 	_tag: Schema.Literal("Request"),
-	id: Schema.String,
+	id: Schema.Union([Schema.String, Schema.Number]),
 	tag: Schema.String,
 	payload: Schema.Struct({
 		resumeFromSequence: Schema.optional(Schema.Number),
@@ -27,7 +35,9 @@ const sockets: FakeWebSocket[] = [];
 class FakeWebSocket extends EventTarget {
 	readyState = 0;
 	readonly requests: (typeof Request.Type)[] = [];
-	readonly runtime = ManagedRuntime.make(Layer.scope);
+	readonly runtime = ManagedRuntime.make(
+		Layer.effect(Scope.Scope, Effect.acquireRelease(Scope.make(), Scope.close)),
+	);
 	readonly feed = Effect.runSync(
 		makeRpcStream<Rpc.SuccessChunk<typeof SubscribeShell>, WsRpcError>(),
 	);

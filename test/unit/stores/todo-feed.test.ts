@@ -24,7 +24,7 @@ import {
 } from "../../../src/lib/frontend/stores/todo.svelte.js";
 
 interface Request {
-	id: string;
+	id: string | number;
 	tag: string;
 	payload: unknown;
 	trafficClass: string;
@@ -160,6 +160,6 @@ describe("todo feed", () => {
 		viewTodos("project", "B");
 		expect(todoState.items).toEqual([]);
 		await settled(() => todosRequest(wire.requests, "B") !== undefined);
-		await settled(() => wire.interrupted.includes(a.id));
+		await settled(() => wire.interrupted.includes(String(a.id)));
 	});
 });
