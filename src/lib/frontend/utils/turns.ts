@@ -756,8 +756,8 @@ export interface TurnEconomics {
 /**
  * What the turn cost, and how full the context was when it finished. Context
  * used is the final call's fresh input plus everything read from and written to
- * cache; tokens sum the reported usage across segments. An explicitly unknown
- * capacity shows occupancy alone; legacy omitted windows retain their display.
+ * cache; tokens sum the reported usage across segments. A missing or non-positive
+ * capacity shows positive, explicitly reported occupancy alone.
  */
 export function economics(turn: Turn, now: number): TurnEconomics {
 	const result = lastResult(turn);
@@ -782,7 +782,9 @@ export function economics(turn: Turn, now: number): TurnEconomics {
 			tokensOut = (tokensOut ?? 0) + end.outputTokens;
 	}
 	return {
-		...(window === 0 && result?.contextTokens !== undefined
+		...((window === undefined || window <= 0) &&
+		result?.contextTokens !== undefined &&
+		result.contextTokens > 0
 			? { contextWithoutCapacity: result.contextTokens }
 			: {}),
 		...(duration !== undefined ? { duration } : {}),

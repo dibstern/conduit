@@ -48,6 +48,10 @@ vi.mock(
 beforeEach(() => {
 	clearSessionState();
 	vi.clearAllMocks();
+	// jsdom has no matchMedia; Toast watches the phone breakpoint (desktop here).
+	vi.stubGlobal("matchMedia", (media: string) =>
+		Object.assign(new EventTarget(), { media, matches: false }),
+	);
 	const storage = new Map<string, string>();
 	vi.stubGlobal("localStorage", {
 		getItem: (key: string) => storage.get(key) ?? null,

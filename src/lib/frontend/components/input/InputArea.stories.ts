@@ -29,6 +29,7 @@ import { routerState } from "../../stores/router.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { openSessionForSetup } from "../../stories/session-setup.js";
+import { connectedSocket } from "../../stories/sockets.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import InputArea from "./InputArea.svelte";
 
@@ -147,6 +148,10 @@ const meta = {
 		fileTreeState.entries = fileEntries;
 		fileTreeState.loading = false;
 		fileTreeState.loaded = true;
+		// The composer pre-warms its open session over RPC, which dials the
+		// socket. Static Storybook hosting never completes that dial, so without
+		// a connected socket the composer races into its offline state.
+		return connectedSocket();
 	},
 } satisfies Meta<typeof InputArea>;
 

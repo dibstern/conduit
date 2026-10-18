@@ -170,7 +170,18 @@ export function showToast(
 	};
 	// At most two cards, so the stack never climbs over the transcript. Older
 	// toasts are dropped, actions and all, rather than queued out of sight.
-	uiState.toasts = [...uiState.toasts, toast].slice(-2);
+	uiState.toasts = [
+		...uiState.toasts.filter(
+			(existing) =>
+				existing.variant !== toast.variant ||
+				existing.title !== toast.title ||
+				existing.body !== toast.body ||
+				existing.emphasis !== toast.emphasis ||
+				existing.actions.some((action) => action.kind !== "dismiss") ||
+				toast.actions.some((action) => action.kind !== "dismiss"),
+		),
+		toast,
+	].slice(-2);
 
 	// Auto-dismiss
 	setTimeout(() => {
