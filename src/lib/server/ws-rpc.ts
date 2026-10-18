@@ -388,19 +388,28 @@ export const makeRoutedWsRpcServerLayer = <
 					  >
 					| undefined);
 
+			// Test-only: the named unary RPC dies, so the process harness can pin
+			// how an unexpected defect reaches the browser.
+			const defectRpc =
+				process.env["NODE_ENV"] === "test"
+					? process.env["CONDUIT_TEST_RPC_DEFECT"]
+					: undefined;
 			// Object.entries/fromEntries loses the key-to-payload/result correlation.
 			// Each wrapper preserves its original handler's payload and success type.
 			const handlers = Object.fromEntries(
 				Object.entries({ ...unaryHandlers, ...daemonUnaryHandlers }).map(
 					([name, handler]) => [
 						name,
-						(daemonUnaryHandlers && Object.hasOwn(daemonUnaryHandlers, name)) ||
-						Object.hasOwn(daemonOnlyHandlers, name)
-							? handler
-							: routeHandler<never, unknown, unknown, unknown>(
-									handler,
-									name === "CreateSession" ? undefined : defaultProjectSlug,
-								),
+						name === defectRpc
+							? () => Effect.die(new Error(`Test RPC defect: ${name}`))
+							: (daemonUnaryHandlers &&
+										Object.hasOwn(daemonUnaryHandlers, name)) ||
+									Object.hasOwn(daemonOnlyHandlers, name)
+								? handler
+								: routeHandler<never, unknown, unknown, unknown>(
+										handler,
+										name === "CreateSession" ? undefined : defaultProjectSlug,
+									),
 					],
 				),
 			) as {
