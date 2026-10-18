@@ -1,9 +1,10 @@
 import { Context, Effect, Layer } from "effect";
 import type { DaemonLifecycleContext } from "../../../daemon/daemon-lifecycle.js";
 
-export class DaemonLifecycleContextTag extends Context.Tag(
-	"DaemonLifecycleContext",
-)<DaemonLifecycleContextTag, DaemonLifecycleContext>() {}
+export class DaemonLifecycleContextTag extends Context.Service<
+	DaemonLifecycleContextTag,
+	DaemonLifecycleContext
+>()("DaemonLifecycleContext") {}
 
 export const makeDaemonLifecycleContext = (
 	socketPath: string,

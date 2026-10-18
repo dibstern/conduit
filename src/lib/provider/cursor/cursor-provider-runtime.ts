@@ -1,4 +1,4 @@
-import { Effect, Result as Either } from "effect";
+import { Effect, Result } from "effect";
 import { resolve } from "../../account-directory.js";
 import { makeProcessSessionRunner } from "../runner/process-session-runner.js";
 import { connectRunner } from "../runner/runner-connection.js";
@@ -40,7 +40,7 @@ export const makeCursorProviderRuntime = (deps: RunnerProviderInstanceDeps) =>
 						const accounts = yield* deps.accounts;
 						return yield* recoverRunnerCommands(sql, sessionId, "cursor", {
 							driverForAccount: (id) =>
-								Either.getOrUndefined(resolve(accounts, { _tag: "Id", id }))
+								Result.getOrUndefined(resolve(accounts, { _tag: "Id", id }))
 									?.driver,
 							decodeInput: (row) => ({
 								...(JSON.parse(row.payload_json) as SessionTurn),

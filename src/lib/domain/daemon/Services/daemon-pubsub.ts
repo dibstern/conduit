@@ -1,15 +1,7 @@
 // Sliding PubSub for broadcasting daemon-level events to subscribers.
 // Oldest events are dropped if a consumer falls behind (capacity 256).
 
-import {
-	Context,
-	Data,
-	Effect,
-	Layer,
-	PubSub,
-	type Queue,
-	type Scope,
-} from "effect";
+import { Context, Data, Effect, Layer, PubSub, type Scope } from "effect";
 import type { GlobalSettingTag } from "../../../contracts/ws-rpc.js";
 
 export type DaemonEvent = Data.TaggedEnum<{
@@ -43,10 +35,10 @@ export const DaemonEvent = Data.taggedEnum<DaemonEvent>();
 
 const DAEMON_EVENT_BUFFER_CAPACITY = 256;
 
-export class DaemonEventBusTag extends Context.Tag("DaemonEventBus")<
+export class DaemonEventBusTag extends Context.Service<
 	DaemonEventBusTag,
 	PubSub.PubSub<DaemonEvent>
->() {}
+>()("DaemonEventBus") {}
 
 // sliding(256) — oldest events dropped if consumer falls behind.
 export const DaemonEventBusLive = Layer.effect(
@@ -93,7 +85,7 @@ export const publishSessionDeleted = (sessionId: string) =>
 export const publishConfigChanged = publish(DaemonEvent.ConfigChanged());
 
 export const subscribeToDaemonEvents: Effect.Effect<
-	Queue.Dequeue<DaemonEvent>,
+	PubSub.Subscription<DaemonEvent>,
 	never,
 	DaemonEventBusTag | Scope.Scope
 > = Effect.gen(function* () {

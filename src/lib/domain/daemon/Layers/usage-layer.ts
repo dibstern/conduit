@@ -43,7 +43,7 @@ export const makeConfiguredCursorUsage = Effect.gen(function* () {
 						...(next ? { cursorUsageBinding: next } : {}),
 					}),
 				);
-				yield* Effect.zipRight(
+				yield* Effect.andThen(
 					persistence.value.requestSave,
 					persistence.value.flush,
 				).pipe(
@@ -66,7 +66,7 @@ export const makeConfiguredCursorUsage = Effect.gen(function* () {
 
 /** One instance for the daemon, shared by every project's continuation module. */
 export const UsageLive = (options: ClaudeUsageReaderOptions = {}) =>
-	Layer.scoped(
+	Layer.effect(
 		Usage,
 		Effect.gen(function* () {
 			const state = yield* DaemonStateTag;
@@ -87,8 +87,8 @@ export const UsageLive = (options: ClaudeUsageReaderOptions = {}) =>
 				history: {
 					load: Effect.tryPromise(() => readFile(historyFile, "utf8")).pipe(
 						Effect.flatMap(
-							Schema.decodeUnknown(
-								Schema.parseJson(UsageHistorySnapshotSchema),
+							Schema.decodeUnknownEffect(
+								Schema.fromJsonString(UsageHistorySnapshotSchema),
 							),
 						),
 						Effect.orElseSucceed((): UsageHistorySnapshot => ({})),

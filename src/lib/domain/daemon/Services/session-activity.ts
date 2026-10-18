@@ -23,17 +23,17 @@ export interface SessionActivity {
 	readonly subscribe: Effect.Effect<Stream.Stream<string>, never, Scope.Scope>;
 }
 
-export class SessionActivityTag extends Context.Tag("SessionActivity")<
+export class SessionActivityTag extends Context.Service<
 	SessionActivityTag,
 	SessionActivity
->() {}
+>()("SessionActivity") {}
 
 /** Daemon-owned transient state; project relays only borrow its readers and writers. */
 export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 	function* () {
 		const changes = yield* PubSub.unbounded<string>();
 		const changed = (sessionId: string): void => {
-			changes.unsafeOffer(sessionId);
+			PubSub.publishUnsafe(changes, sessionId);
 		};
 		const compactions = makeSessionCompactions();
 		const retries = makeSessionRetries();
@@ -79,13 +79,13 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 			},
 			hintDismissals,
 			changed,
-			subscribe: Stream.fromPubSub(changes, { scoped: true }),
+			subscribe: Effect.map(PubSub.subscribe(changes), Stream.fromSubscription),
 		} satisfies SessionActivity;
 	},
 );
 
 /** Wake on changes, coalescing a burst into one leading and one trailing refresh. */
-export const SessionActivityDaemonLive = Layer.scoped(
+export const SessionActivityDaemonLive = Layer.effect(
 	SessionActivityTag,
 	Effect.gen(function* () {
 		const activity = yield* makeSessionActivity;

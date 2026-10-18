@@ -27,12 +27,13 @@ import {
 	Data,
 	Duration,
 	Effect,
-	Result as Either,
 	HashMap,
 	Layer,
 	Option,
 	PubSub,
 	Ref,
+	Result,
+	Semaphore,
 	Stream,
 } from "effect";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
@@ -144,7 +145,7 @@ const deriveRepositoryIdentities = (folders: readonly string[]) =>
 		folders,
 		(folder) =>
 			Effect.tryPromise(() => readRepositoryIdentity(folder)).pipe(
-				Effect.catchAll(() => Effect.succeed(undefined)),
+				Effect.catch(() => Effect.succeed(undefined)),
 				Effect.map((identity) =>
 					identity ? ([folder, identity] as const) : undefined,
 				),
@@ -172,15 +173,15 @@ const makeInitialProjectState = (
 		),
 	);
 
-export class ProjectRegistryTag extends Context.Tag("ProjectRegistry")<
+export class ProjectRegistryTag extends Context.Service<
 	ProjectRegistryTag,
 	Ref.Ref<ProjectRegistryState>
->() {}
+>()("ProjectRegistry") {}
 
-export class ProjectSaveLockTag extends Context.Tag("ProjectSaveLock")<
+export class ProjectSaveLockTag extends Context.Service<
 	ProjectSaveLockTag,
-	Effect.Semaphore
->() {}
+	Semaphore.Semaphore
+>()("ProjectSaveLock") {}
 
 /** Get a project entry by slug. Returns Option. */
 export const getEntry = (slug: string) =>
@@ -672,8 +673,8 @@ export const startRelay = (slug: string) =>
 		// honest for both typed startup failures and defects.
 		yield* relayCache.get(slug).pipe(
 			Effect.flatMap(() => markReady(slug)),
-			Effect.catchAll((cause) => markError(slug, formatRelayFailure(cause))),
-			Effect.catchAllDefect((defect) =>
+			Effect.catch((cause) => markError(slug, formatRelayFailure(cause))),
+			Effect.catchDefect((defect) =>
 				markError(slug, formatRelayFailure(defect)),
 			),
 		);
@@ -737,7 +738,7 @@ export const waitForRelay = (slug: string, timeoutMs: number) =>
 			return;
 		}
 
-		yield* Stream.fromQueue(sub).pipe(
+		yield* Stream.fromSubscription(sub).pipe(
 			Stream.filter(
 				(e) => e._tag === "InstanceStatusChanged" && e.instanceId === slug,
 			),
@@ -777,8 +778,8 @@ export const replaceRelay = (slug: string) =>
 		yield* relayCache.invalidate(slug);
 		yield* relayCache.get(slug).pipe(
 			Effect.flatMap(() => markReady(slug)),
-			Effect.catchAll((cause) => markError(slug, formatRelayFailure(cause))),
-			Effect.catchAllDefect((defect) =>
+			Effect.catch((cause) => markError(slug, formatRelayFailure(cause))),
+			Effect.catchDefect((defect) =>
 				markError(slug, formatRelayFailure(defect)),
 			),
 		);
@@ -830,7 +831,7 @@ export const makeProjectRegistryLive = (
 			const ref = yield* Ref.make<ProjectRegistryState>(
 				makeInitialProjectState(initialProjects),
 			);
-			const lock = yield* Effect.makeSemaphore(1);
+			const lock = yield* Semaphore.make(1);
 			return Context.make(ProjectRegistryTag, ref).pipe(
 				Context.add(ProjectSaveLockTag, lock),
 			);
@@ -860,7 +861,7 @@ export const makeProjectRegistryFromDaemonStateLive: Layer.Layer<
 		const ref = yield* Ref.make<ProjectRegistryState>(
 			makeInitialProjectState(initialProjects),
 		);
-		const lock = yield* Effect.makeSemaphore(1);
+		const lock = yield* Semaphore.make(1);
 		return Context.make(ProjectRegistryTag, ref).pipe(
 			Context.add(ProjectSaveLockTag, lock),
 		);
@@ -925,12 +926,12 @@ export const saveProject = (input: SaveProjectInput) =>
 							kind: isPermissionDenied(cause) ? "permission-denied" : "missing",
 							path: folder.path,
 						}),
-					}).pipe(Effect.either);
-					if (Either.isLeft(owned)) {
-						issues.push(owned.left);
+					}).pipe(Effect.result);
+					if (Result.isFailure(owned)) {
+						issues.push(owned.failure);
 						continue;
 					}
-					if (owned.right) {
+					if (owned.success) {
 						issues.push({
 							kind: "conduit-worktree",
 							path: folder.originalPath,
@@ -950,13 +951,13 @@ export const saveProject = (input: SaveProjectInput) =>
 							kind: isPermissionDenied(cause) ? "permission-denied" : "missing",
 							path: folder.path,
 						}),
-					}).pipe(Effect.either);
-					if (Either.isLeft(disk)) {
-						if (!folder.create || disk.left.kind === "permission-denied")
-							issues.push(disk.left);
+					}).pipe(Effect.result);
+					if (Result.isFailure(disk)) {
+						if (!folder.create || disk.failure.kind === "permission-denied")
+							issues.push(disk.failure);
 					} else if (folder.create) {
 						issues.push({ kind: "create-exists", path: folder.path });
-					} else if (!disk.right.isDirectory()) {
+					} else if (!disk.success.isDirectory()) {
 						issues.push({ kind: "not-a-folder", path: folder.path });
 					}
 				}
@@ -968,7 +969,7 @@ export const saveProject = (input: SaveProjectInput) =>
 						project: yield* getProject(taken.slug),
 						warnings: [],
 					};
-				if (!Arr.isNonEmptyReadonlyArray(folders))
+				if (!Arr.isReadonlyArrayNonEmpty(folders))
 					return yield* new ProjectSaveRejected({
 						issues: [{ kind: "empty" }],
 					});
@@ -1077,7 +1078,7 @@ export const saveProject = (input: SaveProjectInput) =>
 									try: () => rmSync(path, { recursive: true, force: true }),
 									catch: (cause) => cause,
 								}).pipe(
-									Effect.catchAll((cause) =>
+									Effect.catch((cause) =>
 										Effect.logWarning(
 											`Failed to remove created folder ${path}: ${formatRelayFailure(cause)}`,
 										),
@@ -1140,7 +1141,7 @@ export const saveProject = (input: SaveProjectInput) =>
 					yield* replaceRelay(slug);
 					if (mainChanged) {
 						yield* stopRegisteredRunners(existing.folders[0], configDir).pipe(
-							Effect.catchAllCause((cause) =>
+							Effect.catchCause((cause) =>
 								Effect.logWarning(
 									`Failed to stop old project runners after saving ${slug}: ${formatRelayFailure(cause)}`,
 								),

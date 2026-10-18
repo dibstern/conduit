@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { Effect, Result as Either, Schema } from "effect";
+import { Effect, Result, Schema } from "effect";
 import type {
 	ProviderRuntimeEventPayloadMap,
 	ProviderRuntimeEventType,
@@ -44,7 +44,7 @@ const ToolDelta = Schema.Struct({
 		result: Schema.optional(Schema.Unknown),
 	}),
 });
-const decodeDelta = Schema.decodeUnknownEither(
+const decodeDelta = Schema.decodeUnknownResult(
 	Schema.Union([
 		Schema.Struct({
 			type: Schema.Literals(["text-delta", "thinking-delta"]),
@@ -79,7 +79,7 @@ const decodeDelta = Schema.decodeUnknownEither(
 		}),
 	]),
 );
-const decodeStream = Schema.decodeUnknownEither(
+const decodeStream = Schema.decodeUnknownResult(
 	Schema.Union([
 		Schema.Struct({
 			type: Schema.Literal("request"),
@@ -115,13 +115,15 @@ const decodeStream = Schema.decodeUnknownEither(
 	]),
 );
 
-const decodeUsage = Schema.decodeUnknownEither(
+const decodeUsage = Schema.decodeUnknownResult(
 	Schema.Struct({
-		inputTokens: Schema.NonNegative,
-		outputTokens: Schema.NonNegative,
-		cacheReadTokens: Schema.NonNegative,
-		cacheWriteTokens: Schema.NonNegative,
-		reasoningTokens: Schema.optional(Schema.NonNegative),
+		inputTokens: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)),
+		outputTokens: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)),
+		cacheReadTokens: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)),
+		cacheWriteTokens: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)),
+		reasoningTokens: Schema.optional(
+			Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)),
+		),
 	}),
 );
 
@@ -194,7 +196,7 @@ export class CursorTurnEvents {
 	}
 
 	steerDelivered(callIds: readonly string[]) {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			// The inbox projector starts a transcript segment at the steered user
 			// message; subsequent assistant content must belong to that segment.
 			this.nextMessage = true;
@@ -286,23 +288,23 @@ export class CursorTurnEvents {
 	}
 
 	stream(value: unknown) {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const decoded = decodeStream(value);
-			if (Either.isLeft(decoded)) {
+			if (Result.isFailure(decoded)) {
 				log.warn("Skipped malformed Cursor stream update", { payload: value });
 				return;
 			}
-			if (decoded.right.type === "request")
-				this.refs.providerRequestId = decoded.right.request_id;
-			if (decoded.right.type === "task") {
-				const text = decoded.right.text ?? decoded.right.status;
+			if (decoded.success.type === "request")
+				this.refs.providerRequestId = decoded.success.request_id;
+			if (decoded.success.type === "task") {
+				const text = decoded.success.text ?? decoded.success.status;
 				if (text) yield* this.progress(text);
 			}
 			if (
-				decoded.right.type === "tool_call" &&
-				(decoded.right.truncated?.args || decoded.right.truncated?.result)
+				decoded.success.type === "tool_call" &&
+				(decoded.success.truncated?.args || decoded.success.truncated?.result)
 			) {
-				const callId = decoded.right.call_id;
+				const callId = decoded.success.call_id;
 				this.truncatedTools.add(callId);
 				const entry = [...this.tools.entries()].find(
 					([, tool]) => tool.providerToolUseId === callId,
@@ -332,30 +334,31 @@ export class CursorTurnEvents {
 				}
 			}
 			if (
-				decoded.right.type === "usage" &&
+				decoded.success.type === "usage" &&
 				typeof value === "object" &&
 				value &&
 				"usage" in value
 			) {
 				const usage = decodeUsage(value.usage);
-				if (Either.isLeft(usage)) {
+				if (Result.isFailure(usage)) {
 					log.warn("Skipped malformed Cursor usage update");
 					return;
 				}
 				this.contextTokens =
-					usage.right.inputTokens +
-					usage.right.cacheReadTokens +
-					usage.right.cacheWriteTokens;
+					usage.success.inputTokens +
+					usage.success.cacheReadTokens +
+					usage.success.cacheWriteTokens;
 				this.tokens = {
-					input: this.tokens.input + usage.right.inputTokens,
-					output: this.tokens.output + usage.right.outputTokens,
-					cacheRead: (this.tokens.cacheRead ?? 0) + usage.right.cacheReadTokens,
+					input: this.tokens.input + usage.success.inputTokens,
+					output: this.tokens.output + usage.success.outputTokens,
+					cacheRead:
+						(this.tokens.cacheRead ?? 0) + usage.success.cacheReadTokens,
 					cacheWrite:
-						(this.tokens.cacheWrite ?? 0) + usage.right.cacheWriteTokens,
-					...(usage.right.reasoningTokens !== undefined
+						(this.tokens.cacheWrite ?? 0) + usage.success.cacheWriteTokens,
+					...(usage.success.reasoningTokens !== undefined
 						? {
 								reasoning:
-									(this.tokens.reasoning ?? 0) + usage.right.reasoningTokens,
+									(this.tokens.reasoning ?? 0) + usage.success.reasoningTokens,
 							}
 						: {}),
 				};
@@ -365,25 +368,25 @@ export class CursorTurnEvents {
 
 	reconcileUsage(value: unknown) {
 		const usage = decodeUsage(value);
-		if (Either.isLeft(usage)) return;
+		if (Result.isFailure(usage)) return;
 		// RunResult repeats the sum of every reported turn on this run, including
 		// background follow-ups. Fill missing reports without adding the sum twice.
 		this.tokens = {
-			input: Math.max(this.tokens.input, usage.right.inputTokens),
-			output: Math.max(this.tokens.output, usage.right.outputTokens),
+			input: Math.max(this.tokens.input, usage.success.inputTokens),
+			output: Math.max(this.tokens.output, usage.success.outputTokens),
 			cacheRead: Math.max(
 				this.tokens.cacheRead ?? 0,
-				usage.right.cacheReadTokens,
+				usage.success.cacheReadTokens,
 			),
 			cacheWrite: Math.max(
 				this.tokens.cacheWrite ?? 0,
-				usage.right.cacheWriteTokens,
+				usage.success.cacheWriteTokens,
 			),
-			...(usage.right.reasoningTokens !== undefined
+			...(usage.success.reasoningTokens !== undefined
 				? {
 						reasoning: Math.max(
 							this.tokens.reasoning ?? 0,
-							usage.right.reasoningTokens,
+							usage.success.reasoningTokens,
 						),
 					}
 				: {}),
@@ -391,7 +394,7 @@ export class CursorTurnEvents {
 	}
 
 	endThinking() {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			if (!this.thinkingPart) return;
 			yield* this.push("thinking.end", {
 				messageId: this.messageId,
@@ -405,14 +408,14 @@ export class CursorTurnEvents {
 		value: unknown,
 		parentCallId?: string,
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			this.trackQuestionSource(value);
 			const decoded = decodeDelta(value);
-			if (Either.isLeft(decoded)) {
+			if (Result.isFailure(decoded)) {
 				log.warn("Skipped malformed Cursor delta update", { payload: value });
 				return;
 			}
-			const update = decoded.right;
+			const update = decoded.success;
 			if (
 				this.nextMessage &&
 				(update.type === "text-delta" ||
@@ -685,7 +688,7 @@ export class CursorTurnEvents {
 	}
 
 	private ensureChild(callId: string, call: CursorToolCall) {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const existing = this.children.get(callId);
 			const childSessionId = `cursor-subagent-${createHash("sha256").update(`${this.sessionId}\0${callId}`).digest("hex").slice(0, 24)}`;
 			const model = call.args["model"];
@@ -748,7 +751,7 @@ export class CursorTurnEvents {
 	}
 
 	private reconcileTask(result: unknown) {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const value = toRecord(toRecord(result)["value"]);
 			const steps = value["conversationSteps"];
 			// Background results can precede more live updates. Only foreground
@@ -867,7 +870,7 @@ export class CursorTurnEvents {
 	finishChildren(
 		status: "completed" | "interrupted" | "error",
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			for (const [callId, child] of this.children) {
 				if (!child.active) continue;
 				yield* child.events.finishChild(status);
@@ -906,7 +909,7 @@ export class CursorTurnEvents {
 	private finishChild(
 		status: "completed" | "interrupted" | "error",
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			yield* this.finishChildren(status);
 			yield* this.endThinking();
 			if (status === "completed")
@@ -954,7 +957,7 @@ export class CursorTurnEvents {
 	}
 
 	private progress(message: string, callId?: string) {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			this.progressText = message;
 			const running = [...this.tools.entries()].filter(
 				([, tool]) => !tool.completed,

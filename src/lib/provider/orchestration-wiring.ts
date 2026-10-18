@@ -125,10 +125,10 @@ interface OrchestrationComponents {
 	readonly openCodeInstance: OpenCodeProviderInstance;
 }
 
-class OrchestrationComponentsTag extends Context.Tag("OrchestrationComponents")<
+class OrchestrationComponentsTag extends Context.Service<
 	OrchestrationComponentsTag,
 	OrchestrationComponents
->() {}
+>()("OrchestrationComponents") {}
 
 const createOrchestrationComponentsEffect = (
 	options: OrchestrationLayerOptions,
@@ -225,7 +225,7 @@ const createOrchestrationComponentsEffect = (
 			);
 			const directory = options.workspaceRoot ?? process.cwd();
 			const daemonConfig = yield* Effect.suspend(() =>
-				loadDaemonConfigResult(options.configDir),
+				Effect.fromResult(loadDaemonConfigResult(options.configDir)),
 			).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)));
 			const config = daemonConfig?.projects.find(
 				(project) => resolve(project.path) === resolve(directory),
@@ -360,7 +360,7 @@ export const makeOrchestrationRuntimeLayer = (
 	| EventStoreEffectTag
 	| ProjectionRunnerEffectTag
 > => {
-	const componentsLayer = Layer.scoped(
+	const componentsLayer = Layer.effect(
 		OrchestrationComponentsTag,
 		Effect.gen(function* () {
 			const client = yield* OpenCodeAPITag;
@@ -414,8 +414,8 @@ export const getOrchestrationLayer = Effect.gen(function* () {
 	const registry = yield* ProviderRegistryTag;
 	const openCodeInstance = yield* registry.getInstanceEffect("opencode");
 	if (!(openCodeInstance instanceof OpenCodeProviderInstance)) {
-		return yield* Effect.dieMessage(
-			"opencode provider is not an OpenCodeProviderInstance",
+		return yield* Effect.die(
+			new Error("opencode provider is not an OpenCodeProviderInstance"),
 		);
 	}
 	return createOrchestrationView({ engine, registry, openCodeInstance });

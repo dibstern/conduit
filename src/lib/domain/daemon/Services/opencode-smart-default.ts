@@ -73,7 +73,7 @@ const hasOpenCodeBinary = Effect.tryPromise(() => isOpencodeInstalled()).pipe(
 
 const findAvailablePort = (startFrom: number) =>
 	Effect.tryPromise(() => findFreePort(startFrom)).pipe(
-		Effect.catchAll((cause) => Effect.die(cause)),
+		Effect.catch((cause) => Effect.die(cause)),
 	);
 
 const convertUnreachableDefault = (instance: DaemonInstanceConfig) =>

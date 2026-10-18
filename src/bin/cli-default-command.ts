@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import type { Request } from "effect/Request";
+import type { Rpc } from "effect/rpc";
 import {
 	GetProjects,
 	GetStatus,
@@ -26,12 +26,15 @@ async function showProject(ctx: CommandContext): Promise<void> {
 	let slug: string | undefined;
 	try {
 		const directory = resolve(cwd);
-		const { projects } = await rpcSend(new GetProjects({}));
+		const { projects } = await rpcSend(
+			GetProjects.payloadSchema.make({ _tag: "GetProjects" }),
+		);
 		const existing = projects.find(
 			(project) => project.folders[0] === directory,
 		);
 		const registerResponse = await rpcSend(
-			new SaveProject({
+			SaveProject.payloadSchema.make({
+				_tag: "SaveProject",
 				...(existing ? { slug: existing.slug } : {}),
 				folders: [directory],
 			}),
@@ -41,9 +44,11 @@ async function showProject(ctx: CommandContext): Promise<void> {
 		// The default view remains available when project registration fails.
 	}
 
-	let statusResponse: Request.Success<GetStatus>;
+	let statusResponse: Rpc.Success<typeof GetStatus>;
 	try {
-		statusResponse = await rpcSend(new GetStatus({}));
+		statusResponse = await rpcSend(
+			GetStatus.payloadSchema.make({ _tag: "GetStatus" }),
+		);
 	} catch {
 		stderr.write(unavailable);
 		exit(1);

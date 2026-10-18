@@ -217,7 +217,7 @@ export class CursorToolResults {
 	}
 
 	complete(call: CursorToolCall, truncated = false) {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const args = { ...call.args };
 			const envelope = toRecord(call.result);
 			const success = envelope["status"] === "success";

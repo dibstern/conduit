@@ -1,7 +1,7 @@
 // CLI command handlers. Keep command output and failure paths local to each handler.
 
 import { resolve } from "node:path";
-import type { Request } from "effect/Request";
+import type { Rpc } from "effect/rpc";
 import {
 	GetProjects,
 	GetStatus,
@@ -117,9 +117,11 @@ export async function handleStatus(ctx: CommandContext): Promise<void> {
 		return;
 	}
 
-	let response: Request.Success<GetStatus>;
+	let response: Rpc.Success<typeof GetStatus>;
 	try {
-		response = await rpcSend(new GetStatus({}));
+		response = await rpcSend(
+			GetStatus.payloadSchema.make({ _tag: "GetStatus" }),
+		);
 	} catch (err) {
 		stderr.write(`Failed to get status: ${formatErrorDetail(err)}\n`);
 		exit(1);
@@ -152,7 +154,7 @@ export async function handleStop(ctx: CommandContext): Promise<void> {
 	}
 
 	try {
-		await rpcSend(new Shutdown({}));
+		await rpcSend(Shutdown.payloadSchema.make({ _tag: "Shutdown" }));
 		stdout.write("Server stopped.\n");
 	} catch (err) {
 		stderr.write(`Failed to stop daemon: ${formatErrorDetail(err)}\n`);
@@ -179,7 +181,7 @@ export async function handlePin(ctx: CommandContext): Promise<void> {
 	}
 
 	try {
-		await rpcSend(new SetPin({ pin: args.pin }));
+		await rpcSend(SetPin.payloadSchema.make({ _tag: "SetPin", pin: args.pin }));
 		stdout.write("PIN updated.\n");
 	} catch (err) {
 		stderr.write(`Failed to set PIN: ${formatErrorDetail(err)}\n`);
@@ -202,10 +204,13 @@ export async function handleAdd(ctx: CommandContext): Promise<void> {
 	}
 
 	try {
-		const { projects } = await rpcSend(new GetProjects({}));
+		const { projects } = await rpcSend(
+			GetProjects.payloadSchema.make({ _tag: "GetProjects" }),
+		);
 		const existing = projects.find((project) => project.folders[0] === addDir);
 		const response = await rpcSend(
-			new SaveProject({
+			SaveProject.payloadSchema.make({
+				_tag: "SaveProject",
 				...(existing ? { slug: existing.slug } : {}),
 				folders: [addDir],
 			}),
@@ -230,9 +235,11 @@ export async function handleRemove(ctx: CommandContext): Promise<void> {
 	}
 
 	// First, list projects to find the slug for cwd
-	let listResponse: Request.Success<GetProjects>;
+	let listResponse: Rpc.Success<typeof GetProjects>;
 	try {
-		listResponse = await rpcSend(new GetProjects({}));
+		listResponse = await rpcSend(
+			GetProjects.payloadSchema.make({ _tag: "GetProjects" }),
+		);
 	} catch {
 		stderr.write("Failed to list projects.\n");
 		exit(1);
@@ -247,7 +254,12 @@ export async function handleRemove(ctx: CommandContext): Promise<void> {
 	}
 
 	try {
-		await rpcSend(new RemoveProject({ slug: match.slug }));
+		await rpcSend(
+			RemoveProject.payloadSchema.make({
+				_tag: "RemoveProject",
+				slug: match.slug,
+			}),
+		);
 		stdout.write(`Project removed: ${match.slug}\n`);
 	} catch (err) {
 		stderr.write(`Failed to remove project: ${formatErrorDetail(err)}\n`);
@@ -267,9 +279,11 @@ export async function handleList(ctx: CommandContext): Promise<void> {
 		return;
 	}
 
-	let response: Request.Success<GetProjects>;
+	let response: Rpc.Success<typeof GetProjects>;
 	try {
-		response = await rpcSend(new GetProjects({}));
+		response = await rpcSend(
+			GetProjects.payloadSchema.make({ _tag: "GetProjects" }),
+		);
 	} catch {
 		stderr.write("Failed to list projects.\n");
 		exit(1);
@@ -308,9 +322,11 @@ export async function handleTitle(ctx: CommandContext): Promise<void> {
 	}
 
 	// Find slug for cwd
-	let listResponse: Request.Success<GetProjects>;
+	let listResponse: Rpc.Success<typeof GetProjects>;
 	try {
-		listResponse = await rpcSend(new GetProjects({}));
+		listResponse = await rpcSend(
+			GetProjects.payloadSchema.make({ _tag: "GetProjects" }),
+		);
 	} catch {
 		stderr.write("Failed to list projects.\n");
 		exit(1);
@@ -328,7 +344,8 @@ export async function handleTitle(ctx: CommandContext): Promise<void> {
 
 	try {
 		await rpcSend(
-			new SaveProject({
+			SaveProject.payloadSchema.make({
+				_tag: "SaveProject",
 				slug: match.slug,
 				title: args.title,
 				folders: match.folders,

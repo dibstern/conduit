@@ -25,7 +25,7 @@ export const makeClaudeRunnerDriver = (
 					? account.folder
 					: resolveClaudeLaunchConfig(
 							yield* Effect.suspend(() =>
-								loadDaemonConfigResult(deps.daemonConfigDir),
+								Effect.fromResult(loadDaemonConfigResult(deps.daemonConfigDir)),
 							).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null))),
 						).configDir;
 			return yield* discoverCapabilitiesEffect(
