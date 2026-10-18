@@ -168,7 +168,13 @@ export const Explained: Story = {
 		})[0];
 		if (choice) await userEvent.click(choice);
 		await expect(args["onReplyToAsk"]).toHaveBeenCalledWith(
-			segment.activity[2],
+			expect.objectContaining({
+				kind: "message",
+				text:
+					segment.activity[2]?.type === "assistant"
+						? segment.activity[2].rawText
+						: "",
+			}),
 			"Keep the new look",
 		);
 		choice?.blur();

@@ -55,7 +55,6 @@
 	{:else}
 		<div class="ask-actions">
 			<Button variant={!setup ? "accent-soft" : "ghost"} size="content" tone={!setup ? "accent" : "inherit"} touchTarget class="ask-action {!setup ? '' : 'bg-chip'}" data-testid="ask-explain" data-primary={!setup} disabled={!enabled || generating} onclick={onexplain}>{generating ? "✦ Explaining…" : error ? "✦ Try again" : "✦ Explain options"}</Button>
-			<Button variant="ghost" size="content" tone="inherit" touchTarget class="ask-action bg-chip" onclick={() => onReplyToAsk()}>↩ Reply</Button>
 		</div>
 	{/if}
 	{#if !enabled && !explanation}<p class="explain-off">Explain uses the summary model. Enable it in Settings › Surfacing.</p>{/if}

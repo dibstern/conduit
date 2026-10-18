@@ -337,8 +337,10 @@ export const makeRecapServiceLive = (
 							return yield* new RecapFailure({
 								message: "Unknown Ask message",
 							});
-						const context = allMessages.filter(
-							({ ordinal }) => ordinal <= question.ordinal,
+						// Chronological prefix through the Ask: ordinals restart per turn segment.
+						const context = allMessages.slice(
+							0,
+							allMessages.indexOf(question) + 1,
 						);
 						const model = preferences.recap.model;
 						const content = yield* askSummary(

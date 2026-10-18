@@ -53,10 +53,16 @@ export const askContextHandlers: StepHandler[] = [
 		match: /^I choose the Ask action (Reply|Reply with this|Something else)$/,
 		run: async ({ world, match }) => {
 			const page = world.page;
-			if (match[1] !== "Reply") {
-				await page.getByTestId("ask-explain").click();
-				await expect(page.getByTestId("ask-explanation")).toBeVisible();
+			// Plain Reply is the card's own toggle; the Ask context adds only the Explain flow's replies.
+			if (match[1] === "Reply") {
+				await page
+					.getByTestId("surfacing-msg-card")
+					.getByRole("button", { name: "Reply", exact: true })
+					.click();
+				return;
 			}
+			await page.getByTestId("ask-explain").click();
+			await expect(page.getByTestId("ask-explanation")).toBeVisible();
 			await page
 				.getByTestId("ask-context")
 				.getByRole("button", {
@@ -199,9 +205,14 @@ export const askContextHandlers: StepHandler[] = [
 			);
 			await expect(
 				world.page
+					.getByTestId("surfacing-msg-card")
+					.getByRole("button", { name: "Reply", exact: true }),
+			).toBeVisible();
+			await expect(
+				world.page
 					.getByTestId("ask-context")
 					.getByRole("button", { name: "↩ Reply", exact: true }),
-			).toBeVisible();
+			).toHaveCount(0);
 			expect(calls(world.page)).toHaveLength(0);
 		},
 	},
