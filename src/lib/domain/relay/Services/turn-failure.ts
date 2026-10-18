@@ -56,7 +56,7 @@ export const makeFailTurn = Effect.gen(function* () {
 			])
 			.pipe(
 				Effect.asVoid,
-				Effect.catchAll((cause) =>
+				Effect.catch((cause) =>
 					Effect.sync(() => {
 						log.warn(
 							`session=${sessionId} Could not record turn failure: ${formatErrorDetail(cause)}`,

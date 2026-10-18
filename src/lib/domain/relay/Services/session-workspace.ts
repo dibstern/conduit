@@ -103,10 +103,10 @@ export interface ResolvedWorkspaceTarget {
 	readonly ownership?: readonly SessionWorktreeOwnership[];
 }
 
-export class SessionWorkspaceTag extends Context.Tag("SessionWorkspace")<
+export class SessionWorkspaceTag extends Context.Service<
 	SessionWorkspaceTag,
 	SessionWorkspace
->() {}
+>()("SessionWorkspace") {}
 
 // Snapshot-only callers have no event store; Git registration remains sufficient
 // for them. Recovery uses only recorded ownership, never legacy branch inference.
@@ -144,8 +144,8 @@ export const recreateSessionWorktrees = (sessionId: string) =>
 				const state =
 					row?.workspace == null
 						? null
-						: yield* Schema.decodeUnknown(
-								Schema.parseJson(SessionWorkspaceSchema),
+						: yield* Schema.decodeUnknownEffect(
+								Schema.fromJsonString(SessionWorkspaceSchema),
 							)(row.workspace);
 				const directory = effectiveWorkingDirectory(config.projectDir, state);
 				const folders =
@@ -223,7 +223,7 @@ export const inspectSessionWorktree = (
 									recordedBranchForFolder(yield* ownership, folder, directory),
 								)
 								.pipe(
-									Effect.catchAll((error) =>
+									Effect.catch((error) =>
 										Effect.succeed({
 											path: directory,
 											canRecreate: false,

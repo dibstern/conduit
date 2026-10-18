@@ -28,10 +28,9 @@
 
 import { channel } from "node:diagnostics_channel";
 import {
-	Chunk,
+	Array as Arr,
 	Deferred,
 	Effect,
-	FiberId,
 	Ref,
 	type Schema,
 	Stream,
@@ -263,7 +262,7 @@ export const stream = <T, E = never>(options: {
 	/** What the resuming client holds its changes on top of. */
 	readonly resumeBase?: ResumeBase;
 }): Stream.Stream<Envelope<T>, E> =>
-	Stream.unwrapScoped(
+	Stream.unwrap(
 		Effect.gen(function* () {
 			// Buffers from this instant.
 			const advances = yield* options.bus.subscribeAdvances();
@@ -294,7 +293,7 @@ export const stream = <T, E = never>(options: {
 							: Effect.succeed(result),
 					),
 				);
-			type SourceRead = Effect.Effect.Success<ReturnType<typeof readRequired>>;
+			type SourceRead = Effect.Success<ReturnType<typeof readRequired>>;
 			const name = options.source.shareKey ?? options.source.name;
 			const shared =
 				options.source.shareReads === true
@@ -341,7 +340,7 @@ export const stream = <T, E = never>(options: {
 									),
 								})),
 							);
-						const deferred = Deferred.unsafeMake<SourceRead, E>(FiberId.none);
+						const deferred = Deferred.makeUnsafe<SourceRead, E>();
 						const window = { after, through, read: Deferred.await(deferred) };
 						shared.latest = window;
 						// A failure is not kept for later readers.
@@ -407,7 +406,7 @@ export const stream = <T, E = never>(options: {
 				const replacement = yield* readRequired("replacement");
 				yield* Ref.set(seen, replacement.version);
 				yield* Ref.set(baseFloor, replacement.version);
-				return Chunk.unsafeFromArray<Envelope<T>>([
+				return [
 					{
 						_tag: "snapshot",
 						rows: replacement.rows.map(({ item }) => item),
@@ -420,23 +419,20 @@ export const stream = <T, E = never>(options: {
 							: { cursor: replacement.cursor }),
 					},
 					{ _tag: "synchronized" },
-				]);
+				] satisfies Envelope<T>[];
 			});
 
 			// A chunk is every advance already queued, so a burst costs one read.
 			const envelopeBatches = Stream.mapEffect(
 				Stream.chunks(advances),
-				(chunk): Effect.Effect<Chunk.Chunk<Envelope<T>>, E> =>
+				(chunk): Effect.Effect<Envelope<T>[], E> =>
 					Effect.gen(function* () {
 						// A publication gap can hide any move or removal. Catch up
 						// through durable tombstones, replacing only when unsupported
 						// or when their coverage does not reach the cursor.
 						// An unrelated surviving advance can carry the gap that lost
 						// an in-scope change, so routing must not hide overflow.
-						const overflow = Chunk.some(
-							chunk,
-							(advance) => advance.dropped === true,
-						);
+						const overflow = chunk.some((advance) => advance.dropped === true);
 						if (overflow && options.source.resume !== "catchUp")
 							return yield* replace;
 						const floor = yield* Ref.get(baseFloor);
@@ -466,7 +462,7 @@ export const stream = <T, E = never>(options: {
 									removed.push({ id, version: advance.version });
 							}
 						}
-						if (through === undefined) return Chunk.empty();
+						if (through === undefined) return [];
 
 						// A removal also closes the window, so catch up every row before
 						// moving the watermark past it. Removals sort first within a
@@ -481,16 +477,17 @@ export const stream = <T, E = never>(options: {
 						if (overflow && cursor < (window.removedSince ?? cursor))
 							return yield* replace;
 						yield* Ref.set(seen, through);
-						return Chunk.unsafeFromArray(
-							deltaEnvelopes(window.rows, [
-								...removed,
-								...(window.removed ?? []),
-							]),
-						);
+						return deltaEnvelopes(window.rows, [
+							...removed,
+							...(window.removed ?? []),
+						]);
 					}),
 			);
-			const nonEmptyBatches = Stream.filter(envelopeBatches, Chunk.isNonEmpty);
-			const live = Stream.flattenChunks(nonEmptyBatches);
+			const nonEmptyBatches = Stream.filter(
+				envelopeBatches,
+				Arr.isArrayNonEmpty,
+			);
+			const live = Stream.flattenArray(nonEmptyBatches);
 
 			return Stream.concat(Stream.fromIterable(opening), live);
 		}),

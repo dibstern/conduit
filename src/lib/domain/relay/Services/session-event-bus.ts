@@ -1,4 +1,12 @@
-import { Context, Effect, Layer, PubSub, type Scope, Stream } from "effect";
+import {
+	Context,
+	Effect,
+	Layer,
+	PubSub,
+	type Scope,
+	Semaphore,
+	Stream,
+} from "effect";
 import type { ReadModelAdvance } from "../../../contracts/read-model-advance.js";
 import type { StoredEvent } from "../../../persistence/events.js";
 
@@ -51,10 +59,10 @@ export interface SessionEventBus {
 	>;
 }
 
-export class SessionEventBusTag extends Context.Tag("SessionEventBus")<
+export class SessionEventBusTag extends Context.Service<
 	SessionEventBusTag,
 	SessionEventBus
->() {}
+>()("SessionEventBus") {}
 
 export const makeSessionEventBusLive = (
 	options: { readonly capacity?: number } = {},
@@ -85,7 +93,7 @@ export const makeSessionEventBusLive = (
 			}>({ capacity: advanceCapacity });
 			// Versions can skip within a commit; only a bus-local ordinal identifies
 			// a lost publication. Acquire and capture it under the same permit.
-			const publication = yield* Effect.makeSemaphore(1);
+			const publication = yield* Semaphore.make(1);
 			let ordinal = 0;
 			return {
 				publish: (events) =>
@@ -101,8 +109,8 @@ export const makeSessionEventBusLive = (
 						),
 					),
 				subscribe: (filter) =>
-					Effect.map(PubSub.subscribe(pubsub), (dequeue) => {
-						const stream = Stream.fromQueue(dequeue);
+					Effect.map(PubSub.subscribe(pubsub), (subscription) => {
+						const stream = Stream.fromSubscription(subscription);
 						return filter?.sessionId === undefined
 							? stream
 							: Stream.filter(
@@ -113,15 +121,18 @@ export const makeSessionEventBusLive = (
 				subscribeAdvances: () =>
 					publication.withPermits(1)(
 						Effect.gen(function* () {
-							const dequeue = yield* PubSub.subscribe(advances);
+							const subscription = yield* PubSub.subscribe(advances);
 							let previous = ordinal;
-							return Stream.map(Stream.fromQueue(dequeue), (entry) => {
-								const dropped = entry.ordinal !== previous + 1;
-								previous = entry.ordinal;
-								return dropped
-									? { ...entry.advance, dropped: true }
-									: entry.advance;
-							});
+							return Stream.map(
+								Stream.fromSubscription(subscription),
+								(entry) => {
+									const dropped = entry.ordinal !== previous + 1;
+									previous = entry.ordinal;
+									return dropped
+										? { ...entry.advance, dropped: true }
+										: entry.advance;
+								},
+							);
 						}),
 					),
 			} satisfies SessionEventBus;

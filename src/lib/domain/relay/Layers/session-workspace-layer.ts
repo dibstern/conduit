@@ -1,6 +1,6 @@
 import { relative, resolve as resolvePath } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { Effect, Result as Either, Layer, Schema } from "effect";
+import { Effect, Layer, Result, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/sql";
 import type { Account } from "../../../contracts/account.js";
 import {
@@ -37,9 +37,7 @@ import {
 } from "../Services/session-workspace.js";
 import { readSessionWorktreeOwnership } from "../Services/session-worktree-deletion.js";
 
-type Dependencies = Effect.Effect.Context<
-	ReturnType<typeof applySessionCommand>
->;
+type Dependencies = Effect.Services<ReturnType<typeof applySessionCommand>>;
 
 export const SessionWorkspaceLive = Layer.effect(
 	SessionWorkspaceTag,
@@ -51,7 +49,7 @@ export const SessionWorkspaceLive = Layer.effect(
 		const commitAndSignal = yield* makeCommitAndSignal;
 		// Capture the relay context so command commits retain its event bus.
 		const services = yield* Effect.context<Dependencies>();
-		const launches = yield* Effect.makeSemaphore(1);
+		const launches = yield* Semaphore.make(1);
 		const folders = [config.projectDir, ...(config.extraFolders ?? [])];
 		const readWorkspace = (sessionId: string) =>
 			Effect.gen(function* () {
@@ -71,8 +69,8 @@ export const SessionWorkspaceLive = Layer.effect(
 				const workspace =
 					row.workspace == null
 						? null
-						: yield* Schema.decodeUnknown(
-								Schema.parseJson(SessionWorkspaceSchema),
+						: yield* Schema.decodeUnknownEffect(
+								Schema.fromJsonString(SessionWorkspaceSchema),
 							)(row.workspace).pipe(
 								Effect.mapError(
 									(cause) =>
@@ -418,21 +416,21 @@ export const SessionWorkspaceLive = Layer.effect(
 									ownership: renamed,
 								},
 							}).pipe(
-								Effect.catchAllCause((cause) =>
+								Effect.catchCause((cause) =>
 									Effect.gen(function* () {
 										// A post-COMMIT signal failure must not undo recorded ownership.
-										const recorded = yield* Effect.either(
+										const recorded = yield* Effect.result(
 											readSessionWorktreeOwnership(sessionId, false),
 										);
-										if (Either.isLeft(recorded))
+										if (Result.isFailure(recorded))
 											return yield* new WorktreeBranchRenameError({
 												folder: ownership[0]?.folder ?? config.projectDir,
 												reason: "git-failed",
-												message: `Git renamed the branch to ${branchName}, but its recorded ownership could not be checked. ${Failure.renderCause(cause).slice(0, 2_000)}. ${String(recorded.left.cause).slice(0, 2_000)}`,
+												message: `Git renamed the branch to ${branchName}, but its recorded ownership could not be checked. ${Failure.renderCause(cause).slice(0, 2_000)}. ${String(recorded.failure.cause).slice(0, 2_000)}`,
 											});
 										if (
-											recorded.right.length === renamed.length &&
-											recorded.right.every(
+											recorded.success.length === renamed.length &&
+											recorded.success.every(
 												(owned) => owned.branchName === branchName,
 											)
 										)

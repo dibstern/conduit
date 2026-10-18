@@ -68,15 +68,15 @@ export const PollerState = {
 	}),
 };
 
-export class PollerStateTag extends Context.Tag("PollerState")<
+export class PollerStateTag extends Context.Service<
 	PollerStateTag,
 	Ref.Ref<PollerState>
->() {}
+>()("PollerState") {}
 
-export class PollerPubSubTag extends Context.Tag("PollerPubSub")<
+export class PollerPubSubTag extends Context.Service<
 	PollerPubSubTag,
 	PubSub.PubSub<PollerChangedEvent>
->() {}
+>()("PollerPubSub") {}
 
 export const makePollerStateLive = (
 	initial?: Partial<PollerState>,
@@ -211,7 +211,7 @@ export const poll = <E, R>(deps: PollDeps<E, R>) =>
 				// Run initial reconciliation
 				if (deps.reconciliation) {
 					yield* runReconciliation(deps.reconciliation).pipe(
-						Effect.catchAll((e) =>
+						Effect.catch((e) =>
 							Effect.log(`initial reconciliation failed: ${String(e)}`),
 						),
 					);
@@ -244,7 +244,7 @@ export const poll = <E, R>(deps: PollDeps<E, R>) =>
 			// Run reconciliation
 			if (deps.reconciliation) {
 				yield* runReconciliation(deps.reconciliation).pipe(
-					Effect.catchAll((e) =>
+					Effect.catch((e) =>
 						Effect.log(`reconciliation failed: ${String(e)}`),
 					),
 				);
@@ -306,9 +306,7 @@ const runReconciliation = (deps: ReconciliationDeps) =>
 				}
 			}
 		}).pipe(
-			Effect.catchAll((e) =>
-				Effect.log(`staleness check failed: ${String(e)}`),
-			),
+			Effect.catch((e) => Effect.log(`staleness check failed: ${String(e)}`)),
 		);
 		yield* Effect.gen(function* () {
 			const children = yield* deps.getStrandedChildren();
@@ -331,7 +329,7 @@ const runReconciliation = (deps: ReconciliationDeps) =>
 				}
 			}
 		}).pipe(
-			Effect.catchAll((e) =>
+			Effect.catch((e) =>
 				Effect.log(`stranded child check failed: ${String(e)}`),
 			),
 		);
@@ -347,21 +345,22 @@ const runReconciliation = (deps: ReconciliationDeps) =>
  */
 export const startReconciliationLoop = <E, R>(
 	pollDeps: PollDeps<E, R>,
-	interval: Duration.DurationInput = Duration.millis(
+	interval: Duration.Input = Duration.millis(
 		DEFAULT_RECONCILIATION_INTERVAL_MS,
 	),
 ) =>
 	poll(pollDeps).pipe(
 		Effect.repeat(Schedule.spaced(interval)),
 		Effect.retry(
-			Schedule.exponential("2 seconds").pipe(
-				Schedule.intersect(Schedule.recurs(STATUS_RECONCILIATION_MAX_RETRIES)),
-			),
+			Schedule.max([
+				Schedule.exponential("2 seconds"),
+				Schedule.recurs(STATUS_RECONCILIATION_MAX_RETRIES),
+			]),
 		),
-		Effect.catchAll((e) =>
+		Effect.catch((e) =>
 			Effect.logWarning("Reconciliation loop failed after retries", e),
 		),
-		Effect.forkScoped,
+		Effect.forkScoped({ uninterruptible: "inherit" }),
 	);
 
 // The production status poller exposes Effect programs. Synchronous reads at

@@ -46,14 +46,16 @@ export function ptyHostSocketPath(configDir: string): string {
 	);
 }
 
-const requestId = Schema.Int.pipe(Schema.positive());
-const dimension = Schema.Int.pipe(Schema.between(1, 10000));
+const requestId = Schema.Int.check(Schema.isGreaterThan(0));
+const dimension = Schema.Int.check(
+	Schema.isBetween({ minimum: 1, maximum: 10000 }),
+);
 const ptyInfo = Schema.Struct({
 	id: Schema.String,
 	title: Schema.String,
 	command: Schema.String,
 	cwd: Schema.String,
-	status: Schema.Literal("running", "exited"),
+	status: Schema.Literals(["running", "exited"]),
 	pid: Schema.Int,
 });
 const terminal = Schema.Struct({
@@ -61,7 +63,7 @@ const terminal = Schema.Struct({
 	exitCode: Schema.NullOr(Schema.Int),
 });
 
-export const PtyHostRequestSchema = Schema.Union(
+export const PtyHostRequestSchema = Schema.Union([
 	Schema.Struct({
 		type: Schema.Literal("hello"),
 		protocolVersion: Schema.Int,
@@ -71,17 +73,17 @@ export const PtyHostRequestSchema = Schema.Union(
 		type: Schema.Literal("create"),
 		requestId,
 		cwd: Schema.String,
-		projectDir: Schema.optional(Schema.String),
+		projectDir: Schema.optionalKey(Schema.String),
 		cols: dimension,
 		rows: dimension,
 		shell: Schema.String,
-		env: Schema.Record({ key: Schema.String, value: Schema.String }),
+		env: Schema.Record(Schema.String, Schema.String),
 	}),
 	Schema.Struct({
 		type: Schema.Literal("list"),
 		requestId,
 		cwd: Schema.String,
-		allProjects: Schema.optional(Schema.Boolean),
+		allProjects: Schema.optionalKey(Schema.Boolean),
 	}),
 	Schema.Struct({
 		type: Schema.Literal("attach"),
@@ -100,30 +102,33 @@ export const PtyHostRequestSchema = Schema.Union(
 		cols: dimension,
 		rows: dimension,
 	}),
-	Schema.Struct({ type: Schema.Literal("close", "detach"), id: Schema.String }),
+	Schema.Struct({
+		type: Schema.Literals(["close", "detach"]),
+		id: Schema.String,
+	}),
 	Schema.Struct({
 		type: Schema.Literal("stop"),
 		requestId,
 		force: Schema.Boolean,
 	}),
-);
+]);
 export type PtyHostRequest = typeof PtyHostRequestSchema.Type;
 
-export const PtyHostMessageSchema = Schema.Union(
+export const PtyHostMessageSchema = Schema.Union([
 	Schema.Struct({
 		type: Schema.Literal("hello"),
 		protocolVersion: Schema.Int,
 		buildId: Schema.String,
 		pid: Schema.Int,
 		openTerminals: Schema.Int,
-		supportsProjectDir: Schema.optional(Schema.Boolean),
+		supportsProjectDir: Schema.optionalKey(Schema.Boolean),
 	}),
 	Schema.Struct({ type: Schema.Literal("created"), requestId, pty: ptyInfo }),
 	Schema.Struct({
 		type: Schema.Literal("list"),
 		requestId,
 		terminals: Schema.Array(terminal),
-		allProjects: Schema.optional(Schema.Boolean),
+		allProjects: Schema.optionalKey(Schema.Boolean),
 	}),
 	Schema.Struct({
 		type: Schema.Literal("attached"),
@@ -138,7 +143,7 @@ export const PtyHostMessageSchema = Schema.Union(
 	}),
 	Schema.Struct({
 		type: Schema.Literal("error"),
-		requestId: Schema.optional(Schema.Int),
+		requestId: Schema.optionalKey(Schema.Int),
 		message: Schema.String,
 	}),
 	// No request IDs or acknowledgements on the input/output path.
@@ -152,7 +157,7 @@ export const PtyHostMessageSchema = Schema.Union(
 		id: Schema.String,
 		exitCode: Schema.Int,
 	}),
-);
+]);
 export type PtyHostMessage = typeof PtyHostMessageSchema.Type;
 export type PtyHostHello = Extract<PtyHostMessage, { type: "hello" }>;
 

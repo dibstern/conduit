@@ -18,9 +18,12 @@ export const repeating = (fn: () => Effect.Effect<void>, ms: number) =>
 	fn().pipe(
 		Effect.delay(Duration.millis(ms)),
 		Effect.forever,
-		Effect.forkScoped,
+		Effect.forkScoped({ uninterruptible: "inherit" }),
 	);
 
 /** Scope-managed delayed effect — uses Effect.delay with forkScoped. */
 export const delayed = (fn: () => Effect.Effect<void>, ms: number) =>
-	fn().pipe(Effect.delay(Duration.millis(ms)), Effect.forkScoped);
+	fn().pipe(
+		Effect.delay(Duration.millis(ms)),
+		Effect.forkScoped({ uninterruptible: "inherit" }),
+	);

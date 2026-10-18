@@ -98,7 +98,7 @@ export const setSessionSettled = (
 		if (settled && consumedHead === undefined && row.workspace !== null) {
 			const config = yield* ConfigTag;
 			const workspace = Schema.decodeUnknownOption(
-				Schema.parseJson(SessionWorkspaceSchema),
+				Schema.fromJsonString(SessionWorkspaceSchema),
 			)(row.workspace);
 			if (Option.isSome(workspace)) {
 				const directory = effectiveWorkingDirectory(

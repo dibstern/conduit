@@ -12,9 +12,10 @@
 import { Context, Effect, HashMap, Layer, Option, Ref } from "effect";
 
 /** Tag for the mutable client→session HashMap Ref in the Effect Context. */
-export class SessionRegistryStateTag extends Context.Tag(
-	"SessionRegistryState",
-)<SessionRegistryStateTag, Ref.Ref<HashMap.HashMap<string, string>>>() {}
+export class SessionRegistryStateTag extends Context.Service<
+	SessionRegistryStateTag,
+	Ref.Ref<HashMap.HashMap<string, string>>
+>()("SessionRegistryState") {}
 
 /**
  * Create a Layer providing SessionRegistryStateTag backed by a Ref.
