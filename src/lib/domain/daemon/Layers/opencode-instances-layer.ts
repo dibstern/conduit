@@ -1003,9 +1003,13 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					directories: readonly string[] | (() => readonly string[]),
 					instanceId: string = MANAGED_OPENCODE_ACCOUNT_ID,
 				) =>
-					Stream.callback<OpenCodeInstanceEvent>(
-						(emit) =>
-							gate
+					Stream.fromPull(
+						Effect.gen(function* () {
+							const emit = yield* Effect.acquireRelease(
+								Queue.unbounded<OpenCodeInstanceEvent>(),
+								Queue.shutdown,
+							);
+							yield* gate
 								.withPermits(1)(
 									Effect.gen(function* () {
 										const subscribedId = yield* resolveId(instanceId);
@@ -1081,9 +1085,10 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 										return subscriber;
 									}),
 								)
-								.pipe(Effect.uninterruptible),
-						{ bufferSize: Number.POSITIVE_INFINITY },
-					),
+								.pipe(Effect.uninterruptible);
+							return Queue.takeAll(emit);
+						}),
+					).pipe(Stream.scoped),
 				use: (instanceId, directory) =>
 					Effect.flatMap(resolveId(instanceId), (id) => use(id, directory)),
 				borrow: (instanceId, directory) =>

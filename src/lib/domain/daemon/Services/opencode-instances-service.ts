@@ -60,6 +60,7 @@ export interface OpenCodeInstances {
 	 * for `directories` from every instance stream that `use` has opened. It
 	 * never keeps a stream open; the instance's demand does.
 	 * A directory callback keeps that same subscription current as workspaces change.
+	 * Acquiring the stream's pull registers the subscriber before returning.
 	 */
 	readonly events: (
 		directories: readonly string[] | (() => readonly string[]),

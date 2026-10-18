@@ -4,6 +4,7 @@ import {
 	Fiber,
 	Layer,
 	Schema,
+	Scope,
 	Semaphore,
 	Stream,
 } from "effect";
@@ -208,13 +209,26 @@ export const SSEStreamLive: Layer.Layer<
 									directories.add(directory);
 							}
 						}
-						fiber = yield* Effect.forkIn(
-							Stream.runForEach(
-								instances.events(() => [...directories]),
-								route,
-							),
-							scope,
-							{ uninterruptible: "inherit" },
+						yield* Effect.uninterruptible(
+							Effect.gen(function* () {
+								const subscriptionScope = yield* Scope.fork(scope);
+								// Acquire registration before returning; callback setup is forked in Effect 4.
+								const pull = yield* Stream.toPull(
+									instances.events(() => [...directories]),
+								).pipe(Scope.provide(subscriptionScope));
+								fiber = yield* Effect.forkIn(
+									Stream.runForEach(
+										Stream.fromPull(Effect.succeed(pull)),
+										route,
+									).pipe(
+										Effect.onExit((exit) =>
+											Scope.close(subscriptionScope, exit),
+										),
+									),
+									scope,
+									{ uninterruptible: false },
+								);
+							}),
 						);
 					}),
 				),
