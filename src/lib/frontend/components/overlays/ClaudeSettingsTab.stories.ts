@@ -24,6 +24,19 @@ const meta = {
 		applyInstanceListResponse({ instances: [] });
 		attachedProjectState.slug = "storybook-project";
 		routerState.path = "/";
+		// The tab's settings reads dial the control socket, and every dial probes
+		// the attached project's relay status. Answer that probe; anything else
+		// still reaches the network guard.
+		const guardedFetch = globalThis.fetch;
+		globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) =>
+			String(input instanceof Request ? input.url : input).endsWith(
+				"/api/status",
+			)
+				? Promise.resolve(Response.json({ status: "ready" }))
+				: guardedFetch(input, init);
+		return () => {
+			globalThis.fetch = guardedFetch;
+		};
 	},
 } satisfies Meta<typeof ClaudeSettingsTab>;
 
