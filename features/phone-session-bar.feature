@@ -193,24 +193,25 @@ Scenario Outline: Phone session sheets show the shared body for every session st
   Then the session sheet has the shared grids and 4 Session tiles
   And the session sheet displays the <state> commands
   And the session sheet footer is overflow with Debug off
+  And the auto-settle status line is <line>
   And the session-sheet region visually matches <baseline> at <threshold> percent
 
 Examples:
-  | state    | theme | baseline                            | threshold |
-  | idle     | dark  | session-sheet-idle-dark             | 98        |
-  | idle     | light | session-sheet-idle-light            | 98        |
-  | unread   | dark  | session-sheet-unread-dark           | 98        |
-  | unread   | light | session-sheet-unread-light          | 98        |
-  | snoozed  | dark  | session-sheet-snoozed-dark          | 98        |
-  | snoozed  | light | session-sheet-snoozed-light         | 98        |
-  | forever  | dark  | session-sheet-forever-dark          | 98        |
-  | forever  | light | session-sheet-forever-light         | 98        |
-  | pinned   | dark  | session-sheet-pinned-dark           | 98        |
-  | pinned   | light | session-sheet-pinned-light          | 98        |
-  | settled  | dark  | session-sheet-settled-dark          | 98        |
-  | settled  | light | session-sheet-settled-light         | 98        |
-  | auto_off | dark  | session-sheet-auto-settle-off-dark  | 98        |
-  | auto_off | light | session-sheet-auto-settle-off-light | 98        |
+  | state    | theme | line                               | baseline                            | threshold |
+  | idle     | dark  | On · settles Sat 9:41 if left idle | session-sheet-idle-dark             | 98        |
+  | idle     | light | On · settles Sat 9:41 if left idle | session-sheet-idle-light            | 98        |
+  | unread   | dark  | On · paused while unread           | session-sheet-unread-dark           | 98        |
+  | unread   | light | On · paused while unread           | session-sheet-unread-light          | 98        |
+  | snoozed  | dark  | On · paused while snoozed          | session-sheet-snoozed-dark          | 98        |
+  | snoozed  | light | On · paused while snoozed          | session-sheet-snoozed-light         | 98        |
+  | forever  | dark  | On · paused while snoozed          | session-sheet-forever-dark          | 98        |
+  | forever  | light | On · paused while snoozed          | session-sheet-forever-light         | 98        |
+  | pinned   | dark  | On · paused while pinned           | session-sheet-pinned-dark           | 98        |
+  | pinned   | light | On · paused while pinned           | session-sheet-pinned-light          | 98        |
+  | settled  | dark  | On · session is settled            | session-sheet-settled-dark          | 98        |
+  | settled  | light | On · session is settled            | session-sheet-settled-light         | 98        |
+  | auto_off | dark  | Off · stays until you settle it    | session-sheet-auto-settle-off-dark  | 98        |
+  | auto_off | light | Off · stays until you settle it    | session-sheet-auto-settle-off-light | 98        |
 
 Scenario Outline: Disabled session tiles explain why and keep the sheet open
   Given the viewport is a phone
@@ -220,6 +221,7 @@ Scenario Outline: Disabled session tiles explain why and keep the sheet open
   When I open the overflow session sheet
   And I tap the unavailable Snooze tile
   Then the session sheet stays open with the reason pill Unpin to snooze
+  And the auto-settle status line is On · paused while pinned
   And the session-sheet region visually matches <baseline> at <threshold> percent
 
 Examples:
@@ -236,6 +238,7 @@ Scenario Outline: The title chevron sheet shares the body and Debug footer
   When I open the chevron session sheet
   Then the session sheet has the shared grids and 4 Session tiles
   And the session sheet footer is chevron with Debug on
+  And the auto-settle status line is On · settles Sat 9:41 if left idle
   And the session-sheet region visually matches <baseline> at <threshold> percent
 
 Examples:
@@ -251,6 +254,7 @@ Scenario Outline: The session list long-press sheet has five Session tiles and n
   When I open the list session sheet
   Then the session sheet has the shared grids and 5 Session tiles
   And the session sheet footer is absent with Debug off
+  And the auto-settle status line is On · settles Sat 9:41 if left idle
   And the session-sheet region visually matches <baseline> at <threshold> percent
 
 Examples:

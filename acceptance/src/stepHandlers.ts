@@ -31,6 +31,7 @@ import { modelDriftHandlers } from "./steps/modelDrift.js";
 import { opencodeConnectionBannerHandlers } from "./steps/opencodeConnectionBanner.js";
 import { pendingInputTrayHandlers } from "./steps/pendingInputTray.js";
 import { providerInstancesHandlers } from "./steps/providerInstances.js";
+import { sessionAutoSettleHandlers } from "./steps/sessionAutoSettle.js";
 import { sessionGoalHandlers } from "./steps/sessionGoal.js";
 import { sessionGoalDetailsHandlers } from "./steps/sessionGoalDetails.js";
 import { sessionModeDefaultHandlers } from "./steps/sessionModeDefault.js";
@@ -59,6 +60,7 @@ const driver = new PlaywrightDriver();
 export const conduitVisualHandlers: StepHandler[] = [
 	...sessionPresentationHandlers,
 	...sessionSheetsHandlers,
+	...sessionAutoSettleHandlers,
 	...sessionRowsHandlers,
 	...sessionModeDefaultHandlers,
 	...backgroundTasksHandlers,

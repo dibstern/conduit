@@ -106,6 +106,8 @@ export class RpcMockControl {
 	projectSlug = "myapp";
 	onConnect?: () => void;
 	onSendMessage?: (payload: Record<string, unknown>) => void;
+	/** Observe a unary reply after it has been sent to the browser. */
+	onReply?: (request: RecordedRpcRequest) => void;
 	private readonly sockets = new Set<WebSocketRoute>();
 	private connectionCount = 0;
 	private readonly requests: RecordedRpcRequest[] = [];
@@ -937,14 +939,17 @@ export async function mockWsRpc(
 		page.once("close", onClose);
 		const requests = new Map<string, EffectRpcRequest[]>();
 		const submissions = new Map<string, Record<string, unknown>>();
+		const requestsById = new Map<string, RecordedRpcRequest>();
 		const ready = Effect.runPromise(
 			serveRpc(socketTable(ws, options, control, requests), (json) =>
 				Effect.sync(() => {
 					ws.send(json);
-					if (submissions.size === 0) return;
 					const frame: unknown = JSON.parse(json);
 					if (!isRecord(frame) || frame["_tag"] !== "Exit") return;
 					const id = String(frame["requestId"]);
+					const request = requestsById.get(id);
+					requestsById.delete(id);
+					if (request) control.onReply?.(request);
 					const payload = submissions.get(id);
 					submissions.delete(id);
 					// Replay a submitted turn after its answer, as the old mock did.
@@ -964,6 +969,10 @@ export async function mockWsRpc(
 			for (const frame of Array.isArray(raw) ? raw : [raw]) {
 				if (isEffectRpcRequest(frame)) {
 					control.record(frame.tag, frame.payload ?? {});
+					requestsById.set(frame.id, {
+						tag: frame.tag,
+						payload: frame.payload ?? {},
+					});
 					if (frame.tag === "input.submit")
 						submissions.set(frame.id, frame.payload ?? {});
 					const pending = requests.get(frame.tag) ?? [];

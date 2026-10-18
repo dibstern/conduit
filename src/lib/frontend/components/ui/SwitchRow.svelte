@@ -17,7 +17,7 @@
 		...rest
 	}: {
 		label: string;
-		description?: string;
+		description?: string | undefined;
 		icon?: string;
 		saving?: boolean;
 		controlled?: boolean;
@@ -39,7 +39,7 @@
 	<span aria-hidden="true" class={checked ? "text-success" : "text-text-dimmer"}><Icon name={icon} size={20} /></span>
 	<span class="min-w-0 flex-1 text-[14.5px] font-medium leading-[1.2]">
 		{label}
-		<span class="mt-[2px] block min-h-[15px] text-[12.5px] font-normal text-text-dimmer">{#if showState}<b class="font-semibold {checked ? 'text-success' : 'text-text-secondary'}">{checked ? "On" : "Off"}</b>{/if}{#if description}{showState ? ` · ${description}` : description}{/if}</span>
+		<span data-switch-status class="mt-[2px] block min-h-[15px] text-[12.5px] font-normal text-text-muted">{#if showState}<b class="font-semibold {checked ? 'text-success' : 'text-text-secondary'}">{checked ? "On" : "Off"}</b>{/if}{#if description}{showState ? ` · ${description}` : description}{/if}</span>
 	</span>
 	{#if saving}<span aria-hidden="true" class="animate-spin text-text-dimmer"><Icon name="loader-circle" size={16} /></span>{/if}
 	<Switch {checked} size="lg" pending={saving} />

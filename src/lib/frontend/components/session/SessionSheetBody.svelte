@@ -1,8 +1,10 @@
 <script lang="ts">
-	import type { Snippet } from "svelte";
+	import { untrack, type Snippet } from "svelte";
 	import type { SessionInfo } from "../../types.js";
 	import { isSessionSnoozed, sessionAttention } from "../../stores/session.svelte.js";
 	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
+	import { describeAutoSettle } from "../../utils/auto-settle.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { dismissToast, showToast, uiState } from "../../stores/ui.svelte.js";
 	import DitherGlyph from "../ui/DitherGlyph.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -13,7 +15,7 @@
 	import SwitchRow from "../ui/SwitchRow.svelte";
 	import Tile from "../ui/Tile.svelte";
 	import { ATTENTION_DISPLAY } from "./SessionItem.svelte";
-	import type { SessionCommand, SessionCommandEntry } from "./session-commands.js";
+	import { sessionCommandActions, type SessionCommand, type SessionCommandEntry } from "./session-commands.js";
 
 	let { commands, onselect, header, views, now = Date.now() }: {
 		commands: readonly SessionCommandEntry[];
@@ -28,7 +30,33 @@
 		now?: number;
 	} = $props();
 	const triage = $derived(commands.filter((item) => item.section === "triage" && item.checked === undefined));
-	const switches = $derived(commands.filter((item) => item.checked !== undefined));
+	let outlook = $state<Awaited<ReturnType<typeof rpc<"GetSessionAutoSettleOutlook">>>>();
+	let saving = $state(false);
+	// Bumped by every read, write and session change: only the latest request's reply lands.
+	let request = 0;
+	// The id, not `header`: shell updates during a save must not restart the read.
+	const autoSettleSessionId = $derived(header.session.id);
+	const checked = $derived(outlook ? outlook.kind !== "off" : header.session.autoSettleDisabled !== true);
+	$effect(() => {
+		const sessionId = autoSettleSessionId;
+		const read = ++request;
+		outlook = undefined;
+		saving = false;
+		void untrack(() => rpc("GetSessionAutoSettleOutlook", { sessionId })).then(
+			(reply) => { if (read === request) outlook = reply; },
+			() => {},
+		);
+		return () => { ++request; };
+	});
+	async function toggleAutoSettle() {
+		if (saving) return;
+		const write = ++request;
+		saving = true;
+		const reply = await sessionCommandActions.autoSettle(header.session, checked);
+		if (write !== request) return;
+		if (reply) outlook = reply;
+		saving = false;
+	}
 	const session = $derived(commands.filter((item) => item.section === "manage" || item.section === "danger"));
 	const toastHost = Symbol("session-sheet");
 	const status = $derived(ATTENTION_DISPLAY[sessionAttention(header.session)]);
@@ -76,9 +104,7 @@
 	<LabelledGridGroup label="Triage">
 		{#each triage as item (item.testId)}{@render tile(item)}{/each}
 	</LabelledGridGroup>
-	{#each switches as item (item.testId)}
-		<SwitchRow data-testid={item.testId} aria-label={item.label} label={item.shortLabel ?? item.label} icon={item.icon} checked={item.checked ?? false} controlled showState={false} oncheckedchange={() => item.run()} />
-	{/each}
+	<SwitchRow data-testid="session-ctx-auto-settle" aria-label="Auto-settle when idle" label="Auto-settle" {checked} {saving} controlled showState={outlook !== undefined} description={outlook && describeAutoSettle(outlook, now)} oncheckedchange={() => void toggleAutoSettle()} />
 	<LabelledGridGroup label="Session" columns={session.length > 4 ? 5 : 4}>
 		{#each session as item (item.testId)}{@render tile(item)}{/each}
 	</LabelledGridGroup>

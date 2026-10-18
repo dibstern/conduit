@@ -3,6 +3,7 @@ import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect, Exit, Layer, Scope } from "effect";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import { formatSnoozeTime } from "../../../src/lib/frontend/utils/format.js";
 import type { ReplayHarness } from "../helpers/e2e-harness.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { chooseSettingsOption } from "../helpers/settings.js";
@@ -114,6 +115,14 @@ test("the auto-settle outlook reads the same with or without a viewer", async ({
 		const at = lastMessageAt(harness, sessionId) + IDLE_WINDOW_MS;
 		const scheduled = { kind: "scheduled", at };
 		await expect.poll(read).toEqual(scheduled);
+		await page.setViewportSize({ width: 393, height: 852 });
+		await page.getByTestId("session-bar-island-overflow").click();
+		await expect(
+			page
+				.getByTestId("session-ctx-auto-settle")
+				.locator("[data-switch-status]"),
+		).toHaveText(`On · settles ${formatSnoozeTime(at)} if left idle`);
+		await page.getByTestId("session-sheet-close").click();
 		// The open page holds the sweep back, but not the outlook.
 		expect(await sweep(at + 1)).toBe(0);
 
