@@ -94,7 +94,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		yield* sessionManagerService
 			.restoreSessionForSend(activeId)
 			.pipe(
-				Effect.catchAll((error) =>
+				Effect.catch((error) =>
 					Effect.sync(() =>
 						log.warn(`Failed to restore ${activeId} on send: ${String(error)}`),
 					),

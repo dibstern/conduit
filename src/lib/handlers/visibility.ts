@@ -44,7 +44,7 @@ export const setHiddenEntriesForRelay = (input: SetHiddenEntriesInput) =>
 		const config = yield* ConfigTag;
 
 		// Effect.try (not Effect.sync): an fs throw must surface as a typed
-		// failure the RPC entry's Effect.catchAll can convert to WsRpcError.
+		// failure the RPC entry's Effect.catch can convert to WsRpcError.
 		yield* Effect.try({
 			try: () =>
 				saveRelaySettings(

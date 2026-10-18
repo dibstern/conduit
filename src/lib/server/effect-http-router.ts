@@ -14,15 +14,11 @@
 //   GET  /auth, /setup, /, /s/*, /p/* — SPA/static entry routes
 
 import { readFile } from "node:fs/promises";
-import { Context, Effect, Option, Schema } from "effect";
-import {
-	HttpMiddleware,
-	HttpRouter,
-	HttpServerRequest,
-	HttpServerResponse,
-} from "effect/http";
+import { Context, Effect, Layer, Option, Schema } from "effect";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import type { HttpBodyError } from "effect/http/HttpBody";
 import {
+	AuthManagerTag,
 	authRoute,
 	authStatusRoute,
 	withAuthGate,
@@ -58,38 +54,38 @@ export interface RouterProjectInfo {
 	isProcessing?: boolean;
 }
 
-export class ProjectsProvider extends Context.Tag("ProjectsProvider")<
+export class ProjectsProvider extends Context.Service<
 	ProjectsProvider,
 	{ readonly getProjects: () => Effect.Effect<RouterProjectInfo[]> }
->() {}
+>()("ProjectsProvider") {}
 
 /** Health response provider — optionally overridden by daemon mode. */
-export class HealthProvider extends Context.Tag("HealthProvider")<
+export class HealthProvider extends Context.Service<
 	HealthProvider,
 	{ readonly getHealthResponse: () => Effect.Effect<object> }
->() {}
+>()("HealthProvider") {}
 
 /** Push notification manager — may not be available. */
-export class PushProvider extends Context.Tag("PushProvider")<
+export class PushProvider extends Context.Service<
 	PushProvider,
 	{
 		readonly getPublicKey: () => string | undefined;
 		readonly addSubscription: (endpoint: string, subscription: unknown) => void;
 		readonly removeSubscription: (endpoint: string) => void;
 	}
->() {}
+>()("PushProvider") {}
 
 /** CA certificate provider — may not be available. */
-export class CaCertProvider extends Context.Tag("CaCertProvider")<
+export class CaCertProvider extends Context.Service<
 	CaCertProvider,
 	{
 		readonly caCertDer: Buffer | undefined;
 		readonly caRootPath: string | undefined;
 	}
->() {}
+>()("CaCertProvider") {}
 
 /** Setup info provider — exposes server connectivity details. */
-export class SetupInfoProvider extends Context.Tag("SetupInfoProvider")<
+export class SetupInfoProvider extends Context.Service<
 	SetupInfoProvider,
 	{
 		readonly getPort: () => Effect.Effect<number>;
@@ -97,12 +93,10 @@ export class SetupInfoProvider extends Context.Tag("SetupInfoProvider")<
 		/** The Tailscale Serve URL, or null when serve mode is off. */
 		readonly getPublicUrl: () => Effect.Effect<string | null>;
 	}
->() {}
+>()("SetupInfoProvider") {}
 
 /** Standalone project API delegation provider — optional. */
-export class ProjectApiDelegateProvider extends Context.Tag(
-	"ProjectApiDelegateProvider",
-)<
+export class ProjectApiDelegateProvider extends Context.Service<
 	ProjectApiDelegateProvider,
 	{
 		readonly delegateApiRequest: (
@@ -111,7 +105,7 @@ export class ProjectApiDelegateProvider extends Context.Tag(
 			req: HttpServerRequest.HttpServerRequest,
 		) => Effect.Effect<HttpServerResponse.HttpServerResponse, Error>;
 	}
->() {}
+>()("ProjectApiDelegateProvider") {}
 
 function serializeProject(p: RouterProjectInfo): DashboardProjectResponse {
 	return {
@@ -333,10 +327,12 @@ const projectRouteHandler = Effect.gen(function* () {
 	const params = yield* HttpRouter.params;
 	const rawSlug = params["slug"];
 	if (!rawSlug) return yield* jsonError(400, "BAD_REQUEST", "Missing slug");
-	const slug = decodeURIComponent(rawSlug);
 	const req = yield* HttpServerRequest.HttpServerRequest;
 	const host = req.headers["host"] ?? "localhost";
 	const pathname = new URL(req.url, `http://${host}`).pathname;
+	// v4 also registers the wildcard's parent path, which serves the SPA root.
+	if (pathname === `/p/${rawSlug}`) return yield* rootHandler;
+	const slug = decodeURIComponent(rawSlug);
 	const subPath = pathname.slice(`/p/${rawSlug}`.length) || "/";
 	if (!subPath.startsWith("/api/")) {
 		return yield* serveStaticFile("/index.html");
@@ -382,46 +378,54 @@ const staticCatchAllHandler = Effect.gen(function* () {
  *
  * Apply CORS middleware via `effectRouterWithCors` for production use.
  */
-const publicRoutes = HttpRouter.empty.pipe(
+const publicRoutes = Layer.mergeAll(
 	// Health check — two paths, same handler
-	HttpRouter.get("/health", healthHandler),
-	HttpRouter.get("/api/status", healthHandler),
+	HttpRouter.add("GET", "/health", healthHandler),
+	HttpRouter.add("GET", "/api/status", healthHandler),
 
 	// Version info
-	HttpRouter.get("/info", infoHandler),
+	HttpRouter.add("GET", "/info", infoHandler),
 
 	// Setup info (onboarding)
-	HttpRouter.get("/api/setup-info", setupInfoHandler),
+	HttpRouter.add("GET", "/api/setup-info", setupInfoHandler),
 
 	// CA certificate download
-	HttpRouter.get("/ca/download", caDownloadHandler),
+	HttpRouter.add("GET", "/ca/download", caDownloadHandler),
 
-	HttpRouter.get("/auth", authPageHandler),
-	HttpRouter.get("/setup", setupPageHandler),
-	HttpRouter.concat(authRoute),
-	HttpRouter.concat(authStatusRoute),
+	HttpRouter.add("GET", "/auth", authPageHandler),
+	HttpRouter.add("GET", "/setup", setupPageHandler),
+	authRoute,
+	authStatusRoute,
 );
 
-const protectedRoutes = HttpRouter.empty.pipe(
-	HttpRouter.get("/api/projects", projectsHandler),
-	HttpRouter.get("/api/push/vapid-key", vapidKeyHandler),
-	HttpRouter.post("/api/push/subscribe", pushSubscribeHandler),
-	HttpRouter.post("/api/push/unsubscribe", pushUnsubscribeHandler),
-	HttpRouter.get("/", rootHandler),
-	HttpRouter.get("/s/:id", rootHandler),
-	HttpRouter.get("/p/:slug", rootHandler),
-	HttpRouter.get("/p/:slug/*", projectRouteHandler),
-	HttpRouter.use((handler) => withAuthGate(handler)),
+const protectedRoutes = Layer.mergeAll(
+	HttpRouter.add("GET", "/api/projects", projectsHandler),
+	HttpRouter.add("GET", "/api/push/vapid-key", vapidKeyHandler),
+	HttpRouter.add("POST", "/api/push/subscribe", pushSubscribeHandler),
+	HttpRouter.add("POST", "/api/push/unsubscribe", pushUnsubscribeHandler),
+	HttpRouter.add("GET", "/", rootHandler),
+	HttpRouter.add("GET", "/s/:id", rootHandler),
+	HttpRouter.add("GET", "/p/:slug/*", projectRouteHandler),
+).pipe(
+	Layer.provide(
+		HttpRouter.middleware(
+			Effect.gen(function* () {
+				const auth = yield* AuthManagerTag;
+				return (handler) =>
+					withAuthGate(handler).pipe(
+						Effect.provideService(AuthManagerTag, auth),
+					);
+			}),
+		).layer,
+	),
 );
 
-const staticCatchAll = HttpRouter.empty.pipe(
-	HttpRouter.get("*", staticCatchAllHandler),
-);
+const staticCatchAll = HttpRouter.add("GET", "*", staticCatchAllHandler);
 
-export const effectRouter = HttpRouter.empty.pipe(
-	HttpRouter.concat(publicRoutes),
-	HttpRouter.concat(protectedRoutes),
-	HttpRouter.concat(staticCatchAll),
+export const effectRouter = Layer.mergeAll(
+	publicRoutes,
+	protectedRoutes,
+	staticCatchAll,
 );
 
 /**
@@ -431,8 +435,9 @@ export const effectRouter = HttpRouter.empty.pipe(
  *   Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS
  *   Access-Control-Allow-Headers: Content-Type, Authorization, X-Relay-Pin
  */
-export const effectRouterWithCors = effectRouter.pipe(
-	HttpMiddleware.cors({
+export const effectRouterWithCors = Layer.merge(
+	effectRouter,
+	HttpRouter.cors({
 		allowedOrigins: ["*"],
 		allowedMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
 		allowedHeaders: ["Content-Type", "Authorization", "X-Relay-Pin"],

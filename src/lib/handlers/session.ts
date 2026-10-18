@@ -1,4 +1,4 @@
-import { Effect, Result as Either, PubSub } from "effect";
+import { Effect, PubSub, Result } from "effect";
 import { accountRefFromSelection } from "../account-directory.js";
 import type { Account, AccountRef } from "../contracts/account.js";
 import type { AccountId } from "../contracts/provider-instance.js";
@@ -111,8 +111,8 @@ export const resolveSessionCreation = (
 			},
 			catalog,
 		);
-		if (Either.isLeft(resolved)) return yield* resolved.left;
-		return { account, pick: resolved.right, permissionMode };
+		if (Result.isFailure(resolved)) return yield* resolved.failure;
+		return { account, pick: resolved.success, permissionMode };
 	});
 
 interface DeleteSessionPayload {
@@ -129,10 +129,10 @@ const shouldStartOpenCodePoller = (sessionId: string) =>
 	Effect.gen(function* () {
 		const readQuery = yield* ReadQueryEffectTag;
 
-		const rowResult = yield* Effect.either(readQuery.getSession(sessionId));
-		if (rowResult._tag === "Left") return true;
+		const rowResult = yield* Effect.result(readQuery.getSession(sessionId));
+		if (rowResult._tag === "Failure") return true;
 
-		const row = rowResult.right;
+		const row = rowResult.success;
 		return !row || getProviderDriver(row.provider)?.runsOpenCodeServer === true;
 	});
 
@@ -211,7 +211,7 @@ export const createSessionForClient = <E = never>({
 	readonly accountRef?: AccountRef;
 	readonly account?: Account;
 	readonly sessionId?: string;
-	readonly resolvedCreation?: Effect.Effect.Success<
+	readonly resolvedCreation?: Effect.Success<
 		ReturnType<typeof resolveSessionCreation>
 	>;
 	readonly permissionMode: SessionPermissionMode;
@@ -284,7 +284,7 @@ export const createSessionForClient = <E = never>({
 									yield* refreshGlobalDefaults;
 								}
 							}).pipe(
-								Effect.catchAllCause((cause) =>
+								Effect.catchCause((cause) =>
 									Effect.sync(() =>
 										log.warn(
 											`client=${clientId} session=${session.id} Failed to remember effort preference`,
@@ -347,7 +347,7 @@ export const deleteSessionForClient = ({
 			if (!id) return [];
 			const inspection = yield* prepareSessionWorktreeDeletion(id).pipe(
 				Effect.map((plan) => ({ plan, warnings: [] as string[] })),
-				Effect.catchAllCause((cause) =>
+				Effect.catchCause((cause) =>
 					Effect.succeed({
 						plan: undefined,
 						warnings: [
@@ -368,7 +368,7 @@ export const deleteSessionForClient = ({
 			) {
 				warnings.push(
 					...(yield* cleanupSessionWorktrees(id, inspection.plan).pipe(
-						Effect.catchAllCause((cause) =>
+						Effect.catchCause((cause) =>
 							Effect.succeed([
 								`Worktree cleanup failed: ${Failure.renderCause(cause).slice(0, 2_000)}`,
 							]),

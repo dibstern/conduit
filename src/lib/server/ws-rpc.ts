@@ -1,6 +1,6 @@
 import {
+	type Array as Arr,
 	type Cause,
-	type Chunk,
 	Context,
 	Effect,
 	Fiber,
@@ -30,6 +30,7 @@ import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-
 import { subscribeSessionFamily } from "../domain/relay/Services/session-family-subscription.js";
 import { subscribeShell } from "../domain/relay/Services/shell-subscription.js";
 import { subscribeSessionTodos } from "../domain/relay/Services/todo-subscription.js";
+import * as Failure from "../effect/failure-classification.js";
 import { conversationHandlers } from "./ws-rpc/conversation.js";
 import { daemonOnlyHandlers } from "./ws-rpc/daemon.js";
 import { filesHandlers } from "./ws-rpc/files.js";
@@ -59,7 +60,7 @@ const unaryHandlers = {
 const subscribeSessionDetailWithPresence = (
 	options: Parameters<typeof subscribeSessionDetail>[0],
 ) =>
-	Stream.unwrapScoped(
+	Stream.unwrap(
 		Effect.gen(function* () {
 			const wsHandler = yield* WebSocketHandlerTag;
 			yield* Effect.acquireRelease(
@@ -152,14 +153,14 @@ type RegisteredStreamHandlers = {
 		request: Rpc.Payload<Rpc.ExtractTag<WsRpcs, K>>,
 	) => Rpc.Wrapper<
 		Stream.Stream<
-			Stream.Stream.Success<ReturnType<(typeof streamHandlers)[K]>>,
+			Stream.Success<ReturnType<(typeof streamHandlers)[K]>>,
 			WsRpcError,
-			Stream.Stream.Context<ReturnType<(typeof streamHandlers)[K]>>
+			Stream.Services<ReturnType<(typeof streamHandlers)[K]>>
 		>
 	>;
 };
 
-type StreamHandlerContext = Stream.Stream.Context<
+type StreamHandlerContext = Stream.Services<
 	ReturnType<(typeof streamHandlers)[keyof typeof streamHandlers]>
 >;
 
@@ -174,12 +175,16 @@ export const wsRpcHandlers = WsRpcGroup.of({
 					handler(request);
 				return Rpc.fork(
 					stream.pipe(
-						Stream.mapError((error) =>
-							error instanceof WsRpcError
-								? error
-								: new WsRpcError({
-										message: `${name} failed: ${String(error)}`,
-									}),
+						Stream.catchCause((cause) =>
+							Stream.failCause(
+								Failure.mapFailures(cause, (error) =>
+									error instanceof WsRpcError
+										? error
+										: new WsRpcError({
+												message: `${name} failed: ${String(error)}`,
+											}),
+								),
+							),
 						),
 					),
 				);
@@ -190,11 +195,12 @@ export const wsRpcHandlers = WsRpcGroup.of({
 
 export const WsRpcServerLayer = WsRpcGroup.toLayer(wsRpcHandlers);
 
-export class RpcSubscriptionScopeTag extends Context.Tag(
-	"RpcSubscriptionScope",
-)<RpcSubscriptionScopeTag, Scope.Scope>() {}
+export class RpcSubscriptionScopeTag extends Context.Service<
+	RpcSubscriptionScopeTag,
+	Scope.Scope
+>()("RpcSubscriptionScope") {}
 
-export const RpcSubscriptionScopeLive = Layer.scoped(
+export const RpcSubscriptionScopeLive = Layer.effect(
 	RpcSubscriptionScopeTag,
 	Effect.scope,
 );
@@ -203,7 +209,7 @@ export type ResolveRpcContext = (
 	projectSlug: string,
 ) => Effect.Effect<
 	Context.Context<
-		Layer.Layer.Context<typeof WsRpcServerLayer> | RpcSubscriptionScopeTag
+		Layer.Services<typeof WsRpcServerLayer> | RpcSubscriptionScopeTag
 	>,
 	WsRpcError
 >;
@@ -248,21 +254,22 @@ export type DaemonRpcName =
 	| "SetLogLevel"
 	| "ResolveSession";
 
-export class RpcCaller extends Context.Tag("RpcCaller")<
+export class RpcCaller extends Context.Service<
 	RpcCaller,
 	{ readonly kind: "browser"; readonly ip: string } | { readonly kind: "cli" }
->() {}
+>()("RpcCaller") {}
 
 /** Browser mutations revoke connections after their reply has been written. */
-export class RpcPinChangeResponse extends Context.Tag("RpcPinChangeResponse")<
+export class RpcPinChangeResponse extends Context.Service<
 	RpcPinChangeResponse,
 	(invalidate: () => void) => void
->() {}
+>()("RpcPinChangeResponse") {}
 
 /** Connection invalidators share the daemon lifetime; Unix clients never register. */
-export class BrowserRpcConnectionsTag extends Context.Tag(
-	"BrowserRpcConnections",
-)<BrowserRpcConnectionsTag, Set<() => void>>() {}
+export class BrowserRpcConnectionsTag extends Context.Service<
+	BrowserRpcConnectionsTag,
+	Set<() => void>
+>()("BrowserRpcConnections") {}
 
 export const BrowserRpcConnectionsLive = Layer.sync(
 	BrowserRpcConnectionsTag,
@@ -304,18 +311,23 @@ export const makeRoutedWsRpcServerLayer = <
 	defaultProjectSlug?: string,
 	attachProject?: AttachDaemonProject,
 ) =>
-	Layer.unwrapEffect(
+	Layer.unwrap(
 		Effect.gen(function* () {
 			const directory = yield* SessionDirectory;
 			const projectSlugFor = (payload: object, fallback?: string) =>
 				Effect.gen(function* () {
 					if ("sessionId" in payload && typeof payload.sessionId === "string") {
 						const owner = yield* directory.projectOf(payload.sessionId).pipe(
-							Effect.mapError(
-								(error) =>
-									new WsRpcError({
-										message: error.message,
-									}),
+							Effect.catchCause((cause) =>
+								Effect.failCause(
+									Failure.mapFailures(
+										cause,
+										(error) =>
+											new WsRpcError({
+												message: error.message,
+											}),
+									),
+								),
 							),
 						);
 						if (Option.isNone(owner))
@@ -407,12 +419,11 @@ export const makeRoutedWsRpcServerLayer = <
 				-readonly [K in keyof typeof unaryHandlers]: (
 					payload: Parameters<(typeof unaryHandlers)[K]>[0],
 				) => Effect.Effect<
-					Effect.Effect.Success<ReturnType<(typeof unaryHandlers)[K]>>,
-					| Effect.Effect.Error<ReturnType<(typeof unaryHandlers)[K]>>
-					| WsRpcError,
+					Effect.Success<ReturnType<(typeof unaryHandlers)[K]>>,
+					Effect.Error<ReturnType<(typeof unaryHandlers)[K]>> | WsRpcError,
 					K extends "SetPin"
 						? D extends DaemonRpcHandlers
-							? Effect.Effect.Context<ReturnType<D["SetPin"]>>
+							? Effect.Services<ReturnType<D["SetPin"]>>
 							: never
 						: never
 				>;
@@ -432,58 +443,59 @@ export const makeRoutedWsRpcServerLayer = <
 			const routeStream = <
 				A,
 				E,
-				R extends Layer.Layer.Context<typeof WsRpcServerLayer>,
+				R extends Layer.Services<typeof WsRpcServerLayer>,
 			>(
 				payload: object,
 				make: () => Stream.Stream<A, E, R>,
 				fallbackProjectSlug?: string,
 			) =>
 				Rpc.fork(
-					Stream.unwrapScoped(
+					Stream.unwrap(
 						Effect.gen(function* () {
 							const projectSlug = yield* projectSlugFor(
 								payload,
 								fallbackProjectSlug,
 							);
 							const context = yield* resolveContext(projectSlug);
-							type Signal =
-								| { readonly _tag: "Batch"; readonly values: Chunk.Chunk<A> }
-								| { readonly _tag: "Failure"; readonly cause: Cause.Cause<E> }
-								| { readonly _tag: "End" };
 							const queue = yield* Effect.acquireRelease(
-								Queue.bounded<Signal>(2),
+								Queue.bounded<Arr.NonEmptyReadonlyArray<A>, E | Cause.Done>(2),
 								Queue.shutdown,
 							);
 							// Project removal and browser cancellation both await this producer
 							// before SQLite closes. Queue shutdown ends the consumer cleanly.
 							yield* Effect.acquireRelease(
-								Stream.runForEachChunk(
+								Stream.runForEachArray(
 									Stream.provideContext(make(), context),
-									(values) => Queue.offer(queue, { _tag: "Batch", values }),
+									(values) => Queue.offer(queue, values),
 								).pipe(
 									Effect.matchCauseEffect({
-										onFailure: (cause) =>
-											Queue.offer(queue, { _tag: "Failure", cause }),
-										onSuccess: () => Queue.offer(queue, { _tag: "End" }),
+										onFailure: (cause) => Queue.failCause(queue, cause),
+										onSuccess: () => Queue.end(queue),
 									}),
 									Effect.interruptible,
-									Effect.onInterrupt(() => Queue.shutdown(queue)),
+									Effect.onInterrupt(() =>
+										// Shutdown retains Done and discards buffered batches on project removal.
+										Queue.end(queue).pipe(
+											Effect.andThen(Queue.shutdown(queue)),
+											Effect.asVoid,
+										),
+									),
 									Effect.forkIn(Context.get(context, RpcSubscriptionScopeTag)),
 								),
 								Fiber.interrupt,
 							);
 							return Stream.fromQueue(queue).pipe(
-								Stream.takeWhile((signal) => signal._tag !== "End"),
-								Stream.flatMap((signal) =>
-									signal._tag === "Batch"
-										? Stream.fromChunk(signal.values)
-										: Stream.failCause(signal.cause),
-								),
-								Stream.mapError(
-									(error) =>
-										new WsRpcError({
-											message: `Subscription failed: ${String(error)}`,
-										}),
+								Stream.flattenArray,
+								Stream.catchCause((cause) =>
+									Stream.failCause(
+										Failure.mapFailures(
+											cause,
+											(error) =>
+												new WsRpcError({
+													message: `Subscription failed: ${String(error)}`,
+												}),
+										),
+									),
 								),
 							);
 						}),

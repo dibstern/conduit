@@ -27,6 +27,7 @@ import {
 } from "../../domain/daemon/Services/worktree-cleanup-service.js";
 import { publishGlobalProjectSetting } from "../../domain/relay/Services/project-settings.js";
 import { ConfigTag } from "../../domain/relay/Services/services.js";
+import * as Failure from "../../effect/failure-classification.js";
 import {
 	getClaudeSettingsOverrides,
 	resolveClaudeSettingsForInstance,
@@ -57,7 +58,7 @@ export const settingsHandlers = {
 			yield* persistence.flush;
 			yield* requestWorktreeCleanup();
 			return { worktreeCleanup };
-		}).pipe(Effect.catchAll(mapRpcFailure("SetWorktreeCleanupSetting"))),
+		}).pipe(Effect.catch(mapRpcFailure("SetWorktreeCleanupSetting"))),
 	CleanUpWorktreesNow: ({ projectSlug }) => cleanUpWorktreesNow(projectSlug),
 	GetAutoSettleSetting: (_request) =>
 		Effect.gen(function* () {
@@ -94,7 +95,7 @@ export const settingsHandlers = {
 			yield* persistence.requestSave;
 			yield* persistence.flush;
 			return { autoArchiveAfterDays: days };
-		}).pipe(Effect.catchAll(mapRpcFailure("SetAutoArchiveSetting"))),
+		}).pipe(Effect.catch(mapRpcFailure("SetAutoArchiveSetting"))),
 	SetAutoSettleSetting: (request) =>
 		Effect.gen(function* () {
 			const days = request.autoSettleAfterDays;
@@ -111,7 +112,7 @@ export const settingsHandlers = {
 			yield* persistence.requestSave;
 			yield* persistence.flush;
 			return { autoSettleAfterDays: days };
-		}).pipe(Effect.catchAll(mapRpcFailure("SetAutoSettleSetting"))),
+		}).pipe(Effect.catch(mapRpcFailure("SetAutoSettleSetting"))),
 	GetUsageLimitsSetting: (_request) =>
 		Effect.gen(function* () {
 			const config = yield* Ref.get(yield* DaemonConfigRefTag);
@@ -129,7 +130,7 @@ export const settingsHandlers = {
 			yield* persistence.requestSave;
 			yield* persistence.flush;
 			return { usageLimits };
-		}).pipe(Effect.catchAll(mapRpcFailure("SetUsageLimitsSetting"))),
+		}).pipe(Effect.catch(mapRpcFailure("SetUsageLimitsSetting"))),
 	SetCursorUsageKeychain: ({ accountId, enabled }) =>
 		Effect.gen(function* () {
 			const accounts = yield* (yield* AccountDirectory).list;
@@ -156,7 +157,7 @@ export const settingsHandlers = {
 				projectSlug: request.projectSlug,
 				mode,
 			})),
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({
 						message: `SetDefaultPermissionMode failed: ${String(error)}`,
@@ -189,7 +190,7 @@ export const settingsHandlers = {
 				hiddenModels: entries.hiddenModels,
 				hiddenAgents: entries.hiddenAgents,
 			})),
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({
 						message: `SetHiddenEntries failed: ${String(error)}`,
@@ -214,12 +215,16 @@ export const settingsHandlers = {
 				projectSlug: request.projectSlug,
 				overrides,
 			})),
-			Effect.mapError((error) =>
-				error instanceof ClaudeSettingsTrustBoundaryError
-					? error
-					: new WsRpcError({
-							message: `SetClaudeSettings failed: ${String(error)}`,
-						}),
+			Effect.catchCause((cause) =>
+				Effect.failCause(
+					Failure.mapFailures(cause, (error) =>
+						error instanceof ClaudeSettingsTrustBoundaryError
+							? error
+							: new WsRpcError({
+									message: `SetClaudeSettings failed: ${String(error)}`,
+								}),
+					),
+				),
 			),
 		),
 	ResolveClaudeSettings: (request) =>
@@ -230,13 +235,17 @@ export const settingsHandlers = {
 					instanceId: request.instanceId,
 					resolved,
 				})),
-				Effect.mapError((error) =>
-					error instanceof ClaudeSettingsResolveError ||
-					error instanceof AccountUnroutable
-						? error
-						: new WsRpcError({
-								message: `ResolveClaudeSettings failed: ${String(error)}`,
-							}),
+				Effect.catchCause((cause) =>
+					Effect.failCause(
+						Failure.mapFailures(cause, (error) =>
+							error instanceof ClaudeSettingsResolveError ||
+							error instanceof AccountUnroutable
+								? error
+								: new WsRpcError({
+										message: `ResolveClaudeSettings failed: ${String(error)}`,
+									}),
+						),
+					),
 				),
 			),
 		),

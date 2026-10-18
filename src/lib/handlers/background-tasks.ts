@@ -38,6 +38,6 @@ export const stopBackgroundTaskById = (sessionId: string, taskId: string) =>
 			);
 		yield* provider.stopTaskEffect(sessionId, taskId).pipe(
 			// Another client or the task itself may finish it while the SDK answers.
-			Effect.catchAll((error) => (isLive() ? Effect.fail(error) : Effect.void)),
+			Effect.catch((error) => (isLive() ? Effect.fail(error) : Effect.void)),
 		);
 	});

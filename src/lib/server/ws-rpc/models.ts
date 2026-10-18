@@ -6,6 +6,7 @@ import { AccountDirectory } from "../../domain/daemon/Services/account-directory
 import { OpenCodeInstancesTag } from "../../domain/daemon/Services/opencode-instances-service.js";
 import { AgentServiceTag } from "../../domain/relay/Services/agent-service.js";
 import { ConfigTag } from "../../domain/relay/Services/services.js";
+import * as Failure from "../../effect/failure-classification.js";
 import { switchContextWindowForSession } from "../../handlers/context-window.js";
 import {
 	getModelsResponse,
@@ -43,7 +44,7 @@ export const modelsHandlers = {
 				hiddenAgents: getHiddenEntries(config.configDir).hiddenAgents,
 			};
 		}).pipe(
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({
 						message: `GetAgents failed: ${String(error)}`,
@@ -61,7 +62,7 @@ export const modelsHandlers = {
 					projectSlug: config.slug,
 					commands,
 				})),
-				Effect.catchAll((error) =>
+				Effect.catch((error) =>
 					Effect.fail(
 						new WsRpcError({
 							message: `GetCommands failed: ${String(error)}`,
@@ -80,7 +81,7 @@ export const modelsHandlers = {
 			});
 			return { ok: true as const };
 		}).pipe(
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({
 						message: `SwitchAgent failed: ${String(error)}`,
@@ -96,7 +97,7 @@ export const modelsHandlers = {
 				contextWindow: request.contextWindow,
 			}).pipe(
 				Effect.map((result) => ({ projectSlug: config.slug, ...result })),
-				Effect.catchAll((error) =>
+				Effect.catch((error) =>
 					Effect.fail(
 						new WsRpcError({
 							message: isPickRejection(error)
@@ -116,7 +117,7 @@ export const modelsHandlers = {
 				providerId: request.providerId,
 			}).pipe(
 				Effect.map((result) => ({ projectSlug: config.slug, ...result })),
-				Effect.catchAll((error) =>
+				Effect.catch((error) =>
 					Effect.fail(
 						new WsRpcError({
 							message: isPickRejection(error)
@@ -134,7 +135,7 @@ export const modelsHandlers = {
 			provider: request.provider,
 		}).pipe(
 			Effect.map((result) => ({ projectSlug: request.projectSlug, ...result })),
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({
 						message: isPickRejection(error)
@@ -151,7 +152,7 @@ export const modelsHandlers = {
 				harness: request.harness,
 				state,
 			})),
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({
 						message: isPickRejection(error)
@@ -169,7 +170,7 @@ export const modelsHandlers = {
 				variant: request.variant,
 			}).pipe(
 				Effect.map((result) => ({ projectSlug: config.slug, ...result })),
-				Effect.catchAll((error) =>
+				Effect.catch((error) =>
 					Effect.fail(
 						new WsRpcError({
 							message: isPickRejection(error)
@@ -195,7 +196,7 @@ export const modelsHandlers = {
 				hiddenModels: getHiddenEntries(config.configDir).hiddenModels,
 			};
 		}).pipe(
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({
 						message: `GetModels failed: ${String(error)}`,
@@ -220,7 +221,7 @@ export const subscribeDraftModels = (request: {
 	readonly projectSlug: string;
 	readonly instanceId: string;
 }) =>
-	Stream.unwrapScoped(
+	Stream.unwrap(
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
 			const account = yield* (yield* AccountDirectory).resolve({
@@ -261,21 +262,28 @@ export const subscribeDraftModels = (request: {
 					),
 				);
 			const [first, rest] = yield* Stream.peel(inventories, Sink.take(1)).pipe(
-				Effect.timeoutFail({
+				Effect.timeoutOrElse({
 					duration: "10 seconds",
-					onTimeout: () =>
-						new WsRpcError({
-							message: "Timed out waiting for OpenCode models",
-						}),
+					orElse: () =>
+						Effect.fail(
+							new WsRpcError({
+								message: "Timed out waiting for OpenCode models",
+							}),
+						),
 				}),
 			);
-			return Stream.concat(Stream.fromChunk(first), rest);
+			return Stream.concat(Stream.fromArray(first), rest);
 		}),
 	).pipe(
-		Stream.mapError(
-			(error) =>
-				new WsRpcError({
-					message: `OpenCode model discovery failed: ${String(error)}`,
-				}),
+		Stream.catchCause((cause) =>
+			Stream.failCause(
+				Failure.mapFailures(
+					cause,
+					(error) =>
+						new WsRpcError({
+							message: `OpenCode model discovery failed: ${String(error)}`,
+						}),
+				),
+			),
 		),
 	);
