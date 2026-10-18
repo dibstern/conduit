@@ -3,6 +3,8 @@
 - Status: accepted
 - Date: 2026-10-18
 - Context: epic conduit-test-m379
+- Amended 2026-10-18: Project Merge, Slug Aliases and the cutover merge were
+  dropped before implementation; see "Projects never merge".
 
 ## Context
 
@@ -31,47 +33,32 @@ grouping.**
 
 - Every session belongs to exactly one project, fixed when it is created.
 - A project is created or picked in New Session as well as from the sidebar.
-- Conduit is never "in" a project. `/p/<slug>/s/<id>` URLs stay, but the slug
-  only names a project; it is not app state. The attached project retires
-  everywhere.
+- Conduit is never "in" a project. A session's URL is `/s/<id>`, and the
+  sidebar Scope is `?p=<slug>`, which only names a project; it is not app
+  state. Old `/p/<slug>/s/<id>` and `/p/<slug>` links are rewritten to those.
+  The attached project retires everywhere.
 - Project Groups retire: automatic clustering, `groupingMode`,
   `defaultGroupingMode`, group labels and the `/group/<key>` Scope are
-  deleted. The Scope is one project or all of them. Repository Identity stays,
-  because merging and the cutover use it.
+  deleted. The Scope is one project or all of them, and old `/group/<key>`
+  links open the unscoped list. Repository Identity stays as a folder fact;
+  the project dialog shows it.
 
 **A folder can be the main folder of one project only.** Other folders, such
 as a shared library, can belong to several projects. So every session's
 starting folder still maps to one project, and imported provider sessions
 stay unambiguous.
 
-**Projects can be merged, and a merge is permanent.**
+**Projects never merge, and sessions never move between projects.**
 
-- Merging moves every session of the absorbed project into the target.
-  Sessions keep running where they ran: each session's workspace maps the
-  target's main folder to the folder or worktree the session used, as a
-  `session.workspace_changed` event with origin `existing`.
-- Folders the absorbed project has and the target lacks join the target, so
-  no session loses a folder. The target's settings win, and the merge prompt
-  lists any absorbed setting that will be dropped.
-- The absorbed project leaves a **slug alias**: its slug and main folder,
-  pointing at the target. Old `/p/<slug>` links redirect through it, and a
-  provider session found in that folder is imported into the target.
-- There is no unmerge. Sessions never move between projects; only an unsent
-  draft can change project. Forking a session into another project is the
-  workaround. This follows t3code.
-
-**The cutover merges copies automatically and asks about the rest once.**
-
-- Projects whose main folders are copies of one folder merge automatically:
-  same Repository Identity, the repository root as main folder, the same other
-  folders and the same settings. This loses nothing. The project on the
-  repository's main checkout survives, otherwise the one added first.
-- Every other group of today's grouping is offered once as a merge, showing
-  what differs. That covers monorepo subfolders, whose sessions would start in
-  the target's main folder, and projects whose other folders or settings
-  differ. The answer is stored and never asked again.
-- Old `/group/<key>` links open the merged project, or the unscoped list when
-  the group was not merged.
+- Only an unsent draft can change project. Forking a session into another
+  project is the way to carry work across. This follows t3code.
+- Projects that share a group today, such as a checkout and its
+  linked-worktree copy, stay separate projects when groups retire. Nothing is
+  merged or rewritten at upgrade.
+- Rejected: Project Merge with Slug Aliases, and a cutover that merges copies.
+  Every project read would have to expand a project to its aliases' slugs,
+  running turns would need handing to another relay, every moved session's
+  workspace would need remapping, and a wrong merge could not be undone.
 
 **A new session's project defaults to the open session's project.** The order
 is the draft's explicit pick, then the open session's project, then the
@@ -87,22 +74,20 @@ which ignored the open session.
   sessions never share files.
 - An unsent draft can switch between No project and a real project. A scratch
   session cannot move, like any other session.
-- The scratch project is not listed as a project and cannot be renamed,
-  merged or given folders.
+- The scratch project is not listed as a project and cannot be renamed or
+  given folders.
 
 ## Consequences
 
 - One grouping concept. The project tree view (conduit-test-m379.4) groups by
-  project alone, and the feed (ADR-0009) carries projects, aliases and
-  sessions.
-- Reads that select sessions by project expand the project to itself plus its
-  aliases' slugs, the way group scopes expand today. Events and session rows
-  keep the slug they were recorded under, so Project Provenance is unchanged
-  and no history is rewritten.
-- A wrong merge cannot be undone. The cutover only merges copies by itself,
-  and the manual merge prompt must say plainly that it is permanent.
+  project alone, and the feed (ADR-0009) carries projects and sessions.
+- A session read by project matches that project's slug alone. Project
+  Provenance is unchanged and no history is rewritten.
+- Today's grouped copies show as separate projects, so the tree has more
+  rows. Removing a copy's project hides its sessions (ADR-0008); it does not
+  fold them into another project.
 - Fork currently stays in its source project, so it needs a target-project
-  choice to be the escape hatch from a wrong project or merge.
+  choice (conduit-test-m379.11) to be the way out of a wrong project.
 - Deleting a scratch session must decide its folder's fate. It uses the
   keep-or-delete prompt of Conduit-created worktrees.
 - New Session gains a project picker with inline create, which
