@@ -1,7 +1,6 @@
 // Agents, models, providers, and commands.
 
-import { Effect, Result as Either, Fiber, Stream } from "effect";
-import type { RuntimeFiber } from "effect/Fiber";
+import { Effect, Fiber, Result, Stream } from "effect";
 import { untrack } from "svelte";
 import { accountRefFromSelection } from "../../account-directory.js";
 import type { DefaultSessionMode } from "../../contracts/project-file.js";
@@ -465,7 +464,7 @@ export const draftModelInventory = $state({
 });
 let inventoryTarget: { projectSlug: string; instanceId: string } | null = null;
 let inventoryGeneration = 0;
-let inventoryFiber: RuntimeFiber<void, never> | null = null;
+let inventoryFiber: Fiber.Fiber<void, never> | null = null;
 
 /** The open browser draft owns one cancellable inventory subscription. */
 export function viewDraftModels(
@@ -535,9 +534,7 @@ export function viewDraftModels(
 									}),
 							),
 					),
-				).pipe(
-					Effect.catchAll((error) => Effect.sync(() => fail(error.message))),
-				),
+				).pipe(Effect.catch((error) => Effect.sync(() => fail(error.message)))),
 			);
 			if (generation === inventoryGeneration) inventoryFiber = next;
 			else runtime.runFork(Fiber.interrupt(next));
@@ -557,7 +554,7 @@ export function getDraftPick(): Immutable<DraftPick> | undefined {
 		return undefined;
 	if (!draftModel || !instanceId) return undefined;
 	if (
-		Either.isFailure(
+		Result.isFailure(
 			resolveTurnSettings(
 				{
 					harness: draftDriver(instanceId),
@@ -1125,7 +1122,7 @@ function fillDraftDefault(): void {
 		},
 		catalog,
 	);
-	if (Either.isFailure(resolved)) return;
+	if (Result.isFailure(resolved)) return;
 	if (!draftPermissionChosen)
 		draft.permissionMode = serverDiscovery.defaultPermissionMode;
 	setDraftModel(
@@ -1190,7 +1187,7 @@ function setDraftModel(
 		},
 		catalog,
 	);
-	if (Either.isFailure(resolved)) return;
+	if (Result.isFailure(resolved)) return;
 	if (!scope) {
 		draft.instanceId = instanceId;
 		draft.driver = harness;

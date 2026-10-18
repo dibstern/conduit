@@ -2,7 +2,6 @@
 // Provides reactive state for the TodoOverlay component.
 
 import { Effect, Fiber, Stream } from "effect";
-import type { RuntimeFiber } from "effect/Fiber";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { supervise } from "../transport/supervise.js";
@@ -17,7 +16,7 @@ export const todoState = $state({
 
 let viewed: { project: string; sessionId: string | null } | null = null;
 let generation = 0;
-let fiber: RuntimeFiber<void, never> | null = null;
+let fiber: Fiber.Fiber<void, never> | null = null;
 
 /**
  * Show `sessionId`'s todo list: subscribe for that session (an explicit

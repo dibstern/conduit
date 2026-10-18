@@ -1,6 +1,6 @@
-import { Effect, Result as Either, Option } from "effect";
+import { Effect, Option, Result } from "effect";
 import type { Rpc, RpcGroup } from "effect/rpc";
-import { RpcClientError } from "effect/rpc/RpcClientError";
+import { RpcClientDefect, RpcClientError } from "effect/rpc/RpcClientError";
 import type { WsRpcGroup } from "../../contracts/ws-rpc.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { runTransportEffect } from "./runtime.js";
@@ -20,27 +20,38 @@ type Payload<T extends UnaryTag> = Rpc.PayloadConstructor<
 type Success<T extends UnaryTag> = Rpc.Success<Rpc.ExtractTag<Rpcs, T>>;
 type Declared<T extends UnaryTag> = Rpc.Error<Rpc.ExtractTag<Rpcs, T>>;
 
+class RpcCallFailed extends RpcClientError {
+	override get message(): string {
+		return "RPC call failed";
+	}
+
+	override get cause(): unknown {
+		return this.reason.cause;
+	}
+}
+
 /** Call a unary RPC on the shared control socket, sending the payload as given. */
 export function rpcEffect<T extends UnaryTag>(
 	tag: T,
 	payload: Payload<T>,
 ): Effect.Effect<Success<T>, Declared<T> | RpcClientError, WsRpcClients>;
-export function rpcEffect<T extends UnaryTag>(tag: T, payload: Payload<T>) {
+export function rpcEffect(tag: UnaryTag, payload: Payload<UnaryTag>) {
 	return Effect.gen(function* () {
 		const clients = yield* WsRpcClients;
 		const { control } = yield* clients.forProject("");
 		return yield* control(tag, payload);
 	}).pipe(
-		Effect.catchAllCause((cause) =>
+		Effect.catchCause((cause) =>
 			Effect.flatMap(Failure.isInterruptedByCaller, (byCaller) => {
 				if (byCaller) return Effect.failCause(cause);
 				const failure = Failure.soleFailure(cause);
 				if (Option.isSome(failure)) return Effect.fail(failure.value);
 				return Effect.fail(
-					new RpcClientError({
-						reason: "Unknown",
-						message: "RPC call failed",
-						cause: Failure.squashCause(cause),
+					new RpcCallFailed({
+						reason: new RpcClientDefect({
+							message: "RPC call failed",
+							cause: Failure.squashCause(cause),
+						}),
 					}),
 				);
 			}),
@@ -53,8 +64,8 @@ export async function rpc<T extends UnaryTag>(
 	payload: Payload<T>,
 ): Promise<Success<T>> {
 	const result = await runTransportEffect(
-		Effect.either(rpcEffect(tag, payload)),
+		Effect.result(rpcEffect(tag, payload)),
 	);
-	if (Either.isLeft(result)) throw result.left;
-	return result.right;
+	if (Result.isFailure(result)) throw result.failure;
+	return result.success;
 }

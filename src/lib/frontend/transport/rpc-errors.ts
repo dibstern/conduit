@@ -45,7 +45,7 @@ export const copy: {
 
 const isDeclared = Schema.is(
 	Schema.Union(
-		...Array.from(WsRpcGroup.requests.values(), (rpc) => rpc.errorSchema),
+		Array.from(WsRpcGroup.requests.values(), (rpc) => rpc.errorSchema),
 	),
 );
 
