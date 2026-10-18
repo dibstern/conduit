@@ -3,6 +3,8 @@
 
 import { defineConfig } from "@playwright/test";
 
+const port = Number(process.env["ACCEPTANCE_PORT"] ?? 4173);
+
 export default defineConfig({
 	testDir: "./specs",
 	testMatch: "notification-session-nav.spec.ts",
@@ -18,7 +20,7 @@ export default defineConfig({
 	expect: { timeout: 10_000 },
 
 	use: {
-		baseURL: "http://localhost:4173",
+		baseURL: `http://localhost:${port}`,
 		trace: "on-first-retry",
 		screenshot: "only-on-failure",
 		video: "off",
@@ -35,10 +37,10 @@ export default defineConfig({
 	],
 
 	webServer: {
-		command: "pnpm exec vite preview --port 4173 --strictPort",
+		command: `pnpm exec vite preview --port ${port} --strictPort`,
 		cwd: "../../",
-		port: 4173,
-		reuseExistingServer: !process.env["CI"],
+		port,
+		reuseExistingServer: false,
 		timeout: 15_000,
 	},
 });
