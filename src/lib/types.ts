@@ -126,6 +126,9 @@ export interface StoredProject {
 		| import("./contracts/project-file.js").SessionMode
 		| undefined;
 	readonly groupingMode?: import("./shared-types.js").GroupingMode | undefined;
+	readonly worktreeCleanup?:
+		| import("./contracts/worktree.js").ProjectWorktreeCleanup
+		| undefined;
 }
 
 export interface RecentProject {

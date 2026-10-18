@@ -9,13 +9,11 @@ import {
 	Option,
 	PubSub,
 	Queue,
-	Ref,
 	Schedule,
 } from "effect";
-import {
-	DEFAULT_WORKTREE_CLEANUP,
-	type WorktreeCleanupEntry,
-	type WorktreeCleanupReport,
+import type {
+	WorktreeCleanupEntry,
+	WorktreeCleanupReport,
 } from "../../../contracts/worktree.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import { stopQuiescentSettledAgents } from "../../../session/stop-settled-agents.js";
@@ -25,6 +23,7 @@ import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
 	allProjects,
+	getEffectiveWorktreeCleanup,
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
@@ -39,11 +38,6 @@ export const WorktreeCleanupLive = (configDir: string) =>
 			const cache = yield* RelayCacheTag;
 			const bus = yield* DaemonEventBusTag;
 			const requests = yield* WorktreeCleanupQueueTag;
-			const getSetting = Ref.get(configRef).pipe(
-				Effect.map(
-					(config) => config.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP,
-				),
-			);
 			const getProjectFolders = allProjects.pipe(
 				Effect.provideService(ProjectRegistryTag, registry),
 				Effect.flatMap((projects) =>
@@ -76,6 +70,13 @@ export const WorktreeCleanupLive = (configDir: string) =>
 					);
 					for (const project of projects) {
 						yield* Effect.gen(function* () {
+							const getSetting = getEffectiveWorktreeCleanup(project.slug).pipe(
+								Effect.provideService(ProjectRegistryTag, registry),
+								Effect.provideService(DaemonConfigRefTag, configRef),
+								Effect.catchTag("ProjectNotFound", () =>
+									Effect.succeed("off" as const),
+								),
+							);
 							let relay = Option.getOrUndefined(
 								yield* cache.peek(project.slug),
 							);
@@ -100,16 +101,15 @@ export const WorktreeCleanupLive = (configDir: string) =>
 									),
 								);
 							}
-							if (
-								worktreeCleanupCandidateFilter(yield* getSetting, now) ===
-								undefined
-							)
+							const setting = yield* getSetting;
+							if (setting === "off") return;
+							if (worktreeCleanupCandidateFilter(setting, now) === undefined)
 								return;
 							if (relay === undefined) {
 								const paths = yield* readColdWorktreeCleanupCandidates(
 									project,
 									configDir,
-									yield* getSetting,
+									setting,
 									now,
 								);
 								if (paths.length === 0) return;

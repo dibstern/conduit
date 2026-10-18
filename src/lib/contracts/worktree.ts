@@ -16,6 +16,17 @@ export const WorktreeCleanupSchema = Schema.Struct({
 });
 export type WorktreeCleanup = typeof WorktreeCleanupSchema.Type;
 
+export const ProjectWorktreeCleanupSchema = Schema.Union(
+	Schema.Literal("off"),
+	WorktreeCleanupSchema,
+);
+export type ProjectWorktreeCleanup = typeof ProjectWorktreeCleanupSchema.Type;
+
+export const resolveWorktreeCleanup = (
+	globalRules: WorktreeCleanup,
+	override: ProjectWorktreeCleanup | undefined,
+): WorktreeCleanup | "off" => override ?? globalRules;
+
 export const DEFAULT_WORKTREE_CLEANUP: WorktreeCleanup = {
 	onSettle: "nothing-missing",
 	onDelete: false,

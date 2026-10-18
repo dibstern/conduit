@@ -68,7 +68,7 @@ export const readSessionQuiescence = (now: number, sessionId: string) =>
 	});
 
 export const cleanUpProjectWorktrees = (
-	getSetting: Effect.Effect<WorktreeCleanup>,
+	getSetting: Effect.Effect<WorktreeCleanup | "off">,
 	getProjectFolders: Effect.Effect<readonly string[]>,
 	now: number,
 ) =>
@@ -112,6 +112,7 @@ export const cleanUpProjectWorktrees = (
 			const base = { projectSlug: config.slug, sessionId };
 			yield* Effect.gen(function* () {
 				const setting = yield* getSetting;
+				if (setting === "off") return;
 				const initial = yield* stateOf(sessionId);
 				const deleted = initial.facts === undefined;
 				const initialDecision = decideWorktreeCleanup(
@@ -243,13 +244,18 @@ export const cleanUpProjectWorktrees = (
 							if (decision._tag === "Keep") return keep(decision.reason);
 						}
 						const changed = Effect.gen(function* () {
-							const current = yield* getSetting;
-							const latest = yield* stateOf(sessionId);
-							return (
-								JSON.stringify(current) !== JSON.stringify(setting) ||
-								JSON.stringify(latest) !== JSON.stringify(initial) ||
+							if (
 								(yield* hasOpenTerminal) ||
 								(yield* sharedReason) !== undefined
+							)
+								return true;
+							// Read rules and session state last: the checks above are slow
+							// enough for a switch to Off to land during them.
+							const latest = yield* stateOf(sessionId);
+							const current = yield* getSetting;
+							return (
+								JSON.stringify(current) !== JSON.stringify(setting) ||
+								JSON.stringify(latest) !== JSON.stringify(initial)
 							);
 						});
 						// Admission holds the inbox before resolving launch folders. Keep

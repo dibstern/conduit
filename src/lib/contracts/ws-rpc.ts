@@ -16,6 +16,7 @@ import {
 } from "../shared-types.js";
 import { AccountChangeRejected } from "./account.js";
 import {
+	ProjectWorktreeCleanupSchema,
 	WorktreeBranchRenameError,
 	WorktreeCleanupReportSchema,
 	WorktreeCleanupSchema,
@@ -1320,7 +1321,8 @@ export class SetDefault extends Schema.TaggedRequest<SetDefault>()(
 ) {}
 
 const WorktreeCleanupSettingResponseSchema = Schema.Struct({
-	worktreeCleanup: WorktreeCleanupSchema,
+	global: WorktreeCleanupSchema,
+	project: Schema.optional(Schema.NullOr(ProjectWorktreeCleanupSchema)),
 });
 
 export class GetWorktreeCleanupSetting extends Schema.TaggedRequest<GetWorktreeCleanupSetting>()(
@@ -1328,7 +1330,7 @@ export class GetWorktreeCleanupSetting extends Schema.TaggedRequest<GetWorktreeC
 	{
 		failure: WsRpcError,
 		success: WorktreeCleanupSettingResponseSchema,
-		payload: {},
+		payload: { projectSlug: Schema.optional(NonEmptyString) },
 	},
 ) {}
 
@@ -1337,7 +1339,23 @@ export class SetWorktreeCleanupSetting extends Schema.TaggedRequest<SetWorktreeC
 	{
 		failure: WsRpcError,
 		success: WorktreeCleanupSettingResponseSchema,
-		payload: { worktreeCleanup: WorktreeCleanupSchema },
+		payload: {
+			scope: Schema.Literal("global"),
+			rules: WorktreeCleanupSchema,
+		},
+	},
+) {}
+
+export class SetProjectWorktreeCleanupSetting extends Schema.TaggedRequest<SetProjectWorktreeCleanupSetting>()(
+	SetWorktreeCleanupSetting._tag,
+	{
+		failure: SetWorktreeCleanupSetting.failure,
+		success: SetWorktreeCleanupSetting.success,
+		payload: {
+			scope: Schema.Literal("project"),
+			projectSlug: NonEmptyString,
+			override: Schema.NullOr(ProjectWorktreeCleanupSchema),
+		},
 	},
 ) {}
 
@@ -3015,7 +3033,23 @@ const wsRpcRequests = [
 	GetAutoSettleSetting,
 	SetAutoSettleSetting,
 	GetWorktreeCleanupSetting,
-	SetWorktreeCleanupSetting,
+	{
+		requests: [SetProjectWorktreeCleanupSetting, SetWorktreeCleanupSetting],
+		rpc: Rpc.make(SetWorktreeCleanupSetting._tag, {
+			payload: Schema.Union(
+				Schema.Struct({
+					...SetProjectWorktreeCleanupSetting.fields,
+					_tag: wireTag(SetProjectWorktreeCleanupSetting._tag),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+				Schema.Struct({
+					...SetWorktreeCleanupSetting.fields,
+					_tag: wireTag(SetWorktreeCleanupSetting._tag),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			),
+			success: SetWorktreeCleanupSetting.success,
+			error: SetWorktreeCleanupSetting.failure,
+		}),
+	},
 	CleanUpWorktreesNow,
 	GetUsageLimitsSetting,
 	SetUsageLimitsSetting,

@@ -118,6 +118,9 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 				...(project.groupingMode !== undefined && {
 					groupingMode: project.groupingMode,
 				}),
+				...(project.worktreeCleanup !== undefined && {
+					worktreeCleanup: project.worktreeCleanup,
+				}),
 				...(sessionCount > 0 && { sessionCount }),
 			};
 		}),

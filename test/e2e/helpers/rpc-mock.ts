@@ -2,7 +2,13 @@ import { RpcSchema } from "@effect/rpc";
 import { expect, type Page, type WebSocketRoute } from "@playwright/test";
 import { Effect, Exit, Schema, Scope, Stream } from "effect";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
-import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
+import {
+	DEFAULT_WORKTREE_CLEANUP,
+	type ProjectWorktreeCleanup,
+	ProjectWorktreeCleanupSchema,
+	type WorktreeCleanup,
+	WorktreeCleanupSchema,
+} from "../../../src/lib/contracts/worktree.js";
 import {
 	type Alert,
 	type GetStatusResponse,
@@ -111,6 +117,8 @@ export interface RecordedRpcRequest {
 export class RpcMockControl {
 	constructor(private readonly page: Page) {}
 	projectSlug = "myapp";
+	worktreeCleanupGlobal: WorktreeCleanup = DEFAULT_WORKTREE_CLEANUP;
+	readonly worktreeCleanupProjects = new Map<string, ProjectWorktreeCleanup>();
 	onConnect?: () => void;
 	onSendMessage?: (payload: Record<string, unknown>) => void;
 	private readonly sockets = new Set<WebSocketRoute>();
@@ -675,9 +683,35 @@ function defaultHandler(
 			? () => ({ mode: "repository" })
 			: undefined) ??
 		(tag === "GetWorktreeCleanupSetting"
-			? () => ({ worktreeCleanup: DEFAULT_WORKTREE_CLEANUP })
+			? ({ projectSlug }) => ({
+					global: control.worktreeCleanupGlobal,
+					...(typeof projectSlug === "string" && {
+						project: control.worktreeCleanupProjects.get(projectSlug) ?? null,
+					}),
+				})
 			: tag === "SetWorktreeCleanupSetting"
-				? ({ worktreeCleanup }) => ({ worktreeCleanup })
+				? ({ scope, projectSlug, override, rules }) => {
+						if (scope === "project" && typeof projectSlug === "string") {
+							if (override === null)
+								control.worktreeCleanupProjects.delete(projectSlug);
+							else
+								control.worktreeCleanupProjects.set(
+									projectSlug,
+									Schema.decodeUnknownSync(ProjectWorktreeCleanupSchema)(
+										override,
+									),
+								);
+							return {
+								global: control.worktreeCleanupGlobal,
+								project:
+									control.worktreeCleanupProjects.get(projectSlug) ?? null,
+							};
+						}
+						control.worktreeCleanupGlobal = Schema.decodeUnknownSync(
+							WorktreeCleanupSchema,
+						)(rules);
+						return { global: control.worktreeCleanupGlobal };
+					}
 				: undefined) ??
 		(tag === "GetUsageLimitsSetting"
 			? () => ({

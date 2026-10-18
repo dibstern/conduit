@@ -3,7 +3,9 @@
  * removes unsettled work, local files, a shared checkout or a viewed session;
  * deleted ownership disappears or deletion never requests cleanup; deferred
  * removal becomes a permanent Keep; settled age reads the wrong clock; defaults or
- * settings disappear across restart; automatic requests race the manual result.
+ * settings disappear across restart; automatic requests race the manual result;
+ * project overrides leak into global or repository settings, skip cold Custom
+ * projects, clean Off projects, or fail to protect a mid-run switch to Off.
  * Exercise the daemon RPCs, real owned checkouts and the next provider turn.
  */
 import { execFileSync } from "node:child_process";
@@ -16,9 +18,13 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { WorktreeCleanup } from "../../../src/lib/contracts/worktree.js";
+import type {
+	ProjectWorktreeCleanup,
+	WorktreeCleanup,
+} from "../../../src/lib/contracts/worktree.js";
 import {
 	CleanUpWorktreesNow,
 	ClosePty,
@@ -30,6 +36,8 @@ import {
 	ListDaemonSessions,
 	ListPtys,
 	MoveSessionWorkspace,
+	SaveProject,
+	SetProjectWorktreeCleanupSetting,
 	SetSessionSettled,
 	SetWorktreeCleanupSetting,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -86,7 +94,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 	let evidence: Record<string, unknown> = {};
 	const owned = new Map<
 		string,
-		{ title: string; path: string; branch: string }
+		{ title: string; path: string; branch: string; projectDir: string }
 	>();
 
 	async function start(
@@ -149,19 +157,23 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		);
 		await fixture.restart({ startupTimeoutMs: 120_000 });
 		const socket = join(fixture.configDir, "relay.sock");
-		const sessions = () =>
+		const sessions = (projectSlug = "process-test") =>
 			sendRpcRequest(
 				socket,
 				new ListDaemonSessions({
-					projectSlug: "process-test",
-					scope: "process-test",
+					projectSlug,
+					scope: projectSlug,
 				}),
 			);
-		const create = async (title: string, newWorktree = true) => {
+		const create = async (
+			title: string,
+			newWorktree = true,
+			project = { slug: "process-test", directory: fixture.projectDir },
+		) => {
 			const result = await sendRpcRequest(
 				socket,
 				new CreateSession({
-					projectSlug: "process-test",
+					projectSlug: project.slug,
 					originId: "cleanup-test",
 					providerId: "claude",
 					permissionMode: "ask",
@@ -170,15 +182,21 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 					...(newWorktree ? { newWorktree: true } : {}),
 				}),
 			);
-			const session = (await sessions()).sessions.find(
+			const session = (await sessions(project.slug)).sessions.find(
 				({ id }) => id === result.sessionId,
 			);
-			const path = session?.workspace?.worktrees[fixture.projectDir];
+			const path = session?.workspace?.worktrees[project.directory];
 			if (newWorktree && !path)
 				throw new Error("Conduit did not publish an owned worktree");
 			const branch = path ? git(path, "branch", "--show-current") : "main";
-			if (path) owned.set(result.sessionId, { title, path, branch });
-			return { id: result.sessionId, path: path ?? fixture.projectDir, branch };
+			if (path)
+				owned.set(result.sessionId, {
+					title,
+					path,
+					branch,
+					projectDir: project.directory,
+				});
+			return { id: result.sessionId, path: path ?? project.directory, branch };
 		};
 		const settle = (sessionId: string) =>
 			sendRpcRequest(
@@ -209,17 +227,40 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			}
 			return result;
 		};
-		const setting = () =>
-			sendRpcRequest(socket, new GetWorktreeCleanupSetting({}));
+		const setting = (projectSlug?: string) =>
+			sendRpcRequest(
+				socket,
+				new GetWorktreeCleanupSetting(
+					projectSlug === undefined ? {} : { projectSlug },
+				),
+			);
 		const set = async (value: Partial<CleanupSetting>) => {
 			const worktreeCleanup = { ...defaults, ...value };
 			expect(
 				await sendRpcRequest(
 					socket,
-					new SetWorktreeCleanupSetting({ worktreeCleanup }),
+					new SetWorktreeCleanupSetting({
+						scope: "global",
+						rules: worktreeCleanup,
+					}),
 				),
-			).toEqual({ worktreeCleanup });
+			).toEqual({ global: worktreeCleanup });
 			return worktreeCleanup;
+		};
+		const setProject = async (
+			override: ProjectWorktreeCleanup | null,
+			projectSlug = "process-test",
+		) => {
+			const result = await sendRpcRequest(
+				socket,
+				new SetProjectWorktreeCleanupSetting({
+					scope: "project",
+					projectSlug,
+					override,
+				}),
+			);
+			expect(result.project).toEqual(override);
+			return result;
 		};
 		// A tracked edit keeps automatic requests harmless until the manual run.
 		// Drain those requests before restoring it so result assertions are repeatable.
@@ -241,6 +282,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			sweep,
 			setting,
 			set,
+			setProject,
 			enable,
 		};
 	}
@@ -261,7 +303,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 						...checkout,
 						exists: existsSync(checkout.path),
 						branchHead: git(
-							fixture.projectDir,
+							checkout.projectDir,
 							"rev-parse",
 							`refs/heads/${checkout.branch}`,
 						),
@@ -1165,6 +1207,312 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		evidence["trigger"] = "setting change";
 	}, 300_000);
 
+	it.each([
+		"loaded",
+		"cold",
+	] as const)("cleans a %s Custom project under its own rules when global rules remove nothing", async (state) => {
+		const { fixture, create, settle, setProject, setting, sweep } =
+			await start();
+		const session = await create("custom rules");
+		writeFileSync(join(session.path, "base.txt"), "unmerged work\n");
+		commit(session.path, "Unmerged custom work");
+		const head = git(session.path, "rev-parse", "HEAD");
+		writeFileSync(join(session.path, "base.txt"), "cleanup guard\n");
+		writeFileSync(
+			join(session.path, "untracked.txt"),
+			"custom allows removal\n",
+		);
+		await settle(session.id);
+		const custom: CleanupSetting = {
+			...defaults,
+			onSettle: "keep",
+			settledAfterDays: 0,
+			keepWhen: "tracked-changes",
+		};
+		await setProject(custom);
+		await sweep("drain custom request");
+		expect(await setting("process-test")).toEqual({
+			global: { ...defaults, onSettle: "keep" },
+			project: custom,
+		});
+		if (state === "cold") await fixture.shutdown();
+		git(session.path, "restore", "base.txt");
+		if (state === "cold") {
+			await fixture.restart({
+				startupTimeoutMs: 120_000,
+				skipBrowserProbe: true,
+			});
+			await vi.waitFor(() => expect(existsSync(session.path)).toBe(false), {
+				timeout: 30_000,
+			});
+		} else {
+			const result = await sweep("custom rules");
+			expect(result.removed).toContainEqual({
+				projectSlug: "process-test",
+				sessionId: session.id,
+				path: session.path,
+				reason: expect.stringMatching(/settled/i),
+			});
+		}
+		expect(existsSync(session.path)).toBe(false);
+		expect(
+			git(fixture.projectDir, "rev-parse", `refs/heads/${session.branch}`),
+		).toBe(head);
+		evidence["custom"] = {
+			state,
+			rules: custom,
+			global: (await setting()).global,
+		};
+	}, 300_000);
+
+	it.each([
+		"loaded",
+		"cold",
+	] as const)("skips a %s Off project without reporting its worktrees in Clean up now", async (state) => {
+		const { fixture, create, settle, setProject, sweep } = await start({
+			onSettle: "keep",
+			settledAfterDays: 0,
+		});
+		await setProject("off");
+		const session = await create("off project");
+		await settle(session.id);
+		if (state === "cold") {
+			await fixture.shutdown();
+			await fixture.restart({
+				startupTimeoutMs: 120_000,
+				skipBrowserProbe: true,
+			});
+		}
+		expect(await sweep("off project")).toEqual({
+			removed: [],
+			kept: [],
+			failed: [],
+		});
+		expect(existsSync(session.path)).toBe(true);
+		if (state === "cold")
+			expect(fixture.generations.at(-1)?.fakeSdkActive).toBe(false);
+		evidence["off"] = { state, pathExists: true };
+	}, 300_000);
+
+	it("a Use global project follows a global rules change", async () => {
+		const { create, settle, setProject, enable, setting, sweep } =
+			await start();
+		await setProject("off");
+		await setProject(null);
+		const session = await create("use global");
+		await settle(session.id);
+		await enable(session, { onSettle: "keep", settledAfterDays: 0 });
+		expect(await setting("process-test")).toEqual({
+			global: { ...defaults, onSettle: "keep", settledAfterDays: 0 },
+			project: null,
+		});
+		expect(
+			(await sweep("use global")).removed.map(({ sessionId }) => sessionId),
+		).toContain(session.id);
+		expect(existsSync(session.path)).toBe(false);
+	}, 300_000);
+
+	it("a project switched to Off during cleanup keeps its worktree", async () => {
+		const { fixture, create, settle, setProject, sweep } = await start();
+		const session = await create("off during cleanup");
+		await settle(session.id);
+		writeFileSync(join(session.path, "base.txt"), "cleanup guard\n");
+		await setProject({ ...defaults, onSettle: "keep", settledAfterDays: 0 });
+		await sweep("drain custom request before pause");
+		await fixture.shutdown();
+		const gate = join(fixture.root, "cleanup-inspection");
+		const preload = join(fixture.root, "pause-cleanup-inspection.mjs");
+		// Pause the real filesystem inspection after the sweep has read its rules.
+		// The process harness already accepts a test-only NODE_OPTIONS preload.
+		writeFileSync(
+			preload,
+			`
+import fs from "node:fs/promises";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+const gate = ${JSON.stringify(gate)};
+const readdir = fs.readdir;
+fs.readdir = async (directory, options) => {
+  if (existsSync(gate) && String(directory) === readFileSync(gate, "utf8")) {
+    writeFileSync(gate + "-started", String(directory));
+    while (!existsSync(gate + "-release")) await new Promise(done => setTimeout(done, 10));
+  }
+  return readdir(directory, options);
+};
+syncBuiltinESMExports();
+`,
+		);
+		await fixture.restart({
+			startupTimeoutMs: 120_000,
+			serviceEnvironment: {
+				NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`,
+			},
+		});
+		await sweep("drain startup before pause");
+		git(session.path, "restore", "base.txt");
+		writeFileSync(gate, session.path);
+		const running = sweep("switch Off during inspection", "process-test");
+		try {
+			await vi.waitFor(() => expect(existsSync(`${gate}-started`)).toBe(true), {
+				timeout: 15_000,
+			});
+			await setProject("off");
+		} finally {
+			writeFileSync(`${gate}-release`, "continue");
+		}
+		const result = await running;
+		expect(result.removed).toEqual([]);
+		expect(result.kept).toContainEqual({
+			projectSlug: "process-test",
+			sessionId: session.id,
+			path: session.path,
+			reason: "Changed during check",
+		});
+		expect(existsSync(session.path)).toBe(true);
+		expect(await sweep("Off after paused run")).toEqual({
+			removed: [],
+			kept: [],
+			failed: [],
+		});
+		evidence["pausedRun"] = {
+			inspectedPath: readFileSync(`${gate}-started`, "utf8"),
+			switchedTo: "off",
+		};
+	}, 300_000);
+
+	it("changing a project override requests only that project, while a global change requests all", async () => {
+		const { fixture, socket, create, settle, set, setProject, sweep } =
+			await start();
+		const directory = join(fixture.root, "other-project");
+		mkdirSync(directory);
+		git(directory, "init", "-b", "main");
+		writeFileSync(join(directory, "base.txt"), "other project\n");
+		git(directory, "add", "base.txt");
+		commit(directory, "Other project base");
+		const { savedSlug: slug } = await sendRpcRequest(
+			socket,
+			new SaveProject({ folders: [directory] }),
+		);
+		const first = await create("project request");
+		const second = await create("global request", true, { slug, directory });
+		for (const session of [first, second]) {
+			writeFileSync(join(session.path, "base.txt"), "cleanup guard\n");
+			await settle(session.id);
+		}
+		await set({ onSettle: "keep", settledAfterDays: 0 });
+		await sweep("drain global request with both guards");
+		for (const session of [first, second])
+			git(session.path, "restore", "base.txt");
+		await setProject({
+			...defaults,
+			onSettle: "keep",
+			settledAfterDays: 0,
+			keepWhen: "any-local-files",
+		});
+		await vi.waitFor(() => expect(existsSync(first.path)).toBe(false), {
+			timeout: 30_000,
+		});
+		expect(existsSync(second.path)).toBe(true);
+		expect(
+			(await sweep("drain project-only request", "process-test")).removed,
+		).toEqual([]);
+		expect(existsSync(second.path)).toBe(true);
+		await set({ onSettle: "keep", settledAfterDays: 0, onDelete: true });
+		await vi.waitFor(() => expect(existsSync(second.path)).toBe(false), {
+			timeout: 30_000,
+		});
+		evidence["requestScopes"] = {
+			projectOnly: "process-test",
+			globalAlsoCleaned: slug,
+		};
+	}, 300_000);
+
+	it("persists raw project overrides only in daemon.json and Use global removes the entry", async () => {
+		const { fixture, socket, setting, setProject } = await start();
+		const projectFile = join(fixture.projectDir, "conduit.json");
+		const original = "{}\n";
+		writeFileSync(projectFile, original);
+		const custom: CleanupSetting = {
+			...defaults,
+			onSettle: "keep",
+			settledAfterDays: 42,
+			keepWhen: "any-local-files",
+		};
+		await setProject(custom);
+		// Ordinary project edits must preserve an override supplied through Settings.
+		await sendRpcRequest(
+			socket,
+			new SaveProject({
+				slug: "process-test",
+				folders: [fixture.projectDir],
+				title: "Renamed project",
+			}),
+		);
+		expect((await setting("process-test")).project).toEqual(custom);
+		for (const override of [custom, "off"] as const) {
+			await setProject(override);
+			await fixture.shutdown();
+			const persisted = JSON.parse(
+				readFileSync(join(fixture.configDir, "daemon.json"), "utf8"),
+			) as {
+				worktreeCleanup: CleanupSetting;
+				projects: Array<{
+					slug: string;
+					worktreeCleanup?: ProjectWorktreeCleanup;
+				}>;
+			};
+			expect(
+				persisted.projects.find(({ slug }) => slug === "process-test")
+					?.worktreeCleanup,
+			).toEqual(override);
+			expect(persisted.worktreeCleanup).toEqual({
+				...defaults,
+				onSettle: "keep",
+			});
+			expect(readFileSync(projectFile, "utf8")).toBe(original);
+			await fixture.restart({ startupTimeoutMs: 120_000 });
+			expect(await setting("process-test")).toEqual({
+				global: persisted.worktreeCleanup,
+				project: override,
+			});
+		}
+		await setProject(null);
+		await fixture.shutdown();
+		const persisted = JSON.parse(
+			readFileSync(join(fixture.configDir, "daemon.json"), "utf8"),
+		) as {
+			projects: Array<{
+				slug: string;
+				worktreeCleanup?: ProjectWorktreeCleanup;
+			}>;
+		};
+		expect(
+			persisted.projects.find(({ slug }) => slug === "process-test"),
+		).not.toHaveProperty("worktreeCleanup");
+		expect(readFileSync(projectFile, "utf8")).toBe(original);
+		await fixture.restart({ startupTimeoutMs: 120_000 });
+		expect((await setting("process-test")).project).toBeNull();
+		evidence["projectSettings"] = {
+			custom,
+			offPersisted: true,
+			useGlobalRemovedOverride: true,
+			projectFileUnchanged: true,
+		};
+	}, 300_000);
+
+	it("rejects cleanup setting reads and overrides for an unknown project", async () => {
+		const { setting, setProject } = await start();
+		await expect(setting("unknown-project")).rejects.toThrow(
+			/not found|not registered|unknown/i,
+		);
+		await expect(setProject("off", "unknown-project")).rejects.toThrow(
+			/not found|not registered|unknown/i,
+		);
+		expect(await setting()).toEqual({
+			global: { ...defaults, onSettle: "keep" },
+		});
+	}, 300_000);
+
 	it("cleans a cold project's candidate at startup", async () => {
 		const { fixture, create, settle } = await start();
 		const session = await create("startup trigger");
@@ -1278,7 +1626,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 
 	it("persists all setting fields across daemon restart and decodes missing fields to defaults", async () => {
 		const { fixture, setting, set } = await start(null);
-		expect(await setting()).toEqual({ worktreeCleanup: defaults });
+		expect(await setting()).toEqual({ global: defaults });
 		const saved = await set({
 			onSettle: "keep",
 			onDelete: true,
@@ -1287,7 +1635,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		});
 		await fixture.shutdown();
 		await fixture.restart({ startupTimeoutMs: 120_000 });
-		expect(await setting()).toEqual({ worktreeCleanup: saved });
+		expect(await setting()).toEqual({ global: saved });
 		await fixture.shutdown();
 		const configPath = join(fixture.configDir, "daemon.json");
 		const config = JSON.parse(readFileSync(configPath, "utf8")) as Record<
@@ -1301,7 +1649,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		);
 		await fixture.restart({ startupTimeoutMs: 120_000 });
 		expect(await setting()).toEqual({
-			worktreeCleanup: { ...defaults, onDelete: true },
+			global: { ...defaults, onDelete: true },
 		});
 		evidence["settings"] = {
 			defaults,
@@ -1396,7 +1744,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 	}) => {
 		const { fixture, setting } = await start(null, { rules, version });
 		const migrated = { ...defaults, ...expected };
-		expect(await setting()).toEqual({ worktreeCleanup: migrated });
+		expect(await setting()).toEqual({ global: migrated });
 		const configPath = join(fixture.configDir, "daemon.json");
 		await fixture.shutdown();
 		const persisted = readFileSync(configPath, "utf8");
@@ -1407,7 +1755,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			startupTimeoutMs: 120_000,
 			skipBrowserProbe: true,
 		});
-		expect(await setting()).toEqual({ worktreeCleanup: migrated });
+		expect(await setting()).toEqual({ global: migrated });
 		expect(readFileSync(configPath, "utf8")).toBe(persisted);
 		evidence["migration"] = {
 			version: version ?? "legacy",

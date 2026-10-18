@@ -31,6 +31,7 @@ import {
 } from "../contracts/provider-instance.js";
 import {
 	DEFAULT_WORKTREE_CLEANUP,
+	ProjectWorktreeCleanupSchema,
 	WorktreeCleanupSchema,
 } from "../contracts/worktree.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
@@ -87,6 +88,9 @@ const ProjectSchema = Schema.Struct({
 	setupScript: Schema.optionalWith(Schema.String, { exact: true }),
 	sessionMode: Schema.optionalWith(SessionModeSchema, { exact: true }),
 	groupingMode: Schema.optionalWith(GroupingModeSchema, { exact: true }),
+	worktreeCleanup: Schema.optionalWith(ProjectWorktreeCleanupSchema, {
+		exact: true,
+	}),
 	sessionCount: Schema.optionalWith(Schema.Number, { exact: true }),
 });
 

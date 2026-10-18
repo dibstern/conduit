@@ -37,6 +37,10 @@ import {
 } from "effect";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import {
+	DEFAULT_WORKTREE_CLEANUP,
+	resolveWorktreeCleanup,
+} from "../../../contracts/worktree.js";
+import {
 	ProjectSaveRejected,
 	type ResolveSessionModeResponse,
 	type SaveProjectInput,
@@ -68,6 +72,7 @@ import {
 	ConfigPersistenceTag,
 	requestConfigSave,
 } from "./config-persistence-service.js";
+import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 import { countRunningProjectSessions } from "./daemon-session-reader.js";
 import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
@@ -142,6 +147,9 @@ const toStoredProject = (project: DaemonProject): StoredProject => ({
 	...(project.groupingMode !== undefined && {
 		groupingMode: project.groupingMode,
 	}),
+	...(project.worktreeCleanup !== undefined && {
+		worktreeCleanup: project.worktreeCleanup,
+	}),
 	...(project.repositoryIdentities !== undefined && {
 		repositoryIdentities: project.repositoryIdentities,
 	}),
@@ -213,6 +221,17 @@ export const getProject = (slug: string) =>
 		Effect.annotateLogs("slug", slug),
 		Effect.withSpan("projectRegistry.getProject"),
 	);
+
+/** Read current global rules and the project's current daemon-only override. */
+export const getEffectiveWorktreeCleanup = (slug: string) =>
+	Effect.gen(function* () {
+		const project = yield* getProject(slug);
+		const config = yield* Ref.get(yield* DaemonConfigRefTag);
+		return resolveWorktreeCleanup(
+			config.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP,
+			project.worktreeCleanup,
+		);
+	});
 
 /** Resolve each draft from the primary folder's current file and persisted defaults. */
 export const resolveSessionMode = (slug: string) =>
@@ -615,6 +634,7 @@ export const updateProject = (
 			| "setupScript"
 			| "sessionMode"
 			| "groupingMode"
+			| "worktreeCleanup"
 		>
 	>,
 ) =>

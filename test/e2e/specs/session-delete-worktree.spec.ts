@@ -95,7 +95,7 @@ async function setup(
 				if (options.failCleanupSetting)
 					throw new WsRpcError({ message: "Could not read cleanup setting" });
 				return {
-					worktreeCleanup: {
+					global: {
 						...DEFAULT_WORKTREE_CLEANUP,
 						onDelete: options.onDelete ?? false,
 					},

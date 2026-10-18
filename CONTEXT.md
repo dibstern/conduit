@@ -124,6 +124,12 @@ keep level. The settled-age rule takes precedence when due. Automatic cleanup
 keeps branches so a checkout can be recreated on the next message. Active
 sessions are never removed merely for inactivity, merging, or having no commits.
 
+Each project can use the global cleanup rules, turn cleanup Off, or supply a full
+Custom rules override in Settings. Overrides live in the project's daemon.json
+entry, never in conduit.json, and each cleanup run reads the current effective
+rules again before removal. Off projects still stop quiescent settled agents,
+but Clean up now neither removes nor reports their worktrees.
+
 Worktree sessions use their own branch's merged signal to settle through the
 sidebar's automatic rule and return to Active when messaged, with that merge
 ignored for the resumed work.

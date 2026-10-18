@@ -35,6 +35,7 @@ import {
 	CreateSession,
 	DeleteSession,
 	ListDaemonSessions,
+	SetProjectWorktreeCleanupSetting,
 	SetSessionSettled,
 	SetWorktreeCleanupSetting,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -149,7 +150,10 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 			join(fixture.root, "claude-end-session-failure-fixture"),
 			"enabled\n",
 		);
-		await fixture.restart({ startupTimeoutMs: 120_000 });
+		await fixture.restart({
+			startupTimeoutMs: 120_000,
+			runnerStartupTimeoutMs: 30_000,
+		});
 		const socket = join(fixture.configDir, "relay.sock");
 		const create = async (
 			title: string,
@@ -205,7 +209,10 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 		const set = (worktreeCleanup: WorktreeCleanup) =>
 			sendRpcRequest(
 				socket,
-				new SetWorktreeCleanupSetting({ worktreeCleanup }),
+				new SetWorktreeCleanupSetting({
+					scope: "global",
+					rules: worktreeCleanup,
+				}),
 			);
 		const enable = async (session: { path: string }) => {
 			// Keep automatic requests harmless until the manual run observes removal.
@@ -217,7 +224,7 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 		const send = async (sessionId: string) => {
 			const browser = await fixture.connect();
 			try {
-				await browser.send(sessionId, "Worktree cleanup agent guard");
+				await browser.send(sessionId, "Worktree cleanup agent guard", 60_000);
 			} finally {
 				await browser.close();
 			}
@@ -511,8 +518,17 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 		await browser.close();
 	}, 90_000);
 
-	it("stops with cleanup Off, resumes the same conversation on the next message, and starts nothing on unsettle", async () => {
-		const { fixture, create, send, settle, sweep } = await start();
+	it("stops with project cleanup Off, resumes the same conversation on the next message, and starts nothing on unsettle", async () => {
+		const { fixture, socket, create, send, settle, sweep, set } = await start();
+		await set(cleanup);
+		await sendRpcRequest(
+			socket,
+			new SetProjectWorktreeCleanupSetting({
+				scope: "project",
+				projectSlug: "process-test",
+				override: "off",
+			}),
+		);
 		const session = await create("settle while cleanup Off");
 		const first = await send(session.sessionId);
 		const before = await vi.waitFor(

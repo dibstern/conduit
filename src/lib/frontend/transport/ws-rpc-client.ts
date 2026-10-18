@@ -7,6 +7,7 @@ import type { DefaultSessionMode } from "../../contracts/project-file.js";
 import { AccountIdSchema } from "../../contracts/provider-instance.js";
 import type { ToolCallId } from "../../contracts/tool-wire.js";
 import type {
+	ProjectWorktreeCleanup,
 	WorktreeCleanup,
 	WorktreeCleanupReport,
 } from "../../contracts/worktree.js";
@@ -1495,22 +1496,42 @@ export async function getAutoSettleSettingRpc(): Promise<number | null> {
 	return result.autoSettleAfterDays;
 }
 
-export async function getWorktreeCleanupSettingRpc(): Promise<WorktreeCleanup> {
+export interface WorktreeCleanupSettingRpcResponse {
+	readonly global: WorktreeCleanup;
+	readonly project?: ProjectWorktreeCleanup | null | undefined;
+}
+
+export function getWorktreeCleanupSettingRpc(): Promise<WorktreeCleanup>;
+export function getWorktreeCleanupSettingRpc(
+	projectSlug: string,
+): Promise<WorktreeCleanupSettingRpcResponse>;
+export async function getWorktreeCleanupSettingRpc(
+	projectSlug?: string,
+): Promise<WorktreeCleanup | WorktreeCleanupSettingRpcResponse> {
 	const result = await runTransportEffect(
-		callControl(undefined, (client) => client("GetWorktreeCleanupSetting", {})),
+		callControl(undefined, (client) =>
+			client("GetWorktreeCleanupSetting", {
+				...(projectSlug !== undefined && { projectSlug }),
+			}),
+		),
 	);
-	return result.worktreeCleanup;
+	return projectSlug === undefined ? result.global : result;
 }
 
 export async function setWorktreeCleanupSettingRpc(
-	worktreeCleanup: WorktreeCleanup,
-): Promise<WorktreeCleanup> {
-	const result = await runTransportEffect(
+	input:
+		| { readonly scope: "global"; readonly rules: WorktreeCleanup }
+		| {
+				readonly scope: "project";
+				readonly projectSlug: string;
+				readonly override: ProjectWorktreeCleanup | null;
+		  },
+): Promise<WorktreeCleanupSettingRpcResponse> {
+	return runTransportEffect(
 		callControl(undefined, (client) =>
-			client("SetWorktreeCleanupSetting", { worktreeCleanup }),
+			client("SetWorktreeCleanupSetting", input),
 		),
 	);
-	return result.worktreeCleanup;
 }
 
 export async function cleanUpWorktreesNowRpc(
