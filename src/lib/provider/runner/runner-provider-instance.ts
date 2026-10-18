@@ -1,6 +1,5 @@
 import { SqlClient } from "@effect/sql";
 import {
-	Cause,
 	Deferred,
 	Effect,
 	Either,
@@ -30,6 +29,7 @@ import {
 	makeProcessingTimeoutHooks,
 	type OverridesStateTag,
 } from "../../domain/relay/Services/session-overrides-state.js";
+import * as Failure from "../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../errors-utils.js";
 import { createLogger } from "../../logger.js";
 import {
@@ -469,7 +469,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 					Effect.onInterrupt(() => Fiber.interrupt(fiber)),
 				);
 				if (Exit.isSuccess(exit)) return;
-				return yield* Cause.isInterruptedOnly(exit.cause)
+				return yield* Failure.isInterruptedOnly(exit.cause)
 					? Effect.fail(
 							new ProviderInstanceFailure({
 								providerId: this.providerId,
@@ -663,7 +663,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 								Effect.gen(this, function* () {
 									if (
 										Exit.isFailure(exit) &&
-										!Cause.isInterruptedOnly(exit.cause)
+										!Failure.isInterruptedOnly(exit.cause)
 									) {
 										yield* this.runner
 											.executeEffect({
@@ -676,7 +676,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 														: "question",
 												failure: sessionFailure(
 													"request interaction",
-													Cause.squash(exit.cause),
+													Failure.squashCause(exit.cause),
 												),
 											})
 											.pipe(Effect.ignore);

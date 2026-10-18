@@ -12,6 +12,7 @@ import {
 import type { Account } from "../../../contracts/account.js";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
 import type { PtyEvent, PtyRow } from "../../../contracts/ws-rpc.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { DEFAULT_CONFIG_DIR } from "../../../env.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { makeClaudeTerminalEnv } from "../../../provider/claude/claude-sdk-env.js";
@@ -571,7 +572,8 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 			completed = next;
 			return yield* reconcile.pipe(
 				Effect.onExit((exit) => {
-					if (Exit.isInterrupted(exit)) return Deferred.interrupt(batch);
+					if (Exit.isFailure(exit) && Failure.isInterrupted(exit.cause))
+						return Deferred.interrupt(batch);
 					if (Exit.isFailure(exit))
 						log.debug(
 							`OpenCode PTY reconciliation unavailable: ${formatErrorDetail(exit.cause)}`,
