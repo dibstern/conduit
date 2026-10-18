@@ -55,10 +55,11 @@ function observeStatus(page: Page): GetStatusResponse[] {
 				if (
 					isRecord(message) &&
 					message["_tag"] === "Request" &&
-					typeof message["id"] === "string" &&
+					(typeof message["id"] === "string" ||
+						typeof message["id"] === "number") &&
 					typeof message["tag"] === "string"
 				)
-					requests.set(message["id"], message["tag"]);
+					requests.set(String(message["id"]), message["tag"]);
 			}
 		});
 		socket.on("framereceived", ({ payload }) => {
@@ -67,8 +68,7 @@ function observeStatus(page: Page): GetStatusResponse[] {
 				if (
 					!isRecord(message) ||
 					message["_tag"] !== "Exit" ||
-					typeof message["requestId"] !== "string" ||
-					requests.get(message["requestId"]) !== "GetStatus"
+					requests.get(String(message["requestId"])) !== "GetStatus"
 				)
 					continue;
 				const exit = message["exit"];
