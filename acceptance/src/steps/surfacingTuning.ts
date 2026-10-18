@@ -368,8 +368,12 @@ export const surfacingTuningHandlers: StepHandler[] = [
 		match:
 			/^categories change elsewhere before the Surfacing proposal is applied$/,
 		run: async ({ world }) => {
+			// Wait for the review first: a change landing before the proposal
+			// arrives makes it stale on arrival, so Apply never renders.
+			const apply = world.page.getByTestId("surfacing-proposal-apply");
+			await expect(apply).toBeEnabled();
 			fixture(world.page).settings.changeElsewhere();
-			await world.page.getByTestId("surfacing-proposal-apply").click();
+			await apply.click();
 		},
 	},
 	{
