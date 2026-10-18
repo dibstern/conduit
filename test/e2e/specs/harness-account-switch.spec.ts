@@ -2712,7 +2712,7 @@ for (const behavior of [
 				await expect(dialog).toHaveCount(0);
 				if (behavior !== "unavailable") {
 					await expect(strip).toHaveCount(0);
-					return { _tag: "Right" } as const;
+					return { _tag: "Success" } as const;
 				}
 				const toast = page.locator('.toast-card[data-variant="error"]');
 				await expect(toast).toContainText("Couldn't switch to Account 2");
@@ -2752,8 +2752,8 @@ for (const behavior of [
 			evidence["result"] = result;
 			if (["unavailable", "limited", "too-large"].includes(behavior)) {
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: {
+					_tag: "Failure",
+					failure: {
 						_tag:
 							behavior === "too-large"
 								? "HandoffTooLarge"
@@ -2768,7 +2768,7 @@ for (const behavior of [
 				expect(harness.claudeOptions()).toHaveLength(callsBefore);
 				return;
 			}
-			expect(result._tag).toBe("Right");
+			expect(result._tag).toBe("Success");
 			expect(
 				await Effect.runPromise(browser.rpc.GetAgents({ sessionId })),
 			).toMatchObject({ instanceId: target.id });

@@ -140,7 +140,8 @@ it.each([
 	if (invalid) {
 		const failure =
 			scenario === "missing-login-kind"
-				? '["_tag"]'
+				? // Effect 4 reports a missing union tag by listing the expected members.
+					'"_tag": "SdkDefault"'
 				: scenario === "invalid-default-path"
 					? "Claude SDK default folder must be a .claude directory"
 					: "Claude config directory must be non-empty";

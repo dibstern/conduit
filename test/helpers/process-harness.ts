@@ -431,7 +431,7 @@ Object.assign(ClaudeDriver, { create: deps => {
   const projectGate = join(deps.workspaceRoot, ".conduit", "recovery-gated");
   const gate = existsSync(projectGate) ? projectGate : join(root, "capabilities-probe-gated");
   return waitForGate(gate, deps.workspaceRoot).pipe(
-    Effect.zipRight(create({ ...deps, capabilitiesService: { get: () => Effect.succeed(
+    Effect.andThen(create({ ...deps, capabilitiesService: { get: () => Effect.succeed(
       existsSync(join(root, "capabilities-probe-result.json"))
         ? JSON.parse(readFileSync(join(root, "capabilities-probe-result.json"), "utf8"))
         : { models: [], agents: [], commands: [] }
@@ -441,7 +441,7 @@ Object.assign(ClaudeDriver, { create: deps => {
       Object.assign(instance, { recoverEffect: () => {
         const failureGate = join(deps.workspaceRoot, ".conduit", "recovery-fail-after-adoption");
         return recover().pipe(
-          Effect.zipRight(waitForGate(failureGate, deps.workspaceRoot)),
+          Effect.andThen(waitForGate(failureGate, deps.workspaceRoot)),
           Effect.tap(() => Effect.sync(() => {
             if (!existsSync(failureGate)) return;
             writeFileSync(failureGate + "-failed", "original recovery completed before fixture failure");

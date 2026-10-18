@@ -594,7 +594,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 					),
 				).pipe(Effect.timeout("15 seconds")),
 			);
-			expect(cachedFailure).toMatchObject({ _tag: "Left" });
+			expect(cachedFailure).toMatchObject({ _tag: "Failure" });
 			await new Promise<void>((resolve) => {
 				socket.once("close", resolve);
 				direct?.destroy();
