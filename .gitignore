@@ -19,6 +19,8 @@ media/_test_output/
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db
+# The store compatibility pin's fixture (conduit-test-16c8.3).
+!/test/fixtures/event-store-compat/events.db
 .beads-credential-key
 
 # bv (beads viewer) local config and caches
