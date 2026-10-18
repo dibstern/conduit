@@ -30,7 +30,7 @@ describe("Integration: Send Message", () => {
 		if (!sessionId) throw new Error("Expected an active session");
 
 		const result = await client.rpcCall((rpc) =>
-			rpc.input.submit({
+			rpc["input.submit"]({
 				sessionId,
 				text: "Reply with just 'ok'",
 				inputId: randomUUID(),
@@ -63,7 +63,7 @@ describe("Integration: Send Message", () => {
 
 			const inputId = randomUUID();
 			const result = await client.rpcCall((rpc) =>
-				rpc.input.submit({ sessionId, text: "Continue", inputId, delivery }),
+				rpc["input.submit"]({ sessionId, text: "Continue", inputId, delivery }),
 			);
 			try {
 				expect(result).toEqual(
@@ -76,7 +76,7 @@ describe("Integration: Send Message", () => {
 			} finally {
 				if (delivery === "queue")
 					await client.rpcCall((rpc) =>
-						rpc.input.cancel({ sessionId, inputId }),
+						rpc["input.cancel"]({ sessionId, inputId }),
 					);
 				harness.mock.emitTestEvent("question.rejected", {
 					requestID: questionId,

@@ -160,8 +160,8 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			await Effect.runPromise(instance.shutdownEffect());
 
 			expect(await result).toMatchObject({
-				_tag: "Left",
-				left: { message: "Provider instance shutting down" },
+				_tag: "Failure",
+				failure: { message: "Provider instance shutting down" },
 			});
 		});
 

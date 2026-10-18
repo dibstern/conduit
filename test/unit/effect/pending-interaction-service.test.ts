@@ -203,8 +203,10 @@ describe("PendingInteractionService", () => {
 			expect(yield* service.takeTimedOutPermissions()).toEqual([
 				{ id: "perm-1", sessionId: "session-1", awaited: true },
 			]);
-			yield* Effect.yieldNow();
-			const waiterExit = yield* Fiber.poll(waiter);
+			yield* Effect.yieldNow;
+			const waiterExit = yield* Effect.sync(() =>
+				Option.fromUndefinedOr(waiter.pollUnsafe()),
+			);
 			expect(Option.isSome(waiterExit)).toBe(true);
 			if (Option.isSome(waiterExit)) {
 				expect(Exit.isFailure(waiterExit.value)).toBe(true);

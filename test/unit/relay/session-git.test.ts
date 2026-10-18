@@ -29,8 +29,7 @@ async function fixture(extraFolders: readonly string[] = []) {
 			Layer.provideMerge(
 				Layer.merge(
 					makePersistenceEffectLayer(path, "test-project"),
-					Layer.succeed(
-						ConfigTag,
+					Layer.succeed(ConfigTag)(
 						makeMockConfig({ projectDir: "/primary", extraFolders }),
 					),
 				),

@@ -1,4 +1,4 @@
-import { Chunk, Effect, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { RpcClientError } from "effect/rpc/RpcClientError";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
@@ -196,9 +196,9 @@ function coalesce(envelopes: readonly SessionDetailEnvelope[]) {
 }
 
 async function fold<E>(stream: Stream.Stream<SessionDetailEnvelope, E>) {
-	const delivered = Chunk.toReadonlyArray(
-		await Effect.runPromise(Stream.runCollect(stream).pipe(Effect.orDie)),
-	);
+	const delivered = [
+		...(await Effect.runPromise(Stream.runCollect(stream).pipe(Effect.orDie))),
+	];
 	return delivered.reduce(applyTranscriptEnvelope, empty());
 }
 

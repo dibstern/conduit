@@ -72,7 +72,7 @@ const testLayer = Layer.mergeAll(
 	DaemonEventBusLive,
 	makeDaemonStateLive({ configDir }),
 	ConfigPersistenceNoopLive,
-	Layer.succeed(RelayCacheTag, makeStubRelayCache()),
+	Layer.succeed(RelayCacheTag)(makeStubRelayCache()),
 );
 
 describe("projectInfos", () => {
@@ -256,7 +256,9 @@ describe("waitForRelay", () => {
 			yield* addWithoutRelay(testProject);
 
 			// Fork the wait in background
-			const fiber = yield* Effect.fork(waitForRelay(testProject.slug, 5000));
+			const fiber = yield* Effect.forkChild(
+				waitForRelay(testProject.slug, 5000),
+			);
 
 			// Simulate the project becoming ready (publishes InstanceStatusChanged)
 			yield* markReady(testProject.slug);

@@ -51,13 +51,14 @@ const readClaudeCatalog = Effect.gen(function* () {
 	return yield* client
 		.SubscribeProjectSettings({ projectSlug: "project-a" })
 		.pipe(
-			Stream.mapConcat((envelope) =>
+			Stream.map((envelope) =>
 				envelope._tag === "snapshot"
 					? envelope.rows
 					: envelope._tag === "upsert"
 						? [envelope.item]
 						: [],
 			),
+			Stream.flattenIterable,
 			Stream.filter((setting) => setting._tag === "providerModels"),
 			Stream.map((setting) => setting.providers),
 			Stream.runHead,
@@ -201,7 +202,7 @@ describe("WsRpcServerLayer GetModels", () => {
 						Layer.provideMerge(
 							Layer.merge(
 								makeTestHandlerLayer({ api, orchestrationEngine }),
-								Layer.succeed(ReadQueryEffectTag, readQuery),
+								Layer.succeed(ReadQueryEffectTag)(readQuery),
 							),
 						),
 					),
@@ -234,7 +235,7 @@ describe("WsRpcServerLayer GetModels", () => {
 					Layer.provideMerge(
 						Layer.merge(
 							makeTestHandlerLayer(),
-							Layer.succeed(ReadQueryEffectTag, readQuery),
+							Layer.succeed(ReadQueryEffectTag)(readQuery),
 						),
 					),
 				),
@@ -268,7 +269,7 @@ describe("WsRpcServerLayer GetModels", () => {
 						Layer.provideMerge(
 							Layer.merge(
 								makeTestHandlerLayer(),
-								Layer.succeed(ReadQueryEffectTag, readQuery),
+								Layer.succeed(ReadQueryEffectTag)(readQuery),
 							),
 						),
 					),

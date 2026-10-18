@@ -95,12 +95,12 @@ const makeTitleServiceLayer = (input: {
 	Layer.provideMerge(
 		makeSessionTitleServiceLive({ queryFactory: input.queryFactory }),
 		Layer.mergeAll(
-			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-			Layer.succeed(LoggerTag, makeMockLogger()),
-			Layer.succeed(ConfigTag, makeMockConfig({ projectDir: process.cwd() })),
-			Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-			Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
+			Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+			Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+			Layer.succeed(LoggerTag)(makeMockLogger()),
+			Layer.succeed(ConfigTag)(makeMockConfig({ projectDir: process.cwd() })),
+			Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+			Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()),
 			makePersistenceEffectLayer(input.filename, "test-project"),
 		),
 	);

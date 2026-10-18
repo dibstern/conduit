@@ -93,7 +93,7 @@ describe("OpenCode Instances shared start", () => {
 		),
 	).pipe(
 		Effect.map(({ cwd }) => cwd),
-		Effect.either,
+		Effect.result,
 	);
 
 	it("spawns once for concurrent first uses and gives both a working client", async () => {
@@ -106,7 +106,7 @@ describe("OpenCode Instances shared start", () => {
 			scenario: "concurrent-first-use",
 			starts,
 			outcomes: outcomes.map((outcome) =>
-				Either.isRight(outcome) ? outcome.right : outcome.left.reason,
+				Either.isSuccess(outcome) ? outcome.success : outcome.failure.reason,
 			),
 		};
 		results.push(result);
@@ -130,12 +130,12 @@ describe("OpenCode Instances shared start", () => {
 			scenario: "retry-after-failed-start",
 			startsAfterFailure: outcomes.startsAfterFailure,
 			starts,
-			failed: Either.isLeft(outcomes.failed)
-				? outcomes.failed.left.reason
-				: outcomes.failed.right,
-			retried: Either.isRight(outcomes.retried)
-				? outcomes.retried.right
-				: outcomes.retried.left.reason,
+			failed: Either.isFailure(outcomes.failed)
+				? outcomes.failed.failure.reason
+				: outcomes.failed.success,
+			retried: Either.isSuccess(outcomes.retried)
+				? outcomes.retried.success
+				: outcomes.retried.failure.reason,
 		};
 		results.push(result);
 		expect(result).toEqual({

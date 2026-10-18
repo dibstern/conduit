@@ -9,12 +9,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Result as Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	GetStatus,
-	SetKeepAwake,
-	SetKeepAwakeCommand,
-	Shutdown,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -126,16 +121,16 @@ describe("daemon keep-awake", () => {
 				const initial = harness.generations.at(-1);
 				if (!initial) throw new Error("No daemon generation");
 				const socket = join(harness.configDir, "relay.sock");
-				const before = await sendRpcRequest(socket, new GetStatus({}));
+				const before = await sendRpcRequest(socket, { _tag: "GetStatus" });
 				expect(before.keepAwake).toBe(false);
 				expect(before.keepAwakeCommand).toBe("caffeinate -di");
 				expect(children(initial.pid)).toEqual([]);
 				record("disabled-at-boot", { daemonPid: initial.pid, status: before });
 
-				const enabled = await sendRpcRequest(
-					socket,
-					new SetKeepAwake({ enabled: true }),
-				);
+				const enabled = await sendRpcRequest(socket, {
+					_tag: "SetKeepAwake",
+					enabled: true,
+				});
 				expect(enabled).toEqual({ ok: true, supported: true, active: true });
 				const original = await waitForChild(
 					initial.pid,
@@ -147,10 +142,11 @@ describe("daemon keep-awake", () => {
 					response: enabled,
 				});
 
-				await sendRpcRequest(
-					socket,
-					new SetKeepAwakeCommand({ command: "sleep", args: ["86400"] }),
-				);
+				await sendRpcRequest(socket, {
+					_tag: "SetKeepAwakeCommand",
+					command: "sleep",
+					args: ["86400"],
+				});
 				const replacement = await waitForChild(
 					initial.pid,
 					/(?:^|\/)sleep 86400$/,
@@ -159,7 +155,7 @@ describe("daemon keep-awake", () => {
 				await vi.waitFor(() => expect(alive(original.pid)).toBe(false), {
 					timeout: 5000,
 				});
-				const changed = await sendRpcRequest(socket, new GetStatus({}));
+				const changed = await sendRpcRequest(socket, { _tag: "GetStatus" });
 				expect(changed.keepAwake).toBe(true);
 				expect(changed.keepAwakeCommand).toBe("sleep 86400");
 				record("command-replaced", {
@@ -169,10 +165,10 @@ describe("daemon keep-awake", () => {
 					status: changed,
 				});
 
-				const disabled = await sendRpcRequest(
-					socket,
-					new SetKeepAwake({ enabled: false }),
-				);
+				const disabled = await sendRpcRequest(socket, {
+					_tag: "SetKeepAwake",
+					enabled: false,
+				});
 				expect(disabled).toEqual({ ok: true, supported: true, active: false });
 				await vi.waitFor(
 					() => {
@@ -181,12 +177,12 @@ describe("daemon keep-awake", () => {
 					},
 					{ timeout: 5000 },
 				);
-				const off = await sendRpcRequest(socket, new GetStatus({}));
+				const off = await sendRpcRequest(socket, { _tag: "GetStatus" });
 				expect(off.keepAwake).toBe(false);
 				expect(off.keepAwakeCommand).toBe("sleep 86400");
 				record("disabled", { childAlive: alive(replacement.pid), status: off });
 
-				await sendRpcRequest(socket, new SetKeepAwake({ enabled: true }));
+				await sendRpcRequest(socket, { _tag: "SetKeepAwake", enabled: true });
 				const beforeRestart = await waitForChild(
 					initial.pid,
 					/(?:^|\/)sleep 86400$/,
@@ -219,7 +215,7 @@ describe("daemon keep-awake", () => {
 					rebooted.pid,
 					/(?:^|\/)sleep 86400$/,
 				);
-				const restored = await sendRpcRequest(socket, new GetStatus({}));
+				const restored = await sendRpcRequest(socket, { _tag: "GetStatus" });
 				expect(restored.keepAwake).toBe(true);
 				expect(restored.keepAwakeCommand).toBe("sleep 86400");
 				record("restored-at-boot", {
@@ -228,7 +224,7 @@ describe("daemon keep-awake", () => {
 					status: restored,
 				});
 
-				await sendRpcRequest(socket, new Shutdown({}));
+				await sendRpcRequest(socket, { _tag: "Shutdown" });
 				await harness.waitForExit();
 				expect(rebooted.exitCode).toBe(0);
 				expect(rebooted.signal).toBeNull();

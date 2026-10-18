@@ -15,7 +15,7 @@ import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/sess
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 
 describe("Session Activity", () => {
-	it.scoped(
+	it.effect(
 		"signals each changed session and stays silent for unchanged state",
 		() =>
 			Effect.gen(function* () {
@@ -118,7 +118,7 @@ describe("Session Activity", () => {
 			}),
 	);
 
-	it.scoped(
+	it.effect(
 		"keeps separate daemon instances isolated without a project store",
 		() =>
 			Effect.gen(function* () {
@@ -137,7 +137,7 @@ describe("Session Activity", () => {
 			}),
 	);
 
-	it.scoped(
+	it.effect(
 		"publishes at most once per second with a final trailing refresh during continuous changes",
 		() =>
 			Effect.gen(function* () {

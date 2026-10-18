@@ -1,5 +1,14 @@
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Exit, Fiber, Layer, Logger, Scope } from "effect";
+import {
+	Deferred,
+	Effect,
+	Option as Effect4PollOption,
+	Exit,
+	Fiber,
+	Layer,
+	Logger,
+	Scope,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import {
@@ -44,8 +53,8 @@ describe("SessionStateProjectionNotifier", () => {
 				const layer = SessionStateProjectionNotifierLive.pipe(
 					Layer.provide(
 						Layer.merge(
-							Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-							Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+							Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+							Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
 						),
 					),
 				);
@@ -89,8 +98,8 @@ describe("SessionStateProjectionNotifier", () => {
 			const layer = SessionStateProjectionNotifierLive.pipe(
 				Layer.provide(
 					Layer.merge(
-						Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-						Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+						Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+						Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
 					),
 				),
 			);
@@ -121,8 +130,8 @@ describe("SessionStateProjectionNotifier", () => {
 			}).pipe(
 				Layer.provide(
 					Layer.merge(
-						Layer.succeed(WebSocketHandlerTag, wsHandler),
-						Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+						Layer.succeed(WebSocketHandlerTag)(wsHandler),
+						Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
 					),
 				),
 			);
@@ -132,7 +141,11 @@ describe("SessionStateProjectionNotifier", () => {
 					.sessionStateProjected("session-1", "turn.completed")
 					.pipe(Effect.forkChild);
 				yield* Deferred.await(refreshStarted);
-				expect((yield* Fiber.poll(call))._tag).toBe("Some");
+				expect(
+					(yield* Effect.sync(() =>
+						Effect4PollOption.fromUndefinedOr(call.pollUnsafe()),
+					))._tag,
+				).toBe("Some");
 				releaseRefresh?.();
 				yield* Fiber.join(call);
 			}).pipe(Effect.provide(layer));
@@ -155,15 +168,15 @@ describe("SessionStateProjectionNotifier", () => {
 				}).pipe(
 					Layer.provide(
 						Layer.merge(
-							Layer.succeed(WebSocketHandlerTag, wsHandler),
-							Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+							Layer.succeed(WebSocketHandlerTag)(wsHandler),
+							Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
 						),
 					),
 				);
 				yield* Effect.gen(function* () {
 					const notifier = yield* SessionStateProjectionNotifierTag;
 					yield* notifier.sessionStateProjected("session-1", "turn.completed");
-					yield* Effect.yieldNow();
+					yield* Effect.yieldNow;
 					expect(order).toEqual(["refresh"]);
 					yield* TestClock.adjust("150 millis");
 					expect(order).toEqual(["refresh", "lineage"]);
@@ -182,8 +195,8 @@ describe("SessionStateProjectionNotifier", () => {
 			}).pipe(
 				Layer.provide(
 					Layer.merge(
-						Layer.succeed(WebSocketHandlerTag, wsHandler),
-						Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+						Layer.succeed(WebSocketHandlerTag)(wsHandler),
+						Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
 					),
 				),
 			);
@@ -207,8 +220,8 @@ describe("SessionStateProjectionNotifier", () => {
 				const layer = SessionStateProjectionNotifierLive.pipe(
 					Layer.provide(
 						Layer.merge(
-							Layer.succeed(WebSocketHandlerTag, wsHandler),
-							Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+							Layer.succeed(WebSocketHandlerTag)(wsHandler),
+							Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
 						),
 					),
 				);
@@ -236,7 +249,7 @@ describe("SessionStateProjectionNotifier", () => {
 			const wsHandler = makeMockWebSocketHandler();
 			const refreshSessionLineage = vi.fn(() =>
 				Deferred.succeed(started, undefined).pipe(
-					Effect.zipRight(Deferred.await(release)),
+					Effect.andThen(Deferred.await(release)),
 				),
 			);
 			const sessionManagerService = makeMockSessionManagerService({
@@ -245,8 +258,8 @@ describe("SessionStateProjectionNotifier", () => {
 			const layer = SessionStateProjectionNotifierLive.pipe(
 				Layer.provide(
 					Layer.merge(
-						Layer.succeed(WebSocketHandlerTag, wsHandler),
-						Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+						Layer.succeed(WebSocketHandlerTag)(wsHandler),
+						Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
 					),
 				),
 			);
@@ -262,7 +275,7 @@ describe("SessionStateProjectionNotifier", () => {
 				// The newly forked fiber needs one scheduling turn to reach its sleep;
 				// TestClock only fires sleeps already registered when it advances.
 				// Under a real clock that gap is microseconds against 150ms.
-				yield* Effect.yieldNow();
+				yield* Effect.yieldNow;
 				yield* TestClock.adjust("150 millis");
 				expect(refreshSessionLineage).toHaveBeenCalledTimes(2);
 
@@ -286,8 +299,8 @@ describe("SessionStateProjectionNotifier", () => {
 			const layer = SessionStateProjectionNotifierLive.pipe(
 				Layer.provide(
 					Layer.merge(
-						Layer.succeed(WebSocketHandlerTag, wsHandler),
-						Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+						Layer.succeed(WebSocketHandlerTag)(wsHandler),
+						Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
 					),
 				),
 			);

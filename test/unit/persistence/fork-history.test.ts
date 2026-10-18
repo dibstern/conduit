@@ -231,7 +231,7 @@ describe("readForkSource", () => {
 					sideThread: false,
 				}),
 			);
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 			if (result._tag === "Failure")
 				expect(result.failure).toMatchObject({
 					_tag: "ForkRefusal",
@@ -250,7 +250,7 @@ describe("readForkSource", () => {
 				const empty = yield* Effect.result(
 					readForkSource("parent", { sideThread: false }),
 				);
-				expect(empty._tag).toBe("Left");
+				expect(empty._tag).toBe("Failure");
 				if (empty._tag === "Failure")
 					expect(empty.failure).toMatchObject({ reason: "no_transcript" });
 				const sql = yield* SqlClient.SqlClient;
@@ -259,7 +259,7 @@ describe("readForkSource", () => {
 				const missing = yield* Effect.result(
 					readForkSource("parent", { sideThread: false }),
 				);
-				expect(missing._tag).toBe("Left");
+				expect(missing._tag).toBe("Failure");
 				if (missing._tag === "Failure")
 					expect(missing.failure).toMatchObject({ reason: "point_not_found" });
 			}).pipe(Effect.provide(testLayer)),
@@ -558,7 +558,7 @@ describe("readForkSource", () => {
 						sideThread: false,
 					}),
 				);
-				expect(removed._tag).toBe("Left");
+				expect(removed._tag).toBe("Failure");
 				if (removed._tag === "Failure")
 					expect(removed.failure).toMatchObject({
 						reason: "message_not_found",
@@ -589,7 +589,7 @@ describe("readForkSource", () => {
 				const hidden = yield* Effect.result(
 					readForkSource("parent", { messageId: "b", sideThread: false }),
 				);
-				expect(hidden._tag).toBe("Left");
+				expect(hidden._tag).toBe("Failure");
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`UPDATE messages SET created_at = 20 WHERE id = 'b'`;
 				const moved = yield* readForkSource("parent", { sideThread: false });
@@ -681,7 +681,7 @@ describe("readForkSource", () => {
 					sideThread: false,
 				});
 				const invalid = yield* Effect.result(later.copy("child"));
-				expect(invalid._tag).toBe("Left");
+				expect(invalid._tag).toBe("Failure");
 			}).pipe(Effect.provide(testLayer)),
 	);
 
@@ -821,7 +821,7 @@ describe("Side Thread boundary reads", () => {
 				const first = yield* Effect.result(
 					readForkSource("parent", { sideThread: true }),
 				);
-				expect(first._tag).toBe("Left");
+				expect(first._tag).toBe("Failure");
 				if (first._tag === "Failure")
 					expect(first.failure).toMatchObject({ reason: "no_completed_turn" });
 				const commit = yield* makeCommitAndSignal;

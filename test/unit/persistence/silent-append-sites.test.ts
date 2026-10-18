@@ -108,9 +108,9 @@ const makeStatusPollerLayer = (dbPath: string) => {
 				createAllEffectProjectors(),
 				bus,
 			),
-			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-			Layer.succeed(ConfigTag, makeMockConfig({ persistenceDbPath: dbPath })),
-			Layer.succeed(LoggerTag, makeMockLogger()),
+			Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+			Layer.succeed(ConfigTag)(makeMockConfig({ persistenceDbPath: dbPath })),
+			Layer.succeed(LoggerTag)(makeMockLogger()),
 			makePollerStateLive(),
 			makePollerPubSubLive(),
 			RelayStatusSnapshotLive,
@@ -355,7 +355,7 @@ it("the auto-title rename advances the version of the session it renames", async
 				queryFactory: () => assistantTitle("Investigate The OAuth Loop"),
 			}),
 			Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+				Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 				bus,
 				makePersistenceEffectLayer(
 					dbPath,
@@ -363,9 +363,9 @@ it("the auto-title rename advances the version of the session it renames", async
 					createAllEffectProjectors(),
 					bus,
 				),
-				Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-				Layer.succeed(ConfigTag, makeMockConfig()),
-				Layer.succeed(LoggerTag, makeMockLogger()),
+				Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+				Layer.succeed(ConfigTag)(makeMockConfig()),
+				Layer.succeed(LoggerTag)(makeMockLogger()),
 			),
 		);
 		await Effect.runPromise(

@@ -5,7 +5,6 @@ import { Schema } from "effect";
 import {
 	type GetStatusResponse,
 	GetStatusResponseSchema,
-	RemoveProject,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import { getVersion } from "../../../src/lib/version.js";
@@ -26,7 +25,10 @@ const test = base.extend<{ harness: ProcessHarness; supervised: boolean }>({
 					startupTimeoutMs: 60_000,
 					serviceEnvironment: { CONDUIT_SERVICE: supervised ? "1" : "0" },
 				});
-				await harness.requestRpc(new RemoveProject({ slug: "process-test" }));
+				await harness.requestRpc({
+					_tag: "RemoveProject",
+					slug: "process-test",
+				});
 				await use(harness);
 			} finally {
 				writeFileSync(testInfo.outputPath("daemon.log"), harness.logTail);

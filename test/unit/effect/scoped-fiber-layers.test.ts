@@ -50,7 +50,7 @@ const configRefLayer = DaemonConfigRefLive(
 const authLayer = makeAuthManagerLive(
 	new AuthManager({ getPinHash: () => null }),
 );
-const wsRelayRouterLayer = Layer.succeed(WebSocketRelayRouterTag, {
+const wsRelayRouterLayer = Layer.succeed(WebSocketRelayRouterTag)({
 	ensureRelayStarted: () => Effect.void,
 	waitForRelay: (slug: string) =>
 		Effect.fail(
@@ -100,7 +100,7 @@ const makeInstancesLayer = (
 			})),
 			{ launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude") },
 		),
-		Layer.succeed(OpenCodeInstancesTag, {
+		Layer.succeed(OpenCodeInstancesTag)({
 			...stub,
 			ifRunning: (instanceId: string, directory?: string) => {
 				calls.push([instanceId, directory]);

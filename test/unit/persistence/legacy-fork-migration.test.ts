@@ -168,7 +168,7 @@ const sidebar = Effect.gen(function* () {
 			version: _version,
 			lastActivity: _lastActivity,
 			...content
-		} = Schema.decodeUnknownSync(Schema.parseJson(SidebarRowSchema))(row);
+		} = Schema.decodeUnknownSync(Schema.fromJsonString(SidebarRowSchema))(row);
 		return { session_id, ...content };
 	});
 });

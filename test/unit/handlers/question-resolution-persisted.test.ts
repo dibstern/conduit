@@ -114,7 +114,7 @@ const withHandlerStack = async (
 ): Promise<void> => {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-question-resolved-"));
 	const advances: ReadModelAdvance[] = [];
-	const bus = Layer.succeed(SessionEventBusTag, {
+	const bus = Layer.succeed(SessionEventBusTag)({
 		publish: () => Effect.void,
 		publishAdvance: (advance) => Effect.sync(() => void advances.push(advance)),
 		subscribe: () => Effect.succeed(Stream.empty),
@@ -129,15 +129,15 @@ const withHandlerStack = async (
 	const layer = Layer.mergeAll(
 		persistence,
 		bus,
-		Layer.succeed(ConfigTag, makeMockConfig({ configDir: dir })),
+		Layer.succeed(ConfigTag)(makeMockConfig({ configDir: dir })),
 		PendingInteractionServiceLive,
-		Layer.succeed(OpenCodeAPITag, client),
-		Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
-		Layer.succeed(LoggerTag, createSilentLogger()),
-		Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
-		Layer.succeed(AgentServiceTag, makeMockAgentService()),
+		Layer.succeed(OpenCodeAPITag)(client),
+		Layer.succeed(WebSocketHandlerTag)(makeWsHandler()),
+		Layer.succeed(LoggerTag)(createSilentLogger()),
+		Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()),
+		Layer.succeed(AgentServiceTag)(makeMockAgentService()),
 		NoopProviderRuntimeIngestionLive,
-		Layer.succeed(ProviderTurnServiceTag, {
+		Layer.succeed(ProviderTurnServiceTag)({
 			holdUserTurnsForAccountSwitch: () => Effect.void,
 			prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 			sendTurn: () => Effect.void,

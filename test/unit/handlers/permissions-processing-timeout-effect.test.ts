@@ -67,22 +67,21 @@ describe("permission/question processing timeouts through Effect state", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					AlertsLive,
-					Layer.succeed(OpenCodeAPITag, client),
-					Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
-					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-					Layer.succeed(ConfigTag, makeMockConfig()),
+					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(WebSocketHandlerTag)(makeWsHandler()),
+					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+					Layer.succeed(ConfigTag)(makeMockConfig()),
 					PendingInteractionServiceLive,
-					Layer.succeed(LoggerTag, createSilentLogger()),
-					Layer.succeed(
-						SessionManagerServiceTag,
+					Layer.succeed(LoggerTag)(createSilentLogger()),
+					Layer.succeed(SessionManagerServiceTag)(
 						makeMockSessionManagerService(),
 					),
 					makeOverridesStateLive(),
 					persistence,
 					makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
-					Layer.succeed(AgentServiceTag, makeMockAgentService()),
-					Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-					Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
+					Layer.succeed(AgentServiceTag)(makeMockAgentService()),
+					Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
+					Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({})),
 				),
 			);
 
@@ -104,17 +103,16 @@ describe("permission/question processing timeouts through Effect state", () => {
 				question: { reject: vi.fn(async () => undefined) },
 			});
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
-				Layer.succeed(LoggerTag, createSilentLogger()),
-				Layer.succeed(
-					SessionManagerServiceTag,
+				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(WebSocketHandlerTag)(makeWsHandler()),
+				Layer.succeed(LoggerTag)(createSilentLogger()),
+				Layer.succeed(SessionManagerServiceTag)(
 					makeMockSessionManagerService(),
 				),
 				makeOverridesStateLive(),
 				PendingInteractionServiceLive,
 				NoopProviderRuntimeIngestionLive,
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
+				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({})),
 			);
 
 			return Effect.gen(function* () {

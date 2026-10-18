@@ -42,7 +42,7 @@ export function stubWsRpc(table: StubTable): Layer.Layer<WsRpcHandlers> {
 							return stub ? stub(payload) : Stream.never;
 						},
 						catch: (error) => error,
-					}).pipe(Effect.catchAll(classify)),
+					}).pipe(Effect.catch(classify)),
 				);
 		} else {
 			handlers[rpc._tag] = (payload) =>
@@ -52,7 +52,7 @@ export function stubWsRpc(table: StubTable): Layer.Layer<WsRpcHandlers> {
 					return Effect.tryPromise({
 						try: async () => stub(payload),
 						catch: (error) => error,
-					}).pipe(Effect.catchAll(classify));
+					}).pipe(Effect.catch(classify));
 				});
 		}
 	}

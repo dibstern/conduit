@@ -93,11 +93,11 @@ const superviseShell = Effect.gen(function* () {
 });
 
 /** Lets every runnable fiber settle before asserting that nothing happened. */
-const settle = Effect.repeatN(Effect.yieldNow(), 50);
+const settle = Effect.repeat(Effect.yieldNow, { times: 50 });
 
 /** Waits until the supervisor is parked on its backoff timer. */
 const untilWaiting = Effect.gen(function* () {
-	while (Chunk.isEmpty(yield* TestClock.sleeps())) yield* Effect.yieldNow();
+	while (Chunk.isEmpty(yield* TestClock.sleeps())) yield* Effect.yieldNow;
 });
 
 /**
@@ -105,7 +105,7 @@ const untilWaiting = Effect.gen(function* () {
  * not a moment sooner, and without needing anything but the clock.
  */
 const restartsAfter = (
-	feed: Effect.Effect.Success<typeof superviseShell>,
+	feed: Effect.Success<typeof superviseShell>,
 	millis: number,
 ) =>
 	Effect.gen(function* () {
@@ -132,7 +132,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("supervise", () => {
-	it.scoped(
+	it.effect(
 		"reports cold, then catching up, then live as the feed arrives",
 		() =>
 			Effect.gen(function* () {
@@ -158,7 +158,7 @@ describe("supervise", () => {
 				expect(feed.received).toEqual([snapshot, synchronized]);
 			}),
 	);
-	it.scoped(
+	it.effect(
 		"restarts after a server error on a 1s x1.5 backoff capped at 10s",
 		() =>
 			Effect.gen(function* () {
@@ -183,7 +183,7 @@ describe("supervise", () => {
 				expect(feed.received).toEqual([snapshot, synchronized]);
 			}),
 	);
-	it.scoped("starts the backoff over once the feed has caught up again", () =>
+	it.effect("starts the backoff over once the feed has caught up again", () =>
 		Effect.gen(function* () {
 			const feed = yield* superviseShell;
 			yield* Effect.flatMap(feed.request, (served) => served.fail("busy"));
@@ -200,7 +200,7 @@ describe("supervise", () => {
 		}),
 	);
 
-	it.scoped("treats the feed ending as a failure and restarts it", () =>
+	it.effect("treats the feed ending as a failure and restarts it", () =>
 		Effect.gen(function* () {
 			const feed = yield* superviseShell;
 			const served = yield* feed.request;
@@ -230,7 +230,7 @@ describe("supervise", () => {
 		}),
 	);
 
-	it.scoped("restarts after a defect, logging it as an error", () =>
+	it.effect("restarts after a defect, logging it as an error", () =>
 		Effect.gen(function* () {
 			const logged: LogLevel.LogLevel[] = [];
 			const feed = yield* superviseShell.pipe(
@@ -264,7 +264,7 @@ describe("supervise", () => {
 	};
 
 	for (const [trigger, wake] of Object.entries(wakeUps)) {
-		it.scoped(`restarts at once on ${trigger}`, () =>
+		it.effect(`restarts at once on ${trigger}`, () =>
 			Effect.gen(function* () {
 				const feed = yield* superviseShell;
 				yield* Effect.flatMap(feed.request, (served) => served.fail("busy"));
@@ -275,7 +275,7 @@ describe("supervise", () => {
 		);
 	}
 
-	it.scoped("keeps waiting through a tab hiding or a fresh page load", () =>
+	it.effect("keeps waiting through a tab hiding or a fresh page load", () =>
 		Effect.gen(function* () {
 			const feed = yield* superviseShell;
 			yield* Effect.flatMap(feed.request, (served) => served.fail("busy"));
@@ -289,7 +289,7 @@ describe("supervise", () => {
 		}),
 	);
 
-	it.scoped("stops for good when the consumer lets go", () =>
+	it.effect("stops for good when the consumer lets go", () =>
 		Effect.gen(function* () {
 			const feed = yield* superviseShell;
 			const served = yield* feed.request;
@@ -303,7 +303,7 @@ describe("supervise", () => {
 		}),
 	);
 
-	it.scoped("stops for good when the consumer lets go mid-backoff", () =>
+	it.effect("stops for good when the consumer lets go mid-backoff", () =>
 		Effect.gen(function* () {
 			const feed = yield* superviseShell;
 			yield* Effect.flatMap(feed.request, (served) => served.fail("busy"));

@@ -11,7 +11,7 @@ import {
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
-const sessionDirectory = Layer.succeed(SessionDirectory, {
+const sessionDirectory = Layer.succeed(SessionDirectory)({
 	projectOf: (sessionId) =>
 		Effect.succeed(
 			sessionId === "s1" || sessionId === "s"
@@ -20,7 +20,7 @@ const sessionDirectory = Layer.succeed(SessionDirectory, {
 		),
 });
 describe("session triage RPCs", () => {
-	it.scoped("routes the triage setters by session ownership", () =>
+	it.effect("routes the triage setters by session ownership", () =>
 		Effect.gen(function* () {
 			const service = makeMockSessionManagerService({
 				setSessionSettled: vi.fn(() => Effect.succeed(true)),
@@ -79,7 +79,7 @@ describe("session triage RPCs", () => {
 		}),
 	);
 
-	it.scoped("returns a WsRpcError explaining the pin guard", () =>
+	it.effect("returns a WsRpcError explaining the pin guard", () =>
 		Effect.gen(function* () {
 			const service = makeMockSessionManagerService({
 				setSessionSettled: () =>
@@ -106,7 +106,7 @@ describe("session triage RPCs", () => {
 					settled: true,
 				}),
 			);
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 			if (result._tag === "Failure")
 				expect(result.failure).toMatchObject({
 					_tag: "WsRpcError",
@@ -115,7 +115,7 @@ describe("session triage RPCs", () => {
 		}),
 	);
 
-	it.scoped("succeeds for idempotent requests", () =>
+	it.effect("succeeds for idempotent requests", () =>
 		Effect.gen(function* () {
 			const service = makeMockSessionManagerService();
 			const context = yield* Layer.build(
@@ -159,7 +159,7 @@ describe("session triage RPCs", () => {
 		["question", "Session is waiting on you"],
 		["past", "Snooze time must be in the future"],
 	] as const) {
-		it.scoped(`maps ${reason} refusal to WsRpcError`, () =>
+		it.effect(`maps ${reason} refusal to WsRpcError`, () =>
 			Effect.gen(function* () {
 				const service = makeMockSessionManagerService({
 					snoozeSession: () =>
@@ -186,7 +186,7 @@ describe("session triage RPCs", () => {
 						until: null,
 					}),
 				);
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 				if (result._tag === "Failure")
 					expect(result.failure).toMatchObject({
 						_tag: "WsRpcError",

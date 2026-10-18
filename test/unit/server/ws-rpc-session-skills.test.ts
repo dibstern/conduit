@@ -117,7 +117,7 @@ const runTest = <E>(
 								orchestrationEngine: engine,
 								readQueryEffect,
 							}),
-							Layer.succeed(ReadQueryEffectTag, readQueryEffect),
+							Layer.succeed(ReadQueryEffectTag)(readQueryEffect),
 						),
 					),
 				),
@@ -526,18 +526,18 @@ describe("WsRpcServerLayer GetSessionSkills with SQLite", () => {
 								input: '{"tool":"Skill","name":"review"}',
 								at: 11,
 							});
-							const result = yield* Effect.either(
+							const result = yield* Effect.result(
 								client.GetSessionSkills({
 									sessionId: "session",
 								}),
 							);
-							expect(result._tag).toBe("Left");
-							if (result._tag === "Left") {
-								expect(result.left._tag).toBe("WsRpcError");
-								expect(result.left.message).toContain(
+							expect(result._tag).toBe("Failure");
+							if (result._tag === "Failure") {
+								expect(result.failure._tag).toBe("WsRpcError");
+								expect(result.failure.message).toContain(
 									"GetSessionSkills failed:",
 								);
-								expect(result.left.message).toContain(
+								expect(result.failure.message).toContain(
 									provider === "claude"
 										? "discovery unavailable"
 										: "UnknownException",

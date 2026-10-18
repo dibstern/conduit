@@ -287,7 +287,7 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 		const inputId = randomUUID();
 		evidence["newInputId"] = inputId;
 		const admitted = await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId,
 				originId: browser.originId,
 				inputId,
@@ -414,7 +414,7 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 		expect(primary?.pid).not.toBe(secondary?.pid);
 		await browser.followSessions();
 		await Effect.runPromise(
-			unrelated.rpc.input.submit({
+			unrelated.rpc["input.submit"]({
 				sessionId: claudeId,
 				originId: unrelated.originId,
 				inputId: randomUUID(),

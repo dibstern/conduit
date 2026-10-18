@@ -48,8 +48,8 @@ const makeFamilyTestLayer = () => {
 		),
 		SessionEventBusLive,
 		Layer.effect(SessionActivityTag, makeSessionActivity),
-		Layer.succeed(ConfigTag, makeMockConfig({ slug: "test-project" })),
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+		Layer.succeed(ConfigTag)(makeMockConfig({ slug: "test-project" })),
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		cleanup,
 	);
 };
@@ -174,7 +174,7 @@ describe("subscribeSessionFamily", () => {
 				expect(added).toMatchObject({ _tag: "upsert" });
 				if (added._tag !== "upsert") return;
 				expect(added.sequence).toBeGreaterThan(snapshot.sequence);
-				const batch = [added, ...(yield* Queue.takeAll(q))];
+				const batch = [added, ...(yield* Queue.clear(q))];
 				expect(upsertedIds(batch)).toContain("child-2");
 				expect(upsertedIds(batch)).not.toContain("other-child");
 

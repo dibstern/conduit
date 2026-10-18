@@ -29,10 +29,9 @@ import { withDispatchEffect } from "../../helpers/orchestration-engine-test-doub
 
 function openCodeSettingsLayer(client: OpenCodeAPI) {
 	const apiLayer = Layer.mergeAll(
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-		Layer.succeed(OpenCodeAPITag, client),
-		Layer.succeed(
-			OpenCodeInstancesTag,
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+		Layer.succeed(OpenCodeAPITag)(client),
+		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: client }),
 		),
 	);
@@ -40,12 +39,11 @@ function openCodeSettingsLayer(client: OpenCodeAPI) {
 		apiLayer,
 		Layer.mergeAll(
 			OpenCodeSettingsServiceLive.pipe(Layer.provide(apiLayer)),
-			Layer.succeed(LoggerTag, makeHandlerLogger()),
-			Layer.succeed(
-				ConfigTag,
+			Layer.succeed(LoggerTag)(makeHandlerLogger()),
+			Layer.succeed(ConfigTag)(
 				makeMockConfig({ projectDir: "/primary-folder" }),
 			),
-			Layer.succeed(SessionWorkspaceTag, {
+			Layer.succeed(SessionWorkspaceTag)({
 				renameBranch: () => Effect.die("unused"),
 				get: () => Effect.succeed("/session-worktree"),
 				move: () => Effect.succeed("/session-worktree"),
@@ -89,8 +87,8 @@ describe("getCommandsForSession active provider", () => {
 
 		const layer = Layer.mergeAll(
 			openCodeSettingsLayer(client),
-			Layer.succeed(OrchestrationEngineTag, engine),
-			Layer.succeed(LoggerTag, makeHandlerLogger()),
+			Layer.succeed(OrchestrationEngineTag)(engine),
+			Layer.succeed(LoggerTag)(makeHandlerLogger()),
 		);
 
 		return getCommandsForSession("session-1").pipe(
@@ -124,7 +122,7 @@ describe("getCommandsForSession active provider", () => {
 
 			const layer = Layer.mergeAll(
 				openCodeSettingsLayer(client),
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OrchestrationEngineTag)(engine),
 			);
 
 			return getCommandsForSession("session-1").pipe(
@@ -146,7 +144,7 @@ describe("getCommandsForSession active provider", () => {
 
 		const layer = Layer.mergeAll(
 			openCodeSettingsLayer(client),
-			Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
+			Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({})),
 		);
 
 		return getCommandsForSession(undefined).pipe(
@@ -191,8 +189,8 @@ describe("getCommandsForSession active provider", () => {
 
 			const layer = Layer.mergeAll(
 				openCodeSettingsLayer(client),
-				Layer.succeed(OrchestrationEngineTag, engine),
-				Layer.succeed(LoggerTag, makeHandlerLogger()),
+				Layer.succeed(OrchestrationEngineTag)(engine),
+				Layer.succeed(LoggerTag)(makeHandlerLogger()),
 			);
 
 			return getCommandsForSession(undefined).pipe(
@@ -230,8 +228,8 @@ describe("getCommandsForSession active provider", () => {
 
 		const layer = Layer.mergeAll(
 			openCodeSettingsLayer(client),
-			Layer.succeed(OrchestrationEngineTag, engine),
-			Layer.succeed(LoggerTag, log),
+			Layer.succeed(OrchestrationEngineTag)(engine),
+			Layer.succeed(LoggerTag)(log),
 		);
 
 		return getCommandsForSession("session-1").pipe(

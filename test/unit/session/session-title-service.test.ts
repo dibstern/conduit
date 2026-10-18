@@ -84,12 +84,11 @@ function makeTestLayer(input: {
 }) {
 	const ws = input.wsHandler ?? makeWebSocketHandler().handler;
 	const deps = Layer.mergeAll(
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-		Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-		Layer.succeed(LoggerTag, input.logger ?? makeMockLogger()),
-		Layer.succeed(WebSocketHandlerTag, ws),
-		Layer.succeed(
-			ConfigTag,
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+		Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+		Layer.succeed(LoggerTag)(input.logger ?? makeMockLogger()),
+		Layer.succeed(WebSocketHandlerTag)(ws),
+		Layer.succeed(ConfigTag)(
 			input.config ?? makeMockConfig({ projectDir: process.cwd() }),
 		),
 		makePersistenceEffectLayer(":memory:", "test-project"),
@@ -113,12 +112,11 @@ function makePersistenceTestLayer(input: {
 }) {
 	const ws = input.wsHandler ?? makeWebSocketHandler().handler;
 	const deps = Layer.mergeAll(
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-		Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-		Layer.succeed(LoggerTag, input.logger ?? makeMockLogger()),
-		Layer.succeed(WebSocketHandlerTag, ws),
-		Layer.succeed(
-			ConfigTag,
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+		Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+		Layer.succeed(LoggerTag)(input.logger ?? makeMockLogger()),
+		Layer.succeed(WebSocketHandlerTag)(ws),
+		Layer.succeed(ConfigTag)(
 			input.config ?? makeMockConfig({ projectDir: process.cwd() }),
 		),
 		makePersistenceEffectLayer(input.persistenceDbPath, "test-project"),
@@ -252,8 +250,10 @@ const makeManualRenameRaceLayer = (input: {
 							)
 							.pipe(
 								Effect.catch((error) =>
-									Effect.dieMessage(
-										`Failed to append manual rename race event: ${String(error)}`,
+									Effect.die(
+										new Error(
+											`Failed to append manual rename race event: ${String(error)}`,
+										),
 									),
 								),
 							);
@@ -264,15 +264,15 @@ const makeManualRenameRaceLayer = (input: {
 		};
 		const ws = input.wsHandler ?? makeWebSocketHandler().handler;
 		const deps = Layer.mergeAll(
-			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-			Layer.succeed(LoggerTag, input.logger ?? makeMockLogger()),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(ConfigTag, makeMockConfig({ projectDir: process.cwd() })),
-			Layer.succeed(ReadQueryEffectTag, raceReadQuery),
-			Layer.succeed(EventStoreEffectTag, eventStore),
-			Layer.succeed(ProjectionRunnerEffectTag, projectionRunner),
-			Layer.succeed(SqlClient.SqlClient, sql),
+			Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+			Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+			Layer.succeed(LoggerTag)(input.logger ?? makeMockLogger()),
+			Layer.succeed(WebSocketHandlerTag)(ws),
+			Layer.succeed(ConfigTag)(makeMockConfig({ projectDir: process.cwd() })),
+			Layer.succeed(ReadQueryEffectTag)(raceReadQuery),
+			Layer.succeed(EventStoreEffectTag)(eventStore),
+			Layer.succeed(ProjectionRunnerEffectTag)(projectionRunner),
+			Layer.succeed(SqlClient.SqlClient)(sql),
 		);
 
 		return {
@@ -601,10 +601,12 @@ describe("SessionTitleService", () => {
 
 				expect(abortSignal?.aborted).toBe(true);
 				yield* Deferred.await(queryFinalized).pipe(
-					Effect.timeoutFail({
+					Effect.timeoutOrElse({
 						duration: "1 second",
-						onTimeout: () =>
-							new Error("Title query generator was not finalized"),
+						orElse: () =>
+							Effect.fail(
+								(() => new Error("Title query generator was not finalized"))(),
+							),
 					}),
 				);
 			});

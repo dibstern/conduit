@@ -28,7 +28,7 @@ import {
 import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 
-const silentBus = Layer.succeed(SessionEventBusTag, {
+const silentBus = Layer.succeed(SessionEventBusTag)({
 	publish: () => Effect.void,
 	publishAdvance: () => Effect.void,
 	subscribe: () => Effect.succeed(Stream.empty),
@@ -232,7 +232,7 @@ it("does not race a live pending send through a second ledger", async () => {
 				.deliver(
 					doneFor("s1"),
 					Deferred.succeed(started, undefined).pipe(
-						Effect.zipRight(Deferred.await(finish)),
+						Effect.andThen(Deferred.await(finish)),
 					),
 				)
 				.pipe(Effect.forkChild);
@@ -261,7 +261,7 @@ it("keeps ownership while an interrupted network send is still in flight", async
 				.deliver(
 					doneFor("s1"),
 					Deferred.succeed(started, undefined).pipe(
-						Effect.zipRight(Effect.promise(() => network)),
+						Effect.andThen(Effect.promise(() => network)),
 					),
 				)
 				.pipe(Effect.forkChild);

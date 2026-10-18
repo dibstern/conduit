@@ -26,7 +26,7 @@ import { seedLegacyEventStore } from "../../helpers/legacy-event-store.js";
 
 const testPersistenceServiceLive = makePersistenceServiceLive.pipe(
 	Layer.provide(
-		Layer.succeed(PersistenceProjectTag, { projectId: "test-project" }),
+		Layer.succeed(PersistenceProjectTag)({ projectId: "test-project" }),
 	),
 );
 
@@ -36,7 +36,7 @@ function makeTestSqlLayer(setup?: (filename: string) => void) {
 	setup?.(filename);
 	return EffectSqliteClient.layer({ filename }).pipe(
 		Layer.merge(
-			Layer.scopedDiscard(
+			Layer.effectDiscard(
 				Effect.addFinalizer(() =>
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 				),
@@ -55,7 +55,7 @@ function makeReadonlySqlLayer() {
 		disableWAL: true,
 	}).pipe(
 		Layer.merge(
-			Layer.scopedDiscard(
+			Layer.effectDiscard(
 				Effect.addFinalizer(() =>
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 				),
@@ -459,7 +459,7 @@ describe("Persistence Effect", () => {
 						),
 					),
 				);
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 				if (result._tag === "Failure")
 					expectMigrationFailure(result.failure, "Unknown recorded migration");
 			}),
@@ -537,7 +537,7 @@ describe("Persistence Effect", () => {
 				),
 			);
 
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 			if (result._tag === "Failure") {
 				expectMigrationFailure(result.failure, "Failed to execute statement");
 			}

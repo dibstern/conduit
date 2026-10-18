@@ -41,7 +41,7 @@ import {
 } from "../../helpers/mock-factories.js";
 
 const recordingBus = (advances: ReadModelAdvance[]) =>
-	Layer.succeed(SessionEventBusTag, {
+	Layer.succeed(SessionEventBusTag)({
 		publish: () => Effect.void,
 		publishAdvance: (advance) => Effect.sync(() => void advances.push(advance)),
 		subscribe: () => Effect.succeed(Stream.empty),
@@ -77,10 +77,10 @@ const withPersistence = async <A>(
 					Layer.mergeAll(
 						persistence,
 						bus,
-						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-						Layer.succeed(ConfigTag, makeMockConfig()),
-						Layer.succeed(LoggerTag, makeMockLogger()),
-						Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+						Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+						Layer.succeed(ConfigTag)(makeMockConfig()),
+						Layer.succeed(LoggerTag)(makeMockLogger()),
+						Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 					),
 				),
 				Effect.orDie,

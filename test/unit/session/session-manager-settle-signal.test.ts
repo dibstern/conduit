@@ -97,28 +97,26 @@ describe("SessionManagerService settle signal", () => {
 				"feature",
 			);
 			const mergedHead = git(worktree, "rev-parse", "HEAD");
-			const configLayer = Layer.succeed(
-				ConfigTag,
+			const configLayer = Layer.succeed(ConfigTag)(
 				makeMockConfig({ configDir: dir, projectDir }),
 			);
-			const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
+			const loggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
 			const openCodeApi = makeMockOpenCodeAPI();
 			// Same wiring as project-relay-layers: one shared bus for the
 			// persistence stack and the relay services.
 			const layer = Layer.provideMerge(
 				SessionManagerServiceLive,
 				Layer.mergeAll(
-					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					makeSessionManagerStateLive(),
-					Layer.succeed(OpenCodeAPITag, openCodeApi),
+					Layer.succeed(OpenCodeAPITag)(openCodeApi),
 					loggerLayer,
 					configLayer,
-					Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+					Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 					Layer.effect(SessionActivityTag, makeSessionActivity),
 					RelayStatusSnapshotLive,
 					makeOverridesStateLive(),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: openCodeApi }),
 					),
 					DaemonEventBusLive,
@@ -129,8 +127,7 @@ describe("SessionManagerService settle signal", () => {
 						undefined,
 						SessionEventBusLive,
 					),
-					Layer.succeed(
-						OrchestrationEngineTag,
+					Layer.succeed(OrchestrationEngineTag)(
 						new OrchestrationEngine({ registry: new ProviderRegistry() }),
 					),
 				),

@@ -418,7 +418,7 @@ test("tools open as previews and expand to full detail", async ({
 	await expect.poll(() => harness.generations.at(-1)?.fakeSdkActive).toBe(true);
 	const send = (sessionId: string, text: string) =>
 		Effect.runPromise(
-			driver.rpc.input.submit({
+			driver.rpc["input.submit"]({
 				sessionId,
 				originId: driver.originId,
 				inputId: randomUUID(),
@@ -716,7 +716,7 @@ test("resting on a turn activity block prefetches its tools, once loaded", async
 	const liveFrom = rpc.frames.length;
 	const requestsBeforeLive = rpc.detailRequests.length;
 	await Effect.runPromise(
-		driver.rpc.input.submit({
+		driver.rpc["input.submit"]({
 			sessionId: liveSession,
 			originId: driver.originId,
 			inputId: randomUUID(),

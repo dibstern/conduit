@@ -144,15 +144,14 @@ describe("handleMessage with Effect provider state persistence", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					AlertsLive,
-					Layer.succeed(OpenCodeAPITag, client),
-					Layer.succeed(WebSocketHandlerTag, ws),
-					Layer.succeed(LoggerTag, log),
-					Layer.succeed(
-						SessionManagerServiceTag,
+					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(WebSocketHandlerTag)(ws),
+					Layer.succeed(LoggerTag)(log),
+					Layer.succeed(SessionManagerServiceTag)(
 						makeMockSessionManagerService(),
 					),
-					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-					Layer.succeed(ConfigTag, {
+					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+					Layer.succeed(ConfigTag)({
 						httpServer: createServer(),
 						opencodeUrl: "http://127.0.0.1:1",
 						projectDir: MOCK_PROJECT_DIR,
@@ -162,9 +161,9 @@ describe("handleMessage with Effect provider state persistence", () => {
 						publishGlobalSetting: () => Effect.void,
 					} satisfies ProjectRelayConfig),
 					PendingInteractionServiceLive,
-					Layer.succeed(AgentServiceTag, makeMockAgentService()),
-					Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-					Layer.succeed(OrchestrationEngineTag, engine),
+					Layer.succeed(AgentServiceTag)(makeMockAgentService()),
+					Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
+					Layer.succeed(OrchestrationEngineTag)(engine),
 					persistence,
 					makeIngestionLayer(persistence),
 					makeOverridesStateLive(),
@@ -250,15 +249,14 @@ describe("handleMessage with Effect provider state persistence", () => {
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
 				AlertsLive,
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(
-					SessionManagerServiceTag,
+				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(log),
+				Layer.succeed(SessionManagerServiceTag)(
 					makeMockSessionManagerService(),
 				),
-				Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-				Layer.succeed(ConfigTag, {
+				Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+				Layer.succeed(ConfigTag)({
 					httpServer: createServer(),
 					opencodeUrl: "http://127.0.0.1:1",
 					projectDir: MOCK_PROJECT_DIR,
@@ -268,9 +266,9 @@ describe("handleMessage with Effect provider state persistence", () => {
 					publishGlobalSetting: () => Effect.void,
 				} satisfies ProjectRelayConfig),
 				PendingInteractionServiceLive,
-				Layer.succeed(AgentServiceTag, makeMockAgentService()),
-				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(AgentServiceTag)(makeMockAgentService()),
+				Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
+				Layer.succeed(OrchestrationEngineTag)(engine),
 				persistence,
 				makeIngestionLayer(persistence),
 				makeOverridesStateLive(),
@@ -361,15 +359,14 @@ describe("handleMessage with Effect provider state persistence", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					AlertsLive,
-					Layer.succeed(OpenCodeAPITag, client),
-					Layer.succeed(WebSocketHandlerTag, ws),
-					Layer.succeed(LoggerTag, log),
-					Layer.succeed(
-						SessionManagerServiceTag,
+					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(WebSocketHandlerTag)(ws),
+					Layer.succeed(LoggerTag)(log),
+					Layer.succeed(SessionManagerServiceTag)(
 						makeMockSessionManagerService(),
 					),
-					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-					Layer.succeed(ConfigTag, {
+					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+					Layer.succeed(ConfigTag)({
 						httpServer: createServer(),
 						opencodeUrl: "http://127.0.0.1:1",
 						projectDir: MOCK_PROJECT_DIR,
@@ -379,9 +376,9 @@ describe("handleMessage with Effect provider state persistence", () => {
 						publishGlobalSetting: () => Effect.void,
 					} satisfies ProjectRelayConfig),
 					PendingInteractionServiceLive,
-					Layer.succeed(AgentServiceTag, makeMockAgentService()),
-					Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-					Layer.succeed(OrchestrationEngineTag, engine),
+					Layer.succeed(AgentServiceTag)(makeMockAgentService()),
+					Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
+					Layer.succeed(OrchestrationEngineTag)(engine),
 					persistence,
 					makeIngestionLayer(persistence),
 					makeOverridesStateLive(),
@@ -494,15 +491,14 @@ describe("handleMessage with Effect provider state persistence", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					AlertsLive,
-					Layer.succeed(OpenCodeAPITag, client),
-					Layer.succeed(WebSocketHandlerTag, ws),
-					Layer.succeed(LoggerTag, log),
-					Layer.succeed(
-						SessionManagerServiceTag,
+					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(WebSocketHandlerTag)(ws),
+					Layer.succeed(LoggerTag)(log),
+					Layer.succeed(SessionManagerServiceTag)(
 						makeMockSessionManagerService(),
 					),
-					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-					Layer.succeed(ConfigTag, {
+					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+					Layer.succeed(ConfigTag)({
 						httpServer: createServer(),
 						opencodeUrl: "http://127.0.0.1:1",
 						projectDir: MOCK_PROJECT_DIR,
@@ -512,9 +508,9 @@ describe("handleMessage with Effect provider state persistence", () => {
 						publishGlobalSetting: () => Effect.void,
 					} satisfies ProjectRelayConfig),
 					PendingInteractionServiceLive,
-					Layer.succeed(AgentServiceTag, makeMockAgentService()),
-					Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-					Layer.succeed(OrchestrationEngineTag, engine),
+					Layer.succeed(AgentServiceTag)(makeMockAgentService()),
+					Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
+					Layer.succeed(OrchestrationEngineTag)(engine),
 					persistence,
 					makeIngestionLayer(persistence),
 					makeOverridesStateLive(),

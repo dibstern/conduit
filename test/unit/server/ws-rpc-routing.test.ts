@@ -41,14 +41,14 @@ import {
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
-const sessionDirectory = Layer.succeed(SessionDirectory, {
+const sessionDirectory = Layer.succeed(SessionDirectory)({
 	projectOf: (sessionId) =>
 		Effect.succeed(
 			sessionId === "session-a" ? Option.some("project-a") : Option.none(),
 		),
 });
 describe("routed RPC server", () => {
-	it.scoped(
+	it.effect(
 		"rejects session creation without a project even with a relay default",
 		() =>
 			Effect.gen(function* () {
@@ -71,18 +71,18 @@ describe("routed RPC server", () => {
 					{ originId: "relay-client" },
 					{ disableValidation: true },
 				);
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					createSession(malformed, Headers.empty),
 				);
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: { message: "projectSlug is required" },
+					_tag: "Failure",
+					failure: { message: "projectSlug is required" },
 				});
 				expect(resolve).not.toHaveBeenCalled();
 			}),
 	);
 
-	it.scoped(
+	it.effect(
 		"serves a named project's approvals, a subagent's included, and no other project's",
 		() =>
 			Effect.gen(function* () {
@@ -193,7 +193,7 @@ describe("routed RPC server", () => {
 			}),
 	);
 
-	it.scoped(
+	it.effect(
 		"AttachProject replies with the daemon's resolved project without resolving a relay context",
 		() =>
 			Effect.gen(function* () {
@@ -233,7 +233,7 @@ describe("routed RPC server", () => {
 			}),
 	);
 
-	it.scoped(
+	it.effect(
 		"AttachProject on a standalone relay replies with its own project",
 		() =>
 			Effect.gen(function* () {
@@ -257,7 +257,7 @@ describe("routed RPC server", () => {
 			}),
 	);
 
-	it.scoped("routes ViewSession through the project handler", () =>
+	it.effect("routes ViewSession through the project handler", () =>
 		Effect.gen(function* () {
 			const context = yield* Layer.build(
 				makeTestHandlerLayer().pipe(
@@ -283,7 +283,7 @@ describe("routed RPC server", () => {
 		}),
 	);
 
-	it.scoped(
+	it.effect(
 		"uses the initial standalone relay when a daemon request omits projectSlug",
 		() =>
 			Effect.gen(function* () {
@@ -310,7 +310,7 @@ describe("routed RPC server", () => {
 			}),
 	);
 
-	it.scoped("does not return a disposed relay's context", () =>
+	it.effect("does not return a disposed relay's context", () =>
 		Effect.gen(function* () {
 			const runtime = yield* Effect.acquireRelease(
 				Effect.sync(() =>
@@ -333,7 +333,7 @@ describe("routed RPC server", () => {
 		}),
 	);
 
-	it.scoped(
+	it.effect(
 		"uses each project's services and keeps serving after a routing error",
 		() =>
 			Effect.gen(function* () {
@@ -387,13 +387,13 @@ describe("routed RPC server", () => {
 					current: "project-b",
 					projects: [{ slug: "project-b" }],
 				});
-				const missing = yield* Effect.either(
+				const missing = yield* Effect.result(
 					client.GetProjects({ projectSlug: "missing" }),
 				);
-				expect(missing._tag).toBe("Left");
-				if (missing._tag === "Left") {
-					expect(missing.left).toBeInstanceOf(WsRpcError);
-					expect(missing.left.message).toContain("missing");
+				expect(missing._tag).toBe("Failure");
+				if (missing._tag === "Failure") {
+					expect(missing.failure).toBeInstanceOf(WsRpcError);
+					expect(missing.failure.message).toContain("missing");
 				}
 				expect(
 					yield* client.GetProjects({ projectSlug: "project-b" }),
@@ -407,14 +407,14 @@ describe("routed RPC server", () => {
 			}),
 	);
 
-	it.scoped("keeps its transport open until the owning scope closes", () =>
+	it.effect("keeps its transport open until the owning scope closes", () =>
 		Effect.gen(function* () {
 			const close = vi.spyOn(WebSocketServer.prototype, "close");
 			yield* Effect.addFinalizer(() => Effect.sync(() => close.mockRestore()));
 			const scope = yield* Scope.make();
 			yield* makeRoutedWsRpcWebSocketHandler(() =>
 				Effect.fail(new WsRpcError({ message: "unused" })),
-			).pipe(Effect.provide(sessionDirectory), Scope.extend(scope));
+			).pipe(Effect.provide(sessionDirectory), Scope.provide(scope));
 			expect(close).not.toHaveBeenCalled();
 			yield* Scope.close(scope, Exit.void);
 			expect(close).toHaveBeenCalledTimes(1);

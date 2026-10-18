@@ -53,11 +53,11 @@ const testProjects: RouterProjectInfo[] = [
 	},
 ];
 
-const TestProjectsLayer = Layer.succeed(ProjectsProvider, {
+const TestProjectsLayer = Layer.succeed(ProjectsProvider)({
 	getProjects: () => Effect.succeed(testProjects),
 });
 
-const TestPushLayer = Layer.succeed(PushProvider, {
+const TestPushLayer = Layer.succeed(PushProvider)({
 	getPublicKey: () => "test-vapid-public-key",
 	addSubscription: () => {},
 	removeSubscription: () => {},
@@ -66,7 +66,7 @@ const TestPushLayer = Layer.succeed(PushProvider, {
 let setupInfoPort = 9999;
 let setupInfoIsTls = false;
 
-const TestSetupInfoLayer = Layer.succeed(SetupInfoProvider, {
+const TestSetupInfoLayer = Layer.succeed(SetupInfoProvider)({
 	getPort: () => Effect.sync(() => setupInfoPort),
 	getIsTls: () => Effect.sync(() => setupInfoIsTls),
 	getPublicUrl: () => Effect.succeed(null),
@@ -81,7 +81,7 @@ beforeAll(async () => {
 const baseRouterLayer = () =>
 	Layer.mergeAll(
 		makeAuthManagerLive(new AuthManager()),
-		Layer.succeed(StaticDirTag, staticDir),
+		Layer.succeed(StaticDirTag)(staticDir),
 		NodeFileSystem.layer,
 		NodePath.layer,
 	);
@@ -109,7 +109,7 @@ describe("Effect HTTP Router - Extended Routes", () => {
 	describe("POST /api/push/unsubscribe", () => {
 		it("removes subscription and returns ok", async () => {
 			const removed: string[] = [];
-			const trackingPushLayer = Layer.succeed(PushProvider, {
+			const trackingPushLayer = Layer.succeed(PushProvider)({
 				getPublicKey: () => "key",
 				addSubscription: () => {},
 				removeSubscription: (endpoint: string) => {
@@ -354,7 +354,7 @@ describe("HttpServerLive layer construction", () => {
 	it.effect("can construct and start a server on port 0", () =>
 		Effect.gen(function* () {
 			// Provide a minimal config with port 0 to let the OS pick a free port.
-			const configLayer = Layer.succeed(HttpServerConfigTag, {
+			const configLayer = Layer.succeed(HttpServerConfigTag)({
 				port: 0,
 				host: "127.0.0.1",
 				tls: false,

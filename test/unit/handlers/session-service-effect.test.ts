@@ -81,14 +81,14 @@ function makeSessionMetadataLayer(options: {
 
 	const baseLayer = Layer.mergeAll(
 		makePersistenceEffectLayer(":memory:", "test-project"),
-		Layer.succeed(OpenCodeAPITag, api),
-		Layer.succeed(WebSocketHandlerTag, wsHandler),
-		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-		Layer.succeed(LoggerTag, logger),
-		Layer.succeed(ConfigTag, makeMockConfig()),
+		Layer.succeed(OpenCodeAPITag)(api),
+		Layer.succeed(WebSocketHandlerTag)(wsHandler),
+		Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+		Layer.succeed(LoggerTag)(logger),
+		Layer.succeed(ConfigTag)(makeMockConfig()),
 		PendingInteractionServiceLive,
-		Layer.succeed(StatusPollerTag, statusPoller),
-		Layer.succeed(PollerManagerTag, pollerManager),
+		Layer.succeed(StatusPollerTag)(statusPoller),
+		Layer.succeed(PollerManagerTag)(pollerManager),
 		makeOverridesStateLive(),
 	);
 
@@ -260,7 +260,7 @@ describe("session handler metadata", () => {
 					Effect.provide(
 						Layer.merge(
 							layer,
-							Layer.succeed(ReadQueryEffectTag, readQueryEffect),
+							Layer.succeed(ReadQueryEffectTag)(readQueryEffect),
 						),
 					),
 					Effect.tap((result) => {

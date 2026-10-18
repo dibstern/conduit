@@ -150,7 +150,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				durableCommands: yield* makeDurableOptions({ sql }),
 			});
 			const result = yield* Effect.result(engine.dispatchEffect(command));
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 			expect(
 				JSON.stringify({
 					receipts: yield* sql`SELECT * FROM command_receipts`,
@@ -331,7 +331,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				engine.dispatchEffect(sendTurnCommand()),
 			);
 
-			expect(failed._tag).toBe("Left");
+			expect(failed._tag).toBe("Failure");
 			if (failed._tag === "Failure") {
 				expect(failed.failure._tag).toBe("CommandIdGenerationFailed");
 			}
@@ -403,7 +403,7 @@ describe("OrchestrationEngine durable receipts", () => {
 					secondEngine.dispatchEffect(sendTurnCommand({ prompt: "changed" })),
 				);
 
-				expect(rejected._tag).toBe("Left");
+				expect(rejected._tag).toBe("Failure");
 				if (rejected._tag === "Failure") {
 					expect(rejected.failure._tag).toBe("CommandFingerprintMismatch");
 				}
@@ -420,7 +420,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				const rejectedAgain = yield* Effect.result(
 					thirdEngine.dispatchEffect(sendTurnCommand({ prompt: "changed" })),
 				);
-				expect(rejectedAgain._tag).toBe("Left");
+				expect(rejectedAgain._tag).toBe("Failure");
 				expect(thirdInstance.sendTurnEffect).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
@@ -504,7 +504,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				const first = yield* Effect.result(
 					engine.dispatchEffect(sendTurnCommand()),
 				);
-				expect(first._tag).toBe("Left");
+				expect(first._tag).toBe("Failure");
 				expect(providerCalls).toBe(1);
 
 				const retry = yield* engine.dispatchEffect(sendTurnCommand());
@@ -740,7 +740,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				});
 
 				const result = yield* Effect.result(engine.dispatchEffect(command));
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 				if (result._tag === "Failure") {
 					expect((result.failure as { _tag: string })._tag).toBe(
 						"CommandFingerprintMismatch",
@@ -777,7 +777,7 @@ describe("OrchestrationEngine durable receipts", () => {
 					engine.dispatchEffect(sendTurnCommand()),
 				);
 
-				expect(rejected._tag).toBe("Left");
+				expect(rejected._tag).toBe("Failure");
 				if (rejected._tag === "Failure") {
 					expect(rejected.failure._tag).toBe("StaleCommandRejected");
 				}

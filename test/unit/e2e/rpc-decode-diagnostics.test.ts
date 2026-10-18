@@ -27,7 +27,7 @@ const serverReply = (table: StubTable, request: RpcMessage.RequestEncoded) =>
 					Deferred.succeed(reply, json).pipe(Effect.asVoid),
 				);
 				yield* receive(JSON.stringify(request));
-				return yield* reply;
+				return yield* Deferred.await(reply);
 			}),
 		),
 	);
@@ -45,7 +45,7 @@ describe("process RPC decode diagnostics", () => {
 
 	it("correlates an invalid unary response without changing the frame or capturing valid responses", async () => {
 		const diagnostics = new RpcDecodeDiagnostics(build);
-		const parser = diagnostics.serialization("/rpc").unsafeMake();
+		const parser = diagnostics.serialization("/rpc").makeUnsafe();
 		const bad = instancesRequest("1");
 		const good = instancesRequest("2");
 		parser.encode(bad);
@@ -96,7 +96,7 @@ describe("process RPC decode diagnostics", () => {
 
 	it("captures the schema path of a retired state in a stream chunk", async () => {
 		const diagnostics = new RpcDecodeDiagnostics(build);
-		const parser = diagnostics.serialization("/rpc").unsafeMake();
+		const parser = diagnostics.serialization("/rpc").makeUnsafe();
 		const request: RpcMessage.RequestEncoded = {
 			_tag: "Request",
 			id: "3",
@@ -144,7 +144,7 @@ describe("process RPC decode diagnostics", () => {
 		'{"password":"malformed-tripwire',
 	])("records malformed JSON with auth redacted: %s", (raw) => {
 		const diagnostics = new RpcDecodeDiagnostics(build);
-		const parser = diagnostics.serialization("/rpc").unsafeMake();
+		const parser = diagnostics.serialization("/rpc").makeUnsafe();
 		expect(() => parser.decode(raw)).toThrow();
 		expect(diagnostics.failures).toHaveLength(1);
 		expect(diagnostics.failures[0]?.schemaPaths).toEqual([[]]);
@@ -158,7 +158,7 @@ describe("process RPC decode diagnostics", () => {
 		const artifact = join(root, "test-results", "decode.json");
 		try {
 			const diagnostics = new RpcDecodeDiagnostics(build, artifact);
-			const parser = diagnostics.serialization("/rpc").unsafeMake();
+			const parser = diagnostics.serialization("/rpc").makeUnsafe();
 			const request = instancesRequest("4");
 			parser.encode(request);
 			const frame: unknown = JSON.parse(await serverReply(instances, request));

@@ -117,7 +117,7 @@ const makeLayer = (options: {
 		Layer.provide(
 			Layer.mergeAll(
 				makeSessionManagerStateLive(),
-				Layer.succeed(ReadQueryEffectTag, {
+				Layer.succeed(ReadQueryEffectTag)({
 					readToolDetails: () => Effect.succeed([]),
 					getSessionStatus: () => Effect.succeed(undefined),
 					getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -201,7 +201,7 @@ const makeLayer = (options: {
 								),
 					getLatestTurnModelExecution: () => Effect.succeed(undefined),
 				}),
-				Layer.succeed(EventStoreEffectTag, {
+				Layer.succeed(EventStoreEffectTag)({
 					projectId: "test-project",
 					append: () => Effect.die("unused append"),
 					appendBatch: () => Effect.succeed([]),
@@ -210,7 +210,7 @@ const makeLayer = (options: {
 					readAllBySession: () => Effect.succeed([]),
 					getNextStreamVersion: () => Effect.succeed(1),
 				}),
-				Layer.succeed(SessionEventBusTag, {
+				Layer.succeed(SessionEventBusTag)({
 					publish: () => Effect.void,
 					publishAdvance: () => Effect.void,
 					subscribe: () => Effect.succeed(Stream.empty),
@@ -444,7 +444,7 @@ describe("RpcTest subscription stream semantics", () => {
 										frame._tag === "synchronized",
 								)
 							) {
-								const chunk = yield* Queue.takeAll(queue);
+								const chunk = yield* Queue.clear(queue);
 								opening.push(...chunk);
 							}
 							expect(opening).toEqual(initial);

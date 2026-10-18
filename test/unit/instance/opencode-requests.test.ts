@@ -94,7 +94,7 @@ function makeMockApi(
 function makeMockApiLayer(overrides?: Parameters<typeof makeMockApi>[0]) {
 	const mock = makeMockApi(overrides);
 	// biome-ignore lint/suspicious/noExplicitAny: Mock OpenCodeAPI for testing
-	return Layer.succeed(OpenCodeAPITag, mock as any);
+	return Layer.succeed(OpenCodeAPITag)(mock as any);
 }
 
 describe("GetSessions", () => {
@@ -111,7 +111,7 @@ describe("GetSessions", () => {
 		Effect.gen(function* () {
 			const mock = makeMockApi();
 			// biome-ignore lint/suspicious/noExplicitAny: Mock OpenCodeAPI for testing
-			const layer = Layer.succeed(OpenCodeAPITag, mock as any);
+			const layer = Layer.succeed(OpenCodeAPITag)(mock as any);
 
 			yield* getSessions.pipe(Effect.provide(layer));
 
@@ -152,7 +152,7 @@ describe("GetMessages", () => {
 		Effect.gen(function* () {
 			const mock = makeMockApi();
 			// biome-ignore lint/suspicious/noExplicitAny: Mock OpenCodeAPI for testing
-			const layer = Layer.succeed(OpenCodeAPITag, mock as any);
+			const layer = Layer.succeed(OpenCodeAPITag)(mock as any);
 
 			yield* getMessages("s42").pipe(Effect.provide(layer));
 
@@ -190,7 +190,7 @@ describe("GetSessionStatuses", () => {
 		Effect.gen(function* () {
 			const mock = makeMockApi();
 			// biome-ignore lint/suspicious/noExplicitAny: Mock OpenCodeAPI for testing
-			const layer = Layer.succeed(OpenCodeAPITag, mock as any);
+			const layer = Layer.succeed(OpenCodeAPITag)(mock as any);
 
 			yield* getSessionStatuses.pipe(Effect.provide(layer));
 
@@ -230,7 +230,7 @@ describe("GetSession (batched)", () => {
 			Effect.gen(function* () {
 				const mock = makeMockApi();
 				// biome-ignore lint/suspicious/noExplicitAny: Mock OpenCodeAPI for testing
-				const layer = Layer.succeed(OpenCodeAPITag, mock as any);
+				const layer = Layer.succeed(OpenCodeAPITag)(mock as any);
 
 				// Run two concurrent getSession requests with batching enabled
 				const [s1, s2] = yield* Effect.all(

@@ -118,28 +118,26 @@ const makeShellTestLayer = (
 		undefined,
 		SessionEventBusLive,
 	);
-	const cleanup = Layer.scopedDiscard(
+	const cleanup = Layer.effectDiscard(
 		Effect.addFinalizer(() =>
 			Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 		),
 	);
 	return Layer.mergeAll(
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-		Layer.succeed(
-			OpenCodeInstancesTag,
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({
 				opencode: handlerApi ?? makeMockOpenCodeAPI(),
 			}),
 		),
 		RelayStatusSnapshotLive,
-		Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+		Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 		persistenceLayer,
 		...(handlerApi === undefined
 			? []
 			: [makeTestHandlerLayer({ api: handlerApi, persistenceLayer })]),
 		SessionEventBusLive,
-		Layer.succeed(
-			OrchestrationEngineTag,
+		Layer.succeed(OrchestrationEngineTag)(
 			withDispatchEffect({
 				dispatch: async () => ({
 					models: [
@@ -157,8 +155,7 @@ const makeShellTestLayer = (
 			}),
 		),
 		Layer.effect(SessionActivityTag, makeSessionActivity),
-		Layer.succeed(
-			ConfigTag,
+		Layer.succeed(ConfigTag)(
 			makeMockConfig({
 				slug: "test-project",
 				configDir: dir,
@@ -171,7 +168,7 @@ const makeShellTestLayer = (
 				},
 			}),
 		),
-		Layer.succeed(LoggerTag, makeMockLogger()),
+		Layer.succeed(LoggerTag)(makeMockLogger()),
 		cleanup,
 	);
 };
@@ -307,7 +304,7 @@ const countingReadQuery = (
 	...real,
 	readSessionList: (...args) =>
 		Ref.update(requeries, (n) => n + 1).pipe(
-			Effect.zipRight(real.readSessionList(...args)),
+			Effect.andThen(real.readSessionList(...args)),
 		),
 });
 
@@ -338,7 +335,7 @@ const takeN = <A>(q: Queue.Queue<A>, n: number): Effect.Effect<A[]> =>
 const SID = "session-shell";
 
 describe("subscribeShell", () => {
-	it.scoped(
+	it.effect(
 		"a project's sidebar ignores another project's committed advance",
 		() =>
 			Effect.gen(function* () {
@@ -358,7 +355,7 @@ describe("subscribeShell", () => {
 				yield* commit([sessionCreated("other-session", "Project B")]).pipe(
 					Effect.provideService(EventStoreEffectTag, otherStore),
 				);
-				yield* Effect.yieldNow();
+				yield* Effect.yieldNow;
 				expect(yield* Ref.get(reads)).toBe(1);
 				expect(yield* Queue.size(q)).toBe(0);
 				yield* commit([sessionRenamed(SID, "Updated A")]);
@@ -369,7 +366,7 @@ describe("subscribeShell", () => {
 				expect(yield* Queue.size(q)).toBe(0);
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
-	it.scoped(
+	it.effect(
 		"a resume point from another store replaces the sidebar snapshot",
 		() =>
 			Effect.gen(function* () {
@@ -399,7 +396,7 @@ describe("subscribeShell", () => {
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 	for (const provider of ["opencode", "claude"] as const) {
-		it.scoped(
+		it.effect(
 			`${provider} fork commands update an open subscription from the event store`,
 			() =>
 				Effect.gen(function* () {
@@ -434,7 +431,7 @@ describe("subscribeShell", () => {
 		);
 	}
 	for (const entry of ["command", "handler"] as const) {
-		it.scoped(
+		it.effect(
 			`a new Claude fork through the ${entry} publishes lineage without containment and resumes the SDK child`,
 			() => {
 				const api = makeMockOpenCodeAPI();
@@ -503,7 +500,7 @@ describe("subscribeShell", () => {
 			},
 		);
 	}
-	it.scoped(
+	it.effect(
 		"does not create a new Claude fork without a durable boundary key",
 		() =>
 			Effect.gen(function* () {
@@ -527,14 +524,14 @@ describe("subscribeShell", () => {
 					sessionId: "unclassified-child",
 				});
 				vi.mocked(sdkForkSession).mockClear();
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					forkSession("claude-parent", { messageId: "missing" }),
 				);
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 				expect(sdkForkSession).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
-	it.scoped(
+	it.effect(
 		"a Claude tip fork records the actual parent transcript boundary",
 		() =>
 			Effect.gen(function* () {
@@ -576,7 +573,7 @@ describe("subscribeShell", () => {
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 	// hk9m.7: the imported turns were the parent's to read, so the fork has no dot.
-	it.scoped("a Claude fork starts seen up to its last imported turn end", () =>
+	it.effect("a Claude fork starts seen up to its last imported turn end", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -616,7 +613,7 @@ describe("subscribeShell", () => {
 			});
 		}).pipe(Effect.provide(makeShellTestLayer())),
 	);
-	it.scoped(
+	it.effect(
 		"rejects a Claude UI boundary that continues through tool rounds",
 		() =>
 			Effect.gen(function* () {
@@ -658,14 +655,14 @@ describe("subscribeShell", () => {
 				vi.mocked(sdkForkSession).mockResolvedValue({
 					sessionId: "incorrect-child",
 				});
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					forkSession("claude-parent", { messageId: "ui-boundary" }),
 				);
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 				expect(sdkForkSession).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
-	it.scoped(
+	it.effect(
 		"a Claude fork is not published if its resume state cannot be saved",
 		() =>
 			Effect.gen(function* () {
@@ -691,13 +688,13 @@ describe("subscribeShell", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`CREATE TRIGGER reject_child_state BEFORE INSERT ON provider_state WHEN NEW.session_id = 'unresumable-child' BEGIN SELECT RAISE(ABORT, 'resume state unavailable'); END`;
 				yield* commit([messageCreated("claude-parent", "api-tip", 1000)]);
-				const result = yield* Effect.either(forkSession("claude-parent"));
-				expect(result._tag).toBe("Left");
+				const result = yield* Effect.result(forkSession("claude-parent"));
+				expect(result._tag).toBe("Failure");
 				const read = yield* ReadQueryEffectTag;
 				expect(yield* read.getSession("unresumable-child")).toBeUndefined();
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
-	it.scoped(
+	it.effect(
 		"rejects a Claude fork whose transcript store differs from the SDK process",
 		() =>
 			Effect.gen(function* () {
@@ -726,14 +723,14 @@ describe("subscribeShell", () => {
 				vi.mocked(getSessionMessages).mockClear();
 				vi.mocked(getSessionMessages).mockResolvedValue([]);
 				const config = yield* ConfigTag;
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					forkSession("claude-parent", { messageId: "api-tip" }).pipe(
 						Effect.provideService(ConfigTag, { ...config, configDir }),
 					),
 				);
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: { message: expect.stringContaining("Claude transcript") },
+					_tag: "Failure",
+					failure: { message: expect.stringContaining("Claude transcript") },
 				});
 				expect(getSessionMessages).toHaveBeenCalledWith("sdk-parent", {
 					configDir: {
@@ -745,7 +742,7 @@ describe("subscribeShell", () => {
 	);
 	for (const messageId of ["fork-message", undefined]) {
 		// OpenCode keeps message identity across a fork.
-		it.scoped(
+		it.effect(
 			`a new OpenCode fork exposes its Source and fork point ${messageId ?? "at tip"} without a metadata cache`,
 			() => {
 				const api = makeMockOpenCodeAPI();
@@ -803,14 +800,14 @@ describe("subscribeShell", () => {
 					Effect.provide(
 						Layer.merge(
 							makeShellTestLayer(api),
-							Layer.succeed(OpenCodeAPITag, api),
+							Layer.succeed(OpenCodeAPITag)(api),
 						),
 					),
 				);
 			},
 		);
 	}
-	it.scoped("successive committed bursts deliver successive current rows", () =>
+	it.effect("successive committed bursts deliver successive current rows", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([sessionCreated(SID)]);
@@ -829,7 +826,7 @@ describe("subscribeShell", () => {
 		}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"snapshot orders rows by recency and excludes unprojected history from its version",
 		() =>
 			Effect.gen(function* () {
@@ -863,7 +860,7 @@ describe("subscribeShell", () => {
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"resume after a parent deletion is told both it and its child are deleted",
 		() =>
 			Effect.gen(function* () {
@@ -891,14 +888,14 @@ describe("subscribeShell", () => {
 				Effect.provide(
 					Layer.mergeAll(
 						makeShellTestLayer(),
-						Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+						Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 						makeSessionManagerStateLive(),
 					),
 				),
 			),
 	);
 
-	it.scoped(
+	it.effect(
 		"resume covers more than a log page and excludes deleted sessions",
 		() =>
 			Effect.gen(function* () {
@@ -929,7 +926,7 @@ describe("subscribeShell", () => {
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"cold start snapshots the list, then upserts the whole current row per advance",
 		() =>
 			Effect.gen(function* () {
@@ -967,7 +964,7 @@ describe("subscribeShell", () => {
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 
-	it.scoped("two sessions moved by one commit arrive as one upsert each", () =>
+	it.effect("two sessions moved by one commit arrive as one upsert each", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([sessionCreated("shell-a"), sessionCreated("shell-b")]);
@@ -997,7 +994,7 @@ describe("subscribeShell", () => {
 		}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 
-	it.scoped("traffic that moves no session row emits nothing", () =>
+	it.effect("traffic that moves no session row emits nothing", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([sessionCreated(SID), messageCreated(SID, "m1")]);
@@ -1031,7 +1028,7 @@ describe("subscribeShell", () => {
 		}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"session.deleted through the persist choke point projects the row away and the shell emits remove",
 		() =>
 			Effect.gen(function* () {
@@ -1061,7 +1058,7 @@ describe("subscribeShell", () => {
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"deleteSession appends the session.deleted tombstone: row gone, shell emits remove live",
 		() =>
 			Effect.gen(function* () {
@@ -1083,14 +1080,14 @@ describe("subscribeShell", () => {
 				Effect.provide(
 					Layer.mergeAll(
 						makeShellTestLayer(),
-						Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+						Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 						makeSessionManagerStateLive(),
 					),
 				),
 			),
 	);
 
-	it.scoped(
+	it.effect(
 		"deleting a parent emits remove(parent) and remove(child) live, both deleted",
 		() =>
 			Effect.gen(function* () {
@@ -1129,14 +1126,14 @@ describe("subscribeShell", () => {
 				Effect.provide(
 					Layer.mergeAll(
 						makeShellTestLayer(),
-						Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+						Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 						makeSessionManagerStateLive(),
 					),
 				),
 			),
 	);
 
-	it.scoped(
+	it.effect(
 		"a cursor the tombstones do not cover gets a snapshot, not a catch-up",
 		() =>
 			Effect.gen(function* () {
@@ -1168,7 +1165,7 @@ describe("subscribeShell", () => {
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"resume catches up: the reconnecting client is told what moved and what left",
 		() =>
 			Effect.gen(function* () {
@@ -1211,14 +1208,14 @@ describe("subscribeShell", () => {
 				Effect.provide(
 					Layer.mergeAll(
 						makeShellTestLayer(),
-						Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+						Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 						makeSessionManagerStateLive(),
 					),
 				),
 			),
 	);
 
-	it.scoped(
+	it.effect(
 		"exactly-once across the base read: a commit during the read is not re-delivered",
 		() =>
 			Effect.gen(function* () {
@@ -1251,7 +1248,7 @@ describe("subscribeShell", () => {
 											),
 										),
 							),
-							Effect.zipRight(real.readSessionList(...args)),
+							Effect.andThen(real.readSessionList(...args)),
 						),
 				};
 
@@ -1271,7 +1268,7 @@ describe("subscribeShell", () => {
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 
-	it.scoped("closing the scope tears down the advance subscription", () =>
+	it.effect("closing the scope tears down the advance subscription", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([sessionCreated(SID)]);
@@ -1285,12 +1282,12 @@ describe("subscribeShell", () => {
 			yield* takeN(q, 2); // running & subscribed
 			yield* Scope.close(scope, Exit.void);
 
-			expect(Exit.isInterrupted(yield* Fiber.await(fiber))).toBe(true);
+			expect(Exit.hasInterrupts(yield* Fiber.await(fiber))).toBe(true);
 		}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 	// Unread is a turn end past the seen marker, and only SessionAttention
 	// moves the marker (ADR-0004, Scope; conduit-test-hk9m.3).
-	it.scoped(
+	it.effect(
 		"a seen mark reaches a live subscriber with the updated unread state",
 		() =>
 			Effect.gen(function* () {
@@ -1315,7 +1312,7 @@ describe("subscribeShell", () => {
 				const baseVersion = snapshot.sequence;
 
 				expect(yield* markSeen(SID, Number.MAX_SAFE_INTEGER)).toBe(true);
-				yield* Effect.yieldNow();
+				yield* Effect.yieldNow;
 
 				const delta = yield* Queue.take(q);
 				if (delta._tag !== "upsert") throw new Error("expected upsert");
@@ -1329,7 +1326,7 @@ describe("subscribeShell", () => {
 
 	// Background work outlives the turn that started it, so the session row
 	// says idle while the work runs. Only the in-memory liveness knows.
-	it.scoped(
+	it.effect(
 		"background work starting and ending reaches a live subscriber",
 		() => {
 			return Effect.gen(function* () {
@@ -1351,7 +1348,7 @@ describe("subscribeShell", () => {
 							})),
 						});
 						yield* announceBackgroundWork(SID);
-						yield* Effect.yieldNow();
+						yield* Effect.yieldNow;
 						const delta = yield* Queue.take(q).pipe(
 							Effect.timeout("2 seconds"),
 						);
@@ -1366,7 +1363,7 @@ describe("subscribeShell", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"a view of an unknown session announces nothing and emits nothing",
 		() =>
 			Effect.gen(function* () {
@@ -1379,12 +1376,12 @@ describe("subscribeShell", () => {
 				expect(
 					yield* markSeen("no-such-session", Number.MAX_SAFE_INTEGER),
 				).toBe(false);
-				yield* Effect.yieldNow();
+				yield* Effect.yieldNow;
 				expect(yield* Queue.size(q)).toBe(0);
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 
-	it.scoped("a message-only advance does not re-emit the session row", () =>
+	it.effect("a message-only advance does not re-emit the session row", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commitThroughSeam([
@@ -1399,13 +1396,13 @@ describe("subscribeShell", () => {
 			// session — but the session ROW did not move. Re-emitting the shell
 			// row on every token would undo the whole point of coalescing.
 			yield* commitThroughSeam([textDelta(SID, "m1", "hello")]);
-			yield* Effect.yieldNow();
+			yield* Effect.yieldNow;
 
 			expect(yield* Queue.size(q)).toBe(0);
 		}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 
-	it.scoped("a projection and its advance still produce ONE upsert", () =>
+	it.effect("a projection and its advance still produce ONE upsert", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commitThroughSeam([sessionCreated(SID)]);
@@ -1420,7 +1417,7 @@ describe("subscribeShell", () => {
 			// The seam publishes the events AND the advance for the same commit.
 			// The subscriber follows the advance and must emit only once.
 			yield* commitThroughSeam([sessionRenamed(SID, "Renamed")]);
-			yield* Effect.yieldNow();
+			yield* Effect.yieldNow;
 
 			const delta = yield* Queue.take(q);
 			if (delta._tag !== "upsert") throw new Error("expected upsert");
@@ -1431,7 +1428,7 @@ describe("subscribeShell", () => {
 	);
 	// ni8.12 group 2: the session's approval mode rides the shell row, so every
 	// open subscriber (every tab) follows a switch with no refetch.
-	it.scoped(
+	it.effect(
 		"a permission-mode switch reaches two open subscribers as the row's permissionMode",
 		() =>
 			Effect.gen(function* () {
@@ -1455,7 +1452,7 @@ describe("subscribeShell", () => {
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"a provider-reported permission mode reaches an open subscription",
 		() =>
 			Effect.gen(function* () {
@@ -1500,7 +1497,7 @@ describe("subscribeShell", () => {
 	// C1: a compaction's start is transient status. It rides the shell row from
 	// memory and is never appended; its outcome or the session going idle
 	// clears it.
-	it.scoped("a compaction in progress rides the shell row, not the log", () => {
+	it.effect("a compaction in progress rides the shell row, not the log", () => {
 		return Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([sessionCreated(SID)]);
@@ -1563,7 +1560,7 @@ describe("subscribeShell", () => {
 		}).pipe(
 			Effect.provide(
 				Layer.provideMerge(
-					Layer.unwrapEffect(
+					Layer.unwrap(
 						Effect.map(SessionActivityTag, (activity) =>
 							makeProviderRuntimeIngestionLive({
 								compactions: activity.compactions,

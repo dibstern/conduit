@@ -24,7 +24,7 @@ import {
 	type ServiceRunner,
 } from "../../../src/bin/cli-service.js";
 import { parseArgs } from "../../../src/bin/cli-utils.js";
-import { GetStatus } from "../../../src/lib/contracts/ws-rpc.js";
+
 import {
 	loadDaemonConfigResult,
 	saveDaemonConfig,
@@ -278,7 +278,7 @@ describe.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
 						serviceEnvironment: { CONDUIT_SERVICE: supervised ? "1" : "0" },
 					});
 				await start(args);
-				const initial = await harness.requestRpc(new GetStatus({}));
+				const initial = await harness.requestRpc({ _tag: "GetStatus" });
 				expect(initial).toMatchObject({ port: installPort, tlsEnabled: false });
 				expect(harness.logTail).not.toContain("re-run conduit service install");
 				record("initial-daemon", {
@@ -312,7 +312,7 @@ describe.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
 					claudeConfigDir: changedClaudeDir,
 				});
 				await start(args);
-				const restarted = await harness.requestRpc(new GetStatus({}));
+				const restarted = await harness.requestRpc({ _tag: "GetStatus" });
 				expect(restarted).toMatchObject({
 					port: changedPort,
 					tlsEnabled: false,
@@ -331,7 +331,7 @@ describe.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
 				await harness.terminate();
 				const explicitArgs = [...args, "--port", String(installPort)];
 				await start(explicitArgs, false);
-				const foreground = await harness.requestRpc(new GetStatus({}));
+				const foreground = await harness.requestRpc({ _tag: "GetStatus" });
 				expect(foreground.port).toBe(installPort);
 				expect(harness.logTail).not.toContain("re-run conduit service install");
 				record("foreground-override", {

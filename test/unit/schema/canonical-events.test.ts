@@ -24,7 +24,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -38,7 +38,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -52,7 +52,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -66,7 +66,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -80,7 +80,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -100,7 +100,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -120,7 +120,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isFailure(result)).toBe(true);
 		});
 
@@ -134,7 +134,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -154,7 +154,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -174,7 +174,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -188,7 +188,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -207,7 +207,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -221,7 +221,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -235,7 +235,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -249,7 +249,7 @@ describe("Canonical event schemas", () => {
 				{ requestedModel: "sonnet", actualModel: "claude-sonnet-5" },
 				{ actualModel: "claude-sonnet-5" },
 			]) {
-				const result = Schema.decodeUnknownEither(CanonicalEventSchema)({
+				const result = Schema.decodeUnknownResult(CanonicalEventSchema)({
 					eventId: "evt_model",
 					sessionId: "s1",
 					type: "turn.model_resolved",
@@ -269,7 +269,7 @@ describe("Canonical event schemas", () => {
 				{ actualModel: "claude-sonnet-5", requestedModel: "" },
 				{ actualModel: "claude-sonnet-5", expectedModel: "" },
 			]) {
-				const result = Schema.decodeUnknownEither(CanonicalEventSchema)({
+				const result = Schema.decodeUnknownResult(CanonicalEventSchema)({
 					eventId: "evt_model_invalid",
 					sessionId: "s1",
 					type: "turn.model_resolved",
@@ -298,7 +298,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -312,7 +312,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -326,7 +326,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -344,7 +344,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -358,7 +358,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -388,7 +388,7 @@ describe("Canonical event schemas", () => {
 			expect(
 				[defaultProvider, namedInstance].map((event) =>
 					Either.isSuccess(
-						Schema.decodeUnknownEither(CanonicalEventSchema)(event),
+						Schema.decodeUnknownResult(CanonicalEventSchema)(event),
 					),
 				),
 			).toEqual([true, true]);
@@ -409,7 +409,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -423,7 +423,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -441,7 +441,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -455,7 +455,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -469,7 +469,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isFailure(result)).toBe(true);
 		});
 
@@ -483,7 +483,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isFailure(result)).toBe(true);
 		});
 
@@ -508,7 +508,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -522,7 +522,7 @@ describe("Canonical event schemas", () => {
 				provider: "opencode",
 				createdAt: Date.now(),
 			};
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 	});
@@ -541,7 +541,7 @@ describe("Canonical event schemas", () => {
 				sequence: 1,
 				streamVersion: 0,
 			};
-			const result = Schema.decodeUnknownEither(StoredEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(StoredEventSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -556,7 +556,7 @@ describe("Canonical event schemas", () => {
 				createdAt: Date.now(),
 				streamVersion: 0,
 			};
-			const result = Schema.decodeUnknownEither(StoredEventSchema)(raw);
+			const result = Schema.decodeUnknownResult(StoredEventSchema)(raw);
 			expect(Either.isFailure(result)).toBe(true);
 		});
 	});
@@ -575,12 +575,12 @@ describe("Canonical event schemas", () => {
 				sseBatchSize: 5,
 				schemaVersion: 2,
 			};
-			const result = Schema.decodeUnknownEither(EventMetadataSchema)(raw);
+			const result = Schema.decodeUnknownResult(EventMetadataSchema)(raw);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
 		it("decodes empty metadata", () => {
-			const result = Schema.decodeUnknownEither(EventMetadataSchema)({});
+			const result = Schema.decodeUnknownResult(EventMetadataSchema)({});
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 	});
@@ -592,7 +592,7 @@ describe("Canonical event schemas", () => {
 				messageId: "m1",
 				sessionId: "s1",
 			});
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(event);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(event);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -602,7 +602,7 @@ describe("Canonical event schemas", () => {
 				messageId: "m1",
 				partId: "p1",
 			});
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(event);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(event);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -614,7 +614,7 @@ describe("Canonical event schemas", () => {
 				callId: "c1",
 				input: { tool: "Bash", command: "ls" },
 			});
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(event);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(event);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 
@@ -630,7 +630,7 @@ describe("Canonical event schemas", () => {
 				},
 				duration: 3000,
 			});
-			const result = Schema.decodeUnknownEither(CanonicalEventSchema)(event);
+			const result = Schema.decodeUnknownResult(CanonicalEventSchema)(event);
 			expect(Either.isSuccess(result)).toBe(true);
 		});
 	});

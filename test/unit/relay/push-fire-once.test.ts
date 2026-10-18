@@ -44,7 +44,7 @@ import {
 	type RelayMessage,
 } from "../../../src/lib/shared-types.js";
 
-const silentBus = Layer.succeed(SessionEventBusTag, {
+const silentBus = Layer.succeed(SessionEventBusTag)({
 	publish: () => Effect.void,
 	publishAdvance: () => Effect.void,
 	subscribe: () => Effect.succeed(Stream.empty),

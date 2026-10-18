@@ -60,7 +60,7 @@ function makeProject(slug: string, dir?: string): StoredProject {
 }
 
 /** No-op RelayCacheTag for tests that don't exercise relay lifecycle. */
-const NoOpRelayCacheLive = Layer.succeed(RelayCacheTag, {
+const NoOpRelayCacheLive = Layer.succeed(RelayCacheTag)({
 	get: (_slug: string) =>
 		Effect.succeed({
 			slug: _slug,
@@ -76,7 +76,7 @@ const NoOpRelayCacheLive = Layer.succeed(RelayCacheTag, {
 } satisfies RelayCache);
 
 /** Failing RelayCache for testing error paths (dies with defect). */
-const FailingRelayCacheLive = Layer.succeed(RelayCacheTag, {
+const FailingRelayCacheLive = Layer.succeed(RelayCacheTag)({
 	get: (_slug: string) => Effect.die(new Error("relay-boom")),
 	peek: () => Effect.succeed(Option.none()),
 	invalidate: (_slug: string) => Effect.void,
@@ -124,7 +124,7 @@ describe("ProjectRegistry Effect - addWithoutRelay", () => {
 
 			yield* addWithoutRelay(makeProject("alpha"));
 
-			const msg = yield* Queue.take(sub);
+			const msg = yield* PubSub.take(sub);
 			expect(msg._tag).toBe("InstanceAdded");
 			if (msg._tag === "InstanceAdded") {
 				expect(msg.instanceId).toBe("alpha");
@@ -188,7 +188,7 @@ describe("ProjectRegistry Effect - markReady", () => {
 				}),
 			);
 
-			const events = yield* Queue.takeAll(sub);
+			const events = yield* PubSub.takeUpTo(sub, Number.POSITIVE_INFINITY);
 			expect(Array.from(events)).toEqual([
 				{ _tag: "InstanceStatusChanged", instanceId: "alpha" },
 			]);
@@ -210,9 +210,9 @@ describe("ProjectRegistry Effect - markReady", () => {
 				_tag: "Ready",
 				project: yield* getProject("alpha"),
 			});
-			expect(Array.from(yield* Queue.takeAll(sub))).toEqual([
-				{ _tag: "InstanceStatusChanged", instanceId: "alpha" },
-			]);
+			expect(
+				Array.from(yield* PubSub.takeUpTo(sub, Number.POSITIVE_INFINITY)),
+			).toEqual([{ _tag: "InstanceStatusChanged", instanceId: "alpha" }]);
 		}).pipe(Effect.provide(TestLayer)),
 	);
 
@@ -252,7 +252,7 @@ describe("ProjectRegistry Effect - markError", () => {
 
 			yield* markError("alpha", "boom");
 
-			const msg = yield* Queue.take(sub);
+			const msg = yield* PubSub.take(sub);
 			expect(msg._tag).toBe("InstanceStatusChanged");
 		}).pipe(Effect.provide(TestLayer)),
 	);
@@ -278,7 +278,7 @@ describe("ProjectRegistry Effect - remove", () => {
 
 			yield* remove("alpha");
 
-			const msg = yield* Queue.take(sub);
+			const msg = yield* PubSub.take(sub);
 			expect(msg._tag).toBe("InstanceRemoved");
 			if (msg._tag === "InstanceRemoved") {
 				expect(msg.instanceId).toBe("alpha");
@@ -321,7 +321,7 @@ describe("ProjectRegistry Effect - remove", () => {
 				makeProjectRegistryLive(),
 				DaemonEventBusLive,
 				TestDaemonStateLive,
-				Layer.succeed(RelayCacheTag, trackingCache),
+				Layer.succeed(RelayCacheTag)(trackingCache),
 				ConfigPersistenceNoopLive,
 			),
 		);
@@ -355,7 +355,7 @@ describe("ProjectRegistry Effect - updateProject", () => {
 
 			yield* updateProject("alpha", { title: "New" });
 
-			const msg = yield* Queue.take(sub);
+			const msg = yield* PubSub.take(sub);
 			expect(msg._tag).toBe("InstanceStatusChanged");
 		}).pipe(Effect.provide(TestLayer)),
 	);
@@ -425,7 +425,7 @@ describe("ProjectRegistry Effect - touchLastUsed", () => {
 
 			yield* touchLastUsed("alpha");
 
-			const msg = yield* Queue.take(sub);
+			const msg = yield* PubSub.take(sub);
 			expect(msg._tag).toBe("InstanceStatusChanged");
 		}).pipe(Effect.provide(TestLayer)),
 	);
@@ -621,8 +621,8 @@ describe("ProjectRegistry Effect - removeAll", () => {
 
 			yield* removeAll;
 
-			const msg1 = yield* Queue.take(sub);
-			const msg2 = yield* Queue.take(sub);
+			const msg1 = yield* PubSub.take(sub);
+			const msg2 = yield* PubSub.take(sub);
 			const tags = [msg1._tag, msg2._tag];
 			expect(tags).toEqual(["InstanceRemoved", "InstanceRemoved"]);
 		}).pipe(Effect.provide(TestLayer)),
@@ -646,7 +646,7 @@ describe("ProjectRegistry Effect - removeAll", () => {
 				const invalidated = yield* Ref.make<ReadonlyArray<string>>([]);
 				const firstInvalidationStarted = yield* Deferred.make<void>();
 				const releaseInvalidations = yield* Deferred.make<void>();
-				const TrackingRelayCacheLive = Layer.succeed(RelayCacheTag, {
+				const TrackingRelayCacheLive = Layer.succeed(RelayCacheTag)({
 					get: (slug: string) =>
 						Effect.succeed({
 							slug,
@@ -688,7 +688,7 @@ describe("ProjectRegistry Effect - removeAll", () => {
 					const fiber = yield* Effect.forkChild(removeAll);
 					yield* Deferred.await(firstInvalidationStarted);
 					for (let index = 0; index < maxAllowedConcurrency; index++) {
-						yield* Effect.yieldNow();
+						yield* Effect.yieldNow;
 					}
 					expect(yield* Ref.get(maxObserved)).toBe(maxAllowedConcurrency);
 					yield* Deferred.succeed(releaseInvalidations, void 0);

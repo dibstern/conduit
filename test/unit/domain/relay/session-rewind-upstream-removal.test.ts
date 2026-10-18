@@ -166,7 +166,7 @@ it("rolls back the entire upstream rewind commit when a hidden removal cannot pr
 			const outcome = yield* Effect.result(
 				ingestion.ingest(upstreamRemoval("cut-user")),
 			);
-			expect.soft(outcome._tag).toBe("Left");
+			expect.soft(outcome._tag).toBe("Failure");
 			expect
 				.soft((yield* read.getSession(SESSION_ID))?.pending_rewind_message_id)
 				.toBe("cut-user");

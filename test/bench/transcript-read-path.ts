@@ -2,8 +2,8 @@
 // pnpm exec tsx test/bench/transcript-read-path.ts /tmp/read-path.db /tmp/read-path.json
 import { channel } from "node:diagnostics_channel";
 import { existsSync, writeFileSync } from "node:fs";
-import Database from "better-sqlite3";
-import { Chunk, Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { DatabaseSync } from "node:sqlite";
+import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { defaultDaemonConfig } from "../../src/lib/daemon/config-persistence.js";
 import { AccountDirectoryLive } from "../../src/lib/domain/daemon/Services/account-directory.js";
@@ -168,9 +168,9 @@ let reads: Record<
 		messageBytes: number;
 	}
 > = {};
-const prepare = Database.prototype.prepare;
-Object.defineProperty(Database.prototype, "prepare", {
-	value: function (this: Database.Database, source: string) {
+const prepare = DatabaseSync.prototype.prepare;
+Object.defineProperty(DatabaseSync.prototype, "prepare", {
+	value: function (this: DatabaseSync, source: string) {
 		const statement = prepare.call(this, source);
 		const all = statement.all;
 		Object.defineProperty(statement, "all", {
@@ -236,7 +236,6 @@ const sample = async (
 		}).pipe(
 			Stream.takeUntil((envelope) => envelope._tag === "synchronized"),
 			Stream.runCollect,
-			Effect.map(Chunk.toReadonlyArray),
 		),
 	);
 	const ms = performance.now() - start;
@@ -293,7 +292,7 @@ try {
 		}
 	}
 } finally {
-	Database.prototype.prepare = prepare;
+	DatabaseSync.prototype.prepare = prepare;
 	diagnostics.unsubscribe(onRead);
 	await runtime.dispose();
 }

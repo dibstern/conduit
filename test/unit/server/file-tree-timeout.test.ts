@@ -3,7 +3,7 @@ import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
 import { Cause, Effect, Fiber, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
-import { GetFileTree } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
@@ -109,9 +109,21 @@ describe("file tree time limits", () => {
 			return Effect.gen(function* () {
 				const fiber = yield* Effect.forkScoped(getFileTreeEntries());
 				yield* TestClock.adjust("4999 millis");
-				expect(Option.isNone(yield* Fiber.poll(fiber))).toBe(true);
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(fiber.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 				yield* TestClock.adjust("1 millis");
-				expect(Option.isSome(yield* Fiber.poll(fiber))).toBe(true);
+				expect(
+					Option.isSome(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(fiber.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 				expect(yield* Fiber.join(fiber)).toEqual([
 					"stalled/",
 					"healthy/",
@@ -149,14 +161,27 @@ describe("file tree time limits", () => {
 			);
 			return Effect.gen(function* () {
 				const fiber = yield* Effect.forkScoped(
-					filesHandlers.GetFileTree(
-						new GetFileTree({ projectSlug: "private-project" }),
-					),
+					filesHandlers.GetFileTree({
+						_tag: "GetFileTree",
+						projectSlug: "private-project",
+					}),
 				);
 				yield* TestClock.adjust("14999 millis");
-				expect(Option.isNone(yield* Fiber.poll(fiber))).toBe(true);
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(fiber.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 				yield* TestClock.adjust("1 millis");
-				expect(Option.isSome(yield* Fiber.poll(fiber))).toBe(true);
+				expect(
+					Option.isSome(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(fiber.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 				expect(yield* Fiber.join(fiber)).toEqual({
 					projectSlug: "private-project",
 					entries: ["a/", "b/", "c/", "d/"],
@@ -190,7 +215,11 @@ describe("file tree time limits", () => {
 		return Effect.gen(function* () {
 			const fiber = yield* Effect.forkScoped(getFileTreeEntries());
 			yield* TestClock.adjust("5 seconds");
-			expect(Option.isSome(yield* Fiber.poll(fiber))).toBe(true);
+			expect(
+				Option.isSome(
+					yield* Effect.sync(() => Option.fromUndefinedOr(fiber.pollUnsafe())),
+				),
+			).toBe(true);
 			expect(yield* Fiber.join(fiber)).toEqual([]);
 			expect(log.warn).toHaveBeenCalledWith(
 				'File tree folder timed out: "." after 5000 ms',
@@ -238,9 +267,21 @@ describe("file tree time limits", () => {
 				);
 				expect(signals).toHaveLength(1);
 				expect(signals[0]?.aborted).toBe(false);
-				expect(Option.isNone(yield* Fiber.poll(fiber))).toBe(true);
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(fiber.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 				yield* TestClock.adjust("1 millis");
-				expect(Option.isSome(yield* Fiber.poll(fiber))).toBe(true);
+				expect(
+					Option.isSome(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(fiber.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 				expect(yield* Fiber.join(fiber)).toEqual([]);
 				expect(signals[0]?.aborted).toBe(true);
 				expect(aborted).toHaveBeenCalledTimes(1);
@@ -256,9 +297,8 @@ describe("file tree time limits", () => {
 					OpenCodeFileServiceLive.pipe(
 						Layer.provide(
 							Layer.mergeAll(
-								Layer.succeed(OpenCodeAPITag, api),
-								Layer.succeed(
-									OpenCodeInstancesTag,
+								Layer.succeed(OpenCodeAPITag)(api),
+								Layer.succeed(OpenCodeInstancesTag)(
 									makeOpenCodeInstancesStub({ opencode: api }),
 								),
 							),
@@ -290,11 +330,11 @@ describe("file tree time limits", () => {
 					Effect.asVoid(files.list(".")),
 					Effect.asVoid(files.read(".gitignore")),
 				]) {
-					const result = yield* Effect.either(call);
-					expect(result._tag).toBe("Left");
-					if (result._tag === "Left") {
-						expect(result.left).toBeInstanceOf(Cause.UnknownException);
-						expect(result.left.cause).toMatchObject({
+					const result = yield* Effect.result(call);
+					expect(result._tag).toBe("Failure");
+					if (result._tag === "Failure") {
+						expect(result.failure).toBeInstanceOf(Cause.UnknownException);
+						expect(result.failure.cause).toMatchObject({
 							_tag: "OpenCodeConnectionError",
 						});
 					}
@@ -304,9 +344,8 @@ describe("file tree time limits", () => {
 					OpenCodeFileServiceLive.pipe(
 						Layer.provide(
 							Layer.mergeAll(
-								Layer.succeed(OpenCodeAPITag, api),
-								Layer.succeed(
-									OpenCodeInstancesTag,
+								Layer.succeed(OpenCodeAPITag)(api),
+								Layer.succeed(OpenCodeInstancesTag)(
 									makeOpenCodeInstancesStub({ opencode: api }),
 								),
 							),

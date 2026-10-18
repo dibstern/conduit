@@ -58,7 +58,7 @@ describe("relay tracing propagation", () => {
 
 			const dependencies = Layer.mergeAll(
 				makeDaemonStoreTestLayer(),
-				Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+				Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 				makeDaemonTracingLive({
 					enabled: false,
 					filePath: join(dir, "unused.trace.ndjson"),
@@ -68,7 +68,7 @@ describe("relay tracing propagation", () => {
 					spanProcessors: [processor],
 				}),
 				InstanceHealthCheckLive,
-				Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
+				Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
 				DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 				ConfigPersistenceNoopLive,
 				DaemonEventBusLive,
@@ -77,16 +77,16 @@ describe("relay tracing propagation", () => {
 				makeInstanceManagerStateLive(undefined, [], {
 					launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
 				}),
-				Layer.succeed(PortScannerTag, {
+				Layer.succeed(PortScannerTag)({
 					getKnownPorts: () => Effect.succeed(new Set<number>()),
 					scanNow: () =>
 						Effect.succeed({ discovered: [], lost: [], active: [] }),
 				}),
-				Layer.succeed(VersionCheckerTag, {
+				Layer.succeed(VersionCheckerTag)({
 					getLatestKnown: () => Effect.succeed(null),
 					getCurrentVersion: () => Effect.succeed("unknown"),
 				}),
-				Layer.succeed(PushManagerTag, {
+				Layer.succeed(PushManagerTag)({
 					subscribe: () => Effect.void,
 					unsubscribe: () => Effect.void,
 					broadcast: () => Effect.void,

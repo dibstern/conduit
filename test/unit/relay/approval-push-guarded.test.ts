@@ -53,7 +53,7 @@ const delivered: PushDeliveryReport = {
 	failed: [],
 };
 
-const silentBus = Layer.succeed(SessionEventBusTag, {
+const silentBus = Layer.succeed(SessionEventBusTag)({
 	publish: () => Effect.void,
 	publishAdvance: () => Effect.void,
 	subscribe: () => Effect.succeed(Stream.empty),
@@ -106,7 +106,7 @@ const run = async (
 		AlertsLive,
 		PendingInteractionServiceLive,
 		makeOverridesStateLive(),
-		Layer.succeed(SessionManagerServiceTag, {
+		Layer.succeed(SessionManagerServiceTag)({
 			getSessionParentMap: () => Effect.succeed(new Map()),
 		} as never),
 	).pipe(Layer.provideMerge(persistence));

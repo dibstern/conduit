@@ -33,14 +33,7 @@ import type {
 	DefaultSessionMode,
 	SessionMode,
 } from "../../../src/lib/contracts/project-file.js";
-import {
-	CreateSession,
-	GetProjects,
-	ResolveSessionMode,
-	type ResolveSessionModeResponse,
-	SaveProject,
-	SetDefaultSessionMode,
-} from "../../../src/lib/contracts/ws-rpc.js";
+import type { ResolveSessionModeResponse } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -57,27 +50,26 @@ describe("Session-mode defaults through the built daemon", () => {
 		await fixture.restart({ startupTimeoutMs: 120_000 });
 		const socket = join(fixture.configDir, "relay.sock");
 		const resolve = async (name: string, projectSlug = "process-test") => {
-			const result = await sendRpcRequest(
-				socket,
-				new ResolveSessionMode({ projectSlug }),
-			);
+			const result = await sendRpcRequest(socket, {
+				_tag: "ResolveSessionMode",
+				projectSlug,
+			});
 			cases.push({ name, ...result });
 			return result;
 		};
 		const save = (sessionMode?: SessionMode | null) =>
-			sendRpcRequest(
-				socket,
-				new SaveProject({
-					slug: "process-test",
-					folders: [fixture.projectDir],
-					...(sessionMode !== undefined && { sessionMode }),
-				}),
-			);
+			sendRpcRequest(socket, {
+				_tag: "SaveProject",
+				slug: "process-test",
+				folders: [fixture.projectDir],
+				...(sessionMode !== undefined && { sessionMode }),
+			});
 		const global = (mode: DefaultSessionMode) =>
-			sendRpcRequest(
-				socket,
-				new SetDefaultSessionMode({ projectSlug: "process-test", mode }),
-			);
+			sendRpcRequest(socket, {
+				_tag: "SetDefaultSessionMode",
+				projectSlug: "process-test",
+				mode,
+			});
 		return { fixture, socket, resolve, save, global };
 	}
 
@@ -130,10 +122,11 @@ describe("Session-mode defaults through the built daemon", () => {
 		});
 		const second = join(fixture.root, "second");
 		mkdirSync(second);
-		const added = await sendRpcRequest(
-			socket,
-			new SaveProject({ title: "Second", folders: [second] }),
-		);
+		const added = await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			title: "Second",
+			folders: [second],
+		});
 		expect(await resolve("another-project", added.savedSlug)).toEqual({
 			mode: "worktree",
 			source: "global",
@@ -188,17 +181,15 @@ describe("Session-mode defaults through the built daemon", () => {
 			newWorktree?: boolean;
 			worktreePath?: string;
 		}) =>
-			sendRpcRequest(
-				socket,
-				new CreateSession({
-					permissionMode: "ask",
-					model: { providerId: "claude", modelId: "sonnet" },
-					projectSlug: "process-test",
-					originId: "session-mode-defaults-test",
-					providerId: "claude",
-					...options,
-				}),
-			);
+			sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				permissionMode: "ask",
+				model: { providerId: "claude", modelId: "sonnet" },
+				projectSlug: "process-test",
+				originId: "session-mode-defaults-test",
+				providerId: "claude",
+				...options,
+			});
 		expect(await global("last")).toEqual({ mode: "last" });
 		expect(await resolve("last-never-recorded")).toEqual({
 			mode: "local",
@@ -341,7 +332,7 @@ describe("Session-mode defaults through the built daemon", () => {
 		});
 		await fixture.shutdown();
 		await fixture.restart({ startupTimeoutMs: 120_000 });
-		const projects = (await sendRpcRequest(socket, new GetProjects({})))
+		const projects = (await sendRpcRequest(socket, { _tag: "GetProjects" }))
 			.projects;
 		expect(
 			projects.find(({ slug }) => slug === "process-test")?.sessionMode,
@@ -381,24 +372,20 @@ describe("Session-mode defaults through the built daemon", () => {
 			'{"sessionMode":"worktree"}',
 		);
 		writeFileSync(join(second, "conduit.json"), '{"sessionMode":"local"}');
-		await sendRpcRequest(
-			socket,
-			new SaveProject({
-				slug: "process-test",
-				folders: [fixture.projectDir, second],
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [fixture.projectDir, second],
+		});
 		expect(await resolve("first-primary")).toEqual({
 			mode: "worktree",
 			source: "file",
 		});
-		await sendRpcRequest(
-			socket,
-			new SaveProject({
-				slug: "process-test",
-				folders: [second, fixture.projectDir],
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [second, fixture.projectDir],
+		});
 		expect(await resolve("second-primary")).toEqual({
 			mode: "local",
 			source: "file",

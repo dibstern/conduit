@@ -9,8 +9,11 @@ describe("Daemon RPC command schema validation", () => {
 		"12345678",
 	])("accepts explicit SetPin value %j", (pin) => {
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(SetPin)({ _tag: "SetPin", pin }),
+			Either.isSuccess(
+				Schema.decodeUnknownResult(SetPin.payloadSchema)({
+					_tag: "SetPin",
+					pin,
+				}),
 			),
 		).toBe(true);
 	});
@@ -23,286 +26,292 @@ describe("Daemon RPC command schema validation", () => {
 		undefined,
 	])("rejects invalid SetPin value %j", (pin) => {
 		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(SetPin)({ _tag: "SetPin", pin }),
+			Either.isFailure(
+				Schema.decodeUnknownResult(SetPin.payloadSchema)({
+					_tag: "SetPin",
+					pin,
+				}),
 			),
 		).toBe(true);
 	});
 
 	it("decodes save_project command", () => {
 		const raw = { _tag: "SaveProject", folders: ["/home/user/project"] };
-		const result = Schema.decodeUnknownEither(WsRpcRequest)(raw);
-		expect(Either.isRight(result)).toBe(true);
+		const result = Schema.decodeUnknownResult(WsRpcRequest)(raw);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("rejects save_project with an empty folder path", () => {
 		const raw = { _tag: "SaveProject", folders: [""] };
-		const result = Schema.decodeUnknownEither(WsRpcRequest)(raw);
-		expect(Either.isLeft(result)).toBe(true);
+		const result = Schema.decodeUnknownResult(WsRpcRequest)(raw);
+		expect(Either.isFailure(result)).toBe(true);
 	});
 
 	it("rejects unknown command", () => {
 		const raw = { _tag: "not_a_command" };
-		const result = Schema.decodeUnknownEither(WsRpcRequest)(raw);
-		expect(Either.isLeft(result)).toBe(true);
+		const result = Schema.decodeUnknownResult(WsRpcRequest)(raw);
+		expect(Either.isFailure(result)).toBe(true);
 	});
 
 	it("decodes a parsed tagged JSON request", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)(
+		const result = Schema.decodeUnknownResult(WsRpcRequest)(
 			JSON.parse('{"_tag":"SaveProject","folders":["/home/user/project"]}'),
 		);
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("decodes get_status command", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "GetStatus",
 		});
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("decodes list_projects command", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "GetProjects",
 		});
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("decodes shutdown command", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "Shutdown",
 		});
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("decodes restart_with_config command", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "RestartWithConfig",
 		});
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("drops legacy restart configuration overrides", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "RestartWithConfig",
 			config: { tls: true, port: 2634 },
 		});
-		expect(Either.isRight(result)).toBe(true);
-		if (Either.isRight(result) && result.right._tag === "RestartWithConfig") {
-			expect(Object.hasOwn(result.right, "config")).toBe(false);
+		expect(Either.isSuccess(result)).toBe(true);
+		if (
+			Either.isSuccess(result) &&
+			result.success._tag === "RestartWithConfig"
+		) {
+			expect(Object.hasOwn(result.success, "config")).toBe(false);
 		}
 	});
 
 	it("decodes instance_list command", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "GetInstances",
 		});
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("decodes remove_project with slug", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "RemoveProject",
 			slug: "my-project",
 		});
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("rejects remove_project with empty slug", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "RemoveProject",
 			slug: "",
 		});
-		expect(Either.isLeft(result)).toBe(true);
+		expect(Either.isFailure(result)).toBe(true);
 	});
 
 	it("decodes set_project_title", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "SaveProject",
 			slug: "proj",
 			title: "My Title",
 			folders: ["/home/user/project"],
 		});
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("rejects set_project_title with empty slug", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "SaveProject",
 			slug: "",
 			title: "foo",
 			folders: ["/home/user/project"],
 		});
-		expect(Either.isLeft(result)).toBe(true);
+		expect(Either.isFailure(result)).toBe(true);
 	});
 
 	it("decodes set_pin with valid PIN", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "SetPin",
 			pin: "1234",
 		});
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("rejects set_pin with non-digit PIN", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "SetPin",
 			pin: "abcd",
 		});
-		expect(Either.isLeft(result)).toBe(true);
+		expect(Either.isFailure(result)).toBe(true);
 	});
 
 	it("rejects set_pin with too-short PIN", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "SetPin",
 			pin: "12",
 		});
-		expect(Either.isLeft(result)).toBe(true);
+		expect(Either.isFailure(result)).toBe(true);
 	});
 
 	it("decodes set_keep_awake", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "SetKeepAwake",
 			enabled: true,
 		});
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("rejects set_keep_awake without boolean enabled", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "SetKeepAwake",
 			enabled: "yes",
 		});
-		expect(Either.isLeft(result)).toBe(true);
+		expect(Either.isFailure(result)).toBe(true);
 	});
 
 	it("decodes set_keep_awake_command with args", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "SetKeepAwakeCommand",
 			command: "caffeinate",
 			args: ["-d"],
 		});
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("decodes set_keep_awake_command with args defaulting to []", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "SetKeepAwakeCommand",
 			command: "caffeinate",
 		});
-		expect(Either.isRight(result)).toBe(true);
-		if (Either.isRight(result)) {
-			expect(result.right._tag).toBe("SetKeepAwakeCommand");
-			if (result.right._tag === "SetKeepAwakeCommand")
-				expect(result.right.args).toEqual([]);
+		expect(Either.isSuccess(result)).toBe(true);
+		if (Either.isSuccess(result)) {
+			expect(result.success._tag).toBe("SetKeepAwakeCommand");
+			if (result.success._tag === "SetKeepAwakeCommand")
+				expect(result.success.args).toEqual([]);
 		}
 	});
 
 	it("rejects set_keep_awake_command with empty command", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "SetKeepAwakeCommand",
 			command: "",
 		});
-		expect(Either.isLeft(result)).toBe(true);
+		expect(Either.isFailure(result)).toBe(true);
 	});
 
 	it("decodes set_agent", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "SetAgent",
 			slug: "proj",
 			agent: "claude",
 		});
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("decodes set_model through the existing SetDefaultModel RPC", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "SetDefaultModel",
 			projectSlug: "proj",
 			provider: "anthropic",
 			model: "claude-3",
 		});
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("decodes instance_add managed with port", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "AddInstance",
 			name: "work",
 			managed: true,
 			port: 4097,
 		});
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("decodes instance_add unmanaged with url", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "AddInstance",
 			name: "remote",
 			managed: false,
 			url: "http://host:4096",
 		});
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("decodes instance_add unmanaged with port", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "AddInstance",
 			name: "remote",
 			managed: false,
 			port: 4096,
 		});
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("decodes instance_remove with id", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "RemoveInstance",
 			instanceId: "abc",
 		});
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("rejects instance_remove with empty id", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "RemoveInstance",
 			instanceId: "",
 		});
-		expect(Either.isLeft(result)).toBe(true);
+		expect(Either.isFailure(result)).toBe(true);
 	});
 
 	it("decodes instance_update with id", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "UpdateInstance",
 			instanceId: "abc",
 		});
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("decodes instance_update with optional fields", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "UpdateInstance",
 			instanceId: "abc",
 			name: "new-name",
 			port: 4097,
 			env: { KEY: "val" },
 		});
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("decodes instance_status with id", () => {
-		const result = Schema.decodeUnknownEither(WsRpcRequest)({
+		const result = Schema.decodeUnknownResult(WsRpcRequest)({
 			_tag: "GetInstanceStatus",
 			instanceId: "abc",
 		});
-		expect(Either.isRight(result)).toBe(true);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("rejects missing and unknown request tags", () => {
 		for (const raw of [{}, { _tag: "Unknown" }]) {
-			expect(Either.isLeft(Schema.decodeUnknownEither(WsRpcRequest)(raw))).toBe(
-				true,
-			);
+			expect(
+				Either.isFailure(Schema.decodeUnknownResult(WsRpcRequest)(raw)),
+			).toBe(true);
 		}
 	});
 });

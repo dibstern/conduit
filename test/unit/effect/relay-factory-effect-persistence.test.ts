@@ -48,13 +48,13 @@ vi.mock("../../../src/lib/relay/relay-stack.js", () => ({
 
 const NoopAuxiliaryDaemonServices = Layer.mergeAll(
 	makeDaemonStoreTestLayer(),
-	Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
+	Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
 	InstanceHealthCheckLive,
-	Layer.succeed(PortScannerTag, {
+	Layer.succeed(PortScannerTag)({
 		getKnownPorts: () => Effect.succeed(new Set<number>()),
 		scanNow: () => Effect.succeed({ discovered: [], lost: [], active: [] }),
 	}),
-	Layer.succeed(PushManagerTag, {
+	Layer.succeed(PushManagerTag)({
 		subscribe: () => Effect.void,
 		unsubscribe: () => Effect.void,
 		broadcast: () => Effect.void,
@@ -280,7 +280,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				Layer.provide(
 					Layer.mergeAll(
 						InstanceHealthCheckLive,
-						Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
+						Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
 						DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 						ConfigPersistenceNoopLive,
 						DaemonEventBusLive,
@@ -360,8 +360,8 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					service.update("missing", { name: "Missing" }),
 				);
 				expect(missing).toMatchObject({
-					_tag: "Left",
-					left: {
+					_tag: "Failure",
+					failure: {
 						_tag: "InstanceManagementServiceError",
 						operation: "update",
 						cause: { _tag: "AccountChangeRejected", id: "missing" },
@@ -431,12 +431,12 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 							"/isolated-test-home/.claude",
 						),
 					}),
-					Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
-					Layer.succeed(PortScannerTag, {
+					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
+					Layer.succeed(PortScannerTag)({
 						getKnownPorts: () => Effect.succeed(new Set([4321, 4322])),
 						scanNow: () => Effect.succeed(scanResult),
 					}),
-					Layer.succeed(PushManagerTag, {
+					Layer.succeed(PushManagerTag)({
 						subscribe: () => Effect.void,
 						unsubscribe: () => Effect.void,
 						broadcast: () => Effect.void,
@@ -663,8 +663,8 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					service.save({ folders: [join(dir, "missing")] }),
 				);
 				expect(invalid).toMatchObject({
-					_tag: "Left",
-					left: { _tag: "ProjectSaveRejected" },
+					_tag: "Failure",
+					failure: { _tag: "ProjectSaveRejected" },
 				});
 				projects = yield* service.remove(added.slug);
 				expect(projects.some((project) => project.slug === added.slug)).toBe(

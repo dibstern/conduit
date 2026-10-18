@@ -50,12 +50,11 @@ import {
 
 const persistence = makePersistenceEffectLayer(":memory:", "test-project");
 const services = Layer.mergeAll(
-	Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+	Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 	persistence,
 	makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
-	Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-	Layer.succeed(
-		OpenCodeModelServiceTag,
+	Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+	Layer.succeed(OpenCodeModelServiceTag)(
 		makeMockOpenCodeModelService({
 			providers: [
 				{
@@ -68,14 +67,13 @@ const services = Layer.mergeAll(
 			connected: ["opencode"],
 		}),
 	),
-	Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-	Layer.succeed(LoggerTag, makeMockLogger()),
-	Layer.succeed(
-		ConfigTag,
+	Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+	Layer.succeed(LoggerTag)(makeMockLogger()),
+	Layer.succeed(ConfigTag)(
 		makeMockConfig({ configDir: "/tmp/conduit-rewind-commit-no-config" }),
 	),
-	Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
-	Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
+	Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()),
+	Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
 	PendingInteractionServiceLive,
 	makeOverridesStateLive(),
 	AlertsLive,

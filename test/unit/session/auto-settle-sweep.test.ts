@@ -123,32 +123,29 @@ describe("relay automatic settlement sweep", () => {
 		"settles only eligible rows once and clears the automatic marker on un-settle",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-auto-settle-"));
-			const configLayer = Layer.succeed(
-				ConfigTag,
+			const configLayer = Layer.succeed(ConfigTag)(
 				makeMockConfig({ configDir: dir, projectDir: dir }),
 			);
-			const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
+			const loggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
 			const openCodeApi = makeMockOpenCodeAPI();
 			const layer = Layer.provideMerge(
 				SessionManagerServiceLive,
 				Layer.mergeAll(
-					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					makeSessionManagerStateLive(),
-					Layer.succeed(OpenCodeAPITag, openCodeApi),
+					Layer.succeed(OpenCodeAPITag)(openCodeApi),
 					loggerLayer,
 					configLayer,
-					Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+					Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 					Layer.effect(SessionActivityTag, makeSessionActivity),
 					RelayStatusSnapshotLive,
 					makeOverridesStateLive(),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: openCodeApi }),
 					),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(join(dir, "events.db"), "test-project"),
-					Layer.succeed(
-						OrchestrationEngineTag,
+					Layer.succeed(OrchestrationEngineTag)(
 						new OrchestrationEngine({ registry: new ProviderRegistry() }),
 					),
 				),

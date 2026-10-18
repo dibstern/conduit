@@ -41,7 +41,7 @@ const mockEnsureCerts = (
 	result: TlsCerts | null | "throw",
 	callTracker?: { called: boolean },
 ) =>
-	Layer.succeed(EnsureCertsTag, {
+	Layer.succeed(EnsureCertsTag)({
 		ensureCerts: (_opts) => {
 			if (callTracker) callTracker.called = true;
 			if (result === "throw") {

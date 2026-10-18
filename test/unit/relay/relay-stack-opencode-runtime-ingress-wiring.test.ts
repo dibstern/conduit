@@ -537,7 +537,7 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 			);
 			// fullBaseLayers supplies these services; the public runtime exposes a narrower facade.
 			const context = (await relay.effectRuntime.runtime.runtime())
-				.context as Context.Context<Effect.Effect.Context<typeof program>>;
+				.context as Context.Context<Effect.Services<typeof program>>;
 			const result = await relay.effectRuntime.runtime.runPromise(
 				Effect.provide(program, context),
 			);

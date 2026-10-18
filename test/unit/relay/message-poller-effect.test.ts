@@ -14,17 +14,17 @@ import { partialFake } from "../../helpers/partial-fake.js";
 describe("MessagePoller Effect", () => {
 	// Mock matches the real OpenCodeAPI shape: api.session.messages(sessionId)
 	// but returns Effect-wrapped values for the Effect-based poller.
-	const mockApi = partialFake<OpenCodeAPITag["Type"]>({
-		session: partialFake<OpenCodeAPITag["Type"]["session"]>({
+	const mockApi = partialFake<OpenCodeAPITag["Service"]>({
+		session: partialFake<OpenCodeAPITag["Service"]["session"]>({
 			messages: vi
-				.fn<OpenCodeAPITag["Type"]["session"]["messages"]>()
+				.fn<OpenCodeAPITag["Service"]["session"]["messages"]>()
 				.mockReturnValue(Promise.resolve([])),
 		}),
 	});
 
 	const testLayer = Layer.mergeAll(
 		makePollerManagerStateLive(),
-		Layer.succeed(OpenCodeAPITag, mockApi),
+		Layer.succeed(OpenCodeAPITag)(mockApi),
 	);
 
 	it.effect("starts a poller for a session", () =>

@@ -7,7 +7,7 @@ import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 
 describe("Retry Behavior with TestClock", () => {
-	it.scoped("retries 3 times with exponential backoff", () =>
+	it.effect("retries 3 times with exponential backoff", () =>
 		Effect.gen(function* () {
 			const attempts = yield* Ref.make(0);
 
@@ -55,7 +55,7 @@ describe("Retry Behavior with TestClock", () => {
 		}),
 	);
 
-	it.scoped("no retries when schedule has zero recurrences", () =>
+	it.effect("no retries when schedule has zero recurrences", () =>
 		Effect.gen(function* () {
 			const attempts = yield* Ref.make(0);
 
@@ -76,7 +76,7 @@ describe("Retry Behavior with TestClock", () => {
 		}),
 	);
 
-	it.scoped("succeeding on second attempt stops retrying", () =>
+	it.effect("succeeding on second attempt stops retrying", () =>
 		Effect.gen(function* () {
 			const attempts = yield* Ref.make(0);
 

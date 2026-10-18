@@ -56,7 +56,7 @@ describe("managed OpenCode stop confirmation", () => {
 			),
 			DaemonEventBusLive,
 			ConfigPersistenceNoopLive,
-			Layer.succeed(InstanceHealthCheckTag, {
+			Layer.succeed(InstanceHealthCheckTag)({
 				check: () => Effect.succeed(true),
 			}),
 		);
@@ -105,7 +105,7 @@ describe("managed OpenCode stop confirmation", () => {
 			),
 			DaemonEventBusLive,
 			ConfigPersistenceNoopLive,
-			Layer.succeed(InstanceHealthCheckTag, {
+			Layer.succeed(InstanceHealthCheckTag)({
 				check: () => Effect.succeed(true),
 			}),
 		);
@@ -169,7 +169,7 @@ describe("managed OpenCode stop confirmation", () => {
 			),
 			DaemonEventBusLive,
 			ConfigPersistenceNoopLive,
-			Layer.succeed(InstanceHealthCheckTag, {
+			Layer.succeed(InstanceHealthCheckTag)({
 				check: () => Effect.succeed(true),
 			}),
 		);

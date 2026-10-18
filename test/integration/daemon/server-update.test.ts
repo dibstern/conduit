@@ -14,12 +14,7 @@ import { RpcClient, RpcSerialization } from "effect/rpc";
 import { Socket } from "effect/socket";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
-import {
-	RemoveProject,
-	SaveProject,
-	SetPin,
-	WsRpcGroup,
-} from "../../../src/lib/contracts/ws-rpc.js";
+import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { WS_PROTOCOL_VERSION } from "../../../src/lib/shared-types.js";
 import { testRunnerAlive } from "../../helpers/claude-runner-cleanup.js";
@@ -243,10 +238,10 @@ describe("supervised server build updates", () => {
 		const firstInitial = await initialStatus(firstStatus, false);
 		const directory = join(owned.root, "second-project");
 		mkdirSync(directory);
-		const added = await sendRpcRequest(
-			join(owned.configDir, "relay.sock"),
-			new SaveProject({ folders: [directory] }),
-		);
+		const added = await sendRpcRequest(join(owned.configDir, "relay.sock"), {
+			_tag: "SaveProject",
+			folders: [directory],
+		});
 		if (!added.savedSlug) throw new Error("Second project was not registered");
 		const second = await owned.connect(undefined, undefined, added.savedSlug);
 		const secondStatus = followStatus(generation.port);
@@ -303,10 +298,10 @@ describe("supervised server build updates", () => {
 		writeFileSync(markerPath, JSON.stringify({ buildId: randomUUID() }));
 		const projectUpdate = await status(projectStatus, true, cursor);
 		await projectBrowser.close();
-		const removed = await sendRpcRequest(
-			join(owned.configDir, "relay.sock"),
-			new RemoveProject({ slug: "process-test" }),
-		);
+		const removed = await sendRpcRequest(join(owned.configDir, "relay.sock"), {
+			_tag: "RemoveProject",
+			slug: "process-test",
+		});
 		expect(removed.projects).toEqual([]);
 
 		const browserUrl = `ws://127.0.0.1:${generation.port}/rpc`;
@@ -427,10 +422,10 @@ describe("supervised server build updates", () => {
 		const query = owned.marks.find((mark) => mark.kind === "query");
 		if (query?.kind !== "query") throw new Error("Fake SDK query is missing");
 		const pin = "482615";
-		await sendRpcRequest(
-			join(owned.configDir, "relay.sock"),
-			new SetPin({ pin }),
-		);
+		await sendRpcRequest(join(owned.configDir, "relay.sock"), {
+			_tag: "SetPin",
+			pin,
+		});
 		await browser.close();
 
 		const originId = randomUUID();
@@ -444,8 +439,7 @@ describe("supervised server build updates", () => {
 		const protocol = RpcClient.layerProtocolSocket().pipe(
 			Layer.provide(Socket.layerWebSocket(rpcUrl)),
 			Layer.provide(
-				Layer.succeed(
-					Socket.WebSocketConstructor,
+				Layer.succeed(Socket.WebSocketConstructor)(
 					(url) =>
 						new WebSocket(url, {
 							headers: { "x-relay-pin": pin },
@@ -490,10 +484,10 @@ describe("supervised server build updates", () => {
 		const replacement = owned.generations[1];
 		if (!replacement)
 			throw new Error("Replacement server generation is missing");
-		await sendRpcRequest(
-			join(owned.configDir, "relay.sock"),
-			new SetPin({ pin: null }),
-		);
+		await sendRpcRequest(join(owned.configDir, "relay.sock"), {
+			_tag: "SetPin",
+			pin: null,
+		});
 		const reconnected = await owned.connect(sessionId);
 		await vi.waitFor(() => expect(replacement.fakeSdkActive).toBe(true), {
 			timeout: 2000,

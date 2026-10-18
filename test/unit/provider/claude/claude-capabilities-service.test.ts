@@ -160,8 +160,14 @@ describe("ClaudeCapabilitiesService", () => {
 					const second = yield* Effect.forkChild(
 						service.get("/tmp/workspace", { refresh: true }),
 					);
-					yield* Effect.yieldNow();
-					expect(Option.isNone(yield* Fiber.poll(second))).toBe(true);
+					yield* Effect.yieldNow;
+					expect(
+						Option.isNone(
+							yield* Effect.sync(() =>
+								Option.fromUndefinedOr(second.pollUnsafe()),
+							),
+						),
+					).toBe(true);
 					expect(probe).toHaveBeenCalledTimes(1);
 					yield* Deferred.succeed(release, undefined);
 					expect(yield* Fiber.join(second)).toEqual(refreshed);
@@ -220,12 +226,22 @@ describe("ClaudeCapabilitiesService", () => {
 				const refresh = yield* Effect.forkChild(
 					service.get("/tmp/workspace", { refresh: true }),
 				);
-				yield* Effect.yieldNow();
+				yield* Effect.yieldNow;
 				expect(probe).toHaveBeenCalledTimes(2);
 				const plain = yield* Effect.forkChild(service.get("/tmp/workspace"));
-				yield* waitUntil(Fiber.poll(plain).pipe(Effect.map(Option.isSome)));
+				yield* waitUntil(
+					Effect.sync(() => Option.fromUndefinedOr(plain.pollUnsafe())).pipe(
+						Effect.map(Option.isSome),
+					),
+				);
 				expect(yield* Fiber.join(plain)).toEqual(original);
-				expect(Option.isNone(yield* Fiber.poll(refresh))).toBe(true);
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(refresh.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 				expect(probe).toHaveBeenCalledTimes(2);
 				yield* Deferred.succeed(release, undefined);
 				expect(yield* Fiber.join(refresh)).toEqual(capabilities("new"));
@@ -261,7 +277,11 @@ describe("ClaudeCapabilitiesService", () => {
 						{ concurrency: "unbounded" },
 					),
 				);
-				yield* waitUntil(Fiber.poll(reads).pipe(Effect.map(Option.isSome)));
+				yield* waitUntil(
+					Effect.sync(() => Option.fromUndefinedOr(reads.pollUnsafe())).pipe(
+						Effect.map(Option.isSome),
+					),
+				);
 				expect(yield* Fiber.join(reads)).toEqual(Array(4).fill(first));
 				yield* waitUntil(Effect.sync(() => probe.mock.calls.length === 2));
 				expect(yield* service.get("/tmp/workspace")).toEqual(first);
@@ -374,7 +394,11 @@ describe("ClaudeCapabilitiesService", () => {
 					const stale = yield* Effect.forkChild(
 						restarted.get("/tmp/workspace"),
 					);
-					yield* waitUntil(Fiber.poll(stale).pipe(Effect.map(Option.isSome)));
+					yield* waitUntil(
+						Effect.sync(() => Option.fromUndefinedOr(stale.pollUnsafe())).pipe(
+							Effect.map(Option.isSome),
+						),
+					);
 					expect(yield* Fiber.join(stale)).toEqual(original);
 					yield* waitUntil(Effect.sync(() => probe.mock.calls.length === 1));
 					expect(yield* restarted.get("/tmp/workspace")).toEqual(original);
@@ -520,7 +544,11 @@ describe("ClaudeCapabilitiesService", () => {
 					const stale = yield* Effect.forkChild(
 						service.get("/tmp/workspace").pipe(Effect.provide(refreshLogs)),
 					);
-					yield* waitUntil(Fiber.poll(stale).pipe(Effect.map(Option.isSome)));
+					yield* waitUntil(
+						Effect.sync(() => Option.fromUndefinedOr(stale.pollUnsafe())).pipe(
+							Effect.map(Option.isSome),
+						),
+					);
 					expect(yield* Fiber.join(stale)).toEqual(original);
 					yield* waitUntil(Effect.sync(() => probe.mock.calls.length === 2));
 				}).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));

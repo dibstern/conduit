@@ -117,7 +117,11 @@ describe("OpenCode Instances use during an idle stop", () => {
 					yield* Effect.promise(
 						() => new Promise((done) => setTimeout(done, 200)),
 					);
-					const pendingDuringStop = Option.isNone(yield* Fiber.poll(during));
+					const pendingDuringStop = Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(during.pollUnsafe()),
+						),
+					);
 					yield* TestClock.adjust("300 millis");
 					const second = yield* Fiber.join(during);
 					return { first, pendingDuringStop, second };

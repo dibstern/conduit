@@ -13,8 +13,8 @@ describe("standalone ScanServiceLive", () => {
 			const service = yield* ScanServiceTag;
 			const result = yield* Effect.result(service.scanNow());
 			expect(result).toMatchObject({
-				_tag: "Left",
-				left: {
+				_tag: "Failure",
+				failure: {
 					_tag: "ScanServiceNotAvailable",
 					message: "Port scanning not available",
 				},

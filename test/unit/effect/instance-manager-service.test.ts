@@ -132,7 +132,7 @@ describe("InstanceManager — missing methods", () => {
 					),
 					DaemonEventBusLive,
 					ConfigPersistenceNoopLive,
-					Layer.succeed(InstanceHealthCheckTag, {
+					Layer.succeed(InstanceHealthCheckTag)({
 						check: () =>
 							Effect.sync(() => {
 								healthChecks++;
@@ -144,7 +144,7 @@ describe("InstanceManager — missing methods", () => {
 				return Effect.gen(function* () {
 					yield* startInstance("work-claude");
 					yield* stopInstance("work-claude");
-					yield* Effect.yieldNow();
+					yield* Effect.yieldNow;
 
 					const instance = yield* getInstance("work-claude");
 					expect(instance).toMatchObject({
@@ -226,7 +226,7 @@ describe("InstanceManager — missing methods", () => {
 	describe("persistConfig", () => {
 		it.effect("requests config persistence", () => {
 			let requests = 0;
-			const trackingPersistence = Layer.succeed(ConfigPersistenceTag, {
+			const trackingPersistence = Layer.succeed(ConfigPersistenceTag)({
 				requestSave: Effect.sync(() => {
 					requests += 1;
 				}),

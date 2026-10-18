@@ -44,7 +44,7 @@ const completeOrTimeout = <A, E>(effect: Effect.Effect<A, E>) =>
 	});
 
 describe("RelayCache", () => {
-	it.scoped("creates relay on first get", () =>
+	it.effect("creates relay on first get", () =>
 		Effect.gen(function* () {
 			const created: Relay[] = [];
 			const factory: RelayFactory = (slug) =>
@@ -65,7 +65,7 @@ describe("RelayCache", () => {
 		}),
 	);
 
-	it.scoped("returns same relay on subsequent gets", () =>
+	it.effect("returns same relay on subsequent gets", () =>
 		Effect.gen(function* () {
 			let callCount = 0;
 			const factory: RelayFactory = (slug) =>
@@ -85,7 +85,7 @@ describe("RelayCache", () => {
 		}),
 	);
 
-	it.scoped("peeks cached relays without creating them", () =>
+	it.effect("peeks cached relays without creating them", () =>
 		Effect.gen(function* () {
 			let callCount = 0;
 			const factory: RelayFactory = (slug) =>
@@ -112,7 +112,7 @@ describe("RelayCache", () => {
 		}),
 	);
 
-	it.scoped("peek does not wait for in-flight relay creation", () =>
+	it.effect("peek does not wait for in-flight relay creation", () =>
 		Effect.gen(function* () {
 			const factoryStarted = yield* Deferred.make<void>();
 			const releaseFactory = yield* Deferred.make<void>();
@@ -130,8 +130,10 @@ describe("RelayCache", () => {
 			yield* Deferred.await(factoryStarted);
 
 			const peekFiber = yield* Effect.forkChild(cache.peek("my-project"));
-			yield* Effect.yieldNow();
-			const peekExit = yield* Fiber.poll(peekFiber);
+			yield* Effect.yieldNow;
+			const peekExit = yield* Effect.sync(() =>
+				Option.fromUndefinedOr(peekFiber.pollUnsafe()),
+			);
 
 			expect(Option.isSome(peekExit)).toBe(true);
 			if (Option.isSome(peekExit)) {
@@ -146,7 +148,7 @@ describe("RelayCache", () => {
 		}),
 	);
 
-	it.scoped("invalidate interrupts in-flight relay creation", () =>
+	it.effect("invalidate interrupts in-flight relay creation", () =>
 		Effect.gen(function* () {
 			const factoryStarted = yield* Deferred.make<void>();
 			const releaseFactory = yield* Deferred.make<void>();
@@ -197,7 +199,7 @@ describe("RelayCache", () => {
 		}),
 	);
 
-	it.scoped("keeps startup alive when its first caller disconnects", () =>
+	it.effect("keeps startup alive when its first caller disconnects", () =>
 		Effect.gen(function* () {
 			const factoryStarted = yield* Deferred.make<void>();
 			const releaseFactory = yield* Deferred.make<void>();
@@ -231,7 +233,7 @@ describe("RelayCache", () => {
 		}),
 	);
 
-	it.scoped("deduplicates concurrent gets for same slug", () =>
+	it.effect("deduplicates concurrent gets for same slug", () =>
 		Effect.gen(function* () {
 			let callCount = 0;
 			const factory: RelayFactory = (slug) =>
@@ -257,7 +259,7 @@ describe("RelayCache", () => {
 		}),
 	);
 
-	it.scoped("invalidate stops relay and allows re-creation", () =>
+	it.effect("invalidate stops relay and allows re-creation", () =>
 		Effect.gen(function* () {
 			const relays: Relay[] = [];
 			const factory: RelayFactory = (slug) =>
@@ -286,7 +288,7 @@ describe("RelayCache", () => {
 		}),
 	);
 
-	it.scoped("invalidate awaits an async relay stop before returning", () =>
+	it.effect("invalidate awaits an async relay stop before returning", () =>
 		Effect.gen(function* () {
 			const stopStarted = yield* Deferred.make<void>();
 			const releaseStop = yield* Deferred.make<void>();
@@ -314,7 +316,9 @@ describe("RelayCache", () => {
 			);
 			yield* Deferred.await(stopStarted);
 
-			const beforeRelease = yield* Fiber.poll(invalidateFiber);
+			const beforeRelease = yield* Effect.sync(() =>
+				Option.fromUndefinedOr(invalidateFiber.pollUnsafe()),
+			);
 			yield* Deferred.succeed(releaseStop, undefined);
 			yield* Fiber.join(invalidateFiber);
 			yield* Deferred.await(stopFinished);
@@ -352,7 +356,9 @@ describe("RelayCache", () => {
 			const closeFiber = yield* Effect.forkChild(Scope.close(scope, Exit.void));
 			yield* Deferred.await(stopStarted);
 
-			const beforeRelease = yield* Fiber.poll(closeFiber);
+			const beforeRelease = yield* Effect.sync(() =>
+				Option.fromUndefinedOr(closeFiber.pollUnsafe()),
+			);
 			yield* Deferred.succeed(releaseStop, undefined);
 			yield* Fiber.join(closeFiber);
 			yield* Deferred.await(stopFinished);
@@ -412,7 +418,7 @@ describe("RelayCache", () => {
 		}),
 	);
 
-	it.scoped("invalidate logs and swallows relay stop rejection", () =>
+	it.effect("invalidate logs and swallows relay stop rejection", () =>
 		Effect.gen(function* () {
 			const messages: unknown[] = [];
 			const logger = Logger.make<unknown, void>((options) => {
@@ -447,7 +453,7 @@ describe("RelayCache", () => {
 		}),
 	);
 
-	it.scoped("manages multiple slugs independently", () =>
+	it.effect("manages multiple slugs independently", () =>
 		Effect.gen(function* () {
 			const factory: RelayFactory = (slug) =>
 				Effect.sync(() => makeTestRelay(slug));

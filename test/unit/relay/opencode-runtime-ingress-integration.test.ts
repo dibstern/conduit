@@ -52,7 +52,7 @@ function createServicesLayer() {
 		AlertsLive,
 		PendingInteractionServiceLive,
 		makeOverridesStateLive(),
-		Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
+		Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()),
 	);
 }
 

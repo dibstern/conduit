@@ -26,8 +26,8 @@ describe("WsRpcServerLayer RewindSession", () => {
 				}),
 			);
 			expect(result).toMatchObject({
-				_tag: "Left",
-				left: {
+				_tag: "Failure",
+				failure: {
 					_tag: "WsRpcError",
 					message: expect.stringContaining("not found"),
 				},

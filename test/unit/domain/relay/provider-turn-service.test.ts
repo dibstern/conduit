@@ -340,7 +340,7 @@ const serviceLayer = (input: {
 	readonly titleService?: SessionTitleService;
 	readonly api?: OpenCodeAPI;
 	readonly configDir?: string;
-	readonly accountDirectory?: AccountDirectory["Type"];
+	readonly accountDirectory?: AccountDirectory["Service"];
 }) => {
 	const wsHandler = makeMockWebSocketHandler({
 		getClientsForSession: vi.fn(() => ["client-1"]),
@@ -350,22 +350,20 @@ const serviceLayer = (input: {
 	const ingestion = input.ingestion ?? makeIngestion();
 	let baseLayer = Layer.mergeAll(
 		input.accountDirectory !== undefined
-			? Layer.succeed(AccountDirectory, input.accountDirectory)
+			? Layer.succeed(AccountDirectory)(input.accountDirectory)
 			: input.configDir === undefined
-				? Layer.succeed(AccountDirectory, makeMockAccountDirectory())
+				? Layer.succeed(AccountDirectory)(makeMockAccountDirectory())
 				: AccountDirectoryFromConfigLive(
 						input.configDir,
 						configuredClaudeConfigDir("/isolated-provider-home/.claude"),
 					),
-		Layer.succeed(OpenCodeAPITag, input.api ?? makeMockOpenCodeAPI()),
-		Layer.succeed(
-			OpenCodeModelServiceTag,
+		Layer.succeed(OpenCodeAPITag)(input.api ?? makeMockOpenCodeAPI()),
+		Layer.succeed(OpenCodeModelServiceTag)(
 			makeMockOpenCodeModelService(openCodeCatalog),
 		),
-		Layer.succeed(WebSocketHandlerTag, wsHandler),
-		Layer.succeed(LoggerTag, log),
-		Layer.succeed(
-			ConfigTag,
+		Layer.succeed(WebSocketHandlerTag)(wsHandler),
+		Layer.succeed(LoggerTag)(log),
+		Layer.succeed(ConfigTag)(
 			makeMockConfig({
 				projectDir: MOCK_PROJECT_DIR,
 				...(input.configDir === undefined
@@ -373,32 +371,30 @@ const serviceLayer = (input: {
 					: { configDir: input.configDir }),
 			}),
 		),
-		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+		Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
 		PendingInteractionServiceLive,
 		makeOverridesStateLive(),
 		makePersistenceEffectLayer(":memory:", "test-project"),
-		Layer.succeed(
-			ClaudeEventPersistEffectTag,
+		Layer.succeed(ClaudeEventPersistEffectTag)(
 			input.persist ?? makePersistService(() => Effect.void),
 		),
-		Layer.succeed(OrchestrationEngineTag, input.engine ?? makeEngine()),
-		Layer.succeed(ProviderRuntimeIngestionTag, ingestion),
+		Layer.succeed(OrchestrationEngineTag)(input.engine ?? makeEngine()),
+		Layer.succeed(ProviderRuntimeIngestionTag)(ingestion),
 		AlertsLive,
-		Layer.succeed(
-			SessionTitleServiceTag,
+		Layer.succeed(SessionTitleServiceTag)(
 			input.titleService ?? makeTitleService(),
 		),
 	);
 	if (input.readQuery) {
 		baseLayer = Layer.merge(
 			baseLayer,
-			Layer.succeed(ReadQueryEffectTag, input.readQuery),
+			Layer.succeed(ReadQueryEffectTag)(input.readQuery),
 		);
 	}
 	if (input.providerState) {
 		baseLayer = Layer.merge(
 			baseLayer,
-			Layer.succeed(ProviderStateEffectTag, input.providerState),
+			Layer.succeed(ProviderStateEffectTag)(input.providerState),
 		);
 	}
 	return {
@@ -531,7 +527,7 @@ describe("ProviderTurnService", () => {
 					{ eventId: "evt-required-ingestion", providerId: "claude" },
 				);
 				const result = yield* Effect.result(sink.push(event));
-				expect(result._tag).toBe("Right");
+				expect(result._tag).toBe("Success");
 				expect(ingestion.ingest).toHaveBeenCalledWith(event);
 			}),
 	);

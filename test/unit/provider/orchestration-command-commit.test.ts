@@ -84,7 +84,7 @@ describe("DurableCommandCommitRepository", () => {
 				const result = yield* Effect.result(
 					repository.commit(commitInput({ requestSequence: 2, at: 2000 })),
 				);
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 				expect(
 					JSON.stringify({
 						receipts: yield* sql`SELECT * FROM command_receipts`,
@@ -112,7 +112,7 @@ describe("DurableCommandCommitRepository", () => {
 				const result = yield* Effect.result(
 					repository.commit(commitInput({ requestSequence: 2, at: 2000 })),
 				);
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 				expect(
 					JSON.stringify(yield* sql`SELECT * FROM provider_command_outbox`),
 				).toBe(before);
@@ -165,7 +165,7 @@ describe("DurableCommandCommitRepository", () => {
 						repository.commit(commitInput({ requestSequence: 2, at: 2000 })),
 					);
 
-					expect(result._tag).toBe("Left");
+					expect(result._tag).toBe("Failure");
 					if (result._tag === "Failure") {
 						expect(result.failure.message).toMatch(/already running/);
 					}
@@ -191,7 +191,7 @@ describe("DurableCommandCommitRepository", () => {
 					repository.commit(commitInput({ events: [event, event] })),
 				);
 
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 				expect(yield* sql`SELECT * FROM events`).toEqual([]);
 				expect(yield* sql`SELECT * FROM command_receipts`).toEqual([]);
 				expect(yield* sql`SELECT * FROM provider_command_outbox`).toEqual([]);
@@ -209,7 +209,7 @@ describe("DurableCommandCommitRepository", () => {
 
 				const result = yield* Effect.result(repository.commit(commitInput()));
 
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 				expect(yield* sql`SELECT * FROM events`).toEqual([]);
 				expect(yield* sql`SELECT * FROM command_receipts`).toEqual([]);
 				expect(yield* sql`SELECT * FROM provider_command_outbox`).toEqual([]);

@@ -33,7 +33,7 @@ const serve = (
 		Layer.provideMerge(
 			Layer.merge(
 				makeTestHandlerLayer(),
-				Layer.succeed(ToolContentServiceTag, { details }),
+				Layer.succeed(ToolContentServiceTag)({ details }),
 			),
 		),
 	);
@@ -63,7 +63,7 @@ describe("WsRpcServerLayer GetToolDetails", () => {
 					toolIds: [ToolCallId.make("tool-1")],
 				}),
 			);
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(

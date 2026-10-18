@@ -122,7 +122,7 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 				".hidden",
 			]) {
 				const result = yield* Effect.result(readSkill(name));
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 				if (result._tag === "Failure") {
 					expect(result.failure.message).toBe("Skill content not available");
 				}
@@ -180,7 +180,7 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 				);
 				for (const name of ["escaped-dir", "escaped-file"]) {
 					const result = yield* Effect.result(readSkill(name));
-					expect(result._tag).toBe("Left");
+					expect(result._tag).toBe("Failure");
 					if (result._tag === "Failure") {
 						expect(result.failure.message).toBe("Skill content not available");
 					}
@@ -193,7 +193,7 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 			writeSkill(project, "review", "Project A instructions");
 			const homePath = writeSkill(home, "review", "Home instructions");
 			const otherProject = join(temp, "project-b");
-			const directoryLayer = Layer.succeed(SessionDirectory, {
+			const directoryLayer = Layer.succeed(SessionDirectory)({
 				projectOf: (sessionId) =>
 					Effect.succeed(
 						sessionId === "owned-b" ? Option.some("project-b") : Option.none(),
@@ -279,8 +279,8 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 					client.GetSkillContent({ sessionId: "missing", name: "review" }),
 				),
 			).toMatchObject({
-				_tag: "Left",
-				left: { _tag: "WsRpcError", code: "unknown-session" },
+				_tag: "Failure",
+				failure: { _tag: "WsRpcError", code: "unknown-session" },
 			});
 			expect(resolve).not.toHaveBeenCalled();
 			expect(realpath).not.toHaveBeenCalled();
@@ -291,7 +291,7 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 	it.effect("returns not-found when neither root contains the skill", () =>
 		Effect.gen(function* () {
 			const result = yield* Effect.result(readSkill("missing"));
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 			if (result._tag === "Failure") {
 				expect(result.failure.message).toBe("Skill content not available");
 			}

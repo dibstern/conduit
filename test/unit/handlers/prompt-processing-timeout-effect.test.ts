@@ -76,35 +76,29 @@ describe("prompt processing timeouts through Effect state", () => {
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
 				AlertsLive,
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(
-					OpenCodeModelServiceTag,
+				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(OpenCodeModelServiceTag)(
 					makeMockOpenCodeModelService(MOCK_OPENCODE_GPT4_CATALOG),
 				),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, createSilentLogger()),
-				Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-				Layer.succeed(ConfigTag, config as ProjectRelayConfig),
-				Layer.succeed(
-					SessionManagerServiceTag,
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(createSilentLogger()),
+				Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+				Layer.succeed(ConfigTag)(config as ProjectRelayConfig),
+				Layer.succeed(SessionManagerServiceTag)(
 					makeMockSessionManagerService(),
 				),
 				PendingInteractionServiceLive,
 				makeOverridesStateLive(),
 				persistence,
 				makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
-				Layer.succeed(AgentServiceTag, makeMockAgentService()),
-				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-				Layer.succeed(
-					OrchestrationEngineTag,
+				Layer.succeed(AgentServiceTag)(makeMockAgentService()),
+				Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
+				Layer.succeed(OrchestrationEngineTag)(
 					withDispatchEffect({
 						dispatchEffect: vi.fn(
 							(command: { onAccepted?: Effect.Effect<void> }) =>
 								// The engine commits the handoff, then the turn runs on.
-								Effect.zipRight(
-									command.onAccepted ?? Effect.void,
-									Effect.never,
-								),
+								Effect.andThen(command.onAccepted ?? Effect.void, Effect.never),
 						),
 					}),
 				),
@@ -141,22 +135,21 @@ describe("prompt processing timeouts through Effect state", () => {
 			);
 			const baseLayer = Layer.mergeAll(
 				AlertsLive,
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, createSilentLogger()),
-				Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-				Layer.succeed(ConfigTag, config as ProjectRelayConfig),
-				Layer.succeed(
-					SessionManagerServiceTag,
+				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(createSilentLogger()),
+				Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+				Layer.succeed(ConfigTag)(config as ProjectRelayConfig),
+				Layer.succeed(SessionManagerServiceTag)(
 					makeMockSessionManagerService(),
 				),
 				PendingInteractionServiceLive,
 				makeOverridesStateLive(),
 				persistence,
 				makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
-				Layer.succeed(AgentServiceTag, makeMockAgentService()),
-				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
+				Layer.succeed(AgentServiceTag)(makeMockAgentService()),
+				Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
+				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({})),
 			);
 			const layer = Layer.provideMerge(ProviderTurnServiceLive, baseLayer);
 

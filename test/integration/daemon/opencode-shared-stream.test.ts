@@ -2,13 +2,7 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { Result as Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	GetInstances,
-	RemoveProject,
-	SaveProject,
-	StartInstance,
-	UpdateInstance,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
@@ -45,18 +39,18 @@ describe("daemon shared OpenCode global stream", () => {
 
 	async function addProject(fixture: ProcessHarness, directory: string) {
 		mkdirSync(directory, { recursive: true });
-		const result = await sendRpcRequest(
-			join(fixture.configDir, "relay.sock"),
-			new SaveProject({ folders: [directory] }),
-		);
+		const result = await sendRpcRequest(join(fixture.configDir, "relay.sock"), {
+			_tag: "SaveProject",
+			folders: [directory],
+		});
 		return result.savedSlug;
 	}
 
 	async function removeProject(fixture: ProcessHarness, slug: string) {
-		await sendRpcRequest(
-			join(fixture.configDir, "relay.sock"),
-			new RemoveProject({ slug }),
-		);
+		await sendRpcRequest(join(fixture.configDir, "relay.sock"), {
+			_tag: "RemoveProject",
+			slug,
+		});
 	}
 
 	function requests(browser: ProcessBrowser, prefix: string) {
@@ -188,7 +182,9 @@ describe("daemon shared OpenCode global stream", () => {
 	it("keeps a session's selected OpenCode instance separate from the daemon default", async () => {
 		const fixture = await start("project-instance", true);
 		const socket = join(fixture.configDir, "relay.sock");
-		const { instances } = await sendRpcRequest(socket, new GetInstances({}));
+		const { instances } = await sendRpcRequest(socket, {
+			_tag: "GetInstances",
+		});
 		const opencode = instances.filter(({ driver }) => driver === "opencode");
 		expect(opencode).toHaveLength(2);
 		const [defaultInstance, namedInstance] = opencode;
@@ -250,7 +246,9 @@ describe("daemon shared OpenCode global stream", () => {
 	it("refreshes the shared transport for a new relay after the default endpoint changes", async () => {
 		const fixture = await start("endpoint-change", true);
 		const socket = join(fixture.configDir, "relay.sock");
-		const { instances } = await sendRpcRequest(socket, new GetInstances({}));
+		const { instances } = await sendRpcRequest(socket, {
+			_tag: "GetInstances",
+		});
 		const opencode = instances.filter(({ driver }) => driver === "opencode");
 		expect(opencode).toHaveLength(2);
 		const [defaultInstance, namedInstance] = opencode;
@@ -260,10 +258,10 @@ describe("daemon shared OpenCode global stream", () => {
 		// Managed OpenCode spawns on first use; the replacement must be running.
 		// That use opens its stream, which stays open through the idle grace,
 		// so count connections after it.
-		await sendRpcRequest(
-			socket,
-			new StartInstance({ instanceId: namedInstance.id }),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "StartInstance",
+			instanceId: namedInstance.id,
+		});
 		const connectionsAfterStart = fixture.opencodeStreamConnections().length;
 		const replacement = Either.getOrThrowWith(
 			loadDaemonConfigResult(fixture.configDir),
@@ -273,14 +271,12 @@ describe("daemon shared OpenCode global stream", () => {
 		if (!replacement) throw new Error("Replacement OpenCode instance missing");
 		const a = await fixture.connect();
 		await a.createSession("Existing A", "opencode", "opencode");
-		await sendRpcRequest(
-			socket,
-			new UpdateInstance({
-				instanceId: defaultId,
-				port: replacement.port,
-				env: replacement.env,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "UpdateInstance",
+			instanceId: defaultId,
+			port: replacement.port,
+			env: replacement.env,
+		});
 		const directoryB = join(fixture.root, "project-b");
 		const slugB = await addProject(fixture, directoryB);
 		const b = await fixture.connect(undefined, undefined, slugB);

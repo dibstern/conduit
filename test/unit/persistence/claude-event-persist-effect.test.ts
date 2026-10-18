@@ -183,11 +183,12 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-lifecycle-"));
 			const filename = join(dir, "events.db");
 			const publish = vi.fn(() => Effect.void);
-			const busLayer = Layer.succeed(SessionEventBusTag, {
+			const busLayer = Layer.succeed(SessionEventBusTag)({
 				publish,
 				publishAdvance: () => Effect.void,
-				subscribe: () => Effect.dieMessage("unused test subscription"),
-				subscribeAdvances: () => Effect.dieMessage("unused test subscription"),
+				subscribe: () => Effect.die(new Error("unused test subscription")),
+				subscribeAdvances: () =>
+					Effect.die(new Error("unused test subscription")),
 			} satisfies SessionEventBus);
 			const layer = makePersistenceEffectLayer(
 				filename,
@@ -208,8 +209,8 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 				SELECT COUNT(*) AS count FROM events WHERE session_id = 'missing-session'`;
 
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: expect.objectContaining({
+					_tag: "Failure",
+					failure: expect.objectContaining({
 						_tag: "ClaudeSessionLifecycleError",
 						operation: "persistUserMessage",
 						sessionId: "missing-session",
@@ -254,8 +255,8 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 					SELECT COUNT(*) AS count FROM events WHERE session_id = ${sessionId}`;
 
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: expect.objectContaining({
+					_tag: "Failure",
+					failure: expect.objectContaining({
 						_tag: "ClaudeSessionLifecycleError",
 						operation: "persistUserMessage",
 						sessionId,
@@ -309,8 +310,8 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 					SELECT COUNT(*) AS count FROM events WHERE session_id = ${sessionId}`;
 
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: expect.objectContaining({
+					_tag: "Failure",
+					failure: expect.objectContaining({
 						_tag: "ClaudeSessionLifecycleError",
 						operation: "persistEvent",
 						sessionId,
@@ -384,8 +385,8 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 				SELECT COUNT(*) AS count FROM events WHERE session_id = 'existing-delete-session'`;
 
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: expect.objectContaining({
+					_tag: "Failure",
+					failure: expect.objectContaining({
 						_tag: "ClaudeSessionLifecycleError",
 						operation: "persistEvent",
 						sessionId: "missing-event-session",

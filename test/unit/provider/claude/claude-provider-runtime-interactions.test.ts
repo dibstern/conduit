@@ -8,7 +8,6 @@ import {
 	Effect,
 	Exit,
 	Fiber,
-	FiberId,
 	Layer,
 	ManagedRuntime,
 	Schedule,
@@ -487,13 +486,13 @@ describe("Claude durable interaction resolution", () => {
 						runnerFactory: detachedRunnerFactory(started),
 						workspaceRoot: "/tmp/ws",
 						capabilitiesService,
-					}).pipe(Scope.extend(relayScope));
+					}).pipe(Scope.provide(relayScope));
 					if (shutdownPath === "engine") {
 						const engine = new OrchestrationEngine({
 							registry: new ProviderRegistry([runtime]),
 						});
 						yield* Effect.addFinalizer(() => engine.shutdownEffect()).pipe(
-							Scope.extend(relayScope),
+							Scope.provide(relayScope),
 						);
 					}
 					yield* Effect.forkChild(
@@ -588,7 +587,7 @@ describe("Claude durable interaction resolution", () => {
 									Effect.map((waiter) => ({
 										awaitResponse: waiter.awaitResponse.pipe(
 											Effect.tap(() => Deferred.succeed(answerRead, undefined)),
-											Effect.zipLeft(Deferred.await(finalize)),
+											Effect.tap(() => Deferred.await(finalize)),
 										),
 									})),
 								),
@@ -598,7 +597,7 @@ describe("Claude durable interaction resolution", () => {
 									Effect.map((waiter) => ({
 										awaitAnswers: waiter.awaitAnswers.pipe(
 											Effect.tap(() => Deferred.succeed(answerRead, undefined)),
-											Effect.zipLeft(Deferred.await(finalize)),
+											Effect.tap(() => Deferred.await(finalize)),
 										),
 									})),
 								),
@@ -757,9 +756,7 @@ describe("Claude recovered runner processing timeout", () => {
 				Effect.gen(function* () {
 					const runtime = yield* makeClaudeProviderRuntime({
 						runnerFactory: (...args) =>
-							detachedRunnerFactory(Deferred.unsafeMake(FiberId.none))(
-								...args,
-							).pipe(
+							detachedRunnerFactory(Deferred.makeUnsafe())(...args).pipe(
 								Effect.map((runner) => ({
 									...runner,
 									recoverEffect: Effect.void,
@@ -795,7 +792,7 @@ describe("Claude recovered runner processing timeout", () => {
 							},
 							"session-1",
 						);
-						yield* Effect.yieldNow();
+						yield* Effect.yieldNow;
 					}
 					return timedOut;
 				}),

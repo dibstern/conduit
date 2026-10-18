@@ -458,7 +458,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			),
 		);
 
-		expect(outcome._tag).toBe("Left");
+		expect(outcome._tag).toBe("Failure");
 		if (outcome._tag === "Failure") {
 			expect(outcome.failure.message).toContain("model");
 		}
@@ -996,7 +996,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				),
 			),
 		);
-		expect(result._tag).toBe("Left");
+		expect(result._tag).toBe("Failure");
 		await vi.waitFor(() =>
 			expect(subagentSdk.getSubagentMessages).toHaveBeenCalled(),
 		);
@@ -1169,9 +1169,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			expect(turnResult).not.toBe("timeout");
 			if (turnResult === "timeout")
 				throw new Error("Turn cleanup waited for a transcript");
-			if (ending === "stream-end") expect(turnResult._tag).toBe("Left");
+			if (ending === "stream-end") expect(turnResult._tag).toBe("Failure");
 			else {
-				expect(turnResult._tag).toBe("Right");
+				expect(turnResult._tag).toBe("Success");
 				if (turnResult._tag === "Success")
 					expect(turnResult.success.status).toBe(
 						ending === "Stop" ? "interrupted" : "completed",
@@ -1653,7 +1653,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				.pipe(Effect.result),
 		);
 
-		expect(result._tag).toBe("Left");
+		expect(result._tag).toBe("Failure");
 		if (result._tag === "Failure") {
 			expect(result.failure.message).toContain(
 				"Claude SDK options decode failed",
@@ -2263,10 +2263,15 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		const result = await Effect.runPromise(
 			instance.sendTurnEffect(input).pipe(
-				Effect.timeoutFail({
+				Effect.timeoutOrElse({
 					duration: "500 millis",
-					onTimeout: () =>
-						new Error("sendTurnEffect did not settle after sink failure"),
+					orElse: () =>
+						Effect.fail(
+							(() =>
+								new Error(
+									"sendTurnEffect did not settle after sink failure",
+								))(),
+						),
 				}),
 			),
 		);
@@ -2342,7 +2347,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				.pipe(Effect.result),
 		);
 
-		expect(result._tag).toBe("Left");
+		expect(result._tag).toBe("Failure");
 		if (result._tag === "Failure") {
 			expect(result.failure.message).toContain(
 				"Claude SDK user message decode failed",
@@ -2494,7 +2499,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const first = await Effect.runPromise(
 			instance.sendTurnEffect(input1).pipe(Effect.result),
 		);
-		expect(first._tag).toBe("Left");
+		expect(first._tag).toBe("Failure");
 
 		const second = await Promise.race([
 			secondPromise,

@@ -29,7 +29,7 @@ function makeFileSqlLayer(setup: (filename: string) => void) {
 	setup(filename);
 	return EffectSqliteClient.layer({ filename }).pipe(
 		Layer.merge(
-			Layer.scopedDiscard(
+			Layer.effectDiscard(
 				Effect.addFinalizer(() =>
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 				),
@@ -426,7 +426,7 @@ describe("legacy skeleton purge migration", () => {
 				const result = yield* Effect.result(
 					sql`DELETE FROM sessions WHERE id = 'with-message'`,
 				);
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 			}).pipe(
 				Effect.provide(
 					makeFileSqlLayer((filename) =>

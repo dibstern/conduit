@@ -320,7 +320,7 @@ export async function createReplayHarness(
 			)
 		: undefined;
 	const daemonReadContext = daemonReads
-		? (await daemonReads.runtime()).context
+		? await daemonReads.context()
 		: undefined;
 	const startStack = (port: number): Promise<RelayStack> =>
 		createRelayStack({

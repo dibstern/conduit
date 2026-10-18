@@ -6,7 +6,7 @@ import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SaveProject } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -50,10 +50,10 @@ describe("OpenCode project extra folders through the daemon", () => {
 
 	async function save(fixture: ProcessHarness, folders: readonly string[]) {
 		const input = { slug: "process-test", folders };
-		const result = await sendRpcRequest(
-			join(fixture.configDir, "relay.sock"),
-			new SaveProject(input),
-		);
+		const result = await sendRpcRequest(join(fixture.configDir, "relay.sock"), {
+			_tag: "SaveProject",
+			...input,
+		});
 		evidence["save"] = { input, result };
 		expect(result.savedSlug).toBe("process-test");
 		expect(result.warnings).toEqual([]);

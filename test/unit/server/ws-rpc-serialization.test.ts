@@ -395,7 +395,7 @@ const connect = Effect.gen(function* () {
 	);
 	const protocol = yield* Layer.build(
 		RpcClient.layerProtocolSocket().pipe(
-			Layer.provide(Layer.succeed(Socket.Socket, connection.clientSocket)),
+			Layer.provide(Layer.succeed(Socket.Socket)(connection.clientSocket)),
 			Layer.provide(RpcSerialization.layerJson),
 		),
 	);
@@ -540,22 +540,25 @@ it("ResolveClaudeSettings preserves display values and provenance", async () => 
 	// A supplied Id must win over a stale wire field. These explicit-account
 	// requests cannot represent a driver default without changing its meaning.
 	const requests = [
-		new Contracts.ResolveClaudeSettings({
+		{
+			_tag: "ResolveClaudeSettings",
 			projectSlug: "project",
 			instanceId: "stale-account",
 			accountRef: { _tag: "Id", id: "claude-1" },
-		}),
-		new Contracts.ContinueSession({
+		},
+		{
+			_tag: "ContinueSession",
 			sessionId: "session-1",
 			instanceId: "stale-account",
 			expectedInstanceId: "source-account",
 			accountRef: { _tag: "Id", id: "claude-1" },
-		}),
-		new Contracts.PreviewContinuation({
+		},
+		{
+			_tag: "PreviewContinuation",
 			sessionId: "session-1",
 			instanceId: "stale-account",
 			accountRef: { _tag: "Id", id: "claude-1" },
-		}),
+		},
 	];
 	const wireRequests = requests.map((request) =>
 		Schema.encodeSync(Contracts.WsRpcRequest)(request),

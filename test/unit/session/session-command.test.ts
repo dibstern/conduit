@@ -118,18 +118,16 @@ describe("applySessionCommand", () => {
 			Effect.provide(
 				Layer.mergeAll(
 					persistenceLayer,
-					Layer.succeed(
-						OpenCodeAPITag,
+					Layer.succeed(OpenCodeAPITag)(
 						partialFake<OpenCodeAPI>({
 							session: partialFake<OpenCodeAPI["session"]>(api.session),
 						}),
 					),
-					Layer.succeed(LoggerTag, log),
-					Layer.succeed(
-						OrchestrationEngineTag,
+					Layer.succeed(LoggerTag)(log),
+					Layer.succeed(OrchestrationEngineTag)(
 						new OrchestrationEngine({ registry: new ProviderRegistry() }),
 					),
-					Layer.succeed(OpenCodeModelServiceTag, {
+					Layer.succeed(OpenCodeModelServiceTag)({
 						listProviders: () =>
 							Effect.succeed({
 								providers: [
@@ -149,8 +147,8 @@ describe("applySessionCommand", () => {
 					}),
 					// An empty config dir keeps provider routing at its defaults instead
 					// of reading the developer's real ~/.config/conduit.
-					Layer.succeed(ConfigTag, makeMockConfig({ configDir: dir })),
-					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+					Layer.succeed(ConfigTag)(makeMockConfig({ configDir: dir })),
+					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					...(projectors
 						? [
 								Layer.effect(
@@ -411,7 +409,7 @@ describe("applySessionCommand", () => {
 
 					// conduit-test-42k7: the caller must not be told a delete worked
 					// while the row it reads back is still there.
-					expect(result._tag).toBe("Left");
+					expect(result._tag).toBe("Failure");
 					if (
 						result._tag === "Failure" &&
 						result.failure instanceof SessionCommandError
@@ -584,7 +582,7 @@ describe("applySessionCommand", () => {
 							"msg-7",
 						),
 					);
-					expect(result._tag).toBe("Left");
+					expect(result._tag).toBe("Failure");
 					expect(api.session.fork).not.toHaveBeenCalled();
 				}),
 			),

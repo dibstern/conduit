@@ -120,7 +120,7 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 							log: makeMockLogger(),
 						}),
 					),
-					Layer.provideMerge(Layer.succeed(LoggerTag, makeMockLogger())),
+					Layer.provideMerge(Layer.succeed(LoggerTag)(makeMockLogger())),
 				),
 			),
 		);
@@ -173,7 +173,7 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 							persistenceLayer,
 						}),
 					),
-					Layer.provideMerge(Layer.succeed(LoggerTag, makeMockLogger())),
+					Layer.provideMerge(Layer.succeed(LoggerTag)(makeMockLogger())),
 					Layer.provideMerge(persistenceLayer),
 				),
 			),
@@ -214,7 +214,7 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 					)`;
 
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					client.SwitchPermissionMode({
 						sessionId,
 						mode: "full",
@@ -222,9 +222,11 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 					}),
 				);
 
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left") {
-					expect(result.left.message).toContain("SDK rejected permission mode");
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure") {
+					expect(result.failure.message).toContain(
+						"SDK rejected permission mode",
+					);
 				}
 				expect(yield* getPermissionMode(sessionId)).toBe("ask");
 				const rows = yield* sql<{ readonly permission_mode: string | null }>`
@@ -243,7 +245,7 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 								persistenceLayer,
 							}),
 						),
-						Layer.provideMerge(Layer.succeed(LoggerTag, makeMockLogger())),
+						Layer.provideMerge(Layer.succeed(LoggerTag)(makeMockLogger())),
 						Layer.provideMerge(persistenceLayer),
 					),
 				),

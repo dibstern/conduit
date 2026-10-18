@@ -23,8 +23,8 @@ describe("standalone InstanceManagementServiceLive", () => {
 				] as const;
 				for (const [operation, effect] of operations) {
 					expect(yield* Effect.result(effect)).toMatchObject({
-						_tag: "Left",
-						left: {
+						_tag: "Failure",
+						failure: {
 							_tag: "InstanceManagementServiceError",
 							operation,
 							cause: expect.objectContaining({

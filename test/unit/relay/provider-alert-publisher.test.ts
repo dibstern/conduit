@@ -1,4 +1,4 @@
-import { Chunk, Effect, PubSub, Queue } from "effect";
+import { Effect, PubSub } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
 import type { Alert } from "../../../src/lib/contracts/ws-rpc.js";
@@ -51,7 +51,9 @@ it("pushes canonical terminal alerts, preserves replay identity, and suppresses 
 					Effect.provideService(AlertLedgerTag, ledger),
 				);
 			}
-			return Chunk.toArray(yield* Queue.takeAll(subscribed));
+			return [
+				...(yield* PubSub.takeUpTo(subscribed, Number.POSITIVE_INFINITY)),
+			];
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(AlertsLive),

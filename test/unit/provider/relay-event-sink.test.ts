@@ -197,7 +197,7 @@ describe("createRelayEventSink — persistence", () => {
 
 		const result = await Effect.runPromise(Effect.result(sink.push(event)));
 
-		expect(result._tag).toBe("Left");
+		expect(result._tag).toBe("Failure");
 		if (result._tag === "Failure") {
 			expect(result.failure).toBe(ingestionError);
 		}
@@ -302,8 +302,8 @@ describe("createRelayEventSink — permission/question", () => {
 			),
 		);
 		expect(permissionResult).toMatchObject({
-			_tag: "Left",
-			left: {
+			_tag: "Failure",
+			failure: {
 				_tag: "MissingPendingInteractions",
 				operation: "requestPermission",
 				sessionId: "ses-1",
@@ -325,8 +325,8 @@ describe("createRelayEventSink — permission/question", () => {
 			),
 		);
 		expect(questionResult).toMatchObject({
-			_tag: "Left",
-			left: {
+			_tag: "Failure",
+			failure: {
 				_tag: "MissingPendingInteractions",
 				operation: "requestQuestion",
 				sessionId: "ses-1",

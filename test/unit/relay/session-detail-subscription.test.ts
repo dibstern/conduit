@@ -79,8 +79,7 @@ afterEach(() => {
 	rmSync(isolatedRoot, { recursive: true, force: true });
 });
 const detailAccountsLayer = () =>
-	Layer.succeed(
-		AccountDirectory,
+	Layer.succeed(AccountDirectory)(
 		makeAccountDirectory(
 			Effect.succeed(
 				accountsStateFromConfig(
@@ -1079,14 +1078,14 @@ describe("subscribeSessionDetail", () => {
 						),
 					),
 				);
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 
 				// Sentinel: the next successful persist must be the FIRST bus signal —
 				// proving the failed persist published nothing.
 				yield* persist.persistEvent(messageCreated(SID, "m-ok", "user"));
-				const first = Chunk.toReadonlyArray(
-					yield* events.pipe(Stream.take(1), Stream.runCollect),
-				);
+				const first = [
+					...(yield* events.pipe(Stream.take(1), Stream.runCollect)),
+				];
 				expect(first[0]?.type).toBe("message.created");
 			}).pipe(
 				Effect.provide(
@@ -1129,8 +1128,8 @@ describe("subscribeSessionDetail", () => {
 							yield* Ref.update(published, (all) => [...all, ...events]);
 						}),
 					publishAdvance: () => Effect.void,
-					subscribe: () => Effect.dieMessage("unused in this test"),
-					subscribeAdvances: () => Effect.dieMessage("unused in this test"),
+					subscribe: () => Effect.die(new Error("unused in this test")),
+					subscribeAdvances: () => Effect.die(new Error("unused in this test")),
 				};
 
 				yield* Effect.gen(function* () {
@@ -1162,7 +1161,7 @@ describe("subscribeSessionDetail", () => {
 				}).pipe(
 					Effect.provide(
 						makeDetailTestLayer({
-							busLayer: Layer.succeed(SessionEventBusTag, probeBus),
+							busLayer: Layer.succeed(SessionEventBusTag)(probeBus),
 						}),
 					),
 				);

@@ -60,23 +60,21 @@ function agentHandlerLayer({
 	engine?: OrchestrationEngine;
 	log?: Logger;
 }) {
-	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
-	const wsLayer = Layer.succeed(WebSocketHandlerTag, ws);
+	const apiLayer = Layer.succeed(OpenCodeAPITag)(client);
+	const wsLayer = Layer.succeed(WebSocketHandlerTag)(ws);
 	const overridesLayer = makeOverridesStateLive();
-	const logLayer = Layer.succeed(LoggerTag, log);
+	const logLayer = Layer.succeed(LoggerTag)(log);
 	const deps = Layer.mergeAll(
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		apiLayer,
-		Layer.succeed(
-			OpenCodeInstancesTag,
+		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: client }),
 		),
 		wsLayer,
 		overridesLayer,
 		logLayer,
-		Layer.succeed(ConfigTag, makeMockConfig()),
-		Layer.succeed(
-			OrchestrationEngineTag,
+		Layer.succeed(ConfigTag)(makeMockConfig()),
+		Layer.succeed(OrchestrationEngineTag)(
 			engine ??
 				new OrchestrationEngineLive({ registry: new ProviderRegistry() }),
 		),

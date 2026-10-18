@@ -89,7 +89,7 @@ const recordingConnect = () => {
 
 const withClients = <A>(
 	connect: WsRpcConnect,
-	use: (clients: WsRpcClients["Type"]) => Effect.Effect<A>,
+	use: (clients: WsRpcClients["Service"]) => Effect.Effect<A>,
 ) =>
 	Effect.scoped(
 		Effect.flatMap(WsRpcClients, use).pipe(
@@ -219,14 +219,14 @@ describe("shared two-socket RPC client in memory", () => {
 			const slowConnect: WsRpcConnect = (options) =>
 				++attempts === 2
 					? Deferred.succeed(connecting, undefined).pipe(
-							Effect.zipRight(Effect.never),
+							Effect.andThen(Effect.never),
 						)
 					: connect(options);
 			yield* withClients(slowConnect, (clients) =>
 				Effect.gen(function* () {
-					const opening = yield* Effect.fork(clients.forProject("alpha"));
+					const opening = yield* Effect.forkChild(clients.forProject("alpha"));
 					yield* Deferred.await(connecting);
-					expect(Exit.isInterrupted(yield* Fiber.interrupt(opening))).toBe(
+					expect(Exit.hasInterrupts(yield* Fiber.interrupt(opening))).toBe(
 						true,
 					);
 					expect(transports.filter((t) => !t.closed)).toEqual([]);
@@ -336,7 +336,7 @@ describe("shared two-socket RPC client over WebSockets", () => {
 	it.effect("carries a request placed after forProject has returned", () =>
 		Effect.gen(function* () {
 			const frame = yield* Deferred.make<void>();
-			onFrame = () => Deferred.unsafeDone(frame, Effect.void);
+			onFrame = () => Deferred.doneUnsafe(frame, Effect.void);
 
 			const clients = yield* WsRpcClients;
 			const { control } = yield* clients.forProject("alpha");
@@ -347,10 +347,15 @@ describe("shared two-socket RPC client over WebSockets", () => {
 				),
 			);
 			yield* Deferred.await(frame).pipe(
-				Effect.timeoutFail({
+				Effect.timeoutOrElse({
 					duration: "3 seconds",
-					onTimeout: () =>
-						new Error("no frame reached a socket — the protocol is closed"),
+					orElse: () =>
+						Effect.fail(
+							(() =>
+								new Error(
+									"no frame reached a socket — the protocol is closed",
+								))(),
+						),
 				}),
 			);
 
@@ -375,7 +380,7 @@ describe("shared two-socket RPC client over WebSockets", () => {
 
 	// Wake must reach both sockets, ignore hidden tabs and healthy sockets, and
 	// work even when a close has not yet entered its retry delay.
-	it.scoped.each(["navigation", "visible", "online", "registration"] as const)(
+	it.effect.each(["navigation", "visible", "online", "registration"] as const)(
 		"%s wakes both socket retries immediately",
 		(reason) =>
 			Effect.gen(function* () {
@@ -398,12 +403,12 @@ describe("shared two-socket RPC client over WebSockets", () => {
 								socket.sent.some((frame) => frame.includes("SetLogLevel")),
 							)
 						)
-							Deferred.unsafeDone(opened, Effect.void);
+							Deferred.doneUnsafe(opened, Effect.void);
 					};
 					dial = (socket) => {
 						socket.open();
 						if (fakeSockets.length === 4)
-							Deferred.unsafeDone(redialed, Effect.void);
+							Deferred.doneUnsafe(redialed, Effect.void);
 					};
 					const clients = yield* WsRpcClients;
 					const { control, stream } = yield* clients.forProject("alpha");
@@ -455,9 +460,9 @@ describe("shared two-socket RPC client over WebSockets", () => {
 					} else {
 						for (const socket of fakeSockets) socket.close(1006);
 					}
-					yield* Effect.yieldNow();
+					yield* Effect.yieldNow;
 					document.dispatchEvent(new Event("visibilitychange"));
-					yield* Effect.yieldNow();
+					yield* Effect.yieldNow;
 					expect(fakeSockets).toHaveLength(2);
 					if (reason === "navigation") yield* clients.wake;
 					else if (reason === "online")
@@ -471,7 +476,7 @@ describe("shared two-socket RPC client over WebSockets", () => {
 					expect(fakeSockets).toHaveLength(4);
 					// Ordinary retries still wait; a wake must not leave a latched signal.
 					for (const socket of fakeSockets.slice(2)) socket.close(1006);
-					yield* Effect.yieldNow();
+					yield* Effect.yieldNow;
 					expect(fakeSockets).toHaveLength(4);
 					yield* TestClock.adjust("1 second");
 					expect(fakeSockets).toHaveLength(6);
@@ -490,9 +495,10 @@ describe("shared two-socket RPC client over WebSockets", () => {
 							until: (finished) => finished,
 							schedule: Schedule.spaced("1 millis"),
 						}),
-						Effect.timeoutFail({
+						Effect.timeoutOrElse({
 							duration: "3 seconds",
-							onTimeout: () => new Error("condition never held"),
+							orElse: () =>
+								Effect.fail((() => new Error("condition never held"))()),
 						}),
 					);
 				const clients = yield* WsRpcClients;
@@ -512,9 +518,7 @@ describe("shared two-socket RPC client over WebSockets", () => {
 							projectSlug: "alpha",
 							level: "debug",
 						}).pipe(
-							Effect.catchAll((error) =>
-								Deferred.succeed(outcome, String(error)),
-							),
+							Effect.catch((error) => Deferred.succeed(outcome, String(error))),
 						),
 					);
 					return placed;
@@ -525,7 +529,7 @@ describe("shared two-socket RPC client over WebSockets", () => {
 							ws.sent.some((frame) => frame.includes("SetLogLevel")),
 						)
 					)
-						Deferred.unsafeDone(outcome, Effect.succeed("sent"));
+						Deferred.doneUnsafe(outcome, Effect.succeed("sent"));
 				};
 				dial = (ws) => {
 					ws.open();
@@ -538,9 +542,12 @@ describe("shared two-socket RPC client over WebSockets", () => {
 
 				expect(
 					yield* Deferred.await(outcome).pipe(
-						Effect.timeoutFail({
+						Effect.timeoutOrElse({
 							duration: "3 seconds",
-							onTimeout: () => new Error("the request neither sent nor failed"),
+							orElse: () =>
+								Effect.fail(
+									(() => new Error("the request neither sent nor failed"))(),
+								),
 						}),
 					),
 				).toBe("sent");

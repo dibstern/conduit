@@ -783,13 +783,17 @@ function socketTable(
 	>;
 	const table: Record<string, (payload: never) => unknown> = {};
 	for (const rpc of WsRpcGroup.requests.values()) {
-		const streamSchema = RpcSchema.getStreamSchemas(rpc.successSchema.ast);
+		const streamSchema = RpcSchema.isStreamSchema(rpc.successSchema)
+			? rpc.successSchema
+			: undefined;
 		table[rpc._tag] = (payload: Record<string, unknown>) => {
 			const request = requests.get(rpc._tag)?.shift();
 			if (!request) throw new Error(`Missing request for ${rpc._tag}`);
 			const stub = stubs[rpc._tag];
-			if (streamSchema._tag === "Some") {
-				const schema = Schema.make(streamSchema.value.success.ast);
+			if (streamSchema) {
+				const schema = Schema.make<Schema.Codec<unknown>>(
+					streamSchema.success.ast,
+				);
 				// The group's stream schema establishes this result's shape.
 				const source = stub
 					? (stub(payload) as Stream.Stream<unknown, unknown>)
@@ -822,8 +826,8 @@ function socketTable(
 									catch: (error) => new WsRpcError({ message: String(error) }),
 								});
 								if (!isRecord(response))
-									return yield* Effect.dieMessage(
-										"Mock GetModels must return an object",
+									return yield* Effect.die(
+										new Error("Mock GetModels must return an object"),
 									);
 								yield* queue.emit({
 									defaultOpenCodeInstanceId: "opencode",
@@ -858,7 +862,7 @@ function socketTable(
 						stub
 							? checkedReply(rpc._tag, () => {
 									Schema.encodeUnknownSync(
-										Schema.make(streamSchema.value.failure.ast),
+										Schema.make<Schema.Codec<unknown>>(streamSchema.error.ast),
 									)(error);
 									return error;
 								})
@@ -873,9 +877,9 @@ function socketTable(
 			return (async () => {
 				const response = await stub(payload);
 				const value = checkedReply(rpc._tag, () => {
-					Schema.encodeUnknownSync(Schema.make(rpc.successSchema.ast))(
-						response,
-					);
+					Schema.encodeUnknownSync(
+						Schema.make<Schema.Codec<unknown>>(rpc.successSchema.ast),
+					)(response);
 					return response;
 				});
 				if (!rpc._tag.startsWith("Get") && isRecord(value)) {
@@ -991,7 +995,7 @@ export async function mockWsRpc(
 					)
 						control.onSendMessage?.(payload);
 				}),
-			).pipe(Scope.extend(scope)),
+			).pipe(Scope.provide(scope)),
 		);
 		control.onConnect?.();
 		ws.onMessage(async (data) => {

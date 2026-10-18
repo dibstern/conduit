@@ -92,7 +92,7 @@ describe("PTY output storm", () => {
 					const protocol = yield* Layer.build(
 						RpcClient.layerProtocolSocket().pipe(
 							Layer.provide(
-								Layer.succeed(Socket.Socket, connection.clientSocket),
+								Layer.succeed(Socket.Socket)(connection.clientSocket),
 							),
 							Layer.provide(RpcSerialization.layerJson),
 						),

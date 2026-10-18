@@ -23,7 +23,7 @@ import {
 	vi,
 } from "vitest";
 import { parseArgs } from "../../../src/bin/cli-utils.js";
-import { GetStatus } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { DaemonOptions } from "../../../src/lib/daemon/daemon-types.js";
@@ -180,10 +180,9 @@ describe("daemon Tailscale Serve", () => {
 		]);
 		const url = `https://${dnsName}:${daemon.port}`;
 		expect(daemon.getStatus().tailscaleServe).toEqual({ url });
-		const status = await sendRpcRequest(
-			join(configDir, "relay.sock"),
-			new GetStatus({}),
-		);
+		const status = await sendRpcRequest(join(configDir, "relay.sock"), {
+			_tag: "GetStatus",
+		});
 		expect(status.tailscaleServe).toEqual({ url });
 		expect(JSON.parse(readFileSync(join(root, "serve.json"), "utf8"))).toEqual({
 			Web: {

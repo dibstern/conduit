@@ -95,7 +95,7 @@ describe("a stale OpenCode status read", () => {
 		await fixture.setOpenCodeStatus(directory, running, { type: "busy" });
 		const inputId = randomUUID();
 		const accepted = await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId: running,
 				text: "after the running turn",
 				inputId,

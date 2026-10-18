@@ -87,7 +87,7 @@ describe("provider binding revisions", () => {
 			filename: join(dir, "events.db"),
 		}).pipe(
 			Layer.merge(
-				Layer.scopedDiscard(
+				Layer.effectDiscard(
 					Effect.addFinalizer(() =>
 						Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 					),
@@ -118,7 +118,7 @@ describe("provider binding revisions", () => {
 			filename: join(dir, "events.db"),
 		}).pipe(
 			Layer.merge(
-				Layer.scopedDiscard(
+				Layer.effectDiscard(
 					Effect.addFinalizer(() =>
 						Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 					),
@@ -149,7 +149,7 @@ describe("provider binding revisions", () => {
 			filename: join(dir, "events.db"),
 		}).pipe(
 			Layer.merge(
-				Layer.scopedDiscard(
+				Layer.effectDiscard(
 					Effect.addFinalizer(() =>
 						Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 					),
@@ -223,7 +223,7 @@ describe("provider binding revisions", () => {
 			filename: join(dir, "events.db"),
 		}).pipe(
 			Layer.merge(
-				Layer.scopedDiscard(
+				Layer.effectDiscard(
 					Effect.addFinalizer(() =>
 						Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 					),

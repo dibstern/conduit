@@ -250,15 +250,15 @@ describe("createProjectRelay override-state defaults", () => {
 		);
 		expect(unsupported).toMatchObject({
 			scan: {
-				_tag: "Left",
-				left: {
+				_tag: "Failure",
+				failure: {
 					_tag: "ScanServiceNotAvailable",
 					message: "Port scanning not available",
 				},
 			},
 			sessions: {
-				_tag: "Left",
-				left: {
+				_tag: "Failure",
+				failure: {
 					_tag: "DaemonSessionQueryNotSupported",
 					message:
 						"Cross-project session listing is not supported in this mode",
@@ -266,15 +266,15 @@ describe("createProjectRelay override-state defaults", () => {
 			},
 			projects: [],
 			save: {
-				_tag: "Left",
-				left: {
+				_tag: "Failure",
+				failure: {
 					_tag: "ProjectManagementNotSupported",
 					message: "Saving projects is not supported in this mode",
 				},
 			},
 			instances: {
-				_tag: "Left",
-				left: {
+				_tag: "Failure",
+				failure: {
 					_tag: "InstanceManagementServiceError",
 					cause: expect.objectContaining({
 						message: "Instance management not available",

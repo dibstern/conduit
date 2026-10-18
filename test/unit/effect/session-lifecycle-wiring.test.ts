@@ -123,14 +123,13 @@ function makeTestLayer(
 	});
 
 	const bridgeLayers = Layer.mergeAll(
-		Layer.succeed(
-			OpenCodeInstancesTag,
+		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: client }),
 		),
-		Layer.succeed(OpenCodeAPITag, services.client as any),
-		Layer.succeed(PollerManagerTag, services.pollerManager as any),
-		Layer.succeed(StatusPollerTag, services.statusPoller),
-		Layer.succeed(LoggerTag, services.log),
+		Layer.succeed(OpenCodeAPITag)(services.client as any),
+		Layer.succeed(PollerManagerTag)(services.pollerManager as any),
+		Layer.succeed(StatusPollerTag)(services.statusPoller),
+		Layer.succeed(LoggerTag)(services.log),
 		DaemonEventBusLive,
 	);
 
@@ -152,21 +151,20 @@ function makeServiceLifecycleLayers<ROut, E, RIn>(
 	});
 
 	const baseLayer = Layer.mergeAll(
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-		Layer.succeed(ConfigTag, makeMockConfig()),
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+		Layer.succeed(ConfigTag)(makeMockConfig()),
 		Layer.effect(SessionActivityTag, makeSessionActivity),
 		makeOverridesStateLive(),
 		RelayStatusSnapshotLive,
-		Layer.succeed(OpenCodeInstancesTag, instances),
-		Layer.succeed(OpenCodeAPITag, api),
-		Layer.succeed(PollerManagerTag, services.pollerManager as any),
-		Layer.succeed(StatusPollerTag, services.statusPoller),
-		Layer.succeed(LoggerTag, services.log),
+		Layer.succeed(OpenCodeInstancesTag)(instances),
+		Layer.succeed(OpenCodeAPITag)(api),
+		Layer.succeed(PollerManagerTag)(services.pollerManager as any),
+		Layer.succeed(StatusPollerTag)(services.statusPoller),
+		Layer.succeed(LoggerTag)(services.log),
 		makeSessionManagerStateLive(),
 		DaemonEventBusLive,
 		persistenceLayer,
-		Layer.succeed(
-			OrchestrationEngineTag,
+		Layer.succeed(OrchestrationEngineTag)(
 			new OrchestrationEngine({ registry: new ProviderRegistry() }),
 		),
 	);
@@ -336,7 +334,7 @@ describe("SessionLifecycleWiringLive", () => {
 				}),
 			);
 
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 			if (result._tag === "Failure") {
 				expect(result.failure).toBeInstanceOf(
 					SessionLifecycleHistoryRebuildError,

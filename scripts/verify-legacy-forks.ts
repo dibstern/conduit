@@ -19,9 +19,9 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { isDeepStrictEqual, parseArgs } from "node:util";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import Database from "better-sqlite3";
 import { Effect, Layer } from "effect";
 import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
@@ -165,12 +165,11 @@ function copyStore(source: string, target: string): void {
 	}
 }
 
-function placements(db: Database.Database): Placement[] {
+function placements(db: DatabaseSync): Placement[] {
 	const columns = new Set(
-		db
-			.prepare<[], { name: string }>("PRAGMA table_info(sessions)")
-			.all()
-			.map(({ name }) => name),
+		(db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[]).map(
+			({ name }) => name,
+		),
 	);
 	// Older snapshots can precede the sessions_lineage migration, which adds forked_from.
 	const selection = placementColumns.map((column) => {
@@ -180,54 +179,47 @@ function placements(db: Database.Database): Placement[] {
 		return column;
 	});
 	return db
-		.prepare<[], Placement>(
-			`SELECT id, ${selection.join(",")} FROM sessions ORDER BY id`,
-		)
-		.all();
+		.prepare(`SELECT id, ${selection.join(",")} FROM sessions ORDER BY id`)
+		.all() as Placement[];
 }
 
-function sidebarRows(db: Database.Database): Sidebar[] {
+function sidebarRows(db: DatabaseSync): Sidebar[] {
 	return db
-		.prepare<[], Sidebar>(
+		.prepare(
 			"SELECT session_id, version, last_activity, row FROM session_sidebar ORDER BY session_id",
 		)
-		.all();
+		.all() as Sidebar[];
 }
 
-function fingerprint(
-	db: Database.Database,
-	table: "messages" | "message_parts",
-) {
+function fingerprint(db: DatabaseSync, table: "messages" | "message_parts") {
 	const owner = table === "messages" ? "session_id" : "message_id";
 	const hash = createHash("sha256");
 	let count = 0;
 	for (const row of db
-		.prepare<[], { id: string; owner_id: string; version: number }>(
+		.prepare(
 			`SELECT id, ${owner} AS owner_id, version FROM ${table} ORDER BY id`,
 		)
-		.iterate()) {
+		.iterate() as Iterable<{ id: string; owner_id: string; version: number }>) {
 		hash.update(`${JSON.stringify([row.id, row.owner_id, row.version])}\n`);
 		count++;
 	}
 	return { count, sha256: hash.digest("hex") };
 }
 
-function eventCounts(db: Database.Database) {
+function eventCounts(db: DatabaseSync) {
 	const row = db
-		.prepare<[], { count: number; maxSequence: number }>(
+		.prepare(
 			"SELECT COUNT(*) AS count, COALESCE(MAX(sequence), 0) AS maxSequence FROM events",
 		)
-		.get();
+		.get() as { count: number; maxSequence: number } | undefined;
 	assert(row);
 	return row;
 }
 
-function counter(db: Database.Database): number {
+function counter(db: DatabaseSync): number {
 	const row = db
-		.prepare<[], { value: number }>(
-			"SELECT value FROM read_model_counter WHERE id = 1",
-		)
-		.get();
+		.prepare("SELECT value FROM read_model_counter WHERE id = 1")
+		.get() as { value: number } | undefined;
 	assert(row);
 	return row.value;
 }
@@ -266,10 +258,10 @@ async function replay(
 			const diskGuard =
 				projected++ % 500 === 0
 					? Effect.try(() => guardDisk(1024 ** 3)).pipe(
-							Effect.catchAll(() => Effect.interrupt),
+							Effect.catch(() => Effect.interrupt),
 						)
 					: Effect.void;
-			return diskGuard.pipe(Effect.zipRight(projector.project(event, context)));
+			return diskGuard.pipe(Effect.andThen(projector.project(event, context)));
 		},
 	}));
 	return Effect.runPromise(
@@ -409,11 +401,15 @@ async function verify() {
 	const snapshotFilename = join(temporaryDirectory, "source.db");
 	const replayFilename = join(temporaryDirectory, "replay.db");
 	const rerunFilename = join(temporaryDirectory, "rerun.db");
-	const connections: Database.Database[] = [];
-	function open(filename: string, readonly = true): Database.Database {
-		const db = new Database(filename, { readonly, fileMustExist: true });
+	const connections: DatabaseSync[] = [];
+	function open(filename: string, readonly = true): DatabaseSync {
+		assert(existsSync(filename), `Database does not exist: ${filename}`);
+		const db = new DatabaseSync(filename, {
+			readOnly: readonly,
+			timeout: 5000,
+		});
 		connections.push(db);
-		db.pragma("temp_store = MEMORY");
+		db.exec("PRAGMA temp_store = MEMORY");
 		return db;
 	}
 	try {
@@ -422,15 +418,16 @@ async function verify() {
 		copyStore(migratedFilename, snapshotFilename);
 		const source = open(snapshotFilename);
 		const sourcePlacements = placements(source);
-		const legacyForks = source
-			.prepare<[], { id: string }>(`
+		const legacyForks = (
+			source
+				.prepare(`
 			SELECT id FROM sessions WHERE parent_id IS NOT NULL AND side_thread = 0
 			AND (fork_point_event IS NOT NULL OR fork_point_timestamp IS NOT NULL
 				OR EXISTS (SELECT 1 FROM events WHERE session_id = sessions.id AND type = 'session.forked'))
 			ORDER BY id
 		`)
-			.all()
-			.map(({ id }) => id);
+				.all() as { id: string }[]
+		).map(({ id }) => id);
 		const sideThreads = sourcePlacements
 			.filter((row) => row.side_thread === 1)
 			.map(({ id }) => id);
@@ -478,41 +475,49 @@ async function verify() {
 		guardDisk(16 * 1024 ** 2);
 		await migrate(replayFilename);
 		const replayStore = open(replayFilename, false);
-		replayStore.pragma("foreign_keys = OFF");
-		const columns = source
-			.prepare<[], { name: string }>("PRAGMA table_info(events)")
-			.all()
-			.map(({ name }) => name);
-		const insert = replayStore.prepare<EventRow>(
+		replayStore.exec("PRAGMA foreign_keys = OFF");
+		const columns = (
+			source.prepare("PRAGMA table_info(events)").all() as { name: string }[]
+		).map(({ name }) => name);
+		const insert = replayStore.prepare(
 			`INSERT INTO events (${columns.join(",")}) VALUES (${columns.map((column) => `@${column}`).join(",")})`,
 		);
-		const extraction = source.prepare<[string], EventRow>(`
+		const extraction = source.prepare(`
 			SELECT ${columns.join(",")} FROM events
 			WHERE session_id IN (SELECT value FROM json_each(?)) ORDER BY sequence
 		`);
 		let copiedEvents = 0;
-		replayStore.transaction(() => {
-			for (const row of extraction.iterate(JSON.stringify(selectedIds))) {
+		replayStore.exec("BEGIN");
+		try {
+			for (const row of extraction.iterate(
+				JSON.stringify(selectedIds),
+			) as Iterable<EventRow>) {
 				if (copiedEvents++ % 10000 === 0) guardDisk(1024 ** 3);
 				insert.run(row);
 			}
-		})();
+
+			replayStore.exec("COMMIT");
+		} catch (cause) {
+			replayStore.exec("ROLLBACK");
+			throw cause;
+		}
 		const extractedCounts = eventCounts(replayStore);
-		replayStore.pragma("wal_checkpoint(TRUNCATE)");
+		replayStore.exec("PRAGMA wal_checkpoint(TRUNCATE)");
 		replayStore.close();
 		console.error(
 			`Replaying ${copiedEvents} events for ${selectedIds.length} sessions`,
 		);
-		const readSessionIds = migrated
-			.prepare<[string], { id: string }>(`
+		const readSessionIds = (
+			migrated
+				.prepare(`
 				SELECT id FROM sessions
 				WHERE id IN (SELECT value FROM json_each(?))
 				AND seen_version IS NOT NULL
 				AND seen_version >= COALESCE(last_turn_end_version, -1)
 				ORDER BY id
 			`)
-			.all(JSON.stringify(selectedIds))
-			.map(({ id }) => id);
+				.all(JSON.stringify(selectedIds)) as { id: string }[]
+		).map(({ id }) => id);
 		const { readState, ...recovery } = await replay(
 			replayFilename,
 			selectedIds,
@@ -574,17 +579,17 @@ async function verify() {
 		const afterParts = fingerprint(migrated, "message_parts");
 		const afterEvents = eventCounts(migrated);
 		const counterAfter = counter(migrated);
-		const integrity = migrated
-			.prepare<[], { integrity_check: string }>("PRAGMA integrity_check")
-			.all();
+		const integrity = migrated.prepare("PRAGMA integrity_check").all() as {
+			integrity_check: string;
+		}[];
 		const integrityOk =
 			integrity.length === 1 && integrity[0]?.integrity_check === "ok";
-		const foreignKeys = migrated
-			.prepare<
-				[],
-				{ table: string; rowid: number | null; parent: string; fkid: number }
-			>("PRAGMA foreign_key_check")
-			.all();
+		const foreignKeys = migrated.prepare("PRAGMA foreign_key_check").all() as {
+			table: string;
+			rowid: number | null;
+			parent: string;
+			fkid: number;
+		}[];
 		const legacyForksMoved = migratedPlacements
 			.filter(
 				(row) =>
@@ -736,7 +741,7 @@ async function verify() {
 			},
 		};
 	} finally {
-		for (const db of connections) if (db.open) db.close();
+		for (const db of connections) if (db.isOpen) db.close();
 		rmSync(temporaryDirectory, { recursive: true, force: true });
 	}
 }

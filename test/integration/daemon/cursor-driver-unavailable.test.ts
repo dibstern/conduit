@@ -4,11 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import Database from "better-sqlite3";
 import { Effect, Result as Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	AddInstance,
-	CreateSession,
-	SetDefault,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -111,9 +107,11 @@ describe("Cursor without an installed runtime through the built daemon", () => {
 
 	it("reports Cursor unavailable and stores a failed turn without dispatching to another driver", async () => {
 		const fixture = await start("cursor-unavailable-and-existing-drivers");
-		const added = await fixture.requestRpc(
-			new AddInstance({ name: "Cursor", driver: "cursor" }),
-		);
+		const added = await fixture.requestRpc({
+			_tag: "AddInstance",
+			name: "Cursor",
+			driver: "cursor",
+		});
 		const accountId = added.addedInstanceId;
 		if (!accountId) throw new Error("Missing registered Cursor account");
 		let browser = await fixture.connect();
@@ -302,19 +300,18 @@ describe("Cursor without an installed runtime through the built daemon", () => {
 			.filter(({ configured }) => configured)
 			.flatMap(({ models }) => models)[0];
 		if (!opencodeModel) throw new Error("Missing replay OpenCode model");
-		const { sessionId: opencodeId } = await fixture.requestRpc(
-			new CreateSession({
-				projectSlug: "process-test",
-				title: "OpenCode still runs",
-				originId: browser.originId,
-				providerId: "opencode",
-				permissionMode: "ask",
-				model: {
-					providerId: opencodeModel.provider,
-					modelId: opencodeModel.id,
-				},
-			}),
-		);
+		const { sessionId: opencodeId } = await fixture.requestRpc({
+			_tag: "CreateSession",
+			projectSlug: "process-test",
+			title: "OpenCode still runs",
+			originId: browser.originId,
+			providerId: "opencode",
+			permissionMode: "ask",
+			model: {
+				providerId: opencodeModel.provider,
+				modelId: opencodeModel.id,
+			},
+		});
 		const opencode = await browser.send(
 			opencodeId,
 			"Say hello in one sentence.",
@@ -355,14 +352,18 @@ describe("Cursor without an installed runtime through the built daemon", () => {
 		)?.id;
 		expect(claudeDefault).toBeDefined();
 		const first = (
-			await fixture.requestRpc(
-				new AddInstance({ name: "Cursor A", driver: "cursor" }),
-			)
+			await fixture.requestRpc({
+				_tag: "AddInstance",
+				name: "Cursor A",
+				driver: "cursor",
+			})
 		).addedInstanceId;
 		const second = (
-			await fixture.requestRpc(
-				new AddInstance({ name: "Cursor B", driver: "cursor" }),
-			)
+			await fixture.requestRpc({
+				_tag: "AddInstance",
+				name: "Cursor B",
+				driver: "cursor",
+			})
 		).addedInstanceId;
 		if (!first || !second)
 			throw new Error("Missing registered Cursor accounts");
@@ -380,7 +381,7 @@ describe("Cursor without an installed runtime through the built daemon", () => {
 			{ id: claudeDefault, driver: "claude" },
 			{ id: first, driver: "cursor" },
 		]);
-		await fixture.requestRpc(new SetDefault({ instanceId: second }));
+		await fixture.requestRpc({ _tag: "SetDefault", instanceId: second });
 		expect(await defaults()).toEqual([
 			{ id: claudeDefault, driver: "claude" },
 			{ id: second, driver: "cursor" },

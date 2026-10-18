@@ -190,24 +190,21 @@ it.skipIf(!snapshot || !baselineRef)(
 						mkdirSync(configDir, { recursive: true });
 						const runtime = ManagedRuntime.make(
 							Layer.mergeAll(
-								Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-								Layer.succeed(
-									OpenCodeInstancesTag,
+								Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+								Layer.succeed(OpenCodeInstancesTag)(
 									makeOpenCodeInstancesStub(),
 								),
 								makePersistenceEffectLayer(filename, projectId),
 								makeOverridesStateLive(),
-								Layer.succeed(
-									ConfigTag,
+								Layer.succeed(ConfigTag)(
 									makeMockConfig({
 										projectDir: directory,
 										configDir,
 										claudeSdk,
 									}),
 								),
-								Layer.succeed(LoggerTag, makeMockLogger()),
-								Layer.succeed(
-									OrchestrationEngineTag,
+								Layer.succeed(LoggerTag)(makeMockLogger()),
+								Layer.succeed(OrchestrationEngineTag)(
 									withDispatchEffect({
 										dispatchEffect: () =>
 											Effect.succeed({

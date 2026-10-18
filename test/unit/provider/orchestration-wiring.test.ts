@@ -32,8 +32,7 @@ function orchestrationDeps(
 	client: OpenCodeAPI,
 ) {
 	return Layer.mergeAll(
-		Layer.succeed(
-			AccountDirectory,
+		Layer.succeed(AccountDirectory)(
 			makeAccountDirectory(
 				Effect.succeed(
 					accountsStateFromInstances(
@@ -46,10 +45,9 @@ function orchestrationDeps(
 				),
 			),
 		),
-		Layer.succeed(OpenCodeAPITag, client),
+		Layer.succeed(OpenCodeAPITag)(client),
 		persistence,
-		Layer.succeed(
-			OpenCodeInstancesTag,
+		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: client }),
 		),
 		makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),

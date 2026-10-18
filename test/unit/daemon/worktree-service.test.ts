@@ -77,6 +77,7 @@ import {
 	Cause,
 	Chunk,
 	Effect,
+	Option as Effect4PollOption,
 	Result as Either,
 	Exit,
 	Fiber,
@@ -146,10 +147,10 @@ describe("daemon Worktree service", () => {
 		baseBranches?: Readonly<Record<string, string>>,
 	) => {
 		const result = await Effect.runPromise(
-			Effect.either(createEffect(branchName, options, folders, baseBranches)),
+			Effect.result(createEffect(branchName, options, folders, baseBranches)),
 		);
-		if (Either.isRight(result)) throw new Error("Expected creation to fail");
-		return result.left;
+		if (Either.isSuccess(result)) throw new Error("Expected creation to fail");
+		return result.failure;
 	};
 	const gitWrapper = (body: string) => {
 		const path = join(fixture, "git-wrapper");
@@ -190,10 +191,10 @@ describe("daemon Worktree service", () => {
 					created.ownership,
 					failure === "invalid" ? "bad name" : "renamed",
 				),
-			).pipe(Effect.either, Effect.provide(makeWorktreeLive(configDir))),
+			).pipe(Effect.result, Effect.provide(makeWorktreeLive(configDir))),
 		);
-		if (Either.isRight(result)) throw new Error("Expected rename to fail");
-		expect(result.left).toMatchObject({
+		if (Either.isSuccess(result)) throw new Error("Expected rename to fail");
+		expect(result.failure).toMatchObject({
 			folder: failure === "invalid" ? repository : second.path,
 			reason: {
 				invalid: "invalid-name",
@@ -254,18 +255,18 @@ process.exit(result.status ?? 1);`);
 			Effect.flatMap(WorktreeServiceTag, (service) =>
 				service.renameBranch(created.ownership, "renamed"),
 			).pipe(
-				Effect.either,
+				Effect.result,
 				Effect.provide(
 					makeWorktreeLive(configDir, { gitExecutable: executable }),
 				),
 			),
 		);
-		if (Either.isRight(result)) throw new Error("Expected rename to fail");
-		expect(result.left).toMatchObject({
+		if (Either.isSuccess(result)) throw new Error("Expected rename to fail");
+		expect(result.failure).toMatchObject({
 			folder: second.path,
 			reason: "git-failed",
 		});
-		expect(result.left.message).toContain("forced second rename failure");
+		expect(result.failure.message).toContain("forced second rename failure");
 		expect(existsSync(marker)).toBe(true);
 		expect([repositoryState(), repositoryState(second.path)]).toEqual(before);
 	});
@@ -580,9 +581,9 @@ process.exit(result.status ?? 1);`,
 		const result = await Effect.runPromise(
 			Effect.flatMap(WorktreeServiceTag, (service) =>
 				service.remove(folder, owned),
-			).pipe(Effect.either, Effect.provide(makeWorktreeLive(configDir))),
+			).pipe(Effect.result, Effect.provide(makeWorktreeLive(configDir))),
 		);
-		expect(Either.isLeft(result)).toBe(detached);
+		expect(Either.isFailure(result)).toBe(detached);
 		expect(existsSync(owned.path)).toBe(detached);
 		expect(git("rev-parse", "owned")).toBe(tip);
 	});
@@ -605,10 +606,10 @@ process.exit(result.status ?? 1);`,
 		const result = await Effect.runPromise(
 			Effect.flatMap(WorktreeServiceTag, (service) =>
 				service.remove(folder, owned, Effect.succeed(protection === "in-use")),
-			).pipe(Effect.either, Effect.provide(makeWorktreeLive(configDir))),
+			).pipe(Effect.result, Effect.provide(makeWorktreeLive(configDir))),
 		);
-		if (Either.isRight(result)) throw new Error("Expected removal to fail");
-		expect(result.left.message).toContain(
+		if (Either.isSuccess(result)) throw new Error("Expected removal to fail");
+		expect(result.failure.message).toContain(
 			protection === "dirty" ? "uncommitted changes" : "another session",
 		);
 		expect(existsSync(owned.path)).toBe(true);
@@ -666,15 +667,15 @@ process.exit(result.status ?? 1);
 			Effect.flatMap(WorktreeServiceTag, (service) =>
 				service.remove(folder, owned),
 			).pipe(
-				Effect.either,
+				Effect.result,
 				Effect.provide(
 					makeWorktreeLive(configDir, { gitExecutable: resettingGit }),
 				),
 			),
 		);
-		if (Either.isRight(result))
+		if (Either.isSuccess(result))
 			throw new Error("Expected deletion transaction to fail");
-		expect(result.left.message).toContain("refs/heads/main");
+		expect(result.failure.message).toContain("refs/heads/main");
 		expect(existsSync(owned.path)).toBe(false);
 		expect(git("rev-parse", "owned")).toBe(tip);
 		expect(git("rev-parse", "main")).toBe(owned.head);
@@ -903,7 +904,15 @@ finish();
 			await vi.waitFor(() => expect(existsSync(marker)).toBe(true), {
 				timeout: 8_000,
 			});
-			expect((await Effect.runPromise(Fiber.poll(fiber)))._tag).toBe("None");
+			expect(
+				(
+					await Effect.runPromise(
+						Effect.sync(() =>
+							Effect4PollOption.fromUndefinedOr(fiber.pollUnsafe()),
+						),
+					)
+				)._tag,
+			).toBe("None");
 		} finally {
 			// Request interruption before allowing Git to return and transfer ownership.
 			await Effect.runPromise(Fiber.interruptFork(fiber));
@@ -962,14 +971,14 @@ finish();
 
 	it("preserves a concurrent creator's successful checkout", async () => {
 		const results = await Promise.all([
-			Effect.runPromise(Effect.either(createEffect())),
-			Effect.runPromise(Effect.either(createEffect())),
+			Effect.runPromise(Effect.result(createEffect())),
+			Effect.runPromise(Effect.result(createEffect())),
 		]);
-		const successes = results.filter(Either.isRight);
-		const failures = results.filter(Either.isLeft);
+		const successes = results.filter(Either.isSuccess);
+		const failures = results.filter(Either.isFailure);
 		expect(successes).toHaveLength(1);
 		expect(failures).toHaveLength(1);
-		const created = successes[0]?.right;
+		const created = successes[0]?.success;
 		expect(created).toBeDefined();
 		expect(existsSync(created?.worktrees[repository] ?? "")).toBe(true);
 		expect(
@@ -1024,10 +1033,11 @@ finish();
 		options?: { gitExecutable?: string; gitTimeoutMs?: number },
 	) => {
 		const result = await Effect.runPromise(
-			Effect.either(recreateEffect(directory, options)),
+			Effect.result(recreateEffect(directory, options)),
 		);
-		if (Either.isRight(result)) throw new Error("Expected recreation to fail");
-		return result.left;
+		if (Either.isSuccess(result))
+			throw new Error("Expected recreation to fail");
+		return result.failure;
 	};
 	const inspectMissing = (directory?: string) =>
 		Effect.runPromise(
@@ -1238,12 +1248,12 @@ finish();
 		const path = created.worktrees[repository] ?? "";
 		rmSync(path, { recursive: true });
 		const results = await Promise.all([
-			Effect.runPromise(Effect.either(recreateEffect())),
-			Effect.runPromise(Effect.either(recreateEffect())),
+			Effect.runPromise(Effect.result(recreateEffect())),
+			Effect.runPromise(Effect.result(recreateEffect())),
 		]);
-		expect(results.filter(Either.isRight)).toHaveLength(1);
+		expect(results.filter(Either.isSuccess)).toHaveLength(1);
 		expect(
-			results.filter(Either.isLeft).map(({ left }) => left.reason),
+			results.filter(Either.isFailure).map(({ left }) => left.reason),
 		).toEqual(["target-exists"]);
 		expect(git("-C", path, "branch", "--show-current")).toBe(
 			created.branchName,

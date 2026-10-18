@@ -20,7 +20,7 @@ function makeFileSqlLayer(seed?: (filename: string) => void) {
 	seed?.(filename);
 	return EffectSqliteClient.layer({ filename }).pipe(
 		Layer.merge(
-			Layer.scopedDiscard(
+			Layer.effectDiscard(
 				Effect.addFinalizer(() =>
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 				),
@@ -791,12 +791,12 @@ describe("Effect migration lineage", () => {
 
 	it.effect("refuses static migration ids without the baseline", () =>
 		Effect.gen(function* () {
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				makeEffectMigrationLoader({ "0002_skip_baseline": Effect.void }),
 			);
-			expect(Either.isLeft(result)).toBe(true);
-			if (Either.isLeft(result))
-				expect(result.left.message).toContain("start at 1");
+			expect(Either.isFailure(result)).toBe(true);
+			if (Either.isFailure(result))
+				expect(result.failure.message).toContain("start at 1");
 		}),
 	);
 
@@ -1471,10 +1471,10 @@ describe("Effect migration lineage", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`INSERT INTO effect_sql_migrations (migration_id, name)
 				VALUES (18, 'foreign_future_migration')`;
-				const result = yield* Effect.either(makeEffectSqlMigrator());
-				expect(Either.isLeft(result)).toBe(true);
-				if (Either.isLeft(result))
-					expect(result.left.message).toContain("foreign_future_migration");
+				const result = yield* Effect.result(makeEffectSqlMigrator());
+				expect(Either.isFailure(result)).toBe(true);
+				if (Either.isFailure(result))
+					expect(result.failure.message).toContain("foreign_future_migration");
 				const history = yield* sql<{ migration_id: number; name: string }>`
 				SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(history).toEqual([

@@ -311,7 +311,7 @@ for (const scenario of [
 				withSession: (sessionId, effect) =>
 					admission.withPermits(1)(
 						Effect.sync(() => admittedSessions.push(sessionId)).pipe(
-							Effect.zipRight(effect),
+							Effect.andThen(effect),
 						),
 					),
 				start: Effect.void,

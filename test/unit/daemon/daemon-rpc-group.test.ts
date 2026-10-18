@@ -2,11 +2,7 @@ import { describe, it } from "@effect/vitest";
 import { Result as Either, Schema } from "effect";
 import { expect } from "vitest";
 import {
-	ResolveSessionMode,
 	RestartWithConfig,
-	SaveProject,
-	SetDefaultSessionMode,
-	SetKeepAwakeCommand,
 	SetPin,
 	WsRpcGroup,
 	WsRpcRequest,
@@ -33,7 +29,7 @@ describe("shared daemon RPC contracts", () => {
 		expect(WsRpcGroup.requests.has("SetModel")).toBe(false);
 		expect(
 			Either.isFailure(
-				Schema.decodeUnknownEither(WsRpcRequest)({
+				Schema.decodeUnknownResult(WsRpcRequest)({
 					_tag: "SetModel",
 					slug: "project",
 					provider: "anthropic",
@@ -47,7 +43,7 @@ describe("shared daemon RPC contracts", () => {
 		for (const pin of ["1234", "12345678", null]) {
 			expect(
 				Either.isSuccess(
-					Schema.decodeUnknownEither(SetPin)({
+					Schema.decodeUnknownResult(SetPin.payloadSchema)({
 						_tag: "SetPin",
 						pin,
 					}),
@@ -57,7 +53,7 @@ describe("shared daemon RPC contracts", () => {
 		for (const pin of ["", "123", "123456789", "12ab", 1234]) {
 			expect(
 				Either.isFailure(
-					Schema.decodeUnknownEither(SetPin)({
+					Schema.decodeUnknownResult(SetPin.payloadSchema)({
 						_tag: "SetPin",
 						pin,
 					}),
@@ -71,12 +67,11 @@ describe("shared daemon RPC contracts", () => {
 			_tag: "SetKeepAwakeCommand",
 			command: "caffeinate",
 		});
-		expect(request).toEqual(
-			new SetKeepAwakeCommand({
-				command: "caffeinate",
-				args: [],
-			}),
-		);
+		expect(request).toEqual({
+			_tag: "SetKeepAwakeCommand",
+			command: "caffeinate",
+			args: [],
+		});
 	});
 
 	it("drops restart overrides across schema encoding and decoding", () => {
@@ -91,7 +86,10 @@ describe("shared daemon RPC contracts", () => {
 	});
 
 	it("keeps existing project requests on the same contract", () => {
-		const request = new SaveProject({ folders: ["/tmp/daemon-rpc-project"] });
+		const request = {
+			_tag: "SaveProject" as const,
+			folders: ["/tmp/daemon-rpc-project"],
+		};
 		expect(
 			Schema.decodeUnknownSync(WsRpcRequest)(
 				Schema.encodeSync(WsRpcRequest)(request),
@@ -101,8 +99,12 @@ describe("shared daemon RPC contracts", () => {
 
 	it("keeps session-mode resolution and global writes on the shared contract", () => {
 		for (const request of [
-			new ResolveSessionMode({ projectSlug: "project" }),
-			new SetDefaultSessionMode({ projectSlug: "project", mode: "worktree" }),
+			{ _tag: "ResolveSessionMode", projectSlug: "project" },
+			{
+				_tag: "SetDefaultSessionMode",
+				projectSlug: "project",
+				mode: "worktree",
+			},
 		]) {
 			expect(
 				Schema.decodeUnknownSync(WsRpcRequest)(

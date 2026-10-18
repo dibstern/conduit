@@ -1,4 +1,4 @@
-import { Chunk, Deferred, Effect, Fiber, Layer, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { describe, expect, it, vi } from "vitest";
@@ -167,9 +167,9 @@ function makeHarness(options?: {
 	sql.withTransaction = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect;
 
 	const depsLayer = Layer.mergeAll(
-		Layer.succeed(EventStoreEffectTag, eventStore),
-		Layer.succeed(ProjectionRunnerEffectTag, projectionRunner),
-		Layer.succeed(SqlClient.SqlClient, sql),
+		Layer.succeed(EventStoreEffectTag)(eventStore),
+		Layer.succeed(ProjectionRunnerEffectTag)(projectionRunner),
+		Layer.succeed(SqlClient.SqlClient)(sql),
 	);
 	const layer = ProviderRuntimeIngestionLive.pipe(Layer.provide(depsLayer));
 
@@ -264,7 +264,7 @@ describe("ProviderRuntimeIngestion", () => {
 			),
 		);
 
-		expect(Chunk.toReadonlyArray(received)).toEqual([
+		expect([...received]).toEqual([
 			expect.objectContaining({ eventId: "committed-1", sequence: 1 }),
 		]);
 	});
@@ -292,7 +292,7 @@ describe("ProviderRuntimeIngestion", () => {
 		const harness = makeHarness({ existingSession: true });
 		const busPublish = vi.fn(() => Effect.void);
 		const relayPublish = vi.fn(() => Effect.void);
-		const busLayer = Layer.succeed(SessionEventBusTag, {
+		const busLayer = Layer.succeed(SessionEventBusTag)({
 			publish: busPublish,
 			publishAdvance: () => Effect.void,
 			subscribe: () => Effect.succeed(Stream.empty),
@@ -337,7 +337,7 @@ describe("ProviderRuntimeIngestion", () => {
 		});
 		const busPublish = vi.fn(() => Effect.void);
 		const relayPublish = vi.fn(() => Effect.void);
-		const busLayer = Layer.succeed(SessionEventBusTag, {
+		const busLayer = Layer.succeed(SessionEventBusTag)({
 			publish: busPublish,
 			publishAdvance: () => Effect.void,
 			subscribe: () => Effect.succeed(Stream.empty),
@@ -366,7 +366,7 @@ describe("ProviderRuntimeIngestion", () => {
 			}).pipe(Effect.provide(layer)),
 		);
 
-		expect(result._tag).toBe("Left");
+		expect(result._tag).toBe("Failure");
 		expect(harness.projectBatch).toHaveBeenCalledTimes(1);
 		expect(harness.projectBatch).toHaveBeenCalledWith([
 			expect.objectContaining({
@@ -385,7 +385,7 @@ describe("ProviderRuntimeIngestion", () => {
 		const published: StoredEvent[] = [];
 		let projectedCountAtPublish = 0;
 		const harness = makeHarness();
-		const busLayer = Layer.succeed(SessionEventBusTag, {
+		const busLayer = Layer.succeed(SessionEventBusTag)({
 			publish: (events) =>
 				Effect.gen(function* () {
 					yield* Deferred.succeed(publishStarted, undefined);
@@ -421,7 +421,7 @@ describe("ProviderRuntimeIngestion", () => {
 				yield* Deferred.await(publishStarted);
 				projectedCountAtPublish = harness.projected.length;
 				yield* Fiber.interruptFork(fiber);
-				yield* Effect.yieldNow();
+				yield* Effect.yieldNow;
 				yield* Deferred.succeed(publishGate, undefined);
 				yield* Fiber.await(fiber);
 			}).pipe(Effect.provide(layer)),

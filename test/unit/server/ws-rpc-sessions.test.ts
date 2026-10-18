@@ -80,8 +80,8 @@ describe("WsRpcServerLayer ResolveSession", () => {
 			expect(
 				yield* Effect.result(client.ResolveSession({ sessionId: "missing" })),
 			).toMatchObject({
-				_tag: "Left",
-				left: { _tag: "WsRpcError", message: "Unknown session: missing" },
+				_tag: "Failure",
+				failure: { _tag: "WsRpcError", message: "Unknown session: missing" },
 			});
 			expect(sessionExists).toHaveBeenCalledWith("existing");
 			expect(sessionExists).toHaveBeenCalledWith("missing");
@@ -215,8 +215,8 @@ describe("WsRpcServerLayer ListSessions", () => {
 					}),
 				);
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: {
+					_tag: "Failure",
+					failure: {
 						_tag: "WsRpcError",
 						message: expect.stringContaining(
 							"worktreeBase requires newWorktree",
@@ -916,7 +916,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 						originId: "browser-tab-a",
 					}),
 				);
-				expect(missingPoint._tag).toBe("Left");
+				expect(missingPoint._tag).toBe("Failure");
 				if (missingPoint._tag === "Failure")
 					expect(String(missingPoint.failure)).toContain(
 						"was not found in the session history",
@@ -942,7 +942,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 					}),
 				);
 				failPersist.mockRestore();
-				expect(rolledBack._tag).toBe("Left");
+				expect(rolledBack._tag).toBe("Failure");
 				expect(forkSession).toHaveBeenCalledTimes(usesCanonicalHistory ? 0 : 3);
 				expect((yield* sessionCount())[0]?.count).toBe(beforeMissingPoint);
 
@@ -960,7 +960,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 						originId: "browser-tab-a",
 					}),
 				);
-				expect(missing._tag).toBe("Left");
+				expect(missing._tag).toBe("Failure");
 				if (missing._tag === "Failure")
 					expect(String(missing.failure)).toContain(
 						"has no Claude transcript yet",

@@ -288,7 +288,7 @@ describe("SessionOverrides Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
-	it.scoped("clearSession removes all overrides and interrupts timeout", () =>
+	it.effect("clearSession removes all overrides and interrupts timeout", () =>
 		Effect.gen(function* () {
 			yield* setAgent("sess-1", "code");
 			yield* setModel("sess-1", {
@@ -383,7 +383,7 @@ describe("SessionOverrides Effect", () => {
 		},
 	);
 
-	it.scoped("processing timeout fires after duration", () =>
+	it.effect("processing timeout fires after duration", () =>
 		Effect.gen(function* () {
 			const called = { value: false };
 			yield* startProcessingTimeout("sess-1", Duration.millis(TIMEOUT_MS), () =>
@@ -402,7 +402,7 @@ describe("SessionOverrides Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
-	it.scoped("restarting timeout cancels previous", () =>
+	it.effect("restarting timeout cancels previous", () =>
 		Effect.gen(function* () {
 			const cb1Called = { value: false };
 			const cb2Called = { value: false };
@@ -425,7 +425,7 @@ describe("SessionOverrides Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
-	it.scoped("clearProcessingTimeout stops active timeout", () =>
+	it.effect("clearProcessingTimeout stops active timeout", () =>
 		Effect.gen(function* () {
 			const called = { value: false };
 			yield* startProcessingTimeout("sess-1", Duration.millis(TIMEOUT_MS), () =>
@@ -440,7 +440,7 @@ describe("SessionOverrides Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
-	it.scoped("hasActiveProcessingTimeout returns correct state", () =>
+	it.effect("hasActiveProcessingTimeout returns correct state", () =>
 		Effect.gen(function* () {
 			expect(yield* hasActiveProcessingTimeout("sess-1")).toBe(false);
 
@@ -456,19 +456,19 @@ describe("SessionOverrides Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
-	it.scoped("clearProcessingTimeout is safe when no timer is active", () =>
+	it.effect("clearProcessingTimeout is safe when no timer is active", () =>
 		Effect.gen(function* () {
 			yield* clearProcessingTimeout("sess-1"); // should not throw
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
-	it.scoped("clearProcessingTimeout is safe for unknown session", () =>
+	it.effect("clearProcessingTimeout is safe for unknown session", () =>
 		Effect.gen(function* () {
 			yield* clearProcessingTimeout("unknown"); // should not throw
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
-	it.scoped("resetProcessingTimeout restarts with same callback", () =>
+	it.effect("resetProcessingTimeout restarts with same callback", () =>
 		Effect.gen(function* () {
 			const called = { value: false };
 			yield* setVariant("historical", "high");
@@ -509,14 +509,14 @@ describe("SessionOverrides Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
-	it.scoped("resetProcessingTimeout is no-op when no timer active", () =>
+	it.effect("resetProcessingTimeout is no-op when no timer active", () =>
 		Effect.gen(function* () {
 			// Should not throw
 			yield* resetProcessingTimeout("sess-1", Duration.millis(TIMEOUT_MS));
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
-	it.scoped("two sessions have independent timeouts", () =>
+	it.effect("two sessions have independent timeouts", () =>
 		Effect.gen(function* () {
 			const cb1Called = { value: false };
 			const cb2Called = { value: false };

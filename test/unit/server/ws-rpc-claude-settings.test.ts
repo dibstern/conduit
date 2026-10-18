@@ -90,19 +90,19 @@ describe("WsRpcServerLayer Claude settings", () => {
 
 			return Effect.gen(function* () {
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					client.SetClaudeSettings({
 						projectSlug: "project-a",
 						overrides: { [key]: true },
 					}),
 				);
 
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left") {
-					expect(result.left._tag).toBe("ClaudeSettingsTrustBoundaryError");
-					if (result.left._tag === "ClaudeSettingsTrustBoundaryError") {
-						expect(result.left.key).toBe(key);
-						expect(result.left.message).toContain(key);
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure") {
+					expect(result.failure._tag).toBe("ClaudeSettingsTrustBoundaryError");
+					if (result.failure._tag === "ClaudeSettingsTrustBoundaryError") {
+						expect(result.failure.key).toBe(key);
+						expect(result.failure.message).toContain(key);
 					}
 				}
 				expect(loadRelaySettings(configDir).claudeSettings).toBeUndefined();

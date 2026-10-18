@@ -153,7 +153,7 @@ describe("Integration: account catalogues", () => {
 				registry,
 				DaemonEventBusLive,
 				DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
-				Layer.succeed(ConfigPersistenceTag, {
+				Layer.succeed(ConfigPersistenceTag)({
 					requestSave: Effect.void,
 					flush: Effect.fail(new Error("Fixture never flushes config")),
 				}),

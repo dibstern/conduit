@@ -40,7 +40,7 @@ function fakeRelay(
 }
 
 describe("daemon automatic settlement layer", () => {
-	it.scoped(
+	it.effect(
 		"skips missing projects on every sweep and logs once at debug level",
 		() =>
 			Effect.gen(function* () {
@@ -73,7 +73,7 @@ describe("daemon automatic settlement layer", () => {
 									folders: [missingDirectory],
 								},
 							]),
-							Layer.succeed(RelayCacheTag, {
+							Layer.succeed(RelayCacheTag)({
 								peek: (slug) =>
 									Effect.succeed(
 										slug === "running"
@@ -117,7 +117,7 @@ describe("daemon automatic settlement layer", () => {
 			}),
 	);
 
-	it.scoped(
+	it.effect(
 		"ticks a running relay, skips cold empty projects, and survives one project failure",
 		() =>
 			Effect.gen(function* () {
@@ -167,7 +167,7 @@ describe("daemon automatic settlement layer", () => {
 									lastUsed: 1,
 								},
 							]),
-							Layer.succeed(RelayCacheTag, {
+							Layer.succeed(RelayCacheTag)({
 								peek: (slug: string) =>
 									Effect.succeed(Option.fromNullishOr(relays.get(slug))),
 								get,
@@ -192,7 +192,7 @@ describe("daemon automatic settlement layer", () => {
 			}),
 	);
 
-	it.scoped(
+	it.effect(
 		"starts a cold project only when its persisted session is eligible",
 		() =>
 			Effect.gen(function* () {
@@ -237,7 +237,7 @@ describe("daemon automatic settlement layer", () => {
 									lastUsed: 1,
 								},
 							]),
-							Layer.succeed(RelayCacheTag, {
+							Layer.succeed(RelayCacheTag)({
 								peek: () => Effect.succeed(Option.none<Relay>()),
 								get,
 								invalidate: () => Effect.void,
@@ -260,7 +260,7 @@ describe("daemon automatic settlement layer", () => {
 			}),
 	);
 
-	it.scoped(
+	it.effect(
 		"disables settlement but still stops workers for missing projects",
 		() =>
 			Effect.gen(function* () {
@@ -285,7 +285,7 @@ describe("daemon automatic settlement layer", () => {
 									lastUsed: 1,
 								},
 							]),
-							Layer.succeed(RelayCacheTag, {
+							Layer.succeed(RelayCacheTag)({
 								peek,
 								get: () => Effect.fail(new Error("must skip")),
 								invalidate,

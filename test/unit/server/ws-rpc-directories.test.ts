@@ -202,10 +202,10 @@ describe("WsRpcServerLayer FindFolders", () => {
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
 
 				for (const query of [path, `${path}/child`]) {
-					const result = yield* Effect.either(client.FindFolders({ query }));
-					expect(result._tag).toBe("Left");
-					if (result._tag === "Left")
-						expect(result.left.message).toMatch(/not a directory|ENOTDIR/i);
+					const result = yield* Effect.result(client.FindFolders({ query }));
+					expect(result._tag).toBe("Failure");
+					if (result._tag === "Failure")
+						expect(result.failure.message).toMatch(/not a directory|ENOTDIR/i);
 				}
 			}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
 	);
@@ -222,13 +222,13 @@ describe("WsRpcServerLayer FindFolders", () => {
 					() => tryFs(() => chmod(blocked, 0o700)).pipe(Effect.orDie),
 				);
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					client.FindFolders({ query: `${blocked}/missing` }),
 				);
 
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left")
-					expect(result.left).toMatchObject({
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure")
+					expect(result.failure).toMatchObject({
 						_tag: "ProjectSaveRejected",
 						issues: [{ kind: "permission-denied", path: `${blocked}/missing` }],
 					});

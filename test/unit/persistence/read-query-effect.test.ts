@@ -1353,8 +1353,8 @@ describe("ReadQueryEffect.readSessionTranscriptPage", () => {
 					readQuery.readSessionTranscriptPage("s1", { before, limit: 50 }),
 				);
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: {
+					_tag: "Failure",
+					failure: {
 						_tag: "TranscriptPageCursorNotFoundError",
 						sessionId: "s1",
 						before,

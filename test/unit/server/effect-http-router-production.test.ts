@@ -53,17 +53,17 @@ function makeHandler(options?: {
 }) {
 	const auth = options?.auth ?? new AuthManager();
 	const layer = Layer.mergeAll(
-		Layer.succeed(ProjectsProvider, {
+		Layer.succeed(ProjectsProvider)({
 			getProjects: () => Effect.succeed(options?.projects ?? oneProject),
 		}),
 		makeAuthManagerLive(auth),
-		Layer.succeed(StaticDirTag, staticDir),
-		Layer.succeed(SetupInfoProvider, {
+		Layer.succeed(StaticDirTag)(staticDir),
+		Layer.succeed(SetupInfoProvider)({
 			getPort: () => Effect.succeed(2633),
 			getIsTls: () => Effect.succeed(false),
 			getPublicUrl: () => Effect.succeed(null),
 		}),
-		Layer.succeed(ProjectApiDelegateProvider, {
+		Layer.succeed(ProjectApiDelegateProvider)({
 			delegateApiRequest: () =>
 				Effect.succeed(HttpServerResponse.text("delegated", { status: 299 })),
 		}),

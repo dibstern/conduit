@@ -10,12 +10,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect, Exit } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	CreateSession,
-	ListDaemonSessions,
-	ListWorktrees,
-	SaveProject,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { SessionWorkspaceChangedPayload } from "../../../src/lib/persistence/events.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -215,10 +210,10 @@ describe("Draft worktree launches through the built daemon", () => {
 	it("records a launch move before the first turn, while no choice stays in the main folder", async () => {
 		const { fixture, worktree, socket } = await start("launch");
 		const browser = await fixture.connect();
-		const { worktrees } = await sendRpcRequest(
-			socket,
-			new ListWorktrees({ projectSlug: "process-test" }),
-		);
+		const { worktrees } = await sendRpcRequest(socket, {
+			_tag: "ListWorktrees",
+			projectSlug: "process-test",
+		});
 		expect(worktrees).toContainEqual({
 			path: worktree,
 			branch: "feature/draft",
@@ -232,25 +227,21 @@ describe("Draft worktree launches through the built daemon", () => {
 			["existing-worktree", worktree],
 			["current-checkout", undefined],
 		] as const) {
-			const { sessionId } = await sendRpcRequest(
-				socket,
-				new CreateSession({
-					permissionMode: "ask",
-					projectSlug: "process-test",
-					originId: "draft-worktree-test",
-					providerId: "claude",
-					title: name,
-					...(path ? { worktreePath: path } : {}),
-				}),
-			);
+			const { sessionId } = await sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				permissionMode: "ask",
+				projectSlug: "process-test",
+				originId: "draft-worktree-test",
+				providerId: "claude",
+				title: name,
+				...(path ? { worktreePath: path } : {}),
+			});
 			names.set(sessionId, name);
-			const { sessions } = await sendRpcRequest(
-				socket,
-				new ListDaemonSessions({
-					projectSlug: "process-test",
-					scope: "process-test",
-				}),
-			);
+			const { sessions } = await sendRpcRequest(socket, {
+				_tag: "ListDaemonSessions",
+				projectSlug: "process-test",
+				scope: "process-test",
+			});
 			const session = sessions.find(({ id }) => id === sessionId);
 			if (path) {
 				expect(session?.workspace).toEqual({
@@ -287,18 +278,16 @@ describe("Draft worktree launches through the built daemon", () => {
 		git(secondary, "branch", "-m", "docs-main");
 		const linked = join(fixture.root, "docs-worktree");
 		git(secondary, "worktree", "add", "-b", "feature/docs", linked);
-		await sendRpcRequest(
-			socket,
-			new SaveProject({
-				slug: "process-test",
-				folders: [fixture.projectDir, secondary],
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [fixture.projectDir, secondary],
+		});
 		const browser = await fixture.connect();
-		const { worktrees } = await sendRpcRequest(
-			socket,
-			new ListWorktrees({ projectSlug: "process-test" }),
-		);
+		const { worktrees } = await sendRpcRequest(socket, {
+			_tag: "ListWorktrees",
+			projectSlug: "process-test",
+		});
 		evidence["worktrees"] = [...worktrees].sort((a, b) =>
 			a.path.localeCompare(b.path),
 		);
@@ -311,25 +300,21 @@ describe("Draft worktree launches through the built daemon", () => {
 				branch,
 				main: path === secondary,
 			});
-			const { sessionId } = await sendRpcRequest(
-				socket,
-				new CreateSession({
-					permissionMode: "ask",
-					projectSlug: "process-test",
-					originId: browser.originId,
-					providerId: "claude",
-					title: name,
-					worktreePath: path,
-				}),
-			);
+			const { sessionId } = await sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				permissionMode: "ask",
+				projectSlug: "process-test",
+				originId: browser.originId,
+				providerId: "claude",
+				title: name,
+				worktreePath: path,
+			});
 			names.set(sessionId, name);
-			const { sessions } = await sendRpcRequest(
-				socket,
-				new ListDaemonSessions({
-					projectSlug: "process-test",
-					scope: "process-test",
-				}),
-			);
+			const { sessions } = await sendRpcRequest(socket, {
+				_tag: "ListDaemonSessions",
+				projectSlug: "process-test",
+				scope: "process-test",
+			});
 			const session = sessions.find(({ id }) => id === sessionId);
 			expect(session?.workspace).toEqual({
 				cause: "launch",
@@ -374,13 +359,11 @@ describe("Draft worktree launches through the built daemon", () => {
 			await browser.close();
 			expect(Exit.isFailure(await creating)).toBe(true);
 			await vi.waitFor(async () => {
-				const { sessions } = await sendRpcRequest(
-					socket,
-					new ListDaemonSessions({
-						projectSlug: "process-test",
-						scope: "process-test",
-					}),
-				);
+				const { sessions } = await sendRpcRequest(socket, {
+					_tag: "ListDaemonSessions",
+					projectSlug: "process-test",
+					scope: "process-test",
+				});
 				expect(
 					sessions.some(({ title }) => title === "Interrupted draft"),
 				).toBe(false);
@@ -417,13 +400,11 @@ describe("Draft worktree launches through the built daemon", () => {
 			await browser.close();
 			expect(Exit.isFailure(await creating)).toBe(true);
 			await vi.waitFor(async () => {
-				const { sessions } = await sendRpcRequest(
-					socket,
-					new ListDaemonSessions({
-						projectSlug: "process-test",
-						scope: "process-test",
-					}),
-				);
+				const { sessions } = await sendRpcRequest(socket, {
+					_tag: "ListDaemonSessions",
+					projectSlug: "process-test",
+					scope: "process-test",
+				});
 				expect(
 					sessions.some(({ title }) => title === "Interrupted model draft"),
 				).toBe(false);
@@ -459,13 +440,11 @@ describe("Draft worktree launches through the built daemon", () => {
 		);
 		try {
 			await validation.wait();
-			const { sessions } = await sendRpcRequest(
-				socket,
-				new ListDaemonSessions({
-					projectSlug: "process-test",
-					scope: "process-test",
-				}),
-			);
+			const { sessions } = await sendRpcRequest(socket, {
+				_tag: "ListDaemonSessions",
+				projectSlug: "process-test",
+				scope: "process-test",
+			});
 			const sessionId = sessions.find(
 				({ title }) => title === "Concurrent draft",
 			)?.id;
@@ -515,25 +494,21 @@ describe("Draft worktree launches through the built daemon", () => {
 			[foreign, "other-repository"],
 		] as const) {
 			await expect(
-				sendRpcRequest(
-					socket,
-					new CreateSession({
-						permissionMode: "ask",
-						projectSlug: "process-test",
-						originId: "draft-worktree-test",
-						providerId: "claude",
-						title: "Rejected draft",
-						worktreePath: path,
-					}),
-				),
-			).rejects.toMatchObject({ _tag: "WorkspaceMoveError", path, reason });
-			const { sessions } = await sendRpcRequest(
-				socket,
-				new ListDaemonSessions({
+				sendRpcRequest(socket, {
+					_tag: "CreateSession",
+					permissionMode: "ask",
 					projectSlug: "process-test",
-					scope: "process-test",
+					originId: "draft-worktree-test",
+					providerId: "claude",
+					title: "Rejected draft",
+					worktreePath: path,
 				}),
-			);
+			).rejects.toMatchObject({ _tag: "WorkspaceMoveError", path, reason });
+			const { sessions } = await sendRpcRequest(socket, {
+				_tag: "ListDaemonSessions",
+				projectSlug: "process-test",
+				scope: "process-test",
+			});
 			expect(sessions.some(({ title }) => title === "Rejected draft")).toBe(
 				false,
 			);
@@ -553,28 +528,24 @@ describe("Draft worktree launches through the built daemon", () => {
 			"chat-multi-turn",
 		);
 		await expect(
-			sendRpcRequest(
-				socket,
-				new CreateSession({
-					permissionMode: "ask",
-					projectSlug: "process-test",
-					originId: "draft-worktree-test",
-					providerId: "opencode",
-					title: "Unsupported draft",
-					worktreePath: worktree,
-				}),
-			),
+			sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				permissionMode: "ask",
+				projectSlug: "process-test",
+				originId: "draft-worktree-test",
+				providerId: "opencode",
+				title: "Unsupported draft",
+				worktreePath: worktree,
+			}),
 		).rejects.toMatchObject({
 			_tag: "WorkspaceMoveError",
 			reason: "unsupported-provider",
 		});
-		const { sessions } = await sendRpcRequest(
-			socket,
-			new ListDaemonSessions({
-				projectSlug: "process-test",
-				scope: "process-test",
-			}),
-		);
+		const { sessions } = await sendRpcRequest(socket, {
+			_tag: "ListDaemonSessions",
+			projectSlug: "process-test",
+			scope: "process-test",
+		});
 		expect(sessions.some(({ title }) => title === "Unsupported draft")).toBe(
 			false,
 		);

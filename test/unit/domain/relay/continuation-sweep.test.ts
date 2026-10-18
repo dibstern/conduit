@@ -379,7 +379,7 @@ const resetInboxFixture = Effect.gen(function* () {
 	const continuation = yield* makeContinuation;
 	const sent = yield* Queue.unbounded<string>();
 	const dispatches: string[] = [];
-	const turns: ProviderTurnServiceTag["Type"] = {
+	const turns: ProviderTurnServiceTag["Service"] = {
 		holdUserTurnsForAccountSwitch: () => Effect.void,
 		prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 		interruptTurn: () => Effect.void,
@@ -459,7 +459,7 @@ const resetInboxFixture = Effect.gen(function* () {
 const withResetInbox = <A, E, R>(
 	reading: () => UsageReading,
 	use: (
-		fixture: Effect.Effect.Success<typeof resetInboxFixture>,
+		fixture: Effect.Success<typeof resetInboxFixture>,
 	) => Effect.Effect<A, E, R>,
 ) =>
 	Effect.flatMap(resetInboxFixture, (fixture) =>
@@ -582,7 +582,7 @@ for (const admission of ["user", "quota-reset"] as const) {
 										)
 								: fixture.submit("q1")
 						).pipe(Effect.result);
-						expect(scheduled).toMatchObject({ _tag: "Right" });
+						expect(scheduled).toMatchObject({ _tag: "Success" });
 						expect(
 							(yield* fixture.read.listSessionInfos({
 								projectIds: ["test-project"],
@@ -604,8 +604,8 @@ for (const admission of ["user", "quota-reset"] as const) {
 								Effect.result,
 							);
 						expect(immediate).toMatchObject({
-							_tag: "Left",
-							left: { _tag: "SessionBusy" },
+							_tag: "Failure",
+							failure: { _tag: "SessionBusy" },
 						});
 						expect(yield* fixture.store.readAllBySession("s1")).toEqual(before);
 						expect(fixture.dispatches).toEqual([]);
@@ -723,7 +723,7 @@ for (const schedule of [
 						).toEqual([{ input_id: "q1" }, { input_id: "q2" }]);
 						if (schedule === "cancelled") {
 							yield* fixture.continuation.cancelContinuation("s1");
-							yield* Effect.yieldNow().pipe(Effect.repeat(Schedule.recurs(10)));
+							yield* Effect.yieldNow.pipe(Effect.repeat(Schedule.recurs(10)));
 							expect(
 								(yield* fixture.store.readAllBySession("s1")).filter(
 									(event) => event.type === "session.resume_scheduled",
@@ -759,7 +759,7 @@ for (const schedule of [
 							]);
 						yield* fixture.sweep;
 						if (schedule === "later-stopped") {
-							yield* Effect.yieldNow().pipe(Effect.repeat(Schedule.recurs(10)));
+							yield* Effect.yieldNow.pipe(Effect.repeat(Schedule.recurs(10)));
 							expect(fixture.dispatches).toEqual([]);
 							return;
 						}

@@ -59,7 +59,7 @@ describe("ConfigPersistenceLive", () => {
 		instances: readonly import("../../../src/lib/domain/daemon/Services/daemon-state.js").DaemonInstanceConfig[] = [],
 	) => {
 		const writes: DaemonConfig[] = [];
-		const writerLayer = Layer.succeed(ConfigWriterTag, {
+		const writerLayer = Layer.succeed(ConfigWriterTag)({
 			write: (config: DaemonConfig) =>
 				Effect.sync(() => {
 					writes.push(config);
@@ -80,7 +80,7 @@ describe("ConfigPersistenceLive", () => {
 		return { layer, writes };
 	};
 
-	it.scoped("writes config to disk after explicit save request", () =>
+	it.effect("writes config to disk after explicit save request", () =>
 		Effect.gen(function* () {
 			const { layer, writes } = makeTestLayer();
 			const ctx = yield* Layer.build(Layer.fresh(layer));
@@ -91,7 +91,7 @@ describe("ConfigPersistenceLive", () => {
 		}),
 	);
 
-	it.scoped("flushes a pending explicit save request when scope closes", () =>
+	it.effect("flushes a pending explicit save request when scope closes", () =>
 		Effect.gen(function* () {
 			const { layer, writes } = makeTestLayer();
 			const scope = yield* Scope.make();
@@ -108,7 +108,7 @@ describe("ConfigPersistenceLive", () => {
 		}),
 	);
 
-	it.scoped(
+	it.effect(
 		"persists the account folder and omits the retired server-wide field",
 		() =>
 			Effect.gen(function* () {
@@ -148,7 +148,7 @@ describe("ConfigPersistenceLive", () => {
 			}),
 	);
 
-	it.scoped("writes within 500 ms despite requests every 100 ms", () =>
+	it.effect("writes within 500 ms despite requests every 100 ms", () =>
 		Effect.gen(function* () {
 			const { layer, writes } = makeTestLayer();
 			const ctx = yield* Layer.build(Layer.fresh(layer));
@@ -172,7 +172,7 @@ describe("ConfigPersistenceLive", () => {
 		}),
 	);
 
-	it.scoped("coalesces a burst into one write at the end of the window", () =>
+	it.effect("coalesces a burst into one write at the end of the window", () =>
 		Effect.gen(function* () {
 			const { layer, writes } = makeTestLayer();
 			const ctx = yield* Layer.build(Layer.fresh(layer));
@@ -191,7 +191,7 @@ describe("ConfigPersistenceLive", () => {
 		}),
 	);
 
-	it.scoped("does not write without a save request", () =>
+	it.effect("does not write without a save request", () =>
 		Effect.gen(function* () {
 			const { layer, writes } = makeTestLayer();
 			yield* Layer.build(Layer.fresh(layer));
@@ -200,7 +200,7 @@ describe("ConfigPersistenceLive", () => {
 		}),
 	);
 
-	it.scoped(
+	it.effect(
 		"keeps an interrupted write locked until the disk operation ends",
 		() =>
 			Effect.gen(function* () {
@@ -214,11 +214,11 @@ describe("ConfigPersistenceLive", () => {
 							"/isolated-test-home/.claude",
 						),
 					}),
-					Layer.succeed(ConfigWriterTag, {
+					Layer.succeed(ConfigWriterTag)({
 						// Like a filesystem Promise, the operation can finish even if
 						// the waiting fiber has been interrupted.
 						write: (config) =>
-							Effect.async<void>((resume) => {
+							Effect.callback<void>((resume) => {
 								pendingWrites.push({
 									complete: () => {
 										writes.push(config);
@@ -266,7 +266,7 @@ describe("ConfigPersistenceLive", () => {
 			}),
 	);
 
-	it.scoped("writes reflect current config state at time of flush", () =>
+	it.effect("writes reflect current config state at time of flush", () =>
 		Effect.gen(function* () {
 			const { layer, writes } = makeTestLayer();
 			const ctx = yield* Layer.build(Layer.fresh(layer));
@@ -280,7 +280,7 @@ describe("ConfigPersistenceLive", () => {
 		}),
 	);
 
-	it.scoped(
+	it.effect(
 		"builds full daemon config from runtime, project, and instance state",
 		() =>
 			Effect.gen(function* () {
@@ -371,7 +371,7 @@ describe("ConfigPersistenceLive", () => {
 			}),
 	);
 
-	it.scoped("100+ rapid save requests coalesced to exactly 1 write", () =>
+	it.effect("100+ rapid save requests coalesced to exactly 1 write", () =>
 		Effect.gen(function* () {
 			const { layer, writes } = makeTestLayer();
 			const ctx = yield* Layer.build(Layer.fresh(layer));
@@ -384,9 +384,9 @@ describe("ConfigPersistenceLive", () => {
 		}),
 	);
 
-	it.scoped("writer failure does not crash the persistence loop", () =>
+	it.effect("writer failure does not crash the persistence loop", () =>
 		Effect.gen(function* () {
-			const failingWriterLayer = Layer.succeed(ConfigWriterTag, {
+			const failingWriterLayer = Layer.succeed(ConfigWriterTag)({
 				write: (_config: DaemonConfig) => Effect.fail(new Error("disk full")),
 			});
 			const stateDeps = Layer.mergeAll(
@@ -412,7 +412,7 @@ describe("ConfigPersistenceLive", () => {
 		}),
 	);
 
-	it.scoped("snapshot failure keeps pending save dirty for manual retry", () =>
+	it.effect("snapshot failure keeps pending save dirty for manual retry", () =>
 		Effect.gen(function* () {
 			const writes: DaemonConfig[] = [];
 			let attempts = 0;
@@ -426,7 +426,7 @@ describe("ConfigPersistenceLive", () => {
 				projects: [],
 				instances: [],
 			} satisfies DaemonConfig;
-			const snapshotLayer = Layer.succeed(ConfigSnapshotTag, {
+			const snapshotLayer = Layer.succeed(ConfigSnapshotTag)({
 				build: Effect.gen(function* () {
 					attempts += 1;
 					if (attempts === 1) {
@@ -435,7 +435,7 @@ describe("ConfigPersistenceLive", () => {
 					return snapshotConfig;
 				}),
 			});
-			const writerLayer = Layer.succeed(ConfigWriterTag, {
+			const writerLayer = Layer.succeed(ConfigWriterTag)({
 				write: (config: DaemonConfig) =>
 					Effect.sync(() => {
 						writes.push(config);
@@ -457,7 +457,7 @@ describe("ConfigPersistenceLive", () => {
 		}),
 	);
 
-	it.scoped("background flush retries after transient writer failure", () =>
+	it.effect("background flush retries after transient writer failure", () =>
 		Effect.gen(function* () {
 			const writes: DaemonConfig[] = [];
 			let attempts = 0;
@@ -471,10 +471,10 @@ describe("ConfigPersistenceLive", () => {
 				projects: [],
 				instances: [],
 			} satisfies DaemonConfig;
-			const snapshotLayer = Layer.succeed(ConfigSnapshotTag, {
+			const snapshotLayer = Layer.succeed(ConfigSnapshotTag)({
 				build: Effect.succeed(snapshotConfig),
 			});
-			const writerLayer = Layer.succeed(ConfigWriterTag, {
+			const writerLayer = Layer.succeed(ConfigWriterTag)({
 				write: (config: DaemonConfig) =>
 					Effect.gen(function* () {
 						attempts += 1;

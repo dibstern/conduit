@@ -23,7 +23,7 @@ import {
 	it,
 	vi,
 } from "vitest";
-import { AttachProject, GetStatus } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
 	type ForegroundDaemonHandle,
@@ -103,19 +103,19 @@ describe("daemon project readiness and socket routing", () => {
 			const runningDaemon = d;
 
 			await runningDaemon.addProject(projectDir);
-			const registering = await sendRpcRequest(
-				join(tmpDir, "relay.sock"),
-				new GetStatus({}),
-			);
+			const registering = await sendRpcRequest(join(tmpDir, "relay.sock"), {
+				_tag: "GetStatus",
+			});
 			expect(
 				registering.projects.find((project) => project.slug === slug)?.status,
 			).toBe("registering");
 			expect(createProjectRelayMock).not.toHaveBeenCalled();
 			let attachmentSettled = false;
-			const attachment = sendRpcRequest(
-				join(tmpDir, "relay.sock"),
-				new AttachProject({ projectSlug: slug, originId: "waiting-client" }),
-			).finally(() => {
+			const attachment = sendRpcRequest(join(tmpDir, "relay.sock"), {
+				_tag: "AttachProject",
+				projectSlug: slug,
+				originId: "waiting-client",
+			}).finally(() => {
 				attachmentSettled = true;
 			});
 
@@ -139,10 +139,9 @@ describe("daemon project readiness and socket routing", () => {
 						.projects.find((project) => project.slug === slug)?.status,
 				).toBe("ready");
 			});
-			const ready = await sendRpcRequest(
-				join(tmpDir, "relay.sock"),
-				new GetStatus({}),
-			);
+			const ready = await sendRpcRequest(join(tmpDir, "relay.sock"), {
+				_tag: "GetStatus",
+			});
 			expect(
 				ready.projects.find((project) => project.slug === slug)?.status,
 			).toBe("ready");
@@ -213,10 +212,11 @@ describe("daemon project readiness and socket routing", () => {
 			await d.addProject(directory);
 			expect(createProjectRelayMock).not.toHaveBeenCalled();
 			await expect(
-				sendRpcRequest(
-					join(tmpDir, "relay.sock"),
-					new AttachProject({ projectSlug: slug, originId: "failed-client" }),
-				),
+				sendRpcRequest(join(tmpDir, "relay.sock"), {
+					_tag: "AttachProject",
+					projectSlug: slug,
+					originId: "failed-client",
+				}),
 			).rejects.toMatchObject({
 				_tag: "WsRpcError",
 				message: expect.stringContaining(`Project "${slug}" unavailable`),
@@ -229,10 +229,9 @@ describe("daemon project readiness and socket routing", () => {
 					.projects.find((entry) => entry.slug === slug);
 				expect(project?.status).toBe("error");
 			});
-			const failed = await sendRpcRequest(
-				join(tmpDir, "relay.sock"),
-				new GetStatus({}),
-			);
+			const failed = await sendRpcRequest(join(tmpDir, "relay.sock"), {
+				_tag: "GetStatus",
+			});
 			expect(
 				failed.projects.find((project) => project.slug === slug)?.status,
 			).toBe("error");

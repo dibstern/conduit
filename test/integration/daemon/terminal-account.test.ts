@@ -7,14 +7,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
-import {
-	ContinueSession,
-	CreatePty,
-	CreatePtyForSession,
-	RemoveInstance,
-	SetDefault,
-	UpdateInstance,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import {
 	defaultDaemonConfig,
 	saveDaemonConfig,
@@ -124,16 +117,18 @@ describe("Terminal account login through the daemon and PTY host", () => {
 			await sendRpcRequest(
 				socket,
 				sessionId === undefined
-					? new CreatePty({
+					? {
+							_tag: "CreatePty",
 							projectSlug: "process-test",
 							originId: browser.originId,
 							...(accountId === undefined ? {} : { accountId }),
-						})
-					: new CreatePtyForSession({
+						}
+					: {
+							_tag: "CreatePty",
 							sessionId,
 							originId: browser.originId,
 							...(accountId === undefined ? {} : { accountId }),
-						}),
+						},
 			);
 			const frame = await browser.waitFor(
 				(message) => ptyEnvelope(message)?._tag === "upsert",
@@ -168,14 +163,12 @@ describe("Terminal account login through the daemon and PTY host", () => {
 		const { fixture, browser, socket, create, work, personal } =
 			await start("selection");
 		const sessionId = await browser.createSession("Switched account", "work");
-		await sendRpcRequest(
-			socket,
-			new ContinueSession({
-				sessionId,
-				instanceId: "personal",
-				expectedInstanceId: "work",
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "ContinueSession",
+			sessionId,
+			instanceId: "personal",
+			expectedInstanceId: "work",
+		});
 		const row = await browser.waitFor(
 			(message) =>
 				message["type"] === "session_row" &&
@@ -215,16 +208,20 @@ describe("Terminal account login through the daemon and PTY host", () => {
 			browser,
 			existingDefault.id,
 		);
-		await sendRpcRequest(socket, new SetDefault({ instanceId: "personal" }));
+		await sendRpcRequest(socket, {
+			_tag: "SetDefault",
+			instanceId: "personal",
+		});
 		expect(await terminalEnvironment(browser, existingDefault.id)).toEqual(
 			defaultBefore,
 		);
 		const edited = join(fixture.root, "edited-login");
 		mkdirSync(edited);
-		await sendRpcRequest(
-			socket,
-			new UpdateInstance({ instanceId: "personal", configDir: edited }),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "UpdateInstance",
+			instanceId: "personal",
+			configDir: edited,
+		});
 		expect(await terminalEnvironment(browser, existing.id)).toEqual(before);
 		expect(await terminalEnvironment(browser, existingDefault.id)).toEqual(
 			defaultBefore,
@@ -232,7 +229,10 @@ describe("Terminal account login through the daemon and PTY host", () => {
 		expect(before.folder).toBe(personal);
 		const next = await terminalEnvironment(browser, (await create()).id);
 		expect(next.folder).toBe(edited);
-		await sendRpcRequest(socket, new RemoveInstance({ instanceId: "work" }));
+		await sendRpcRequest(socket, {
+			_tag: "RemoveInstance",
+			instanceId: "work",
+		});
 		for (const id of ["work", "unknown-account", "claude", "claude-sdk"]) {
 			const env = await terminalEnvironment(browser, (await create(id)).id);
 			expect(env).toEqual(next);
@@ -256,11 +256,14 @@ describe("Terminal account login through the daemon and PTY host", () => {
 			(await create("opencode", sessionId)).id,
 		);
 		expect(openCode.folder).toBe(work);
-		await sendRpcRequest(socket, new RemoveInstance({ instanceId: "work" }));
-		await sendRpcRequest(
-			socket,
-			new RemoveInstance({ instanceId: "personal" }),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "RemoveInstance",
+			instanceId: "work",
+		});
+		await sendRpcRequest(socket, {
+			_tag: "RemoveInstance",
+			instanceId: "personal",
+		});
 		const inherited = { ...openCode, folder: join(fixture.root, "claude") };
 		for (const id of ["opencode", "work", "unknown-account", undefined]) {
 			const env = await terminalEnvironment(browser, (await create(id)).id);

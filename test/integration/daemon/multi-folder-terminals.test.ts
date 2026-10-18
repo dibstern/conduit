@@ -2,12 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	CreatePty,
-	CreatePtyForSession,
-	MoveSessionWorkspace,
-	SaveProject,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
 	type ProcessBrowser,
@@ -92,13 +87,11 @@ describe("Multi-folder terminals through the built daemon", () => {
 		}
 		await fixture.restart({ startupTimeoutMs: 25_000 });
 		const socket = join(fixture.configDir, "relay.sock");
-		await sendRpcRequest(
-			socket,
-			new SaveProject({
-				slug: "process-test",
-				folders: [fixture.projectDir, secondary],
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [fixture.projectDir, secondary],
+		});
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession("Two terminal folders");
 		const scope = { projectSlug: "process-test", sessionId };
@@ -107,16 +100,18 @@ describe("Multi-folder terminals through the built daemon", () => {
 			await sendRpcRequest(
 				socket,
 				scoped
-					? new CreatePtyForSession({
+					? {
+							_tag: "CreatePty",
 							sessionId,
 							originId: browser.originId,
 							...(root === undefined ? {} : { root }),
-						})
-					: new CreatePty({
+						}
+					: {
+							_tag: "CreatePty",
 							projectSlug: scope.projectSlug,
 							originId: browser.originId,
 							...(root === undefined ? {} : { root }),
-						}),
+						},
 			);
 			const frame = await browser.waitFor(
 				(message) => ptyEnvelope(message)?._tag === "upsert",
@@ -159,14 +154,12 @@ describe("Multi-folder terminals through the built daemon", () => {
 		evidence["defaultCwd"] = await terminalCwd(browser, defaultTerminal.id);
 		expect(evidence["defaultCwd"]).toBe(realpathSync(fixture.projectDir));
 		await expect(
-			sendRpcRequest(
-				socket,
-				new CreatePtyForSession({
-					...scope,
-					originId: browser.originId,
-					root: fixture.root,
-				}),
-			),
+			sendRpcRequest(socket, {
+				_tag: "CreatePty",
+				...scope,
+				originId: browser.originId,
+				root: fixture.root,
+			}),
 		).rejects.toThrow(/Unknown terminal root/);
 		expect((await browser.listPtys()).map(({ id }) => id).sort()).toEqual(
 			[selected.id, defaultTerminal.id].sort(),
@@ -177,10 +170,11 @@ describe("Multi-folder terminals through the built daemon", () => {
 	it("maps selected roots through the workspace while rootless and sessionless creates keep their defaults", async () => {
 		const { fixture, socket, browser, scope, secondary, mapped, create } =
 			await start("workspace", true);
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({ ...scope, path: mapped[1] }),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			...scope,
+			path: mapped[1],
+		});
 		const selected = await create(secondary);
 		evidence["selectedCwd"] = await terminalCwd(browser, selected.id);
 		expect(evidence["selectedCwd"]).toBe(realpathSync(mapped[1]));
@@ -190,10 +184,11 @@ describe("Multi-folder terminals through the built daemon", () => {
 		const primaryTerminal = await create(fixture.projectDir);
 		evidence["primaryCwd"] = await terminalCwd(browser, primaryTerminal.id);
 		expect(evidence["primaryCwd"]).toBe(realpathSync(fixture.projectDir));
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({ ...scope, path: mapped[0] }),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			...scope,
+			path: mapped[0],
+		});
 		const primaryDefault = await create();
 		evidence["primaryDefaultCwd"] = await terminalCwd(
 			browser,
@@ -210,14 +205,12 @@ describe("Multi-folder terminals through the built daemon", () => {
 		evidence["sessionlessCwd"] = await terminalCwd(browser, projectTerminal.id);
 		expect(evidence["sessionlessCwd"]).toBe(realpathSync(fixture.projectDir));
 		await expect(
-			sendRpcRequest(
-				socket,
-				new CreatePtyForSession({
-					...scope,
-					originId: browser.originId,
-					root: mapped[1],
-				}),
-			),
+			sendRpcRequest(socket, {
+				_tag: "CreatePty",
+				...scope,
+				originId: browser.originId,
+				root: mapped[1],
+			}),
 		).rejects.toThrow(/Unknown terminal root/);
 		evidence["worktreeRoot"] =
 			"refused: selection uses the Project Folder path";

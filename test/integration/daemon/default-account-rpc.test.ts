@@ -365,12 +365,12 @@ describe("default Claude account through daemon RPC", () => {
 			Effect.gen(function* () {
 				const client = yield* makeClient;
 				for (const instanceId of ["missing", "opencode"]) {
-					const result = yield* Effect.either(
+					const result = yield* Effect.result(
 						client.SetDefault({ instanceId }),
 					);
-					expect(Either.isLeft(result)).toBe(true);
-					if (Either.isLeft(result))
-						expect(result.left).toBeInstanceOf(AccountChangeRejected);
+					expect(Either.isFailure(result)).toBe(true);
+					if (Either.isFailure(result))
+						expect(result.failure).toBeInstanceOf(AccountChangeRejected);
 				}
 				const initial = yield* Stream.runHead(client.SubscribeInstances({}));
 				expect(

@@ -120,9 +120,7 @@ const fakeTransport = () => {
 			const down = yield* Ref.make(false);
 			const count = yield* Ref.make(0);
 			const current = yield* Ref.make<
-				| Effect.Effect.Success<
-						ReturnType<typeof makeRpcStream<unknown, WsRpcError>>
-				  >
+				| Effect.Success<ReturnType<typeof makeRpcStream<unknown, WsRpcError>>>
 				| undefined
 			>(undefined);
 			const history: { sequence: number; envelope: unknown }[] = [];
@@ -143,7 +141,9 @@ const fakeTransport = () => {
 							.reverse()
 							.find((r) => r.tag === tag);
 						if (!frame)
-							return yield* Effect.dieMessage("missing subscription request");
+							return yield* Effect.die(
+								new Error("missing subscription request"),
+							);
 						yield* Queue.offer(sent, { ...frame, payload });
 						const resume = resumePointOf(payload);
 						for (const entry of history) {
@@ -175,7 +175,7 @@ const fakeTransport = () => {
 							: Effect.flatMap(Ref.get(down), (isDown) =>
 									isDown
 										? Queue.offer(rejected, undefined).pipe(
-												Effect.zipRight(
+												Effect.andThen(
 													Effect.fail(
 														new RpcClientError({
 															reason: "Protocol",
@@ -193,7 +193,7 @@ const fakeTransport = () => {
 				Effect.flatMap(Ref.get(current), (served) =>
 					served
 						? served.emit(envelope)
-						: Effect.dieMessage("no request to answer"),
+						: Effect.die(new Error("no request to answer")),
 				);
 			links.push({
 				takeRequest: Queue.take(sent),
@@ -202,30 +202,32 @@ const fakeTransport = () => {
 				pendingRejections: Queue.size(rejected),
 				emit: (envelope) =>
 					Effect.sync(() => record(envelope)).pipe(
-						Effect.zipRight(push(envelope)),
+						Effect.andThen(push(envelope)),
 					),
 				stage: (envelope) => Effect.sync(() => record(envelope)),
 				failRequest: (message) =>
 					Effect.flatMap(Ref.get(current), (served) =>
 						served
 							? served.fail(new WsRpcError({ message }))
-							: Effect.dieMessage("no request to fail"),
+							: Effect.die(new Error("no request to fail")),
 					),
 				drop: Effect.suspend(
-					() => wire.connections[0]?.drop ?? Effect.dieMessage("no connection"),
+					() =>
+						wire.connections[0]?.drop ?? Effect.die(new Error("no connection")),
 				),
 				emitDetached: (envelopes) =>
 					Effect.forEach(
 						envelopes,
 						(envelope) =>
 							Effect.sync(() => record(envelope)).pipe(
-								Effect.zipRight(push(envelope)),
+								Effect.andThen(push(envelope)),
 							),
 						{ discard: true },
 					),
 				tearDown: Effect.suspend(
 					() =>
-						wire.connections[0]?.tearDown ?? Effect.dieMessage("no connection"),
+						wire.connections[0]?.tearDown ??
+						Effect.die(new Error("no connection")),
 				),
 				setDown: (isDown) => Ref.set(down, isDown),
 			});
@@ -249,7 +251,7 @@ const withSockets = <A, E>(
 				const sockets = yield* clients.forProject("alpha");
 				const [control, stream] = links;
 				if (control === undefined || stream === undefined) {
-					return yield* Effect.dieMessage("the pair did not open");
+					return yield* Effect.die(new Error("the pair did not open"));
 				}
 				return yield* use(sockets, { control, stream });
 			}).pipe(Effect.provide(makeWsRpcClientsLayer(connect))),
@@ -662,7 +664,7 @@ describe("client-side resume at the shared client", () => {
 						Stream.runForEach(
 							sockets.subscriptions.sessionDetail({ sessionId: "s1" }),
 							(item) =>
-								Effect.zipRight(
+								Effect.andThen(
 									Queue.offer(received, item),
 									Deferred.await(release),
 								),

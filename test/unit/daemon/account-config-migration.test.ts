@@ -242,7 +242,7 @@ describe("account config migration", () => {
 		).toEqual([]);
 		expect(defaultFor(restarted, "claude")).toEqual(Option.none());
 		expect(
-			Either.isLeft(resolve(restarted, { _tag: "Id", id: "claude" })),
+			Either.isFailure(resolve(restarted, { _tag: "Id", id: "claude" })),
 		).toBe(true);
 		expect(decode(config)).toEqual(config);
 	});

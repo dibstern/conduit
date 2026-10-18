@@ -922,7 +922,7 @@ describe("Claude turn economics through SQLite persistence", () => {
 						completion("s1", "a1", 2),
 					]),
 				);
-				expect(rejected._tag).toBe("Left");
+				expect(rejected._tag).toBe("Failure");
 				yield* persist.persistEvent(completion("s1", "a1", 1.6));
 				const rows = yield* sql<{ cost: number }>`
 					SELECT json_extract(data, '$.cost') AS cost FROM events WHERE type = 'turn.completed' ORDER BY sequence`;

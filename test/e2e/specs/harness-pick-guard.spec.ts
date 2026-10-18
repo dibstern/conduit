@@ -3151,7 +3151,7 @@ test("pick-required-create: no model rejects before session creation", async ({
 	for (const model of requests) {
 		try {
 			const result = await Effect.runPromise(
-				Effect.either(
+				Effect.result(
 					browser.rpc
 						.CreateSession({
 							permissionMode: "ask",
@@ -3163,7 +3163,7 @@ test("pick-required-create: no model rejects before session creation", async ({
 						.pipe(Effect.timeout("10 seconds")),
 				),
 			);
-			errors.push(result._tag === "Left" ? result.left : undefined);
+			errors.push(result._tag === "Failure" ? result.failure : undefined);
 		} catch (error) {
 			errors.push(error);
 		}
@@ -3538,7 +3538,7 @@ test("legacy-partial-pick-backfill: fills NULL effort and context while preservi
 		);
 		const prompt = `${caseId}-empty-${empty}`;
 		await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId: created.sessionId,
 				inputId: prompt,
 				originId: caseId,
@@ -3733,7 +3733,7 @@ test("legacy-executed-unrecoverable-pick: a turn without a recoverable model nev
 	let after = restarted;
 	try {
 		await Effect.runPromise(
-			restoredBrowser.rpc.input.submit({
+			restoredBrowser.rpc["input.submit"]({
 				sessionId,
 				inputId: `${caseId}-rejected`,
 				originId: caseId,
@@ -4431,7 +4431,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 					}
 					const beforePrompts = openCodePrompts(harness).length;
 					await Effect.runPromise(
-						browser.rpc.input.submit({
+						browser.rpc["input.submit"]({
 							sessionId,
 							originId: caseId,
 							inputId: `${caseId}-rejected`,
@@ -4469,7 +4469,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 						}),
 					);
 					await Effect.runPromise(
-						browser.rpc.input.submit({
+						browser.rpc["input.submit"]({
 							sessionId,
 							originId: caseId,
 							inputId: `${caseId}-offered`,
@@ -4587,7 +4587,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 			evidence["beforeTurn"] = before;
 			const promptCount = openCodePrompts(harness).length;
 			await Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId,
 					originId: "9cn3-review-bound-switches",
 					inputId: "9cn3-review-bound-switches",
@@ -4668,11 +4668,19 @@ test.describe("OpenCode draft inventory borrows", () => {
 				// An ordered request on this same RPC client fences handler delivery;
 				// health stays held, so neither use can complete its shared start.
 				await setup.browser.getModels("opencode");
-				expect(Option.isNone(await Effect.runPromise(Fiber.poll(borrow)))).toBe(
-					true,
-				);
 				expect(
-					Option.isNone(await Effect.runPromise(Fiber.poll(ordinary))),
+					Option.isNone(
+						await Effect.runPromise(
+							Effect.sync(() => Option.fromUndefinedOr(borrow.pollUnsafe())),
+						),
+					),
+				).toBe(true);
+				expect(
+					Option.isNone(
+						await Effect.runPromise(
+							Effect.sync(() => Option.fromUndefinedOr(ordinary.pollUnsafe())),
+						),
+					),
 				).toBe(true);
 				await Effect.runPromise(Fiber.interrupt(ordinary));
 				await Effect.runPromise(Fiber.interrupt(borrow));
@@ -5164,7 +5172,7 @@ test.describe("runtime and stopped OpenCode picks", () => {
 				const promptsBefore = openCodePrompts(harness).length;
 				const prompt = `${caseId}-${parentId ? "child" : "external"}`;
 				await Effect.runPromise(
-					browser.rpc.input.submit({
+					browser.rpc["input.submit"]({
 						sessionId: native.id,
 						inputId: prompt,
 						originId: caseId,
@@ -5518,7 +5526,7 @@ for (const rejection of [
 			db.close();
 		}
 		const submit = await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId,
 				inputId: caseId,
 				originId: "pick-guard",
@@ -5702,7 +5710,7 @@ test("server-side-thread-pick: a server-created session inherits its source pick
 			sessionId,
 		);
 		const rejected = await Effect.runPromise(
-			Effect.either(
+			Effect.result(
 				browser.rpc.StartSideThread({
 					...sideRequest,
 					inputId: crypto.randomUUID(),
@@ -5723,7 +5731,7 @@ test("server-side-thread-pick: a server-created session inherits its source pick
 			rejected,
 			afterRejected,
 		});
-		expect(rejected._tag).toBe("Left");
+		expect(rejected._tag).toBe("Failure");
 		expect(afterRejected.sessionCount).toBe(created.sessionCount);
 		expect(
 			enqueues(harness, true).filter((mark) =>
@@ -5740,7 +5748,7 @@ test("server-side-thread-pick: a server-created session inherits its source pick
 
 async function assertPickRejected(
 	guard: GuardCase,
-	result: Either.Either<unknown, unknown>,
+	result: Either.Result<unknown, unknown>,
 	tag: "EffortNotOffered" | "ContextWindowNotOffered",
 	testInfo: TestInfo,
 	evidence: {
@@ -5751,7 +5759,7 @@ async function assertPickRejected(
 		sessionsAfter: readonly string[];
 	},
 ): Promise<void> {
-	const error = result._tag === "Left" ? result.left : undefined;
+	const error = result._tag === "Failure" ? result.failure : undefined;
 	const mismatches: string[] = [];
 	if (!(error instanceof WsRpcError))
 		mismatches.push(`RPC did not reject with WsRpcError: ${result._tag}`);
@@ -5780,7 +5788,7 @@ async function assertPickRejected(
 		sent: null,
 		expectedRejection: tag,
 		rpcResult:
-			result._tag === "Left" && error instanceof WsRpcError
+			result._tag === "Failure" && error instanceof WsRpcError
 				? { _tag: "Left", error: { _tag: error._tag, message: error.message } }
 				: result,
 		equal: mismatches.length === 0,
@@ -5897,7 +5905,7 @@ test.describe("server pick rejections", () => {
 						: rejection === "context"
 							? browser.rpc.SwitchContextWindow(contextRequest)
 							: browser.rpc.SwitchVariant(variantRequest);
-				const result = await Effect.runPromise(Effect.either(call));
+				const result = await Effect.runPromise(Effect.result(call));
 				// Rehydrate server settings so a stale composer cannot hide mutation.
 				await page.reload();
 				await expect(picker).toHaveAttribute("data-shown-model", model.modelID);

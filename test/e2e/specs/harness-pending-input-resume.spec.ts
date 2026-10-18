@@ -95,7 +95,7 @@ test("resume removes an input consumed while the browser was disconnected", asyn
 		await expect(chat.stopBtn).toBeVisible();
 		expect(
 			await Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId,
 					originId: browser.originId,
 					inputId,

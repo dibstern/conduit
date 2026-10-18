@@ -66,8 +66,7 @@ const row = (text: string): SessionDetailItem => part("p", text);
 const testLayer = () => {
 	const dir = mkdtempSync(join(process.cwd(), ".suffix-test-"));
 	return Layer.mergeAll(
-		Layer.succeed(
-			AccountDirectory,
+		Layer.succeed(AccountDirectory)(
 			makeAccountDirectory(
 				Effect.succeed(
 					accountsStateFromConfig(
@@ -107,22 +106,20 @@ describe("session detail wire", () => {
 				{ _tag: "synchronized" },
 				{ _tag: "upsert", item: outside, sequence: 2 },
 			];
-			const wire = Chunk.toReadonlyArray(
-				yield* Stream.fromIterable(input).pipe(
+			const wire = [
+				...(yield* Stream.fromIterable(input).pipe(
 					encodeSessionDetail,
 					Stream.map(wireRoundTrip),
 					Stream.runCollect,
-				),
-			);
+				)),
+			];
 			expect(wire[2]).toEqual(input[2]);
-			expect(
-				Chunk.toReadonlyArray(
-					yield* Stream.fromIterable(wire).pipe(
-						decodeSessionDetail,
-						Stream.runCollect,
-					),
-				),
-			).toEqual(input);
+			expect([
+				...(yield* Stream.fromIterable(wire).pipe(
+					decodeSessionDetail,
+					Stream.runCollect,
+				)),
+			]).toEqual(input);
 		}),
 	);
 
@@ -181,7 +178,7 @@ describe("session detail wire", () => {
 						decodeSessionDetail,
 						Stream.runCollect,
 					);
-					expect(Chunk.toReadonlyArray(decoded)).toEqual(input);
+					expect([...decoded]).toEqual(input);
 					const probes = wire.slice(probeStart, probeStart + 24);
 					expect(
 						probes.filter(
@@ -198,14 +195,14 @@ describe("session detail wire", () => {
 	for (const damage of ["missed", "reordered", "duplicated"] as const) {
 		it.effect(`a ${damage} suffix repairs the transcript`, () =>
 			Effect.gen(function* () {
-				const encoded = Chunk.toReadonlyArray(
-					yield* Stream.fromIterable<SessionDetailEnvelope>([
+				const encoded = [
+					...(yield* Stream.fromIterable<SessionDetailEnvelope>([
 						{ _tag: "snapshot", rows: [row("A")], sequence: 1 },
 						{ _tag: "synchronized" },
 						{ _tag: "upsert", item: row("AB"), sequence: 2 },
 						{ _tag: "upsert", item: row("ABC"), sequence: 3 },
-					]).pipe(encodeSessionDetail, Stream.runCollect),
-				);
+					]).pipe(encodeSessionDetail, Stream.runCollect)),
+				];
 				const [snapshot, synchronized, first, last] = encoded;
 				if (!snapshot || !synchronized || !first || !last)
 					throw new Error("missing wire envelope");
@@ -227,7 +224,7 @@ describe("session detail wire", () => {
 					).pipe(Stream.map(wireRoundTrip), decodeSessionDetail),
 				).pipe(Stream.runCollect);
 				expect(attempts).toBe(2);
-				expect(Chunk.toReadonlyArray(delivered).slice(-2)).toEqual([
+				expect([...delivered].slice(-2)).toEqual([
 					{ _tag: "snapshot", rows: [row("ABC")], sequence: 3 },
 					{ _tag: "synchronized" },
 				]);
@@ -254,18 +251,14 @@ describe("session detail wire", () => {
 				const first = yield* source.pipe(Stream.runCollect);
 				const second = yield* source.pipe(Stream.runCollect);
 				expect(second).toEqual(first);
-				expect(Chunk.toReadonlyArray(first).slice(0, 8)).toEqual(
-					input.slice(0, 8),
-				);
-				expect(
-					Chunk.toReadonlyArray(
-						yield* source.pipe(
-							Stream.map(wireRoundTrip),
-							decodeSessionDetail,
-							Stream.runCollect,
-						),
-					),
-				).toEqual(input);
+				expect([...first].slice(0, 8)).toEqual(input.slice(0, 8));
+				expect([
+					...(yield* source.pipe(
+						Stream.map(wireRoundTrip),
+						decodeSessionDetail,
+						Stream.runCollect,
+					)),
+				]).toEqual(input);
 			}),
 	);
 
@@ -305,7 +298,7 @@ describe("session detail wire", () => {
 					{ from: 7 },
 				).pipe(Stream.runCollect);
 				expect(requests).toEqual([7, undefined]);
-				expect(Chunk.toReadonlyArray(delivered)).toEqual([
+				expect([...delivered]).toEqual([
 					{ _tag: "synchronized" },
 					{ _tag: "snapshot", rows: [row("Hello world")], sequence: 8 },
 					{ _tag: "synchronized" },
@@ -359,7 +352,7 @@ describe("session detail wire", () => {
 				expect(wire[5]).toMatchObject({
 					textSuffix: { from: 5, total: 11 },
 				});
-				expect(Chunk.toReadonlyArray(delivered)).toEqual([
+				expect([...delivered]).toEqual([
 					{ _tag: "snapshot", rows: [], sequence: 0 },
 					{ _tag: "synchronized" },
 					{ _tag: "upsert", item: row("Hello"), sequence: 1 },

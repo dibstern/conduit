@@ -196,7 +196,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				const command = sendTurnCommand();
 
 				const failed = yield* Effect.result(engine.dispatchEffect(command));
-				expect(failed._tag).toBe("Left");
+				expect(failed._tag).toBe("Failure");
 				if (failed._tag === "Failure") {
 					expect(failed.failure).toMatchObject({
 						_tag: "ProviderNotRegistered",
@@ -405,8 +405,8 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				const result = yield* Effect.result(engine.dispatchEffect(command));
 
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: {
+					_tag: "Failure",
+					failure: {
 						_tag: "ProviderNotRegistered",
 						providerId: "deleted-instance",
 					},

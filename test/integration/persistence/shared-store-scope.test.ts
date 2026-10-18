@@ -547,10 +547,10 @@ describe("shared-store relay project scope", () => {
 					SessionSetupLive.pipe(
 						Layer.provide(
 							Layer.mergeAll(
-								Layer.succeed(ConfigTag, config()),
-								Layer.succeed(LoggerTag, makeMockLogger()),
-								Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-								Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+								Layer.succeed(ConfigTag)(config()),
+								Layer.succeed(LoggerTag)(makeMockLogger()),
+								Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+								Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 							),
 						),
 					),
@@ -636,7 +636,7 @@ describe("shared-store relay project scope", () => {
 		const before = daemonStoreManifest(store.filename);
 		const removed: string[] = [];
 		const unused = () => Effect.die("Unexpected cleanup service call");
-		const worktrees: WorktreeServiceTag["Type"] = {
+		const worktrees: WorktreeServiceTag["Service"] = {
 			withCheckoutUse: (effect) => effect,
 			renameBranch: unused,
 			runSetup: () => Stream.empty,
@@ -655,7 +655,7 @@ describe("shared-store relay project scope", () => {
 					return undefined;
 				}),
 		};
-		const workspace: SessionWorkspaceTag["Type"] = {
+		const workspace: SessionWorkspaceTag["Service"] = {
 			preview: unused,
 			renameBranch: unused,
 			withLaunch: (effect) => effect,
@@ -666,7 +666,7 @@ describe("shared-store relay project scope", () => {
 			record: unused,
 			claudeWorktreeState: unused,
 		};
-		const inbox: SessionInboxTag["Type"] = {
+		const inbox: SessionInboxTag["Service"] = {
 			withSession: (_session, effect) => effect,
 			submit: unused,
 			cancel: unused,
@@ -674,7 +674,7 @@ describe("shared-store relay project scope", () => {
 			steerDeclined: unused,
 			start: Effect.void,
 		};
-		const localPty: LocalPtyServiceTag["Type"] = {
+		const localPty: LocalPtyServiceTag["Service"] = {
 			list: () => Effect.succeed([]),
 			attach: unused,
 			create: unused,
@@ -768,8 +768,8 @@ describe("shared-store relay project scope", () => {
 						SSEStreamLive.pipe(
 							Layer.provide(
 								Layer.mergeAll(
-									Layer.succeed(ConfigTag, config()),
-									Layer.succeed(OpenCodeInstancesTag, instances),
+									Layer.succeed(ConfigTag)(config()),
+									Layer.succeed(OpenCodeInstancesTag)(instances),
 								),
 							),
 						),
@@ -922,7 +922,7 @@ describe("shared-store relay project scope", () => {
 			}).pipe(
 				Effect.provide(
 					SessionGitLive.pipe(
-						Layer.provide(Layer.succeed(ConfigTag, config())),
+						Layer.provide(Layer.succeed(ConfigTag)(config())),
 					),
 				),
 			),
@@ -1090,8 +1090,8 @@ describe("shared-store relay project scope", () => {
 			Number(result.own.projectId === A) +
 				Number(result.unknown.projectId === A),
 		);
-		expect(result.single._tag).toBe("Left");
-		expect(result.batch._tag).toBe("Left");
+		expect(result.single._tag).toBe("Failure");
+		expect(result.batch._tag).toBe("Failure");
 		expect(result.leakedBatch).toBe(0);
 		for (const outcome of [result.single, result.batch])
 			if (outcome._tag === "Failure") {
@@ -1202,7 +1202,7 @@ describe("shared-store relay project scope", () => {
 						"UPDATE scope_writer_probe SET value = value + 1 WHERE id = 1",
 					)
 					.run();
-				expect(outcome._tag, JSON.stringify(outcome)).toBe("Right");
+				expect(outcome._tag, JSON.stringify(outcome)).toBe("Success");
 				expect(attempted).toBe(true);
 				expect(competitorBlocked).toBe(true);
 				expect(

@@ -54,7 +54,7 @@ const makeTestFileSystem = () => {
 			}),
 	});
 
-	const layer = Layer.succeed(FileSystem.FileSystem, fs);
+	const layer = Layer.succeed(FileSystem.FileSystem)(fs);
 
 	return { files, renames, directories, layer };
 };
@@ -67,7 +67,7 @@ const makeTestLayers = (
 ) =>
 	Layer.mergeAll(
 		testFs.layer,
-		Layer.succeed(PersistencePathTag, CONFIG_PATH),
+		Layer.succeed(PersistencePathTag)(CONFIG_PATH),
 		makeDaemonStateLive(stateOverrides),
 	);
 
@@ -143,12 +143,12 @@ describe("daemon-config-persistence", () => {
 					Effect.gen(function* () {
 						// Yield to the scheduler so other fibers can run and
 						// attempt to acquire the pendingSave lock.
-						yield* Effect.yieldNow();
+						yield* Effect.yieldNow;
 						files.set(path, data);
 					}),
 				rename: (oldPath: string, newPath: string) =>
 					Effect.gen(function* () {
-						yield* Effect.yieldNow();
+						yield* Effect.yieldNow;
 						const content = files.get(oldPath);
 						if (content !== undefined) {
 							files.set(newPath, content);
@@ -163,8 +163,8 @@ describe("daemon-config-persistence", () => {
 			});
 
 			const layers = Layer.mergeAll(
-				Layer.succeed(FileSystem.FileSystem, slowFs),
-				Layer.succeed(PersistencePathTag, CONFIG_PATH),
+				Layer.succeed(FileSystem.FileSystem)(slowFs),
+				Layer.succeed(PersistencePathTag)(CONFIG_PATH),
 				makeDaemonStateLive({ port: 7777 }),
 			);
 
@@ -193,8 +193,8 @@ describe("daemon-config-persistence", () => {
 
 			const layers = Layer.mergeAll(
 				testFs.layer,
-				Layer.succeed(PersistencePathTag, CONFIG_PATH),
-				Layer.succeed(DaemonStateTag, ref),
+				Layer.succeed(PersistencePathTag)(CONFIG_PATH),
+				Layer.succeed(DaemonStateTag)(ref),
 			);
 
 			yield* persistConfig.pipe(Effect.provide(layers));

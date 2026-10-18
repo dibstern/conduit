@@ -474,11 +474,11 @@ describe("Scope-filtered reads over one store-wide version space", () => {
 					],
 				] as const;
 				for (const [label, query, expected] of checks) {
-					const result = await alpha.runPromise(Effect.either(query));
+					const result = await alpha.runPromise(Effect.result(query));
 					record(
 						label,
 						name,
-						result._tag === "Right" ? result.right : [],
+						result._tag === "Success" ? result.success : [],
 						expected,
 					);
 				}
@@ -609,7 +609,7 @@ describe("Scope-filtered reads over one store-wide version space", () => {
 	it("publishes committed projects and routes project advances without splitting the global counter", async () => {
 		const busRuntime = ManagedRuntime.make(makeSessionEventBusLive());
 		const bus = await busRuntime.runPromise(SessionEventBusTag);
-		const busLayer = Layer.succeed(SessionEventBusTag, bus);
+		const busLayer = Layer.succeed(SessionEventBusTag)(bus);
 		const sharedFile = filename();
 		const alpha = ManagedRuntime.make(
 			makePersistenceEffectLayer(sharedFile, "alpha", undefined, busLayer).pipe(

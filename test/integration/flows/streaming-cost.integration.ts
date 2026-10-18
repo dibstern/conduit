@@ -36,7 +36,7 @@ describe("streaming storage and detail payload cost", () => {
 		let wireTextBytes = 0;
 		let decodedText = "";
 		const layer = Layer.mergeAll(
-			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+			Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 			makePersistenceEffectLayer(
 				dbPath,
 				"test-project",

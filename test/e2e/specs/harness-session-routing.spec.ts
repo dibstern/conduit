@@ -1,10 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import {
-	CreateSession,
-	SaveProject,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 
@@ -38,40 +35,37 @@ test("session RPCs use the owner even when the page attaches to another project"
 	try {
 		const folder = join(harness.root, "project-b");
 		mkdirSync(folder);
-		const project = await harness.requestRpc(
-			new SaveProject({
-				folders: [folder],
-				title: "Project B",
-			}),
-		);
-		const a = await harness.requestRpc(
-			new CreateSession({
-				projectSlug: "process-test",
-				originId: "routing-test",
+		const project = await harness.requestRpc({
+			_tag: "SaveProject",
+			folders: [folder],
+			title: "Project B",
+		});
+		const a = await harness.requestRpc({
+			_tag: "CreateSession",
+			projectSlug: "process-test",
+			originId: "routing-test",
+			providerId: "claude",
+			permissionMode: "full",
+			model: {
 				providerId: "claude",
-				permissionMode: "full",
-				model: {
-					providerId: "claude",
-					modelId: "sonnet",
-					variant: "",
-					contextWindow: "200k",
-				},
-			}),
-		);
-		const b = await harness.requestRpc(
-			new CreateSession({
-				projectSlug: project.savedSlug,
-				originId: "routing-test",
+				modelId: "sonnet",
+				variant: "",
+				contextWindow: "200k",
+			},
+		});
+		const b = await harness.requestRpc({
+			_tag: "CreateSession",
+			projectSlug: project.savedSlug,
+			originId: "routing-test",
+			providerId: "claude",
+			permissionMode: "full",
+			model: {
 				providerId: "claude",
-				permissionMode: "full",
-				model: {
-					providerId: "claude",
-					modelId: "sonnet",
-					variant: "",
-					contextWindow: "200k",
-				},
-			}),
-		);
+				modelId: "sonnet",
+				variant: "",
+				contextWindow: "200k",
+			},
+		});
 		steps.createdBothSessions = Boolean(a.sessionId && b.sessionId);
 		const app = new AppPage(page);
 		await app.goto(`${harness.baseUrl}/?p=process-test`);

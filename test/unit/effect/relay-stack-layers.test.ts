@@ -30,24 +30,22 @@ import {
 } from "../../helpers/mock-factories.js";
 
 const configLayer = Layer.mergeAll(
-	Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-	Layer.succeed(ConfigTag, makeMockConfig()),
+	Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+	Layer.succeed(ConfigTag)(makeMockConfig()),
 );
-const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
+const loggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
 const openCodeApi = makeMockOpenCodeAPI();
 const relayStateTestLayer = RelayStateLive.pipe(
 	Layer.provide(
 		Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, openCodeApi),
+			Layer.succeed(OpenCodeAPITag)(openCodeApi),
 			configLayer,
 			loggerLayer,
 			Layer.effect(SessionActivityTag, makeSessionActivity),
-			Layer.succeed(
-				OpenCodeInstancesTag,
+			Layer.succeed(OpenCodeInstancesTag)(
 				makeOpenCodeInstancesStub({ opencode: openCodeApi }),
 			),
-			Layer.succeed(
-				OrchestrationEngineTag,
+			Layer.succeed(OrchestrationEngineTag)(
 				new OrchestrationEngine({ registry: new ProviderRegistry() }),
 			),
 			makePersistenceEffectLayer(":memory:", "test-project"),

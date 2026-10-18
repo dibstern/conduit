@@ -330,11 +330,10 @@ describe("SessionManager read-your-writes parity", () => {
 			() => {
 				const dir = mkdtempSync(join(tmpdir(), "conduit-session-parity-"));
 				const api = makeMockOpenCodeAPI();
-				const configLayer = Layer.succeed(
-					ConfigTag,
+				const configLayer = Layer.succeed(ConfigTag)(
 					makeMockConfig({ configDir: dir, projectDir: dir }),
 				);
-				const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
+				const loggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
 				const persistenceLayer = makePersistenceEffectLayer(
 					join(dir, "events.db"),
 					"test-project",
@@ -342,23 +341,21 @@ describe("SessionManager read-your-writes parity", () => {
 				const layer = Layer.provideMerge(
 					SessionManagerServiceLive,
 					Layer.mergeAll(
-						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+						Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 						makeSessionManagerStateLive(),
-						Layer.succeed(OpenCodeAPITag, api),
+						Layer.succeed(OpenCodeAPITag)(api),
 						loggerLayer,
 						configLayer,
-						Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+						Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 						Layer.effect(SessionActivityTag, makeSessionActivity),
 						RelayStatusSnapshotLive,
 						makeOverridesStateLive(),
-						Layer.succeed(
-							OpenCodeInstancesTag,
+						Layer.succeed(OpenCodeInstancesTag)(
 							makeOpenCodeInstancesStub({ opencode: api }),
 						),
 						DaemonEventBusLive,
 						persistenceLayer,
-						Layer.succeed(
-							OrchestrationEngineTag,
+						Layer.succeed(OrchestrationEngineTag)(
 							new OrchestrationEngine({ registry: new ProviderRegistry() }),
 						),
 					),

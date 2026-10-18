@@ -303,8 +303,8 @@ export function writeEventStore(
 ): void {
 	Effect.runSync(
 		makeEffectSqlMigrator().pipe(
-			Effect.zipRight(seed),
-			Effect.provide(EffectSqliteClient.layer({ filename })),
+			Effect.andThen(seed),
+			Effect.provide(EffectSqliteClient.layer({ filename }), { local: true }),
 		),
 	);
 }
@@ -350,6 +350,6 @@ export const makeTestPersistenceLayer = () =>
 		makePersistenceServiceLive,
 		Layer.merge(
 			makeTestSqlLayer(),
-			Layer.succeed(PersistenceProjectTag, { projectId: "test-project" }),
+			Layer.succeed(PersistenceProjectTag)({ projectId: "test-project" }),
 		),
 	);

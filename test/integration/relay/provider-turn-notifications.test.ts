@@ -1,4 +1,4 @@
-import { Chunk, Effect, Layer, PubSub, Queue } from "effect";
+import { Effect, Layer, PubSub } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
 import {
@@ -76,7 +76,9 @@ it.each([
 					error: "failed",
 				}),
 			);
-			return Chunk.toArray(yield* Queue.takeAll(subscribed));
+			return [
+				...(yield* PubSub.takeUpTo(subscribed, Number.POSITIVE_INFINITY)),
+			];
 		}).pipe(Effect.scoped, Effect.provide(layer)),
 	);
 	expect(alerts).toEqual([

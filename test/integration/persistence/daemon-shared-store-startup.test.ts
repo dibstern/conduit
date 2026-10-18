@@ -192,7 +192,7 @@ function startup(root: string, projects: readonly StoredProject[]) {
 					store,
 					registry,
 					directory,
-					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					Layer.effect(SessionActivityTag, makeSessionActivity),
 					DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
 					makeOpenCodeRuntimeStateLive(),
@@ -200,13 +200,13 @@ function startup(root: string, projects: readonly StoredProject[]) {
 					SessionEventBusLive,
 					ConfigPersistenceNoopLive,
 					InstanceHealthCheckLive,
-					Layer.succeed(PortScannerTag, {
+					Layer.succeed(PortScannerTag)({
 						getKnownPorts: () => Effect.succeed(new Set<number>()),
 						scanNow: () =>
 							Effect.succeed({ discovered: [], lost: [], active: [] }),
 					}),
-					Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
-					Layer.succeed(PushManagerTag, {
+					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
+					Layer.succeed(PushManagerTag)({
 						subscribe: () => Effect.void,
 						unsubscribe: () => Effect.void,
 						broadcast: () => Effect.void,
@@ -228,14 +228,14 @@ function watchReaderPreparation() {
 	const migrationSpy = vi
 		.spyOn(migrations, "makeEffectSqlMigrator")
 		.mockImplementation((...args) =>
-			Effect.sync(migrationRuns).pipe(Effect.zipRight(migrate(...args))),
+			Effect.sync(migrationRuns).pipe(Effect.andThen(migrate(...args))),
 		);
 	const stamp = persistence.stampProjectProvenance;
 	const stampRuns = vi.fn();
 	const stampSpy = vi
 		.spyOn(persistence, "stampProjectProvenance")
 		.mockImplementation((...args) =>
-			Effect.sync(stampRuns).pipe(Effect.zipRight(stamp(...args))),
+			Effect.sync(stampRuns).pipe(Effect.andThen(stamp(...args))),
 		);
 	return {
 		migrationRuns,
@@ -292,8 +292,8 @@ describe("daemon shared-store startup", () => {
 						const factory = yield* RelayFactoryTag;
 						for (let retry = 0; retry < 2; retry++) {
 							expect(yield* Effect.result(factory.create(beta))).toMatchObject({
-								_tag: "Left",
-								left: { _tag: "RelayFactoryError", reason },
+								_tag: "Failure",
+								failure: { _tag: "RelayFactoryError", reason },
 							});
 						}
 						const sql = yield* SqlClient.SqlClient;
@@ -926,8 +926,8 @@ describe("daemon shared-store startup", () => {
 				}),
 			);
 			expect(result).toMatchObject({
-				_tag: "Left",
-				left: { _tag: "SessionDirectoryReadError", sessionId: "parent" },
+				_tag: "Failure",
+				failure: { _tag: "SessionDirectoryReadError", sessionId: "parent" },
 			});
 		} finally {
 			await runtime.dispose();

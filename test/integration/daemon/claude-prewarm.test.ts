@@ -1650,7 +1650,7 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		if (state === "approval") {
 			const cursor = browser.frames.length;
 			await Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId,
 					originId: browser.originId,
 					inputId: randomUUID(),

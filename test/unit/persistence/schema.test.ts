@@ -348,7 +348,7 @@ describe("Schema Migration", () => {
 				sql`INSERT INTO events (event_id, session_id, stream_version, type, data, provider, created_at)
 				VALUES ('evt-1', 's1', 1, 'session.created', '{}', 'opencode', ${T})`,
 			);
-			expect(duplicate._tag).toBe("Left");
+			expect(duplicate._tag).toBe("Failure");
 		}).pipe(Effect.provide(migratedStore)),
 	);
 
@@ -365,7 +365,7 @@ describe("Schema Migration", () => {
 					sql`INSERT INTO events (event_id, session_id, stream_version, type, data, provider, created_at)
 				VALUES ('evt-2', 's1', 0, 'text.delta', '{}', 'opencode', ${T})`,
 				);
-				expect(conflict._tag).toBe("Left");
+				expect(conflict._tag).toBe("Failure");
 			}).pipe(Effect.provide(migratedStore)),
 	);
 
@@ -439,7 +439,7 @@ describe("Schema Migration", () => {
 				const deleted = yield* Effect.result(
 					sql`DELETE FROM sessions WHERE id = 's1'`,
 				);
-				expect(deleted._tag).toBe("Right");
+				expect(deleted._tag).toBe("Success");
 				expect(
 					yield* sql`SELECT event_id FROM events WHERE session_id = 's1'`,
 				).toEqual([{ event_id: "evt-1" }]);

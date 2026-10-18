@@ -71,10 +71,10 @@ const terminalOutput = (id: string): SessionOutput => ({
 async function fixture(beforePublish: Effect.Effect<void> = Effect.void) {
 	const directory = mkdtempSync(join(tmpdir(), "conduit-runner-race-"));
 	const published: unknown[] = [];
-	const bus = Layer.succeed(SessionEventBusTag, {
+	const bus = Layer.succeed(SessionEventBusTag)({
 		publish: (events) =>
 			beforePublish.pipe(
-				Effect.zipRight(Effect.sync(() => void published.push(...events))),
+				Effect.andThen(Effect.sync(() => void published.push(...events))),
 			),
 		publishAdvance: () => Effect.void,
 		subscribe: () => Effect.succeed(Stream.empty),
@@ -105,7 +105,7 @@ async function fixture(beforePublish: Effect.Effect<void> = Effect.void) {
 	const closedPeers = new Set<ClaudeRunnerSocket>();
 	const frames: RunnerMessage[] = [];
 	let closing = false;
-	const fibers: Fiber.RuntimeFiber<void, unknown>[] = [];
+	const fibers: Fiber.Fiber<void, unknown>[] = [];
 	const spool = new RunnerSpool(join(directory, "runner.spool"));
 	const socketPath = join(directory, "runner.sock");
 	const server = createServer((socket) => {
@@ -193,7 +193,7 @@ it("acknowledges a durable terminal output while its event publication is still 
 	const release = await Effect.runPromise(Deferred.make<void>());
 	const f = await fixture(
 		Deferred.succeed(publishing, undefined).pipe(
-			Effect.zipRight(Deferred.await(release)),
+			Effect.andThen(Deferred.await(release)),
 		),
 	);
 	cleanups.push(async () => {
@@ -298,7 +298,7 @@ it("does not acknowledge a rolled-back terminal transaction before its successfu
 	const releaseRetry = await Effect.runPromise(Deferred.make<void>());
 	const f = await fixture(
 		Deferred.succeed(publishing, undefined).pipe(
-			Effect.zipRight(Deferred.await(releasePublication)),
+			Effect.andThen(Deferred.await(releasePublication)),
 		),
 	);
 	cleanups.push(async () => {
@@ -374,8 +374,8 @@ it("fences a disconnected attachment before its pending event can commit", async
 	const output = eventOutput("overlap");
 	const first = await f.attach((event) =>
 		Deferred.succeed(entered, undefined).pipe(
-			Effect.zipRight(Deferred.await(release)),
-			Effect.zipRight(f.ingest(event)),
+			Effect.andThen(Deferred.await(release)),
+			Effect.andThen(f.ingest(event)),
 			Effect.ensuring(Deferred.succeed(staleFinished, undefined)),
 		),
 	);

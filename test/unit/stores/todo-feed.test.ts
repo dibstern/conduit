@@ -33,7 +33,7 @@ interface Request {
 function adapter() {
 	const feeds = new Map<
 		string,
-		Effect.Effect.Success<
+		Effect.Success<
 			ReturnType<typeof makeRpcStream<SessionTodosEnvelope, WsRpcError>>
 		>
 	>();

@@ -42,7 +42,7 @@ const withPersistence = async (
 ) => {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-session-attention-"));
 	const advances: ReadModelAdvance[] = [];
-	const bus = Layer.succeed(SessionEventBusTag, {
+	const bus = Layer.succeed(SessionEventBusTag)({
 		publish: () => Effect.void,
 		publishAdvance: (advance) => Effect.sync(() => void advances.push(advance)),
 		subscribe: () => Effect.succeed(Stream.empty),

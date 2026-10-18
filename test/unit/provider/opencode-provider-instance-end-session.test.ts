@@ -90,7 +90,7 @@ describe("OpenCodeProviderInstance.endSessionEffect()", () => {
 
 		const result = await resultPromise;
 
-		expect(result._tag).toBe("Left");
+		expect(result._tag).toBe("Failure");
 		if (result._tag !== "Failure") return;
 		expect(result.failure).toMatchObject({
 			_tag: "ProviderInstanceFailure",

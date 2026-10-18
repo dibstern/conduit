@@ -28,6 +28,11 @@ export const makeTracedSqlite = (
 					record(statement);
 					return connection.executeValues(statement, params);
 				}),
+			executeValuesUnprepared: (statement, params) =>
+				Effect.suspend(() => {
+					record(statement);
+					return connection.executeValuesUnprepared(statement, params);
+				}),
 			executeUnprepared: (statement, params, transformRows) =>
 				Effect.suspend(() => {
 					record(statement);

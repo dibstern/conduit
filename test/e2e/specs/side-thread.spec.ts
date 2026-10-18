@@ -341,7 +341,7 @@ test.describe("OpenCode Side Threads", () => {
 					}),
 				),
 			);
-			expect(nested._tag).toBe("Left");
+			expect(nested._tag).toBe("Failure");
 			if (nested._tag !== "Failure")
 				throw new Error("Nested Side Thread was created");
 			expect(nested.failure).toBeInstanceOf(WsRpcError);
@@ -478,7 +478,7 @@ test.describe("OpenCode Side Threads", () => {
 				}),
 			),
 		);
-		expect(result._tag).toBe("Left");
+		expect(result._tag).toBe("Failure");
 		if (result._tag !== "Failure")
 			throw new Error("Missing parent started a Side Thread");
 		expect(result.failure).toBeInstanceOf(WsRpcError);

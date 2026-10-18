@@ -885,7 +885,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 			);
 			const steer = "recovery-steer";
 			const submitted = await Effect.runPromise(
-				after.rpc.input.submit({
+				after.rpc["input.submit"]({
 					sessionId,
 					inputId: randomUUID(),
 					originId: after.originId,

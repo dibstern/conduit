@@ -11,7 +11,6 @@ import {
 	Layer,
 	Option,
 	PubSub,
-	Queue,
 	Stream,
 	Supervisor,
 } from "effect";
@@ -73,7 +72,7 @@ import {
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-layer(Layer.mergeAll(Layer.succeed(AccountDirectory, makeMockAccountDirectory()), makePersistenceEffectLayer(":memory:", "test-project"), Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, makeMockConfig()), ProjectSettingsLive, RpcSubscriptionScopeLive))("persistent handler runtime", (it) => {
+layer(Layer.mergeAll(Layer.succeed(AccountDirectory)(makeMockAccountDirectory()), makePersistenceEffectLayer(":memory:", "test-project"), Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()), Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()), Layer.succeed(ConfigTag)(makeMockConfig()), ProjectSettingsLive, RpcSubscriptionScopeLive))("persistent handler runtime", (it) => {
 describe("model handlers with Effect-native model service", () => {
 	it.effect(
 		"loads providers and relay-owned active-session model info without requiring the Promise OpenCode API tag",
@@ -107,13 +106,10 @@ describe("model handlers with Effect-native model service", () => {
 			};
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeModelServiceTag, modelService),
-				Layer.succeed(WebSocketHandlerTag, wsHandler),
-				Layer.succeed(LoggerTag, logger),
-				Layer.succeed(
-					OrchestrationEngineTag,
-					withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [] })) }),
-				),
+				Layer.succeed(OpenCodeModelServiceTag)(modelService),
+				Layer.succeed(WebSocketHandlerTag)(wsHandler),
+				Layer.succeed(LoggerTag)(logger),
+				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [] })) })),
 				makeOverridesStateLive(),
 			);
 
@@ -189,10 +185,10 @@ describe("model handlers with Effect-native model service", () => {
 			});
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeModelServiceTag, modelService),
-				Layer.succeed(WebSocketHandlerTag, wsHandler),
-				Layer.succeed(LoggerTag, logger),
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OpenCodeModelServiceTag)(modelService),
+				Layer.succeed(WebSocketHandlerTag)(wsHandler),
+				Layer.succeed(LoggerTag)(logger),
+				Layer.succeed(OrchestrationEngineTag)(engine),
 				makeOverridesStateLive(),
 			);
 
@@ -222,7 +218,7 @@ describe("model handlers with Effect-native model service", () => {
 						},
 				]);
 				const catalog = yield* subscribeProjectSettings().pipe(
-					Stream.mapConcat((envelope) => envelope._tag === "snapshot" ? envelope.rows : envelope._tag === "upsert" ? [envelope.item] : []),
+					Stream.map((envelope) => envelope._tag === "snapshot" ? envelope.rows : envelope._tag === "upsert" ? [envelope.item] : []), Stream.flattenIterable,
 					Stream.filter((setting) => setting._tag === "providerModels"),
 					Stream.runHead, Effect.map(Option.getOrThrow),
 				);
@@ -258,16 +254,16 @@ describe("model handlers with Effect-native model service", () => {
 				return yield* Deferred.await(pending);
 			}) });
 			const deps = Layer.mergeAll(
-				Layer.succeed(OpenCodeModelServiceTag, {
+				Layer.succeed(OpenCodeModelServiceTag)({
 					listProviders: () => Effect.succeed({ connected: ["fake"], defaults: {}, providers: [
 						{ id: "fake", name: "Fake", models: [{ id: "model-a", name: "A" }] },
 					] }),
 					cachedProviders: () => Effect.succeedNone,
 					persistDefaultModel: () => Effect.void,
 				}),
-				Layer.succeed(OrchestrationEngineTag, engine),
-				Layer.succeed(LoggerTag, makeMockLogger()),
-				Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+				Layer.succeed(OrchestrationEngineTag)(engine),
+				Layer.succeed(LoggerTag)(makeMockLogger()),
+				Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 				makeOverridesStateLive(), ProjectSettingsLive, RpcSubscriptionScopeLive,
 			);
 			return yield* Effect.gen(function* () {
@@ -285,7 +281,7 @@ describe("model handlers with Effect-native model service", () => {
 				if (fails) yield* Deferred.fail(pending, new Error("Claude discovery failed"));
 				else yield* Deferred.succeed(pending, capabilities);
 				yield* Effect.forEach(fibers, Fiber.join);
-				const firstUpdates = Array.from(yield* Queue.takeAll(updates));
+				const firstUpdates = Array.from(yield* PubSub.takeUpTo(updates, Number.POSITIVE_INFINITY));
 				const firstModels = firstUpdates.filter(({ item }) => item._tag === "providerModels");
 				expect(firstModels).toHaveLength(1);
 				if (fails) expect(firstModels[0]?.item).toMatchObject({ providers: [] });
@@ -296,7 +292,7 @@ describe("model handlers with Effect-native model service", () => {
 				expect(refresh).toHaveLength(1);
 				yield* Deferred.succeed(pending, { ...capabilities, models: [{ id: "opus", name: "Opus", providerId: "claude" }] });
 				yield* Effect.forEach(refresh, Fiber.join);
-				expect(Array.from(yield* Queue.takeAll(updates)).filter(({ item }) => item._tag === "providerModels")).toMatchObject([
+				expect(Array.from(yield* PubSub.takeUpTo(updates, Number.POSITIVE_INFINITY)).filter(({ item }) => item._tag === "providerModels")).toMatchObject([
 					{ item: { _tag: "providerModels", providers: [{ id: "claude", models: [{ id: "opus" }] }] } },
 				]);
 			}).pipe(Effect.provide(deps), Effect.scoped);
@@ -318,14 +314,14 @@ describe("model handlers with Effect-native model service", () => {
 			};
 			const engine = withDispatchEffect({
 				dispatchEffect: () => Deferred.succeed(started, undefined).pipe(
-					Effect.zipRight(readyCapabilities ? Effect.succeed(readyCapabilities) : Deferred.await(pending)),
+					Effect.andThen(readyCapabilities ? Effect.succeed(readyCapabilities) : Deferred.await(pending)),
 				),
 			});
 			const deps = Layer.mergeAll(
-				Layer.succeed(OpenCodeModelServiceTag, modelService),
-				Layer.succeed(OrchestrationEngineTag, engine),
-				Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-				Layer.succeed(LoggerTag, makeMockLogger()),
+				Layer.succeed(OpenCodeModelServiceTag)(modelService),
+				Layer.succeed(OrchestrationEngineTag)(engine),
+				Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+				Layer.succeed(LoggerTag)(makeMockLogger()),
 				makeOverridesStateLive(), ProjectSettingsLive, RpcSubscriptionScopeLive,
 			);
 			return yield* Effect.gen(function* () {
@@ -407,15 +403,12 @@ describe("model handlers with Effect-native model service", () => {
 			};
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeModelServiceTag, modelService),
-				Layer.succeed(WebSocketHandlerTag, wsHandler),
-				Layer.succeed(LoggerTag, logger),
-				Layer.succeed(
-					ConfigTag,
-					makeMockConfig({
+				Layer.succeed(OpenCodeModelServiceTag)(modelService),
+				Layer.succeed(WebSocketHandlerTag)(wsHandler),
+				Layer.succeed(LoggerTag)(logger),
+				Layer.succeed(ConfigTag)(makeMockConfig({
 						configDir: mkdtempSync(join(tmpdir(), "conduit-switch-variant-")),
-					}),
-				),
+					})),
 				makeOverridesStateLive(),
 				ProjectSettingsLive,
 			);
@@ -472,15 +465,12 @@ describe("model handlers with Effect-native model service", () => {
 			};
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeModelServiceTag, modelService),
-				Layer.succeed(WebSocketHandlerTag, wsHandler),
-				Layer.succeed(LoggerTag, logger),
-				Layer.succeed(
-					ConfigTag,
-					makeMockConfig({
+				Layer.succeed(OpenCodeModelServiceTag)(modelService),
+				Layer.succeed(WebSocketHandlerTag)(wsHandler),
+				Layer.succeed(LoggerTag)(logger),
+				Layer.succeed(ConfigTag)(makeMockConfig({
 						configDir: mkdtempSync(join(tmpdir(), "conduit-switch-model-")),
-					}),
-				),
+					})),
 				makeOverridesStateLive(),
 			);
 
@@ -542,16 +532,13 @@ describe("model handlers with Effect-native model service", () => {
 			};
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeModelServiceTag, modelService),
-				Layer.succeed(WebSocketHandlerTag, wsHandler),
-				Layer.succeed(LoggerTag, logger),
-				Layer.succeed(
-					ConfigTag,
-					makeMockConfig({
+				Layer.succeed(OpenCodeModelServiceTag)(modelService),
+				Layer.succeed(WebSocketHandlerTag)(wsHandler),
+				Layer.succeed(LoggerTag)(logger),
+				Layer.succeed(ConfigTag)(makeMockConfig({
 						configDir: mkdtempSync(join(tmpdir(), "conduit-default-model-")),
 						projectDir: mkdtempSync(join(tmpdir(), "conduit-project-")),
-					}),
-				),
+					})),
 				makeOverridesStateLive(),
 				ProjectSettingsLive,
 			);
@@ -602,10 +589,10 @@ describe("model handlers with Effect-native model service", () => {
 			expect(instances.use).not.toHaveBeenCalled();
 			expect(api.provider.list).toHaveBeenCalledOnce();
 		}).pipe(Effect.provide(OpenCodeModelServiceLive.pipe(Layer.provide(Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, api),
-			Layer.succeed(OpenCodeInstancesTag, instances),
-			Layer.succeed(ConfigTag, makeMockConfig()),
-			Layer.succeed(LoggerTag, makeMockLogger()),
+			Layer.succeed(OpenCodeAPITag)(api),
+			Layer.succeed(OpenCodeInstancesTag)(instances),
+			Layer.succeed(ConfigTag)(makeMockConfig()),
+			Layer.succeed(LoggerTag)(makeMockLogger()),
 		)))));
 	});
 
@@ -637,12 +624,12 @@ describe("model handlers with Effect-native model service", () => {
 		}));
 		const deps = Layer.mergeAll(
 			AccountDirectoryFromConfigLive(configDir, configuredClaudeConfigDir(join(configDir, "login"))),
-			Layer.succeed(OpenCodeAPITag, api),
-			Layer.succeed(OpenCodeInstancesTag, instances),
-			Layer.succeed(ConfigTag, config),
-			Layer.succeed(LoggerTag, makeMockLogger()),
-			Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-			Layer.succeed(OrchestrationEngineTag, withDispatchEffect({
+			Layer.succeed(OpenCodeAPITag)(api),
+			Layer.succeed(OpenCodeInstancesTag)(instances),
+			Layer.succeed(ConfigTag)(config),
+			Layer.succeed(LoggerTag)(makeMockLogger()),
+			Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+			Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({
 				getProviderForSessionEffect: (sessionId: string) => Effect.succeed(
 					sessionId === "opencode-session" ? "opencode" : sessionId === "claude-session" ? "claude" : "work-claude",
 				),
@@ -714,13 +701,10 @@ describe("model handlers with Effect-native model service", () => {
 			const layer = OpenCodeModelServiceLive.pipe(
 				Layer.provide(
 					Layer.mergeAll(
-						Layer.succeed(OpenCodeAPITag, api),
-						Layer.succeed(
-							OpenCodeInstancesTag,
-							makeOpenCodeInstancesStub({ opencode: api }),
-						),
-						Layer.succeed(ConfigTag, makeMockConfig({ configDir, projectDir })),
-						Layer.succeed(LoggerTag, logger),
+						Layer.succeed(OpenCodeAPITag)(api),
+						Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: api })),
+						Layer.succeed(ConfigTag)(makeMockConfig({ configDir, projectDir })),
+						Layer.succeed(LoggerTag)(logger),
 					),
 				),
 			);

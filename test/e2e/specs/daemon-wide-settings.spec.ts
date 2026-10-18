@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { test as base, expect, type Page } from "@playwright/test";
-import { RemoveProject } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { ProcessHarness } from "../../helpers/process-harness.js";
 import { AppPage } from "../page-objects/app.page.js";
 
@@ -105,9 +105,10 @@ test("no project open: instance mutations, scan and log level use daemon RPC", a
 }, testInfo) => {
 	// The startup probe registers a fixture project. Remove it so a cold browser
 	// cannot auto-attach a default project.
-	const projects = await harness.requestRpc(
-		new RemoveProject({ slug: "process-test" }),
-	);
+	const projects = await harness.requestRpc({
+		_tag: "RemoveProject",
+		slug: "process-test",
+	});
 	expect(projects.projects).toEqual([]);
 	const observed = observeRpc(page);
 	await new AppPage(page).goto(harness.baseUrl);

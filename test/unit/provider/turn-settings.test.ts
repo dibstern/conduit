@@ -266,7 +266,9 @@ describe("resolveTurnSettings", () => {
 			}),
 		),
 	])("$name", ({ input, expected }) => {
-		expect(resolveTurnSettings(input, catalog)).toEqual(Either.right(expected));
+		expect(resolveTurnSettings(input, catalog)).toEqual(
+			Either.succeed(expected),
+		);
 	});
 
 	it.each([
@@ -334,16 +336,16 @@ describe("resolveTurnSettings", () => {
 		),
 	])("rejects $tag for $input", ({ input, tag }) => {
 		const result = resolveTurnSettings(input, catalog);
-		expect(Either.isLeft(result)).toBe(true);
-		if (Either.isLeft(result)) {
-			expect(result.left._tag).toBe(tag);
-			expect(result.left.message).toMatch(new RegExp(`^${tag}:`));
+		expect(Either.isFailure(result)).toBe(true);
+		if (Either.isFailure(result)) {
+			expect(result.failure._tag).toBe(tag);
+			expect(result.failure.message).toMatch(new RegExp(`^${tag}:`));
 		}
 	});
 
 	it("rejects an empty catalog with model identity fields", () => {
 		expect(resolveTurnSettings(pick(), [])).toMatchObject({
-			left: {
+			failure: {
 				_tag: "ModelNotInCatalog",
 				harness: "claude",
 				providerId: "claude",
@@ -355,7 +357,7 @@ describe("resolveTurnSettings", () => {
 	it("reports the requested effort and offered efforts", () => {
 		expect(resolveTurnSettings(pick({ effort: "max" }), catalog)).toMatchObject(
 			{
-				left: {
+				failure: {
 					_tag: "EffortNotOffered",
 					modelId: "sonnet",
 					effort: "max",
@@ -369,7 +371,7 @@ describe("resolveTurnSettings", () => {
 		expect(
 			resolveTurnSettings(pick({ contextWindow: "2m" }), catalog),
 		).toMatchObject({
-			left: {
+			failure: {
 				_tag: "ContextWindowNotOffered",
 				modelId: "sonnet",
 				contextWindow: "2m",
@@ -382,7 +384,7 @@ describe("resolveTurnSettings", () => {
 		expect(
 			resolveTurnSettings(pick(), [{ ...claude, id: "sonnet[1m]" }]),
 		).toEqual(
-			Either.right(
+			Either.succeed(
 				pick({ model: { providerId: "claude", modelId: "sonnet[1m]" } }),
 			),
 		);

@@ -126,13 +126,13 @@ const makeFakeSource = <T>(
 					(existing) => !entries.some((entry) => entry.id === existing.id),
 				),
 				...entries.map(({ id, row }) => ({ id, version, row })),
-			]).pipe(Effect.zipRight(Ref.set(counter, version)));
+			]).pipe(Effect.andThen(Ref.set(counter, version)));
 
 		/** A deletion: the row is gone, leaving no version behind to query (§8). */
 		const drop = (version: number, ...ids: readonly string[]) =>
 			Ref.update(table, (rowsSoFar) =>
 				rowsSoFar.filter((existing) => !ids.includes(existing.id)),
-			).pipe(Effect.zipRight(Ref.set(counter, version)));
+			).pipe(Effect.andThen(Ref.set(counter, version)));
 
 		return { source, commit, drop, calls, readStarted, readGate, onNextRead };
 	});
@@ -160,7 +160,7 @@ const withBus = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	Effect.provide(effect, SessionEventBusLive);
 
 describe("ReadModelSubscription", () => {
-	it.scoped("replays a tombstone at its own version on catch-up resume", () =>
+	it.effect("replays a tombstone at its own version on catch-up resume", () =>
 		withBus(
 			Effect.gen(function* () {
 				const bus = yield* SessionEventBusTag;
@@ -192,7 +192,7 @@ describe("ReadModelSubscription", () => {
 			}),
 		),
 	);
-	it.scoped("preserves page info on cold and overflow snapshots", () =>
+	it.effect("preserves page info on cold and overflow snapshots", () =>
 		withBus(
 			Effect.gen(function* () {
 				const bus = yield* SessionEventBusTag;
@@ -249,7 +249,7 @@ describe("ReadModelSubscription", () => {
 		),
 	);
 
-	it.scoped("cold start emits snapshot, synchronized, then re-queries", () =>
+	it.effect("cold start emits snapshot, synchronized, then re-queries", () =>
 		withBus(
 			Effect.gen(function* () {
 				const bus = yield* SessionEventBusTag;
@@ -282,7 +282,7 @@ describe("ReadModelSubscription", () => {
 		),
 	);
 
-	it.scoped(
+	it.effect(
 		"delivers an advance published during the base read once, after synchronized",
 		() =>
 			withBus(
@@ -325,7 +325,7 @@ describe("ReadModelSubscription", () => {
 			),
 	);
 
-	it.scoped("ignores an advance at or below the base's version", () =>
+	it.effect("ignores an advance at or below the base's version", () =>
 		withBus(
 			Effect.gen(function* () {
 				const bus = yield* SessionEventBusTag;
@@ -356,7 +356,7 @@ describe("ReadModelSubscription", () => {
 		),
 	);
 
-	it.scoped(
+	it.effect(
 		"does not query for an advance outside its session or collections",
 		() =>
 			withBus(
@@ -393,7 +393,7 @@ describe("ReadModelSubscription", () => {
 			),
 	);
 
-	it.scoped("queries a removal-only window before advancing seen", () =>
+	it.effect("queries a removal-only window before advancing seen", () =>
 		withBus(
 			Effect.gen(function* () {
 				const bus = yield* SessionEventBusTag;
@@ -422,7 +422,7 @@ describe("ReadModelSubscription", () => {
 		),
 	);
 
-	it.scoped("reports removals after querying their window", () =>
+	it.effect("reports removals after querying their window", () =>
 		withBus(
 			Effect.gen(function* () {
 				const bus = yield* SessionEventBusTag;
@@ -454,7 +454,7 @@ describe("ReadModelSubscription", () => {
 		),
 	);
 
-	it.scoped(
+	it.effect(
 		"carries upserts and removes from one advance at one sequence",
 		() =>
 			withBus(
@@ -488,7 +488,7 @@ describe("ReadModelSubscription", () => {
 			),
 	);
 
-	it.scoped(
+	it.effect(
 		"resume on a catch-up source replays past the cursor, no base",
 		() =>
 			withBus(
@@ -535,7 +535,7 @@ describe("ReadModelSubscription", () => {
 			),
 	);
 
-	it.scoped(
+	it.effect(
 		"resume on a rebase source re-reads the whole set as a snapshot",
 		() =>
 			withBus(
@@ -564,7 +564,7 @@ describe("ReadModelSubscription", () => {
 			),
 	);
 
-	it.scoped("gives each advance its own window and its own sequence", () =>
+	it.effect("gives each advance its own window and its own sequence", () =>
 		withBus(
 			Effect.gen(function* () {
 				const bus = yield* SessionEventBusTag;
@@ -616,7 +616,7 @@ describe("ReadModelSubscription", () => {
 	// watermark taken from that query's own counter jumps past advances still
 	// queued; bounding the query by the advance is what stops it.
 
-	it.scoped("keeps a removal an overtaking commit would have swallowed", () =>
+	it.effect("keeps a removal an overtaking commit would have swallowed", () =>
 		withBus(
 			Effect.gen(function* () {
 				const bus = yield* SessionEventBusTag;
@@ -660,7 +660,7 @@ describe("ReadModelSubscription", () => {
 		),
 	);
 
-	it.scoped("orders a removal before the re-creation that follows it", () =>
+	it.effect("orders a removal before the re-creation that follows it", () =>
 		withBus(
 			Effect.gen(function* () {
 				const bus = yield* SessionEventBusTag;
@@ -703,7 +703,7 @@ describe("ReadModelSubscription", () => {
 		),
 	);
 
-	it.scoped(
+	it.effect(
 		"rebases when the sliding bus loses a removal during the base read",
 		() =>
 			withBus(
@@ -744,7 +744,7 @@ describe("ReadModelSubscription", () => {
 			),
 	);
 
-	it.scoped(
+	it.effect(
 		"rebases after a live read stalls even when surviving advances are unrouted",
 		() =>
 			withBus(
@@ -764,7 +764,7 @@ describe("ReadModelSubscription", () => {
 					const release = yield* Deferred.make<void>();
 					yield* Ref.set(
 						fake.onNextRead,
-						Effect.zipRight(
+						Effect.andThen(
 							Deferred.succeed(entered, undefined),
 							Deferred.await(release),
 						),
@@ -798,7 +798,7 @@ describe("ReadModelSubscription", () => {
 			),
 	);
 
-	it.scoped("closing the enclosing scope terminates the stream", () =>
+	it.effect("closing the enclosing scope terminates the stream", () =>
 		withBus(
 			Effect.gen(function* () {
 				const bus = yield* SessionEventBusTag;
@@ -817,7 +817,7 @@ describe("ReadModelSubscription", () => {
 		),
 	);
 
-	it.scoped("passes rows, items and ids through untouched", () =>
+	it.effect("passes rows, items and ids through untouched", () =>
 		withBus(
 			Effect.gen(function* () {
 				const bus = yield* SessionEventBusTag;
@@ -859,7 +859,7 @@ describe("ReadModelSubscription", () => {
 // device disconnects) before its read settles the answer. Every later joiner of
 // that source on that bus then waits forever on an answer nobody will give.
 describe("ReadModelSubscription shared windows", () => {
-	it.scoped("isolates shared windows by project on one bus", () =>
+	it.effect("isolates shared windows by project on one bus", () =>
 		Effect.gen(function* () {
 			const bus = yield* SessionEventBusTag;
 			const a = yield* makeFakeSource<Row>();
@@ -930,7 +930,7 @@ describe("ReadModelSubscription shared windows", () => {
 							const asker = yield* Effect.forkChild(
 								Effect.withMaxOpsBeforeYield(pullA, ops),
 							);
-							for (let i = 0; i < yields; i++) yield* Effect.yieldNow();
+							for (let i = 0; i < yields; i++) yield* Effect.yieldNow;
 							yield* Fiber.interrupt(asker);
 							return yield* pullB.pipe(
 								Effect.timeout("200 millis"),

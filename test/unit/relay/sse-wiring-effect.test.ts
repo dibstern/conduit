@@ -38,7 +38,7 @@ const makeEffectLayer = () =>
 		AlertsLive,
 		PendingInteractionServiceLive,
 		makeOverridesStateLive(),
-		Layer.succeed(SessionManagerServiceTag, {
+		Layer.succeed(SessionManagerServiceTag)({
 			getSessionParentMap: () => Effect.succeed(new Map()),
 		} as never),
 	);
@@ -98,7 +98,7 @@ describe("handleSSEEventEffect", () => {
 						AlertsLive,
 						PendingInteractionServiceLive,
 						makeOverridesStateLive(),
-						Layer.succeed(SessionManagerServiceTag, {
+						Layer.succeed(SessionManagerServiceTag)({
 							getSessionParentMap: () => Effect.succeed(new Map()),
 						} as never),
 					),
@@ -134,7 +134,7 @@ describe("handleSSEEventEffect", () => {
 						AlertsLive,
 						PendingInteractionServiceLive,
 						makeOverridesStateLive(),
-						Layer.succeed(SessionManagerServiceTag, {
+						Layer.succeed(SessionManagerServiceTag)({
 							recordMessageActivity,
 							getSessionParentMap: () => Effect.succeed(new Map()),
 						} as never),

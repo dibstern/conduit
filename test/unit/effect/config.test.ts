@@ -5,7 +5,7 @@ import { DaemonConfigSchema } from "../../../src/lib/daemon/config-persistence.j
 
 describe("DaemonConfigSchema", () => {
 	it("ignores dismissedPaths from older daemon.json files", () => {
-		const result = Schema.decodeUnknownEither(DaemonConfigSchema)({
+		const result = Schema.decodeUnknownResult(DaemonConfigSchema)({
 			pid: 1,
 			port: 2633,
 			pinHash: null,
@@ -15,10 +15,10 @@ describe("DaemonConfigSchema", () => {
 			projects: [{ path: "/app", slug: "app", addedAt: 1 }],
 			dismissedPaths: ["/removed"],
 		});
-		expect(Either.isRight(result)).toBe(true);
-		if (Either.isRight(result)) {
-			expect(result.right.projects).toHaveLength(1);
-			expect(result.right).not.toHaveProperty("dismissedPaths");
+		expect(Either.isSuccess(result)).toBe(true);
+		if (Either.isSuccess(result)) {
+			expect(result.success.projects).toHaveLength(1);
+			expect(result.success).not.toHaveProperty("dismissedPaths");
 		}
 	});
 
@@ -32,8 +32,8 @@ describe("DaemonConfigSchema", () => {
 			keepAwake: false,
 			projects: [],
 		};
-		const result = Schema.decodeUnknownEither(DaemonConfigSchema)(raw);
-		expect(Either.isRight(result)).toBe(true);
+		const result = Schema.decodeUnknownResult(DaemonConfigSchema)(raw);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("validates config with all optional fields", () => {
@@ -67,8 +67,8 @@ describe("DaemonConfigSchema", () => {
 				},
 			],
 		};
-		const result = Schema.decodeUnknownEither(DaemonConfigSchema)(raw);
-		expect(Either.isRight(result)).toBe(true);
+		const result = Schema.decodeUnknownResult(DaemonConfigSchema)(raw);
+		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("rejects config with projects as a non-array", () => {
@@ -81,14 +81,14 @@ describe("DaemonConfigSchema", () => {
 			keepAwake: false,
 			projects: "not an array",
 		};
-		const result = Schema.decodeUnknownEither(DaemonConfigSchema)(raw);
-		expect(Either.isLeft(result)).toBe(true);
+		const result = Schema.decodeUnknownResult(DaemonConfigSchema)(raw);
+		expect(Either.isFailure(result)).toBe(true);
 	});
 
 	it("rejects config missing required fields", () => {
 		const raw = { projects: [], instances: [] };
-		const result = Schema.decodeUnknownEither(DaemonConfigSchema)(raw);
-		expect(Either.isLeft(result)).toBe(true);
+		const result = Schema.decodeUnknownResult(DaemonConfigSchema)(raw);
+		expect(Either.isFailure(result)).toBe(true);
 	});
 
 	it("rejects config with wrong type for pid", () => {
@@ -101,8 +101,8 @@ describe("DaemonConfigSchema", () => {
 			keepAwake: false,
 			projects: [],
 		};
-		const result = Schema.decodeUnknownEither(DaemonConfigSchema)(raw);
-		expect(Either.isLeft(result)).toBe(true);
+		const result = Schema.decodeUnknownResult(DaemonConfigSchema)(raw);
+		expect(Either.isFailure(result)).toBe(true);
 	});
 
 	it("migrates a legacy config without instances to one ordinary Claude default", () => {
@@ -115,10 +115,10 @@ describe("DaemonConfigSchema", () => {
 			keepAwake: false,
 			projects: [],
 		};
-		const result = Schema.decodeUnknownEither(DaemonConfigSchema)(raw);
-		expect(Either.isRight(result)).toBe(true);
-		if (Either.isRight(result)) {
-			expect(result.right.instances).toEqual([
+		const result = Schema.decodeUnknownResult(DaemonConfigSchema)(raw);
+		expect(Either.isSuccess(result)).toBe(true);
+		if (Either.isSuccess(result)) {
+			expect(result.success.instances).toEqual([
 				{
 					id: "claude",
 					name: "Claude",
@@ -127,7 +127,7 @@ describe("DaemonConfigSchema", () => {
 					managed: false,
 				},
 			]);
-			expect(result.right.accountDefaults).toEqual({ claude: "claude" });
+			expect(result.success.accountDefaults).toEqual({ claude: "claude" });
 		}
 	});
 
@@ -141,8 +141,8 @@ describe("DaemonConfigSchema", () => {
 			keepAwake: false,
 			projects: [{ path: "/src/app", addedAt: 1000 }],
 		};
-		const result = Schema.decodeUnknownEither(DaemonConfigSchema)(raw);
-		expect(Either.isLeft(result)).toBe(true);
+		const result = Schema.decodeUnknownResult(DaemonConfigSchema)(raw);
+		expect(Either.isFailure(result)).toBe(true);
 	});
 
 	it("rejects instance with missing managed field", () => {
@@ -156,7 +156,7 @@ describe("DaemonConfigSchema", () => {
 			projects: [],
 			instances: [{ id: "x", name: "X", port: 4096 }],
 		};
-		const result = Schema.decodeUnknownEither(DaemonConfigSchema)(raw);
-		expect(Either.isLeft(result)).toBe(true);
+		const result = Schema.decodeUnknownResult(DaemonConfigSchema)(raw);
+		expect(Either.isFailure(result)).toBe(true);
 	});
 });

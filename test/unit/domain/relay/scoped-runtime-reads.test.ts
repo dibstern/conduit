@@ -27,21 +27,21 @@ it("keeps inbox startup, advance and overflow drains within the bound project", 
 	const persistence = makePersistenceEffectLayer(":memory:", "project-a");
 	const deps = Layer.mergeAll(
 		makeTestHandlerLayer({ persistenceLayer: persistence }),
-		Layer.succeed(SessionEventBusTag, {
+		Layer.succeed(SessionEventBusTag)({
 			publish: () => Effect.void,
 			publishAdvance: (advance) =>
 				Queue.offer(advances, advance).pipe(Effect.asVoid),
 			subscribe: () => Effect.succeed(Stream.empty),
 			subscribeAdvances: () => Effect.succeed(Stream.fromQueue(advances)),
 		}),
-		Layer.succeed(Usage, {
+		Layer.succeed(Usage)({
 			readings: Stream.empty,
 			latest: () => Effect.succeed(undefined),
 			refresh: () => Effect.succeed([]),
 			turnEnded: () => Effect.void,
 			pickFailover: () => Effect.succeed(undefined),
 		}),
-		Layer.succeed(ContinuationTag, {
+		Layer.succeed(ContinuationTag)({
 			requestContinuation: () => Effect.void,
 			intakeLimit: () => Effect.succeed(false),
 			dismissCutOff: () => Effect.void,
@@ -62,7 +62,7 @@ it("keeps inbox startup, advance and overflow drains within the bound project", 
 						Effect.sync(() => {
 							dispatched.push(input.sessionId);
 						}).pipe(
-							Effect.zipRight(
+							Effect.andThen(
 								sql`UPDATE pending_inputs SET state = 'removed' WHERE input_id = ${input.commandId}`,
 							),
 							Effect.orDie,

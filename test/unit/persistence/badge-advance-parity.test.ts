@@ -35,7 +35,7 @@ import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 
 const recordingBus = (advances: ReadModelAdvance[], filename: string) => {
 	let previousVersion = 0;
-	return Layer.succeed(SessionEventBusTag, {
+	return Layer.succeed(SessionEventBusTag)({
 		publish: () => Effect.void,
 		publishAdvance: (advance) =>
 			Effect.sync(() => {

@@ -3,11 +3,7 @@ import { Deferred, Effect, Result as Either, Layer, Ref } from "effect";
 import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { hashPin } from "../../../src/lib/auth.js";
-import {
-	GetStatus,
-	WsRpcError,
-	WsRpcGroup,
-} from "../../../src/lib/contracts/ws-rpc.js";
+import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { ShutdownSignalTag } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import {
@@ -219,7 +215,7 @@ describe("daemon control through the shared RPC group", () => {
 				const calls: string[][] = [];
 				let proxy: string | undefined;
 				const snapshots: boolean[] = [];
-				const tailscaleCli = Layer.succeed(TailscaleCliTag, {
+				const tailscaleCli = Layer.succeed(TailscaleCliTag)({
 					exec: (args) =>
 						Effect.sync(() => {
 							calls.push(args);
@@ -317,7 +313,7 @@ describe("daemon control through the shared RPC group", () => {
 						tailscaleServe: { url: "https://computer.tailnet.ts.net:2633" },
 					}),
 				};
-				const tailscaleCli = Layer.succeed(TailscaleCliTag, {
+				const tailscaleCli = Layer.succeed(TailscaleCliTag)({
 					exec: (args) =>
 						args[0] === "status"
 							? Effect.succeed(
@@ -347,12 +343,12 @@ describe("daemon control through the shared RPC group", () => {
 					const client = yield* makeClient;
 					const config = yield* DaemonConfigRefTag;
 					const before = yield* Ref.get(config);
-					const result = yield* Effect.either(
+					const result = yield* Effect.result(
 						client.SetTailscaleServe({ enabled }),
 					);
-					expect(Either.isLeft(result)).toBe(true);
-					if (Either.isLeft(result))
-						expect(result.left).toBeInstanceOf(WsRpcError);
+					expect(Either.isFailure(result)).toBe(true);
+					if (Either.isFailure(result))
+						expect(result.failure).toBeInstanceOf(WsRpcError);
 					expect(yield* Ref.get(config)).toEqual(before);
 					expect(yield* client.GetStatus({})).toMatchObject(previous);
 					expect(requestSave).not.toHaveBeenCalled();
@@ -361,7 +357,7 @@ describe("daemon control through the shared RPC group", () => {
 						makeDaemonRpcTestLayer([], undefined, {
 							config: { port: 2633, ...previous },
 							tailscaleCli,
-							persistence: Layer.succeed(ConfigPersistenceTag, {
+							persistence: Layer.succeed(ConfigPersistenceTag)({
 								requestSave: Effect.sync(requestSave),
 								flush: Effect.void,
 							}),
@@ -381,16 +377,16 @@ describe("daemon control through the shared RPC group", () => {
 				expect((yield* client.GetStatus({})).tailscaleServeAvailable).toBe(
 					false,
 				);
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					client.SetTailscaleServe({ enabled: true }),
 				);
-				expect(Either.isLeft(result)).toBe(true);
+				expect(Either.isFailure(result)).toBe(true);
 				expect((yield* client.GetStatus({})).tailscaleServeEnabled).toBe(false);
 				expect(requestSave).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.provide(
 					makeDaemonRpcTestLayer([], undefined, {
-						tailscaleCli: Layer.succeed(TailscaleCliTag, {
+						tailscaleCli: Layer.succeed(TailscaleCliTag)({
 							exec: () =>
 								Effect.fail(
 									new TailscaleServeError({
@@ -398,7 +394,7 @@ describe("daemon control through the shared RPC group", () => {
 									}),
 								),
 						}),
-						persistence: Layer.succeed(ConfigPersistenceTag, {
+						persistence: Layer.succeed(ConfigPersistenceTag)({
 							requestSave: Effect.sync(requestSave),
 							flush: Effect.void,
 						}),
@@ -412,10 +408,10 @@ describe("daemon control through the shared RPC group", () => {
 		const calls: string[][] = [];
 		return Effect.gen(function* () {
 			const client = yield* makeClient;
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				client.SetTailscaleServe({ enabled: true }),
 			);
-			expect(Either.isLeft(result)).toBe(true);
+			expect(Either.isFailure(result)).toBe(true);
 			expect(calls).toEqual([
 				["status", "--json"],
 				["serve", "status", "--json"],
@@ -427,7 +423,7 @@ describe("daemon control through the shared RPC group", () => {
 			Effect.provide(
 				makeDaemonRpcTestLayer([], undefined, {
 					config: { port: 2633 },
-					tailscaleCli: Layer.succeed(TailscaleCliTag, {
+					tailscaleCli: Layer.succeed(TailscaleCliTag)({
 						exec: (args) =>
 							Effect.sync(() => {
 								calls.push(args);
@@ -473,7 +469,7 @@ describe("daemon control through the shared RPC group", () => {
 				Effect.provide(
 					makeDaemonRpcTestLayer([], undefined, {
 						config: { port: 2633, tailscaleServeEnabled: true },
-						tailscaleCli: Layer.succeed(TailscaleCliTag, {
+						tailscaleCli: Layer.succeed(TailscaleCliTag)({
 							exec: (args) =>
 								Effect.sync(() => {
 									calls.push(args);
@@ -538,16 +534,16 @@ describe("daemon control through the shared RPC group", () => {
 		() =>
 			Effect.gen(function* () {
 				const client = yield* makeClient;
-				const agent = yield* Effect.either(
+				const agent = yield* Effect.result(
 					client.SetAgent({ slug: "project", agent: "build" }),
 				);
-				const rejected = yield* Effect.either(
+				const rejected = yield* Effect.result(
 					client.SetAgent({ slug: "rejected", agent: "build" }),
 				);
-				expect(Either.isLeft(agent) && agent.left.message).toBe(
+				expect(Either.isFailure(agent) && agent.failure.message).toBe(
 					'Relay "project" does not support default agent updates',
 				);
-				expect(Either.isLeft(rejected) && rejected.left.message).toBe(
+				expect(Either.isFailure(rejected) && rejected.failure.message).toBe(
 					"agent unavailable",
 				);
 			}).pipe(
@@ -581,7 +577,7 @@ describe("daemon control through the shared RPC group", () => {
 			() => {
 				const saves = vi.fn();
 				const layer = makeDaemonRpcTestLayer([], undefined, {
-					persistence: Layer.succeed(ConfigPersistenceTag, {
+					persistence: Layer.succeed(ConfigPersistenceTag)({
 						requestSave: Effect.sync(() => saves()),
 						flush: Effect.void,
 					}),
@@ -662,13 +658,13 @@ describe("daemon control through the shared RPC group", () => {
 					status: "healthy",
 					configDir: "/tmp/profile-personal",
 				});
-				const missing = yield* Effect.either(
+				const missing = yield* Effect.result(
 					client.GetInstanceStatus({ instanceId: "missing" }),
 				);
-				expect(Either.isLeft(missing) && missing.left).toBeInstanceOf(
+				expect(Either.isFailure(missing) && missing.failure).toBeInstanceOf(
 					WsRpcError,
 				);
-				expect(Either.isLeft(missing) && missing.left.message).toBe(
+				expect(Either.isFailure(missing) && missing.failure.message).toBe(
 					'Instance "missing" not found',
 				);
 			}).pipe(Effect.provide(makeDaemonRpcTestLayer())),
@@ -676,10 +672,10 @@ describe("daemon control through the shared RPC group", () => {
 
 	it.effect("returns daemon-required errors from standalone handlers", () =>
 		Effect.gen(function* () {
-			const result = yield* Effect.either(
-				wsRpcHandlers.GetStatus(new GetStatus({})),
+			const result = yield* Effect.result(
+				wsRpcHandlers.GetStatus({ _tag: "GetStatus" }),
 			);
-			expect(Either.isLeft(result) && result.left.message).toBe(
+			expect(Either.isFailure(result) && result.failure.message).toBe(
 				"GetStatus requires daemon mode",
 			);
 		}),

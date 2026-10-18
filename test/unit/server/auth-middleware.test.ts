@@ -18,8 +18,7 @@ import {
 const authLayer = (auth: AuthManager) => makeAuthManagerLive(auth);
 
 const requestLayer = (url: string, headers?: HeadersInit) =>
-	Layer.succeed(
-		HttpServerRequest.HttpServerRequest,
+	Layer.succeed(HttpServerRequest.HttpServerRequest)(
 		HttpServerRequest.fromWeb(
 			new Request(`http://localhost${url}`, {
 				...(headers !== undefined && { headers }),

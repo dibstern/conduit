@@ -1,8 +1,8 @@
 // Run only against a disposable snapshot: opening the writer analyzes indexes.
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import Database from "better-sqlite3";
 import { Effect, ManagedRuntime } from "effect";
 import { SqlClient, Statement } from "effect/sql";
 import { PersistenceProjectTag } from "../../src/lib/domain/persistence/Services/persistence-service.js";
@@ -38,7 +38,7 @@ await Effect.runPromise(
 		operation = "stream-version";
 		yield* store.getNextStreamVersion(sessionId);
 	}).pipe(
-		Statement.withTransformer((statement) => {
+		Effect.provideService(Statement.CurrentTransformer, (statement) => {
 			const [sql, params] = statement.compile();
 			if (/^\s*(SELECT|WITH)\b/i.test(sql)) {
 				const name =
@@ -60,18 +60,21 @@ await Effect.runPromise(
 	),
 );
 
-function measure(db: Database.Database) {
+function measure(db: DatabaseSync) {
 	return queries.map((query) => {
-		const plan = db
-			.prepare<unknown[], { detail: string }>(`EXPLAIN QUERY PLAN ${query.sql}`)
-			.all(...query.params)
-			.map(({ detail }) => detail);
-		const statement = db.prepare<unknown[], Record<string, unknown>>(query.sql);
-		const warm = statement.all(...query.params);
+		// These captured production read queries bind only SQLite scalar values.
+		const params = query.params as readonly SQLInputValue[];
+		const plan = (
+			db.prepare(`EXPLAIN QUERY PLAN ${query.sql}`).all(...params) as {
+				detail: string;
+			}[]
+		).map(({ detail }) => detail);
+		const statement = db.prepare(query.sql);
+		const warm = statement.all(...params);
 		const samples: number[] = [];
 		for (let index = 0; index < 7; index++) {
 			const start = performance.now();
-			statement.all(...query.params);
+			statement.all(...params);
 			samples.push(performance.now() - start);
 		}
 		return {
@@ -84,9 +87,9 @@ function measure(db: Database.Database) {
 	});
 }
 
-const beforeDb = new Database(filename, {
-	readonly: true,
-	fileMustExist: true,
+const beforeDb = new DatabaseSync(filename, {
+	readOnly: true,
+	timeout: 5000,
 });
 const before = measure(beforeDb);
 const sqliteVersion = beforeDb
@@ -97,11 +100,11 @@ const beforeStats = beforeDb
 		"SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'sqlite_stat1'",
 	)
 	.get();
-const projectId = beforeDb
-	.prepare<[string], { project_id: string }>(
-		"SELECT project_id FROM events WHERE session_id = ? LIMIT 1",
-	)
-	.get(sessionId)?.project_id;
+const projectId = (
+	beforeDb
+		.prepare("SELECT project_id FROM events WHERE session_id = ? LIMIT 1")
+		.get(sessionId) as { project_id: string } | undefined
+)?.project_id;
 beforeDb.close();
 if (!projectId) throw new Error("Session has no project identity");
 
@@ -121,8 +124,8 @@ const profile = await runtime.runPromise(
 	}),
 );
 const openMs = performance.now() - started;
-const afterDb = new Database(filename, { readonly: true, fileMustExist: true });
-afterDb.pragma("mmap_size = 1073741824");
+const afterDb = new DatabaseSync(filename, { readOnly: true, timeout: 5000 });
+afterDb.exec("PRAGMA mmap_size = 1073741824");
 const after = measure(afterDb);
 afterDb.close();
 await runtime.dispose();

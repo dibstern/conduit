@@ -210,7 +210,7 @@ describe("account catalogue refresh through browser RPC", () => {
 				const repeatedRead = yield* project
 					.GetModels({ projectSlug: "myapp", instanceId: "claude" })
 					.pipe(Effect.forkScoped);
-				yield* Effect.yieldNow();
+				yield* Effect.yieldNow;
 				expect(yield* Queue.size(started)).toBe(0);
 				yield* daemon.SetDefault({ instanceId: "personal" });
 				yield* project.GetModels({ projectSlug: "myapp" });

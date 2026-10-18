@@ -72,7 +72,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 				Effect.result(instance.interruptTurnEffect("bad-session")),
 			);
 
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 			if (result._tag === "Failure") {
 				expect(result.failure).toMatchObject({
 					_tag: "ProviderInstanceFailure",
@@ -225,7 +225,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 					.pipe(Effect.result),
 			);
 
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 			if (result._tag === "Failure") {
 				expect(result.failure).toMatchObject({
 					_tag: "ProviderInstanceFailure",
@@ -254,7 +254,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 					.pipe(Effect.result),
 			);
 
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 			if (result._tag === "Failure") {
 				expect(result.failure).toMatchObject({
 					_tag: "ProviderInstanceFailure",
@@ -328,7 +328,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 					.pipe(Effect.result),
 			);
 
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 			if (result._tag === "Failure") {
 				expect(result.failure).toMatchObject({
 					_tag: "ProviderInstanceFailure",
@@ -426,7 +426,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 				Effect.result(instance.interruptTurnEffect("bound-s")),
 			);
 
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 			if (result._tag === "Failure") {
 				expect(result.failure).toMatchObject({
 					_tag: "ProviderInstanceFailure",

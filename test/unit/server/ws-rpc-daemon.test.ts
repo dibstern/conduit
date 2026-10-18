@@ -47,8 +47,8 @@ describe("daemon RPC handlers", () => {
 					createSession(malformed, Headers.empty),
 				);
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: { message: "projectSlug is required" },
+					_tag: "Failure",
+					failure: { message: "projectSlug is required" },
 				});
 				expect(resolve).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(makeDaemonRpcTestLayer())),
@@ -90,8 +90,8 @@ describe("daemon RPC handlers", () => {
 				expect(
 					yield* Effect.result(client.ResolveSession({ sessionId: "missing" })),
 				).toMatchObject({
-					_tag: "Left",
-					left: { _tag: "WsRpcError", message: "Unknown session: missing" },
+					_tag: "Failure",
+					failure: { _tag: "WsRpcError", message: "Unknown session: missing" },
 				});
 				expect((yield* client.ScanNow({})).active).toEqual([]);
 				expect(
@@ -108,7 +108,7 @@ describe("daemon RPC handlers", () => {
 					(yield* Effect.result(
 						client.SetAutoSettleSetting({ autoSettleAfterDays: 91 }),
 					))._tag,
-				).toBe("Left");
+				).toBe("Failure");
 				expect(
 					(yield* client.GetAutoSettleSetting({})).autoSettleAfterDays,
 				).toBe(7);

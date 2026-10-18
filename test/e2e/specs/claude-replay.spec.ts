@@ -83,7 +83,7 @@ function recordSends(page: Page): Send[] {
 }
 
 const makeWsRpcClient = RpcClient.make(WsRpcGroup);
-type WsRpcClient = Effect.Effect.Success<typeof makeWsRpcClient>;
+type WsRpcClient = Effect.Success<typeof makeWsRpcClient>;
 
 test.describe("Claude replay lane", () => {
 	test.beforeEach(({ page }) => {

@@ -61,7 +61,7 @@ const flushDispatchContinuation = () =>
 	Effect.promise<void>(() => new Promise((resolve) => setImmediate(resolve)));
 
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-layer(Layer.mergeAll(Layer.succeed(AccountDirectory, makeMockAccountDirectory()), makePersistenceEffectLayer(":memory:", "test-project"), Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry())))("persistent handler runtime", (it) => {
+layer(Layer.mergeAll(Layer.succeed(AccountDirectory)(makeMockAccountDirectory()), makePersistenceEffectLayer(":memory:", "test-project"), Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()), Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag)(new ProviderRegistry())))("persistent handler runtime", (it) => {
 describe("model handlers with Effect override state", () => {
 	it.effect(
 		"stores selected session model and restored variant without legacy SessionOverrides",
@@ -98,10 +98,10 @@ describe("model handlers with Effect override state", () => {
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeModelServiceTag, modelService),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, mockLogger()),
-				Layer.succeed(ConfigTag, makeMockConfig({ configDir })),
+				Layer.succeed(OpenCodeModelServiceTag)(modelService),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(mockLogger()),
+				Layer.succeed(ConfigTag)(makeMockConfig({ configDir })),
 				makeOverridesStateLive(),
 			);
 

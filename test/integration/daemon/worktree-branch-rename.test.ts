@@ -31,14 +31,7 @@ import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-	CreateSession,
-	DeleteSession,
-	ForkSessionForSession,
-	InspectSessionWorktrees,
-	ListDaemonSessions,
-	MoveSessionWorkspace,
 	RenameSessionBranch,
-	SaveProject,
 	type SessionInfo,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
@@ -178,16 +171,18 @@ process.exit(result.status ?? 1);
 		}
 		await fixture.restart({ startupTimeoutMs: 120_000 });
 		const socket = join(fixture.configDir, "relay.sock");
-		await sendRpcRequest(
-			socket,
-			new SaveProject({ slug: "process-test", folders }),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders,
+		});
 		const sessions = async () =>
 			(
-				await sendRpcRequest(
-					socket,
-					new ListDaemonSessions({ scope: "process-test", roots: false }),
-				)
+				await sendRpcRequest(socket, {
+					_tag: "ListDaemonSessions",
+					scope: "process-test",
+					roots: false,
+				})
 			).sessions;
 		const find = async (id: string) => {
 			const session = (await sessions()).find((row) => row.id === id);
@@ -195,17 +190,15 @@ process.exit(result.status ?? 1);
 			return session;
 		};
 		const create = async (title: string, newWorktree = true) => {
-			const { sessionId } = await sendRpcRequest(
-				socket,
-				new CreateSession({
-					permissionMode: "ask",
-					projectSlug: "process-test",
-					originId: "worktree-branch-rename-test",
-					providerId: "claude",
-					title,
-					...(newWorktree ? { newWorktree: true } : {}),
-				}),
-			);
+			const { sessionId } = await sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				permissionMode: "ask",
+				projectSlug: "process-test",
+				originId: "worktree-branch-rename-test",
+				providerId: "claude",
+				title,
+				...(newWorktree ? { newWorktree: true } : {}),
+			});
 			const session = await find(sessionId);
 			for (const [folder, path] of Object.entries(
 				session.workspace?.worktrees ?? {},
@@ -822,13 +815,11 @@ process.exit(result.status ?? 1);
 		const session = await create("Existing worktree", false);
 		const path = join(fixture.root, "existing");
 		git(fixture.projectDir, "worktree", "add", "-b", "external/existing", path);
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId: session.id,
-				path: realpathSync(path),
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId: session.id,
+			path: realpathSync(path),
+		});
 		worktrees.set(`${session.id}:${fixture.projectDir}`, {
 			sessionId: session.id,
 			folder: fixture.projectDir,
@@ -853,13 +844,11 @@ process.exit(result.status ?? 1);
 		const parent = await create("Parent");
 		const browser = await fixture.connect(parent.id);
 		await browser.send(parent.id, "Reply with pong.", 120_000);
-		const fork = await sendRpcRequest(
-			socket,
-			new ForkSessionForSession({
-				sessionId: parent.id,
-				originId: browser.originId,
-			}),
-		);
+		const fork = await sendRpcRequest(socket, {
+			_tag: "ForkSession",
+			sessionId: parent.id,
+			originId: browser.originId,
+		});
 		const child = await find(fork.sessionId);
 		expect(child.workspace?.worktrees).toEqual(parent.workspace?.worktrees);
 		expect(child.canRenameBranch ?? false).toBe(false);
@@ -901,13 +890,11 @@ process.exit(result.status ?? 1);
 			"external/user-choice",
 			existing,
 		);
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId: session.id,
-				path: existing,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId: session.id,
+			path: existing,
+		});
 		const moved = await find(session.id);
 		expect(moved.workspace?.cause).toBe("user");
 		expect(moved.workspace?.worktrees[fixture.projectDir]).toBe(existing);
@@ -977,12 +964,10 @@ process.exit(result.status ?? 1);
 		}
 		const branchName = "feature/merged-renamed";
 		expect(await rename(session.id, branchName)).toEqual({ ok: true });
-		const inspection = await sendRpcRequest(
-			socket,
-			new InspectSessionWorktrees({
-				sessionId: session.id,
-			}),
-		);
+		const inspection = await sendRpcRequest(socket, {
+			_tag: "InspectSessionWorktrees",
+			sessionId: session.id,
+		});
 		evidence["inspection"] = inspection;
 		expect(inspection.removeWorktrees).toBe(true);
 		expect(inspection.worktrees).toHaveLength(2);
@@ -995,13 +980,11 @@ process.exit(result.status ?? 1);
 				}),
 			);
 		const before = state();
-		const response = await sendRpcRequest(
-			socket,
-			new DeleteSession({
-				sessionId: session.id,
-				removeWorktrees: true,
-			}),
-		);
+		const response = await sendRpcRequest(socket, {
+			_tag: "DeleteSession",
+			sessionId: session.id,
+			removeWorktrees: true,
+		});
 		evidence["deletion"] = { before, response, after: state() };
 		expect(response.ok).toBe(true);
 		expect(response.worktreeWarnings ?? []).toEqual([]);

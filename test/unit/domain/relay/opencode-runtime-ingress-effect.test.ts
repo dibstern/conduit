@@ -451,8 +451,8 @@ describe("EffectOpenCodeRuntimeIngress", () => {
 							ingestion.ingestBatch(events, {
 								...options,
 								beforeCommit: Deferred.succeed(entered, undefined).pipe(
-									Effect.zipRight(Deferred.await(release)),
-									Effect.zipRight(options.beforeCommit ?? Effect.void),
+									Effect.andThen(Deferred.await(release)),
+									Effect.andThen(options.beforeCommit ?? Effect.void),
 								),
 							}),
 					}),

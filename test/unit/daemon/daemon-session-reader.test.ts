@@ -182,7 +182,7 @@ describe("listDaemonSessions", () => {
 							),
 						),
 					).pipe(
-						Effect.zipRight(
+						Effect.andThen(
 							Effect.gen(function* () {
 								const sql = yield* SqlClient.SqlClient;
 								yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
@@ -264,11 +264,19 @@ describe("listDaemonSessions", () => {
 					);
 					expect(empty.sessions).toEqual([]);
 					expect(unusedGit).not.toHaveBeenCalled();
-					const listing = yield* Effect.fork(listDaemonSessions({}, cache));
+					const listing = yield* Effect.forkChild(
+						listDaemonSessions({}, cache),
+					);
 					yield* Effect.tryPromise(() =>
 						vi.waitFor(() => expect(read).toHaveBeenCalledTimes(4)),
 					);
-					expect(Option.isNone(yield* Fiber.poll(listing))).toBe(true);
+					expect(
+						Option.isNone(
+							yield* Effect.sync(() =>
+								Option.fromUndefinedOr(listing.pollUnsafe()),
+							),
+						),
+					).toBe(true);
 					expect(cache.peek(project)?.branch).toBe("cached");
 					release();
 					const result = yield* Fiber.join(listing);
@@ -1264,8 +1272,8 @@ describe("ResolveSession", () => {
 			expect(
 				yield* Effect.result(client.ResolveSession({ sessionId: "unknown" })),
 			).toMatchObject({
-				_tag: "Left",
-				left: { _tag: "WsRpcError", message: "Unknown session: unknown" },
+				_tag: "Failure",
+				failure: { _tag: "WsRpcError", message: "Unknown session: unknown" },
 			});
 		}).pipe(
 			Effect.provide(

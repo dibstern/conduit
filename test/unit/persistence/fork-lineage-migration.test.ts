@@ -32,8 +32,8 @@ import { projectStorageDir } from "../../../src/lib/persistence/project-storage.
 const migrateWithConfig = (dir: string) =>
 	Effect.gen(function* () {
 		const loaded = loadDaemonConfigResult(dir);
-		const config = yield* Either.isLeft(loaded) &&
-		loaded.left._tag === "NotFound"
+		const config = yield* Either.isFailure(loaded) &&
+		loaded.failure._tag === "NotFound"
 			? Effect.succeed(defaultDaemonConfig())
 			: loaded;
 		if (

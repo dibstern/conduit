@@ -1,4 +1,4 @@
-import { Cause, Chunk, Effect, Layer, Schema, Stream } from "effect";
+import { Cause, Effect, Layer, Schema, Stream } from "effect";
 import { RpcClient, RpcSchema, RpcSerialization } from "effect/rpc";
 import { Socket } from "effect/socket";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
@@ -19,9 +19,7 @@ async function callRpc(tag: string, payload: unknown, take?: number) {
 					? response
 					: take === undefined
 						? Stream.runDrain(response)
-						: Stream.runCollect(Stream.take(response, take)).pipe(
-								Effect.map(Chunk.toReadonlyArray),
-							),
+						: Stream.runCollect(Stream.take(response, take)),
 			);
 			if (result._tag === "Success") return { value: result.value };
 			const failure = Cause.findErrorOption(result.cause);
@@ -29,15 +27,18 @@ async function callRpc(tag: string, payload: unknown, take?: number) {
 				return { defect: String(Cause.squash(result.cause)) };
 			const error = failure.value;
 			const rpc = WsRpcGroup.requests.get(tag);
-			const stream = rpc && RpcSchema.getStreamSchemas(rpc.successSchema.ast);
+			const stream =
+				rpc && RpcSchema.isStreamSchema(rpc.successSchema)
+					? rpc.successSchema
+					: undefined;
 			const decoded = rpc
 				? Schema.decodeUnknownOption(
-						Schema.Union(
-							Schema.make(rpc.errorSchema.ast),
-							stream?._tag === "Some"
-								? Schema.make(stream.value.failure.ast)
+						Schema.Union([
+							Schema.make<Schema.Codec<unknown>>(rpc.errorSchema.ast),
+							stream
+								? Schema.make<Schema.Codec<unknown>>(stream.error.ast)
 								: Schema.Never,
-						),
+						]),
 					)(JSON.parse(JSON.stringify(error)))
 				: undefined;
 			return {

@@ -126,16 +126,15 @@ const makeLayer = (options?: {
 	return OpenCodeTerminalServiceLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
-				Layer.succeed(
-					OpenCodeInstancesTag,
+				Layer.succeed(OpenCodeInstancesTag)(
 					options?.instances ?? makeOpenCodeInstancesStub({ opencode: api }),
 				),
-				Layer.succeed(PtyManagerTag, ptyManager),
-				Layer.succeed(ConnectPtyUpstreamTag, connectPtyUpstream),
-				Layer.succeed(LocalPtyServiceTag, localPty),
-				Layer.succeed(WebSocketHandlerTag, wsHandler),
-				Layer.succeed(ConfigTag, makeMockConfig({ projectDir: "/project" })),
-				Layer.succeed(LoggerTag, log),
+				Layer.succeed(PtyManagerTag)(ptyManager),
+				Layer.succeed(ConnectPtyUpstreamTag)(connectPtyUpstream),
+				Layer.succeed(LocalPtyServiceTag)(localPty),
+				Layer.succeed(WebSocketHandlerTag)(wsHandler),
+				Layer.succeed(ConfigTag)(makeMockConfig({ projectDir: "/project" })),
+				Layer.succeed(LoggerTag)(log),
 			),
 		),
 	);
@@ -724,8 +723,12 @@ describe("OpenCodeTerminalServiceLive", () => {
 					}),
 				);
 				yield* Deferred.await(closeStarted);
-				yield* Effect.yieldNow();
-				const closedBeforeAttach = Option.isSome(yield* Fiber.poll(closing));
+				yield* Effect.yieldNow;
+				const closedBeforeAttach = Option.isSome(
+					yield* Effect.sync(() =>
+						Option.fromUndefinedOr(closing.pollUnsafe()),
+					),
+				);
 				yield* Deferred.succeed(releaseAttach, undefined);
 				yield* Fiber.join(listing);
 				yield* Fiber.join(closing);

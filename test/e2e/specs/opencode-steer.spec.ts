@@ -85,7 +85,7 @@ test.describe("OpenCode steering", () => {
 		const refused = await Effect.runPromise(
 			Effect.scoped(
 				Effect.flatMap(RpcClient.make(WsRpcGroup), (client) =>
-					client.input.submit({
+					client["input.submit"]({
 						sessionId,
 						inputId: randomUUID(),
 						text: "Bravo",

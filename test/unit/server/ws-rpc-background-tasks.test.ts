@@ -66,7 +66,7 @@ describe("StopBackgroundTask RPC", () => {
 						providerRegistry: new ProviderRegistry([provider]),
 						orchestrationEngine: engine,
 					}),
-					Layer.succeed(BackgroundLivenessTag, () =>
+					Layer.succeed(BackgroundLivenessTag)(() =>
 						live
 							? {
 									work: "monitoring" as const,
@@ -136,7 +136,7 @@ describe("StopBackgroundTask RPC", () => {
 			return Effect.gen(function* () {
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
 				const result = yield* Effect.result(client.StopBackgroundTask(request));
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 				state.stopTaskEffect.mockImplementationOnce(() => {
 					state.finish();
 					return Effect.fail(error);
@@ -154,7 +154,7 @@ describe("StopBackgroundTask RPC", () => {
 			return Effect.gen(function* () {
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
 				const result = yield* Effect.result(client.StopBackgroundTask(request));
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 				expect(state.stopTaskEffect).not.toHaveBeenCalled();
 				expect(state.interruptTurnEffect).not.toHaveBeenCalled();
 			}).pipe(Effect.scoped, Effect.provide(state.layer));

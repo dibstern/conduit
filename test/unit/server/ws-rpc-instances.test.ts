@@ -262,7 +262,7 @@ describe("WsRpcServerLayer instance management", () => {
 					Layer.provideMerge(
 						Layer.merge(
 							makeTestHandlerLayer(),
-							Layer.succeed(ScanServiceTag, { scanNow: triggerScan }),
+							Layer.succeed(ScanServiceTag)({ scanNow: triggerScan }),
 						),
 					),
 				),

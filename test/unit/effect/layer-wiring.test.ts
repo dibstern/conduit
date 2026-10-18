@@ -119,7 +119,7 @@ const waitForTraceRecord = (
 describe("makeDaemonLive wiring", () => {
 	const makeDaemonLayer = () => Layer.fresh(makeDaemonLive(makeMockOptions()));
 
-	it.scoped("provides DaemonEventBusTag (Tier 0)", () =>
+	it.effect("provides DaemonEventBusTag (Tier 0)", () =>
 		Effect.gen(function* () {
 			const bus = yield* DaemonEventBusTag;
 			// Verify it's a real PubSub by publishing
@@ -131,7 +131,7 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
-	it.scoped("provides DaemonConfigRefTag with the actual ephemeral port", () =>
+	it.effect("provides DaemonConfigRefTag with the actual ephemeral port", () =>
 		Effect.gen(function* () {
 			const ref = yield* DaemonConfigRefTag;
 			const config = yield* Ref.get(ref);
@@ -140,7 +140,7 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"makeDaemonLive seeds DaemonConfigRef from the full initial config",
 		() => {
 			const options = {
@@ -172,7 +172,7 @@ describe("makeDaemonLive wiring", () => {
 		},
 	);
 
-	it.scoped("provides ShutdownSignalTag as a Deferred (Tier 0)", () =>
+	it.effect("provides ShutdownSignalTag as a Deferred (Tier 0)", () =>
 		Effect.gen(function* () {
 			const shutdown = yield* ShutdownSignalTag;
 			// It should be a Deferred — verify by checking it's not already done
@@ -181,7 +181,7 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
-	it.scoped("installs local trace artifact tracing in Tier 0", () => {
+	it.effect("installs local trace artifact tracing in Tier 0", () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-daemon-wiring-"));
 		const options = {
 			...makeMockOptions(),
@@ -210,7 +210,7 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
 	});
 
-	it.scoped(
+	it.effect(
 		"provides AuthManagerTag with reactive pinHash from DaemonConfigRef (Tier 1)",
 		() =>
 			Effect.gen(function* () {
@@ -225,7 +225,7 @@ describe("makeDaemonLive wiring", () => {
 			}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
-	it.scoped("provides TlsCertTag (Tier 1)", () =>
+	it.effect("provides TlsCertTag (Tier 1)", () =>
 		Effect.gen(function* () {
 			const tls = yield* TlsCertTag;
 			// TLS disabled by default — certs should be null
@@ -234,7 +234,7 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
-	it.scoped("provides ProjectRegistryTag (Tier 2)", () =>
+	it.effect("provides ProjectRegistryTag (Tier 2)", () =>
 		Effect.gen(function* () {
 			const ref = yield* ProjectRegistryTag;
 			const state = yield* Ref.get(ref);
@@ -243,7 +243,7 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
-	it.scoped("provides DaemonHandleTag from the composed daemon graph", () =>
+	it.effect("provides DaemonHandleTag from the composed daemon graph", () =>
 		Effect.gen(function* () {
 			const handle = yield* DaemonHandleTag;
 			const status = yield* handle.getStatus();
@@ -253,7 +253,7 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"provides InstanceManagerStateTag and PollerFibersTag (Tier 2)",
 		() =>
 			Effect.gen(function* () {
@@ -267,7 +267,7 @@ describe("makeDaemonLive wiring", () => {
 			}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
-	it.scoped("seeds the CLI OpenCode URL into Effect instance state", () => {
+	it.effect("seeds the CLI OpenCode URL into Effect instance state", () => {
 		const options = {
 			...makeMockOptions(),
 			defaultOpencodeUrl: "http://127.0.0.1:4567",
@@ -294,7 +294,7 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
 	});
 
-	it.scoped("provides RelayFactoryTag and HttpServerRefTag (Tier 2)", () =>
+	it.effect("provides RelayFactoryTag and HttpServerRefTag (Tier 2)", () =>
 		Effect.gen(function* () {
 			const factory = yield* RelayFactoryTag;
 			expect(factory.create).toBeDefined();
@@ -308,7 +308,7 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
-	it.scoped("creates daemon lifecycle context when options omit ctx", () => {
+	it.effect("creates daemon lifecycle context when options omit ctx", () => {
 		const options = makeMockOptions();
 		return Effect.gen(function* () {
 			const serverRef = yield* HttpServerRefTag;
@@ -318,7 +318,7 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
 	});
 
-	it.scoped("provides DaemonStateTag (Tier 2)", () =>
+	it.effect("provides DaemonStateTag (Tier 2)", () =>
 		Effect.gen(function* () {
 			const stateRef = yield* DaemonStateTag;
 			const state = yield* Ref.get(stateRef);
@@ -326,7 +326,7 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
-	it.scoped("provides KeepAwakeTag with activate/deactivate (Tier 4)", () =>
+	it.effect("provides KeepAwakeTag with activate/deactivate (Tier 4)", () =>
 		Effect.gen(function* () {
 			const keepAwake = yield* KeepAwakeTag;
 			const supported = yield* keepAwake.isSupported();
@@ -338,7 +338,7 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
-	it.scoped("provides VersionCheckerTag (Tier 4)", () =>
+	it.effect("provides VersionCheckerTag (Tier 4)", () =>
 		Effect.gen(function* () {
 			const checker = yield* VersionCheckerTag;
 			const current = yield* checker.getCurrentVersion();
@@ -346,7 +346,7 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
-	it.scoped("provides StorageMonitorTag (Tier 4)", () =>
+	it.effect("provides StorageMonitorTag (Tier 4)", () =>
 		Effect.gen(function* () {
 			const monitor = yield* StorageMonitorTag;
 			const usage = yield* monitor.getUsage();
@@ -355,7 +355,7 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
-	it.scoped("DaemonEventBus is shared across all tiers", () =>
+	it.effect("DaemonEventBus is shared across all tiers", () =>
 		Effect.gen(function* () {
 			const bus = yield* DaemonEventBusTag;
 
@@ -371,7 +371,7 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
-	it.scoped("ConfigPersistenceLive is wired into makeDaemonLive", () =>
+	it.effect("ConfigPersistenceLive is wired into makeDaemonLive", () =>
 		Effect.gen(function* () {
 			const configDir = mkdtempSync(join(tmpdir(), "conduit-effect-config-"));
 			yield* Effect.addFinalizer(() =>
@@ -396,7 +396,7 @@ describe("makeDaemonLive wiring", () => {
 				const bus = yield* DaemonEventBusTag;
 				const configPersistence = yield* ConfigPersistenceTag;
 				yield* PubSub.publish(bus, DaemonEvent.ConfigChanged());
-				yield* Effect.yieldNow();
+				yield* Effect.yieldNow;
 				yield* configPersistence.flush;
 				const raw = readFileSync(join(configDir, "daemon.json"), "utf-8");
 				return JSON.parse(raw) as {
@@ -414,7 +414,7 @@ describe("makeDaemonLive wiring", () => {
 		}),
 	);
 
-	it.scoped(
+	it.effect(
 		"Effect project and instance mutations request config persistence",
 		() =>
 			Effect.gen(function* () {
@@ -478,7 +478,7 @@ describe("makeDaemonLive wiring", () => {
 			}),
 	);
 
-	it.scoped(
+	it.effect(
 		"pure Effect snapshot preserves disk-loaded projects and instances",
 		() =>
 			Effect.gen(function* () {
@@ -545,7 +545,7 @@ describe("makeDaemonLive wiring", () => {
 					const bus = yield* DaemonEventBusTag;
 					const configPersistence = yield* ConfigPersistenceTag;
 					yield* PubSub.publish(bus, DaemonEvent.ConfigChanged());
-					yield* Effect.yieldNow();
+					yield* Effect.yieldNow;
 					yield* configPersistence.flush;
 					const raw = readFileSync(configPath, "utf-8");
 					return JSON.parse(raw) as {
@@ -576,7 +576,7 @@ describe("makeDaemonLive wiring", () => {
 			}),
 	);
 
-	it.scoped(
+	it.effect(
 		"AuthManager reactive wiring: pinHash update in Tier 0 visible in Tier 1",
 		() =>
 			Effect.gen(function* () {
@@ -599,7 +599,7 @@ describe("makeDaemonLive wiring", () => {
 			}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"KeepAwake activate/deactivate lifecycle works through Layer (Tier 4)",
 		() =>
 			Effect.gen(function* () {

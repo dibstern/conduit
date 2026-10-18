@@ -5,12 +5,7 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { describe, expect, it } from "@effect/vitest";
 import { Context, Effect, Result as Either, Layer, Ref } from "effect";
-import {
-	GetAutoSettleSetting,
-	GetUsageLimitsSetting,
-	SetAutoSettleSetting,
-	SetUsageLimitsSetting,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import {
 	type DaemonConfig,
 	defaultDaemonConfig,
@@ -35,7 +30,7 @@ import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/clau
 import { settingsHandlers } from "../../../src/lib/server/ws-rpc/settings.js";
 
 describe("settings RPC config persistence", () => {
-	it.scoped("updates memory and flushes settings before returning", () =>
+	it.effect("updates memory and flushes settings before returning", () =>
 		Effect.gen(function* () {
 			const configDir = yield* Effect.acquireRelease(
 				Effect.sync(() => mkdtempSync("/tmp/rpc-settings-")),
@@ -51,7 +46,7 @@ describe("settings RPC config persistence", () => {
 				makeInstanceManagerStateLive(undefined, [], {
 					launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
 				}),
-				Layer.succeed(ConfigTag, {
+				Layer.succeed(ConfigTag)({
 					httpServer: createServer(),
 					projectDir: configDir,
 					slug: "settings",
@@ -59,7 +54,7 @@ describe("settings RPC config persistence", () => {
 					persistenceDbPath: join(configDir, "events.db"),
 					publishGlobalSetting: () => Effect.void,
 				}),
-				Layer.succeed(ConfigWriterTag, {
+				Layer.succeed(ConfigWriterTag)({
 					write: (config) =>
 						Effect.tryPromise(() => saveDaemonConfig(config, configDir)).pipe(
 							Effect.tap(() => Effect.sync(() => writes.push(config))),
@@ -81,7 +76,7 @@ describe("settings RPC config persistence", () => {
 				order: ["second", "first"],
 			};
 			yield* settingsHandlers
-				.SetUsageLimitsSetting(new SetUsageLimitsSetting({ usageLimits }))
+				.SetUsageLimitsSetting({ _tag: "SetUsageLimitsSetting", usageLimits })
 				.pipe(Effect.provide(context));
 			expect((yield* Ref.get(configRef)).usageLimits).toEqual(usageLimits);
 			expect(writes).toHaveLength(1);
@@ -92,11 +87,10 @@ describe("settings RPC config persistence", () => {
 				)?.usageLimits,
 			).toEqual(usageLimits);
 			yield* settingsHandlers
-				.SetAutoSettleSetting(
-					new SetAutoSettleSetting({
-						autoSettleAfterDays: null,
-					}),
-				)
+				.SetAutoSettleSetting({
+					_tag: "SetAutoSettleSetting",
+					autoSettleAfterDays: null,
+				})
 				.pipe(Effect.provide(context));
 			expect((yield* Ref.get(configRef)).autoSettleAfterDays).toBeNull();
 			expect(writes).toHaveLength(2);
@@ -125,12 +119,12 @@ describe("settings RPC config persistence", () => {
 			);
 			expect(
 				yield* settingsHandlers
-					.GetUsageLimitsSetting(new GetUsageLimitsSetting({}))
+					.GetUsageLimitsSetting({ _tag: "GetUsageLimitsSetting" })
 					.pipe(Effect.provide(context)),
 			).toEqual({ usageLimits });
 			expect(
 				yield* settingsHandlers
-					.GetAutoSettleSetting(new GetAutoSettleSetting({}))
+					.GetAutoSettleSetting({ _tag: "GetAutoSettleSetting" })
 					.pipe(Effect.provide(context)),
 			).toEqual({ autoSettleAfterDays: null });
 		}),

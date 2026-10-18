@@ -42,7 +42,7 @@ const layerFor = (instance: ProviderInstance) =>
 	Layer.mergeAll(
 		makePersistenceEffectLayer(":memory:", "test-project"),
 		ProviderRegistryLive([instance]),
-		Layer.succeed(LoggerTag, makeMockLogger()),
+		Layer.succeed(LoggerTag)(makeMockLogger()),
 	);
 
 const seedSessionPick = (pick: {

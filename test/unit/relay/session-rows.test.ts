@@ -78,7 +78,7 @@ describe("Session Rows read paths", () => {
 						),
 					);
 					const activity = yield* makeSessionActivity;
-					const activityLayer = Layer.succeed(SessionActivityTag, activity);
+					const activityLayer = Layer.succeed(SessionActivityTag)(activity);
 					const persistence = makePersistenceEffectLayer(
 						join(configDir, "events.db"),
 						slug,
@@ -93,11 +93,10 @@ describe("Session Rows read paths", () => {
 						store,
 						activityLayer,
 						SessionEventBusLive,
-						Layer.succeed(
-							ConfigTag,
+						Layer.succeed(ConfigTag)(
 							makeMockConfig({ configDir, projectDir, slug }),
 						),
-						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+						Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 						makeProjectRegistryLive([{ slug, title: "Project", folders }]),
 					);
 					yield* Effect.gen(function* () {

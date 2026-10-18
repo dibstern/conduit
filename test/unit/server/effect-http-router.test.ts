@@ -35,22 +35,22 @@ const testProjects: RouterProjectInfo[] = [
 	},
 ];
 
-const TestProjectsLayer = Layer.succeed(ProjectsProvider, {
+const TestProjectsLayer = Layer.succeed(ProjectsProvider)({
 	getProjects: () => Effect.succeed(testProjects),
 });
 
-const TestHealthLayer = Layer.succeed(HealthProvider, {
+const TestHealthLayer = Layer.succeed(HealthProvider)({
 	getHealthResponse: () =>
 		Effect.succeed({ ok: true, custom: "daemon-health" }),
 });
 
-const TestPushLayer = Layer.succeed(PushProvider, {
+const TestPushLayer = Layer.succeed(PushProvider)({
 	getPublicKey: () => "test-vapid-public-key",
 	addSubscription: () => {},
 	removeSubscription: () => {},
 });
 
-const TestCaCertLayer = Layer.succeed(CaCertProvider, {
+const TestCaCertLayer = Layer.succeed(CaCertProvider)({
 	caCertDer: Buffer.from("fake-der-cert"),
 	caRootPath: undefined,
 });
@@ -64,7 +64,7 @@ beforeAll(async () => {
 const baseRouterLayer = () =>
 	Layer.mergeAll(
 		makeAuthManagerLive(new AuthManager()),
-		Layer.succeed(StaticDirTag, staticDir),
+		Layer.succeed(StaticDirTag)(staticDir),
 		NodeFileSystem.layer,
 		NodePath.layer,
 	);
@@ -204,7 +204,7 @@ describe("Effect HTTP Router", () => {
 	describe("POST /api/push/subscribe", () => {
 		it("accepts valid subscription and returns ok", async () => {
 			const subscriptions: Array<{ endpoint: string; sub: unknown }> = [];
-			const trackingPushLayer = Layer.succeed(PushProvider, {
+			const trackingPushLayer = Layer.succeed(PushProvider)({
 				getPublicKey: () => "key",
 				addSubscription: (endpoint: string, sub: unknown) => {
 					subscriptions.push({ endpoint, sub });
@@ -290,7 +290,7 @@ describe("Effect HTTP Router", () => {
 				Layer.mergeAll(
 					TestProjectsLayer,
 					baseRouterLayer(),
-					Layer.succeed(SetupInfoProvider, {
+					Layer.succeed(SetupInfoProvider)({
 						getPort: () => Effect.succeed(2633),
 						getIsTls: () => Effect.succeed(false),
 						getPublicUrl: () => Effect.succeed(null),

@@ -11,13 +11,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Result as Either, Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	CreateSession,
-	ListDaemonSessions,
-	MoveSessionWorkspace,
-	OpenCodeUseWorktree,
-	SubmitInput,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
@@ -139,13 +133,11 @@ describe("Missing session worktrees through the built daemon", () => {
 			worktree: realpathSync(worktree),
 			socket,
 			list: () =>
-				sendRpcRequest(
-					socket,
-					new ListDaemonSessions({
-						projectSlug: "process-test",
-						scope: "process-test",
-					}),
-				),
+				sendRpcRequest(socket, {
+					_tag: "ListDaemonSessions",
+					projectSlug: "process-test",
+					scope: "process-test",
+				}),
 		};
 	}
 
@@ -193,13 +185,11 @@ describe("Missing session worktrees through the built daemon", () => {
 		);
 		let native: OpenCodeAPI | undefined;
 		if (provider === "claude") {
-			await sendRpcRequest(
-				socket,
-				new MoveSessionWorkspace({
-					sessionId,
-					path: worktree,
-				}),
-			);
+			await sendRpcRequest(socket, {
+				_tag: "MoveSessionWorkspace",
+				sessionId,
+				path: worktree,
+			});
 			await browser.send(sessionId, "Before removal.");
 			expect(
 				fixture
@@ -208,14 +198,12 @@ describe("Missing session worktrees through the built daemon", () => {
 					.at(-1)?.options["cwd"],
 			).toBe(worktree);
 		} else {
-			await sendRpcRequest(
-				socket,
-				new OpenCodeUseWorktree({
-					instanceId: "managed-test",
-					providerSessionId: sessionId,
-					path: worktree,
-				}),
-			);
+			await sendRpcRequest(socket, {
+				_tag: "OpenCodeUseWorktree",
+				instanceId: "managed-test",
+				providerSessionId: sessionId,
+				path: worktree,
+			});
 			const instance = Either.getOrThrowWith(
 				loadDaemonConfigResult(fixture.configDir),
 				(error) => error,
@@ -258,15 +246,13 @@ describe("Missing session worktrees through the built daemon", () => {
 					.at(-1),
 			).toMatchObject({ prompt: "After removal.", options: { cwd: main } });
 		} else {
-			await sendRpcRequest(
-				socket,
-				new SubmitInput({
-					sessionId,
-					inputId: randomUUID(),
-					delivery: "queue",
-					text: "After removal.",
-				}),
-			);
+			await sendRpcRequest(socket, {
+				_tag: "input.submit",
+				sessionId,
+				inputId: randomUUID(),
+				delivery: "queue",
+				text: "After removal.",
+			});
 			await vi.waitFor(() => {
 				const request = fixture
 					.opencodeRequests()
@@ -312,13 +298,11 @@ describe("Missing session worktrees through the built daemon", () => {
 			).toHaveLength(1);
 			const restored = join(fixture.root, "restored-worktree");
 			git(main, "worktree", "add", "-b", "feature/restored", restored);
-			await sendRpcRequest(
-				socket,
-				new MoveSessionWorkspace({
-					sessionId,
-					path: restored,
-				}),
-			);
+			await sendRpcRequest(socket, {
+				_tag: "MoveSessionWorkspace",
+				sessionId,
+				path: restored,
+			});
 			await vi.waitFor(() =>
 				expect(shellRows(browser, sessionId).at(-1)?.workspace?.cause).toBe(
 					"user",
@@ -430,15 +414,13 @@ describe("Missing session worktrees through the built daemon", () => {
 				await sendRpcRequest(
 					socket,
 					provider === "claude"
-						? new MoveSessionWorkspace({
-								sessionId,
-								path: worktree,
-							})
-						: new OpenCodeUseWorktree({
+						? { _tag: "MoveSessionWorkspace", sessionId, path: worktree }
+						: {
+								_tag: "OpenCodeUseWorktree",
 								instanceId: "managed-test",
 								providerSessionId: sessionId,
 								path: worktree,
-							}),
+							},
 				);
 			const before = events(fixture, sessionId).filter(
 				({ type }) => type === "session.workspace_changed",
@@ -477,18 +459,16 @@ describe("Missing session worktrees through the built daemon", () => {
 			`owned-kept-branch-${removal}`,
 		);
 		const browser = await fixture.connect();
-		const { sessionId } = await sendRpcRequest(
-			socket,
-			new CreateSession({
-				projectSlug: "process-test",
-				originId: "missing-worktree-test",
-				providerId: "claude",
-				permissionMode: "ask",
-				model: { providerId: "claude", modelId: "sonnet" },
-				title: "Removed owned worktree",
-				newWorktree: true,
-			}),
-		);
+		const { sessionId } = await sendRpcRequest(socket, {
+			_tag: "CreateSession",
+			projectSlug: "process-test",
+			originId: "missing-worktree-test",
+			providerId: "claude",
+			permissionMode: "ask",
+			model: { providerId: "claude", modelId: "sonnet" },
+			title: "Removed owned worktree",
+			newWorktree: true,
+		});
 		const session = (await list()).sessions.find(({ id }) => id === sessionId);
 		expect(session?.workspace?.origin).toBe("conduit");
 		const directory = session?.workspace?.worktrees[main];
@@ -532,18 +512,16 @@ describe("Missing session worktrees through the built daemon", () => {
 	it("rejects a removed owned worktree whose branch no longer exists", async () => {
 		const { fixture, main, socket, list } = await start("owned-deleted-branch");
 		const browser = await fixture.connect();
-		const { sessionId } = await sendRpcRequest(
-			socket,
-			new CreateSession({
-				projectSlug: "process-test",
-				originId: "missing-worktree-test",
-				providerId: "claude",
-				permissionMode: "ask",
-				model: { providerId: "claude", modelId: "sonnet" },
-				title: "Deleted owned branch",
-				newWorktree: true,
-			}),
-		);
+		const { sessionId } = await sendRpcRequest(socket, {
+			_tag: "CreateSession",
+			projectSlug: "process-test",
+			originId: "missing-worktree-test",
+			providerId: "claude",
+			permissionMode: "ask",
+			model: { providerId: "claude", modelId: "sonnet" },
+			title: "Deleted owned branch",
+			newWorktree: true,
+		});
 		const session = (await list()).sessions.find(({ id }) => id === sessionId);
 		expect(session?.workspace?.origin).toBe("conduit");
 		const directory = session?.workspace?.worktrees[main];
@@ -583,13 +561,11 @@ describe("Missing session worktrees through the built daemon", () => {
 		);
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession("Other origin");
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId,
-				path: worktree,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId,
+			path: worktree,
+		});
 		// Seed conduit origin on an unowned path to pin fail-closed dispatch,
 		// including recorded state that cannot be recreated by the owned service.
 		const db = new Database(fixture.daemonStorePath());

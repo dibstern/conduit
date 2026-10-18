@@ -12,7 +12,7 @@ import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 
 const testLayer = Layer.mergeAll(
 	EffectSqliteClient.layer({ filename: ":memory:" }),
-	Layer.succeed(PersistenceProjectTag, { projectId: "test-project" }),
+	Layer.succeed(PersistenceProjectTag)({ projectId: "test-project" }),
 );
 
 describe("EffectSessionSeeder", () => {

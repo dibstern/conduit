@@ -104,7 +104,7 @@ it("rejects with the declared error instance and exposes tag narrowing in Effect
 		},
 	});
 	const result = await runtime.runPromise(
-		Effect.either(
+		Effect.result(
 			rpcEffect("input.submit", {
 				sessionId: "s1",
 				inputId: "i1",
@@ -113,10 +113,13 @@ it("rejects with the declared error instance and exposes tag narrowing in Effect
 			}),
 		),
 	);
-	if (result._tag === "Left" && result.left._tag === "AccountUnroutable") {
-		expectTypeOf(result.left).toEqualTypeOf<AccountUnroutable>();
-		expect(result.left).toBeInstanceOf(AccountUnroutable);
-		expect(result.left.ref).toEqual({
+	if (
+		result._tag === "Failure" &&
+		result.failure._tag === "AccountUnroutable"
+	) {
+		expectTypeOf(result.failure).toEqualTypeOf<AccountUnroutable>();
+		expect(result.failure).toBeInstanceOf(AccountUnroutable);
+		expect(result.failure.ref).toEqual({
 			_tag: "DriverDefault",
 			driver: "claude",
 		});
@@ -173,7 +176,7 @@ it("keeps caller cancellation as an interruption", async () => {
 	);
 	await wire.request("ListWorktrees");
 	expect(
-		Exit.isInterrupted(await Effect.runPromise(Fiber.interrupt(fiber))),
+		Exit.hasInterrupts(await Effect.runPromise(Fiber.interrupt(fiber))),
 	).toBe(true);
 });
 

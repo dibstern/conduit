@@ -29,9 +29,9 @@ const pollerLayer = (api: ReturnType<typeof makeMockOpenCodeAPI>) =>
 			Layer.mergeAll(
 				makePersistenceEffectLayer(":memory:", "test-project"),
 				PendingInteractionServiceLive,
-				Layer.succeed(ConfigTag, makeMockConfig()),
-				Layer.succeed(LoggerTag, makeMockLogger()),
-				Layer.succeed(OpenCodeAPITag, api),
+				Layer.succeed(ConfigTag)(makeMockConfig()),
+				Layer.succeed(LoggerTag)(makeMockLogger()),
+				Layer.succeed(OpenCodeAPITag)(api),
 				makePollerStateLive(),
 				makePollerPubSubLive(),
 				RelayStatusSnapshotLive,
@@ -60,7 +60,7 @@ it("returns readiness while initial git is blocked and completes it in the relay
 	const runtime = ManagedRuntime.make(
 		pollerLayer(makeMockOpenCodeAPI()).pipe(
 			Layer.provide(
-				Layer.succeed(SessionGitServiceTag, {
+				Layer.succeed(SessionGitServiceTag)({
 					refresh: () =>
 						Effect.tryPromise(readGit).pipe(
 							Effect.tap(() => {
@@ -96,12 +96,12 @@ it("interrupts the initial git refresh when the relay scope closes", async () =>
 	const runtime = ManagedRuntime.make(
 		pollerLayer(makeMockOpenCodeAPI()).pipe(
 			Layer.provide(
-				Layer.succeed(SessionGitServiceTag, {
+				Layer.succeed(SessionGitServiceTag)({
 					refresh: () =>
 						Effect.sync(() => {
 							reading = true;
 						}).pipe(
-							Effect.zipRight(Effect.never),
+							Effect.andThen(Effect.never),
 							Effect.onInterrupt(() =>
 								Effect.sync(() => {
 									interrupted = true;

@@ -51,7 +51,7 @@ const makeTodoTestLayer = () => {
 		),
 	);
 	return Layer.mergeAll(
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		makePersistenceEffectLayer(
 			join(dir, "events.db"),
 			"test-project",
@@ -60,7 +60,7 @@ const makeTodoTestLayer = () => {
 		),
 		SessionEventBusLive,
 		Layer.effect(SessionActivityTag, makeSessionActivity),
-		Layer.succeed(ConfigTag, makeMockConfig({ slug: "test-project" })),
+		Layer.succeed(ConfigTag)(makeMockConfig({ slug: "test-project" })),
 		cleanup,
 	);
 };
@@ -218,8 +218,8 @@ describe("subscribeSessionTodos", () => {
 					yield* Queue.take(first.detail);
 					yield* Queue.take(second.detail);
 					yield* Effect.sleep("20 millis");
-					yield* Queue.takeAll(first.detail);
-					yield* Queue.takeAll(second.detail);
+					yield* Queue.clear(first.detail);
+					yield* Queue.clear(second.detail);
 					expect(yield* Queue.size(first.todos)).toBe(0);
 					expect(yield* Queue.size(second.todos)).toBe(0);
 					textChunks.push(counts(after));

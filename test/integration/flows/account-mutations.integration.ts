@@ -287,8 +287,8 @@ describe("account mutations through daemon RPC", () => {
 			for (const { reason, ...request } of invalidAdds) {
 				const result = yield* Effect.result(client.AddInstance(request));
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: {
+					_tag: "Failure",
+					failure: {
 						_tag: "AccountChangeRejected",
 						reason: expect.stringContaining(reason),
 					},
@@ -307,8 +307,8 @@ describe("account mutations through daemon RPC", () => {
 				client.RemoveInstance({ instanceId: "missing" }),
 			]) {
 				expect(yield* Effect.result(mutation)).toMatchObject({
-					_tag: "Left",
-					left: {
+					_tag: "Failure",
+					failure: {
 						_tag: "AccountChangeRejected",
 						id: "missing",
 						reason: expect.stringContaining("not found"),
@@ -324,8 +324,8 @@ describe("account mutations through daemon RPC", () => {
 						}),
 					),
 				).toMatchObject({
-					_tag: "Left",
-					left: {
+					_tag: "Failure",
+					failure: {
 						_tag: "AccountChangeRejected",
 						id: instanceId,
 						reason: expect.stringContaining("type"),
@@ -574,8 +574,8 @@ describe("account mutations through daemon RPC", () => {
 					client.RenameInstance({ instanceId: "personal", name: "Renamed" }),
 				);
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: {
+					_tag: "Failure",
+					failure: {
 						_tag: "AccountChangeRejected",
 						id: "personal",
 						reason: expect.stringContaining("daemon.json"),
@@ -677,8 +677,8 @@ describe("account mutations through daemon RPC", () => {
 				vi.mocked(stopManagedOpenCode).mockResolvedValue(false);
 				const mutate = client.RemoveInstance({ instanceId: "remote" });
 				expect(yield* Effect.result(mutate)).toMatchObject({
-					_tag: "Left",
-					left: {
+					_tag: "Failure",
+					failure: {
 						_tag: "AccountChangeRejected",
 						id: "remote",
 						reason: expect.stringContaining("ownership"),

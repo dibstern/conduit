@@ -39,9 +39,9 @@ const bedrockModel = (id: string, name: string) => ({
 
 layer(
 	Layer.mergeAll(
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		makePersistenceEffectLayer(":memory:", "test-project"),
-		Layer.succeed(ConfigTag, makeMockConfig()),
+		Layer.succeed(ConfigTag)(makeMockConfig()),
 		ProjectSettingsLive,
 		RpcSubscriptionScopeLive,
 	),
@@ -112,11 +112,10 @@ layer(
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeModelServiceTag, modelService),
-				Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-				Layer.succeed(LoggerTag, makeMockLogger()),
-				Layer.succeed(
-					OrchestrationEngineTag,
+				Layer.succeed(OpenCodeModelServiceTag)(modelService),
+				Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+				Layer.succeed(LoggerTag)(makeMockLogger()),
+				Layer.succeed(OrchestrationEngineTag)(
 					withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [] })) }),
 				),
 				makeOverridesStateLive(),
@@ -171,11 +170,10 @@ layer(
 			persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 		};
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeModelServiceTag, modelService),
-			Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-			Layer.succeed(LoggerTag, makeMockLogger()),
-			Layer.succeed(
-				OrchestrationEngineTag,
+			Layer.succeed(OpenCodeModelServiceTag)(modelService),
+			Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+			Layer.succeed(LoggerTag)(makeMockLogger()),
+			Layer.succeed(OrchestrationEngineTag)(
 				withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [] })) }),
 			),
 			makeOverridesStateLive(),

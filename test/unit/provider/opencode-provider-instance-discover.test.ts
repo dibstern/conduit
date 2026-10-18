@@ -164,7 +164,7 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 			Effect.result(instance.discoverEffect()),
 		);
 
-		expect(result._tag).toBe("Left");
+		expect(result._tag).toBe("Failure");
 		if (result._tag === "Failure") {
 			expect(result.failure).toMatchObject({
 				_tag: "ProviderInstanceFailure",

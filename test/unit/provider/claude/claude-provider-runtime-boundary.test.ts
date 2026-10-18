@@ -319,9 +319,10 @@ describe("Claude provider runtime boundary", () => {
 						.pipe(Effect.result),
 				);
 				yield* Deferred.await(streamStarted).pipe(
-					Effect.timeoutFail({
+					Effect.timeoutOrElse({
 						duration: "1 second",
-						onTimeout: () => new Error("Claude stream did not start"),
+						orElse: () =>
+							Effect.fail((() => new Error("Claude stream did not start"))()),
 					}),
 				);
 
@@ -331,7 +332,7 @@ describe("Claude provider runtime boundary", () => {
 				expect(query.interrupt).toHaveBeenCalledTimes(1);
 				expect(query.close).toHaveBeenCalledTimes(1);
 				expect(getClaudeRuntimeSessionCountForTest(instance)).toBe(0);
-				expect(turnResult._tag).toBe("Left");
+				expect(turnResult._tag).toBe("Failure");
 			}),
 		);
 	});
@@ -376,7 +377,7 @@ describe("Claude provider runtime boundary", () => {
 					const failure = yield* Effect.result(
 						instance.stopTaskEffect("task-stop", "shell"),
 					);
-					expect(failure._tag).toBe("Left");
+					expect(failure._tag).toBe("Failure");
 					expect(query.close).not.toHaveBeenCalled();
 					// Composer Stop retains its existing teardown behavior.
 					yield* instance.interruptTurnEffect("task-stop");

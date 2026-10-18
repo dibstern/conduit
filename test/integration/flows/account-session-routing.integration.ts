@@ -29,7 +29,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AccountRef } from "../../../src/lib/contracts/account.js";
 import { AccountUnroutable } from "../../../src/lib/contracts/limit-recovery.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
-import { SetDefault } from "../../../src/lib/contracts/ws-rpc.js";
+
 import {
 	defaultDaemonConfig,
 	saveDaemonConfig,
@@ -178,7 +178,7 @@ describe("Integration: account session routing", () => {
 				registry,
 				DaemonEventBusLive,
 				DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
-				Layer.succeed(ConfigPersistenceTag, {
+				Layer.succeed(ConfigPersistenceTag)({
 					requestSave: Effect.void,
 					flush: Effect.void,
 				}),
@@ -301,14 +301,12 @@ describe("Integration: account session routing", () => {
 				client.createSession("No Claude account", { providerId: "claude" }),
 			).rejects.toThrow(/claude/);
 			const sendError = await client.rpcCall((rpc) =>
-				rpc.input
-					.submit({
-						sessionId,
-						inputId: "input-after-last-account-removed",
-						text: "Cannot send without a Claude account",
-						delivery: "queue",
-					})
-					.pipe(Effect.flip),
+				rpc["input.submit"]({
+					sessionId,
+					inputId: "input-after-last-account-removed",
+					text: "Cannot send without a Claude account",
+					delivery: "queue",
+				}).pipe(Effect.flip),
 			);
 			expect(sendError).toMatchObject({
 				_tag: "AccountUnroutable",
@@ -407,14 +405,12 @@ describe("Integration: account session routing", () => {
 			),
 		);
 		const sendError = await client.rpcCall((rpc) =>
-			rpc.input
-				.submit({
-					sessionId,
-					inputId: "input-missing-account",
-					text: "This account no longer exists",
-					delivery: "queue",
-				})
-				.pipe(Effect.flip),
+			rpc["input.submit"]({
+				sessionId,
+				inputId: "input-missing-account",
+				text: "This account no longer exists",
+				delivery: "queue",
+			}).pipe(Effect.flip),
 		);
 		expect(sendError).toBeInstanceOf(AccountUnroutable);
 		if (!(sendError instanceof AccountUnroutable))
@@ -466,7 +462,7 @@ describe("Integration: account session routing", () => {
 				registry,
 				DaemonEventBusLive,
 				DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
-				Layer.succeed(ConfigPersistenceTag, {
+				Layer.succeed(ConfigPersistenceTag)({
 					requestSave: Effect.void,
 					flush: Effect.fail(new Error("This fixture never flushes config")),
 				}),
@@ -732,7 +728,7 @@ describe("Integration: account session routing", () => {
 			});
 			await runtime.runPromise(
 				Effect.flatMap(DaemonWsRpcHandlersTag, (handlers) =>
-					handlers.SetDefault(new SetDefault({ instanceId: "personal" })),
+					handlers.SetDefault({ _tag: "SetDefault", instanceId: "personal" }),
 				),
 			);
 			const result = await client.rpcCall((rpc) =>

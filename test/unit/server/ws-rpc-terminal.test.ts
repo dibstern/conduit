@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Chunk, Effect, Fiber, Layer, Stream } from "effect";
+import { Effect, Fiber, Layer, Stream } from "effect";
 import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
@@ -171,7 +171,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 				).toEqual({ ok: true });
 				expect(upstream.close).toHaveBeenCalledWith(1000, "Proxy closed");
 				expect(api.pty.delete).not.toHaveBeenCalled();
-				expect(Chunk.toReadonlyArray(yield* Fiber.join(announced))).toEqual([
+				expect([...(yield* Fiber.join(announced))]).toEqual([
 					{ _tag: "snapshot", rows: [] },
 					{ _tag: "synchronized" },
 					{

@@ -176,7 +176,7 @@ describe("Claude runner admission socket probes", () => {
 			socket.once("close", () => sockets.delete(socket));
 			if (rejecting) {
 				socket.once("data", () => {
-					Deferred.unsafeDone(received, Effect.void);
+					Deferred.doneUnsafe(received, Effect.void);
 					socket.destroy();
 				});
 				return;
@@ -187,14 +187,14 @@ describe("Claude runner admission socket probes", () => {
 					if (message.type === "hello") {
 						if (mode === "delayed") {
 							delayedPeer = peer;
-							Deferred.unsafeDone(received, Effect.void);
+							Deferred.doneUnsafe(received, Effect.void);
 						} else replyHello(peer);
 					}
 					if (message.type !== "command") return;
 					commands.push(message.command.type);
 					if (message.command.type === "send-turn") {
 						pending = message;
-						Deferred.unsafeDone(received, Effect.void);
+						Deferred.doneUnsafe(received, Effect.void);
 					} else if (message.command.type === "end-session") {
 						peer.write({ type: "idle-exit" });
 						if (pending)
@@ -357,8 +357,8 @@ describe("Claude runner admission socket probes", () => {
 						Effect.timeout("6 seconds"),
 					);
 					expect(ended).toMatchObject({
-						_tag: "Left",
-						left: { code: "runner_idle_exit" },
+						_tag: "Failure",
+						failure: { code: "runner_idle_exit" },
 					});
 					expect(
 						(yield* Fiber.join(send).pipe(Effect.timeout("10 seconds"))).status,
@@ -441,7 +441,7 @@ describe("Claude runner admission socket probes", () => {
 							.executeEffect({ type: "shutdown" })
 							.pipe(Effect.timeout("6 seconds")),
 					);
-					yield* Effect.yieldNow();
+					yield* Effect.yieldNow;
 					fixture.allowHello();
 					yield* Fiber.join(disposal);
 					yield* Fiber.join(recovery).pipe(Effect.timeout("6 seconds"));
@@ -1000,7 +1000,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		);
 		const steerId = randomUUID();
 		const submitted = await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId,
 				inputId: steerId,
 				originId: browser.originId,
@@ -1078,7 +1078,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		);
 		const steerId = randomUUID();
 		const submitted = await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId,
 				inputId: steerId,
 				originId: browser.originId,

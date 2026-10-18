@@ -82,7 +82,7 @@ describe("WsRpcServerLayer SwitchContextWindow", () => {
 							orchestrationEngine: engine,
 						}),
 					),
-					Layer.provideMerge(Layer.succeed(LoggerTag, makeMockLogger())),
+					Layer.provideMerge(Layer.succeed(LoggerTag)(makeMockLogger())),
 				),
 			),
 		);

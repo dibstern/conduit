@@ -80,7 +80,7 @@ describe("Shutdown Path", () => {
 				}).pipe(Effect.scoped, Effect.forkIn(scope));
 
 				// Allow the fiber to start
-				yield* Effect.yieldNow();
+				yield* Effect.yieldNow;
 
 				// Close scope — should release fiber, then run earlier finalizer
 				yield* Scope.close(scope, Exit.void);

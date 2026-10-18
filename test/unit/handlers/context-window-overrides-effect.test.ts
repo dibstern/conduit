@@ -47,10 +47,10 @@ describe("switchContextWindowForSession with Effect override state", () => {
 			});
 			const layer = Layer.mergeAll(
 				makeSessionSettingsLayer(),
-				Layer.succeed(LoggerTag, mockLogger()),
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				Layer.succeed(LoggerTag)(mockLogger()),
+				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 				makeOverridesStateLive(),
-				Layer.succeed(ProviderRegistryTag, new ProviderRegistry()),
+				Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()),
 			);
 
 			return Effect.gen(function* () {
