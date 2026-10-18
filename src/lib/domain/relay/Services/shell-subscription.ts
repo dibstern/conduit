@@ -6,7 +6,6 @@ import type {
 } from "../../../contracts/ws-rpc.js";
 import { readProjectFile } from "../../../daemon/project-file.js";
 import { withCachedProjectGit } from "../../../git/session-git.js";
-import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import { subscribeShellProjects } from "../../daemon/Services/shell-subscription.js";
 import { ConfigTag } from "./services.js";
 
@@ -27,7 +26,6 @@ export const subscribeShell = (
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
 			const file = yield* readProjectFile(config.projectDir);
-			const settings = loadRelaySettings(config.configDir);
 			const frame: ShellProjectsFrame = {
 				_tag: "projects",
 				projects: withCachedProjectGit([
@@ -36,7 +34,6 @@ export const subscribeShell = (
 						title: config.slug,
 						folders: [config.projectDir, ...(config.extraFolders ?? [])],
 						...(file._tag === "parsed" ? file.file : {}),
-						effectiveGroupingMode: settings.defaultGroupingMode ?? "repository",
 					},
 				]),
 				newSessionProject: config.slug,

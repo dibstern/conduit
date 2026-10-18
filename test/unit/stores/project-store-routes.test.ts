@@ -9,7 +9,6 @@ import {
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { setSessionScope } from "../../../src/lib/frontend/stores/session-scope.js";
-import { encodeGroupScope } from "../../../src/lib/session-scope.js";
 
 const pushState = vi.fn();
 const replaceState = vi.fn();
@@ -53,11 +52,6 @@ describe("draft project selection", () => {
 	it("prefers an explicit draft project over the sidebar scope", () => {
 		routerState.search = "?project=conduit";
 		setSessionScope("dotfiles");
-		expect(getDraftProject()).toBe("conduit");
-	});
-
-	it("does not treat a group scope as a project slug", () => {
-		setSessionScope(encodeGroupScope("dotfiles"));
 		expect(getDraftProject()).toBe("conduit");
 	});
 

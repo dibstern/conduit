@@ -3,7 +3,6 @@
 
 <script lang="ts">
 	import { tick, untrack } from "svelte";
-	import { getScopeGroupKey } from "../../../session-scope.js";
 	import type { SessionInfo } from "../../types.js";
 	import {
 		sessionState,
@@ -26,7 +25,6 @@
 		routerState,
 	} from "../../stores/router.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
-	import { getProjectGroup } from "../../stores/project-state.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
@@ -139,15 +137,6 @@
 
 	const scope = $derived(getSessionScope());
 	const scopeLabel = $derived(getSessionScopeLabel(scope));
-	const scopeGroupKey = $derived(getScopeGroupKey(scope));
-	// A group's membership can change without its URL changing. Reset browsing
-	// and repeat an active search when its members change.
-	const scopeQueryKey = $derived(JSON.stringify([
-		scope,
-		scopeGroupKey === null ? null : projectState.projects
-			.filter((project) => getProjectGroup(project.slug)?.key === scopeGroupKey)
-			.map((project) => project.slug).sort(),
-	]));
 	const emptyMessage = $derived.by(() => {
 		if (searching && filtered.length === 0) return "No matching sessions";
 		if (statusFilter !== null) {
@@ -208,10 +197,10 @@
 
 	// Browse scopes filter the complete live collection; search scopes are paged
 	// by the server and need a fresh first page.
-	let loadedScope = untrack(() => scopeQueryKey);
+	let loadedScope = untrack(() => scope);
 	$effect(() => {
-		if (scopeQueryKey === loadedScope) return;
-		loadedScope = scopeQueryKey;
+		if (scope === loadedScope) return;
+		loadedScope = scope;
 		browsePage.limit = DAEMON_SESSION_PAGE_SIZE;
 		const query = untrack(() => localSearchValue);
 		if (query.trim()) requestRemoteSearch(query);

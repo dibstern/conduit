@@ -6,6 +6,7 @@
 <script lang="ts">
 	import { onDestroy, tick, untrack } from "svelte";
 	import { reveal } from "../../stores/reveal.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import {
 		loadSessionSkills,
@@ -38,8 +39,11 @@
 	} | null = null;
 
 	const sessionId = $derived(placedSessionId());
+	// A deep link places the session before its project attaches, and the loader
+	// needs the slug, so attaching has to trigger the first load.
+	const projectSlug = $derived(getCurrentSlug());
 	$effect(() => {
-		if (sessionId) void untrack(() => loadSessionSkills(sessionId));
+		if (sessionId && projectSlug) void untrack(() => loadSessionSkills(sessionId));
 	});
 
 	const rows = $derived(

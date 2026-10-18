@@ -1,23 +1,21 @@
 <script lang="ts">
-	import { untrack } from "svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
 	import Select from "../ui/Select.svelte";
 	import { Schema } from "effect";
-	import { GroupingModeSchema } from "../../../shared-types.js";
 	import { DefaultSessionModeSchema } from "../../../contracts/project-file.js";
-	import { projectState } from "../../stores/project-state.svelte.js";
 	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { applyDefaultSessionMode, discoveryState } from "../../stores/discovery.svelte.js";
 	import { getDraftProject } from "../../stores/project.svelte.js";
+	import { projectState } from "../../stores/project-state.svelte.js";
 	import { findSession } from "../../stores/session.svelte.js";
 	import { DEFAULT_WORKTREE_CLEANUP, type ProjectWorktreeCleanup, type WorktreeCleanup, type WorktreeCleanupReport } from "../../../contracts/worktree.js";
 	import Button from "../ui/Button.svelte";
 	import Disclosure from "../ui/Disclosure.svelte";
-	let state = $state({ autoSettleDays: 3 as number | null, autoSettleSaving: false, autoArchiveDays: 30 as number | null, autoArchiveSaving: false, sessionModeSaving: false, groupingSaving: false, cleanupGlobal: DEFAULT_WORKTREE_CLEANUP as WorktreeCleanup, cleanupOverride: null as ProjectWorktreeCleanup | null, cleanupScope: "global" as "global" | "project", cleanupLoaded: true, cleanupSaving: false, cleanupOpen: false, cleanupDetailsOpen: false, cleanupRun: { status: "idle" } as { status: "idle" | "running" | "failed" } | { status: "done"; report: WorktreeCleanupReport } });
+	let state = $state({ autoSettleDays: 3 as number | null, autoSettleSaving: false, autoArchiveDays: 30 as number | null, autoArchiveSaving: false, sessionModeSaving: false, cleanupGlobal: DEFAULT_WORKTREE_CLEANUP as WorktreeCleanup, cleanupOverride: null as ProjectWorktreeCleanup | null, cleanupScope: "global" as "global" | "project", cleanupLoaded: true, cleanupSaving: false, cleanupOpen: false, cleanupDetailsOpen: false, cleanupRun: { status: "idle" } as { status: "idle" | "running" | "failed" } | { status: "done"; report: WorktreeCleanupReport } });
 	const cleanupProjectSlug = $derived.by(() => {
 		const route = getCurrentRoute();
 		return route.page === "chat" && route.draft ? getDraftProject() : getCurrentSlug();
@@ -96,7 +94,6 @@
 		const route = getCurrentRoute();
 		if (route.page === "chat" && route.sessionId && !getCurrentSlug()) return;
 		let current = true;
-		const groupingReadRevision = untrack(() => projectState.defaultGroupingRevision);
 		void rpc("GetAutoArchiveSetting", {})
 			.then(({ autoArchiveAfterDays: days }) => {
 				if (current && !state.autoArchiveSaving) state.autoArchiveDays = days;
@@ -110,13 +107,6 @@
 			})
 			.catch((error) => {
 				if (current) toastFailure("Couldn't load auto-settle setting")(error);
-			});
-		void rpc("GetDefaultGroupingMode", {})
-			.then(({ mode }) => {
-				if (current && groupingReadRevision === projectState.defaultGroupingRevision) projectState.defaultGroupingMode = mode;
-			})
-			.catch((error) => {
-				if (current) toastFailure("Couldn't load grouping setting")(error);
 			});
 		return () => { current = false; };
 	});
@@ -141,26 +131,6 @@
 </script>
 
 <SettingsGroup id="settings-sessions" title="Sessions">
-	<SettingsRow label="Default repository grouping" labelFor="settings-grouping-mode-select" description="Projects inherit this unless they choose their own mode.">
-		{#snippet control()}
-			<Select id="settings-grouping-mode-select" value={projectState.defaultGroupingMode} disabled={state.groupingSaving} onchange={(event) => {
-				const mode = event.currentTarget.value;
-				if (!Schema.is(GroupingModeSchema)(mode)) return;
-				const groupingSaveRevision = ++projectState.defaultGroupingRevision;
-				state.groupingSaving = true;
-				void rpc("SetDefaultGroupingMode", { mode })
-					.then(({ mode: saved }) => {
-						if (groupingSaveRevision === projectState.defaultGroupingRevision) projectState.defaultGroupingMode = saved;
-					})
-					.catch(toastFailure("Couldn't save grouping setting"))
-					.finally(() => { state.groupingSaving = false; });
-			}}>
-				<option value="repository">By repository</option>
-				<option value="repository+subfolder">By repository and subfolder</option>
-				<option value="off">Off</option>
-			</Select>
-		{/snippet}
-	</SettingsRow>
 	<SettingsRow
 		label="Default session mode"
 		labelFor="settings-default-session-mode"

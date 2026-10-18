@@ -43,10 +43,7 @@ import {
 	type ClaudeLaunchConfig,
 	captureClaudeLaunchLogin,
 } from "../provider/claude/claude-sdk-env.js";
-import {
-	GroupingModeSchema,
-	RepositoryIdentitySchema,
-} from "../shared-types.js";
+import { RepositoryIdentitySchema } from "../shared-types.js";
 import type { RecentProject } from "../types.js";
 import { isRecord } from "../utils.js";
 import {
@@ -90,7 +87,6 @@ const ProjectSchema = Schema.Struct({
 	shellEnv: Schema.optionalWith(ProjectShellEnvConfigSchema, { exact: true }),
 	setupScript: Schema.optionalWith(Schema.String, { exact: true }),
 	sessionMode: Schema.optionalWith(SessionModeSchema, { exact: true }),
-	groupingMode: Schema.optionalWith(GroupingModeSchema, { exact: true }),
 	worktreeCleanup: Schema.optionalWith(ProjectWorktreeCleanupSchema, {
 		exact: true,
 	}),

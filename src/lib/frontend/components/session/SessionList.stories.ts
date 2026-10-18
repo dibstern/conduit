@@ -1,8 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
-import { encodeGroupScope } from "../../../session-scope.js";
 import { projectState } from "../../stores/project.svelte.js";
-import { getProjectGroup } from "../../stores/project-state.svelte.js";
 import {
 	attachedProjectState,
 	routerState,
@@ -413,8 +411,7 @@ export const ScopePickerOpen: Story = {
 	},
 };
 
-function seedRepositoryScope(projectOnly: boolean) {
-	projectState.defaultGroupingMode = "repository";
+function seedCheckoutScope(projectOnly: boolean) {
 	projectState.projects = [
 		{
 			slug: "conduit",
@@ -446,7 +443,7 @@ function seedRepositoryScope(projectOnly: boolean) {
 			projectSlug: "conduit",
 			accountId: null,
 			id: "scope-main",
-			title: "Implement repository scope",
+			title: "Implement project scope",
 			attention: "working",
 		},
 	]);
@@ -459,68 +456,67 @@ function seedRepositoryScope(projectOnly: boolean) {
 			projectSlug: "conduit-review",
 		},
 	]);
-	const group = getProjectGroup("conduit");
-	routerState.search = `?${new URLSearchParams({ p: projectOnly ? "conduit" : encodeGroupScope(group?.key ?? "") })}`;
+	routerState.search = projectOnly ? "?p=conduit" : "";
 }
 
-export const RepositoryScope: Story = {
-	name: "Repository scope, both checkouts",
-	beforeEach: () => seedRepositoryScope(false),
+export const SharedRepositoryProjects: Story = {
+	name: "All projects, shared repository",
+	beforeEach: () => seedCheckoutScope(false),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(canvas.getByTestId("session-scope-chip")).toHaveTextContent(
-			"Conduit",
+			"All projects",
 		);
-		await expect(canvas.getByText("Implement repository scope")).toBeVisible();
+		await expect(canvas.getByText("Implement project scope")).toBeVisible();
 		await expect(canvas.getByText("Review the scope menu")).toBeVisible();
 	},
 };
 
-export const ProjectWithinRepositoryScope: Story = {
-	name: "Project within repository scope",
-	beforeEach: () => seedRepositoryScope(true),
+export const CheckoutScope: Story = {
+	name: "One checkout scope",
+	beforeEach: () => seedCheckoutScope(true),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(canvas.getByTestId("session-scope-chip")).toHaveTextContent(
-			"Conduit · Main checkout",
+			"Main checkout",
 		);
-		await expect(canvas.getByText("Implement repository scope")).toBeVisible();
+		await expect(canvas.getByText("Implement project scope")).toBeVisible();
 		await expect(
 			canvas.queryByText("Review the scope menu"),
 		).not.toBeInTheDocument();
 	},
 };
 
-export const RepositoryScopePickerOpen: Story = {
-	name: "Repository scope menu",
+export const SharedRepositoryPickerOpen: Story = {
+	name: "Shared repository project choices",
 	tags: ["viewport-capture"],
-	beforeEach: () => seedRepositoryScope(false),
+	beforeEach: () => seedCheckoutScope(false),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByTestId("session-scope-chip"));
 		const menu = within(canvasElement.ownerDocument.body);
 		await expect(
-			await menu.findByRole("menuitemradio", { name: "Conduit" }),
+			await menu.findByRole("menuitemradio", { name: /All projects/ }),
 		).toHaveAttribute("aria-checked", "true");
 		await expect(menu.getByText("project:conduit-review")).toBeVisible();
 	},
 };
 
-export const ProjectWithinRepositoryScopePickerOpen: Story = {
-	name: "Project within repository scope menu",
+export const CheckoutScopePickerOpen: Story = {
+	name: "Selected checkout scope menu",
 	tags: ["viewport-capture"],
-	beforeEach: () => seedRepositoryScope(true),
+	beforeEach: () => seedCheckoutScope(true),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByTestId("session-scope-chip"));
 		const menu = within(canvasElement.ownerDocument.body);
 		await expect(
 			await menu.findByRole("menuitemradio", {
-				name: /Conduit · Main checkout/,
+				name: /Main checkout/,
 			}),
 		).toHaveAttribute("aria-checked", "true");
 		await expect(
-			menu.getByRole("menuitemradio", { name: "Conduit" }),
+			menu.getByRole("menuitemradio", { name: /All projects/ }),
 		).toHaveAttribute("aria-checked", "false");
 	},
 };

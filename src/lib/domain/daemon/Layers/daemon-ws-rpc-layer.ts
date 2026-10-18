@@ -31,10 +31,6 @@ import { getLogLevel } from "../../../logger.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
 import { makeCursorAuth } from "../../../provider/cursor/cursor-auth.js";
 import {
-	loadRelaySettings,
-	saveRelaySettings,
-} from "../../../relay/relay-settings.js";
-import {
 	getRestartAvailable,
 	isServerSupervised,
 	SERVER_BUILD_ID,
@@ -584,9 +580,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						...(request.sessionMode !== undefined && {
 							sessionMode: request.sessionMode,
 						}),
-						...(request.groupingMode !== undefined && {
-							groupingMode: request.groupingMode,
-						}),
 					});
 					// Saving without a slug adds a project; its first session goes there.
 					if (request.slug === undefined && kind !== "existing")
@@ -737,30 +730,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(wsRpcHandlers.SetWorktreeCleanupSetting(request)),
 			CleanUpWorktreesNow: (request) =>
 				run(wsRpcHandlers.CleanUpWorktreesNow(request)),
-			GetDefaultGroupingMode: (_request) =>
-				run(
-					Effect.sync(() => ({
-						mode:
-							loadRelaySettings(configDir).defaultGroupingMode ?? "repository",
-					})),
-				),
-			SetDefaultGroupingMode: ({ mode }) =>
-				run(
-					Effect.gen(function* () {
-						yield* Effect.try(() =>
-							saveRelaySettings({ defaultGroupingMode: mode }, configDir),
-						);
-						yield* PubSub.publish(
-							bus,
-							DaemonEvent.GlobalSettingChanged({
-								originSlug: "",
-								tag: "defaultGroupingMode",
-							}),
-						);
-						yield* PubSub.publish(bus, DaemonEvent.ProjectsChanged());
-						return { mode };
-					}),
-				),
 			GetUsageLimitsSetting: (request) =>
 				run(wsRpcHandlers.GetUsageLimitsSetting(request)),
 			SetUsageLimitsSetting: (request) =>
@@ -783,7 +752,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			ListDaemonSessions: (request) =>
 				run(
-					listDaemonSessions(configDir, {
+					listDaemonSessions({
 						...(request.limit !== undefined ? { limit: request.limit } : {}),
 						...(request.roots !== undefined ? { roots: request.roots } : {}),
 						...(request.search !== undefined ? { search: request.search } : {}),
