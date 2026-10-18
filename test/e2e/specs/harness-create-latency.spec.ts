@@ -173,7 +173,7 @@ const traceSummary = (file: string, debuggedSessionId: string | null) => {
 		);
 	});
 	const debuggedShortSpans = shortSuccesses.filter(belongsToDebuggedSession);
-	const sqlSpans = spans.filter((span) => span["name"] === "sql.execute");
+	const sqlSpans = spans.filter((span) => span["name"] === "sqlite");
 	return {
 		spans: spans.length,
 		debuggedSessionId,
@@ -647,7 +647,7 @@ test("overflow catches up every sidebar through create and delete bursts", async
 			keepPort: true,
 			skipBrowserProbe: true,
 			metricsFile,
-			serviceEnvironment: { CONDUIT_TEST_ADVANCE_BUS_CAPACITY: "2" },
+			serviceEnvironment: { CONDUIT_TEST_ADVANCE_BUS_CAPACITY: "1" },
 		});
 		const driver = await harness.connect(
 			undefined,
@@ -845,7 +845,7 @@ test("overflow catches up every sidebar through create and delete bursts", async
 						devices: 4,
 						creates: 20,
 						deletes: 5,
-						advanceBusCapacity: 2,
+						advanceBusCapacity: 1,
 					},
 					phaseStart,
 					phaseEnd,

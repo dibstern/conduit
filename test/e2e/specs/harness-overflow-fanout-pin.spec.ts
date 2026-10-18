@@ -1,5 +1,5 @@
 // Behaviour pin conduit-test-16c8.2: two devices watch one session while its
-// advance bus runs at the smallest capacity the bus accepts. Ways this can fail,
+// advance bus runs at capacity 1, the smallest PubSub. Ways this can fail,
 // each checked below:
 // - the burst never overflows the devices' advance buffers, so nothing is
 //   pinned (overflow read count, and the burst landing inside the hold);
@@ -28,7 +28,7 @@ import {
 import { observeDetail } from "../helpers/detail-wire.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 
-const advanceBusCapacity = 2;
+const advanceBusCapacity = 1;
 const burstToolCalls = 16;
 const burstPrompt = `load-tools-${burstToolCalls}`;
 const warmupPrompt = "overflow-fanout-warmup";

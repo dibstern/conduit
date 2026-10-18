@@ -70,13 +70,7 @@ export const makeSessionEventBusLive = (
 	Layer.effect(
 		SessionEventBusTag,
 		Effect.gen(function* () {
-			// Effect 3.21 backs a 1-slot PubSub with a variant that lets a
-			// subscriber that fell behind a slide take another subscriber's
-			// share of the next publication. Every larger size is sound.
-			const capacity = Math.max(
-				2,
-				options.capacity ?? SESSION_EVENT_BUS_CAPACITY,
-			);
+			const capacity = options.capacity ?? SESSION_EVENT_BUS_CAPACITY;
 			const pubsub = yield* PubSub.sliding<StoredEvent>({ capacity });
 			const configuredAdvanceCapacity =
 				process.env["NODE_ENV"] === "test"
@@ -85,7 +79,7 @@ export const makeSessionEventBusLive = (
 			const advanceCapacity =
 				Number.isSafeInteger(configuredAdvanceCapacity) &&
 				configuredAdvanceCapacity > 0
-					? Math.max(2, configuredAdvanceCapacity)
+					? configuredAdvanceCapacity
 					: capacity;
 			const advances = yield* PubSub.sliding<{
 				readonly advance: ReadModelAdvance;

@@ -20,7 +20,6 @@
 		"access": "public"
 	},
 	"scripts": {
-		"codemod:effect4": "node scripts/effect4-codemod/index.mjs",
 		"dev": "tsx watch src/bin/cli.ts -- serve",
 		"dev:frontend": "vite",
 		"dev:all": "node scripts/dev.mjs",
