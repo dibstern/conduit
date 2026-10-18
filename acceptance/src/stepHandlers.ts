@@ -1,5 +1,6 @@
 import { PlaywrightDriver } from "./playwrightDriver.js";
 import type { AcceptanceLifecycle, StepHandler } from "./runtime.js";
+import { askContextHandlers } from "./steps/askContext.js";
 import { backgroundTasksHandlers } from "./steps/backgroundTasks.js";
 import { claudeSettingsHandlers } from "./steps/claudeSettings.js";
 import { composerHandlers } from "./steps/composer.js";
@@ -49,6 +50,8 @@ import { surfacingCardHandlers } from "./steps/surfacingCard.js";
 import { surfacingMarksHandlers } from "./steps/surfacingMarks.js";
 import { surfacingMinimiseHandlers } from "./steps/surfacingMinimise.js";
 import { surfacingRecapHandlers } from "./steps/surfacingRecap.js";
+import { surfacingReplyHandlers } from "./steps/surfacingReply.js";
+import { surfacingSwitchesHandlers } from "./steps/surfacingSwitches.js";
 import { surfacingTuningHandlers } from "./steps/surfacingTuning.js";
 import { taskDrillInHandlers } from "./steps/taskDrillIn.js";
 import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
@@ -78,6 +81,9 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...surfacingMarksHandlers,
 	...surfacingMinimiseHandlers,
 	...surfacingRecapHandlers,
+	...surfacingSwitchesHandlers,
+	...surfacingReplyHandlers,
+	...askContextHandlers,
 	...surfacingTuningHandlers,
 	...sessionGoalDetailsHandlers,
 	...sessionGoalHandlers,

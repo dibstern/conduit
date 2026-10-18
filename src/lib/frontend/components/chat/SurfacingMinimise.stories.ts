@@ -73,6 +73,7 @@ const turn: Turn = {
 const config = {
 	status: {
 		...DEFAULT_MESSAGE_SURFACING_SETTINGS,
+		summariesEnabled: true,
 		enabled: true,
 		active: true,
 		key: { source: "stored" as const, rejected: false },

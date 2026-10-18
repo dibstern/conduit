@@ -89,6 +89,8 @@ export interface InterruptTurnCommand {
 	readonly type: "interrupt_turn";
 	readonly commandId: string;
 	readonly sessionId: string;
+	/** Interrupt only an active turn admitted under one of these input ids. */
+	readonly turnIds?: readonly string[];
 }
 
 export interface ResolvePermissionCommand {
@@ -678,17 +680,19 @@ export class OrchestrationEngine {
 				log.info(`Dispatching interruptTurn: session=${command.sessionId}`),
 			);
 
-			return yield* instance
-				.interruptTurnEffect(command.sessionId)
-				.pipe(
-					Effect.tapError((error) =>
-						Effect.sync(() =>
-							log.error(
-								`interruptTurn failed: session=${command.sessionId} provider=${providerId}: ${error.message}`,
-							),
+			return yield* (
+				command.turnIds === undefined
+					? instance.interruptTurnEffect(command.sessionId)
+					: instance.interruptTurnEffect(command.sessionId, command.turnIds)
+			).pipe(
+				Effect.tapError((error) =>
+					Effect.sync(() =>
+						log.error(
+							`interruptTurn failed: session=${command.sessionId} provider=${providerId}: ${error.message}`,
 						),
 					),
-				);
+				),
+			);
 		});
 	}
 

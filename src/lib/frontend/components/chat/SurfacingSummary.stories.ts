@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, fn, within } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
 import type { TurnRecap } from "../../../contracts/turn-recap.js";
 import { type SurfacePart, surfaceTurn } from "../../utils/surface-turn.js";
@@ -74,6 +74,8 @@ const meta = {
 		onretry: fn(),
 		onsettings: fn(),
 		oncite: fn(),
+		onreply: fn(),
+		onquote: fn(),
 	},
 } satisfies Meta<typeof SurfacingSummary>;
 export default meta;
@@ -154,5 +156,63 @@ export const CitedMessageLight: Story = {
 	...CitedMessage,
 	// Storybook indexes tags statically, so the spread does not carry them.
 	tags: ["viewport-capture"],
+	globals: { theme: "light" },
+};
+/** ↩ Reply on a cited message references it whole, and stays pressed while the draft does. */
+export const CitedReplied: Story = {
+	...WholeTurn,
+	args: { ...WholeTurn.args, replies: new Map([[2, 0]]) },
+	tags: ["viewport-capture"],
+	play: async ({ args, canvasElement }) => {
+		await within(canvasElement).getByTestId("surfacing-recap-cite-2").click();
+		const reply = within(
+			within(document.body).getByTestId("surfacing-recap-reader"),
+		).getByRole("button", { name: "Reply" });
+		await expect(reply).toHaveAttribute("aria-pressed", "true");
+		await userEvent.click(reply);
+		await expect(args["onreply"]).toHaveBeenCalledWith(2, undefined);
+		// Capture the resting pressed pill, not its focus ring.
+		reply.blur();
+	},
+};
+export const CitedRepliedLight: Story = {
+	...CitedReplied,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
+};
+
+const QUOTE = "The job grew: the unread counter has three consumers";
+function selectProse(canvasElement: HTMLElement) {
+	const prose = canvasElement.querySelector(".summary-prose");
+	const node = [...(prose?.childNodes ?? [])].find((child) =>
+		child.textContent?.startsWith(QUOTE),
+	);
+	if (!node) throw new Error("Recap prose moved");
+	const range = document.createRange();
+	range.setStart(node, 0);
+	range.setEnd(node, QUOTE.length);
+	window.getSelection()?.removeAllRanges();
+	window.getSelection()?.addRange(range);
+}
+
+/** Selected recap words offer ❝ Reply to this, which quotes exactly the selection. */
+export const RecapQuote: Story = {
+	...WholeTurn,
+	play: async ({ args, canvasElement }) => {
+		const canvas = within(canvasElement);
+		selectProse(canvasElement);
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Reply to this" }),
+		);
+		await expect(args["onquote"]).toHaveBeenCalledWith(QUOTE);
+		await expect(
+			canvas.queryByRole("button", { name: "Reply to this" }),
+		).toBeNull();
+		selectProse(canvasElement);
+		await canvas.findByRole("button", { name: "Reply to this" });
+	},
+};
+export const RecapQuoteLight: Story = {
+	...RecapQuote,
 	globals: { theme: "light" },
 };

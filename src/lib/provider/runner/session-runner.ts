@@ -70,7 +70,14 @@ export type SessionCommand =
 			readonly answers: Record<string, unknown>;
 	  }
 	| {
-			readonly type: "interrupt" | "end-session" | "shutdown-after-turn";
+			readonly type: "interrupt";
+			readonly sessionId: string;
+			// No capability flag: runners predating it ignore the field and
+			// interrupt session-wide, bounded by the daemon's Stop wait like OpenCode.
+			readonly turnIds?: readonly string[];
+	  }
+	| {
+			readonly type: "end-session" | "shutdown-after-turn";
 			readonly sessionId: string;
 	  }
 	| {

@@ -51,6 +51,11 @@ const inboxCommand = <E>(
 	);
 
 export const conversationHandlers = {
+	ExplainAsk: (request) =>
+		RecapServiceTag.pipe(
+			Effect.flatMap((service) => service.explainAsk(request)),
+			Effect.catchAll(mapRpcFailure("ExplainAsk")),
+		),
 	ListRecaps: (request) =>
 		RecapServiceTag.pipe(
 			Effect.flatMap((service) => service.list(request)),
@@ -244,6 +249,7 @@ export const conversationHandlers = {
 	WsRpcHandlerMap,
 	| "ListRecaps"
 	| "GenerateRecap"
+	| "ExplainAsk"
 	| "StopBackgroundTask"
 	| "SwitchPermissionMode"
 	| "RespondPermission"

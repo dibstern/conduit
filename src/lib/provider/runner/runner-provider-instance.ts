@@ -487,9 +487,21 @@ export class RunnerProviderInstance implements ProviderInstance {
 
 	interruptTurnEffect(
 		sessionId: string,
+		turnIds?: readonly string[],
 	): Effect.Effect<void, ProviderInstanceFailure> {
-		return FiberMap.remove(this.preWarmFibers, sessionId).pipe(
-			Effect.andThen(this.commandEffect({ type: "interrupt", sessionId })),
+		// A bound Stop must leave a pre-warm for a replacement turn alone.
+		return (
+			turnIds === undefined
+				? FiberMap.remove(this.preWarmFibers, sessionId)
+				: Effect.void
+		).pipe(
+			Effect.andThen(
+				this.commandEffect({
+					type: "interrupt",
+					sessionId,
+					...(turnIds !== undefined ? { turnIds } : {}),
+				}),
+			),
 		);
 	}
 	stopTaskEffect(

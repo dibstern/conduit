@@ -2200,7 +2200,9 @@ describe("handleAskUserResponse", () => {
 				completeRecoveredQuestion,
 				prepareTurnSession: ({ sessionId }) => Effect.succeed(sessionId),
 				sendTurn,
-				interruptTurn: () => Effect.void,
+				turnFences: () => ({ stopping: false, switching: false }),
+				fenceLifts: Effect.succeed(Stream.never),
+				beginStop: () => Effect.succeed(Effect.void),
 			};
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
@@ -3091,7 +3093,9 @@ Layer.effect(SessionActivityTag, makeSessionActivity),
 									events.filter((e) => e.type === "session.unsnoozed"),
 								).toHaveLength(snoozed ? 1 : 0);
 							}).pipe(Effect.orDie),
-						interruptTurn: () => Effect.void,
+						turnFences: () => ({ stopping: false, switching: false }),
+						fenceLifts: Effect.succeed(Stream.never),
+						beginStop: () => Effect.succeed(Effect.void),
 					};
 					yield* sendMessageToSession({
 						clientId: "c1",
@@ -3124,7 +3128,9 @@ Layer.effect(SessionActivityTag, makeSessionActivity),
 			holdUserTurnsForAccountSwitch: () => Effect.void,
 			prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 			sendTurn,
-			interruptTurn: () => Effect.void,
+			turnFences: () => ({ stopping: false, switching: false }),
+			fenceLifts: Effect.succeed(Stream.never),
+			beginStop: () => Effect.succeed(Effect.void),
 		};
 		const service = makeMockSessionManagerService({
 			restoreSessionForSend: () =>
@@ -3163,7 +3169,9 @@ describe("cancelSessionById", () => {
 			holdUserTurnsForAccountSwitch: () => Effect.void,
 			prepareTurnSession: vi.fn((input) => Effect.succeed(input.sessionId)),
 			sendTurn: vi.fn(() => Effect.void),
-			interruptTurn: vi.fn(() => Effect.void),
+			turnFences: () => ({ stopping: false, switching: false }),
+			fenceLifts: Effect.succeed(Stream.never),
+			beginStop: vi.fn(() => Effect.succeed(Effect.void)),
 		};
 
 		const layer = Layer.mergeAll(
@@ -3174,12 +3182,12 @@ describe("cancelSessionById", () => {
 		return Effect.gen(function* () {
 			yield* cancelSessionById("client-1", "session-1", "cmd-cancel-test");
 
-			expect(providerTurnService.interruptTurn).toHaveBeenCalledWith({
+			expect(providerTurnService.beginStop).toHaveBeenCalledWith({
 				clientId: "client-1",
 				commandId: "cmd-cancel-test",
 				sessionId: "session-1",
 			});
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 	});
 });
 

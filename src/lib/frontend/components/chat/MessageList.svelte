@@ -19,6 +19,7 @@
 		getSessionPhase,
 		isLlmActive,
 		isProcessing,
+		insertInputDraft,
 		sessionMessages,
 	} from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
@@ -55,6 +56,7 @@
 	import UserMessage from "./UserMessage.svelte";
 	import AssistantMessage from "./AssistantMessage.svelte";
 	import TurnActivity from "./TurnActivity.svelte";
+	import { insertComposerReference } from "../input/composer-reference.svelte.js";
 	import RunningPill from "./RunningPill.svelte";
 	import TurnEconomics from "./TurnEconomics.svelte";
 	import ToolItem from "./ToolItem.svelte";
@@ -574,6 +576,8 @@
 			{#if segment.activity.length > 0 || (final && turn.live)}
 				{@const reply = segment.reply[0]}
 				<TurnActivity latestTurn={turn.id === latestTurnId} newestSettledTurn={turn.id === newestEndedTurnId} {turn} {segment} {final} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
+					onjump={scrollCtrl.requestJump}
+					onReplyToAsk={(reference, text) => { if (viewedSessionId) insertComposerReference(reference, viewedSessionId); if (text) insertInputDraft(text); }}
 					forkMessageId={reply ? forkMessageIdAtReply(turn, reply) : undefined}
 					model={turn.user?.modelExecution?.actualModel ?? turn.user?.modelExecution?.requestedModel} />
 			{/if}

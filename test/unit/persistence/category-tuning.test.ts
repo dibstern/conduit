@@ -55,6 +55,7 @@ const fixture = (
 ) => {
 	const preferences: MessageSurfacingStatus = {
 		enabled: true,
+		summariesEnabled: true,
 		active,
 		defaultLevel: "balanced",
 		turnsOpen: "auto",
@@ -149,6 +150,7 @@ it("reuses persisted verdict criteria after weight-only saves and full service r
 				Layer.succeed(MessageSurfacingSettings, {
 					get: Effect.succeed<MessageSurfacingStatus>({
 						enabled: true,
+						summariesEnabled: true,
 						active: true,
 						defaultLevel: "balanced",
 						turnsOpen: "auto",

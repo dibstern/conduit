@@ -188,11 +188,13 @@ export const cancelSessionById = (
 ) =>
 	Effect.gen(function* () {
 		const providerTurnService = yield* ProviderTurnServiceTag;
-		yield* providerTurnService.interruptTurn({
-			clientId,
-			commandId,
+		const inbox = yield* SessionInboxTag;
+		// Fence under the inbox permit, so no handoff is mid-decision; wait outside it.
+		const stopped = yield* inbox.withSession(
 			sessionId,
-		});
+			providerTurnService.beginStop({ clientId, commandId, sessionId }),
+		);
+		yield* stopped;
 	});
 
 export {

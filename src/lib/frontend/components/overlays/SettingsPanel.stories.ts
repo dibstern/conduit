@@ -156,6 +156,28 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+/** Scroll changes do not produce the DOM mutations the visual runner waits for. */
+async function scrollSettingsIntoView(
+	element: HTMLElement,
+	block: ScrollLogicalPosition,
+): Promise<void> {
+	await element.ownerDocument.fonts.ready;
+	const scroller = element.closest<HTMLElement>(".settings-content");
+	await expect(scroller).not.toBeNull();
+	if (!scroller) return;
+	element.scrollIntoView({ block, behavior: "instant" });
+	let previousTop = scroller.scrollTop;
+	let stableFrames = 0;
+	while (stableFrames < 2) {
+		await new Promise<void>((resolve) =>
+			requestAnimationFrame(() => resolve()),
+		);
+		const top = scroller.scrollTop;
+		stableFrames = top === previousTop ? stableFrames + 1 : 0;
+		previousTop = top;
+	}
+}
+
 /** A generic open: General on desktop, the section list on phone. */
 export const Default: Story = {
 	play: async ({ canvasElement }) => {
@@ -297,8 +319,7 @@ export const Advanced: Story = {
 			name: /^Advanced.*Debug off$/,
 		});
 		await expect(disclosure).toHaveAttribute("aria-expanded", "false");
-		await canvasElement.ownerDocument.fonts.ready;
-		disclosure.scrollIntoView({ block: "nearest" });
+		await scrollSettingsIntoView(disclosure, "nearest");
 		await userEvent.click(disclosure);
 		const toggle = body.getByRole("switch", {
 			name: "Toggle connection debug panel",
@@ -307,8 +328,7 @@ export const Advanced: Story = {
 		await userEvent.click(toggle);
 		await expect(disclosure).toHaveTextContent("Debug on");
 		await expect(disclosure).toHaveAttribute("aria-expanded", "true");
-		await canvasElement.ownerDocument.fonts.ready;
-		toggle.scrollIntoView({ block: "nearest" });
+		await scrollSettingsIntoView(toggle, "nearest");
 		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
 	},
 };
@@ -323,9 +343,7 @@ export const WorktreeCleanup: Story = {
 		});
 		await userEvent.click(disclosure);
 		await expect(disclosure).toHaveAttribute("aria-expanded", "true");
-		// The web font reflows the groups above; scroll once it has settled.
-		await canvasElement.ownerDocument.fonts.ready;
-		disclosure.scrollIntoView({ block: "start" });
+		await scrollSettingsIntoView(disclosure, "start");
 		await expect(
 			body.getByTestId("settings-cleanup-on-settle"),
 		).toHaveAttribute("data-value", "merged");
@@ -562,10 +580,10 @@ export const Claude: Story = {
 		await expect(
 			canvas.queryByTestId("claude-setting-attribution"),
 		).not.toBeInTheDocument();
-		await canvasElement.ownerDocument.fonts.ready;
-		canvas
-			.getByTestId("claude-attribution-group")
-			.scrollIntoView({ block: "end" });
+		await scrollSettingsIntoView(
+			canvas.getByTestId("claude-attribution-group"),
+			"end",
+		);
 	},
 };
 
@@ -596,10 +614,10 @@ export const ClaudeAttributionExpanded: Story = {
 		await expect(
 			canvas.getByTestId("claude-setting-attribution-provenance"),
 		).toBeVisible();
-		await canvasElement.ownerDocument.fonts.ready;
-		canvas
-			.getByTestId("claude-attribution-group")
-			.scrollIntoView({ block: "end" });
+		await scrollSettingsIntoView(
+			canvas.getByTestId("claude-attribution-group"),
+			"end",
+		);
 	},
 };
 
@@ -733,10 +751,10 @@ export const Server: Story = {
 			canvas.queryByTestId("server-shutdown-confirmation"),
 		).not.toBeInTheDocument();
 		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
-		await canvasElement.ownerDocument.fonts.ready;
-		canvas
-			.getByTestId("server-startup-settings")
-			.scrollIntoView({ block: "end" });
+		await scrollSettingsIntoView(
+			canvas.getByTestId("server-startup-settings"),
+			"end",
+		);
 	},
 };
 
@@ -764,8 +782,7 @@ export const ServerStartupExpanded: Story = {
 			"Installed",
 		);
 		await expect(within(startup).queryByRole("switch")).not.toBeInTheDocument();
-		await canvasElement.ownerDocument.fonts.ready;
-		startup.scrollIntoView({ block: "end" });
+		await scrollSettingsIntoView(startup, "end");
 	},
 };
 
@@ -781,10 +798,10 @@ export const PowerCommandEdit: Story = {
 		await expect(canvas.getByTestId("server-power-args")).toHaveValue("-di");
 		await expect(canvas.getByTestId("server-power-save")).toBeVisible();
 		await expect(canvas.getByTestId("server-power-cancel")).toBeVisible();
-		await canvasElement.ownerDocument.fonts.ready;
-		canvas
-			.getByTestId("server-power-settings")
-			.scrollIntoView({ block: "end" });
+		await scrollSettingsIntoView(
+			canvas.getByTestId("server-power-settings"),
+			"end",
+		);
 	},
 };
 
@@ -805,10 +822,10 @@ export const PowerNotAvailable: Story = {
 		await expect(
 			canvas.queryByTestId("server-power-edit"),
 		).not.toBeInTheDocument();
-		await canvasElement.ownerDocument.fonts.ready;
-		canvas
-			.getByTestId("server-power-settings")
-			.scrollIntoView({ block: "end" });
+		await scrollSettingsIntoView(
+			canvas.getByTestId("server-power-settings"),
+			"end",
+		);
 	},
 };
 
@@ -826,8 +843,7 @@ export const PinOn: Story = {
 		);
 		await expect(canvas.getByTestId("server-pin-change-btn")).toBeVisible();
 		await expect(canvas.getByTestId("server-pin-remove-btn")).toBeVisible();
-		await canvasElement.ownerDocument.fonts.ready;
-		security.scrollIntoView({ block: "nearest" });
+		await scrollSettingsIntoView(security, "nearest");
 	},
 };
 
@@ -844,10 +860,10 @@ export const ChangePin: Story = {
 		await expect(canvas.getByTestId("server-pin-form")).toHaveTextContent(
 			"Every browser, including this one, will ask for the new PIN.",
 		);
-		await canvasElement.ownerDocument.fonts.ready;
-		canvas.getByTestId("server-security-settings").scrollIntoView({
-			block: "end",
-		});
+		await scrollSettingsIntoView(
+			canvas.getByTestId("server-security-settings"),
+			"end",
+		);
 	},
 };
 
@@ -860,6 +876,8 @@ export const ChangePin: Story = {
 export const QuickStartExpanded: Story = {
 	args: { initialTab: "server" },
 	play: async ({ canvasElement }) => {
+		// Click-driven focus scrolls too, so wait for layout before interacting.
+		await canvasElement.ownerDocument.fonts.ready;
 		const guides = within(
 			within(canvasElement).getByTestId("opencode-setup-guides"),
 		);
@@ -873,17 +891,18 @@ export const QuickStartExpanded: Story = {
 			guides.getByText(/opencode config set provider anthropic/),
 		).toBeVisible();
 		await expect(row).toHaveAttribute("aria-expanded", "true");
-		// Show the opened guide. Without this, focusing a row this close to the
-		// phone fold scrolls by 0 or 1px depending on sub-pixel layout.
-		row.scrollIntoView({ block: "start" });
+		// Show the opened guide at the top. Without a settled scroll, focusing a
+		// row this close to the phone fold scrolls by 0 or 1px.
+		await scrollSettingsIntoView(row, "start");
 	},
 };
 
 /** Instances sit below the fold on the Server page, so scroll them in. */
 const showInstances: Story["play"] = async ({ canvasElement }) => {
-	within(canvasElement)
-		.getByTestId("add-instance-btn")
-		.scrollIntoView({ block: "start" });
+	await scrollSettingsIntoView(
+		within(canvasElement).getByTestId("add-instance-btn"),
+		"start",
+	);
 };
 
 export const InstancesPopulated: Story = {
@@ -939,6 +958,7 @@ export const DefaultClaudeAccountEdit: Story = {
 	args: { initialTab: "server" },
 	beforeEach: populateInstances,
 	play: async ({ canvasElement }) => {
+		await canvasElement.ownerDocument.fonts.ready;
 		const canvas = within(canvasElement);
 		const account = within(canvas.getByTestId("instance-row-claude"));
 		await userEvent.click(
@@ -964,6 +984,10 @@ export const DefaultClaudeAccountEdit: Story = {
 		await expect(
 			canvas.queryByRole("radiogroup", { name: "Type" }),
 		).not.toBeInTheDocument();
+		await scrollSettingsIntoView(
+			canvas.getByTestId("instance-form"),
+			"nearest",
+		);
 	},
 };
 
@@ -991,7 +1015,10 @@ export const InstancesEmpty: Story = {
 			"aria-expanded",
 			"false",
 		);
-		canvas.getByTestId("add-instance-btn").scrollIntoView({ block: "start" });
+		await scrollSettingsIntoView(
+			canvas.getByTestId("add-instance-btn"),
+			"start",
+		);
 	},
 };
 
@@ -999,6 +1026,7 @@ export const InstanceAddOpenCode: Story = {
 	args: { initialTab: "server" },
 	beforeEach: populateInstances,
 	play: async ({ canvasElement }) => {
+		await canvasElement.ownerDocument.fonts.ready;
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByTestId("add-instance-btn"));
 		await userEvent.click(canvas.getByTestId("instance-form-driver-opencode"));
@@ -1017,6 +1045,10 @@ export const InstanceAddOpenCode: Story = {
 		await expect(canvas.getByTestId("instance-form-save")).toHaveTextContent(
 			"Add instance",
 		);
+		await scrollSettingsIntoView(
+			canvas.getByTestId("instance-form"),
+			"nearest",
+		);
 	},
 };
 
@@ -1034,6 +1066,7 @@ export const Hover: Story = {
 export const InstanceForm: Story = {
 	args: { initialTab: "server" },
 	play: async ({ canvasElement }) => {
+		await canvasElement.ownerDocument.fonts.ready;
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByTestId("add-instance-btn"));
 		await expect(canvas.getByTestId("instance-form-save")).toBeVisible();
@@ -1042,7 +1075,11 @@ export const InstanceForm: Story = {
 		// baseline would otherwise bake in Add's focus ring — and that ring is
 		// exactly what changes when Add moves onto Button. A fidelity baseline
 		// has to be blind to the migration it is about to police.
-		await userEvent.click(canvas.getByTestId("instance-form-name"));
+		canvas.getByTestId("instance-form-name").focus({ preventScroll: true });
+		await scrollSettingsIntoView(
+			canvas.getByTestId("instance-form"),
+			"nearest",
+		);
 	},
 };
 

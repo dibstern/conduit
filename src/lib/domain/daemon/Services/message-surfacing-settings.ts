@@ -47,12 +47,17 @@ export interface MessageSurfacingSettingsOptions {
 }
 
 const SnapshotSchema = Schema.Struct({
-	settings: MessageSurfacingSettingsSchema,
+	settings: Schema.Struct({
+		...MessageSurfacingSettingsSchema.fields,
+		summariesEnabled: Schema.optional(Schema.Boolean),
+	}),
 	apiKey: Schema.OptionFromNullOr(Schema.Redacted(Schema.String)),
 	keyState: Schema.Literal("none", "valid", "invalid"),
 	invalidEnvKeyHash: Schema.OptionFromNullOr(Schema.String),
 });
-type Snapshot = typeof SnapshotSchema.Type;
+type Snapshot = Omit<typeof SnapshotSchema.Type, "settings"> & {
+	readonly settings: typeof MessageSurfacingSettingsSchema.Type;
+};
 
 export const isSurfacingLoopback = (address: string): boolean => {
 	const ipv4 = address.startsWith("::ffff:") ? address.slice(7) : address;
@@ -103,9 +108,28 @@ export const makeMessageSurfacingSettings = (
 				}
 				await chmod(directory, 0o700);
 				await chmod(filename, 0o600);
-				return Schema.decodeUnknownSync(Schema.parseJson(SnapshotSchema))(
-					content,
-				);
+				const saved = Schema.decodeUnknownSync(
+					Schema.parseJson(SnapshotSchema),
+				)(content);
+				const rejected = Option.isSome(envKey)
+					? Option.isSome(saved.invalidEnvKeyHash) &&
+						Option.isSome(envKeyHash) &&
+						saved.invalidEnvKeyHash.value === envKeyHash.value
+					: saved.keyState === "invalid";
+				// Preserve the old effective summary state once, then persist the
+				// independent choice on the next settings write. Keep legacy timing.
+				return {
+					...saved,
+					settings: {
+						...saved.settings,
+						summariesEnabled:
+							saved.settings.summariesEnabled ??
+							(saved.settings.enabled &&
+								saved.settings.recap.model !== "off" &&
+								(Option.isSome(envKey) || Option.isSome(saved.apiKey)) &&
+								!rejected),
+					},
+				};
 			},
 			// Foreign errors can contain a credential or response body.
 			catch: () =>
@@ -249,6 +273,11 @@ export const makeMessageSurfacingSettings = (
 						...current,
 						settings: {
 							enabled: patch.enabled ?? current.settings.enabled,
+							summariesEnabled:
+								patch.summariesEnabled ??
+								(patch.recap?.model === "off"
+									? false
+									: current.settings.summariesEnabled),
 							defaultLevel: patch.defaultLevel ?? current.settings.defaultLevel,
 							turnsOpen: patch.turnsOpen ?? current.settings.turnsOpen,
 							recap: {

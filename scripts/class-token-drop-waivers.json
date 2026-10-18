@@ -18,6 +18,7 @@
 	},
 	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: bg-[var(--account-color)],bg-border,border-dashed,gap-2.5,last:border-b-0,mb-[2px],mb-[5px],min-h-[46px],mt-[9px],pb-[4px],rounded-[2px],rounded-none,text-[10px],text-sm,tracking-[0.07em],tracking-[0.5px],uppercase,w-16": "conduit-test-aoqb.12: the approved Final model picker replaces the account-coloured full-width meter with QuotaMeter's neutral/semantic 26px usage meter, uppercase section captions with 12px sentence case, and ruled square rows with icon-led 36px rows (50px phone targets), 10px corners and intrinsic trailing values. The popover uses 6px outer padding and its shared primitives own control appearance.",
 	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-border-subtle,bg-text,flex-wrap,font-semibold,gap-0.5,gap-[3px],px-0.5,py-0.5,py-1.5,rounded-[7px],text-bg": "conduit-test-aoqb.12: the picker and picker-context recipes lost their last consumer when the Final model picker moved to the joined segment, so they and their SegmentedControl stories are deleted.",
+	"src/lib/frontend/components/input/SkillHighlightBackdrop.svelte :: z-0": "conduit-test-ahu8.12: the mirror must not create a stacking context. Reference remove buttons use z-index 20 to receive clicks above the textarea at z-index 10; all other mirror content remains behind the textarea.",
 	"src/lib/frontend/components/overlays/ClaudeSettingsTab.svelte :: max-w-full": {
 		"movedTo": "src/lib/frontend/components/ui/SettingsPicker.svelte",
 		"requires": "<SettingsPicker",

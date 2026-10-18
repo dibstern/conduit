@@ -57,7 +57,9 @@ it("keeps inbox startup, advance and overflow drains within the bound project", 
 				return {
 					holdUserTurnsForAccountSwitch: () => Effect.void,
 					prepareTurnSession: () => Effect.succeed("opencode"),
-					interruptTurn: () => Effect.void,
+					turnFences: () => ({ stopping: false, switching: false }),
+					fenceLifts: Effect.succeed(Stream.never),
+					beginStop: () => Effect.succeed(Effect.void),
 					sendTurn: (input) =>
 						Effect.sync(() => {
 							dispatched.push(input.sessionId);

@@ -211,18 +211,24 @@ export function surfaceTurn(input: {
 		notJudgedCount: messages.filter(
 			({ part }) => part.surfacingProbabilities === null,
 		).length,
-		numbers: turnMessages.flatMap(({ part, level }) =>
-			part.surfacingOrdinal === undefined
-				? []
-				: [
-						{
-							number: part.surfacingOrdinal,
-							part,
-							level,
-							belowLevel: rank[level] < rank[input.level],
-						},
-					],
-		),
+		// Everything a reply reference names, for any message the turn's summary can cite.
+		numbers: turnMessages.flatMap(({ part, level, category: id }) => {
+			if (part.surfacingOrdinal === undefined) return [];
+			const category = input.categorySet.categories.find(
+				(candidate) => candidate.id === id,
+			);
+			return [
+				{
+					number: part.surfacingOrdinal,
+					part,
+					level,
+					belowLevel: rank[level] < rank[input.level],
+					label: category?.label ?? "Message",
+					glyph: category?.glyph ?? "·",
+					time: surfaceTime((part.createdAt ?? input.start) - input.start),
+				},
+			];
+		}),
 		following: input.live && input.picked === null,
 		previous: pins[cardIndex - 1] ?? null,
 		next: pins[cardIndex + 1] ?? null,
