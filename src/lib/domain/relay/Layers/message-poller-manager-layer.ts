@@ -20,7 +20,7 @@ export const makeMessagePollerManagerLive = (
 	never,
 	OpenCodeAPITag | ConfigTag | LoggerTag
 > =>
-	Layer.scoped(
+	Layer.effect(
 		PollerManagerTag,
 		Effect.gen(function* () {
 			const client = yield* OpenCodeAPITag;
@@ -41,14 +41,14 @@ export const makeMessagePollerManagerLive = (
 					try: () => manager.drain(),
 					catch: (cause) => cause,
 				}).pipe(
-					Effect.catchAll((cause) =>
+					Effect.catch((cause) =>
 						Effect.sync(() =>
 							pollerLog.warn(
 								`Failed to drain message pollers during shutdown: ${formatErrorDetail(cause)}`,
 							),
 						),
 					),
-					Effect.catchAllCause((cause) =>
+					Effect.catchCause((cause) =>
 						Effect.sync(() =>
 							pollerLog.warn(
 								`Defect while draining message pollers during shutdown: ${Failure.renderCause(cause)}`,

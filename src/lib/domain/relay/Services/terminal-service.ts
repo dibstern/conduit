@@ -8,6 +8,7 @@ import {
 	Option,
 	Queue,
 	Schedule,
+	Semaphore,
 } from "effect";
 import type { Account } from "../../../contracts/account.js";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
@@ -84,9 +85,10 @@ export interface OpenCodeTerminalService {
 	): Effect.Effect<void>;
 }
 
-export class OpenCodeTerminalServiceTag extends Context.Tag(
-	"OpenCodeTerminalService",
-)<OpenCodeTerminalServiceTag, OpenCodeTerminalService>() {}
+export class OpenCodeTerminalServiceTag extends Context.Service<
+	OpenCodeTerminalServiceTag,
+	OpenCodeTerminalService
+>()("OpenCodeTerminalService") {}
 
 export interface LocalPtySession {
 	readonly pty: PtyInfo;
@@ -114,16 +116,16 @@ export interface LocalPtyService {
 	}): Effect.Effect<LocalPtySession, TerminalServiceError>;
 }
 
-export class LocalPtyServiceTag extends Context.Tag("LocalPtyService")<
+export class LocalPtyServiceTag extends Context.Service<
 	LocalPtyServiceTag,
 	LocalPtyService
->() {}
+>()("LocalPtyService") {}
 
 export const LocalPtyServiceLive: Layer.Layer<
 	LocalPtyServiceTag,
 	never,
 	ConfigTag | LoggerTag
-> = Layer.scoped(
+> = Layer.effect(
 	LocalPtyServiceTag,
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
@@ -244,7 +246,7 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 	| PtyManagerTag
 	| ConnectPtyUpstreamTag
 	| LocalPtyServiceTag
-> = Layer.scoped(
+> = Layer.effect(
 	OpenCodeTerminalServiceTag,
 	Effect.gen(function* () {
 		const instances = yield* OpenCodeInstancesTag;
@@ -272,8 +274,8 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 		const ptyManager = yield* PtyManagerTag;
 		const connectPtyUpstream = yield* ConnectPtyUpstreamTag;
 		const localPty = yield* LocalPtyServiceTag;
-		const terminalLock = yield* Effect.makeSemaphore(1);
-		const openCodeLock = yield* Effect.makeSemaphore(1);
+		const terminalLock = yield* Semaphore.make(1);
+		const openCodeLock = yield* Semaphore.make(1);
 		const trackedPtys = () =>
 			ptyManager
 				.listSessions()
@@ -414,7 +416,7 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 					(!session.upstream || session.upstream.readyState === 3)
 				) {
 					yield* connectPtyUpstream(pty.id, -1).pipe(
-						Effect.catchAll((cause) =>
+						Effect.catch((cause) =>
 							Effect.sync(() => {
 								log.warn(
 									`Failed to connect PTY ${pty.id}: ${formatErrorDetail(cause)}`,
@@ -431,7 +433,7 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 		let completed = yield* Deferred.make<boolean>();
 		yield* Effect.addFinalizer(() =>
 			Deferred.interrupt(completed).pipe(
-				Effect.zipRight(Queue.shutdown(changes)),
+				Effect.andThen(Queue.shutdown(changes)),
 			),
 		);
 
@@ -439,7 +441,7 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 			create: (clientId: string, cwd = config.projectDir, account) =>
 				Effect.gen(function* () {
 					const session = wsHandler.getClientSession(clientId) ?? "?";
-					const createResult = yield* Effect.either(
+					const createResult = yield* Effect.result(
 						localPty.create({
 							cwd,
 							...(account?.driver === "claude"
@@ -450,18 +452,18 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 								: {}),
 						}),
 					);
-					if (createResult._tag === "Left") {
+					if (createResult._tag === "Failure") {
 						log.warn(
-							`client=${clientId} session=${session} Failed to create PTY: ${formatErrorDetail(createResult.left.cause)}`,
+							`client=${clientId} session=${session} Failed to create PTY: ${formatErrorDetail(createResult.failure.cause)}`,
 						);
-						return yield* createResult.left;
+						return yield* createResult.failure;
 					}
 
-					const { pty } = createResult.right;
+					const { pty } = createResult.success;
 					log.info(
 						`client=${clientId} session=${session} Created: ${pty.id} (pid=${pty.pid})`,
 					);
-					registerLocalSession(createResult.right, false);
+					registerLocalSession(createResult.success, false);
 				}).pipe(Effect.uninterruptible, terminalLock.withPermits(1), (create) =>
 					Effect.gen(function* () {
 						// Match cleanup's launch lock so a successful spawn is visible
@@ -480,7 +482,7 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 			list: () =>
 				Effect.gen(function* () {
 					const batch = completed;
-					changes.unsafeOffer(undefined);
+					Queue.offerUnsafe(changes, undefined);
 					if (!(yield* Deferred.await(batch))) yield* restoreLocalSessions;
 					return trackedPtys();
 				}),
@@ -491,7 +493,7 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 				})),
 			subscribe: (listener) => ptyManager.subscribe(listener),
 			onOpenCodePtysChanged: (instanceId) => {
-				if (instanceId === openCodeId) changes.unsafeOffer(undefined);
+				if (instanceId === openCodeId) Queue.offerUnsafe(changes, undefined);
 			},
 			sendInput: (ptyId: string, data: string) =>
 				Effect.try({
@@ -553,20 +555,20 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 						session.upstream?.resize?.(cols, rows);
 						return;
 					}
-					const resizeResult = yield* Effect.either(
+					const resizeResult = yield* Effect.result(
 						callOpenCodePty("resize", ptyId, (pty) =>
 							pty.resize(ptyId, rows, cols),
 						),
 					);
-					if (resizeResult._tag === "Left") {
+					if (resizeResult._tag === "Failure") {
 						log.warn(
-							`client=${clientId} session=${wsHandler.getClientSession(clientId) ?? "?"} Resize failed ${ptyId}: ${formatErrorDetail(resizeResult.left.cause)}`,
+							`client=${clientId} session=${wsHandler.getClientSession(clientId) ?? "?"} Resize failed ${ptyId}: ${formatErrorDetail(resizeResult.failure.cause)}`,
 						);
 					}
 				}),
 		};
 		const attempt = Effect.gen(function* () {
-			yield* Queue.takeAll(changes);
+			yield* Queue.clear(changes);
 			const next = yield* Deferred.make<boolean>();
 			const batch = completed;
 			completed = next;
@@ -589,21 +591,23 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 		});
 		yield* Effect.forkScoped(
 			Queue.take(changes).pipe(
-				Effect.zipRight(
+				Effect.andThen(
 					// Each retry leases the instance and so renews its idle grace;
 					// unbounded retries would keep a broken instance alive forever.
 					// The next lifecycle signal re-arms discovery.
 					attempt.pipe(
 						Effect.retry(
-							Schedule.exponential("1 second").pipe(
-								Schedule.intersect(Schedule.recurs(5)),
-							),
+							Schedule.max([
+								Schedule.exponential("1 second"),
+								Schedule.recurs(5),
+							]),
 						),
 						Effect.ignore,
 					),
 				),
 				Effect.forever,
 			),
+			{ uninterruptible: "inherit" },
 		);
 
 		return terminal;

@@ -1,4 +1,4 @@
-import { Effect, Exit, Option, Runtime } from "effect";
+import { Effect, Exit, Option } from "effect";
 import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
@@ -112,9 +112,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 		const translator = yield* TranslatorTag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
-			context: Effect.suspend(() =>
-				Effect.map(relayManagedRuntime.runtimeEffect, (value) => value.context),
-			),
+			context: Effect.suspend(() => relayManagedRuntime.contextEffect),
 			runFork: relayManagedRuntime.runFork,
 		});
 		const statusSnapshot = yield* RelayStatusSnapshotTag;
@@ -142,7 +140,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 		if (!(yield* projectionRunner.isRecovered()))
 			yield* projectionRunner.recover();
 		const backfilled = yield* backfillSessionPicks().pipe(
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.sync(() => {
 					log.warn(
 						`Could not backfill session picks: ${formatErrorDetail(error)}`,
@@ -155,7 +153,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 			log.info(`Backfilled picks for ${backfilled} session(s)`);
 		// Restore only the durable pick; past turns never override it.
 		const restored = yield* restoreSessionSettings().pipe(
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.sync(() => {
 					log.warn(
 						`Could not restore session settings: ${formatErrorDetail(error)}`,
@@ -169,7 +167,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 				`Restored permission modes for ${restored.permissionModes} session(s)`,
 			);
 		const rejectedPermissions = yield* resolveOrphanedClaudePermissions.pipe(
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.sync(() => {
 					log.warn(
 						`Could not reject Claude permissions left pending by a crash: ${formatErrorDetail(error)}`,
@@ -186,27 +184,27 @@ function acquireStartupServices(inputs: StartupInputs) {
 			);
 		}
 		const sessionManagerService = yield* SessionManagerServiceTag;
-		const runFork = Runtime.runFork(
-			yield* Effect.runtime<
+		const runFork = Effect.runForkWith(
+			yield* Effect.context<
 				| SessionManagerServiceTag
-				| Effect.Effect.Context<ReturnType<typeof announceBackgroundWork>>
+				| Effect.Services<ReturnType<typeof announceBackgroundWork>>
 			>(),
 		);
 		// Read-model only: creating a first session could call OpenCode, so attach
 		// creates it instead (getDefaultSessionId).
 		const readQueryEffect = yield* ReadQueryEffectTag;
-		const sessionsResult = yield* Effect.either(readPersistedStartupSessions);
-		if (sessionsResult._tag === "Right" && sessionsResult.right.count > 0)
-			yield* statusSnapshot.setSessionCount(sessionsResult.right.count);
-		if (sessionsResult._tag === "Left")
+		const sessionsResult = yield* Effect.result(readPersistedStartupSessions);
+		if (sessionsResult._tag === "Success" && sessionsResult.success.count > 0)
+			yield* statusSnapshot.setSessionCount(sessionsResult.success.count);
+		if (sessionsResult._tag === "Failure")
 			yield* Effect.sync(() =>
 				log.warn(
-					`Session list unavailable at startup: ${formatErrorDetail(sessionsResult.left)}`,
+					`Session list unavailable at startup: ${formatErrorDetail(sessionsResult.failure)}`,
 				),
 			);
 		const sessionId =
-			(sessionsResult._tag === "Right"
-				? sessionsResult.right.sessionId
+			(sessionsResult._tag === "Success"
+				? sessionsResult.success.sessionId
 				: undefined) ?? "";
 		yield* PollerStateTag;
 		yield* PollerPubSubTag;
@@ -243,7 +241,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 					});
 				}).pipe(
 					Effect.provide(pickContext),
-					Effect.catchAll((cause) =>
+					Effect.catch((cause) =>
 						Effect.sync(() => {
 							log.warn("Could not resolve native OpenCode session pick", {
 								instanceId,
@@ -283,7 +281,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 	});
 }
 
-type AcquiredStartupServices = Effect.Effect.Success<
+type AcquiredStartupServices = Effect.Success<
 	ReturnType<typeof acquireStartupServices>
 >;
 
@@ -354,7 +352,7 @@ function startMonitoringAndPollers(
 	});
 }
 
-type StartupMonitoring = Effect.Effect.Success<
+type StartupMonitoring = Effect.Success<
 	ReturnType<typeof startMonitoringAndPollers>
 >;
 
@@ -470,7 +468,7 @@ export async function startProjectRelay(inputs: StartupInputs) {
 					announceBackgroundWork: (changedSessionId: string) => {
 						runFork(
 							announceBackgroundWork(changedSessionId).pipe(
-								Effect.catchAllCause((cause) =>
+								Effect.catchCause((cause) =>
 									Effect.sync(() =>
 										log.warn(
 											`Failed to announce background work: ${Failure.renderCause(cause)}`,

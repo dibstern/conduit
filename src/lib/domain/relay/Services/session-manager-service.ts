@@ -9,6 +9,7 @@ import {
 	Option,
 	PubSub,
 	Ref,
+	Semaphore,
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../account-directory.js";
@@ -155,7 +156,7 @@ function renderProviderCleanupDetail(error: unknown): string {
 		return truncateProviderCleanupDiagnostic(
 			// The upstream adapter wraps provider failures; its message is generic.
 			formatErrorDetail(
-				Failure.isUnknownException(error) ? error.error : error,
+				Failure.isUnknownException(error) ? error.cause : error,
 			),
 			PROVIDER_CLEANUP_DETAIL_MAX_LENGTH,
 		);
@@ -732,9 +733,10 @@ export interface SessionManagerService {
 }
 
 /** Bundled service object for callers that prefer DI over free functions. */
-export class SessionManagerServiceTag extends Context.Tag(
-	"SessionManagerService",
-)<SessionManagerServiceTag, SessionManagerService>() {}
+export class SessionManagerServiceTag extends Context.Service<
+	SessionManagerServiceTag,
+	SessionManagerService
+>()("SessionManagerService") {}
 
 const makeServiceCreateSession = ({
 	engine,
@@ -746,7 +748,7 @@ const makeServiceCreateSession = ({
 	sql,
 }: {
 	engine: OrchestrationEngine;
-	accounts: AccountDirectory["Type"];
+	accounts: Context.Service.Shape<typeof AccountDirectory>;
 	instanceClients: OpenCodeInstances;
 	readQuery: ReadQueryEffect;
 	eventStore: EventStoreEffect;
@@ -1070,7 +1072,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 				: provided;
 		};
 
-		const triageLock = yield* Effect.makeSemaphore(1);
+		const triageLock = yield* Semaphore.make(1);
 		return {
 			getDefaultSessionId: (title) =>
 				Effect.gen(function* () {
@@ -1165,7 +1167,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 					);
 					yield* Deferred.done(completion, exit);
 					inFlightDeletes.delete(sessionId);
-					return yield* Exit.matchEffect(exit, {
+					return yield* Effect.matchCauseEffectEager(exit, {
 						onFailure: Effect.failCause,
 						onSuccess: () => Effect.succeed(true),
 					});
@@ -1213,7 +1215,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 							const restored = yield* withSessionCommandServices(
 								operation,
 							).pipe(
-								Effect.catchAll((error) =>
+								Effect.catch((error) =>
 									Effect.sync(() =>
 										log.warn(
 											`Failed to restore ${sessionId} on send: ${String(error)}`,

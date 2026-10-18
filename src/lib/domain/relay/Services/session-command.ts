@@ -139,7 +139,7 @@ export interface SessionUpstreamAdapter {
 	readonly provider: KnownProviderDriverKind;
 	readonly sync: (
 		command: SessionCommand,
-	) => Effect.Effect<void, Cause.UnknownException>;
+	) => Effect.Effect<void, Cause.UnknownError>;
 }
 
 export interface ApplySessionCommandOptions {
@@ -370,7 +370,7 @@ export const applySessionCommand = (
 				yield* sync;
 			}
 		}).pipe(
-			Effect.catchAll((cause) =>
+			Effect.catch((cause) =>
 				Effect.sync(() => {
 					log.warn("Upstream session sync failed", {
 						operation: command.type,
@@ -569,7 +569,7 @@ export const forkOpenCodeSession = (
 			api.session.messagesPage(session.id, { limit: 1 }),
 		).pipe(
 			Effect.map((messages) => messages.at(-1)),
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.logWarning(
 					`Could not determine fork point for ${session.id}: ${String(error)}`,
 				).pipe(Effect.as(undefined)),

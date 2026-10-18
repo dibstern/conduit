@@ -90,7 +90,7 @@ export const readPersistedAutoSettleFacts = (
 			for (const row of rows) {
 				if (row.workspace === null || row.settled_at !== null) continue;
 				const workspace = Schema.decodeUnknownOption(
-					Schema.parseJson(SessionWorkspaceSchema),
+					Schema.fromJsonString(SessionWorkspaceSchema),
 				)(row.workspace);
 				if (Option.isNone(workspace)) continue;
 				const directory = effectiveWorkingDirectory(

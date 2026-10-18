@@ -97,35 +97,35 @@ export interface ProviderTurnService {
 		answers?: Record<string, unknown>,
 	) => Effect.Effect<
 		void,
-		Effect.Effect.Error<ReturnType<typeof completeRecoveredQuestion>>
+		Effect.Error<ReturnType<typeof completeRecoveredQuestion>>
 	>;
 	readonly prepareTurnSession: (
 		input: ProviderTurnServicePrepareInput,
 	) => Effect.Effect<
 		string,
-		Effect.Effect.Error<ReturnType<typeof prepareTurnSession>>,
+		Effect.Error<ReturnType<typeof prepareTurnSession>>,
 		OverridesStateTag
 	>;
 	readonly sendTurn: (
 		input: ProviderTurnServiceSendInput,
 	) => Effect.Effect<
 		void,
-		Effect.Effect.Error<ReturnType<typeof sendTurn>>,
+		Effect.Error<ReturnType<typeof sendTurn>>,
 		OverridesStateTag
 	>;
 	readonly interruptTurn: (
 		input: ProviderTurnServiceInterruptInput,
 	) => Effect.Effect<
 		void,
-		Effect.Effect.Error<ReturnType<typeof interruptTurn>>,
+		Effect.Error<ReturnType<typeof interruptTurn>>,
 		OverridesStateTag
 	>;
 }
 
-export class ProviderTurnServiceTag extends Context.Tag("ProviderTurnService")<
+export class ProviderTurnServiceTag extends Context.Service<
 	ProviderTurnServiceTag,
 	ProviderTurnService
->() {}
+>()("ProviderTurnService") {}
 
 const makeProviderTurnService = Effect.gen(function* () {
 	const context = yield* Effect.context<
@@ -149,7 +149,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 		| EventStoreEffectTag
 		| ProjectionRunnerEffectTag
 	>();
-	const runtime = yield* Effect.runtime<OverridesStateTag>();
+	const runtime = yield* Effect.context<OverridesStateTag>();
 	const overridesRef = yield* OverridesStateTag;
 	const providedContext = Context.add(context, ProviderTurnTimeoutRuntimeTag, {
 		runtime,
@@ -182,7 +182,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 				}),
 				(hold) =>
 					Effect.sync(() => accountSwitches.delete(sessionId)).pipe(
-						Effect.zipRight(Deferred.succeed(hold, undefined)),
+						Effect.andThen(Deferred.succeed(hold, undefined)),
 					),
 			).pipe(Effect.asVoid),
 		completeRecoveredQuestion: (question, result, answers) =>
@@ -191,7 +191,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 			),
 		prepareTurnSession: (input) =>
 			awaitStop(input.sessionId).pipe(
-				Effect.zipRight(prepareTurnSession(input)),
+				Effect.andThen(prepareTurnSession(input)),
 				Effect.provide(providedContext),
 			),
 		sendTurn: (input) =>
@@ -216,7 +216,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 						Effect.sync(() => {
 							if (stopping.get(input.sessionId) === stop)
 								stopping.delete(input.sessionId);
-						}).pipe(Effect.zipRight(Deferred.succeed(stop, undefined))),
+						}).pipe(Effect.andThen(Deferred.succeed(stop, undefined))),
 					),
 				);
 			}).pipe(Effect.provide(providedContext)),
@@ -224,7 +224,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 	return service;
 });
 
-const ProviderTurnDispatchFibersLive = Layer.scoped(
+const ProviderTurnDispatchFibersLive = Layer.effect(
 	ProviderTurnDispatchFibersTag,
 	FiberMap.make<string, void, unknown>(),
 );

@@ -101,15 +101,15 @@ export interface AgentService {
 	listAgents(
 		activeSessionId: string | undefined,
 		accountRef?: AccountRef,
-	): Effect.Effect<AgentList, Cause.UnknownException | AccountUnroutable>;
+	): Effect.Effect<AgentList, Cause.UnknownError | AccountUnroutable>;
 	getActiveAgent(sessionId: string): Effect.Effect<string | undefined>;
 	switchAgent(input: SwitchAgentInput): Effect.Effect<void>;
 }
 
-export class AgentServiceTag extends Context.Tag("AgentService")<
+export class AgentServiceTag extends Context.Service<
 	AgentServiceTag,
 	AgentService
->() {}
+>()("AgentService") {}
 
 const describeError = (error: unknown): string =>
 	error instanceof Error ? error.message : String(error);
@@ -204,22 +204,22 @@ export const AgentServiceLive: Layer.Layer<
 					const clearMissing = accountRef === undefined;
 					const listClaudeAgents = (claude: Account) =>
 						Effect.gen(function* () {
-							const result = yield* Effect.either(
+							const result = yield* Effect.result(
 								engine.dispatchEffect({
 									type: "discover",
 									providerId: "claude",
 									account: claude,
 								}),
 							);
-							if (result._tag === "Left")
+							if (result._tag === "Failure")
 								log.warn(
-									`Failed to discover Claude agents: ${describeError(result.left)}`,
+									`Failed to discover Claude agents: ${describeError(result.failure)}`,
 								);
 							return yield* provideOverrides(
 								scopedAgentList(
 									CLAUDE_PROVIDER_SCOPE,
-									result._tag === "Right"
-										? toWireAgents(result.right.agents ?? [])
+									result._tag === "Success"
+										? toWireAgents(result.success.agents ?? [])
 										: [],
 									activeSessionId,
 									instanceId,
@@ -245,21 +245,21 @@ export const AgentServiceLive: Layer.Layer<
 							),
 						);
 					}
-					const result = yield* Effect.either(
+					const result = yield* Effect.result(
 						Effect.tryPromise(() => running.value.app.agents()),
 					);
-					if (result._tag === "Right")
+					if (result._tag === "Success")
 						return yield* provideOverrides(
 							scopedAgentList(
 								OPENCODE_PROVIDER_SCOPE,
-								filterAgents(result.right),
+								filterAgents(result.success),
 								activeSessionId,
 								instanceId,
 								clearMissing,
 							),
 						);
 					log.warn(
-						`Failed to discover OpenCode agents: ${describeError(result.left)}`,
+						`Failed to discover OpenCode agents: ${describeError(result.failure)}`,
 					);
 					if (accountRef !== undefined)
 						return yield* provideOverrides(
@@ -273,7 +273,7 @@ export const AgentServiceLive: Layer.Layer<
 						);
 					if (boundId === undefined) {
 						log.warn(
-							`Failed to discover OpenCode agents; falling back to Claude agents: ${describeError(result.left)}`,
+							`Failed to discover OpenCode agents; falling back to Claude agents: ${describeError(result.failure)}`,
 						);
 						return yield* listClaudeAgents(
 							yield* directory.resolve({
@@ -282,7 +282,7 @@ export const AgentServiceLive: Layer.Layer<
 							}),
 						);
 					}
-					return yield* Effect.fail(result.left);
+					return yield* Effect.fail(result.failure);
 				}).pipe(Effect.scoped),
 			getActiveAgent: (sessionId) => provideOverrides(getAgent(sessionId)),
 			switchAgent: ({ clientId, sessionId, agentId }) =>

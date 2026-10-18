@@ -71,10 +71,10 @@ export interface SessionTitleService {
 	}) => Effect.Effect<void>;
 }
 
-export class SessionTitleServiceTag extends Context.Tag("SessionTitleService")<
+export class SessionTitleServiceTag extends Context.Service<
 	SessionTitleServiceTag,
 	SessionTitleService
->() {}
+>()("SessionTitleService") {}
 
 interface SessionTitleServiceLiveOptions {
 	readonly queryFactory?: ClaudeTitleQueryFactory;
@@ -111,7 +111,7 @@ export const makeSessionTitleServiceLive = (
 	| SqlClient.SqlClient
 	| AccountDirectory
 > =>
-	Layer.scoped(
+	Layer.effect(
 		SessionTitleServiceTag,
 		Effect.gen(function* () {
 			const accounts = yield* AccountDirectory;
@@ -134,12 +134,12 @@ export const makeSessionTitleServiceLive = (
 					const workspace =
 						session?.workspace == null
 							? null
-							: yield* Schema.decodeUnknown(
-									Schema.parseJson(SessionWorkspaceSchema),
+							: yield* Schema.decodeUnknownEffect(
+									Schema.fromJsonString(SessionWorkspaceSchema),
 								)(session.workspace);
 					const cwd = effectiveWorkingDirectory(primaryFolder, workspace);
 					const daemonConfig = yield* Effect.suspend(() =>
-						loadDaemonConfigResult(config.configDir),
+						Effect.fromResult(loadDaemonConfigResult(config.configDir)),
 					).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)));
 					const generator: TitleGenerator = Match.value(
 						resolveSessionTitleModel(),
@@ -179,12 +179,12 @@ export const makeSessionTitleServiceLive = (
 
 			const applyTitleIfStillDefault = (sessionId: string, title: string) =>
 				Effect.gen(function* () {
-					const currentResult = yield* Effect.either(
+					const currentResult = yield* Effect.result(
 						readQuery.getSession(sessionId),
 					);
-					if (currentResult._tag === "Left") return false;
+					if (currentResult._tag === "Failure") return false;
 
-					const current = currentResult.right;
+					const current = currentResult.success;
 					if (!current) return false;
 					if (!isPlaceholderTitle(current.title)) return false;
 					const recovered = yield* projectionRunner.isRecovered();
@@ -226,15 +226,18 @@ export const makeSessionTitleServiceLive = (
 				readonly message: string;
 			}) =>
 				Effect.gen(function* () {
-					const titleResult = yield* Effect.either(
+					const titleResult = yield* Effect.result(
 						generateTitle(input.sessionId, input.message),
 					);
-					if (titleResult._tag === "Right") {
-						yield* applyTitleIfStillDefault(input.sessionId, titleResult.right);
+					if (titleResult._tag === "Success") {
+						yield* applyTitleIfStillDefault(
+							input.sessionId,
+							titleResult.success,
+						);
 						return;
 					}
 
-					const reason = titleResult.left.reason;
+					const reason = titleResult.failure.reason;
 					const fallbackTitle = formatTitleFallback(now());
 					const applied = yield* applyTitleIfStillDefault(
 						input.sessionId,
@@ -266,7 +269,7 @@ export const makeSessionTitleServiceLive = (
 									HashSet.remove(sessions, input.sessionId),
 								),
 							),
-							Effect.catchAllCause((cause) =>
+							Effect.catchCause((cause) =>
 								Failure.isInterruptedOnly(cause)
 									? Effect.interrupt
 									: Effect.sync(() => {
@@ -277,7 +280,9 @@ export const makeSessionTitleServiceLive = (
 							),
 						);
 
-						yield* job.pipe(Effect.forkIn(scope));
+						yield* job.pipe(
+							Effect.forkIn(scope, { uninterruptible: "inherit" }),
+						);
 					}),
 			} satisfies SessionTitleService;
 		}),
