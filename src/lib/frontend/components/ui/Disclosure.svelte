@@ -74,7 +74,7 @@
 		 *  own children (name, badges, port) each carry their own. */
 		row: "text-sm",
 		transcript: `text-text-secondary ${HOVER_FILL_CLASSES.surface}`,
-		/** The composer's "What the agent receives" header: the mockup's `.js-rh2`. */
+		/** The composer's "What Claude receives" header: the mockup's `.js-rh2`. */
 		preview: "text-[13px] font-semibold text-text",
 	} as const;
 

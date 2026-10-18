@@ -139,7 +139,7 @@ export const surfacingReplyHandlers: StepHandler[] = [
 			const expected = (match[1] ?? "").replaceAll("\\n", "\n");
 			const preview = world.page.getByTestId("surfacing-ref-preview");
 			await preview
-				.getByRole("button", { name: "What the agent receives" })
+				.getByRole("button", { name: "What Claude receives" })
 				.click();
 			await expect
 				.poll(() => preview.locator("pre").textContent())

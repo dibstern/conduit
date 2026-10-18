@@ -1461,7 +1461,7 @@
 
 					{#if referenceView.references.length}
 						<div data-testid="surfacing-ref-preview">
-							<Disclosure look="preview" density="tight" expanded={previewOpen} onToggle={() => (previewOpen = !previewOpen)}>What the agent receives</Disclosure>
+							<Disclosure look="preview" density="tight" expanded={previewOpen} onToggle={() => (previewOpen = !previewOpen)}>What {composerPresentation?.label ?? "the agent"} receives</Disclosure>
 							{#if previewOpen && preview !== undefined}
 								{@const lines = preview.split("\n")}
 								<!-- Reference lines lead, one each; their `Re …:` prefix is bold. -->

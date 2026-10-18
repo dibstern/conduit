@@ -246,6 +246,8 @@ const replyAsk: ReplyReference = {
 async function showReferences(
 	canvasElement: HTMLElement,
 	references: ReplyReference[],
+	// The default story composer runs on OpenCode.
+	receiver = "OpenCode",
 ) {
 	const canvas = within(canvasElement);
 	const input = canvas.getByRole<HTMLTextAreaElement>("textbox", {
@@ -262,7 +264,7 @@ async function showReferences(
 	}
 	await userEvent.type(input, "Recapture it. The 2px shift is expected.");
 	await userEvent.click(
-		canvas.getByRole("button", { name: "What the agent receives" }),
+		canvas.getByRole("button", { name: `What ${receiver} receives` }),
 	);
 	// Back to the draft, as a user would, so the header's focus ring is not drawn.
 	input.focus();
@@ -342,7 +344,8 @@ export const ReplyMultiple: Story = {
 export const ReplyReferencesPhone: Story = {
 	globals: { viewport: { value: "mobile1", isRotated: false } },
 	beforeEach: ({ canvasElement }) => setupWords(canvasElement, true),
-	play: async ({ canvasElement }) => showReferences(canvasElement, [replyAsk]),
+	play: async ({ canvasElement }) =>
+		showReferences(canvasElement, [replyAsk], "Claude"),
 };
 export const ReplyAtomicEditing: Story = {
 	play: async ({ canvasElement }) => {
