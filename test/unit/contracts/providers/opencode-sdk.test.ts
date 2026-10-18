@@ -1,4 +1,4 @@
-import { Result as Either, Schema } from "effect";
+import { Exit, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -33,20 +33,20 @@ describe("OpenCode provider contract schemas", () => {
 		};
 
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeSessionSchema)(validSession),
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(OpenCodeSessionSchema)(validSession),
 			),
 		).toBe(true);
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(Schema.Array(OpenCodeSessionSchema))([
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(Schema.Array(OpenCodeSessionSchema))([
 					validSession,
 				]),
 			),
 		).toBe(true);
 		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(OpenCodeSessionSchema)({
+			Exit.isFailure(
+				Schema.decodeUnknownExit(OpenCodeSessionSchema)({
 					...validSession,
 					id: undefined,
 				}),
@@ -55,7 +55,7 @@ describe("OpenCode provider contract schemas", () => {
 	});
 
 	it("decodes session status maps returned by OpenCode", () => {
-		const result = Schema.decodeUnknownEither(
+		const result = Schema.decodeUnknownExit(
 			Schema.Record(Schema.String, OpenCodeSessionStatusSchema),
 		)({
 			ses_1: { type: "idle" },
@@ -68,7 +68,7 @@ describe("OpenCode provider contract schemas", () => {
 			},
 		});
 
-		expect(Either.isRight(result)).toBe(true);
+		expect(Exit.isSuccess(result)).toBe(true);
 	});
 
 	it("decodes relay session-detail extension fields returned by OpenCode", () => {
@@ -85,7 +85,7 @@ describe("OpenCode provider contract schemas", () => {
 				action: "ask",
 			},
 		];
-		const result = Schema.decodeUnknownEither(OpenCodeSessionDetailSchema)({
+		const result = Schema.decodeUnknownExit(OpenCodeSessionDetailSchema)({
 			id: "ses_1",
 			projectID: "proj_1",
 			directory: "/workspace/project",
@@ -100,14 +100,14 @@ describe("OpenCode provider contract schemas", () => {
 			permission,
 		});
 
-		expect(Either.isRight(result)).toBe(true);
-		if (Either.isRight(result)) {
-			expect(result.right).toHaveProperty("permission", permission);
+		expect(Exit.isSuccess(result)).toBe(true);
+		if (Exit.isSuccess(result)) {
+			expect(result.value).toHaveProperty("permission", permission);
 		}
 	});
 
 	it("rejects invalid session permission actions", () => {
-		const result = Schema.decodeUnknownEither(OpenCodeSessionDetailSchema)({
+		const result = Schema.decodeUnknownExit(OpenCodeSessionDetailSchema)({
 			id: "ses_1",
 			projectID: "proj_1",
 			directory: "/workspace/project",
@@ -122,27 +122,27 @@ describe("OpenCode provider contract schemas", () => {
 				},
 			],
 		});
-		expect(Either.isLeft(result)).toBe(true);
+		expect(Exit.isFailure(result)).toBe(true);
 	});
 
 	it("validates OpenCode session status variants", () => {
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeSessionStatusSchema)({
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(OpenCodeSessionStatusSchema)({
 					type: "idle",
 				}),
 			),
 		).toBe(true);
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeSessionStatusSchema)({
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(OpenCodeSessionStatusSchema)({
 					type: "busy",
 				}),
 			),
 		).toBe(true);
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeSessionStatusSchema)({
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(OpenCodeSessionStatusSchema)({
 					type: "retry",
 					attempt: 2,
 					message: "rate limited",
@@ -151,8 +151,8 @@ describe("OpenCode provider contract schemas", () => {
 			),
 		).toBe(true);
 		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(OpenCodeSessionStatusSchema)({
+			Exit.isFailure(
+				Schema.decodeUnknownExit(OpenCodeSessionStatusSchema)({
 					type: "retry",
 					attempt: 2,
 				}),
@@ -162,8 +162,8 @@ describe("OpenCode provider contract schemas", () => {
 
 	it("decodes SDK app path responses", () => {
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodePathSchema)({
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(OpenCodePathSchema)({
 					state: "/state",
 					config: "/config",
 					worktree: "/workspace/project",
@@ -172,8 +172,8 @@ describe("OpenCode provider contract schemas", () => {
 			),
 		).toBe(true);
 		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(OpenCodePathSchema)({
+			Exit.isFailure(
+				Schema.decodeUnknownExit(OpenCodePathSchema)({
 					cwd: "/workspace/project",
 				}),
 			),
@@ -182,8 +182,8 @@ describe("OpenCode provider contract schemas", () => {
 
 	it("decodes file-list envelopes from SDK and legacy mock responses", () => {
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeFileNodeSchema)({
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(OpenCodeFileNodeSchema)({
 					name: "app.ts",
 					type: "file",
 					path: "src/app.ts",
@@ -195,16 +195,16 @@ describe("OpenCode provider contract schemas", () => {
 		// Conduit reads only name/type; a node without the provider-owned
 		// path/absolute/ignored fields still decodes (grill #10).
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeFileNodeSchema)({
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(OpenCodeFileNodeSchema)({
 					name: "package.json",
 					type: "file",
 				}),
 			),
 		).toBe(true);
 		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(OpenCodeFileNodeSchema)({
+			Exit.isFailure(
+				Schema.decodeUnknownExit(OpenCodeFileNodeSchema)({
 					name: "package.json",
 				}),
 			),
@@ -213,8 +213,8 @@ describe("OpenCode provider contract schemas", () => {
 
 	it("decodes SDK agents without requiring local public ids or provider-owned permission shape", () => {
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeAgentSchema)({
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(OpenCodeAgentSchema)({
 					name: "build",
 					description: "Build agent",
 					mode: "primary",
@@ -226,8 +226,8 @@ describe("OpenCode provider contract schemas", () => {
 			),
 		).toBe(true);
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeAgentSchema)({
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(OpenCodeAgentSchema)({
 					name: "build",
 					mode: "primary",
 					native: true,
@@ -240,8 +240,8 @@ describe("OpenCode provider contract schemas", () => {
 			),
 		).toBe(true);
 		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(OpenCodeAgentSchema)({
+			Exit.isFailure(
+				Schema.decodeUnknownExit(OpenCodeAgentSchema)({
 					description: "missing name",
 					mode: "primary",
 				}),
@@ -251,18 +251,18 @@ describe("OpenCode provider contract schemas", () => {
 
 	it("decodes SDK void responses from 204 calls and rejects non-empty bodies", () => {
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeUndefinedResponseSchema)(undefined),
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(OpenCodeUndefinedResponseSchema)(undefined),
 			),
 		).toBe(true);
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeUndefinedResponseSchema)({}),
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(OpenCodeUndefinedResponseSchema)({}),
 			),
 		).toBe(true);
 		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(OpenCodeUndefinedResponseSchema)({
+			Exit.isFailure(
+				Schema.decodeUnknownExit(OpenCodeUndefinedResponseSchema)({
 					accepted: true,
 				}),
 			),
@@ -271,8 +271,8 @@ describe("OpenCode provider contract schemas", () => {
 
 	it("decodes SDK command, project, and provider list responses", () => {
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeCommandSchema)({
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(OpenCodeCommandSchema)({
 					name: "fix",
 					description: "Fix issue",
 					template: "Fix {{args}}",
@@ -280,15 +280,15 @@ describe("OpenCode provider contract schemas", () => {
 			),
 		).toBe(true);
 		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(OpenCodeCommandSchema)({
+			Exit.isFailure(
+				Schema.decodeUnknownExit(OpenCodeCommandSchema)({
 					name: "fix",
 				}),
 			),
 		).toBe(true);
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeProjectSchema)({
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(OpenCodeProjectSchema)({
 					id: "proj1",
 					worktree: "/workspace/project",
 					time: { created: 1 },
@@ -296,8 +296,8 @@ describe("OpenCode provider contract schemas", () => {
 			),
 		).toBe(true);
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeProviderListResponseSchema)({
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(OpenCodeProviderListResponseSchema)({
 					all: [
 						{
 							id: "anthropic",
@@ -339,11 +339,11 @@ describe("OpenCode provider contract schemas", () => {
 			},
 		};
 
-		const result = Schema.decodeUnknownEither(OpenCodePartSchema)(raw);
+		const result = Schema.decodeUnknownExit(OpenCodePartSchema)(raw);
 
-		expect(Either.isRight(result)).toBe(true);
-		if (Either.isRight(result)) {
-			expect(result.right["metadata"]).toEqual(raw.metadata);
+		expect(Exit.isSuccess(result)).toBe(true);
+		if (Exit.isSuccess(result)) {
+			expect(result.value["metadata"]).toEqual(raw.metadata);
 		}
 	});
 
@@ -379,17 +379,17 @@ describe("OpenCode provider contract schemas", () => {
 			],
 		};
 
-		const result = Schema.decodeUnknownEither(OpenCodeMessageWithPartsSchema)(
+		const result = Schema.decodeUnknownExit(OpenCodeMessageWithPartsSchema)(
 			raw,
 		);
 
-		expect(Either.isRight(result)).toBe(true);
-		if (Either.isRight(result)) {
-			expect(result.right.parts[0]?.["state"]).toEqual(raw.parts[0]?.state);
+		expect(Exit.isSuccess(result)).toBe(true);
+		if (Exit.isSuccess(result)) {
+			expect(result.value.parts[0]?.["state"]).toEqual(raw.parts[0]?.state);
 		}
 		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(OpenCodeMessageWithPartsSchema)({
+			Exit.isFailure(
+				Schema.decodeUnknownExit(OpenCodeMessageWithPartsSchema)({
 					info: raw.info,
 				}),
 			),
@@ -431,8 +431,8 @@ describe("OpenCode provider contract schemas", () => {
 		};
 
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeEventSchema)(validGapEvent),
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(OpenCodeEventSchema)(validGapEvent),
 			),
 		).toBe(true);
 
@@ -445,12 +445,12 @@ describe("OpenCode provider contract schemas", () => {
 				extra: { provider: ["owned"] },
 			},
 		};
-		const decodedPartRemoved = Schema.decodeUnknownEither(OpenCodeEventSchema)(
+		const decodedPartRemoved = Schema.decodeUnknownExit(OpenCodeEventSchema)(
 			validPartRemovedEvent,
 		);
-		expect(Either.isRight(decodedPartRemoved)).toBe(true);
-		if (Either.isRight(decodedPartRemoved)) {
-			expect(decodedPartRemoved.right.properties["extra"]).toEqual(
+		expect(Exit.isSuccess(decodedPartRemoved)).toBe(true);
+		if (Exit.isSuccess(decodedPartRemoved)) {
+			expect(decodedPartRemoved.value.properties["extra"]).toEqual(
 				validPartRemovedEvent.properties.extra,
 			);
 		}
@@ -463,34 +463,34 @@ describe("OpenCode provider contract schemas", () => {
 				extra: { provider: ["owned"] },
 			},
 		};
-		const decodedMessageRemoved = Schema.decodeUnknownEither(
-			OpenCodeEventSchema,
-		)(validMessageRemovedEvent);
-		expect(Either.isRight(decodedMessageRemoved)).toBe(true);
-		if (Either.isRight(decodedMessageRemoved)) {
-			expect(decodedMessageRemoved.right.properties["extra"]).toEqual(
+		const decodedMessageRemoved = Schema.decodeUnknownExit(OpenCodeEventSchema)(
+			validMessageRemovedEvent,
+		);
+		expect(Exit.isSuccess(decodedMessageRemoved)).toBe(true);
+		if (Exit.isSuccess(decodedMessageRemoved)) {
+			expect(decodedMessageRemoved.value.properties["extra"]).toEqual(
 				validMessageRemovedEvent.properties.extra,
 			);
 		}
 		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(OpenCodeEventSchema)({
+			Exit.isFailure(
+				Schema.decodeUnknownExit(OpenCodeEventSchema)({
 					type: "message.part.delta",
 					properties: { partID: "part-1", delta: "missing field" },
 				}),
 			),
 		).toBe(true);
 		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(OpenCodeEventSchema)({
+			Exit.isFailure(
+				Schema.decodeUnknownExit(OpenCodeEventSchema)({
 					type: "message.part.removed",
 					properties: { messageID: "msg-1" },
 				}),
 			),
 		).toBe(true);
 		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(OpenCodeEventSchema)({
+			Exit.isFailure(
+				Schema.decodeUnknownExit(OpenCodeEventSchema)({
 					type: "message.removed",
 					properties: { sessionID: "ses-1" },
 				}),
@@ -500,8 +500,8 @@ describe("OpenCode provider contract schemas", () => {
 
 	it("validates the question reply body Conduit sends to the SDK", () => {
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeQuestionReplyRequestSchema)({
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(OpenCodeQuestionReplyRequestSchema)({
 					answers: [["yes"], ["custom", "answer"]],
 				}),
 			),
@@ -510,8 +510,8 @@ describe("OpenCode provider contract schemas", () => {
 
 	it("validates permission and question response envelopes Conduit reads", () => {
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodePendingPermissionSchema)({
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(OpenCodePendingPermissionSchema)({
 					id: "per_1",
 					sessionID: "ses_1",
 					permission: "bash",
@@ -522,15 +522,15 @@ describe("OpenCode provider contract schemas", () => {
 			),
 		).toBe(true);
 		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(OpenCodePendingPermissionSchema)({
+			Exit.isFailure(
+				Schema.decodeUnknownExit(OpenCodePendingPermissionSchema)({
 					id: "perm-1",
 				}),
 			),
 		).toBe(true);
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodePendingPermissionSchema)({
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(OpenCodePendingPermissionSchema)({
 					id: "per_1",
 					sessionID: "ses_1",
 					permission: "bash",
@@ -540,8 +540,8 @@ describe("OpenCode provider contract schemas", () => {
 			),
 		).toBe(true);
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodePendingQuestionSchema)({
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(OpenCodePendingQuestionSchema)({
 					id: "que_1",
 					sessionID: "ses_1",
 					questions: [{ question: "Pick", options: [{ label: "A" }] }],
@@ -549,8 +549,8 @@ describe("OpenCode provider contract schemas", () => {
 			),
 		).toBe(true);
 		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(OpenCodePendingQuestionSchema)({
+			Exit.isFailure(
+				Schema.decodeUnknownExit(OpenCodePendingQuestionSchema)({
 					id: "que_1",
 					sessionID: "ses_1",
 				}),

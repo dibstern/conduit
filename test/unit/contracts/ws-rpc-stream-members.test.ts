@@ -33,7 +33,7 @@ describe("subscription RPC contracts", () => {
 			expect(() => decodePayload(payload)).toThrow();
 		}
 		expect(RpcSchema.isStreamSchema(member.successSchema)).toBe(true);
-		expect(member.successSchema.failure).toBe(Contracts.WsRpcError);
+		expect(member.successSchema.error).toBe(Contracts.WsRpcError);
 		const decode = Schema.decodeUnknownSync(member.successSchema.success);
 		const message = {
 			_tag: "message",
@@ -128,7 +128,7 @@ describe("subscription RPC contracts", () => {
 		}
 		expect(() => decodePayload({ resumeFromSequence: "42" })).toThrow();
 		expect(RpcSchema.isStreamSchema(member.successSchema)).toBe(true);
-		expect(member.successSchema.failure).toBe(Contracts.WsRpcError);
+		expect(member.successSchema.error).toBe(Contracts.WsRpcError);
 		const decode = Schema.decodeUnknownSync(member.successSchema.success);
 		const session = {
 			id: "session-1",
@@ -165,7 +165,7 @@ describe("subscription RPC contracts", () => {
 		expect(() => decodePayload({})).toThrow();
 		expect(() => decodePayload({ projectSlug: "" })).toThrow();
 		expect(RpcSchema.isStreamSchema(member.successSchema)).toBe(true);
-		expect(member.successSchema.failure).toBe(Contracts.WsRpcError);
+		expect(member.successSchema.error).toBe(Contracts.WsRpcError);
 		const decode = Schema.decodeUnknownSync(member.successSchema.success);
 		const visibility = {
 			_tag: "visibility",

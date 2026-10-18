@@ -1,33 +1,31 @@
 import {
 	Arbitrary,
 	Effect,
-	type Result as Either,
+	Exit,
+	type Result,
 	Schema,
+	type SchemaAST,
 	Stream,
 } from "effect";
 import { RpcSchema } from "effect/rpc";
-import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { WsRpcGroup, WsRpcRequest } from "../../../src/lib/contracts/ws-rpc.js";
 import { makeRpcWire } from "../../helpers/rpc-wire.js";
 import type { StubTable } from "../../helpers/stub-ws-rpc.js";
 
-const options = { seed: 42, numRuns: 30, endOnFailure: true };
+const options = { seed: 42, runs: 30, maxShrinks: 0 };
 const json = (value: unknown): unknown =>
 	value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 
 // Generate the wire side, then decode so transformed requests have canonical
 // account references and tagged errors are instances of their declared class.
-const values = (schema: Schema.Schema<unknown, unknown>) =>
-	(schema.ast._tag === "VoidKeyword"
-		? fc.constant(undefined)
-		: Arbitrary.makeLazy(Schema.encodedBoundSchema(schema))({
-				...fc,
-				float: (constraints) =>
-					fc.float({ ...constraints, noNaN: true, noDefaultInfinity: true }),
-				anything: () => fc.jsonValue({ maxDepth: 2 }),
-			})
-	).map((value) => Schema.decodeUnknownSync(schema)(json(value)));
+const values = <S extends Schema.Codec<unknown, unknown>>(schema: S) =>
+	Arbitrary.schema(Schema.toEncoded(schema)).pipe(
+		Arbitrary.filter((value) =>
+			Exit.isSuccess(Schema.decodeUnknownExit(schema)(json(value))),
+		),
+		Arbitrary.map((value) => Schema.decodeUnknownSync(schema)(json(value))),
+	);
 
 type ContractClient = (
 	tag: string,
@@ -40,7 +38,7 @@ const withClient = (
 		call: (
 			tag: string,
 			payload: unknown,
-		) => Promise<Either.Result<unknown, unknown>>,
+		) => Promise<Result.Result<unknown, unknown>>,
 	) => Promise<void>,
 ) =>
 	Effect.runPromise(
@@ -73,18 +71,20 @@ const withClient = (
 	);
 
 for (const rpc of WsRpcGroup.requests.values()) {
-	const payloadSchema = Schema.make(rpc.payloadSchema.ast);
+	const payloadSchema = rpc.payloadSchema;
 	// Some request transforms canonicalize legacy account-selection fields.
 	// Generate their normal form, then require the next wire round trip to preserve it.
-	const payloads = values(payloadSchema).map((payload) =>
-		Schema.decodeUnknownSync(payloadSchema)(
-			json(Schema.encodeSync(payloadSchema)(payload)),
+	const payloads = values(payloadSchema).pipe(
+		Arbitrary.map((payload) =>
+			Schema.decodeUnknownSync(payloadSchema)(
+				json(Schema.encodeSync(payloadSchema)(payload)),
+			),
 		),
 	);
 	const stream = RpcSchema.isStreamSchema(rpc.successSchema)
 		? rpc.successSchema
 		: undefined;
-	const successSchema = Schema.make((stream?.success ?? rpc.successSchema).ast);
+	const successSchema = stream?.success ?? rpc.successSchema;
 
 	describe(`RPC contract properties: ${rpc._tag}`, () => {
 		it("round-trips requests and responses through JSON and the stub server", async () => {
@@ -100,52 +100,60 @@ for (const rpc of WsRpcGroup.requests.values()) {
 					},
 				},
 				(call) =>
-					fc.assert(
-						fc.asyncProperty(
-							payloads,
-							fc.array(values(successSchema), {
-								minLength: stream ? 0 : 1,
-								maxLength: stream ? 5 : 1,
-							}),
-							async (payload, success) => {
-								const encodedPayload = json(
-									Schema.encodeSync(payloadSchema)(payload),
-								);
-								reply = success;
-								const result = await call(rpc._tag, payload);
-								expect(received).toEqual(payload);
-								expect(
-									json(Schema.encodeSync(payloadSchema)(received)),
-								).toEqual(encodedPayload);
-								expect(result._tag).toBe("Right");
-								if (result._tag === "Success") {
-									expect(result.success).toEqual(stream ? success : success[0]);
-								}
-								if (!stream) {
+					Effect.runPromise(
+						Arbitrary.checkEffect(
+							Arbitrary.all([
+								payloads,
+								Arbitrary.array(values(successSchema), {
+									minLength: stream ? 0 : 1,
+									maxLength: stream ? 5 : 1,
+								}),
+							]),
+							([payload, success]) =>
+								Effect.promise(async () => {
+									const encodedPayload = json(
+										Schema.encodeSync(payloadSchema)(payload),
+									);
+									reply = success;
+									const result = await call(rpc._tag, payload);
+									expect(received).toEqual(payload);
 									expect(
-										Schema.decodeUnknownSync(WsRpcRequest)(encodedPayload),
-									).toEqual(payload);
-								}
-							},
+										json(Schema.encodeUnknownSync(payloadSchema)(received)),
+									).toEqual(encodedPayload);
+									expect(result._tag).toBe("Success");
+									if (result._tag === "Success") {
+										expect(result.success).toEqual(
+											stream ? success : success[0],
+										);
+									}
+									if (!stream) {
+										expect(
+											Schema.decodeUnknownSync(WsRpcRequest)(encodedPayload),
+										).toEqual(payload);
+									}
+									return true;
+								}),
+							options,
 						),
-						options,
-					),
+					).then((result) => {
+						expect(result._tag).toBe("Passed");
+					}),
 			);
 		});
 
-		const variants = [rpc.errorSchema.ast];
-		if (stream) variants.push(stream.failure.ast);
+		const variants: SchemaAST.AST[] = [rpc.errorSchema.ast];
+		if (stream) variants.push(stream.error.ast);
 		for (const [index, ast] of variants.entries()) {
 			if (ast._tag === "Suspend") {
-				variants.push(ast.f());
+				variants.push(ast.thunk());
 				continue;
 			}
 			if (ast._tag === "Union") {
 				variants.push(...ast.types);
 				continue;
 			}
-			if (ast._tag === "NeverKeyword") continue;
-			const errorSchema = Schema.make(ast);
+			if (ast._tag === "Never") continue;
+			const errorSchema = Schema.make<Schema.Codec<unknown, unknown>>(ast);
 			it(`decodes declared error variant ${index} through JSON and the stub server`, async () => {
 				let failure: unknown;
 				await withClient(
@@ -155,26 +163,31 @@ for (const rpc of WsRpcGroup.requests.values()) {
 						},
 					},
 					(call) =>
-						fc.assert(
-							fc.asyncProperty(
-								payloads,
-								values(errorSchema),
-								async (payload, error) => {
-									failure = error;
-									const result = await call(rpc._tag, payload);
-									expect(result._tag).toBe("Left");
-									if (result._tag === "Failure") {
-										expect(
-											json(Schema.encodeSync(errorSchema)(result.failure)),
-										).toEqual(json(Schema.encodeSync(errorSchema)(error)));
-										if (typeof error === "object" && error !== null) {
-											expect(result.failure).toBeInstanceOf(error.constructor);
+						Effect.runPromise(
+							Arbitrary.checkEffect(
+								Arbitrary.all([payloads, values(errorSchema)]),
+								([payload, error]) =>
+									Effect.promise(async () => {
+										failure = error;
+										const result = await call(rpc._tag, payload);
+										expect(result._tag).toBe("Failure");
+										if (result._tag === "Failure") {
+											expect(
+												json(Schema.encodeSync(errorSchema)(result.failure)),
+											).toEqual(json(Schema.encodeSync(errorSchema)(error)));
+											if (typeof error === "object" && error !== null) {
+												expect(result.failure).toBeInstanceOf(
+													error.constructor,
+												);
+											}
 										}
-									}
-								},
+										return true;
+									}),
+								options,
 							),
-							options,
-						),
+						).then((result) => {
+							expect(result._tag).toBe("Passed");
+						}),
 				);
 			});
 		}

@@ -1,4 +1,4 @@
-import { Result as Either, Schema } from "effect";
+import { Exit, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -37,15 +37,15 @@ describe("Claude Agent SDK provider contract schemas", () => {
 			session_id: "sdk-session-1",
 		};
 
-		const result = Schema.decodeUnknownEither(ClaudeSDKUserMessageSchema)(raw);
+		const result = Schema.decodeUnknownExit(ClaudeSDKUserMessageSchema)(raw);
 
-		expect(Either.isRight(result)).toBe(true);
-		if (Either.isRight(result)) {
-			expect(result.right.tool_use_result).toEqual(raw.tool_use_result);
+		expect(Exit.isSuccess(result)).toBe(true);
+		if (Exit.isSuccess(result)) {
+			expect(result.value.tool_use_result).toEqual(raw.tool_use_result);
 		}
 		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(ClaudeSDKUserMessageSchema)({
+			Exit.isFailure(
+				Schema.decodeUnknownExit(ClaudeSDKUserMessageSchema)({
 					...raw,
 					message: { role: "assistant", content: [] },
 				}),
@@ -166,52 +166,52 @@ describe("Claude Agent SDK provider contract schemas", () => {
 
 		for (const message of [assistant, result, streamEvent, system]) {
 			expect(
-				Either.isRight(
-					Schema.decodeUnknownEither(ClaudeSDKMessageSchema)(message),
+				Exit.isSuccess(
+					Schema.decodeUnknownExit(ClaudeSDKMessageSchema)(message),
 				),
 			).toBe(true);
 		}
 
-		const decodedAssistant = Schema.decodeUnknownEither(ClaudeSDKMessageSchema)(
+		const decodedAssistant = Schema.decodeUnknownExit(ClaudeSDKMessageSchema)(
 			assistant,
 		);
-		const decodedResult = Schema.decodeUnknownEither(ClaudeSDKMessageSchema)(
+		const decodedResult = Schema.decodeUnknownExit(ClaudeSDKMessageSchema)(
 			result,
 		);
-		const decodedStreamEvent = Schema.decodeUnknownEither(
-			ClaudeSDKMessageSchema,
-		)(streamEvent);
+		const decodedStreamEvent = Schema.decodeUnknownExit(ClaudeSDKMessageSchema)(
+			streamEvent,
+		);
 
 		if (
-			Either.isRight(decodedAssistant) &&
-			decodedAssistant.right.type === "assistant"
+			Exit.isSuccess(decodedAssistant) &&
+			decodedAssistant.value.type === "assistant"
 		) {
-			expect(decodedAssistant.right.message).toEqual(assistant.message);
+			expect(decodedAssistant.value.message).toEqual(assistant.message);
 		}
 		if (
-			Either.isRight(decodedResult) &&
-			decodedResult.right.type === "result" &&
-			decodedResult.right.subtype === "success"
+			Exit.isSuccess(decodedResult) &&
+			decodedResult.value.type === "result" &&
+			decodedResult.value.subtype === "success"
 		) {
-			expect(decodedResult.right.structured_output).toEqual(structuredOutput);
+			expect(decodedResult.value.structured_output).toEqual(structuredOutput);
 		}
 		if (
-			Either.isRight(decodedStreamEvent) &&
-			decodedStreamEvent.right.type === "stream_event"
+			Exit.isSuccess(decodedStreamEvent) &&
+			decodedStreamEvent.value.type === "stream_event"
 		) {
-			expect(decodedStreamEvent.right.event).toEqual(streamEvent.event);
+			expect(decodedStreamEvent.value.event).toEqual(streamEvent.event);
 		}
 		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(ClaudeSDKMessageSchema)({
+			Exit.isFailure(
+				Schema.decodeUnknownExit(ClaudeSDKMessageSchema)({
 					...result,
 					subtype: "not-a-result-subtype",
 				}),
 			),
 		).toBe(true);
 		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(ClaudeSDKMessageSchema)({
+			Exit.isFailure(
+				Schema.decodeUnknownExit(ClaudeSDKMessageSchema)({
 					message: assistant.message,
 					parent_tool_use_id: null,
 					uuid: "00000000-0000-0000-0000-000000000006",
@@ -220,8 +220,8 @@ describe("Claude Agent SDK provider contract schemas", () => {
 			),
 		).toBe(true);
 		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(ClaudeSDKMessageSchema)({
+			Exit.isFailure(
+				Schema.decodeUnknownExit(ClaudeSDKMessageSchema)({
 					...assistant,
 					session_id: 123,
 				}),
@@ -247,13 +247,13 @@ describe("Claude Agent SDK provider contract schemas", () => {
 		};
 
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(ClaudeSDKOptionsJsonShapeSchema)(raw),
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(ClaudeSDKOptionsJsonShapeSchema)(raw),
 			),
 		).toBe(true);
 		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(ClaudeSDKOptionsJsonShapeSchema)({
+			Exit.isFailure(
+				Schema.decodeUnknownExit(ClaudeSDKOptionsJsonShapeSchema)({
 					...raw,
 					permissionMode: "please",
 				}),

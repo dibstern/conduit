@@ -1,12 +1,10 @@
 import { describe, it } from "@effect/vitest";
 import {
 	Cause,
-	Chunk,
 	Effect,
 	Exit,
 	Fiber,
 	Layer,
-	type Mailbox,
 	Queue,
 	Scope,
 	Stream,
@@ -344,10 +342,7 @@ describe("RpcTest subscription stream semantics", () => {
 					...chunkMessages,
 					{ _tag: "Exit", exit: Exit.void },
 				]);
-				expect(Array.from(chunks, Chunk.toReadonlyArray).flat()).toEqual([
-					...initial,
-					...deltas(member),
-				]);
+				expect(chunks.flat()).toEqual([...initial, ...deltas(member)]);
 			}).pipe(Effect.provide(makeLayer({ member }))),
 		);
 		it.effect(`${member} waits for each chunk acknowledgement`, () =>
@@ -427,16 +422,16 @@ describe("RpcTest subscription stream semantics", () => {
 								Scope.close(consumerScope, Exit.void),
 							);
 							const subscription: Effect.Effect<
-								Mailbox.ReadonlyMailbox<unknown, WsRpcError>,
+								Queue.Dequeue<unknown, WsRpcError | Cause.Done>,
 								never,
 								Scope.Scope
 							> = member === "SubscribeShell"
-								? client.SubscribeShell({}, { asMailbox: true })
+								? client.SubscribeShell({}, { asQueue: true })
 								: client.SubscribeSessionDetail(
 										{ sessionId: "session-1" },
-										{ asMailbox: true },
+										{ asQueue: true },
 									);
-							const mailbox = yield* subscription.pipe(
+							const queue = yield* subscription.pipe(
 								Effect.provideService(Scope.Scope, consumerScope),
 							);
 							const opening: unknown[] = [];
@@ -449,7 +444,7 @@ describe("RpcTest subscription stream semantics", () => {
 										frame._tag === "synchronized",
 								)
 							) {
-								const [chunk] = yield* mailbox.takeAll;
+								const chunk = yield* Queue.takeAll(queue);
 								opening.push(...chunk);
 							}
 							expect(opening).toEqual(initial);
