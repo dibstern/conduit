@@ -52,6 +52,7 @@ export function surfacingSettingsFixture(
 				...settings,
 				enabled,
 				defaultLevel: patch.defaultLevel ?? settings.defaultLevel,
+				turnsOpen: patch.turnsOpen ?? settings.turnsOpen,
 				tuningModel: patch.tuningModel ?? settings.tuningModel,
 				recap: {
 					model: recap?.model ?? settings.recap.model,

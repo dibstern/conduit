@@ -64,6 +64,43 @@ async function choose(
 
 export const settingsSurfacingHandlers: StepHandler[] = [
 	{
+		name: "persist all Turns open choices from General",
+		match: /^Turns open defaults to Auto and saves all three choices$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			expect(fixture(page).settings.turnsOpen).toBe("auto");
+			for (const [label, value] of [
+				["Expanded", "expanded"],
+				["Minimised", "minimised"],
+				["Auto", "auto"],
+			] as const) {
+				await choose(page, "Turns open", label);
+				await expect.poll(() => fixture(page).settings.turnsOpen).toBe(value);
+			}
+			await page.reload();
+			await page.evaluate(() =>
+				window.dispatchEvent(
+					new CustomEvent("settings:open", {
+						detail: { section: "surfacing" },
+					}),
+				),
+			);
+			await expect(page.getByTestId("surfacing-key-state")).toBeVisible();
+			const radio = page.getByRole("radiogroup", {
+				name: "Turns open",
+				exact: true,
+			});
+			if (await radio.count())
+				await expect(
+					radio.getByRole("radio", { name: "Auto", exact: true }),
+				).toHaveAttribute("aria-checked", "true");
+			else
+				await expect(
+					page.getByRole("button", { name: /^Turns open: Auto/ }),
+				).toBeVisible();
+		},
+	},
+	{
 		name: "seed Surfacing settings and category RPCs",
 		match:
 			/^Surfacing has a (none|valid|invalid|env|invalid-env) key in the (dark|light) theme$/,

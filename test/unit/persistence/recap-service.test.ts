@@ -42,6 +42,7 @@ const layer = (
 		enabled: true,
 		active: options.active ?? true,
 		defaultLevel: "balanced",
+		turnsOpen: "auto",
 		recap: {
 			model: options.model ?? "sonnet",
 			when: options.when ?? "on-request",

@@ -9,6 +9,7 @@ import {
 	UpdateMessageSurfacing,
 } from "../../../contracts/ws-rpc.js";
 import { applyInstanceListResponse } from "../../stores/instance.svelte.js";
+import { messageSurfacing } from "../../stores/message-surfacing.svelte.js";
 import { routerState } from "../../stores/router.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { applyUsageReadings } from "../../stores/usage.svelte.js";
@@ -26,6 +27,7 @@ const meta = {
 	args: { visible: true, initialTab: "surfacing" },
 	beforeEach: ({ name }) => {
 		const compact = sessionViewState.compact;
+		const previousStatus = messageSurfacing.status;
 		sessionViewState.compact = window.innerWidth < 768;
 		routerState.path = "/";
 		applyInstanceListResponse({ instances: [] });
@@ -70,6 +72,7 @@ const meta = {
 		return () => {
 			for (const restore of cleanup.reverse()) restore();
 			sessionViewState.compact = compact;
+			messageSurfacing.status = previousStatus;
 		};
 	},
 } satisfies Meta<typeof SettingsPanel>;

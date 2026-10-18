@@ -4,6 +4,7 @@ import {
 	readFileSync,
 	rmSync,
 	statSync,
+	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import { RpcTest } from "@effect/rpc";
@@ -29,6 +30,8 @@ import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 // replacement holds the lock, and must remain invalid after restarting.
 // Key ownership must remain visible after rejection/restart so environment keys
 // stay read-only, while stored keys remain editable and missing keys have no owner.
+// Turns open must survive restart and partial patches. Pre-minimise snapshots
+// must default to Auto without dropping their existing preferences or key.
 const directories: string[] = [];
 const directory = () => {
 	const dir = mkdtempSync("/tmp/message-surfacing-");
@@ -58,6 +61,7 @@ describe("message surfacing settings", () => {
 					active: false,
 					key: { source: "none", rejected: false },
 					defaultLevel: "balanced",
+					turnsOpen: "auto",
 					recap: { model: "sonnet", when: "turn-end" },
 					tuningModel: "opus",
 				});
@@ -66,6 +70,7 @@ describe("message surfacing settings", () => {
 						settings.update({ enabled: true, recap: { model: "off" } }),
 						settings.update({
 							defaultLevel: "key",
+							turnsOpen: "minimised",
 							recap: { when: "on-request" },
 						}),
 					],
@@ -79,9 +84,51 @@ describe("message surfacing settings", () => {
 					enabled: true,
 					active: false,
 					defaultLevel: "key",
+					turnsOpen: "minimised",
 					recap: { model: "off", when: "on-request" },
 				});
 				expect(transport).not.toHaveBeenCalled();
+			}),
+	);
+	it.effect(
+		"loads older snapshots with Auto and retains explicit choices",
+		() =>
+			Effect.gen(function* () {
+				const dir = directory();
+				const settings = yield* makeMessageSurfacingSettings(dir, {
+					env: {},
+					transport: validTransport(),
+				});
+				yield* settings.update({
+					apiKey: "fake-legacy-key",
+					enabled: true,
+					defaultLevel: "key",
+				});
+				const filename = join(dir, "credentials/typesafe");
+				const saved: { settings: Record<string, unknown> } = JSON.parse(
+					readFileSync(filename, "utf8"),
+				);
+				delete saved.settings["turnsOpen"];
+				writeFileSync(filename, JSON.stringify(saved));
+				const restarted = yield* makeMessageSurfacingSettings(dir, { env: {} });
+				expect(yield* restarted.get).toMatchObject({
+					turnsOpen: "auto",
+					defaultLevel: "key",
+					active: true,
+					key: { source: "stored" },
+				});
+				for (const turnsOpen of ["expanded", "auto", "minimised"] as const) {
+					yield* restarted.update({ turnsOpen });
+					yield* restarted.update({ recap: { model: "off" } });
+					const reloaded = yield* makeMessageSurfacingSettings(dir, {
+						env: {},
+					});
+					expect(yield* reloaded.get).toMatchObject({
+						turnsOpen,
+						defaultLevel: "key",
+						active: true,
+					});
+				}
 			}),
 	);
 	it.effect("validates once, stores privately and never returns the key", () =>
