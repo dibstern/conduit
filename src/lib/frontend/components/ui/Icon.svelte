@@ -106,6 +106,7 @@
     Gauge,
     Server,
     Timer,
+    Keyboard,
   } from '@lucide/svelte';
   import ClaudeMark from './marks/ClaudeMark.svelte';
   import OpenCodeMark from './marks/OpenCodeMark.svelte';
@@ -228,6 +229,7 @@
     'gauge': Gauge,
     'server': Server,
     'timer': Timer,
+    'keyboard': Keyboard,
 
     // Harness brand marks (not lucide).
     'claude': ClaudeMark,

@@ -6,6 +6,7 @@
 -->
 <script lang="ts">
 	import { tick } from "svelte";
+	import { MediaQuery } from "svelte/reactivity";
 	import {
 		terminalState,
 		getTabList,
@@ -24,10 +25,15 @@
 	import { failureLine } from "../../transport/rpc-errors.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import type { GetFileTreeResponse } from "../../transport/ws-rpc.js";
+	import type { Terminal } from "@xterm/xterm";
+	import type { TerminalModifier } from "../../../contracts/terminal-keys.js";
+	import { createTerminalKeys, type TerminalArrow } from "../../utils/terminal-keys.svelte.js";
 	import Button from "../ui/Button.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import Surface from "../ui/Surface.svelte";
+	import TerminalKey from "../ui/TerminalKey.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
@@ -35,6 +41,29 @@
 		onTabBarTouchStart?: (e: TouchEvent) => void;
 		folders?: GetFileTreeResponse["roots"];
 	} = $props();
+
+	// One per panel, so key state resets when the panel closes.
+	// The find bar belongs to the tab it was opened on.
+	let find = $state<{ terminal: Terminal; tab: string | null } | null>(null);
+	const keys = createTerminalKeys({
+		openFind: (terminal) => (find = { terminal, tab: terminalState.activeTabId }),
+	});
+	// Input type, not width: a fine pointer gets the tab-bar keys.
+	// jsdom has no matchMedia; real browsers always do.
+	const finePointer =
+		typeof matchMedia === "function" ? new MediaQuery("(pointer: fine)") : { current: true };
+	const ARROWS: readonly (readonly [TerminalArrow, string])[] = [
+		["left", "Left arrow"],
+		["up", "Up arrow"],
+		["down", "Down arrow"],
+		["right", "Right arrow"],
+	];
+	const MODIFIERS: readonly (readonly [TerminalModifier, string, string])[] = [
+		["ctrl", "⌃", "Control"],
+		["opt", "⌥", "Option"],
+		["cmd", "⌘", "Command"],
+		["shift", "⇧", "Shift"],
+	];
 
 	const tabs = $derived(getTabList());
 	const pendingTitle = $derived(getPendingTabTitle());
@@ -413,8 +442,39 @@
 				{/if}
 			{/if}
 
-			<!-- Font size controls (right-aligned) -->
+			<!-- Keys and font size controls (right-aligned) -->
 			<div class="flex items-center gap-0 ml-auto shrink-0">
+				{#if finePointer.current}
+					<div
+						class="term-keys flex items-center h-[32px] px-[3px] mr-[6px] rounded-full bg-chip"
+						role="toolbar"
+						aria-label="Terminal keys"
+					>
+						<TerminalKey label="Paste" onpress={() => keys.pasteClipboard()}>
+							<Icon name="clipboard" size={13} />Paste
+						</TerminalKey>
+						<span class="w-px h-[18px] mx-[5px] bg-border" aria-hidden="true"></span>
+						<TerminalKey label="Escape" onpress={() => keys.press("esc")}>esc</TerminalKey>
+						<TerminalKey label="Tab" onpress={() => keys.press("tab")}>tab</TerminalKey>
+						<span class="w-px h-[18px] mx-[5px] bg-border" aria-hidden="true"></span>
+						{#each MODIFIERS as [modifier, glyph, label] (modifier)}
+							<TerminalKey
+								{label}
+								glyph
+								state={keys.modifiers[modifier]}
+								onpress={() => keys.tap(modifier)}
+							>
+								{glyph}
+							</TerminalKey>
+						{/each}
+						<span class="w-px h-[18px] mx-[5px] bg-border" aria-hidden="true"></span>
+						{#each ARROWS as [arrow, label] (arrow)}
+							<TerminalKey {label} glyph repeat onpress={(repeated) => keys.press(arrow, repeated)}>
+								<Icon name="arrow-{arrow}" size={14} />
+							</TerminalKey>
+						{/each}
+					</div>
+				{/if}
 				<Button
 					variant="ghost"
 					size="content"
@@ -459,6 +519,86 @@
 
 		<!-- Terminal body area -->
 		<div class="term-body flex-1 relative overflow-hidden bg-code-bg" {@attach pinchFontSize}>
+			{#if finePointer.current && (keys.modifiers.cmd === "waiting" || keys.modifiers.opt === "waiting")}
+				{@const cmd = keys.modifiers.cmd === "waiting"}
+				<div
+					class="absolute z-10 top-[6px] right-[10px] w-[330px] flex items-start gap-[10px] px-3 py-2.5 rounded-lg border border-border bg-popover-bg shadow-dropdown text-xs text-text-secondary"
+					role="note"
+				>
+					<Icon name="keyboard" size={14} class="mt-[2px] shrink-0 text-accent" />
+					<div class="flex flex-col gap-0.5">
+						<b class="font-semibold text-text">{cmd ? "⌘" : "⌥"} is waiting for your next key</b>
+						{#if cmd}
+							<span>
+								<kbd class="font-mono text-text">V</kbd> pastes, <kbd class="font-mono text-text">C</kbd> copies,
+								<kbd class="font-mono text-text">K</kbd> clears,
+								<kbd class="font-mono text-text">F</kbd> finds. Other keys go to the terminal as Meta.
+							</span>
+						{:else}
+							<span>
+								⌥ then <kbd class="font-mono text-text">B</kbd> jumps back a word. Your Mac's own ⌥B types ∫ instead.
+							</span>
+						{/if}
+					</div>
+				</div>
+			{/if}
+			<div
+				class="absolute z-10 top-[12px] left-1/2 -translate-x-1/2 pointer-events-none"
+				role="status"
+			>
+				{#if keys.notice}
+					{@const notice = keys.notice}
+					{#key notice.id}
+						{#if notice.kind === "sent"}
+							<div
+								class="term-key-confirmation flex items-center gap-1.5 h-[32px] px-[14px] rounded-full border border-border bg-popover-bg shadow-dropdown text-[13px] font-medium text-text-secondary whitespace-nowrap"
+							>
+								Sent <b class="font-mono font-semibold text-accent">{notice.combo}</b>
+								{#if notice.hint}· {notice.hint}{/if}
+							</div>
+						{:else if notice.kind === "pasted"}
+							<div
+								class="flex items-center gap-[5px] h-[22px] px-2 rounded-full bg-success/[16%] text-xs font-medium text-success whitespace-nowrap"
+							>
+								<Icon name="check" size={12} />Pasted {notice.lines} lines as one block
+							</div>
+						{:else}
+							<div
+								class="flex items-center h-[32px] px-[14px] rounded-full border border-border bg-popover-bg shadow-dropdown text-[13px] font-medium text-text-secondary whitespace-nowrap"
+							>
+								{notice.text}
+							</div>
+						{/if}
+					{/key}
+				{/if}
+			</div>
+			<!-- Loads with the first tab, so it is ready by the time ⌘ then F opens
+			     it: typing straight afterwards must reach the field, not the shell. -->
+			{#if tabs.length > 0}
+				{#await import("./TerminalFind.svelte") then { default: TerminalFind }}
+					{#if find && find.tab === activeTabId}
+						{#key find}
+							<TerminalFind terminal={find.terminal} onclose={() => (find = null)} />
+						{/key}
+					{/if}
+				{/await}
+			{/if}
+			{#if keys.pendingPasteLines}
+				<div
+					class="absolute z-20 top-[12px] left-1/2 -translate-x-1/2 flex items-center gap-3 pl-[14px] pr-[6px] h-[40px] rounded-full border border-border bg-popover-bg shadow-dropdown text-[13px] text-text-secondary whitespace-nowrap"
+					role="alertdialog"
+					aria-label="Paste {keys.pendingPasteLines} lines?"
+				>
+					<span>
+						<b class="font-semibold text-text">Paste {keys.pendingPasteLines} lines?</b>
+						They'll run one at a time.
+					</span>
+					<span class="flex items-center gap-1">
+						<Button variant="ghost" size="sm" onclick={() => keys.resolvePaste(false)}>Cancel</Button>
+						<Button variant="primary" size="sm" onclick={() => keys.resolvePaste(true)}>Paste</Button>
+					</span>
+				</div>
+			{/if}
 			{#if pendingTitle && activeTabId === null}
 				<p class="term-starting p-2 font-mono text-xs text-text-dimmer" role="status">
 					Starting terminal…
@@ -470,6 +610,7 @@
 					<TerminalTab
 						ptyId={tab.ptyId}
 						active={tab.ptyId === activeTabId}
+						{keys}
 						fontSize={termFontSize}
 						onFontSizeResize={handleFontSizeResize}
 					/>
