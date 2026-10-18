@@ -79,6 +79,7 @@ describe("WsRpcServerLayer Claude settings", () => {
 						makeTestHandlerLayer({ config: makeMockConfig({ configDir }) }),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -118,6 +119,7 @@ describe("WsRpcServerLayer Claude settings", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		});

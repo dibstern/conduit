@@ -101,6 +101,7 @@ describe("WsRpcServerLayer SwitchModel", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},

@@ -77,6 +77,7 @@ describe("WsRpcServerLayer ReloadProviderSession", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});

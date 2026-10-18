@@ -285,12 +285,12 @@ const group = RpcGroup.make(
 	Contracts.SubscribeSessionTodos,
 	Contracts.SubscribeProjectSettings,
 	Contracts.SubscribePtys,
-	Rpc.fromTaggedRequest(Contracts.PtyInput),
-	Rpc.fromTaggedRequest(Contracts.SetDefaultPermissionMode),
-	Rpc.fromTaggedRequest(Contracts.GetClaudeSettings),
-	Rpc.fromTaggedRequest(Contracts.SetClaudeSettings),
-	Rpc.fromTaggedRequest(Contracts.ResolveClaudeSettings),
-	Rpc.fromTaggedRequest(Contracts.RewindSession),
+	Contracts.PtyInput,
+	Contracts.SetDefaultPermissionMode,
+	Contracts.GetClaudeSettings,
+	Contracts.SetClaudeSettings,
+	Contracts.ResolveClaudeSettings,
+	Contracts.RewindSession,
 );
 const handlers = group.toLayer({
 	SubscribeApprovals: (payload) => {
@@ -387,7 +387,7 @@ const handlers = group.toLayer({
 const connect = Effect.gen(function* () {
 	const connection = yield* makeFakeSocketServer;
 	yield* RpcServer.make(group, { concurrency: 32 }).pipe(
-		Effect.provide(RpcServer.layerProtocolSocketServer),
+		Effect.provide(RpcServer.layerProtocolSocketServer, { local: true }),
 		Effect.provideService(SocketServer.SocketServer, connection.socketServer),
 		Effect.provide(handlers),
 		Effect.provide(RpcSerialization.layerJson),
@@ -559,7 +559,7 @@ it("ResolveClaudeSettings preserves display values and provenance", async () => 
 			instanceId: "stale-account",
 			accountRef: { _tag: "Id", id: "claude-1" },
 		},
-	];
+	] as const;
 	const wireRequests = requests.map((request) =>
 		Schema.encodeSync(Contracts.WsRpcRequest)(request),
 	);

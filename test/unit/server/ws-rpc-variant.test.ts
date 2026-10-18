@@ -92,6 +92,7 @@ describe("WsRpcServerLayer SwitchVariant", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},

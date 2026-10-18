@@ -175,8 +175,8 @@ const withHandlerStack = async (
 
 				yield* body({ advances, pendingQuestions });
 			}).pipe(
-				Effect.provide(PassThroughSessionInbox),
-				Effect.provide(layer),
+				Effect.provide(PassThroughSessionInbox, { local: true }),
+				Effect.provide(layer, { local: true }),
 				Effect.orDie,
 			),
 		);

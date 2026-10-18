@@ -1,7 +1,6 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Effect, Fiber, Layer, ManagedRuntime } from "effect";
-import type { RuntimeFiber } from "effect/Fiber";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
@@ -22,7 +21,7 @@ describe("WsRpcWebSocketHandler", () => {
 			),
 		);
 		cleanups.push(() => runtime.dispose());
-		const forked: RuntimeFiber<unknown, unknown>[] = [];
+		const forked: Fiber.Fiber<unknown, unknown>[] = [];
 		const trackingRuntime = {
 			runFork: (effect: Effect.Effect<unknown, unknown, never>) => {
 				const fiber = runtime.runFork(effect);
@@ -56,7 +55,7 @@ describe("WsRpcWebSocketHandler", () => {
 
 		await expect(
 			runtime.runPromise(
-				Fiber.await(forked[0] as RuntimeFiber<unknown, unknown>).pipe(
+				Fiber.await(forked[0] as Fiber.Fiber<unknown, unknown>).pipe(
 					Effect.timeout("2 seconds"),
 				),
 			),

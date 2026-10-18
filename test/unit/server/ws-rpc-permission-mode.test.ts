@@ -60,6 +60,7 @@ describe("WsRpcServerLayer SetDefaultPermissionMode", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 			Effect.ensuring(
 				Effect.sync(() => rmSync(configDir, { recursive: true, force: true })),
@@ -122,6 +123,7 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 					),
 					Layer.provideMerge(Layer.succeed(LoggerTag)(makeMockLogger())),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -176,6 +178,7 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 					Layer.provideMerge(Layer.succeed(LoggerTag)(makeMockLogger())),
 					Layer.provideMerge(persistenceLayer),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -248,6 +251,7 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 						Layer.provideMerge(Layer.succeed(LoggerTag)(makeMockLogger())),
 						Layer.provideMerge(persistenceLayer),
 					),
+					{ local: true },
 				),
 			);
 		},

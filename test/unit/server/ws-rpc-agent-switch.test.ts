@@ -24,6 +24,7 @@ describe("WsRpcServerLayer SwitchAgent", () => {
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(Layer.provideMerge(makeTestHandlerLayer())),
+				{ local: true },
 			),
 		),
 	);

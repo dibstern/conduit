@@ -119,7 +119,10 @@ describe("prompt processing timeouts through Effect state", () => {
 			expect(yield* hasActiveProcessingTimeout("session-1")).toBe(true);
 			yield* TestClock.adjust("120 seconds");
 			expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
-		}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+		}).pipe(
+			Effect.provide(PassThroughSessionInbox, { local: true }),
+			Effect.provide(layer, { local: true }),
+		);
 	});
 
 	it.effect(
@@ -162,7 +165,7 @@ describe("prompt processing timeouts through Effect state", () => {
 				yield* cancelSessionById("client-1", "session-1", "cmd-cancel-test");
 
 				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 });

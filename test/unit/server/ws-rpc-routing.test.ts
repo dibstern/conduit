@@ -12,11 +12,7 @@ import {
 import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WebSocketServer } from "ws";
-import {
-	CreateSession,
-	WsRpcError,
-	WsRpcGroup,
-} from "../../../src/lib/contracts/ws-rpc.js";
+import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	makeSessionActivity,
 	SessionActivityTag,
@@ -64,14 +60,15 @@ describe("routed RPC server", () => {
 						makeRoutedWsRpcServerLayer(resolve, undefined, "conduit").pipe(
 							Layer.provide(sessionDirectory),
 						),
+						{ local: true },
 					),
 				);
-				const malformed = new CreateSession(
-					// @ts-expect-error CreateSession requires an explicit projectSlug.
-					{ originId: "relay-client" },
-					{ disableValidation: true },
-				);
+				const malformed = {
+					_tag: "CreateSession" as const,
+					originId: "relay-client",
+				};
 				const result = yield* Effect.result(
+					// @ts-expect-error CreateSession requires an explicit projectSlug.
 					createSession(malformed, Headers.empty),
 				);
 				expect(result).toMatchObject({
@@ -167,6 +164,7 @@ describe("routed RPC server", () => {
 										new WsRpcError({ message: `Unknown project ${slug}` }),
 									);
 						}).pipe(Layer.provide(sessionDirectory)),
+						{ local: true },
 					),
 				);
 				const envelopes = yield* client
@@ -214,6 +212,7 @@ describe("routed RPC server", () => {
 							undefined,
 							attachProject,
 						).pipe(Layer.provide(sessionDirectory)),
+						{ local: true },
 					),
 				);
 				expect(
@@ -248,6 +247,7 @@ describe("routed RPC server", () => {
 						makeRoutedWsRpcServerLayer(resolve, undefined, "initial").pipe(
 							Layer.provide(sessionDirectory),
 						),
+						{ local: true },
 					),
 				);
 				expect(
@@ -270,6 +270,7 @@ describe("routed RPC server", () => {
 					makeRoutedWsRpcServerLayer(resolve).pipe(
 						Layer.provide(sessionDirectory),
 					),
+					{ local: true },
 				),
 			);
 
@@ -298,6 +299,7 @@ describe("routed RPC server", () => {
 						makeRoutedWsRpcServerLayer(resolve, undefined, "initial").pipe(
 							Layer.provide(sessionDirectory),
 						),
+						{ local: true },
 					),
 				);
 				expect(yield* client.GetProjects({})).toMatchObject({
@@ -324,7 +326,7 @@ describe("routed RPC server", () => {
 				(runtime) => runtime.disposeEffect,
 			);
 			const handler = yield* makeWsRpcWebSocketHandler({ runtime }).pipe(
-				Effect.provide(runtime),
+				Effect.provide(yield* runtime.contextEffect),
 			);
 			if (!handler.context) throw new Error("Missing relay context");
 			expect((yield* Effect.exit(handler.context))._tag).toBe("Success");
@@ -370,6 +372,7 @@ describe("routed RPC server", () => {
 						makeRoutedWsRpcServerLayer(resolve).pipe(
 							Layer.provide(sessionDirectory),
 						),
+						{ local: true },
 					),
 				);
 				const results = yield* Effect.all(

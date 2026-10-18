@@ -78,15 +78,14 @@ describe("file tree time limits", () => {
 			}).pipe(
 				Effect.provideService(LoggerTag, log),
 				Effect.provideService(OpenCodeFileServiceTag, {
-					read: () =>
-						Effect.fail(new Cause.UnknownException("missing .gitignore")),
+					read: () => Effect.fail(new Cause.UnknownError("missing .gitignore")),
 					list: (path) =>
 						path === "."
 							? Effect.succeed([
 									{ name: "src", type: "directory" },
 									{ name: "README.md", type: "file" },
 								])
-							: Effect.fail(new Cause.UnknownException("offline")),
+							: Effect.fail(new Cause.UnknownError("offline")),
 				}),
 			);
 		},
@@ -202,9 +201,10 @@ describe("file tree time limits", () => {
 					ConfigTag,
 					makeMockConfig({ slug: "private-project" }),
 				),
-				Effect.provide(AlertsLive),
+				Effect.provide(AlertsLive, { local: true }),
 				Effect.provide(
 					makePersistenceEffectLayer(":memory:", "private-project"),
+					{ local: true },
 				),
 			);
 		},
@@ -304,6 +304,7 @@ describe("file tree time limits", () => {
 							),
 						),
 					),
+					{ local: true },
 				),
 			);
 		});
@@ -333,7 +334,7 @@ describe("file tree time limits", () => {
 					const result = yield* Effect.result(call);
 					expect(result._tag).toBe("Failure");
 					if (result._tag === "Failure") {
-						expect(result.failure).toBeInstanceOf(Cause.UnknownException);
+						expect(result.failure).toBeInstanceOf(Cause.UnknownError);
 						expect(result.failure.cause).toMatchObject({
 							_tag: "OpenCodeConnectionError",
 						});
@@ -351,6 +352,7 @@ describe("file tree time limits", () => {
 							),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},

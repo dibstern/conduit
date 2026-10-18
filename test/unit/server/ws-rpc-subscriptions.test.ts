@@ -165,11 +165,11 @@ describe("subscription RPC handlers", () => {
 					expect(yield* Queue.take(decoded)).toMatchObject(header);
 					expect(yield* Queue.take(wire)).toMatchObject(header);
 				}
-			}).pipe(Effect.provide(makeLayer())),
+			}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 	it("do not require a caller-owned Scope", () => {
 		expectTypeOf<
-			Extract<Layer.Layer.Context<typeof WsRpcServerLayer>, Scope.Scope>
+			Extract<Layer.Services<typeof WsRpcServerLayer>, Scope.Scope>
 		>().toEqualTypeOf<never>();
 	});
 
@@ -271,7 +271,7 @@ describe("subscription RPC handlers", () => {
 					},
 					{ _tag: "synchronized" },
 				]);
-			}).pipe(Effect.provide(makeLayer())),
+			}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 
 	for (const member of ["SubscribeShell", "SubscribeSessionDetail"] as const) {
@@ -481,7 +481,7 @@ describe("subscription RPC handlers", () => {
 									},
 								],
 					);
-				}).pipe(Effect.provide(makeLayer())),
+				}).pipe(Effect.provide(makeLayer(), { local: true })),
 			{ timeout: 10000 },
 		);
 	}

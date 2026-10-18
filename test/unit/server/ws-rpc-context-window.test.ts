@@ -84,6 +84,7 @@ describe("WsRpcServerLayer SwitchContextWindow", () => {
 					),
 					Layer.provideMerge(Layer.succeed(LoggerTag)(makeMockLogger())),
 				),
+				{ local: true },
 			),
 		);
 	});

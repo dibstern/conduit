@@ -43,6 +43,7 @@ describe("WsRpcServerLayer GetCommands", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});

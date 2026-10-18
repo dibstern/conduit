@@ -85,7 +85,7 @@ describe("applyLiveSessionSettings", () => {
 					contextWindow: "1m",
 					variant: "high",
 				});
-			}).pipe(Effect.provide(layerFor(instance)));
+			}).pipe(Effect.provide(layerFor(instance), { local: true }));
 		},
 	);
 
@@ -126,7 +126,7 @@ describe("applyLiveSessionSettings", () => {
 					variant: "high",
 					context_window: "1m",
 				});
-			}).pipe(Effect.provide(layerFor(instance)));
+			}).pipe(Effect.provide(layerFor(instance), { local: true }));
 		},
 	);
 
@@ -143,6 +143,6 @@ describe("applyLiveSessionSettings", () => {
 			});
 			yield* applyLiveSessionSettings("s1");
 			expect(applySpy).not.toHaveBeenCalled();
-		}).pipe(Effect.provide(layerFor(instance)));
+		}).pipe(Effect.provide(layerFor(instance), { local: true }));
 	});
 });

@@ -91,7 +91,7 @@ describe("SubscribeProjectSettings", () => {
 					{ _tag: "claudeSettings", overrides: {} },
 				]),
 			);
-		}).pipe(Effect.provide(makeLayer())),
+		}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 
 	it.effect("a visibility change in one tab reaches every open tab", () =>
@@ -121,7 +121,7 @@ describe("SubscribeProjectSettings", () => {
 					},
 				});
 			}
-		}).pipe(Effect.provide(makeLayer())),
+		}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 
 	it.effect(
@@ -154,7 +154,7 @@ describe("SubscribeProjectSettings", () => {
 						variant: "fast",
 					},
 				});
-			}).pipe(Effect.provide(makeLayer())),
+			}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 
 	it.effect("a default approval-mode change reaches an open tab", () =>
@@ -171,7 +171,7 @@ describe("SubscribeProjectSettings", () => {
 				_tag: "upsert",
 				item: { _tag: "defaultPermissionMode", mode: "acceptEdits" },
 			});
-		}).pipe(Effect.provide(makeLayer())),
+		}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 });
 
@@ -198,7 +198,7 @@ describe("defaultSessionMode subscriptions", () => {
 				_tag: "defaultSessionMode",
 				mode: "worktree",
 			});
-		}).pipe(Effect.provide(makeLayer())),
+		}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 });
 
@@ -248,6 +248,6 @@ describe("SubscribeProjectSettings live facts", () => {
 						},
 					]),
 				);
-			}).pipe(Effect.provide(makeLayer())),
+			}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 });

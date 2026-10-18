@@ -78,6 +78,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -201,6 +202,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -235,6 +237,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 					WsRpcServerLayer.pipe(
 						Layer.provideMerge(makeTestHandlerLayer({ wsHandler, localPty })),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -282,6 +285,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 					WsRpcServerLayer.pipe(
 						Layer.provideMerge(makeTestHandlerLayer({ ptyManager })),
 					),
+					{ local: true },
 				),
 			);
 		},

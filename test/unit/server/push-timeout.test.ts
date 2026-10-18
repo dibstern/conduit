@@ -144,7 +144,7 @@ it("releases a timed-out delivery claim so a later observation reaches the devic
 				yield* send;
 				yield* send;
 			}).pipe(
-				Effect.provide(AlertLedgerLive),
+				Effect.provide(AlertLedgerLive, { local: true }),
 				Effect.provide(
 					Layer.merge(
 						makePersistenceEffectLayer(
@@ -155,6 +155,7 @@ it("releases a timed-out delivery claim so a later observation reaches the devic
 						),
 						bus,
 					),
+					{ local: true },
 				),
 			),
 		);

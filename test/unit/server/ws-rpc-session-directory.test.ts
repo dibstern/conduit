@@ -72,6 +72,7 @@ it.effect(
 					makeRoutedWsRpcServerLayer(resolve, undefined, "a").pipe(
 						Layer.provide(Layer.succeed(SessionDirectory)(directory)),
 					),
+					{ local: true },
 				),
 			);
 			expect(yield* client.ResolveSession({ sessionId: "owned" })).toEqual({

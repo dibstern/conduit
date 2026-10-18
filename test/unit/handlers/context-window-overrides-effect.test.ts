@@ -79,7 +79,7 @@ describe("switchContextWindowForSession with Effect override state", () => {
 					contextWindow: "1m",
 					options: contextWindowOptions,
 				});
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 });

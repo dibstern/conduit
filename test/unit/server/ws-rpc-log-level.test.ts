@@ -30,6 +30,7 @@ describe("WsRpcServerLayer log level controls", () => {
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(Layer.provideMerge(makeTestHandlerLayer())),
+				{ local: true },
 			),
 		);
 	});

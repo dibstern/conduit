@@ -65,7 +65,7 @@ describe("WsRpcServerLayer FindFolders", () => {
 					},
 				],
 			});
-		}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
+		}).pipe(Effect.scoped, Effect.provide(rpcLayer, { local: true })),
 	);
 
 	it.effect("normalizes and deduplicates the exact existing folder", () =>
@@ -87,7 +87,7 @@ describe("WsRpcServerLayer FindFolders", () => {
 					},
 				],
 			});
-		}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
+		}).pipe(Effect.scoped, Effect.provide(rpcLayer, { local: true })),
 	);
 
 	it.effect(
@@ -118,7 +118,7 @@ describe("WsRpcServerLayer FindFolders", () => {
 				expect(entries.some((entry) => entry.path.endsWith(".hidden"))).toBe(
 					false,
 				);
-			}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
+			}).pipe(Effect.scoped, Effect.provide(rpcLayer, { local: true })),
 	);
 
 	it.effect("expands the current user's home directory", () =>
@@ -131,7 +131,7 @@ describe("WsRpcServerLayer FindFolders", () => {
 			expect(entries.every((entry) => entry.path === resolve(entry.path))).toBe(
 				true,
 			);
-		}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
+		}).pipe(Effect.scoped, Effect.provide(rpcLayer, { local: true })),
 	);
 
 	it.effect("identifies git directories and worktree git files", () =>
@@ -161,7 +161,7 @@ describe("WsRpcServerLayer FindFolders", () => {
 				{ path: `${root}/project-c`, isGitRepo: false },
 				{ path: `${root}/project`, isGitRepo: false },
 			]);
-		}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
+		}).pipe(Effect.scoped, Effect.provide(rpcLayer, { local: true })),
 	);
 
 	it.effect("returns no suggestions for non-path queries", () =>
@@ -176,7 +176,7 @@ describe("WsRpcServerLayer FindFolders", () => {
 				home: homedir(),
 				entries: [],
 			});
-		}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
+		}).pipe(Effect.scoped, Effect.provide(rpcLayer, { local: true })),
 	);
 
 	it.effect("returns the typed new folder when its parent is missing", () =>
@@ -189,7 +189,7 @@ describe("WsRpcServerLayer FindFolders", () => {
 				home: homedir(),
 				entries: [{ path, isGitRepo: false, reason: "match", exists: false }],
 			});
-		}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
+		}).pipe(Effect.scoped, Effect.provide(rpcLayer, { local: true })),
 	);
 
 	it.effect(
@@ -207,7 +207,7 @@ describe("WsRpcServerLayer FindFolders", () => {
 					if (result._tag === "Failure")
 						expect(result.failure.message).toMatch(/not a directory|ENOTDIR/i);
 				}
-			}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
+			}).pipe(Effect.scoped, Effect.provide(rpcLayer, { local: true })),
 	);
 
 	it.effect(
@@ -232,6 +232,6 @@ describe("WsRpcServerLayer FindFolders", () => {
 						_tag: "ProjectSaveRejected",
 						issues: [{ kind: "permission-denied", path: `${blocked}/missing` }],
 					});
-			}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
+			}).pipe(Effect.scoped, Effect.provide(rpcLayer, { local: true })),
 	);
 });

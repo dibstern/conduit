@@ -51,13 +51,15 @@ describe("settings reads with Effect-native settings service", () => {
 			);
 
 			return getCommandsForSession(undefined).pipe(
-				Effect.provide(layer),
-				Effect.tap((commands) => {
-					expect(settingsService.listCommands).toHaveBeenCalledOnce();
-					expect(commands).toEqual([
-						{ name: "build", description: "Run build" },
-					]);
-				}),
+				Effect.provide(layer, { local: true }),
+				Effect.tap((commands) =>
+					Effect.sync(() => {
+						expect(settingsService.listCommands).toHaveBeenCalledOnce();
+						expect(commands).toEqual([
+							{ name: "build", description: "Run build" },
+						]);
+					}),
+				),
 			);
 		},
 	);
@@ -91,15 +93,17 @@ describe("settings reads with Effect-native settings service", () => {
 			return projectsHandlers
 				.GetProjects({ _tag: "GetProjects", projectSlug: "test-project" })
 				.pipe(
-					Effect.provide(layer),
-					Effect.tap((reply) => {
-						expect(settingsService.listProjects).not.toHaveBeenCalled();
-						expect(reply).toEqual({
-							projectSlug: "test-project",
-							projects: [],
-							current: "test-project",
-						});
-					}),
+					Effect.provide(layer, { local: true }),
+					Effect.tap((reply) =>
+						Effect.sync(() => {
+							expect(settingsService.listProjects).not.toHaveBeenCalled();
+							expect(reply).toEqual({
+								projectSlug: "test-project",
+								projects: [],
+								current: "test-project",
+							});
+						}),
+					),
 				);
 		},
 	);

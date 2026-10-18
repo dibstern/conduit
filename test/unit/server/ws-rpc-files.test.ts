@@ -44,6 +44,7 @@ describe("WsRpcServerLayer file reads", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ api })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -74,6 +75,7 @@ describe("WsRpcServerLayer file reads", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ api })),
 				),
+				{ local: true },
 			),
 		);
 	});

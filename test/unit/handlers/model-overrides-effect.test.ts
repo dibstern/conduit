@@ -125,7 +125,7 @@ describe("model handlers with Effect override state", () => {
 					variants: ["standard", "fast"],
 					contextWindow: { contextWindow: "", options: [] },
 				});
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 

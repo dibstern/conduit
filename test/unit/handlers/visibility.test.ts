@@ -74,7 +74,7 @@ describe("setHiddenEntriesForRelay", () => {
 					hiddenModels: ["a/b"],
 					hiddenAgents: ["opencode/plan"],
 				});
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -104,7 +104,7 @@ describe("setHiddenEntriesForRelay", () => {
 				hiddenModels: ["x/y"],
 				hiddenAgents: ["claude/researcher"],
 			});
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(layer, { local: true }));
 	});
 
 	it.effect(
@@ -131,7 +131,7 @@ describe("setHiddenEntriesForRelay", () => {
 					expect(failure.value._tag).toBe("RelaySettingsSaveError");
 				}
 				expect(yield* takePublished).toEqual([]);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 });

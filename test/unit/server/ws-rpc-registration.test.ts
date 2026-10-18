@@ -20,7 +20,7 @@ describe("RPC registration", () => {
 
 	it("requires a handler for every group member", () => {
 		// @ts-expect-error Omitting a group member must fail registration.
-		WsRpcGroup.of(Struct.omit(Server.wsRpcHandlers, "GetStatus"));
+		WsRpcGroup.of(Struct.omit(Server.wsRpcHandlers, ["GetStatus"]));
 	});
 
 	it.effect("ignores daemon hooks outside the RPC group", () =>
@@ -34,11 +34,12 @@ describe("RPC registration", () => {
 						...handlers,
 						nonRpcHook,
 					}),
+					{ local: true },
 				),
 			);
 			expect((yield* client.GetProjects({})).projects).toEqual([]);
 			expect(nonRpcHook).not.toHaveBeenCalled();
 			expect(resolve).not.toHaveBeenCalled();
-		}).pipe(Effect.provide(makeDaemonRpcTestLayer())),
+		}).pipe(Effect.provide(makeDaemonRpcTestLayer(), { local: true })),
 	);
 });

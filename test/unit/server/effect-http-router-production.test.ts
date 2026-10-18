@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { Effect, Layer } from "effect";
-import { HttpEffect as HttpApp, HttpServerResponse } from "effect/http";
+import { HttpRouter, HttpServerResponse } from "effect/http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
@@ -70,7 +70,9 @@ function makeHandler(options?: {
 		NodeFileSystem.layer,
 		NodePath.layer,
 	);
-	return HttpApp.toWebHandlerLayer(effectRouterWithCors, layer);
+	return HttpRouter.toWebHandler(
+		effectRouterWithCors.pipe(Layer.provideMerge(layer)),
+	);
 }
 
 describe("Effect HTTP Router production routes", () => {

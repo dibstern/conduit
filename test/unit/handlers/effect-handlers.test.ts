@@ -364,14 +364,14 @@ describe("GetAgents", () => {
 			return modelsHandlers
 				.GetAgents({ _tag: "GetAgents", projectSlug: "test-project" })
 				.pipe(
-					Effect.provide(makeTestHandlerLayer({ api: client, wsHandler: ws })),
-					Effect.tap((reply) => {
+					Effect.provide(makeTestHandlerLayer({ api: client, wsHandler: ws }), { local: true }),
+					Effect.tap((reply) => Effect.sync(() => {
 						expect(client.app.agents).toHaveBeenCalledOnce();
 						expect(reply).toMatchObject({
 							providerScope: { id: "opencode", name: "OpenCode" },
 							agents: filterAgents(mockAgents),
 						});
-					}),
+					})),
 				);
 		},
 	);
@@ -398,14 +398,14 @@ describe("GetProjects", () => {
 		);
 
 		return projectsHandlers.GetProjects({ _tag: "GetProjects", projectSlug: "test-project" }).pipe(
-			Effect.provide(layer),
-			Effect.tap((reply) => {
+			Effect.provide(layer, { local: true }),
+			Effect.tap((reply) => Effect.sync(() => {
 				expect(reply).toEqual({
 					projectSlug: "test-project",
 					projects,
 					current: "test-project",
 				});
-			}),
+			})),
 		);
 	});
 
@@ -428,15 +428,15 @@ describe("GetProjects", () => {
 			);
 
 			return projectsHandlers.GetProjects({ _tag: "GetProjects", projectSlug: "test-project" }).pipe(
-				Effect.provide(layer),
-				Effect.tap((reply) => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap((reply) => Effect.sync(() => {
 					expect(client.app.projects).not.toHaveBeenCalled();
 					expect(reply).toEqual({
 						projectSlug: "test-project",
 						projects: [],
 						current: "test-project",
 					});
-				}),
+				})),
 			);
 		},
 	);
@@ -478,8 +478,8 @@ describe("reloadProviderSessionForClient", () => {
 			sessionId: "session-42",
 			commandId: "cmd-reload-session",
 		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
+			Effect.provide(layer, { local: true }),
+			Effect.tap(() => Effect.sync(() => {
 				// Should have dispatched end_session
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(
 					expect.objectContaining({
@@ -489,7 +489,7 @@ describe("reloadProviderSessionForClient", () => {
 					}),
 				);
 				expect(engine.dispatchEffect).toHaveBeenCalledTimes(1);
-			}),
+			})),
 		);
 	});
 
@@ -526,7 +526,7 @@ describe("reloadProviderSessionForClient", () => {
 				Layer.succeed(AccountDirectory)(directory),
 				Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
 				Layer.mock(SessionWorkspaceTag, { get: getWorkspace }),
-			))));
+			), { local: true })));
 			yield* TestClock.adjust(1);
 			expect(dispatchEffect).toHaveBeenCalledTimes(1);
 			expect(dispatchEffect).toHaveBeenCalledWith({ type: "end_session", commandId: "cmd-reload-session", sessionId: "session-42", targetProviderId: account.id, account });
@@ -565,7 +565,7 @@ describe("reloadProviderSessionForClient", () => {
 						Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 						Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
 						Layer.mock(SessionWorkspaceTag, { get: () => Effect.succeed("/tmp/session-worktree") }),
-					)),
+					), { local: true }),
 				));
 				yield* TestClock.adjust(1);
 				expect(dispatchEffect).toHaveBeenCalledTimes(3);
@@ -618,13 +618,13 @@ describe("sendModelsStateToClient", () => {
 		);
 
 		return getModelsResponse({ clientId: "client-1" }).pipe(
-			Effect.provide(layer),
-			Effect.tap((response) => {
+			Effect.provide(layer, { local: true }),
+			Effect.tap((response) => Effect.sync(() => {
 				expect(client.provider.list).toHaveBeenCalledOnce();
 				expect(response.providers).toEqual(expect.arrayContaining([
 							expect.objectContaining({ id: "openai" }),
 						]));
-			}),
+			})),
 		);
 	});
 
@@ -689,7 +689,7 @@ describe("sendModelsStateToClient", () => {
 									],
 								},
 							]);
-			}).pipe(Effect.provide(Layer.merge(layer, ProjectSettingsLive)));
+			}).pipe(Effect.provide(Layer.merge(layer, ProjectSettingsLive), { local: true }));
 		},
 	);
 	it.effect(
@@ -742,7 +742,7 @@ describe("sendModelsStateToClient", () => {
 								],
 							},
 						]);
-			}).pipe(Effect.provide(Layer.merge(layer, ProjectSettingsLive)));
+			}).pipe(Effect.provide(Layer.merge(layer, ProjectSettingsLive), { local: true }));
 		},
 	);
 	it.effect(
@@ -836,7 +836,7 @@ describe("sendModelsStateToClient", () => {
 					model: "claude-opus-4-7",
 					provider: "claude",
 				});
-			}).pipe(Effect.provide(Layer.merge(layer, ProjectSettingsLive)));
+			}).pipe(Effect.provide(Layer.merge(layer, ProjectSettingsLive), { local: true }));
 		},
 	);
 });
@@ -882,7 +882,7 @@ describe("switchModelForSession", () => {
 				modelID: "gpt-4",
 			});
 			expect(log.info).toHaveBeenCalled();
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(layer, { local: true }));
 	});
 
 	it.effect(
@@ -1015,7 +1015,7 @@ describe("switchModelForSession", () => {
 					variant: "",
 					variants: ["standard"],
 				});
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -1075,7 +1075,7 @@ describe("switchModelForSession", () => {
 				variant: "",
 				variants: ["low", "medium", "high", "max"],
 			});
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(layer, { local: true }));
 	});
 });
 
@@ -1137,7 +1137,7 @@ describe("switchVariantForSession", () => {
 				variant: "high",
 				variants: ["low", "medium", "high", "max"],
 			});
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(layer, { local: true }));
 	});
 
 	it.effect(
@@ -1193,7 +1193,7 @@ describe("switchVariantForSession", () => {
 					variant: "v2",
 					variants: ["v2", "v3"],
 				});
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 });
@@ -1247,7 +1247,7 @@ describe("switchContextWindowForSession", () => {
 					contextWindow: "1m",
 					options: contextWindowOptions,
 				});
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -1300,7 +1300,7 @@ describe("switchContextWindowForSession", () => {
 						offered: [],
 					},
 				});
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 });
@@ -1497,7 +1497,7 @@ describe("handleForkSession", () => {
 				yield* handleForkSession("client-1", {
 					sessionId: "ses-parent",
 					messageId: "msg-1",
-				}).pipe(Effect.provide(layer));
+				}).pipe(Effect.provide(layer, { local: true }));
 
 				// OpenCode cuts before messageID, so the fork keeps msg-1.
 				expect(client.session.fork).toHaveBeenCalledWith("ses-parent", {
@@ -1541,12 +1541,12 @@ describe("handleForkSession", () => {
 				handleForkSession("client-1", {
 					sessionId: "ses-parent",
 					messageId: "msg-1",
-				}).pipe(Effect.provide(layer)),
+				}).pipe(Effect.provide(layer, { local: true })),
 			).pipe(
-				Effect.tap((exit) => {
+				Effect.tap((exit) => Effect.sync(() => {
 					expect(Exit.isFailure(exit)).toBe(true);
 					expect(setForkEntry).not.toHaveBeenCalled();
-				}),
+				})),
 			);
 		},
 	);
@@ -1574,7 +1574,7 @@ describe("handleForkSession", () => {
 				expect(yield* getAgent("ses-parent")).toBeUndefined();
 				expect(yield* getVariant("ses-parent")).toBe("");
 				expect(yield* getContextWindow("ses-parent")).toBe("");
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -1633,8 +1633,8 @@ describe("handleForkSession", () => {
 				sessionId: "ses-parent",
 				messageId: "msg-1",
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap((fork) => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap((fork) => Effect.sync(() => {
 					expect(serviceSetForkEntry).not.toHaveBeenCalled();
 					expect(legacySetForkEntry).not.toHaveBeenCalled();
 					expect(serviceListSessions).toHaveBeenCalledWith();
@@ -1646,7 +1646,7 @@ describe("handleForkSession", () => {
 						forkPointTimestamp: 456,
 					});
 					expect(ws.setClientSession).not.toHaveBeenCalled();
-				}),
+				})),
 			);
 		},
 	);
@@ -1686,12 +1686,12 @@ describe("handleForkSession", () => {
 		return handleForkSession("client-1", {
 			sessionId: "ses-parent",
 		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
+			Effect.provide(layer, { local: true }),
+			Effect.tap(() => Effect.sync(() => {
 				expect(messagesPage).toHaveBeenCalledWith("ses-child", { limit: 1 });
 				expect(serviceSetForkEntry).not.toHaveBeenCalled();
 				expect(legacySetForkEntry).not.toHaveBeenCalled();
-			}),
+			})),
 		);
 	});
 
@@ -1713,11 +1713,11 @@ describe("handleForkSession", () => {
 			const layer = makeForkSessionLayer({ client, ws, sessionMgr });
 
 			return handleForkSession("client-1", {}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(fork).not.toHaveBeenCalled();
 					expect(setForkEntry).not.toHaveBeenCalled();
-				}),
+				})),
 			);
 		},
 	);
@@ -1756,7 +1756,7 @@ describe("setDefaultPermissionModeForRelay", () => {
 					"client=client-1 Set default permission mode to: auto",
 				);
 			}).pipe(
-				Effect.provide(layer),
+				Effect.provide(layer, { local: true }),
 				Effect.ensuring(
 					Effect.sync(() =>
 						rmSync(configDir, { recursive: true, force: true }),
@@ -1816,14 +1816,14 @@ describe("handlePermissionResponse", () => {
 					decision: "allow",
 				});
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(resolvePermissionEffect).toHaveBeenCalledWith(
 						"session-1",
 						"perm-1",
 						"once",
 					);
-				}),
+				})),
 			);
 		},
 	);
@@ -1866,14 +1866,14 @@ describe("handlePermissionResponse", () => {
 					decision: "allow",
 				});
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(resolvePermissionEffect).toHaveBeenCalledWith(
 						"permission-session",
 						"perm-cross-session",
 						"once",
 					);
-				}),
+				})),
 			);
 		},
 	);
@@ -1922,12 +1922,12 @@ describe("handlePermissionResponse", () => {
 					persistScope: "tool",
 				});
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(client.permission.reply).not.toHaveBeenCalled();
 					expect(client.config.get).not.toHaveBeenCalled();
 					expect(client.config.update).not.toHaveBeenCalled();
-				}),
+				})),
 			);
 		},
 	);
@@ -2030,7 +2030,7 @@ describe("handlePermissionResponse", () => {
 
 					yield* Deferred.succeed(releaseSend, undefined);
 					yield* Fiber.join(fiber);
-				}).pipe(Effect.provide(layer));
+				}).pipe(Effect.provide(layer, { local: true }));
 			}),
 	);
 
@@ -2067,9 +2067,9 @@ describe("handlePermissionResponse", () => {
 				decision: "allow",
 			});
 		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-			}),
+			Effect.provide(layer, { local: true }),
+			Effect.tap(() => Effect.sync(() => {
+			})),
 		);
 	});
 
@@ -2095,10 +2095,10 @@ describe("handleQuestionReject", () => {
 		);
 
 		return handleQuestionReject("client-1", { toolId: "que-1" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
+			Effect.provide(layer, { local: true }),
+			Effect.tap(() => Effect.sync(() => {
 				expect(client.question.reject).toHaveBeenCalledWith("que-1", undefined);
-			}),
+			})),
 		);
 	});
 
@@ -2147,8 +2147,8 @@ describe("handleQuestionReject", () => {
 				const pending = yield* pendingInteractions.listPendingQuestions();
 				return { refusal, pending };
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(({ refusal, pending }) => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(({ refusal, pending }) => Effect.sync(() => {
 					expect(client.question.reject).not.toHaveBeenCalled();
 					expect(engine.getProviderForSessionEffect).toHaveBeenCalledWith(
 						"question-session",
@@ -2160,7 +2160,7 @@ describe("handleQuestionReject", () => {
 					);
 					expect(pending).toHaveLength(1);
 					expect(pending[0]?.requestId).toBe("que-claude");
-				}),
+				})),
 			);
 		},
 	);
@@ -2221,7 +2221,7 @@ describe("handleAskUserResponse", () => {
 					}),
 				);
 				expect(yield* pending.listPendingQuestions()).toHaveLength(0);
-			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 		},
 	);
 	it.effect("answers question via REST API", () => {
@@ -2251,14 +2251,14 @@ describe("handleAskUserResponse", () => {
 			toolId: "que-1",
 			answers: { "1": "Approve", "0": "Yes" },
 		}).pipe(
-			Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
-			Effect.tap(() => {
+			Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }),
+			Effect.tap(() => Effect.sync(() => {
 				expect(client.question.reply).toHaveBeenCalledWith(
 					"que-1",
 					[["Yes"], ["Approve"]],
 					undefined,
 				);
-			}),
+			})),
 		);
 	});
 
@@ -2310,13 +2310,13 @@ describe("handleAskUserResponse", () => {
 					answers: { "0": "Yes" },
 				});
 			}).pipe(
-				Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(client.question.reply).not.toHaveBeenCalled();
 					expect(engine.getProviderForSessionEffect).toHaveBeenCalledWith(
 						"question-session",
 					);
-				}),
+				})),
 			);
 		},
 	);
@@ -2359,8 +2359,8 @@ describe("handleNewSession", () => {
 				permissionMode: "ask",
 				model: { modelId: "sonnet", providerId: "claude" },
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(serviceCreateSession).toHaveBeenCalledWith("New Session", {
 						account: expect.objectContaining({ id: "claude", driver: "claude" }),
 						permissionMode: "ask",
@@ -2379,7 +2379,7 @@ describe("handleNewSession", () => {
 					expect(log.info).toHaveBeenCalledWith(
 						"client=client-1 Created: new-session-1",
 					);
-				}),
+				})),
 			);
 		},
 	);
@@ -2412,8 +2412,8 @@ describe("handleNewSession", () => {
 			providerId: "opencode",
 			model: { modelId: "gpt-4", providerId: "openai" },
 		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
+			Effect.provide(layer, { local: true }),
+			Effect.tap(() => Effect.sync(() => {
 				expect(serviceCreateSession).toHaveBeenCalledWith("OpenCode Session", {
 					account: expect.objectContaining({ id: "opencode", driver: "opencode" }),
 					permissionMode: "ask",
@@ -2423,7 +2423,7 @@ describe("handleNewSession", () => {
 					"client-1",
 					"opencode-session",
 				);
-			}),
+			})),
 		);
 	});
 
@@ -2521,10 +2521,10 @@ describe("handleNewSession", () => {
 				clientId: "client-1",
 				sessionId: "ses-local-placeholder",
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(startPolling).not.toHaveBeenCalled();
-				}),
+				})),
 			);
 		},
 	);
@@ -2633,10 +2633,10 @@ describe("handleNewSession", () => {
 				clientId: "client-1",
 				sessionId: "session-in-flight",
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(dispatchEffect).not.toHaveBeenCalled();
-				}),
+				})),
 			);
 		},
 	);
@@ -2678,13 +2678,13 @@ describe("handleDeleteSession", () => {
 			return handleDeleteSession("client-1", {
 				sessionId: "deleted-session",
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(deleteSession).toHaveBeenCalledWith("deleted-session");
 					expect(listSessions).not.toHaveBeenCalled();
 					expect(ws.setClientSession).not.toHaveBeenCalled();
 					expect(log.info).not.toHaveBeenCalled();
-				}),
+				})),
 			);
 		},
 	);
@@ -2722,8 +2722,8 @@ describe("handleDeleteSession", () => {
 			return handleDeleteSession("client-1", {
 				sessionId: "deleted-session",
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(ws.getClientsForSession).not.toHaveBeenCalled();
 					expect(serviceDeleteSession).toHaveBeenCalledWith("deleted-session");
 					expect(legacyDeleteSession).not.toHaveBeenCalled();
@@ -2732,7 +2732,7 @@ describe("handleDeleteSession", () => {
 					expect(log.info).toHaveBeenCalledWith(
 						"client=client-1 Deleted: deleted-session",
 					);
-				}),
+				})),
 			);
 		},
 	);
@@ -2748,11 +2748,11 @@ describe("handleDeleteSession", () => {
 		return handleDeleteSession("client-1", {
 			sessionId: "deleted-session",
 		}).pipe(
-			Effect.provide(makeSessionLifecycleLayer({ ws, sessionManagerService })),
-			Effect.tap(() => {
+			Effect.provide(makeSessionLifecycleLayer({ ws, sessionManagerService }), { local: true }),
+			Effect.tap(() => Effect.sync(() => {
 				expect(ws.setClientSession).not.toHaveBeenCalled();
 				expect(sessionManagerService.listSessions).not.toHaveBeenCalled();
-			}),
+			})),
 		);
 	});
 });
@@ -2790,13 +2790,13 @@ describe("renameSessionForClient", () => {
 				sessionId: "session-1",
 				title: "New Title",
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(renameSession).toHaveBeenCalledWith("session-1", "New Title");
 					expect(legacyRenameSession).not.toHaveBeenCalled();
 					expect(calls).toEqual(["rename"]);
 					expect(log.info).toHaveBeenCalled();
-				}),
+				})),
 			);
 		},
 	);
@@ -2821,10 +2821,10 @@ describe("renameSessionForClient", () => {
 			sessionId: "",
 			title: "New Title",
 		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
+			Effect.provide(layer, { local: true }),
+			Effect.tap(() => Effect.sync(() => {
 				expect(renameSession).not.toHaveBeenCalled();
-			}),
+			})),
 		);
 	});
 });
@@ -2959,8 +2959,8 @@ describe("loadMoreHistoryForSession", () => {
 		return loadMoreHistoryForSession({
 			sessionId: "session-1",
 		}).pipe(
-			Effect.provide(layer),
-			Effect.tap((result) => {
+			Effect.provide(layer, { local: true }),
+			Effect.tap((result) => Effect.sync(() => {
 				expect(result.messages[0]?.modelExecution).toEqual({
 					requestedModel: "sonnet",
 					expectedModel: "claude-sonnet-5",
@@ -2970,7 +2970,7 @@ describe("loadMoreHistoryForSession", () => {
 				expect(result).toMatchObject({ hasMore: false });
 				expect(result).not.toHaveProperty("total");
 				expect(loadPreRenderedHistory).not.toHaveBeenCalled();
-			}),
+			})),
 		);
 	});
 	}
@@ -3062,7 +3062,7 @@ Layer.effect(SessionActivityTag, makeSessionActivity),
 						text: "Continue",
 						commandId: "cmd1",
 					}).pipe(
-						Effect.provide(PassThroughSessionInbox),
+						Effect.provide(PassThroughSessionInbox, { local: true }),
 						Effect.provideService(ProviderTurnServiceTag, provider),
 					);
 				}).pipe(
@@ -3073,7 +3073,7 @@ Layer.effect(SessionActivityTag, makeSessionActivity),
 							Layer.succeed(ConfigTag)(mockConfig()),
 							PendingInteractionServiceLive,
 							makeOverridesStateLive(),
-						),
+						), { local: true },
 					),
 					Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 				);
@@ -3114,8 +3114,8 @@ Layer.effect(SessionActivityTag, makeSessionActivity),
 			text: "Continue",
 			commandId: "cmd1",
 		}).pipe(
-			Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
-			Effect.tap(() => expect(sendTurn).toHaveBeenCalledOnce()),
+			Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }),
+			Effect.tap(() => Effect.sync(() => expect(sendTurn).toHaveBeenCalledOnce())),
 		);
 	});
 });
@@ -3142,7 +3142,7 @@ describe("cancelSessionById", () => {
 				commandId: "cmd-cancel-test",
 				sessionId: "session-1",
 			});
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(layer, { local: true }));
 	});
 });
 
@@ -3173,13 +3173,13 @@ describe("rewindSessionToMessage", () => {
 			sessionId: "session-1",
 			messageId: "msg-1",
 		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
+			Effect.provide(layer, { local: true }),
+			Effect.tap(() => Effect.sync(() => {
 				expect(client.session.revert).toHaveBeenCalledWith("session-1", {
 					messageID: "msg-1",
 				});
 				expect(log.info).toHaveBeenCalled();
-			}),
+			})),
 		);
 	});
 });
@@ -3209,12 +3209,12 @@ describe("handleMessage", () => {
 			text: "hello",
 			commandId: "cmd-no-session",
 		}).pipe(
-			Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
-			Effect.tap(() => {
+			Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }),
+			Effect.tap(() => Effect.sync(() => {
 				expect(log.warn).toHaveBeenCalledWith(
 					expect.stringContaining("no active session"),
 				);
-			}),
+			})),
 		);
 	});
 
@@ -3289,7 +3289,7 @@ describe("handleMessage", () => {
 					}),
 				}),
 			);
-		}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+		}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 	});
 
 	it.effect(
@@ -3395,7 +3395,7 @@ describe("handleMessage", () => {
 					"0": "Yes",
 				});
 				yield* Effect.tryPromise(() => questionPromise ?? Promise.resolve({}));
-			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -3513,7 +3513,7 @@ describe("handleMessage", () => {
 						}),
 					}),
 				);
-			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -3591,7 +3591,7 @@ describe("handleMessage", () => {
 				expect(renameSession).not.toHaveBeenCalled();
 				expect(legacyListSessions).not.toHaveBeenCalled();
 				expect(legacyRenameSession).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -3656,7 +3656,7 @@ describe("handleMessage", () => {
 
 			expect(listSessions).not.toHaveBeenCalled();
 			expect(renameSession).not.toHaveBeenCalled();
-		}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+		}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 	});
 
 	it.effect(
@@ -3798,7 +3798,7 @@ describe("handleMessage", () => {
 						data: expect.objectContaining({ code: "PICK_REQUIRED" }),
 					}),
 				]));
-			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -3866,7 +3866,7 @@ describe("handleMessage", () => {
 				expect(failures).toEqual([
 					{ code: "SEND_FAILED", error: expect.any(String) },
 				]);
-			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -3902,17 +3902,22 @@ describe("markSessionSeenForClient", () => {
 						Layer.succeed(LoggerTag)(log),
 						Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
 					),
+					{ local: true },
 				),
 				Effect.flip,
-				Effect.tap((error) => {
-					expect(error).toBe(failure);
-					expect(sessionManagerService.markSessionSeen).toHaveBeenCalledOnce();
-					expect(log.warn).toHaveBeenCalledOnce();
-					expect(log.warn).toHaveBeenCalledWith(
-						expect.stringContaining("session-1"),
-						failure,
-					);
-				}),
+				Effect.tap((error) =>
+					Effect.sync(() => {
+						expect(error).toBe(failure);
+						expect(
+							sessionManagerService.markSessionSeen,
+						).toHaveBeenCalledOnce();
+						expect(log.warn).toHaveBeenCalledOnce();
+						expect(log.warn).toHaveBeenCalledWith(
+							expect.stringContaining("session-1"),
+							failure,
+						);
+					}),
+				),
 			);
 		},
 	);
