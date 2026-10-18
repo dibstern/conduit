@@ -130,7 +130,10 @@ export class InProcessSessionRunner implements SessionRunner {
 						) ?? Effect.void;
 					return;
 				case "interrupt":
-					return yield* this.payload.interrupt(command.sessionId);
+					return yield* this.payload.interrupt(
+						command.sessionId,
+						command.turnIds,
+					);
 				case "apply-live-settings":
 					return yield* this.payload.applySettings(
 						command.sessionId,

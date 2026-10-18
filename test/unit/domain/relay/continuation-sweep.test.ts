@@ -308,7 +308,9 @@ it("sweeps due continuations only for its own project in a shared store", async 
 						Effect.sync(() => {
 							dispatched.push(input.sessionId);
 						}),
-					interruptTurn: () => Effect.void,
+					turnFences: () => ({ stopping: false, switching: false }),
+					fenceLifts: Effect.succeed(Stream.never),
+					beginStop: () => Effect.succeed(Effect.void),
 				}),
 				withSwitchServices,
 				withContinuationAdmission,
@@ -382,7 +384,9 @@ const resetInboxFixture = Effect.gen(function* () {
 	const turns: ProviderTurnServiceTag["Type"] = {
 		holdUserTurnsForAccountSwitch: () => Effect.void,
 		prepareTurnSession: (input) => Effect.succeed(input.sessionId),
-		interruptTurn: () => Effect.void,
+		turnFences: () => ({ stopping: false, switching: false }),
+		fenceLifts: Effect.succeed(Stream.never),
+		beginStop: () => Effect.succeed(Effect.void),
 		sendTurn: (input) =>
 			Effect.gen(function* () {
 				dispatches.push(input.continuation ? "resume" : input.text);
@@ -999,7 +1003,9 @@ for (const scenario of [
 						Effect.sync(() => {
 							dispatches++;
 						}),
-					interruptTurn: () => Effect.void,
+					turnFences: () => ({ stopping: false, switching: false }),
+					fenceLifts: Effect.succeed(Stream.never),
+					beginStop: () => Effect.succeed(Effect.void),
 				}),
 				withSwitchServices,
 				withContinuationAdmission,
@@ -1312,7 +1318,9 @@ for (const scenario of [
 							Effect.sync(() => {
 								dispatched.push(input.sessionId);
 							}),
-						interruptTurn: () => Effect.void,
+						turnFences: () => ({ stopping: false, switching: false }),
+						fenceLifts: Effect.succeed(Stream.never),
+						beginStop: () => Effect.succeed(Effect.void),
 					}),
 					withSwitchServices,
 					withContinuationAdmission,
@@ -1378,7 +1386,9 @@ it("a cancelled invalid due row does not prevent another due row from resuming",
 					Effect.sync(() => {
 						dispatched.push(input.sessionId);
 					}),
-				interruptTurn: () => Effect.void,
+				turnFences: () => ({ stopping: false, switching: false }),
+				fenceLifts: Effect.succeed(Stream.never),
+				beginStop: () => Effect.succeed(Effect.void),
 			}),
 			withSwitchServices,
 			withContinuationAdmission,
@@ -1471,7 +1481,9 @@ for (const freshReset of [42, undefined]) {
 					holdUserTurnsForAccountSwitch: () => Effect.void,
 					prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 					sendTurn: () => Effect.die("Limited must never dispatch"),
-					interruptTurn: () => Effect.void,
+					turnFences: () => ({ stopping: false, switching: false }),
+					fenceLifts: Effect.succeed(Stream.never),
+					beginStop: () => Effect.succeed(Effect.void),
 				}),
 				withSwitchServices,
 				Effect.provide(makeOverridesStateLive()),

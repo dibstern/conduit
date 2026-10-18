@@ -1,9 +1,19 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
+import { SqlClient, Statement } from "@effect/sql";
+import { SqlError } from "@effect/sql/SqlError";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Layer } from "effect";
+import {
+	Chunk,
+	Deferred,
+	Effect,
+	Either,
+	Fiber,
+	Layer,
+	Stream,
+	TestClock,
+} from "effect";
 import { afterEach, expect, vi } from "vitest";
 import {
 	MessageVersion,
@@ -28,6 +38,7 @@ import {
 	ProviderTurnServiceLive,
 	type ProviderTurnServiceSendInput,
 	ProviderTurnServiceTag,
+	STOP_ABORT_WAIT_MS,
 } from "../../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
@@ -63,6 +74,7 @@ import {
 } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../../../../src/lib/persistence/read-model-types.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
+import { ProviderNotRegistered } from "../../../../src/lib/provider/errors.js";
 import { OpenCodeProviderInstance } from "../../../../src/lib/provider/opencode-provider-instance.js";
 import {
 	OrchestrationEngine,
@@ -437,15 +449,235 @@ const sendTurn = (input?: TestSendInputOverrides) =>
 
 const interruptTurn = () =>
 	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		yield* sql`INSERT OR IGNORE INTO sessions (id, provider, title, created_at, updated_at)
+			VALUES ('session-1', 'opencode', 'Stored session', 1, 1)`;
 		const service = yield* ProviderTurnServiceTag;
-		yield* service.interruptTurn({
+		const stopped = yield* service.beginStop({
 			clientId: "client-1",
 			commandId: "cmd-interrupt-default",
 			sessionId: "session-1",
 		});
+		yield* stopped;
 	});
 
 describe("ProviderTurnService", () => {
+	// Stop fence failure modes: the abort fails (unregistered account, rejected
+	// dispatch) and the fence stays up; the worker's identity lookup fails before
+	// the abort is issued; the provider never answers and its turn stays open; a
+	// repeated Stop waits on the abandoned completion; the fence lifts without
+	// waking the inbox drain; the provider acknowledges before the turn ends; a
+	// continuation admitted behind the fence is stopped too.
+	describe("Stop fence", () => {
+		const seedSession = Effect.flatMap(
+			SqlClient.SqlClient,
+			(
+				sql,
+			) => sql`INSERT INTO sessions (id, provider, title, created_at, updated_at)
+				VALUES ('session-1', 'claude', 'Stored session', 1, 1)`,
+		);
+
+		it.scoped(
+			"lifts and wakes the inbox in memory when the abort fails",
+			() => {
+				const dispatchEffect = vi.fn(() =>
+					Effect.fail(new ProviderNotRegistered({ providerId: "claude" })),
+				);
+				const engine = makeEngine({ providerId: "claude", dispatchEffect });
+				const { layer } = serviceLayer({ engine });
+				return Effect.gen(function* () {
+					const service = yield* ProviderTurnServiceTag;
+					yield* seedSession;
+					const lifts = yield* service.fenceLifts;
+					const failed = yield* interruptTurn().pipe(Effect.flip);
+					expect(failed._tag).toBe("ProviderNotRegistered");
+					expect(service.turnFences("session-1").stopping).toBe(false);
+					// No store write stands between the lift and the drain.
+					expect(
+						Chunk.toArray(yield* Stream.runCollect(Stream.take(lifts, 1))),
+					).toEqual(["session-1"]);
+					// A repeated Stop issues a fresh abort instead of awaiting the failed one.
+					yield* interruptTurn().pipe(Effect.flip);
+					expect(dispatchEffect).toHaveBeenCalledTimes(2);
+				}).pipe(Effect.provide(layer));
+			},
+		);
+
+		for (const missingTable of ["turns", "provider_command_outbox"] as const) {
+			it.effect(`lifts when the ${missingTable} identity lookup fails`, () => {
+				const engine = makeEngine({ providerId: "claude" });
+				const { layer } = serviceLayer({ engine });
+				return Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const service = yield* ProviderTurnServiceTag;
+					yield* seedSession;
+					let injected = false;
+					const failed = yield* interruptTurn().pipe(
+						Statement.withTransformer((statement) => {
+							const [query] = statement.compile();
+							const lookup =
+								missingTable === "turns"
+									? query.includes("FROM turns WHERE session_id")
+									: query.includes(
+											"FROM provider_command_outbox WHERE session_id",
+										) && query.includes("AS input_id");
+							if (injected || !lookup) return Effect.succeed(statement);
+							injected = true;
+							return Effect.succeed(
+								sql.unsafe("SELECT * FROM unavailable_identity"),
+							);
+						}),
+						Effect.either,
+					);
+					expect(injected).toBe(true);
+					expect(failed._tag).toBe("Left");
+					expect(service.turnFences("session-1").stopping).toBe(false);
+					yield* interruptTurn();
+					expect(engine.dispatchEffect).toHaveBeenCalledOnce();
+				}).pipe(Effect.provide(layer));
+			});
+		}
+
+		it.effect(
+			"lifts after the bound and retires the turn the provider never ended",
+			() =>
+				Effect.gen(function* () {
+					const issued = yield* Deferred.make<void>();
+					const engine = makeEngine({
+						providerId: "claude",
+						dispatchEffect: vi.fn(() =>
+							Deferred.succeed(issued, undefined).pipe(
+								Effect.zipRight(Effect.never),
+							),
+						),
+					});
+					const { layer, ingestion } = serviceLayer({ engine });
+					yield* Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						const service = yield* ProviderTurnServiceTag;
+						yield* seedSession;
+						yield* sql`INSERT INTO turns (id, session_id, state, user_message_id, requested_at)
+							VALUES ('turn-1', 'session-1', 'running', 'input-1', 1)`;
+						const stopped = yield* Effect.fork(interruptTurn());
+						yield* Deferred.await(issued);
+						yield* TestClock.adjust(STOP_ABORT_WAIT_MS - 1);
+						expect(service.turnFences("session-1").stopping).toBe(true);
+						yield* TestClock.adjust(1);
+						yield* Fiber.join(stopped);
+						expect(service.turnFences("session-1").stopping).toBe(false);
+						// The open turn would keep the inbox busy, stranding the reservation.
+						expect(ingestion.ingestBatch).toHaveBeenCalledWith(
+							[
+								expect.objectContaining({
+									type: "turn.interrupted",
+									sessionId: "session-1",
+								}),
+								expect.objectContaining({
+									type: "session.status",
+									data: { sessionId: "session-1", status: "idle" },
+								}),
+							],
+							{ beforeCommit: expect.anything() },
+						);
+					}).pipe(Effect.provide(layer));
+				}),
+		);
+
+		it.effect("holds the fence until the acknowledged turn ends", () => {
+			const engine = makeEngine({ providerId: "claude" });
+			const { layer, ingestion } = serviceLayer({ engine });
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const service = yield* ProviderTurnServiceTag;
+				yield* seedSession;
+				yield* sql`INSERT INTO turns (id, session_id, state, user_message_id, requested_at)
+					VALUES ('turn-1', 'session-1', 'running', 'input-1', 1)`;
+				const stopped = yield* Effect.fork(interruptTurn());
+				// A live background task acknowledges before the interrupted result.
+				yield* TestClock.adjust(1_000);
+				expect(engine.dispatchEffect).toHaveBeenCalledOnce();
+				expect(service.turnFences("session-1").stopping).toBe(true);
+				yield* sql`UPDATE turns SET state = 'interrupted' WHERE id = 'turn-1'`;
+				yield* TestClock.adjust(100);
+				yield* Fiber.join(stopped);
+				expect(service.turnFences("session-1").stopping).toBe(false);
+				expect(ingestion.ingestBatch).not.toHaveBeenCalled();
+			}).pipe(Effect.provide(layer));
+		});
+
+		it.effect(
+			"stops admissions from before the fence, not a continuation behind it",
+			() => {
+				const engine = makeEngine({ providerId: "claude" });
+				const { layer, ingestion } = serviceLayer({ engine });
+				return Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					yield* seedSession;
+					yield* sql`INSERT INTO turns (id, session_id, state, user_message_id, requested_at)
+						VALUES ('previous-turn', 'session-1', 'completed', 'previous-input', 1)`;
+					const admit = (sequence: number, inputId: string) =>
+						sql`INSERT INTO provider_command_outbox (
+							request_sequence, command_id, project_key, session_id, provider_id,
+							effect_type, payload_json, status, attempt_count, requested_at, updated_at
+						) VALUES (${sequence}, ${inputId}, 'project', 'session-1', 'claude', 'send_turn',
+							${JSON.stringify({ inputId })}, 'running', 0, 1, 1)`;
+					// The active input's turn placement is delayed.
+					yield* admit(1, "active-input");
+					yield* admit(2, "queued-steer");
+					let continued = false;
+					yield* interruptTurn().pipe(
+						Statement.withTransformer((statement) => {
+							const [query] = statement.compile();
+							if (continued || !query.includes("AS input_id"))
+								return Effect.succeed(statement);
+							// A continuation bypasses the fence before the abort's lookup.
+							continued = true;
+							return admit(3, "continuation").pipe(
+								Effect.orDie,
+								Effect.as(statement),
+							);
+						}),
+					);
+					expect(continued).toBe(true);
+					const [interrupt] = vi
+						.mocked(engine.dispatchEffect)
+						.mock.calls.map(([command]) => command);
+					expect(interrupt).toMatchObject({ type: "interrupt_turn" });
+					expect(
+						interrupt?.type === "interrupt_turn"
+							? [...(interrupt.turnIds ?? [])].sort()
+							: [],
+					).toEqual(["active-input", "previous-input", "queued-steer"]);
+
+					// The bound retires only the snapshotted turns, never a later admission's.
+					// A continuation commits just before the retirement does.
+					const retirements: Array<Either.Either<void, SqlError>> = [];
+					vi.mocked(ingestion.ingestBatch).mockImplementation(
+						(_events, options) =>
+							admit(4, "late-continuation").pipe(
+								Effect.orDie,
+								Effect.zipRight(
+									Effect.either(options?.beforeCommit ?? Effect.void),
+								),
+								Effect.tap((result) =>
+									Effect.sync(() => retirements.push(result)),
+								),
+								Effect.flatten,
+								Effect.as(1),
+							),
+					);
+					yield* sql`INSERT INTO turns (id, session_id, state, user_message_id, requested_at)
+						VALUES ('stuck-turn', 'session-1', 'running', 'continuation', 2)`;
+					const stopped = yield* Effect.fork(interruptTurn());
+					yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
+					yield* Fiber.join(stopped);
+					expect(ingestion.ingestBatch).toHaveBeenCalledOnce();
+					expect(retirements).toEqual([Either.left(expect.any(SqlError))]);
+				}).pipe(Effect.provide(layer));
+			},
+		);
+	});
+
 	for (const driver of ["opencode", "claude"] as const) {
 		for (const sideThread of [0, 1]) {
 			it.effect(
@@ -1564,7 +1796,7 @@ describe("ProviderTurnService", () => {
 						VALUES ('session-1', 'claude', 'Stored session', 'claude', 'claude-sonnet-4-5', '', '', 1, 1)`;
 					const service = yield* ProviderTurnServiceTag;
 					yield* service.sendTurn(defaultInput());
-					yield* service.interruptTurn({
+					yield* yield* service.beginStop({
 						clientId: "client-1",
 						commandId: "cmd-interrupt-1",
 						sessionId: "session-1",

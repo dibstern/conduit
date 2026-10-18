@@ -53,7 +53,9 @@ it("retains files in history when queued dispatch cannot place the input and pau
 		Layer.succeed(ProviderTurnServiceTag, {
 			holdUserTurnsForAccountSwitch: () => Effect.void,
 			prepareTurnSession: () => Effect.succeed("opencode"),
-			interruptTurn: () => Effect.void,
+			turnFences: () => ({ stopping: false, switching: false }),
+			fenceLifts: Effect.succeed(Stream.never),
+			beginStop: () => Effect.succeed(Effect.void),
 			sendTurn,
 		}),
 	);
