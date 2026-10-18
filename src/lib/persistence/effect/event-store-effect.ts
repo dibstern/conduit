@@ -52,10 +52,10 @@ export interface EventStoreEffect {
 	) => Effect.Effect<number, EventStoreError | SqlError>;
 }
 
-export class EventStoreEffectTag extends Context.Tag("EventStoreEffect")<
+export class EventStoreEffectTag extends Context.Service<
 	EventStoreEffectTag,
 	EventStoreEffect
->() {}
+>()("EventStoreEffect") {}
 
 const decodeEventStoreRow = (
 	row: StoredEventRow,
@@ -69,7 +69,7 @@ const decodeEventStoreRow = (
 export const validateCanonicalEvent = (
 	event: CanonicalEvent,
 ): Effect.Effect<void, EventStoreError> =>
-	Schema.decodeUnknown(CanonicalEventSchema)(event).pipe(
+	Schema.decodeUnknownEffect(CanonicalEventSchema)(event).pipe(
 		Effect.asVoid,
 		Effect.mapError(
 			(cause) =>

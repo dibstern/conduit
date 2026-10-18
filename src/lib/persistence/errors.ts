@@ -1,6 +1,6 @@
 // src/lib/persistence/errors.ts
 
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 export const PERSISTENCE_ERROR_CODES = [
 	"UNKNOWN_EVENT_TYPE",
@@ -22,10 +22,10 @@ export class PersistenceError extends Schema.TaggedError<PersistenceError>()(
 	"PersistenceError",
 	{
 		message: Schema.String,
-		code: Schema.Literal(...PERSISTENCE_ERROR_CODES),
-		context: Schema.optionalWith(
-			Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-			{ default: () => ({}) },
+		code: Schema.Literals(PERSISTENCE_ERROR_CODES),
+		context: Schema.Record(Schema.String, Schema.Unknown).pipe(
+			Schema.withDecodingDefaultType(Effect.sync(() => ({}))),
+			Schema.withConstructorDefault(Effect.sync(() => ({}))),
 		),
 	},
 ) {

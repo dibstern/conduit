@@ -39,9 +39,10 @@ export interface ProjectorCursorEffect {
 	readonly minCursor: () => Effect.Effect<number, CursorError | SqlError>;
 }
 
-export class ProjectorCursorEffectTag extends Context.Tag(
-	"ProjectorCursorEffect",
-)<ProjectorCursorEffectTag, ProjectorCursorEffect>() {}
+export class ProjectorCursorEffectTag extends Context.Service<
+	ProjectorCursorEffectTag,
+	ProjectorCursorEffect
+>()("ProjectorCursorEffect") {}
 
 function rowToCursor(row: CursorRow): ProjectorCursor {
 	return {

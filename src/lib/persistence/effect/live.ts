@@ -1,6 +1,6 @@
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import {
-	type ConfigError,
+	type Config,
 	Context,
 	Effect,
 	Layer,
@@ -60,7 +60,7 @@ export type PersistenceEffectContext =
 	| ProviderStateEffectTag
 	| ClaudeEventPersistEffectTag;
 
-export type PersistenceEffectError = PersistenceError | ConfigError.ConfigError;
+export type PersistenceEffectError = PersistenceError | Config.ConfigError;
 
 export type PersistenceStoreContext =
 	| SqlClient.SqlClient
@@ -69,10 +69,10 @@ export type PersistenceStoreContext =
 	| ProjectionRunnerEffectTag;
 
 /** A borrowed store Context. Its acquiring scope retains connection ownership. */
-export class PersistenceStore extends Context.Tag("PersistenceStore")<
+export class PersistenceStore extends Context.Service<
 	PersistenceStore,
 	Context.Context<PersistenceStoreContext>
->() {}
+>()("PersistenceStore") {}
 
 export type PersistenceProjectContext = Exclude<
 	PersistenceEffectContext,
@@ -96,11 +96,15 @@ export function makePersistenceStoreLayer(
 			: Effect.gen(function* () {
 					yield* Effect.gen(function* () {
 						const sql = yield* SqlClient.SqlClient;
+						yield* sql`PRAGMA busy_timeout = 5000`;
+						yield* sql`PRAGMA journal_mode = WAL`;
+						yield* sql`PRAGMA synchronous = NORMAL`;
 						yield* sql`PRAGMA foreign_keys = OFF`;
 						yield* makeEffectSqlMigrator();
 					}).pipe(
 						Effect.provide(
-							SqliteNode.layer({ filename }).pipe(
+							SqliteNode.layer({ filename, busyTimeout: 5000 }).pipe(
+								Layer.orDie,
 								Layer.provide(Reactivity.layer),
 							),
 						),
@@ -110,13 +114,20 @@ export function makePersistenceStoreLayer(
 					);
 					yield* reclaimStore(filename);
 				});
-	const preparedSqliteLayer = SqliteNode.layer({ filename }).pipe(
+	const preparedSqliteLayer = SqliteNode.layer({
+		filename,
+		busyTimeout: 5000,
+	}).pipe(
+		Layer.orDie,
 		Layer.provide(Reactivity.layer),
 		Layer.provide(Layer.effectDiscard(prepareStore)),
 	);
-	const sqliteLayer = Layer.scopedDiscard(
+	const sqliteLayer = Layer.effectDiscard(
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
+			yield* sql`PRAGMA foreign_keys = ON`;
+			yield* sql`PRAGMA journal_mode = WAL`;
+			yield* sql`PRAGMA busy_timeout = 5000`;
 			// SQLite maps at most the file's size; this is an address-space ceiling.
 			// WAL's NORMAL sync, explicit rather than better-sqlite3's build default.
 			yield* sql`PRAGMA synchronous = NORMAL`;
@@ -124,7 +135,7 @@ export function makePersistenceStoreLayer(
 			yield* sql`PRAGMA analysis_limit = 400`;
 			yield* sql`PRAGMA optimize = 0x10002`;
 			const optimize = sql`PRAGMA optimize`.pipe(
-				Effect.catchAll((cause) =>
+				Effect.catch((cause) =>
 					Effect.logWarning("SQLite optimize failed", cause),
 				),
 				Effect.asVoid,
@@ -187,7 +198,10 @@ export function makePersistenceProjectLayer(
 		EventStoreEffectTag,
 		makeEventStoreEffect,
 	).pipe(Layer.provide(baseLayer));
-	const projectionRunnerLayer = Layer.service(ProjectionRunnerEffectTag);
+	const projectionRunnerLayer = Layer.effect(
+		ProjectionRunnerEffectTag,
+		ProjectionRunnerEffectTag,
+	);
 
 	const readQueryLayer = Layer.effect(
 		ReadQueryEffectTag,

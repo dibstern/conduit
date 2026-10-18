@@ -1,4 +1,4 @@
-import { Context, Data, Effect, Result as Either, Schema } from "effect";
+import { Context, Data, Effect, Result, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
@@ -85,9 +85,10 @@ export interface ClaudeEventPersistEffect {
 	}) => Effect.Effect<void, ClaudeEventPersistFailure | PickRejection>;
 }
 
-export class ClaudeEventPersistEffectTag extends Context.Tag(
-	"ClaudeEventPersistEffect",
-)<ClaudeEventPersistEffectTag, ClaudeEventPersistEffect>() {}
+export class ClaudeEventPersistEffectTag extends Context.Service<
+	ClaudeEventPersistEffectTag,
+	ClaudeEventPersistEffect
+>()("ClaudeEventPersistEffect") {}
 
 /**
  * Terminal events that may act on an existing read-model session without a
@@ -435,15 +436,15 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 								provider,
 								storedSessionPick(parent, provider),
 							);
-							if (Either.isLeft(pick)) return yield* pick.left;
+							if (Result.isFailure(pick)) return yield* pick.failure;
 							pickEvents = sessionPickEvents(
 								input.childSessionId,
 								input.modelId
 									? {
-											...pick.right,
-											model: { ...pick.right.model, modelId: input.modelId },
+											...pick.success,
+											model: { ...pick.success.model, modelId: input.modelId },
 										}
-									: pick.right,
+									: pick.success,
 							);
 						}
 						if (!existingChild) yield* seedClaudeSubagentSession(input);
