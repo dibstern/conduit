@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { Cause, Data, Effect } from "effect";
+import { Data, Effect } from "effect";
 import type { DaemonConfig } from "../../daemon/config-persistence.js";
+import * as Failure from "../../effect/failure-classification.js";
 import {
 	projectStorageDir,
 	readProjectStorageOwner,
@@ -74,10 +75,10 @@ export const migrateProjectStorage = (
 				});
 			}).pipe(
 				Effect.catchAllCause((cause) =>
-					Cause.isInterruptedOnly(cause)
+					Failure.isInterruptedOnly(cause)
 						? Effect.failCause(cause)
 						: Effect.sync(() => {
-								const error = Cause.squash(cause);
+								const error = Failure.squashCause(cause);
 								failures.set(
 									project.slug,
 									`Legacy history migration failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -87,7 +88,7 @@ export const migrateProjectStorage = (
 									Effect.logWarning("Project history migration failed", {
 										projectSlug: project.slug,
 										directory: project.path,
-										cause: Cause.pretty(cause),
+										cause: Failure.renderCause(cause),
 									}),
 								),
 							),

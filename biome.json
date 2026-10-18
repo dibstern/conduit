@@ -8,6 +8,7 @@
 			"!acceptance/generated",
 			"!acceptance/visual/artifacts",
 			"!test-results",
+			"!test/e2e/linux-service/artifacts",
 			"!.claude",
 			"!.scratch",
 			"!.worktrees",

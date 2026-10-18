@@ -1,14 +1,5 @@
 import { SqlClient } from "@effect/sql";
-import {
-	Cause,
-	Context,
-	Effect,
-	HashSet,
-	Layer,
-	Match,
-	Ref,
-	Schema,
-} from "effect";
+import { Context, Effect, HashSet, Layer, Match, Ref, Schema } from "effect";
 import {
 	AUTO_TITLE_SOURCE,
 	isPlaceholderTitle,
@@ -19,6 +10,7 @@ import {
 	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
 } from "../../../daemon/config-persistence.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
@@ -275,11 +267,11 @@ export const makeSessionTitleServiceLive = (
 								),
 							),
 							Effect.catchAllCause((cause) =>
-								Cause.isInterruptedOnly(cause)
+								Failure.isInterruptedOnly(cause)
 									? Effect.interrupt
 									: Effect.sync(() => {
 											log.warn(
-												`Session title job failed for ${input.sessionId}: ${Cause.pretty(cause)}`,
+												`Session title job failed for ${input.sessionId}: ${Failure.renderCause(cause)}`,
 											);
 										}),
 							),

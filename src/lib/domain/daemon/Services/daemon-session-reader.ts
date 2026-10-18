@@ -1,6 +1,7 @@
 import { statSync } from "node:fs";
 import { SqlClient } from "@effect/sql";
-import { Cause, Data, Effect, Exit, Layer, Option } from "effect";
+import { Data, Effect, Exit, Layer, Option } from "effect";
+import * as Failure from "../../../effect/failure-classification.js";
 import {
 	type createSessionGitCache,
 	daemonSessionGitCache,
@@ -236,7 +237,7 @@ const listProjectSessions = (
 						availability: {
 							projectSlug: project.slug,
 							available: false as const,
-							error: String(Cause.squash(exit.cause)),
+							error: String(Failure.squashCause(exit.cause)),
 						},
 					};
 				}),

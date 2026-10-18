@@ -898,6 +898,7 @@ export interface HealthResponse {
 
 export interface InfoResponse {
 	version: string;
+	buildId: string;
 }
 
 export interface DashboardProjectResponse {

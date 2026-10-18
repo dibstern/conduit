@@ -6,15 +6,8 @@ import {
 	unlink,
 } from "node:fs/promises";
 import { dirname } from "node:path";
-import {
-	Cause,
-	Effect,
-	Exit,
-	Layer,
-	Option,
-	type Runtime,
-	Tracer,
-} from "effect";
+import { Effect, Exit, Layer, Option, type Runtime, Tracer } from "effect";
+import * as Failure from "../../../effect/failure-classification.js";
 import { DEFAULT_TRACE_MIN_MS } from "../../../env.js";
 import {
 	attachTurnTimeline,
@@ -526,16 +519,16 @@ const exitToTraceRecordExit = (
 		onSome: (value) =>
 			JSON.stringify(
 				compactTraceAttributes({
-					failures: Cause.failures(value),
-					defects: Cause.defects(value),
-					interrupted: Cause.isInterrupted(value),
+					failures: Failure.failures(value),
+					defects: Failure.defects(value),
+					interrupted: Failure.isInterrupted(value),
 				}),
 			),
 	});
 	const bounded = compactTraceAttributes({ cause: causeSummary })[
 		"cause"
 	] as string;
-	if (Exit.isInterrupted(exit)) {
+	if (Failure.isInterrupted(exit.cause)) {
 		return { _tag: "Interrupted", cause: bounded };
 	}
 	return { _tag: "Failure", cause: bounded };

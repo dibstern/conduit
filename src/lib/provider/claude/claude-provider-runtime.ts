@@ -24,7 +24,6 @@ import {
 	query as sdkQuery,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
-	Cause,
 	Context,
 	Deferred,
 	Effect,
@@ -50,6 +49,7 @@ import {
 	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
 } from "../../daemon/config-persistence.js";
+import * as Failure from "../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../errors-utils.js";
 import { createLogger } from "../../logger.js";
 import type { ClaudeEventPersistEffect } from "../../persistence/effect/claude-event-persist-effect.js";
@@ -1244,7 +1244,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				Effect.onExit((exit) =>
 					Exit.isFailure(exit)
 						? Effect.gen(this, function* () {
-								const failure = asError(Cause.squash(exit.cause));
+								const failure = asError(Failure.squashCause(exit.cause));
 								yield* settleQueuedTurnDeferredsEffect(
 									this.stateRef,
 									sessionId,

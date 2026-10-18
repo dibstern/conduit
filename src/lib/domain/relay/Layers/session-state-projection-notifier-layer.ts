@@ -1,4 +1,5 @@
-import { Cause, Effect, Layer, Option, Ref, Scope } from "effect";
+import { type Cause, Effect, Layer, Option, Ref, Scope } from "effect";
+import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../../errors.js";
 import {
 	type SessionStateProjectionNotifier,
@@ -8,12 +9,14 @@ import { SessionGitServiceTag } from "../Services/session-git-service.js";
 import { SessionManagerServiceTag } from "../Services/session-manager-service.js";
 
 const logFailure = (operation: string, cause: Cause.Cause<unknown>) => {
-	if (Cause.isInterruptedOnly(cause)) return Effect.interrupt;
-	const failure = Cause.failureOption(cause);
+	if (Failure.isInterruptedOnly(cause)) return Effect.interrupt;
+	const failure = Failure.firstFailure(cause);
 	const detail = Option.isSome(failure)
 		? formatErrorDetail(failure.value)
-		: Cause.pretty(cause);
-	return Effect.logError(`${operation}: ${detail}\n${Cause.pretty(cause)}`);
+		: Failure.renderCause(cause);
+	return Effect.logError(
+		`${operation}: ${detail}\n${Failure.renderCause(cause)}`,
+	);
 };
 
 export const makeSessionStateProjectionNotifierLive = (

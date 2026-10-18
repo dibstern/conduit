@@ -1,4 +1,5 @@
-import { Cause, Effect } from "effect";
+import { Effect } from "effect";
+import * as Failure from "../../effect/failure-classification.js";
 import type {
 	RunnerLiveQueryConfiguration,
 	RunnerSettingsSnapshot,
@@ -86,7 +87,7 @@ export function makeRunnerUpgrade<
 			}).pipe(
 				Effect.catchAllCause((cause) =>
 					Effect.sync(() => {
-						if (Cause.isInterruptedOnly(cause)) return;
+						if (Failure.isInterruptedOnly(cause)) return;
 						runner.upgrade.failures++;
 						runner.upgrade.retryAt =
 							Date.now() +
@@ -94,7 +95,7 @@ export function makeRunnerUpgrade<
 								2000,
 								100 * 2 ** Math.min(runner.upgrade.failures - 1, 5),
 							);
-						options.failed(sessionId, runner, Cause.squash(cause));
+						options.failed(sessionId, runner, Failure.squashCause(cause));
 					}),
 				),
 				Effect.ensuring(

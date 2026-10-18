@@ -3,7 +3,7 @@ import { channel } from "node:diagnostics_channel";
 import type { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import {
-	Cause,
+	type Cause,
 	Duration,
 	Effect,
 	Fiber,
@@ -20,6 +20,7 @@ import {
 	type ShellEnvelope,
 	type ShellProjectsFrame,
 } from "../../../contracts/ws-rpc.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { daemonSessionGitCache } from "../../../git/session-git.js";
 import {
 	makeReadQueryEffect,
@@ -112,7 +113,7 @@ export const subscribeShellProjects = <E>(
 					: Effect.void,
 			);
 			const fail = (cause: Cause.Cause<ShellSubscriptionError | E>) =>
-				Cause.isInterruptedOnly(cause)
+				Failure.isInterruptedOnly(cause)
 					? Effect.void
 					: Queue.offer(output, Take.failCause(cause)).pipe(Effect.asVoid);
 
