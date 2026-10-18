@@ -195,7 +195,7 @@ describe("listDaemonSessions", () => {
 				return Effect.gen(function* () {
 					expect([...(yield* DaemonStoreAvailability)]).toEqual([]);
 					if (read === "list") {
-						const result = yield* listDaemonSessions(root, {});
+						const result = yield* listDaemonSessions({});
 						expect(result.sessions.map((session) => session.title)).toEqual([
 							"Legacy",
 						]);
@@ -259,15 +259,12 @@ describe("listDaemonSessions", () => {
 				Effect.gen(function* () {
 					const unusedGit = vi.fn(async () => undefined);
 					const empty = yield* listDaemonSessions(
-						root,
 						{ search: "absent" },
 						createSessionGitCache(unusedGit),
 					);
 					expect(empty.sessions).toEqual([]);
 					expect(unusedGit).not.toHaveBeenCalled();
-					const listing = yield* Effect.fork(
-						listDaemonSessions(root, {}, cache),
-					);
+					const listing = yield* Effect.fork(listDaemonSessions({}, cache));
 					yield* Effect.tryPromise(() =>
 						vi.waitFor(() => expect(read).toHaveBeenCalledTimes(4)),
 					);
@@ -313,7 +310,7 @@ describe("listDaemonSessions", () => {
 		return Effect.gen(function* () {
 			yield* Effect.promise(() => cache.refresh(gitProject));
 			yield* Effect.promise(() => cache.refresh(plainProject));
-			const result = yield* listDaemonSessions(root, {}, cache);
+			const result = yield* listDaemonSessions({}, cache);
 			expect(
 				result.sessions.find((session) => session.id === "git-session")?.git,
 			).toEqual({
@@ -379,7 +376,7 @@ describe("listDaemonSessions", () => {
 		]);
 
 		return Effect.gen(function* () {
-			const result = yield* listDaemonSessions(root);
+			const result = yield* listDaemonSessions();
 			const sessions = new Map(
 				result.sessions.map((session) => [session.id, session]),
 			);
@@ -442,7 +439,7 @@ describe("listDaemonSessions", () => {
 			},
 		]);
 		return Effect.gen(function* () {
-			const result = yield* listDaemonSessions(root);
+			const result = yield* listDaemonSessions();
 			const sessions = new Map(
 				result.sessions.map((session) => [session.id, session]),
 			);
@@ -507,7 +504,7 @@ describe("listDaemonSessions", () => {
 		]);
 
 		return Effect.gen(function* () {
-			const result = yield* listDaemonSessions(root);
+			const result = yield* listDaemonSessions();
 			const sessions = new Map(
 				result.sessions.map((session) => [session.id, session]),
 			);
@@ -568,7 +565,7 @@ describe("listDaemonSessions", () => {
 		]);
 
 		return Effect.gen(function* () {
-			const first = yield* listDaemonSessions(root, { roots: true, limit: 1 });
+			const first = yield* listDaemonSessions({ roots: true, limit: 1 });
 			expect(first.sessions).toEqual([
 				expect.objectContaining({
 					id: "root-a",
@@ -576,7 +573,7 @@ describe("listDaemonSessions", () => {
 					pendingQuestionCount: 1,
 				}),
 			]);
-			const rest = yield* listDaemonSessions(root, {
+			const rest = yield* listDaemonSessions({
 				roots: true,
 				...(first.nextCursor ? { cursor: first.nextCursor } : {}),
 			});
@@ -633,7 +630,7 @@ describe("listDaemonSessions", () => {
 		);
 
 		return Effect.gen(function* () {
-			const result = yield* listDaemonSessions(root);
+			const result = yield* listDaemonSessions();
 			const sessions = new Map(
 				result.sessions.map((session) => [session.id, session]),
 			);
@@ -714,7 +711,7 @@ describe("listDaemonSessions", () => {
 			]);
 
 			return Effect.gen(function* () {
-				const result = yield* listDaemonSessions(root, {
+				const result = yield* listDaemonSessions({
 					limit: 2,
 					roots: true,
 				});
@@ -854,12 +851,12 @@ describe("listDaemonSessions", () => {
 		];
 
 		return Effect.gen(function* () {
-			const unbounded = yield* listDaemonSessions(root);
+			const unbounded = yield* listDaemonSessions();
 			expect(unbounded.sessions.map((session) => session.id)).toEqual(expected);
 			expect(unbounded.hasMore).toBe(false);
 			expect(unbounded.nextCursor).toBeNull();
 
-			const first = yield* listDaemonSessions(root, { limit: 2 });
+			const first = yield* listDaemonSessions({ limit: 2 });
 			expect(first.sessions.map((session) => session.id)).toEqual(
 				expected.slice(0, 2),
 			);
@@ -873,7 +870,7 @@ describe("listDaemonSessions", () => {
 			let cursor: { updatedAt: number; id: string } | undefined;
 			let finalCursor: { updatedAt: number; id: string } | undefined;
 			for (;;) {
-				const page = yield* listDaemonSessions(root, {
+				const page = yield* listDaemonSessions({
 					limit: 2,
 					...(cursor === undefined ? {} : { cursor }),
 				});
@@ -897,7 +894,7 @@ describe("listDaemonSessions", () => {
 			expect(new Set(collected).size).toBe(expected.length);
 			expect(finalCursor).toBeDefined();
 			if (finalCursor === undefined) return;
-			const pastEnd = yield* listDaemonSessions(root, {
+			const pastEnd = yield* listDaemonSessions({
 				limit: 2,
 				cursor: finalCursor,
 			});
@@ -932,7 +929,7 @@ describe("listDaemonSessions", () => {
 		]);
 
 		return Effect.gen(function* () {
-			const first = yield* listDaemonSessions(root, { limit: 2 });
+			const first = yield* listDaemonSessions({ limit: 2 });
 			expect(first.sessions.map((session) => session.id)).toEqual([
 				"five",
 				"four",
@@ -941,7 +938,7 @@ describe("listDaemonSessions", () => {
 			expect(first.nextCursor).toEqual({ updatedAt: 400, id: "four" });
 			if (first.nextCursor === null) return;
 
-			const second = yield* listDaemonSessions(root, {
+			const second = yield* listDaemonSessions({
 				limit: 2,
 				cursor: first.nextCursor,
 			});
@@ -953,7 +950,7 @@ describe("listDaemonSessions", () => {
 			expect(second.nextCursor).toEqual({ updatedAt: 200, id: "two" });
 			if (second.nextCursor === null) return;
 
-			const final = yield* listDaemonSessions(root, {
+			const final = yield* listDaemonSessions({
 				limit: 2,
 				cursor: second.nextCursor,
 			});
@@ -1017,7 +1014,7 @@ describe("listDaemonSessions", () => {
 		];
 
 		return Effect.gen(function* () {
-			const allMatches = yield* listDaemonSessions(root, { search: "nEeDlE" });
+			const allMatches = yield* listDaemonSessions({ search: "nEeDlE" });
 			expect(allMatches.sessions.map((session) => session.id)).toEqual(
 				expected,
 			);
@@ -1027,7 +1024,7 @@ describe("listDaemonSessions", () => {
 			const paged: string[] = [];
 			let cursor: { updatedAt: number; id: string } | undefined;
 			for (;;) {
-				const page = yield* listDaemonSessions(root, {
+				const page = yield* listDaemonSessions({
 					search: "needle",
 					limit: 2,
 					...(cursor === undefined ? {} : { cursor }),
@@ -1074,7 +1071,7 @@ describe("listDaemonSessions", () => {
 		]);
 
 		return Effect.gen(function* () {
-			const firstPage = yield* listDaemonSessions(root, {
+			const firstPage = yield* listDaemonSessions({
 				scope: "project-b",
 				limit: 2,
 			});
@@ -1087,7 +1084,7 @@ describe("listDaemonSessions", () => {
 				"project-b",
 			]);
 
-			const secondPage = yield* listDaemonSessions(root, {
+			const secondPage = yield* listDaemonSessions({
 				scope: "project-b",
 				limit: 2,
 				...(firstPage.nextCursor === null
@@ -1099,7 +1096,7 @@ describe("listDaemonSessions", () => {
 			]);
 			expect(secondPage.hasMore).toBe(false);
 
-			const scopedSearch = yield* listDaemonSessions(root, {
+			const scopedSearch = yield* listDaemonSessions({
 				scope: "project-a",
 				search: "needle",
 			});
@@ -1133,7 +1130,7 @@ describe("listDaemonSessions", () => {
 		]);
 
 		return Effect.gen(function* () {
-			const result = yield* listDaemonSessions(root, { search: "%_" });
+			const result = yield* listDaemonSessions({ search: "%_" });
 			expect(result.sessions.map((session) => session.id)).toEqual([
 				"literal-a",
 				"literal-b",
@@ -1188,7 +1185,7 @@ describe("listDaemonSessions", () => {
 			]);
 
 			return Effect.gen(function* () {
-				const result = yield* listDaemonSessions(root, { limit: 1 });
+				const result = yield* listDaemonSessions({ limit: 1 });
 				expect(result.sessions.map((session) => session.id)).toEqual(["a-new"]);
 				expect(result.hasMore).toBe(true);
 				expect(result.availability).toEqual(

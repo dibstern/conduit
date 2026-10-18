@@ -242,7 +242,7 @@ export const RelayFactoryLive = (
 							),
 						),
 					list: (options) =>
-						listEffectDaemonSessions(configDir, options).pipe(
+						listEffectDaemonSessions(options).pipe(
 							Effect.provide(daemonContext),
 							Effect.mapError(
 								(cause) => new DaemonSessionQueryServiceError({ cause }),
@@ -353,12 +353,6 @@ export const RelayFactoryLive = (
 					Effect.gen(function* () {
 						const listProjects = getEffectProjectInfos.pipe(
 							Effect.provide(daemonContext),
-							Effect.map((projects) =>
-								projects.map(({ group, ...project }) => ({
-									...project,
-									...(group === undefined ? {} : { group }),
-								})),
-							),
 							Effect.mapError(
 								(cause) =>
 									new ProjectManagementServiceError({

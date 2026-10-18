@@ -66,7 +66,7 @@ export const sessionRowsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "seed grouped repository session rows",
+		name: "seed separate project session rows",
 		match:
 			/^the sidebar has sessions in two projects for a shared repository and one project for a lone repository$/,
 		run: ({ world }) => {
@@ -75,8 +75,6 @@ export const sessionRowsHandlers: StepHandler[] = [
 					slug: "myapp",
 					title: "Checkout one",
 					folders: ["/myapp"],
-					groupingMode: "repository",
-					effectiveGroupingMode: "repository",
 					repositoryIdentities: {
 						"/myapp": {
 							key: "example.test/team/shared",
@@ -89,8 +87,6 @@ export const sessionRowsHandlers: StepHandler[] = [
 					slug: "checkout-two",
 					title: "Checkout two",
 					folders: ["/workspaces/shared-two"],
-					groupingMode: "repository",
-					effectiveGroupingMode: "repository",
 					repositoryIdentities: {
 						"/workspaces/shared-two": {
 							key: "example.test/team/shared",
@@ -103,8 +99,6 @@ export const sessionRowsHandlers: StepHandler[] = [
 					slug: "solo",
 					title: "Solo checkout",
 					folders: ["/workspaces/solo"],
-					groupingMode: "repository",
-					effectiveGroupingMode: "repository",
 					repositoryIdentities: {
 						"/workspaces/solo": {
 							key: "example.test/team/solo",
@@ -117,8 +111,8 @@ export const sessionRowsHandlers: StepHandler[] = [
 			const rows: SessionInfo[] = [
 				{
 					accountId: null,
-					id: "row-grouped-one",
-					title: "First grouped session",
+					id: "row-project-one",
+					title: "First project session",
 					status: "idle",
 					projectSlug: "myapp",
 					updatedAt: PINNED_CLOCK_MS - 60_000,
@@ -126,8 +120,8 @@ export const sessionRowsHandlers: StepHandler[] = [
 				},
 				{
 					accountId: null,
-					id: "row-grouped-two",
-					title: "Second grouped session",
+					id: "row-project-two",
+					title: "Second project session",
 					status: "idle",
 					projectSlug: "checkout-two",
 					updatedAt: PINNED_CLOCK_MS - 120_000,

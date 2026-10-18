@@ -1,10 +1,9 @@
-// The project or repository group the list is narrowed to, or null for all.
+// The project the list is narrowed to, or null for all.
 // The URL (`?p=<scope>`) holds the only copy. The chip, the `project:` token,
 // browser back and a refresh all read it from there, which is what stops the
 // chip and the typed text from ever disagreeing.
 
-import { getScopeGroupKey } from "../../session-scope.js";
-import { getProjectGroup, projectState } from "./project-state.svelte.js";
+import { projectState } from "./project-state.svelte.js";
 import {
 	GROUP_PARAM,
 	getCurrentSearchParams,
@@ -53,18 +52,10 @@ export function getSessionScope(): string | null {
 
 export function getSessionScopeLabel(scope: string | null): string {
 	if (scope === null) return "All projects";
-	const groupKey = getScopeGroupKey(scope);
-	if (groupKey !== null) {
-		const member = projectState.projects.find(
-			(project) => getProjectGroup(project.slug)?.key === groupKey,
-		);
-		return (member && getProjectGroup(member.slug)?.label) || scope;
-	}
-	const title =
+	return (
 		projectState.projects.find((project) => project.slug === scope)?.title ||
-		scope;
-	const group = getProjectGroup(scope);
-	return group?.needsProjectQualifier ? `${group.label} · ${title}` : title;
+		scope
+	);
 }
 
 /** Pushes a history entry, so browser back undoes a scope change. */

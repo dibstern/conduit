@@ -162,7 +162,7 @@ describe("Session Rows read paths", () => {
 							const family = yield* Stream.runHead(
 								subscribeSessionFamily({ sessionId }),
 							);
-							const daemon = yield* listDaemonSessions(configDir, {}, cache);
+							const daemon = yield* listDaemonSessions({}, cache);
 							expect(daemon.availability).toEqual([
 								{ projectSlug: slug, available: true },
 							]);
