@@ -11,6 +11,7 @@ import {
 import { makeSessionBackgroundLiveness } from "../../../session/background-liveness.js";
 import { makeSessionCompactions } from "../../../session/session-compactions.js";
 import { makeSessionRetries } from "../../../session/session-retries.js";
+import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 
 export interface SessionActivity {
@@ -89,12 +90,23 @@ export const SessionActivityDaemonLive = Layer.scoped(
 	Effect.gen(function* () {
 		const activity = yield* makeSessionActivity;
 		const bus = yield* DaemonEventBusTag;
+		const advances = yield* (yield* SessionEventBusTag).subscribeAdvances();
 		const changes = yield* activity.subscribe;
 		const pending = yield* Effect.acquireRelease(
 			Queue.sliding<void>(1),
 			Queue.shutdown,
 		);
 		yield* changes.pipe(
+			Stream.runForEach(() => Queue.offer(pending, undefined)),
+			Effect.forkScoped,
+		);
+		// Durable sidebar changes and transient activity share one daemon refresh
+		// cadence. A dropped advance may have contained a sidebar change.
+		yield* advances.pipe(
+			Stream.filter(
+				(advance) =>
+					advance.dropped === true || advance.collections.includes("sidebar"),
+			),
 			Stream.runForEach(() => Queue.offer(pending, undefined)),
 			Effect.forkScoped,
 		);

@@ -111,7 +111,7 @@ async function openProjectList(page: Page, baseUrl: string) {
 					effectiveGroupingMode: project.groupingMode ?? defaultMode,
 				}));
 				rpc.setProjectSetting({ _tag: "defaultGroupingMode", mode });
-				rpc.setDaemonList("SubscribeProjects", { projects });
+				rpc.setProjects({ projects });
 				return { mode };
 			},
 			FindFolders: () => ({ home: "/workspace", entries: [] }),
@@ -143,7 +143,7 @@ async function openProjectList(page: Page, baseUrl: string) {
 				projects = projects.map((project) =>
 					project.slug === savedSlug ? updated : project,
 				);
-				rpc.setDaemonList("SubscribeProjects", { projects });
+				rpc.setProjects({ projects });
 				return { savedSlug: stored.slug, projects, warnings: [] };
 			},
 		},
@@ -154,7 +154,7 @@ async function openProjectList(page: Page, baseUrl: string) {
 			{
 				type: "shell_snapshot",
 				roots: true,
-				sessions: sessions.filter((session) => session.projectSlug === slug),
+				sessions,
 			},
 		],
 		responses: new Map(),
@@ -424,7 +424,7 @@ for (const mode of [
 			await expect(projectLabel(page, slug)).toHaveText("myapp");
 			await expect(projectLabel(page, "web-checkout")).toHaveText("myapp");
 			await recordLabels(page, "live-default");
-			rpc.setDaemonList("SubscribeProjects", {
+			rpc.setProjects({
 				projects: fixtureProjects().map((project) =>
 					project.slug === slug ? { ...project, groupingMode: "off" } : project,
 				),
@@ -496,7 +496,7 @@ for (const mode of [
 			if (!resolveRead)
 				throw new Error("The initial grouping read was not captured");
 			rpc.setProjectSetting({ _tag: "defaultGroupingMode", mode: "off" });
-			rpc.setDaemonList("SubscribeProjects", {
+			rpc.setProjects({
 				projects: fixtureProjects().map((project) => ({
 					...project,
 					effectiveGroupingMode: project.groupingMode ?? "off",

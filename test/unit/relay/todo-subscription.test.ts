@@ -179,7 +179,11 @@ describe("subscribeSessionTodos", () => {
 						subscribeSessionDetail({ sessionId: "fanout" }),
 					);
 					const todos = yield* openTodos("fanout");
-					const shell = yield* openSubscription(subscribeShell());
+					const shell = yield* openSubscription(
+						subscribeShell().pipe(
+							Stream.filter((frame) => frame._tag !== "projects"),
+						),
+					);
 					const approvals = yield* openSubscription(subscribeApprovals());
 					const family = yield* openSubscription(
 						subscribeSessionFamily({ sessionId: "fanout" }),

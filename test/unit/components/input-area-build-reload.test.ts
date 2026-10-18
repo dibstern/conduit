@@ -14,7 +14,7 @@ import { attachedProjectState } from "../../../src/lib/frontend/stores/router.sv
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import {
-	seedDaemonSessions,
+	applySessionSnapshot,
 	seedSessions,
 } from "../stores/session-fixtures.js";
 
@@ -107,15 +107,16 @@ describe("InputArea build reload recovery", () => {
 		vi.unstubAllGlobals();
 		openSessionForSetup(null);
 		attachedProjectState.slug = null;
-		seedDaemonSessions([]);
+
 		seedSessions([]);
 		sessionStorage.clear();
 	});
 
 	it("syncs a loaded foreign session draft by session id", async () => {
-		seedDaemonSessions([
-			{ id: sessionId, title: "Foreign session", projectSlug: "dotfiles" },
-		]);
+		applySessionSnapshot(
+			[{ id: sessionId, title: "Foreign session", projectSlug: "dotfiles" }],
+			"partial",
+		);
 		const { getByRole } = render(InputArea);
 		const textarea = getByRole("textbox", {
 			name: "Message",

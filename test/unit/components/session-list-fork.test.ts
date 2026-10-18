@@ -14,7 +14,6 @@ import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-s
 import { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import {
 	clearSessionSearch,
-	seedDaemonSessions,
 	seedFamilySessions,
 	seedRootSessions,
 } from "../stores/session-fixtures.js";
@@ -56,7 +55,7 @@ describe("SessionList fork", () => {
 			{ id: "other", title: "Other work" },
 		]);
 		seedFamilySessions([...sessionState.rootSessions]);
-		seedDaemonSessions([]);
+
 		sessionState.searchQuery = "";
 		clearSessionSearch();
 		openSessionForSetup("open", "current-project");

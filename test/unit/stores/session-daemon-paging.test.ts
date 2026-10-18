@@ -3,15 +3,11 @@ import { clearSessionState } from "../../../src/lib/frontend/stores/session.svel
 import { sessionList } from "../../../src/lib/frontend/stores/session-list.svelte.js";
 import {
 	applySessionRemoved,
-	seedDaemonSessions,
 	seedFamilySessions,
 	seedRootSessions,
 	seedSessions,
 } from "./session-fixtures.js";
-// Cross-project session paging and search (store level)
-// These assert over the store's data, not over rendering: paging and ordering
-// are properties of the accumulator, and a DOM test would only be able to see
-// them through whatever the sidebar happens to group and sort today.
+// Cross-project paged search stays separate from the daemon-wide live feed.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -24,16 +20,12 @@ import {
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
-	applyListDaemonSessionsResponse,
 	clearSessionSearch,
 	DAEMON_SESSION_PAGE_SIZE,
 	getFilteredSessions,
-	loadDaemonSessions,
-	loadMoreDaemonSessions,
 	loadMoreSearchResults,
 	searchSessions,
 	sessionState,
-	setSearchQuery,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { ListDaemonSessionsResponse } from "../../../src/lib/frontend/transport/ws-rpc.js";
@@ -85,7 +77,6 @@ beforeEach(() => {
 	rpc.mockReset();
 	seedRootSessions([]);
 	seedFamilySessions([]);
-	seedDaemonSessions([]);
 	openSessionForSetup(null);
 	sessionState.searchQuery = "";
 	clearSessionSearch();
@@ -107,97 +98,6 @@ it("keeps search results separate from live session rows", async () => {
 	expect(sessionState.rootSessions.map((row) => row.id)).toEqual(["local"]);
 });
 
-describe("cross-project browse paging", () => {
-	it("keeps the cursor and the more-pages flag from the first page", () => {
-		applyListDaemonSessionsResponse(page([0, 1], { hasMore: true }));
-
-		expect(sessionState.daemonSessions.map((s) => s.id)).toEqual(["s0", "s1"]);
-		expect(sessionState.daemonHasMore).toBe(true);
-		expect(sessionState.daemonCursor).toEqual({ updatedAt: 999, id: "s1" });
-	});
-
-	it("appends page by page in order, each row exactly once", async () => {
-		applyListDaemonSessionsResponse(page([0, 1], { hasMore: true }));
-		rpc.mockResolvedValueOnce(page([2, 3], { hasMore: true }));
-		await loadMoreDaemonSessions();
-		rpc.mockResolvedValueOnce(page([4, 5], { hasMore: false }));
-		await loadMoreDaemonSessions();
-
-		expect(sessionState.daemonSessions.map((s) => s.id)).toEqual([
-			"s0",
-			"s1",
-			"s2",
-			"s3",
-			"s4",
-			"s5",
-		]);
-		expect(sessionState.daemonHasMore).toBe(false);
-		expect(sessionState.daemonCursor).toBeNull();
-	});
-
-	it("asks for the next page with the cursor it was handed", async () => {
-		applyListDaemonSessionsResponse(page([0, 1], { hasMore: true }));
-		rpc.mockResolvedValueOnce(page([2], { hasMore: false }));
-
-		await loadMoreDaemonSessions();
-
-		expect(rpc).toHaveBeenCalledWith("ListDaemonSessions", {
-			projectSlug: "project-a",
-			limit: DAEMON_SESSION_PAGE_SIZE,
-			cursor: { updatedAt: 999, id: "s1" },
-			roots: true,
-			exclude: "project-a",
-		});
-	});
-
-	it("stops requesting once the list is exhausted, and clears loading", async () => {
-		applyListDaemonSessionsResponse(page([0, 1], { hasMore: false }));
-
-		await loadMoreDaemonSessions();
-		await loadMoreDaemonSessions();
-
-		expect(rpc).not.toHaveBeenCalled();
-		expect(sessionState.daemonLoading).toBe(false);
-	});
-
-	it("issues one request when the sentinel fires twice before a page lands", async () => {
-		applyListDaemonSessionsResponse(page([0], { hasMore: true }));
-		rpc.mockResolvedValue(page([1], { hasMore: false }));
-
-		await Promise.all([loadMoreDaemonSessions(), loadMoreDaemonSessions()]);
-
-		expect(rpc).toHaveBeenCalledTimes(1);
-	});
-
-	it("drops a row the next page repeats rather than duplicating its key", async () => {
-		applyListDaemonSessionsResponse(page([0, 1], { hasMore: true }));
-		rpc.mockResolvedValueOnce(page([1, 2], { hasMore: false }));
-
-		await loadMoreDaemonSessions();
-
-		expect(sessionState.daemonSessions.map((s) => s.id)).toEqual([
-			"s0",
-			"s1",
-			"s2",
-		]);
-	});
-
-	it("keeps the rows already shown when a page fails, and allows a retry", async () => {
-		applyListDaemonSessionsResponse(page([0], { hasMore: true }));
-		rpc.mockRejectedValueOnce(new Error("socket closed"));
-
-		await loadMoreDaemonSessions();
-
-		expect(sessionState.daemonSessions.map((s) => s.id)).toEqual(["s0"]);
-		expect(sessionState.daemonHasMore).toBe(true);
-		expect(sessionState.daemonLoading).toBe(false);
-
-		rpc.mockResolvedValueOnce(page([1], { hasMore: false }));
-		await loadMoreDaemonSessions();
-		expect(sessionState.daemonSessions.map((s) => s.id)).toEqual(["s0", "s1"]);
-	});
-});
-
 describe("cross-project search", () => {
 	it("searches every project through the daemon query, not just this one", async () => {
 		rpc.mockResolvedValueOnce(page([0, 1], { hasMore: false }));
@@ -211,40 +111,6 @@ describe("cross-project search", () => {
 			limit: DAEMON_SESSION_PAGE_SIZE,
 		});
 		expect(sessionState.searchResults?.map((s) => s.id)).toEqual(["s0", "s1"]);
-	});
-
-	it("pages the filtered set on its own cursor, leaving the browse page alone", async () => {
-		applyListDaemonSessionsResponse(page([0, 1], { hasMore: true }));
-		const browseCursor = sessionState.daemonCursor;
-
-		rpc.mockResolvedValueOnce(page([2, 3], { hasMore: true }));
-		await searchSessions("session", true);
-		rpc.mockResolvedValueOnce(page([4], { hasMore: false }));
-		await loadMoreSearchResults();
-
-		expect(sessionState.searchResults?.map((s) => s.id)).toEqual([
-			"s2",
-			"s3",
-			"s4",
-		]);
-		expect(sessionState.searchHasMore).toBe(false);
-		expect(sessionState.daemonSessions.map((s) => s.id)).toEqual(["s0", "s1"]);
-		expect(sessionState.daemonCursor).toEqual(browseCursor);
-	});
-
-	it("restores the browse page it was hiding when the search is cleared", async () => {
-		applyListDaemonSessionsResponse(page([0, 1], { hasMore: true }));
-		rpc.mockResolvedValueOnce(page([2], { hasMore: false }));
-		await searchSessions("session", true);
-
-		clearSessionSearch();
-		setSearchQuery("");
-
-		expect(sessionState.searchResults).toBeNull();
-		expect(sessionState.daemonSessions.map((s) => s.id)).toEqual(["s0", "s1"]);
-		// s0 belongs to the attached project, so it comes out of the local arrays
-		// rather than the cross-project accumulator; s1 is the foreign row.
-		expect(getFilteredSessions().map((s) => s.id)).toEqual(["s1"]);
 	});
 
 	it("stops requesting at the end of the filtered set", async () => {
@@ -276,13 +142,14 @@ describe("cross-project search", () => {
 		expect(sessionState.searchHasMore).toBe(false);
 	});
 
-	it("drops a local session deleted mid-search but keeps foreign matches", async () => {
+	it("drops a session deleted mid-search but keeps another project's live match", async () => {
 		const local = {
 			id: "local",
 			title: "Local session",
 			projectSlug: "project-a",
+			updatedAt: 1000,
 		};
-		seedRootSessions([local]);
+		seedRootSessions([local, row(1, "project-b")]);
 		rpc.mockResolvedValueOnce({
 			...page([], { hasMore: false }),
 			sessions: [
@@ -306,9 +173,8 @@ describe("cross-project search", () => {
 
 		expect(getFilteredSessions().map((s) => s.id)).toEqual(["local", "s1"]);
 
-		// The delete paths only ever touch the live map and the local arrays.
+		// Deletion updates the same live collection used to reconcile search.
 		applySessionRemoved("local");
-		seedRootSessions([]);
 
 		expect(getFilteredSessions().map((s) => s.id)).toEqual(["s1"]);
 	});
@@ -319,25 +185,7 @@ describe("project scope", () => {
 
 	beforeEach(() => {
 		routerState.search = "?p=project-b";
-		seedRootSessions([local]);
-	});
-
-	it("asks the daemon for the scoped project only, from the first page", async () => {
-		rpc.mockResolvedValueOnce(
-			page([1, 3], { hasMore: false, projectSlug: "project-b" }),
-		);
-
-		await loadDaemonSessions();
-
-		expect(rpc).toHaveBeenCalledWith("ListDaemonSessions", {
-			projectSlug: "project-a",
-			limit: DAEMON_SESSION_PAGE_SIZE,
-			roots: true,
-			exclude: "project-a",
-			scope: "project-b",
-		});
-		// The local root belongs to project-a, so the scope hides it too.
-		expect(getFilteredSessions().map((s) => s.id)).toEqual(["s1", "s3"]);
+		seedRootSessions([local, row(1, "project-b")]);
 	});
 
 	it("scopes the search as well", async () => {
@@ -352,14 +200,5 @@ describe("project scope", () => {
 			expect.objectContaining({ scope: "project-b" }),
 		);
 		expect(getFilteredSessions().map((s) => s.id)).toEqual(["s1"]);
-	});
-
-	it("keeps the list it has when the first page fails", async () => {
-		routerState.search = "";
-		rpc.mockRejectedValueOnce(new Error("not supported in standalone mode"));
-
-		await loadDaemonSessions();
-
-		expect(getFilteredSessions().map((s) => s.id)).toEqual(["local"]);
 	});
 });

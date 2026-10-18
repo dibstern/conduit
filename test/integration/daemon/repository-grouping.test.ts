@@ -81,8 +81,10 @@ describe("repository grouping through the built daemon", () => {
 		observer = await fixture.connect();
 		lists = [];
 		following = Effect.runFork(
-			Stream.runForEach(observer.rpc.SubscribeProjects({}), ({ projects }) =>
-				Effect.sync(() => lists.push(projects)),
+			Stream.runForEach(observer.rpc.SubscribeShell({}), (frame) =>
+				Effect.sync(() => {
+					if (frame._tag === "projects") lists.push(frame.projects);
+				}),
 			),
 		);
 		await vi.waitFor(() => expect(lists.length).toBeGreaterThan(0));

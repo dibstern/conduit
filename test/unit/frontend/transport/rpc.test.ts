@@ -217,7 +217,7 @@ function contractTypes() {
 		import("../../../../src/lib/contracts/ws-rpc.js").SubmitInputResponse
 	>();
 	// @ts-expect-error Stream tags cannot be called as unary RPCs.
-	rpc("SubscribeShell", { projectSlug: "alpha" });
+	rpc("SubscribeShell", {});
 	// @ts-expect-error The Effect call also accepts only unary tags.
 	rpcEffect("SubscribeInputDraft", { sessionId: "s1" });
 	// @ts-expect-error Contract payload fields are required.

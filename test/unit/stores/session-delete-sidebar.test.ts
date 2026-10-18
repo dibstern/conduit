@@ -151,12 +151,6 @@ describe("deleted sessions leave the sidebar", () => {
 		expect(sidebarIds()).toEqual(["keeper"]);
 	});
 
-	it("drops a stale searched session after an authoritative tagged refresh", () => {
-		searchFor("s", [VICTIM, KEEPER]);
-		applySessionChange({ _tag: "snapshot", rows: [KEEPER] });
-		expect(sidebarIds()).toEqual(["keeper"]);
-	});
-
 	it("returns the live renamed session object during an active search", () => {
 		const renamed = { ...VICTIM, title: "Renamed Session" };
 		searchFor("session", [VICTIM]);

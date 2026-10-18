@@ -209,10 +209,13 @@ describe("subscription RPC handlers", () => {
 				).not.toHaveProperty("forkPointTimestamp");
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
 				const envelopes = yield* Queue.unbounded<unknown>();
-				yield* client.SubscribeShell({ projectSlug: "project-a" }).pipe(
+				yield* client.SubscribeShell({}).pipe(
 					Stream.runForEach((envelope) => Queue.offer(envelopes, envelope)),
 					Effect.forkScoped,
 				);
+				expect(yield* Queue.take(envelopes)).toMatchObject({
+					_tag: "projects",
+				});
 				expect(yield* Queue.take(envelopes)).toMatchObject({
 					_tag: "snapshot",
 					sequence: createdVersion,
@@ -257,12 +260,10 @@ describe("subscription RPC handlers", () => {
 				// The shell catches up on resume: the family that moved past the
 				// cursor, and nothing else (conduit-test-y7eo.3).
 				const replay = yield* client
-					.SubscribeShell({
-						projectSlug: "project-a",
-						resumeFromSequence: createdVersion,
-					})
-					.pipe(Stream.take(2), Stream.runCollect);
+					.SubscribeShell({ resumeFromSequence: createdVersion })
+					.pipe(Stream.take(3), Stream.runCollect);
 				expect(Array.from(replay)).toMatchObject([
+					{ _tag: "projects" },
 					{
 						_tag: "upsert",
 						sequence: busyVersion,
@@ -331,7 +332,6 @@ describe("subscription RPC handlers", () => {
 						wire?: Queue.Queue<SessionDetailEnvelope>,
 					): Stream.Stream<unknown, WsRpcError | DetailLengthMismatch> => {
 						const request = {
-							projectSlug: "project-a",
 							sessionId: "session-1",
 							...(resumeFromSequence === undefined
 								? {}
@@ -355,6 +355,10 @@ describe("subscription RPC handlers", () => {
 							Stream.runForEach((envelope) => Queue.offer(envelopes, envelope)),
 							Effect.forkScoped,
 						);
+						if (member === "SubscribeShell")
+							expect(yield* Queue.take(envelopes)).toMatchObject({
+								_tag: "projects",
+							});
 						expect(yield* Queue.take(envelopes)).toMatchObject({
 							_tag: "snapshot",
 							rows:
@@ -456,14 +460,16 @@ describe("subscription RPC handlers", () => {
 					}
 					const resumed = Array.from(
 						yield* subscribe(cursor).pipe(
-							Stream.take(member === "SubscribeShell" ? 2 : 4),
+							Stream.take(member === "SubscribeShell" ? 3 : 4),
 							Stream.runCollect,
 						),
 					);
 					expect(resumed.at(-1)).toEqual({ _tag: "synchronized" });
 					// Both catch up from the cursor; the detail re-sends its held
 					// rows as they stand, since its checksum covers only the transcript.
-					expect(resumed.slice(0, -1)).toMatchObject(
+					expect(
+						resumed.slice(member === "SubscribeShell" ? 1 : 0, -1),
+					).toMatchObject(
 						member === "SubscribeShell"
 							? expected
 							: [

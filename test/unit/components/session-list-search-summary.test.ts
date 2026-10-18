@@ -1,6 +1,5 @@
 import { clearSessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
-	seedDaemonSessions,
 	seedFamilySessions,
 	seedRootSessions,
 	seedSearchResults,
@@ -27,15 +26,17 @@ describe("SessionList search summary", () => {
 		attachedProjectState.slug = "current-project";
 		routerState.search = "";
 		routerState.sessionNotFound = false;
-		seedRootSessions([]);
-		seedFamilySessions([]);
-		seedDaemonSessions([]);
-		openSessionForSetup(null);
-		sessionState.searchQuery = "report";
-		seedSearchResults([
+		// Unarchived hits are live rows: the daemon-wide feed holds every one.
+		const hits = [
 			{ id: "a", title: "Report one", projectSlug: "other-project" },
 			{ id: "b", title: "Report two", projectSlug: "other-project" },
-		]);
+		];
+		seedRootSessions(hits);
+		seedFamilySessions([]);
+
+		openSessionForSetup(null);
+		sessionState.searchQuery = "report";
+		seedSearchResults(hits);
 		projectState.projects = [
 			{
 				slug: "current-project",

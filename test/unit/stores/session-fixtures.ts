@@ -1,6 +1,5 @@
 import {
 	applyFamilyChange,
-	applyListDaemonSessionsResponse,
 	applySearchResultsResponse,
 	resetSessionFamily,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -117,18 +116,6 @@ export function seedFamilySessions(rows: readonly Row[]): void {
 		sequence: ++sequence,
 	});
 	applyFamilyChange({ _tag: "synchronized" });
-}
-
-export function seedDaemonSessions(
-	rows: readonly Row[],
-	hasMore = false,
-): void {
-	applyListDaemonSessionsResponse({
-		sessions: completeRows(rows),
-		availability: [],
-		hasMore,
-		nextCursor: null,
-	});
 }
 
 export function seedSearchResults(rows: readonly Row[], hasMore = false): void {
