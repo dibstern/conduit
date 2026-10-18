@@ -294,7 +294,7 @@ const TokensSchema = Schema.Struct({
 	output: Schema.optionalWith(Schema.Number, { exact: true }),
 	cacheRead: Schema.optionalWith(Schema.Number, { exact: true }),
 	cacheWrite: Schema.optionalWith(Schema.Number, { exact: true }),
-	/** Zero explicitly records an unavailable capacity; omission retains legacy display. */
+	/** Omission means capacity unknown; readers also treat legacy zero values as unknown. */
 	contextWindow: Schema.optionalWith(Schema.Number, { exact: true }),
 });
 

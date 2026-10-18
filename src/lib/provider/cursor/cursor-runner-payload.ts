@@ -921,9 +921,8 @@ export class CursorRunnerPayload implements RunnerPayload {
 									? { providerSessionId: session.agentId }
 									: {}),
 								duration: durationMs,
-								// Cursor reports occupancy but no capacity. Zero explicitly
-								// distinguishes that absence from legacy omitted metadata.
-								tokens: { ...result.tokens, contextWindow: 0 },
+								// Cursor reports occupancy but no capacity, so the window stays omitted.
+								tokens: result.tokens,
 								...(events.contextTokens !== undefined
 									? { contextTokens: events.contextTokens }
 									: {}),
