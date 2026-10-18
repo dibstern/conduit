@@ -11,8 +11,8 @@ import {
 	SCOPE_PARAM,
 } from "./router.svelte.js";
 
-// The project list and the current slug both come from the server. Writers
-// live in project.svelte.ts: `applyProjectList`.
+// The shell feed owns projects and the new-session preference. Project mutation
+// replies may update the attached hint through project.svelte.ts.
 
 export const projectState = $state({
 	projects: [] as ProjectInfo[],

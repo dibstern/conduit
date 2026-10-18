@@ -16,7 +16,6 @@ const Request = Schema.Struct({
 	id: Schema.String,
 	tag: Schema.String,
 	payload: Schema.Struct({
-		projectSlug: Schema.String,
 		resumeFromSequence: Schema.optional(Schema.Number),
 	}),
 });
@@ -133,7 +132,6 @@ describe("shared client resume over WebSockets", () => {
 			);
 			const first = await nextSubscription();
 			expect(first.request.payload).toEqual({
-				projectSlug: "alpha",
 				...options,
 			});
 			expect(observed).toEqual([]);
@@ -141,7 +139,6 @@ describe("shared client resume over WebSockets", () => {
 			const resumed = await nextSubscription();
 			expect(resumed.socket).not.toBe(first.socket);
 			expect(resumed.request.payload).toEqual({
-				projectSlug: "alpha",
 				...options,
 			});
 			await resumed.socket.emit(
@@ -176,7 +173,7 @@ describe("shared client resume over WebSockets", () => {
 				),
 			);
 			const first = await nextSubscription();
-			expect(first.request.payload).toEqual({ projectSlug: "alpha" });
+			expect(first.request.payload).toEqual({});
 			await first.socket.emit(
 				{ _tag: "snapshot", rows: [], sequence: 11 },
 				{ _tag: "synchronized" },
@@ -191,7 +188,6 @@ describe("shared client resume over WebSockets", () => {
 			// 13 is open: its already delivered member must be suppressed while
 			// its undelivered sibling still reaches the same consumer.
 			expect(resumed.request.payload).toEqual({
-				projectSlug: "alpha",
 				resumeFromSequence: 12,
 			});
 			const history = [

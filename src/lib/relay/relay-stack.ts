@@ -19,7 +19,6 @@ import { fileURLToPath } from "node:url";
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import {
-	Cause,
 	Context,
 	Data,
 	Effect,
@@ -59,6 +58,7 @@ import {
 	makeStandaloneHttpRouterRequestHandler,
 	type RouterProjectInfo,
 } from "../domain/server/Layers/http-router-layer.js";
+import * as Failure from "../effect/failure-classification.js";
 import { ENV } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
 import { withCachedProjectGit } from "../git/session-git.js";
@@ -493,7 +493,7 @@ export async function createProjectRelay(
 			Effect.zip(
 				continuation.sweepDueContinuations().pipe(
 					Effect.catchAllCause((cause) =>
-						Cause.isInterruptedOnly(cause)
+						Failure.isInterruptedOnly(cause)
 							? Effect.interrupt
 							: Effect.logError("Continuation sweep failed", cause),
 					),
@@ -616,7 +616,7 @@ export async function createProjectRelay(
 				layers.relayManagedRuntime
 					.runFork(Fiber.interrupt(continuationSweep))
 					.addObserver((exit) => {
-						if (Exit.isFailure(exit)) reject(Cause.squash(exit.cause));
+						if (Exit.isFailure(exit)) reject(Failure.squashCause(exit.cause));
 						else resolve();
 					});
 			});

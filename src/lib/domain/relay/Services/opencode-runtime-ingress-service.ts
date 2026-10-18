@@ -1,8 +1,9 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Cause, Context, Effect, type Fiber, FiberId } from "effect";
+import { Context, Effect, type Fiber, FiberId } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../../errors.js";
 import type { Message } from "../../../instance/sdk-types.js";
 import {
@@ -440,7 +441,7 @@ export class EffectOpenCodeRuntimeIngress
 					this.deferBackfill(sessionId);
 					this.log.warn(
 						"opencode-runtime-ingress: history backfill failed, retry scheduled",
-						{ sessionId, error: Cause.pretty(cause) },
+						{ sessionId, error: Failure.renderCause(cause) },
 					);
 				}),
 			),

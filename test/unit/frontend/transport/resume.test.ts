@@ -438,9 +438,7 @@ describe("client-side resume at the shared client", () => {
 					yield* links.control.takeRequest;
 					yield* links.control.drop;
 
-					expect((yield* links.control.takeRequest).payload).toEqual({
-						projectSlug: "alpha",
-					});
+					expect((yield* links.control.takeRequest).payload).toEqual({});
 
 					// No cursor means no replay to close, so this re-issue is a cold
 					// start and the answer is a fresh snapshot — scripted here, since
@@ -627,7 +625,6 @@ describe("client-side resume at the shared client", () => {
 					});
 					yield* links.control.drop;
 					expect((yield* links.control.takeRequest).payload).toEqual({
-						projectSlug: "alpha",
 						resumeFromSequence: 9,
 					});
 

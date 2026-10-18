@@ -238,8 +238,10 @@ describe("daemon RPC handlers", () => {
 				const projectLists: (readonly { slug: string; title: string }[])[] = [];
 				const instanceLists: (readonly { id: string }[])[] = [];
 				yield* Effect.forkScoped(
-					Stream.runForEach(client.SubscribeProjects({}), ({ projects }) =>
-						Effect.sync(() => projectLists.push(projects)),
+					Stream.runForEach(client.SubscribeShell({}), (frame) =>
+						Effect.sync(() => {
+							if (frame._tag === "projects") projectLists.push(frame.projects);
+						}),
 					),
 				);
 				yield* Effect.forkScoped(

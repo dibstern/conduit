@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { SqlClient } from "@effect/sql";
-import { Cause, Effect } from "effect";
+import { Effect } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
 import type {
 	WorktreeCleanup,
@@ -25,6 +25,7 @@ import {
 	worktreeUsers,
 } from "../domain/relay/Services/session-worktree-deletion.js";
 import { LocalPtyServiceTag } from "../domain/relay/Services/terminal-service.js";
+import * as Failure from "../effect/failure-classification.js";
 import {
 	daemonSessionGitCache,
 	hasNoCommitsBeyondDefault,
@@ -293,7 +294,7 @@ export const cleanUpProjectWorktrees = (
 						if (sessionGit._tag === "Some")
 							yield* sessionGit.value.refresh({ sessionId }).pipe(
 								Effect.catchAllCause((cause) => {
-									if (Cause.isInterruptedOnly(cause))
+									if (Failure.isInterruptedOnly(cause))
 										return Effect.failCause(cause);
 									report.failed.push({
 										...entry,
@@ -302,28 +303,28 @@ export const cleanUpProjectWorktrees = (
 									});
 									return Effect.logWarning(
 										"worktree cleanup git refresh failed",
-										{ ...entry, cause: Cause.pretty(cause) },
+										{ ...entry, cause: Failure.renderCause(cause) },
 									);
 								}),
 							);
 					}).pipe(
 						Effect.catchAllCause((cause) => {
-							if (Cause.isInterruptedOnly(cause))
+							if (Failure.isInterruptedOnly(cause))
 								return Effect.failCause(cause);
 							report.failed.push({
 								...entry,
-								reason: `Cleanup failed: ${Cause.pretty(cause).split("\n")[0]?.slice(0, 300) ?? "Unknown error"}`,
+								reason: `Cleanup failed: ${Failure.renderCause(cause).split("\n")[0]?.slice(0, 300) ?? "Unknown error"}`,
 							});
 							return Effect.logWarning("worktree cleanup failed for session", {
 								...entry,
-								cause: Cause.pretty(cause),
+								cause: Failure.renderCause(cause),
 							});
 						}),
 					);
 				}
 			}).pipe(
 				Effect.catchAllCause((cause) => {
-					if (Cause.isInterruptedOnly(cause)) return Effect.failCause(cause);
+					if (Failure.isInterruptedOnly(cause)) return Effect.failCause(cause);
 					for (const item of paths.filter(
 						({ session_id }) => session_id === sessionId,
 					))
@@ -334,7 +335,7 @@ export const cleanUpProjectWorktrees = (
 						});
 					return Effect.logWarning(
 						"worktree cleanup ownership inspection failed",
-						{ ...base, cause: Cause.pretty(cause) },
+						{ ...base, cause: Failure.renderCause(cause) },
 					);
 				}),
 			);

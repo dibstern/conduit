@@ -17,6 +17,7 @@ import {
 	type KeepAwakeOptions,
 	resolveKeepAwakeCommand,
 } from "../../../daemon/keep-awake.js";
+import * as Failure from "../../../effect/failure-classification.js";
 
 interface KeepAwakeService {
 	activate: () => Effect.Effect<void>;
@@ -111,7 +112,8 @@ export const KeepAwakeLive = (
 				yield* child.exitCode.pipe(
 					Effect.exit,
 					Effect.flatMap((exit) => {
-						if (Exit.isInterrupted(exit)) return Effect.void;
+						if (Exit.isFailure(exit) && Failure.isInterrupted(exit.cause))
+							return Effect.void;
 						return lock.withPermits(1)(
 							Effect.gen(function* () {
 								const active = yield* Ref.get(current);

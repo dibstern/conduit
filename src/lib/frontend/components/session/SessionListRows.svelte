@@ -22,8 +22,9 @@
 	import TextButton from "../ui/TextButton.svelte";
 	import Icon from "../ui/Icon.svelte";
 
-	let { arrangement, isEmpty, emptyMessage, statusFilter, searching, filteredLength, snoozedShelfOpen, settledShelfOpen, pagerPending, unavailableProjectLabels, selectMode, selectedSessionIds, menuOpenId, renamingSessionId, getProjectLabel, getProjectAccent, oncontextmenu, ontoggleselection, onrenamestart, onrenameend }: {
+	let { arrangement, fullArrangement, isEmpty, emptyMessage, statusFilter, searching, filteredLength, snoozedShelfOpen, settledShelfOpen, pagerPending, unavailableProjectLabels, selectMode, selectedSessionIds, menuOpenId, renamingSessionId, getProjectLabel, getProjectAccent, oncontextmenu, ontoggleselection, onrenamestart, onrenameend }: {
 		arrangement: SessionProjection;
+		fullArrangement: SessionProjection;
 		isEmpty: boolean;
 		emptyMessage: string;
 		statusFilter: SessionStatusFilter | null;
@@ -131,12 +132,12 @@
 			</div>
 		{:else}
 			{#if arrangement.pinned.length > 0}
-				<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand"><span>Pinned</span>{" "}<span class="ml-auto font-medium">{arrangement.pinned.length}</span></div>
+				<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand"><span>Pinned</span>{" "}<span class="ml-auto font-medium">{fullArrangement.pinned.length}</span></div>
 				{#each arrangement.pinned as s (s.id)}{@render sessionRow(s)}{/each}
 			{/if}
 			{#each arrangement.sections as section (section.key)}
 					<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand">
-						<span>{section.label}</span>{" "}<span class="ml-auto font-medium">{section.sessions.length}</span>
+						<span>{section.label}</span>{" "}<span class="ml-auto font-medium">{fullArrangement.sections.find((group) => group.key === section.key)?.sessions.length ?? section.sessions.length}</span>
 					</div>
 					{#each section.sessions as s (s.id)}
 						{@render sessionRow(s)}
@@ -152,7 +153,7 @@
 					onclick={() => { if (!searching) setSnoozedShelfOpen(!uiState.snoozedShelfOpen); }}
 				>
 					<Icon name={snoozedShelfOpen ? "chevron-down" : "chevron-right"} size={12} />
-						<span class="uppercase">Snoozed</span>{" "}<span class="ml-auto font-medium">{arrangement.snoozed.length}</span>
+						<span class="uppercase">Snoozed</span>{" "}<span class="ml-auto font-medium">{fullArrangement.snoozed.length}</span>
 				</TextButton>
 				<div id="snoozed-shelf-rows">
 					{#if snoozedShelfOpen}
@@ -190,7 +191,7 @@
 		     intersection is the list's own viewport, and after the rows so it is
 		     only reached at the bottom. -->
 		<div id="session-list-sentinel" class="h-px" bind:this={sentinelEl}></div>
-		<SessionPager {sentinelEl} />
+		<SessionPager {sentinelEl} hasMore={pagerPending} />
 
 		{#if pagerPending && (searching || scrolled)}
 			<div

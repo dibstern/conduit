@@ -51,7 +51,6 @@ export const MOCK_SERVER_STATUS: GetStatusResponse = {
 type DaemonListTag =
 	| "SubscribeInstances"
 	| "SubscribeUsage"
-	| "SubscribeProjects"
 	| "SubscribeServerStatus";
 
 /** Subscriptions opened once per session, so each session gets its own stream. */
@@ -226,7 +225,7 @@ export class RpcMockControl {
 		return this.detailFeed === "stall" ? frames.slice(0, 1) : frames;
 	}
 
-	/** The relay stamps its own project on every session row it streams. */
+	/** Unowned legacy fixture rows belong to the fixture project. */
 	owned(rows: readonly unknown[]): readonly unknown[] {
 		return rows.map((row) => ({
 			projectSlug: this.projectSlug,
@@ -243,7 +242,7 @@ export class RpcMockControl {
 				{
 					_tag: "snapshot",
 					sequence: this.shellSequence,
-					rows: this.owned(rows),
+					rows: this.visibleShellRows(rows),
 				},
 				{ _tag: "synchronized" },
 			]);
@@ -390,16 +389,70 @@ export class RpcMockControl {
 	}
 
 	initialShellFrames(): readonly unknown[] {
-		return this.shellRows === null
-			? []
-			: [
-					{
-						_tag: "snapshot",
-						sequence: this.shellSequence,
-						rows: this.owned(this.shellRows),
-					},
-					{ _tag: "synchronized" },
-				];
+		return [
+			...this.initialProjectsFrames(),
+			...(this.shellRows === null
+				? []
+				: [
+						{
+							_tag: "snapshot",
+							sequence: this.shellSequence,
+							rows: this.visibleShellRows(this.shellRows),
+						},
+						{ _tag: "synchronized" },
+					]),
+		];
+	}
+
+	private projects: Record<string, unknown> = { projects: [] };
+	private projectsSet = false;
+
+	private visibleShellRows(rows: readonly unknown[]): readonly unknown[] {
+		const owned = this.owned(rows);
+		if (!this.projectsSet) return owned;
+		const projects = Array.isArray(this.projects["projects"])
+			? this.projects["projects"]
+			: [];
+		const visible = new Set(
+			projects
+				.filter(
+					(project: { unavailableReason?: string }) =>
+						project.unavailableReason === undefined,
+				)
+				.map((project: { slug: string }) => project.slug),
+		);
+		return owned.filter((row) =>
+			visible.has((row as { projectSlug: string }).projectSlug),
+		);
+	}
+
+	/** Stays silent until a test sets projects: an empty list would read as the
+	 *  attached project being removed and navigate away. */
+	initialProjectsFrames(): readonly unknown[] {
+		return this.projectsSet ? [this.projectsFrame()] : [];
+	}
+
+	projectsFrame(): Record<string, unknown> {
+		return { ...this.projects, _tag: "projects" };
+	}
+
+	setProjects(value: Record<string, unknown>): void {
+		const membership = (list: Record<string, unknown>) =>
+			JSON.stringify(
+				(Array.isArray(list["projects"]) ? list["projects"] : [])
+					.map((project: { slug: string; unavailableReason?: string }) => [
+						project.slug,
+						project.unavailableReason !== undefined,
+					])
+					.sort(),
+			);
+		const changed = membership(this.projects) !== membership(value);
+		this.projects = value;
+		this.projectsSet = true;
+		if (this.streams.has("SubscribeShell")) {
+			this.sendChunk("SubscribeShell", [this.projectsFrame()]);
+			if (changed && this.shellRows !== null) this.setShellRows(this.shellRows);
+		}
 	}
 
 	/** The daemon-global lists, keyed by subscription tag; unset lists stay silent. */
@@ -429,7 +482,7 @@ export class RpcMockControl {
 
 	/** GetProjects answers from the mocked list, as the daemon does. */
 	projectsHandler(): StubTable["GetProjects"] | undefined {
-		const list = this.daemonLists.get("SubscribeProjects");
+		const list = this.projects;
 		return (
 			list &&
 			(() =>
@@ -549,6 +602,7 @@ const pendingDaemonLists = new WeakMap<
 	Map<DaemonListTag, Record<string, unknown>>
 >();
 const pendingShellRows = new WeakMap<Page, readonly unknown[]>();
+const pendingProjects = new WeakMap<Page, Record<string, unknown>>();
 const pendingFamilyRows = new WeakMap<Page, readonly unknown[]>();
 const pendingProjectSlugs = new WeakMap<Page, string>();
 const pendingCatalogs = new WeakMap<Page, MockCatalog>();
@@ -570,6 +624,16 @@ export function sendMockModelState(page: Page, state: MockModelState): void {
 	const control = controls.get(page);
 	if (control) control.setModelState(state);
 	else pendingCatalogs.set(page, { ...pendingCatalogs.get(page), ...state });
+}
+
+/** Mock-only input: publish project metadata through the shell feed. */
+export function sendMockProjects(
+	page: Page,
+	value: Record<string, unknown>,
+): void {
+	const control = controls.get(page);
+	if (control) control.setProjects(value);
+	else pendingProjects.set(page, value);
 }
 
 /** Mock-only input: deliver a daemon list through its RPC subscription. */
@@ -678,7 +742,13 @@ function initialStream(
 	control: RpcMockControl,
 ): readonly unknown[] {
 	const stream = options.streams?.[tag];
-	if (stream) return stream(payload);
+	if (stream) {
+		const frames = stream(payload);
+		return tag === "SubscribeShell" &&
+			(frames[0] as { _tag?: string } | undefined)?._tag !== "projects"
+			? [...control.initialProjectsFrames(), ...frames]
+			: frames;
+	}
 	switch (tag) {
 		case "SubscribeShell":
 			return control.initialShellFrames();
@@ -694,7 +764,6 @@ function initialStream(
 			return control.initialProjectSettingsFrames();
 		case "SubscribeInstances":
 		case "SubscribeUsage":
-		case "SubscribeProjects":
 		case "SubscribeServerStatus":
 			return control.initialDaemonList(tag);
 		default:
@@ -811,7 +880,8 @@ function socketTable(
 				});
 				if (!rpc._tag.startsWith("Get") && isRecord(value)) {
 					if (Array.isArray(value["projects"]))
-						control.setDaemonList("SubscribeProjects", {
+						control.setProjects({
+							...control.projectsFrame(),
 							projects: value["projects"],
 						});
 					if (Array.isArray(value["instances"]))
@@ -881,6 +951,8 @@ export async function mockWsRpc(
 		if (control.hasStream("SubscribeSessionDetail", sessionId))
 			control.sendChunk("SubscribeSessionDetail", [envelope], sessionId);
 	});
+	const projects = pendingProjects.get(page);
+	if (projects) control.setProjects(projects);
 	const rows = pendingShellRows.get(page);
 	if (rows) control.setShellRows(rows);
 	const familyRows = pendingFamilyRows.get(page);

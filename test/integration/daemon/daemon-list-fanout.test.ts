@@ -56,8 +56,10 @@ const subscribe = (port: number) => {
 						Stream.runForEach(client.SubscribeInstances({}), (list) =>
 							Effect.sync(() => instances.push(list.instances)),
 						),
-						Stream.runForEach(client.SubscribeProjects({}), (list) =>
-							Effect.sync(() => projects.push(list.projects)),
+						Stream.runForEach(client.SubscribeShell({}), (frame) =>
+							Effect.sync(() => {
+								if (frame._tag === "projects") projects.push(frame.projects);
+							}),
 						),
 					],
 					{ concurrency: "unbounded" },

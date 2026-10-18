@@ -846,7 +846,8 @@ function query(params: {
 							.join("");
 			const request = currentRequest(prompt);
 			const userUuid = input.uuid ?? randomUUID();
-			if (request.includes("correction"))
+			// A held queued input is placed when the SDK reports its start.
+			if (request.includes("correction") || request === "after-mode-change")
 				yield {
 					type: "command_lifecycle",
 					state: "started",

@@ -1,18 +1,10 @@
 import { existsSync } from "node:fs";
-import {
-	Cause,
-	Clock,
-	Effect,
-	Layer,
-	Option,
-	PubSub,
-	Ref,
-	Schedule,
-} from "effect";
+import { Clock, Effect, Layer, Option, PubSub, Ref, Schedule } from "effect";
 import {
 	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 } from "../../../daemon/config-persistence.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
@@ -102,22 +94,22 @@ export const AutoSettleLive = () =>
 							yield* PubSub.publish(bus, DaemonEvent.DaemonSessionsChanged());
 					}).pipe(
 						Effect.catchAllCause((cause) =>
-							Cause.isInterruptedOnly(cause)
+							Failure.isInterruptedOnly(cause)
 								? Effect.failCause(cause)
 								: Effect.logWarning("automatic settlement failed for project", {
 										projectSlug: project.slug,
-										cause: Cause.pretty(cause),
+										cause: Failure.renderCause(cause),
 									}),
 						),
 					);
 				}
 			}).pipe(
 				Effect.catchAllCause((cause) =>
-					Cause.isInterruptedOnly(cause)
+					Failure.isInterruptedOnly(cause)
 						? Effect.failCause(cause)
 						: Effect.logWarning(
 								"automatic settlement sweep failed",
-								Cause.pretty(cause),
+								Failure.renderCause(cause),
 							),
 				),
 			);

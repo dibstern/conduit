@@ -13,7 +13,7 @@ import {
 } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { promisify } from "node:util";
-import { Cause, Effect, Either, Layer, Stream } from "effect";
+import { Effect, Either, Layer, Stream } from "effect";
 import type { SessionWorktreeOwnership } from "../../../contracts/session-workspace.js";
 import {
 	type WorkspaceMissing,
@@ -21,6 +21,7 @@ import {
 	WorktreeCreationError,
 	WorktreeRecoveryError,
 } from "../../../contracts/worktree.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import {
 	type CreatedWorktrees,
 	type WorktreeFolder,
@@ -499,14 +500,14 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 										errors.push(`${owned.folder}: ${rollback.left.message}`);
 								}
 								if (errors.length > 0) {
-									const original = Cause.failureOption(cause);
+									const original = Failure.firstFailure(cause);
 									return yield* new WorktreeBranchRenameError({
 										folder:
 											original._tag === "Some"
 												? original.value.folder
 												: (attempted[0]?.folder ?? ""),
 										reason: "git-failed",
-										message: `${original._tag === "Some" ? original.value.message : Cause.pretty(cause)}. Branch rollback failed: ${errors.join("; ")}`,
+										message: `${original._tag === "Some" ? original.value.message : Failure.renderCause(cause)}. Branch rollback failed: ${errors.join("; ")}`,
 									});
 								}
 								return yield* Effect.failCause(cause);
@@ -781,14 +782,14 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 									),
 								);
 								if (Either.isLeft(cleanup)) {
-									const failure = Cause.failureOption(cause);
+									const failure = Failure.firstFailure(cause);
 									return yield* new WorktreeRecoveryError({
 										path:
 											failure._tag === "Some"
 												? failure.value.path
 												: (recreated[0]?.path ?? ""),
 										reason: "git-failed",
-										message: `${failure._tag === "Some" ? failure.value.message : Cause.pretty(cause)}. Worktree rollback failed: ${cleanup.left.join("; ")}`,
+										message: `${failure._tag === "Some" ? failure.value.message : Failure.renderCause(cause)}. Worktree rollback failed: ${cleanup.left.join("; ")}`,
 									});
 								}
 								return yield* Effect.failCause(cause);
@@ -1530,14 +1531,14 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 								],
 								(operation) => operation,
 							);
-							const failure = Cause.failureOption(cause);
+							const failure = Failure.firstFailure(cause);
 							return cleanup.pipe(
 								Effect.mapError(
 									(errors) =>
 										new WorktreeCreationError({
 											path: errors[0].path,
 											reason: errors[0].reason,
-											message: `${failure._tag === "Some" ? failure.value.message : Cause.pretty(cause)}. Worktree rollback failed: ${errors.map((error) => error.message).join("; ")}`,
+											message: `${failure._tag === "Some" ? failure.value.message : Failure.renderCause(cause)}. Worktree rollback failed: ${errors.map((error) => error.message).join("; ")}`,
 										}),
 								),
 								Effect.zipRight(Effect.failCause(cause)),

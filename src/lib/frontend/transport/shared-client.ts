@@ -81,7 +81,6 @@ const makeSubscriptions = (
 		resumeStream(
 			(resumeFromSequence, resumeBase, resumePoint) =>
 				sockets.control("SubscribeShell", {
-					projectSlug,
 					...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
 					...(resumeBase === undefined ? {} : { resumeBase }),
 					...(resumePoint === undefined ? {} : { resumePoint }),
@@ -192,13 +191,11 @@ const makeSubscriptions = (
 			}),
 		),
 	/**
-	 * The daemon's instance and project lists. Daemon-global, so neither takes
-	 * the project; low-rate, so both ride the control socket.
+	 * The daemon's instance list and usage. Both ride the control socket.
 	 */
 	instances: () =>
 		resumeStream(() => sockets.control("SubscribeInstances", {})),
 	usage: () => resumeStream(() => sockets.control("SubscribeUsage", {})),
-	projects: () => resumeStream(() => sockets.control("SubscribeProjects", {})),
 	/** The daemon's protocol, build and restart state, plus a revision that
 	 *  moves when the cross-project session lists go stale. */
 	serverStatus: (options: { readonly onTransportDrop?: () => void } = {}) =>
@@ -250,11 +247,24 @@ const reconnectSchedule = Schedule.exponential("100 millis", 1.5).pipe(
 	Schedule.union(Schedule.spaced("1 second")),
 );
 
+// A redial may reach a daemon from another build, whose RPC wire this tab may
+// not decode. Every redial after a socket has opened first asks the server's
+// build over plain HTTP (registered by server-status, which owns the reload);
+// the check resolves only when this tab may dial. The first dial skips it: the
+// daemon that served this page is the one it dials.
+let redialBuildCheck: () => Promise<void> = async () => {};
+export const setRedialBuildCheck = (check: () => Promise<void>) => {
+	redialBuildCheck = check;
+};
+
 // After a drop the protocol refuses every request until its own `onOpen` clears
 // the stored error, which runs after the raw "open" event. Reporting connected
 // from that hook, not the raw event, means a caller that reacts to `connected`
 // (ChatLayout loading the file tree) is never refused.
-const controlSocket = (url: string, onCreate: (socket: WebSocket) => void) =>
+const controlSocket = (
+	url: Effect.Effect<string>,
+	onCreate: (socket: WebSocket) => void,
+) =>
 	Layer.effect(
 		Socket.Socket,
 		Effect.map(
@@ -284,10 +294,18 @@ const controlSocket = (url: string, onCreate: (socket: WebSocket) => void) =>
 const connectWebSocket: WsRpcConnect = ({ url, trafficClass, wake }) => {
 	let wakeVersion = wake?.version ?? 0;
 	let currentSocket: WebSocket | undefined;
+	let opened = false;
 	const onCreate = (socket: WebSocket) => {
 		currentSocket = socket;
 		wakeVersion = wake?.version ?? 0;
+		socket.addEventListener("open", () => {
+			opened = true;
+		});
 	};
+	const checkedUrl = Effect.promise(async () => {
+		if (opened) await redialBuildCheck();
+		return url;
+	});
 	const onWake = () => {
 		// Ignore healthy wakes, but keep a wake during CLOSING: tab visibility
 		// may close a stale socket before its asynchronous close event arrives.
@@ -326,8 +344,11 @@ const connectWebSocket: WsRpcConnect = ({ url, trafficClass, wake }) => {
 			RpcClient.layerProtocolSocket({ retrySchedule }).pipe(
 				Layer.provide(
 					trafficClass === "control"
-						? controlSocket(url, onCreate)
-						: Socket.layerWebSocket(url).pipe(
+						? controlSocket(checkedUrl, onCreate)
+						: Layer.effect(
+								Socket.Socket,
+								Socket.makeWebSocket(checkedUrl),
+							).pipe(
 								Layer.provide(
 									Layer.succeed(
 										Socket.WebSocketConstructor,

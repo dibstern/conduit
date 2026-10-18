@@ -420,7 +420,9 @@
 		do {
 			savedText = inputText;
 			savedSessionId = sessionState.currentId;
-			await syncInputDraft(savedText);
+			// Offline (e.g. a redial found another build): the reload draft below
+			// carries the text, and no RPC reaches a daemon that may not decode it.
+			if (connectionState.status === "connected") await syncInputDraft(savedText);
 		} while (inputText !== savedText || sessionState.currentId !== savedSessionId);
 		// Cancelling the debounce above dropped any pending new-session draft write.
 		if (!sessionState.currentId) storeNewSessionDraft(inputText);

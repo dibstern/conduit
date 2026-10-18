@@ -7,13 +7,14 @@
 // for focused translator and compatibility tests.
 
 import { SqlError } from "@effect/sql/SqlError";
-import { Cause, Effect, Exit, Option } from "effect";
+import { Effect, Exit, Option } from "effect";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import {
 	PendingInteractionCancelled,
 	type PendingPermissionRequestInput,
 } from "../domain/relay/Services/pending-interaction-service.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
+import * as Failure from "../effect/failure-classification.js";
 import { createLogger } from "../logger.js";
 import { ClaudeEventPersistEffectError } from "../persistence/effect/claude-event-persist-effect.js";
 import { EventStoreError } from "../persistence/effect/event-store-effect.js";
@@ -503,7 +504,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 									answers: exit.value,
 								});
 							}
-							const failure = Cause.failureOption(exit.cause);
+							const failure = Failure.firstFailure(exit.cause);
 							const keptForRecovery =
 								Option.isSome(failure) &&
 								failure.value instanceof PendingInteractionCancelled &&
