@@ -22,6 +22,11 @@ import {
 	SurfacingFeedbackEntrySchema,
 	SurfacingMarkSchema,
 } from "./category-set.js";
+import {
+	CategoryTuningHunkSchema,
+	CategoryTuningProposalSchema,
+	CategoryTuningScoreSchema,
+} from "./category-tuning.js";
 import { AvatarChoiceSchema, AvatarSchema } from "./user-avatar.js";
 import {
 	WorktreeBranchRenameError,
@@ -1832,6 +1837,36 @@ export class GetSurfacingFeedback extends Schema.TaggedRequest<GetSurfacingFeedb
 	},
 ) {}
 
+export class GetSurfacingLedger extends Schema.TaggedRequest<GetSurfacingLedger>()(
+	"GetSurfacingLedger",
+	{
+		failure: WsRpcError,
+		success: Schema.Array(SurfacingFeedbackEntrySchema),
+		payload: {},
+	},
+) {}
+
+export class ScoreCategorySet extends Schema.TaggedRequest<ScoreCategorySet>()(
+	"ScoreCategorySet",
+	{
+		failure: WsRpcError,
+		success: CategoryTuningScoreSchema,
+		payload: {
+			set: CategorySetContentsSchema,
+			estimateOnly: Schema.optional(Schema.Boolean),
+		},
+	},
+) {}
+
+export class ProposeCategoryTuning extends Schema.TaggedRequest<ProposeCategoryTuning>()(
+	"ProposeCategoryTuning",
+	{
+		failure: WsRpcError,
+		success: CategoryTuningProposalSchema,
+		payload: { avoid: Schema.optional(Schema.Array(CategoryTuningHunkSchema)) },
+	},
+) {}
+
 export class ListRecaps extends Schema.TaggedRequest<ListRecaps>()(
 	"ListRecaps",
 	{
@@ -3139,6 +3174,9 @@ const wsRpcRequests = [
 	GetCategorySet,
 	SetSurfacingMark,
 	GetSurfacingFeedback,
+	GetSurfacingLedger,
+	ScoreCategorySet,
+	ProposeCategoryTuning,
 	ReplaceCategorySet,
 	SetHiddenEntries,
 	GetClaudeSettings,

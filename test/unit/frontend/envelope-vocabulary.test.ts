@@ -35,7 +35,11 @@ interface Ban {
 }
 
 const banned: readonly Ban[] = [
-	{ what: "the envelope tags", pattern: /\b(snapshot|upsert|synchronized)\b/i },
+	// `$state.snapshot` is Svelte's rune for a plain copy of reactive state.
+	{
+		what: "the envelope tags",
+		pattern: /(?<!\$state\.)\b(snapshot|upsert|synchronized)\b/i,
+	},
 	{ what: "a discriminator off the wire", pattern: /_tag/ },
 	{ what: "a wire sequence", pattern: /\bsequence\b/i },
 	{
@@ -107,6 +111,14 @@ const title = "safe";
 	it("keeps comment-like text in strings visible", () => {
 		expect(
 			violations(`<script>const title = "// snapshot";</script>`),
+		).toContain("the envelope tags");
+	});
+	it("allows Svelte's $state.snapshot rune but not a bare snapshot", () => {
+		expect(
+			violations(`<script>const copy = $state.snapshot(draft);</script>`),
+		).toEqual([]);
+		expect(
+			violations(`<script>const copy = store.snapshot(draft);</script>`),
 		).toContain("the envelope tags");
 	});
 	it("ignores CSS comments without hiding quoted CSS values", () => {

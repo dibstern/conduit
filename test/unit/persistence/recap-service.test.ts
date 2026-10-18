@@ -42,6 +42,7 @@ const layer = (
 		enabled: true,
 		active: options.active ?? true,
 		defaultLevel: "balanced",
+		turnsOpen: "auto",
 		recap: {
 			model: options.model ?? "sonnet",
 			when: options.when ?? "on-request",
@@ -68,6 +69,7 @@ const layer = (
 		Layer.succeed(LoggerTag, makeMockLogger()),
 		Layer.succeed(CategorySet, {
 			current: () => Effect.succeed(DEFAULT_CATEGORY_SET),
+			criteriaAtVersion: () => Effect.die("unused"),
 			replace: () => Effect.die("unused"),
 		}),
 		Layer.succeed(MessageSurfacingSettings, {

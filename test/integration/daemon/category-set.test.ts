@@ -71,6 +71,48 @@ describe("CategorySet daemon RPC", () => {
 		);
 
 	it.scoped(
+		"serves the tuning contract without a project or provider call",
+		() =>
+			Effect.gen(function* () {
+				const handlers = yield* DaemonWsRpcHandlersTag;
+				const rpc = yield* RpcTest.makeClient(WsRpcGroup).pipe(
+					Effect.provide(
+						makeRoutedWsRpcServerLayer(
+							() => Effect.die("Unexpected project routing"),
+							handlers,
+						),
+					),
+				);
+				const set = yield* rpc.GetCategorySet({});
+				expect(yield* rpc.GetSurfacingLedger({})).toEqual([]);
+				expect(
+					yield* rpc.ScoreCategorySet({ set, estimateOnly: true }),
+				).toEqual({
+					agree: 0,
+					total: 0,
+					levels: [],
+					requiredCalls: 0,
+					jevCalls: 0,
+					complete: true,
+					canTest: false,
+				});
+				expect(
+					yield* rpc.ProposeCategoryTuning({}).pipe(Effect.either),
+				).toMatchObject({
+					_tag: "Left",
+					left: {
+						message:
+							"Raise or lower at least 5 messages before proposing changes.",
+					},
+				});
+			}).pipe(
+				Effect.provide(
+					makeDaemonRpcTestLayer([], undefined, { configDir: root }),
+				),
+			),
+	);
+
+	it.scoped(
 		"re-levels an existing verdict through replace, persists, and reloads",
 		() =>
 			Effect.gen(function* () {
@@ -95,7 +137,7 @@ describe("CategorySet daemon RPC", () => {
 					JSON.parse(
 						readFileSync(join(root, "surfacing/categories.json"), "utf8"),
 					),
-				).toEqual(changed);
+				).toMatchObject(changed);
 				const restarted = yield* client();
 				expect(yield* restarted.GetCategorySet({})).toEqual(changed);
 			}),

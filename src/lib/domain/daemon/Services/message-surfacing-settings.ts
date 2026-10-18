@@ -250,6 +250,7 @@ export const makeMessageSurfacingSettings = (
 						settings: {
 							enabled: patch.enabled ?? current.settings.enabled,
 							defaultLevel: patch.defaultLevel ?? current.settings.defaultLevel,
+							turnsOpen: patch.turnsOpen ?? current.settings.turnsOpen,
 							recap: {
 								model: patch.recap?.model ?? current.settings.recap.model,
 								when: patch.recap?.when ?? current.settings.recap.when,

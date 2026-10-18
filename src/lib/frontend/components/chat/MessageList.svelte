@@ -495,6 +495,7 @@
 		(forkSplit && forkSplit.inherited.length > 0 ? [...inheritedTurns, ...currentTurns] : turns)
 			.filter((turn) => !turn.live).at(-1)?.id,
 	);
+	const latestTurnId = $derived((forkSplit ? currentTurns.at(-1) ?? inheritedTurns.at(-1) : turns.at(-1))?.id);
 
 </script>
 
@@ -572,7 +573,7 @@
 			{/if}
 			{#if segment.activity.length > 0 || (final && turn.live)}
 				{@const reply = segment.reply[0]}
-				<TurnActivity latestTurn={turn === turns.at(-1)} {turn} {segment} {final} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
+				<TurnActivity latestTurn={turn.id === latestTurnId} newestSettledTurn={turn.id === newestEndedTurnId} {turn} {segment} {final} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
 					forkMessageId={reply ? forkMessageIdAtReply(turn, reply) : undefined}
 					model={turn.user?.modelExecution?.actualModel ?? turn.user?.modelExecution?.requestedModel} />
 			{/if}

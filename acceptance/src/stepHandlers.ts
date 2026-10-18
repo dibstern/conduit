@@ -38,6 +38,7 @@ import { sessionGoalDetailsHandlers } from "./steps/sessionGoalDetails.js";
 import { sessionModeDefaultHandlers } from "./steps/sessionModeDefault.js";
 import { sessionPresentationHandlers } from "./steps/sessionPresentation.js";
 import { sessionRowsHandlers } from "./steps/sessionRows.js";
+import { sessionSheetSnoozeHandlers } from "./steps/sessionSheetSnooze.js";
 import { sessionSheetsHandlers } from "./steps/sessionSheets.js";
 import { sessionSkillsHandlers } from "./steps/sessionSkills.js";
 import { settingsGeneralHandlers } from "./steps/settingsGeneral.js";
@@ -45,7 +46,9 @@ import { settingsSurfacingHandlers } from "./steps/settingsSurfacing.js";
 import { sideThreadsHandlers } from "./steps/sideThreads.js";
 import { surfacingCardHandlers } from "./steps/surfacingCard.js";
 import { surfacingMarksHandlers } from "./steps/surfacingMarks.js";
+import { surfacingMinimiseHandlers } from "./steps/surfacingMinimise.js";
 import { surfacingRecapHandlers } from "./steps/surfacingRecap.js";
+import { surfacingTuningHandlers } from "./steps/surfacingTuning.js";
 import { taskDrillInHandlers } from "./steps/taskDrillIn.js";
 import { terminalKeysHandlers } from "./steps/terminalKeys.js";
 import { terminalSettingsHandlers } from "./steps/terminalSettings.js";
@@ -63,6 +66,7 @@ const driver = new PlaywrightDriver();
 export const conduitVisualHandlers: StepHandler[] = [
 	...sessionPresentationHandlers,
 	...sessionSheetsHandlers,
+	...sessionSheetSnoozeHandlers,
 	...sessionAutoSettleHandlers,
 	...sessionRowsHandlers,
 	...sessionModeDefaultHandlers,
@@ -74,7 +78,9 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...sideThreadsHandlers,
 	...surfacingCardHandlers,
 	...surfacingMarksHandlers,
+	...surfacingMinimiseHandlers,
 	...surfacingRecapHandlers,
+	...surfacingTuningHandlers,
 	...sessionGoalDetailsHandlers,
 	...sessionGoalHandlers,
 	...sessionSkillsHandlers,

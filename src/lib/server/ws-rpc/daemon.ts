@@ -34,6 +34,9 @@ export const daemonOnlyHandlers = {
 	GetTerminalKeys: (_request) => daemonRequired("GetTerminalKeys"),
 	GetCategorySet: (_request) => daemonRequired("GetCategorySet"),
 	GetSurfacingFeedback: (_request) => daemonRequired("GetSurfacingFeedback"),
+	GetSurfacingLedger: (_request) => daemonRequired("GetSurfacingLedger"),
+	ScoreCategorySet: (_request) => daemonRequired("ScoreCategorySet"),
+	ProposeCategoryTuning: (_request) => daemonRequired("ProposeCategoryTuning"),
 	ReplaceCategorySet: (_request) => daemonRequired("ReplaceCategorySet"),
 } satisfies Pick<
 	WsRpcHandlerMap,
@@ -61,5 +64,8 @@ export const daemonOnlyHandlers = {
 	| "GetTerminalKeys"
 	| "GetCategorySet"
 	| "GetSurfacingFeedback"
+	| "GetSurfacingLedger"
+	| "ScoreCategorySet"
+	| "ProposeCategoryTuning"
 	| "ReplaceCategorySet"
 >;
