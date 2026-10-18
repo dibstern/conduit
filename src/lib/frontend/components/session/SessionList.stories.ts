@@ -8,7 +8,6 @@ import {
 	routerState,
 } from "../../stores/router.svelte.js";
 import {
-	applyListDaemonSessionsResponse,
 	clearSessionState,
 	sessionState,
 	setSearchQuery,
@@ -41,12 +40,12 @@ function seedDaemonSessions(
 		status?: SessionInfo["status"];
 	})[],
 ) {
-	applyListDaemonSessionsResponse({
-		sessions: rows.map((row) => ({ status: "idle", ...row })),
-		availability: [],
-		hasMore: false,
-		nextCursor: null,
-	});
+	for (const row of rows)
+		applySessionChange({
+			_tag: "upsert",
+			item: { status: "idle", ...row },
+			sequence: ++sequence,
+		});
 }
 
 function resetSessionState() {

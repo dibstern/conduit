@@ -15,7 +15,10 @@ import { ProjectSettingsLive } from "../Services/project-settings.js";
 import { PtyManagerStateLive } from "../Services/pty-manager-service.js";
 import { RelayEventBusLive } from "../Services/relay-event-bus.js";
 import { RelayStatusSnapshotLive } from "../Services/relay-status-snapshot.js";
-import { SessionEventBusLive } from "../Services/session-event-bus.js";
+import {
+	SessionEventBusLive,
+	type SessionEventBusTag,
+} from "../Services/session-event-bus.js";
 import { SessionManagerServiceLive } from "../Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../Services/session-manager-state.js";
 import { makeOverridesStateLive } from "../Services/session-overrides-state.js";
@@ -26,18 +29,6 @@ import {
 } from "../Services/session-status-poller.js";
 import { makeSessionTitleServiceLive } from "../Services/session-title-service.js";
 import { RateLimiterLive } from "./rate-limiter-layer.js";
-
-const sessionManagerDepsLive = Layer.mergeAll(
-	makeSessionManagerStateLive(),
-	DaemonEventBusLive,
-	SessionEventBusLive,
-	RelayStatusSnapshotLive,
-);
-
-const SessionManagerStateAndServiceLive = Layer.provideMerge(
-	SessionManagerServiceLive,
-	sessionManagerDepsLive,
-);
 
 /**
  * Composed Layer providing all Effect-native state Tags.
@@ -57,9 +48,23 @@ export const makeRelayStateLive = (
 		readonly titleQueryFactory?: ClaudeTitleQueryFactory;
 		/** Process-fake benchmark capacity; ordinary relays retain five sends/10s. */
 		readonly testSendLimit?: number;
+		/** Daemon relays borrow the daemon bus; standalone relays own a local bus. */
+		readonly sessionEventBusLayer?: Layer.Layer<SessionEventBusTag>;
 	} = {},
-) =>
-	Layer.mergeAll(
+) => {
+	const sessionEventBusLayer =
+		options.sessionEventBusLayer ?? SessionEventBusLive;
+	const sessionManagerStateAndServiceLive = SessionManagerServiceLive.pipe(
+		Layer.provideMerge(
+			Layer.mergeAll(
+				makeSessionManagerStateLive(),
+				DaemonEventBusLive,
+				sessionEventBusLayer,
+				RelayStatusSnapshotLive,
+			),
+		),
+	);
+	return Layer.mergeAll(
 		// Session state
 		makeSessionRegistryStateLive(),
 		Layer.provideMerge(
@@ -69,7 +74,7 @@ export const makeRelayStateLive = (
 					: {},
 			),
 			Layer.provideMerge(
-				SessionManagerStateAndServiceLive,
+				sessionManagerStateAndServiceLive,
 				makeOverridesStateLive(),
 			),
 		),
@@ -79,8 +84,8 @@ export const makeRelayStateLive = (
 		makePollerPubSubLive(),
 		// Per-relay domain event fanout
 		RelayEventBusLive,
-		// Per-relay committed-event change signal (streaming subscriptions)
-		SessionEventBusLive,
+		// Committed-event change signal, shared by daemon relays.
+		sessionEventBusLayer,
 		// Per-relay project-settings change fanout
 		ProjectSettingsLive,
 		// Per-relay alert and composer-draft fanout (live-only subscriptions)
@@ -96,5 +101,6 @@ export const makeRelayStateLive = (
 			windowMs: 10_000,
 		}),
 	);
+};
 
 export const RelayStateLive = makeRelayStateLive();

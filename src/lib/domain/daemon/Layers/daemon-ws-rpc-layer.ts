@@ -28,7 +28,7 @@ import {
 import { getRecent } from "../../../daemon/recent-projects.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { getLogLevel } from "../../../logger.js";
-import type { PersistenceStore } from "../../../persistence/effect/live.js";
+import { PersistenceStore } from "../../../persistence/effect/live.js";
 import { makeCursorAuth } from "../../../provider/cursor/cursor-auth.js";
 import {
 	loadRelaySettings,
@@ -49,6 +49,7 @@ import {
 import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { getVersion } from "../../../version.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
+import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { AuthManagerTag } from "../../server/Layers/auth-middleware.js";
 import type { AccountDirectory } from "../Services/account-directory.js";
@@ -98,6 +99,7 @@ import {
 import { RelayCacheTag } from "../Services/relay-cache.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
 import type { SessionDirectory } from "../Services/session-directory.js";
+import { subscribeDaemonShell } from "../Services/shell-subscription.js";
 import { Usage } from "../Services/usage.js";
 import { KeepAwakeTag } from "./keep-awake-layer.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
@@ -136,9 +138,12 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| TailscaleCliTag
 		>();
 		const activity = yield* SessionActivityTag;
+		const sessionEventBus = yield* SessionEventBusTag;
 		const context = Context.add(baseContext, SessionActivityTag, activity).pipe(
+			Context.add(SessionEventBusTag, sessionEventBus),
 			Context.merge(yield* persistenceStoreContext),
 		);
+		const shellContext = Context.merge(context, yield* PersistenceStore);
 		const bus = yield* DaemonEventBusTag;
 		const cache = yield* RelayCacheTag;
 		const handle = yield* DaemonHandleTag;
@@ -152,7 +157,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const invalidateBrowsers = () => {
 			for (const invalidate of browserConnections) invalidate();
 		};
-		// Every open SubscribeInstances / SubscribeProjects stream, across all
+		// Every open SubscribeInstances / SubscribeShell stream, across all
 		// connections and projects (conduit-test-ni8.14). A change wakes each
 		// one following that list; it re-reads the list itself.
 		const listSubscribers = new Set<{
@@ -331,19 +336,30 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			SubscribeUsage: () =>
 				usage.readings.pipe(Stream.map((readings) => ({ readings }))),
-			SubscribeProjects: () =>
-				followList(
-					"projects",
-					Effect.gen(function* () {
-						const projects = yield* projectInfos;
-						const { newSessionProject } = yield* Ref.get(
-							yield* DaemonConfigRefTag,
-						);
-						return {
-							projects,
-							...(newSessionProject !== undefined && { newSessionProject }),
-						};
-					}),
+			SubscribeShell: (request) =>
+				subscribeDaemonShell(
+					request,
+					followList(
+						"projects",
+						Effect.gen(function* () {
+							const projects = yield* projectInfos;
+							const { newSessionProject } = yield* Ref.get(
+								yield* DaemonConfigRefTag,
+							);
+							return {
+								_tag: "projects" as const,
+								projects,
+								...(newSessionProject !== undefined && { newSessionProject }),
+							};
+						}),
+					),
+				).pipe(
+					Stream.provideContext(shellContext),
+					Stream.mapError((error) =>
+						error instanceof WsRpcError
+							? error
+							: new WsRpcError({ message: formatErrorDetail(error) }),
+					),
 				),
 			sessionCreated: (projectSlug) =>
 				run(rememberNewSessionProject(projectSlug)).pipe(

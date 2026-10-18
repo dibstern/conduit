@@ -19,6 +19,7 @@ import {
 	collectWorkspaceHintPaths,
 	resolveWorkspaceHint,
 } from "../../../session/workspace-hint.js";
+import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
 import { ConfigTag } from "./services.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 import { SessionWorkspaceTag } from "./session-workspace.js";
@@ -68,6 +69,7 @@ export const SessionWorkspaceHintReactorLive = Layer.scopedDiscard(
 		const bus = yield* SessionEventBusTag;
 		const workspace = yield* SessionWorkspaceTag;
 		const config = yield* ConfigTag;
+		const { projectId } = yield* PersistenceProjectTag;
 		const store = yield* EventStoreEffectTag;
 		const commit = yield* makeCommitAndSignal;
 		const events = yield* bus.subscribe();
@@ -165,6 +167,7 @@ export const SessionWorkspaceHintReactorLive = Layer.scopedDiscard(
 
 		yield* Effect.forkScoped(
 			Stream.runForEach(events, (event) => {
+				if (event.projectId !== projectId) return Effect.void;
 				if (
 					event.type === "turn.completed" ||
 					event.type === "turn.error" ||

@@ -3259,14 +3259,27 @@ type WsRpcRequestRpc<Entry = WsRpcRequestEntry> = Entry extends {
 		? Rpc.From<Entry>
 		: never;
 
+export const ShellProjectsFrameSchema = Schema.Struct({
+	_tag: Schema.Literal("projects"),
+	projects: Schema.Array(ProjectInfoSchema),
+	/** The project a new session prefills, on every client. */
+	newSessionProject: Schema.optional(Schema.String),
+});
+export type ShellProjectsFrame = typeof ShellProjectsFrameSchema.Type;
+
+export const ShellEnvelopeSchema = Schema.Union(
+	EnvelopeSchema(SessionInfoSchema),
+	ShellProjectsFrameSchema,
+);
+export type ShellEnvelope = typeof ShellEnvelopeSchema.Type;
+
 export const SubscribeShell = Rpc.make("SubscribeShell", {
 	payload: {
-		projectSlug: NonEmptyString,
 		resumeFromSequence: Schema.optional(Schema.Number),
 		resumeBase: Schema.optional(ResumeBase),
 		resumePoint: Schema.optional(ResumePoint),
 	},
-	success: EnvelopeSchema(SessionInfoSchema),
+	success: ShellEnvelopeSchema,
 	error: WsRpcError,
 	stream: true,
 });
@@ -3402,17 +3415,6 @@ export const SubscribeInstances = Rpc.make("SubscribeInstances", {
 export const SubscribeUsage = Rpc.make("SubscribeUsage", {
 	payload: {},
 	success: Schema.Struct({ readings: Schema.Array(UsageReadingSchema) }),
-	error: WsRpcError,
-	stream: true,
-});
-
-export const SubscribeProjects = Rpc.make("SubscribeProjects", {
-	payload: {},
-	success: Schema.Struct({
-		projects: Schema.Array(ProjectInfoSchema),
-		/** The project a new session prefills, on every client. */
-		newSessionProject: Schema.optional(Schema.String),
-	}),
 	error: WsRpcError,
 	stream: true,
 });
@@ -3597,7 +3599,6 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribeInstances,
 	SubscribeUsage,
 	SubscribeServerStatus,
-	SubscribeProjects,
 	// Array.map loses the correlation between each tag and its request schema.
 	...(wsRpcRequests.map((entry) =>
 		"rpc" in entry ? entry.rpc : Rpc.fromTaggedRequest(entry),

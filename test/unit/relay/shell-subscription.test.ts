@@ -322,7 +322,7 @@ const openShell = (options?: {
 	Effect.gen(function* () {
 		const q = yield* Queue.unbounded<Envelope<SessionInfo>>();
 		const run = Stream.runForEach(subscribeShell(options), (env) =>
-			Queue.offer(q, env),
+			env._tag === "projects" ? Effect.void : Queue.offer(q, env),
 		);
 		const fiber = yield* (
 			options?.readQuery === undefined
@@ -1279,7 +1279,7 @@ describe("subscribeShell", () => {
 			const scope = yield* Scope.make();
 			const q = yield* Queue.unbounded<Envelope<SessionInfo>>();
 			const fiber = yield* Stream.runForEach(subscribeShell(), (env) =>
-				Queue.offer(q, env),
+				env._tag === "projects" ? Effect.void : Queue.offer(q, env),
 			).pipe(Effect.forkIn(scope));
 
 			yield* takeN(q, 2); // running & subscribed

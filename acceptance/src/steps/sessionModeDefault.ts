@@ -24,7 +24,7 @@ export const sessionModeDefaultHandlers: StepHandler[] = [
 				},
 			];
 			rpc.setStubs({ GetProjects: () => ({ projects, current: "myapp" }) });
-			rpc.setDaemonList("SubscribeProjects", { projects });
+			rpc.setProjects({ projects });
 			rpc.setDaemonList("SubscribeInstances", {
 				instances: [
 					{

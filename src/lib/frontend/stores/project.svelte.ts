@@ -2,6 +2,7 @@
 
 import { Effect, Fiber, Stream } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
+import type { ShellEnvelope } from "../../contracts/ws-rpc.js";
 import { getScopeGroupKey } from "../../session-scope.js";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
@@ -28,13 +29,20 @@ import { applyUsageLimitsSetting, applyUsageReadings } from "./usage.svelte.js";
 
 export { getDraftProject, projectState } from "./project-state.svelte.js";
 
-/** Apply a full project list from a subscription or RPC reply. */
+/** Project mutation replies only update the attached project hint. */
 export function applyProjectList(
 	response: Pick<ProjectMutationResponse, "projects" | "current">,
 ): void {
-	const projects = toProjectInfoList(response.projects);
-	projectState.projects = projects;
 	if (response.current != null) projectState.currentSlug = response.current;
+}
+
+/** The shell feed owns the registered project list. */
+export function applyShellProjects(
+	frame: Extract<ShellEnvelope, { readonly _tag: "projects" }>,
+): void {
+	const projects = toProjectInfoList(frame.projects);
+	projectState.projects = projects;
+	projectState.newSessionProject = frame.newSessionProject ?? null;
 
 	// Removing the attached project returns to the session list.
 	if (
@@ -75,8 +83,8 @@ export async function confirmRemoveProjects(
 		getCurrentSlug(),
 		...projectState.projects.map((project) => project.slug),
 	].find((slug) => slug != null && !slugs.includes(slug));
-	// One at a time: each reply carries the whole project list, so concurrent
-	// replies could land out of order and resurrect a removed project.
+	// Remove one at a time so a later request cannot route through a project
+	// whose removal is still in flight.
 	void (async () => {
 		for (const slug of slugs) {
 			applyProjectList(
@@ -111,6 +119,7 @@ const toProjectInfoList = (
 			? { repositoryIdentities: project.repositoryIdentities }
 			: {}),
 		...(project.git != null ? { git: project.git } : {}),
+		...(project.missing !== undefined ? { missing: project.missing } : {}),
 		...(project.unavailableReason !== undefined
 			? { unavailableReason: project.unavailableReason }
 			: {}),
@@ -124,7 +133,7 @@ let generation = 0;
 let fiber: RuntimeFiber<void, never> | null = null;
 
 /**
- * Follow the daemon-global project, instance, usage and status lists over the
+ * Follow the daemon-global instance, usage and status lists over the
  * tab's one socket pair. None is project-scoped, so a project switch must not
  * re-follow: each new usage subscription re-reads every account's limits.
  */
@@ -156,11 +165,6 @@ export function followDaemonLists(on: boolean): void {
 					Effect.flatMap(clients.forProject(""), ({ subscriptions, control }) =>
 						Effect.all(
 							[
-								follow(subscriptions.projects, (list) => {
-									applyProjectList(list);
-									projectState.newSessionProject =
-										list.newSessionProject ?? null;
-								}),
 								follow(subscriptions.instances, applyInstanceListResponse),
 								Stream.runForEach(
 									supervise(

@@ -175,7 +175,7 @@ export const mockAppHandlers: StepHandler[] = [
 				},
 			];
 			const rpc = requireRpcControl(world.page);
-			rpc.setDaemonList("SubscribeProjects", { projects });
+			rpc.setProjects({ projects });
 			rpc.setStubs({ GetProjects: () => ({ projects, current: "myapp" }) });
 			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
 			if (!sessionId) throw new Error("Checkout requires an open session");
@@ -788,17 +788,6 @@ export const mockAppHandlers: StepHandler[] = [
 						};
 					},
 					CreatePty: async () => ({ ok: true }),
-					// A real daemon always lists its projects; a draft prefills from them.
-					GetProjects: async () => ({
-						projects: [
-							{
-								slug: "myapp",
-								title: "myapp",
-								folders: ["/myapp"],
-							},
-						],
-						current: "myapp",
-					}),
 					AddInstance: async (payload) => {
 						const list = mockInstances.get(page) ?? [];
 						const driver =
@@ -922,6 +911,10 @@ export const mockAppHandlers: StepHandler[] = [
 				},
 			});
 			rpcControls.set(world.page, rpcControl);
+			// A real daemon always lists its projects; a draft prefills from them.
+			rpcControl.setProjects({
+				projects: [{ slug: "myapp", title: "myapp", folders: ["/myapp"] }],
+			});
 			rpcControl.setDaemonList("SubscribeInstances", {
 				instances: initialInstances,
 			});

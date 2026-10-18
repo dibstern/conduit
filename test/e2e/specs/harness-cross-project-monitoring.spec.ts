@@ -7,7 +7,7 @@ import { expect, test } from "../helpers/process-harness-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 
 // Failure cases: another project's row misses live activity; its idle status
-// fails to invalidate the daemon list; a relay rebuild drops that activity;
+// misses its owning project; a relay rebuild drops that activity;
 // ending a task never refreshes the final row. The SDK gate holds the task
 // after its foreground result, so these assertions do not race a real shell.
 test.use({ harnessOptions: { restartProof: true } });
@@ -48,6 +48,84 @@ async function exercise(
 	let current = 0;
 	let row: Locator | undefined;
 	let attachedToA = false;
+	const shellRequests: {
+		socket: number;
+		requestId: string;
+		payload: unknown;
+	}[] = [];
+	const shellUpserts: {
+		socket: number;
+		requestId: string;
+		sessionId: string;
+		owner: string;
+		version: number;
+		attention: unknown;
+	}[] = [];
+	let browseRefetchCount = 0;
+	let existingShell: (typeof shellRequests)[number] | undefined;
+	let backgroundSessionId: string | undefined;
+	let backgroundOwner: string | undefined;
+	let socketSequence = 0;
+	const frames = (payload: string | Buffer): Record<string, unknown>[] => {
+		const parsed: unknown = JSON.parse(payload.toString());
+		return (Array.isArray(parsed) ? parsed : [parsed]).filter(
+			(frame): frame is Record<string, unknown> =>
+				typeof frame === "object" && frame !== null,
+		);
+	};
+	page.on("websocket", (socket) => {
+		const identity = ++socketSequence;
+		socket.on("framesent", ({ payload }) => {
+			for (const frame of frames(payload)) {
+				if (frame["_tag"] !== "Request") continue;
+				if (frame["tag"] === "ListDaemonSessions") browseRefetchCount++;
+				if (frame["tag"] === "SubscribeShell")
+					shellRequests.push({
+						socket: identity,
+						requestId: String(frame["id"]),
+						payload: frame["payload"],
+					});
+			}
+		});
+		socket.on("framereceived", ({ payload }) => {
+			for (const frame of frames(payload)) {
+				if (frame["_tag"] !== "Chunk" || !Array.isArray(frame["values"]))
+					continue;
+				const requestId = String(frame["requestId"]);
+				if (
+					!shellRequests.some(
+						(request) =>
+							request.socket === identity && request.requestId === requestId,
+					)
+				)
+					continue;
+				for (const value of frame["values"]) {
+					if (
+						typeof value !== "object" ||
+						value === null ||
+						value._tag !== "upsert"
+					)
+						continue;
+					const item: unknown = value.item;
+					if (
+						typeof item !== "object" ||
+						item === null ||
+						!("id" in item) ||
+						!("projectSlug" in item)
+					)
+						continue;
+					shellUpserts.push({
+						socket: identity,
+						requestId,
+						sessionId: String(item.id),
+						owner: String(item.projectSlug),
+						version: Number(value.sequence),
+						attention: "attention" in item ? item.attention : undefined,
+					});
+				}
+			}
+		});
+	});
 	const artifact = resolve(
 		"test-results",
 		rebuild
@@ -70,8 +148,10 @@ async function exercise(
 			control.rpc.SaveProject({ title: "Project B", folders: [folderB] }),
 		);
 		if (!slugB) throw new Error("SaveProject omitted Project B's slug");
+		backgroundOwner = slugB;
 		const driverB = await harness.connect(undefined, undefined, slugB);
 		const sessionB = await driverB.createSession("Project B background shell");
+		backgroundSessionId = sessionB;
 		const projectAUrl = `${harness.baseUrl}/s/${sessionA}`;
 		await new AppPage(page).goto(projectAUrl);
 		const observedRow = page.locator(
@@ -86,15 +166,33 @@ async function exercise(
 		attachedToA = page.url() === projectAUrl;
 		expect(attachedToA).toBe(true);
 		await record();
+		expect(shellRequests).toHaveLength(1);
+		existingShell = shellRequests[0];
+		expect(existingShell?.payload).not.toHaveProperty("projectSlug");
+		expect(browseRefetchCount).toBe(0);
 
 		const result = await driverB.send(sessionB, "upgrade-background-work");
 		expect(result.done["status"]).toBe("idle");
-		// No browser navigation or manual list refresh after the turn. A's
-		// cross-project row must react to the daemon's sessionsRevision signal.
+		// B's transition must use A's existing shell request, without a browse RPC.
 		await expect(row).toHaveAttribute("aria-label", /^Monitoring,/, {
 			timeout: 5000,
 		});
 		expect(page.url()).toBe(projectAUrl);
+		await expect
+			.poll(() =>
+				shellUpserts.some(
+					(upsert) =>
+						upsert.sessionId === sessionB &&
+						upsert.owner === slugB &&
+						upsert.attention === "monitoring" &&
+						upsert.socket === existingShell?.socket &&
+						upsert.requestId === existingShell?.requestId &&
+						upsert.version > 0,
+				),
+			)
+			.toBe(true);
+		expect(shellRequests).toHaveLength(1);
+		expect(browseRefetchCount).toBe(0);
 		await record();
 
 		if (rebuild) {
@@ -151,6 +249,8 @@ async function exercise(
 			timeout: 5000,
 		});
 		expect(page.url()).toBe(projectAUrl);
+		expect(shellRequests).toHaveLength(1);
+		expect(browseRefetchCount).toBe(0);
 		await record();
 	} finally {
 		const pending = steps[current];
@@ -164,6 +264,16 @@ async function exercise(
 					project: "B",
 					observedFrom: "A",
 					attachedToA,
+					shellRequest: existingShell,
+					backgroundSession: {
+						id: backgroundSessionId,
+						owner: backgroundOwner,
+					},
+					backgroundUpserts: shellUpserts.filter(
+						(upsert) => upsert.sessionId === backgroundSessionId,
+					),
+					browseRefetchCount,
+					shellRequestCount: shellRequests.length,
 					attentionSequence: steps.flatMap((step) =>
 						step.attention === null ? [] : [step.attention],
 					),

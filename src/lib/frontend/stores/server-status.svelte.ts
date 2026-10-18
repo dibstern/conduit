@@ -12,7 +12,10 @@ import type {
 import * as Failure from "../../effect/failure-classification.js";
 import { WS_PROTOCOL_VERSION } from "../../shared-types.js";
 import { failureLine, toastFailure } from "../transport/rpc-errors.js";
-import type { WsRpcSubscriptions } from "../transport/shared-client.js";
+import {
+	setRedialBuildCheck,
+	type WsRpcSubscriptions,
+} from "../transport/shared-client.js";
 import type { WsRpcError } from "../transport/ws-rpc.js";
 import { rpc } from "../transport/ws-rpc-client.js";
 import {
@@ -30,7 +33,8 @@ const BUILD_MISMATCH_BANNER_ID = "build-mismatch";
 const SERVER_UPDATE_BANNER_ID = "server-update";
 
 let last: ServerStatus | null = null;
-let buildReloadPending = false;
+// Set while a build reload is in flight; never settles once the tab navigates.
+let buildReload: Promise<void> | null = null;
 let buildMismatchWarning = false;
 let serverUpdateAvailable = false;
 export const serverStatus = $state<{
@@ -116,7 +120,7 @@ export function applyServerStatus(status: ServerStatus): void {
 		previous.buildId !== status.buildId
 	) {
 		handleProtocolVersion(status.protocolVersion);
-		handleBuildId(status.buildId);
+		void handleBuildId(status.buildId);
 	}
 	if (previous?.restartAvailable !== status.restartAvailable) {
 		handleServerUpdate(status.restartAvailable);
@@ -203,43 +207,68 @@ function handleServerUpdate(restartAvailable: boolean): void {
 	}
 }
 
-function handleBuildId(serverBuildId: string): void {
-	if (buildReloadPending) return;
+function handleBuildId(serverBuildId: string): Promise<void> {
+	if (buildReload) return buildReload;
 	const action = claimBuildReload(BUILD_ID, serverBuildId);
 	if (action === "current") {
 		buildMismatchWarning = false;
 		removeBanner(BUILD_MISMATCH_BANNER_ID);
-		return;
+		return Promise.resolve();
 	}
 	if (action === "warn") {
 		showBuildMismatchBanner();
-		return;
+		return Promise.resolve();
 	}
-	buildReloadPending = true;
 	inputSyncState.reloadPending = true;
 	showToast({
 		title: "Conduit was updated",
 		body: "Saving your draft and reloading…",
 		duration: 1_000,
 	});
-	void (async () => {
+	buildReload = (async () => {
 		try {
 			await refreshAppShell();
 			// Leave the notice visible briefly; save after any last keystrokes.
 			await new Promise((resolve) => setTimeout(resolve, 750));
 			if (await persistInputDraft()) {
 				location.reload();
-				return;
+				// Hold a waiting redial until the page unloads.
+				return new Promise<void>(() => {});
 			}
 		} catch {
 			// Failed worker updates and draft saves also keep this tab open.
 		}
 		releaseBuildReload(serverBuildId);
-		buildReloadPending = false;
+		buildReload = null;
 		inputSyncState.reloadPending = false;
 		showBuildMismatchBanner();
 	})();
+	return buildReload;
 }
+
+// Redials ask the build over plain HTTP before any RPC: a daemon from another
+// build may speak an RPC wire this tab cannot decode, so a mismatch reloads the
+// tab without sending it a frame. Until the server answers, the socket could
+// not reach it either, so the check waits rather than letting a dial race the
+// restart. An answer without a buildId (an older server) lets the dial go.
+setRedialBuildCheck(async () => {
+	for (;;) {
+		// Only an ok JSON object answers; errors, HTML and timeouts mean retry.
+		const info: unknown = await fetch("/info", {
+			cache: "no-store",
+			signal: AbortSignal.timeout(5_000),
+		})
+			.then((response) => (response.ok ? response.json() : null))
+			.catch(() => null);
+		if (typeof info === "object" && info !== null && !Array.isArray(info)) {
+			// The warn and abandoned-reload paths return here: banner, then dial.
+			if ("buildId" in info && typeof info.buildId === "string")
+				await handleBuildId(info.buildId);
+			return;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 1_000));
+	}
+});
 
 function showStaleDaemonBanner(): void {
 	showBanner({

@@ -42,6 +42,7 @@ export const instanceState = $state({
  * and ConnectOverlay re-renders when the cache is updated.
  */
 let cachedInstances: OpenCodeInstance[] = $state([]);
+let instancesListed = false;
 
 let proxyDetection: { found: boolean; port: number } | null = $state(null);
 
@@ -162,6 +163,8 @@ export function applyInstanceListResponse(
 	const routingKey = (list: readonly OpenCodeInstance[]) =>
 		list.map((i) => `${i.id}:${i.driver}:${i.isDefault}`).join("|");
 	const accountsChanged = routingKey(instances) !== routingKey(cachedInstances);
+	const firstList = !instancesListed;
+	instancesListed = true;
 	instanceState.instances = instances;
 	if (response.providerTraits || !instanceState.loaded)
 		instanceState.providerTraits = { ...response.providerTraits };
@@ -172,7 +175,8 @@ export function applyInstanceListResponse(
 	// Keep a cached copy that survives disconnect
 	cachedInstances = [...instances];
 	if (accountsChanged)
-		for (const listener of accountSnapshotChangedListeners) listener();
+		for (const listener of accountSnapshotChangedListeners)
+			listener({ firstList });
 }
 
 /** Older servers omit traits; their known drivers use the shared contract defaults. */
