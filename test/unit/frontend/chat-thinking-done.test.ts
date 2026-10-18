@@ -15,7 +15,7 @@ import {
 	type SessionActivity,
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 let ta: SessionActivity;
@@ -23,7 +23,7 @@ let tm: SessionMessages;
 
 beforeEach(() => {
 	clearMessages();
-	sessionState.currentId = "test-session";
+	openSessionForSetup("test-session", "project-a");
 	ta = testActivity();
 	tm = testMessages();
 	vi.useFakeTimers();

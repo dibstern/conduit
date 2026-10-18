@@ -18,6 +18,7 @@ import {
 } from "../stores/discovery.svelte.js";
 import { hydrateSessionGoal, sessionGoals } from "../stores/goal.svelte.js";
 import { followSessionResumes } from "../stores/handoff-review.svelte.js";
+import { applyShellProjects } from "../stores/project.svelte.js";
 import type { SavedShell } from "../stores/saved-shell.js";
 import {
 	forgetSession,
@@ -33,7 +34,6 @@ import {
 import type { SessionInfo } from "../types.js";
 import type { WsRpcSubscriptions } from "./shared-client.js";
 import {
-	type Change,
 	emptySubscription,
 	reduce,
 	type SubscriptionState,
@@ -129,9 +129,13 @@ export const sessionSubscription = {
 /**
  * Apply one change to the session map. The only writer.
  *
- * Takes only the versioned shell envelope.
+ * Project frames update project metadata without changing the row cursor.
  */
-export function applySessionChange(change: Change<SessionInfo>): void {
+export function applySessionChange(change: ShellEnvelope): void {
+	if (change._tag === "projects") {
+		applyShellProjects(change);
+		return;
+	}
 	if (change._tag === "synchronized") transportFailureSince = null;
 	const next = reduce(applied, change, identify);
 	if (next === applied) return;
@@ -166,7 +170,7 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 			followSessionRetry(change.item.id, change.item.retrying);
 		followSessionResumes(change.item, previous);
 	}
-	// A root that gained a parent only leaves the list; one that is gone, or a
+	// An archived root or one that gained a parent only leaves the list; one that is gone, or a
 	// child that is, comes marked deleted, live or on catch-up.
 	if (change._tag === "remove" && change.deleted === true) {
 		deleteTurn(change.id);
@@ -176,8 +180,8 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 	if (change._tag === "snapshot") {
 		if (applied.floor !== undefined)
 			rebaseTurns([...applied.rows.keys(), ...next.rows.keys()]);
-		for (const id of applied.rows.keys())
-			if (!next.rows.has(id)) forgetSession(id);
+		// Snapshot omissions can be archives. Only an explicit deletion may clear
+		// chat state; the independent family subscription still owns open sessions.
 		for (const row of next.rows.values()) {
 			applyTurnRow(row);
 			hydrateSessionGoal(row);
@@ -194,7 +198,7 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 	settleReadMarks(next.rows);
 }
 
-/** Forget the project we were watching. */
+/** Clear the daemon shell when resetting the browser's session state. */
 export function resetSessionSubscription(): void {
 	sessionGoals.clear();
 	applied = emptySubscription();

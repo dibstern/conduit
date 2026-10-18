@@ -48,6 +48,7 @@ import {
 	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { PermissionId } from "../../../src/lib/frontend/types.js";
 
 /** Create a minimal permission request for the given session. */
@@ -97,7 +98,7 @@ describe("AttentionBanner merge logic", () => {
 		// Clear first: clearSessionState() resets the client half too, so
 		// selecting the session has to come after it.
 		clearSessionState();
-		sessionState.currentId = "ses_current";
+		openSessionForSetup("ses_current", "project-a");
 		routerState.path = "/s/ses_current";
 		attachedProjectState.slug = "project-a";
 	});

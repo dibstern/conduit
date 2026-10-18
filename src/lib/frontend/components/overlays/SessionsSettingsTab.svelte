@@ -1,12 +1,9 @@
 <script lang="ts">
-	import { untrack } from "svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
 	import SettingsPicker from "../ui/SettingsPicker.svelte";
 	import { Schema } from "effect";
-	import { GroupingModeSchema } from "../../../shared-types.js";
 	import { DefaultSessionModeSchema } from "../../../contracts/project-file.js";
-	import { projectState } from "../../stores/project-state.svelte.js";
 	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
@@ -17,7 +14,7 @@
 	import { DEFAULT_WORKTREE_CLEANUP, type WorktreeCleanup, type WorktreeCleanupReport } from "../../../contracts/worktree.js";
 	import Button from "../ui/Button.svelte";
 	import Disclosure from "../ui/Disclosure.svelte";
-	let state = $state({ autoSettleDays: 3 as number | null, autoSettleSaving: false, sessionModeSaving: false, groupingSaving: false, cleanup: DEFAULT_WORKTREE_CLEANUP as WorktreeCleanup, cleanupSaving: false, cleanupOpen: false, cleanupDetailsOpen: false, cleanupRun: { status: "idle" } as { status: "idle" | "running" | "failed" } | { status: "done"; report: WorktreeCleanupReport } });
+	let state = $state({ autoSettleDays: 3 as number | null, autoSettleSaving: false, autoArchiveDays: 30 as number | null, autoArchiveSaving: false, sessionModeSaving: false, cleanup: DEFAULT_WORKTREE_CLEANUP as WorktreeCleanup, cleanupSaving: false, cleanupOpen: false, cleanupDetailsOpen: false, cleanupRun: { status: "idle" } as { status: "idle" | "running" | "failed" } | { status: "done"; report: WorktreeCleanupReport } });
 
 	const idlePresets = [7, 14, 30, 90];
 	const outcomes = [
@@ -78,20 +75,19 @@
 		const route = getCurrentRoute();
 		if (route.page === "chat" && route.sessionId && !getCurrentSlug()) return;
 		let current = true;
-		const groupingReadRevision = untrack(() => projectState.defaultGroupingRevision);
+		void rpc("GetAutoArchiveSetting", {})
+			.then(({ autoArchiveAfterDays: days }) => {
+				if (current && !state.autoArchiveSaving) state.autoArchiveDays = days;
+			})
+			.catch((error) => {
+				if (current) toastFailure("Couldn't load auto-archive setting")(error);
+			});
 		void rpc("GetAutoSettleSetting", {})
 			.then(({ autoSettleAfterDays: days }) => {
 				if (current && !state.autoSettleSaving) state.autoSettleDays = days;
 			})
 			.catch((error) => {
 				if (current) toastFailure("Couldn't load auto-settle setting")(error);
-			});
-		void rpc("GetDefaultGroupingMode", {})
-			.then(({ mode }) => {
-				if (current && groupingReadRevision === projectState.defaultGroupingRevision) projectState.defaultGroupingMode = mode;
-			})
-			.catch((error) => {
-				if (current) toastFailure("Couldn't load grouping setting")(error);
 			});
 		void rpc("GetWorktreeCleanupSetting", {})
 			.then(({ worktreeCleanup: cleanup }) => {
@@ -105,21 +101,6 @@
 </script>
 
 <SettingsGroup id="settings-sessions" title="Sessions">
-	<SettingsRow label="Default repository grouping" labelFor="settings-grouping-mode-select" description="Projects inherit this unless they choose their own mode.">
-		{#snippet control()}
-			<SettingsPicker id="settings-grouping-mode-select" label="Default repository grouping" value={projectState.defaultGroupingMode} disabled={state.groupingSaving} onvaluechange={(mode) => {
-				if (!Schema.is(GroupingModeSchema)(mode)) return;
-				const groupingSaveRevision = ++projectState.defaultGroupingRevision;
-				state.groupingSaving = true;
-				void rpc("SetDefaultGroupingMode", { mode })
-					.then(({ mode: saved }) => {
-						if (groupingSaveRevision === projectState.defaultGroupingRevision) projectState.defaultGroupingMode = saved;
-					})
-					.catch(toastFailure("Couldn't save grouping setting"))
-					.finally(() => { state.groupingSaving = false; });
-			}} options={[{ value: "repository", label: "By repository" }, { value: "repository+subfolder", label: "By repository and subfolder" }, { value: "off", label: "Off" }]} />
-		{/snippet}
-	</SettingsRow>
 	<SettingsRow
 		label="Default session mode"
 		labelFor="settings-default-session-mode"
@@ -168,6 +149,26 @@
 						.finally(() => {
 							state.autoSettleSaving = false;
 						});
+				}}
+				options={[{ value: "1", label: "1 day" }, { value: "2", label: "2 days" }, { value: "3", label: "3 days" }, { value: "7", label: "1 week" }, { value: "14", label: "2 weeks" }, { value: "30", label: "30 days" }, { value: "90", label: "90 days" }, { value: "never", label: "Never" }]}
+			/>
+		{/snippet}
+	</SettingsRow>
+	<SettingsRow
+		label="Archive settled sessions after"
+		labelFor="settings-auto-archive-select"
+		description="Hides them from the sidebar. Search still finds them."
+	>
+		{#snippet control()}
+			<SettingsPicker id="settings-auto-archive-select" label="Archive settled sessions after" data-testid="settings-auto-archive-select"
+				value={state.autoArchiveDays === null ? "never" : String(state.autoArchiveDays)}
+				disabled={state.autoArchiveSaving}
+				onvaluechange={(value) => {
+					state.autoArchiveSaving = true;
+					void rpc("SetAutoArchiveSetting", { autoArchiveAfterDays: value === "never" ? null : Number(value) })
+						.then(({ autoArchiveAfterDays: days }) => { state.autoArchiveDays = days; })
+						.catch(toastFailure("Couldn't save auto-archive setting"))
+						.finally(() => { state.autoArchiveSaving = false; });
 				}}
 				options={[{ value: "1", label: "1 day" }, { value: "2", label: "2 days" }, { value: "3", label: "3 days" }, { value: "7", label: "1 week" }, { value: "14", label: "2 weeks" }, { value: "30", label: "30 days" }, { value: "90", label: "90 days" }, { value: "never", label: "Never" }]}
 			/>

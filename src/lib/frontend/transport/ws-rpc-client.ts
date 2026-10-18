@@ -1,7 +1,8 @@
 import type { Rpc, RpcGroup } from "@effect/rpc";
 import { RpcClientError } from "@effect/rpc/RpcClientError";
-import { Cause, Effect, Either, HashSet } from "effect";
+import { Effect, Either, Option } from "effect";
 import type { WsRpcGroup } from "../../contracts/ws-rpc.js";
+import * as Failure from "../../effect/failure-classification.js";
 import { runTransportEffect } from "./runtime.js";
 import { WsRpcClients } from "./shared-client.js";
 
@@ -31,15 +32,15 @@ export function rpcEffect<T extends UnaryTag>(tag: T, payload: Payload<T>) {
 		return yield* control(tag, payload);
 	}).pipe(
 		Effect.catchAllCause((cause) =>
-			Effect.flatMap(Effect.descriptor, (fiber) => {
-				if (HashSet.size(fiber.interruptors) > 0)
-					return Effect.failCause(cause);
-				if (Cause.isFailType(cause)) return Effect.fail(cause.error);
+			Effect.flatMap(Failure.isInterruptedByCaller, (byCaller) => {
+				if (byCaller) return Effect.failCause(cause);
+				const failure = Failure.soleFailure(cause);
+				if (Option.isSome(failure)) return Effect.fail(failure.value);
 				return Effect.fail(
 					new RpcClientError({
 						reason: "Unknown",
 						message: "RPC call failed",
-						cause: Cause.squash(cause),
+						cause: Failure.squashCause(cause),
 					}),
 				);
 			}),

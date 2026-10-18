@@ -3118,7 +3118,7 @@ Layer.effect(SessionActivityTag, makeSessionActivity),
 		);
 	}
 
-	it.effect("sends the message when unsnooze bookkeeping fails", () => {
+	it.effect("sends the message when triage restoration bookkeeping fails", () => {
 		const sendTurn = vi.fn(() => Effect.void);
 		const provider: ProviderTurnService = {
 			holdUserTurnsForAccountSwitch: () => Effect.void,
@@ -3127,7 +3127,7 @@ Layer.effect(SessionActivityTag, makeSessionActivity),
 			interruptTurn: () => Effect.void,
 		};
 		const service = makeMockSessionManagerService({
-			unsnoozeSession: () =>
+			restoreSessionForSend: () =>
 				Effect.fail(
 					new SessionManagerError({
 						operation: "unsnoozeSession",

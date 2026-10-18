@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
 import {
-	Cause,
 	Context,
 	Deferred,
 	Effect,
@@ -9,6 +8,7 @@ import {
 	HashMap,
 	Layer,
 	Option,
+	PubSub,
 	Ref,
 } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../account-directory.js";
@@ -19,6 +19,7 @@ import {
 	getProviderDriver,
 	PROVIDER_DRIVERS,
 } from "../../../contracts/provider-instance.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../../errors.js";
 import type {
 	SessionDetail,
@@ -54,6 +55,7 @@ import type {
 import type { SessionInfo } from "../../../types.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import {
+	DaemonEvent,
 	DaemonEventBusTag,
 	publishSessionCreated,
 	publishSessionDeleted,
@@ -107,6 +109,7 @@ import {
 	markSessionSeen,
 	markSessionUnread,
 	renameSession,
+	setSessionArchived,
 	setSessionAutoSettleDisabled,
 	setSessionPinned,
 	setSessionSettled,
@@ -151,7 +154,9 @@ function renderProviderCleanupDetail(error: unknown): string {
 	try {
 		return truncateProviderCleanupDiagnostic(
 			// The upstream adapter wraps provider failures; its message is generic.
-			formatErrorDetail(Cause.isUnknownException(error) ? error.error : error),
+			formatErrorDetail(
+				Failure.isUnknownException(error) ? error.error : error,
+			),
 			PROVIDER_CLEANUP_DETAIL_MAX_LENGTH,
 		);
 	} catch {
@@ -189,6 +194,16 @@ export interface SetSessionSettledOptions {
 	readonly automatic?: boolean;
 	readonly mergedHead?: string;
 }
+
+export type SetSessionArchivedOptions =
+	| { readonly archived: false; readonly cause?: "manual" | "send" }
+	| { readonly archived: true; readonly automatic?: false }
+	| {
+			readonly archived: true;
+			readonly automatic: true;
+			readonly idleWindowMs: number;
+			readonly now: number;
+	  };
 
 /**
  * Initialize session state from the provider and return the most recent session,
@@ -370,7 +385,7 @@ export const deleteSession = (sessionId: string) =>
 		if (bindingExit !== undefined && Exit.isFailure(bindingExit)) {
 			cleanupFailures.push(
 				`binding_resolution: ${renderProviderCleanupDetail(
-					Cause.squash(bindingExit.cause),
+					Failure.squashCause(bindingExit.cause),
 				)}`,
 			);
 		}
@@ -400,7 +415,7 @@ export const deleteSession = (sessionId: string) =>
 			Exit.isFailure(providerResolutionExit)
 		) {
 			cleanupFailures.push(
-				`provider_resolution: ${renderProviderCleanupDetail(Cause.squash(providerResolutionExit.cause))}`,
+				`provider_resolution: ${renderProviderCleanupDetail(Failure.squashCause(providerResolutionExit.cause))}`,
 			);
 		}
 		if (account === undefined) {
@@ -434,12 +449,12 @@ export const deleteSession = (sessionId: string) =>
 						),
 					);
 					if (Exit.isFailure(endSessionExit)) {
-						if (Exit.isInterrupted(endSessionExit)) {
+						if (Failure.isInterrupted(endSessionExit.cause)) {
 							return yield* Effect.failCause(endSessionExit.cause);
 						}
 						cleanupFailures.push(
 							`end_session: ${renderProviderCleanupDetail(
-								Cause.squash(endSessionExit.cause),
+								Failure.squashCause(endSessionExit.cause),
 							)}`,
 						);
 					} else {
@@ -494,12 +509,12 @@ export const deleteSession = (sessionId: string) =>
 					}).pipe(Effect.scoped),
 				);
 				if (Exit.isFailure(providerDeleteExit)) {
-					if (Exit.isInterrupted(providerDeleteExit)) {
+					if (Failure.isInterrupted(providerDeleteExit.cause)) {
 						return yield* Effect.failCause(providerDeleteExit.cause);
 					}
 					cleanupFailures.push(
 						`provider_delete: ${renderProviderCleanupDetail(
-							Cause.squash(providerDeleteExit.cause),
+							Failure.squashCause(providerDeleteExit.cause),
 						)}`,
 					);
 				}
@@ -517,12 +532,13 @@ export const deleteSession = (sessionId: string) =>
 						),
 					);
 					if (Exit.isFailure(cleanupExit)) {
-						const failure = Cause.failureOption(cleanupExit.cause);
+						const failure = Failure.firstFailure(cleanupExit.cause);
 						cleanupFailures.push(
-							Option.isSome(failure) && Cause.isTimeoutException(failure.value)
+							Option.isSome(failure) &&
+								Failure.isTimeoutException(failure.value)
 								? "cleanup: timed out after 2s"
 								: `cleanup: ${renderProviderCleanupDetail(
-										Cause.squash(cleanupExit.cause),
+										Failure.squashCause(cleanupExit.cause),
 									)}`,
 						);
 					}
@@ -601,7 +617,7 @@ export const deleteSession = (sessionId: string) =>
 			const receiptFailure =
 				receiptExit !== undefined && Exit.isFailure(receiptExit)
 					? ` receipt_append_failed=${renderProviderCleanupDetail(
-							Cause.squash(receiptExit.cause),
+							Failure.squashCause(receiptExit.cause),
 						)}`
 					: eventStoreOption._tag === "None"
 						? " receipt_append_failed=event store unavailable"
@@ -667,6 +683,13 @@ export interface SessionManagerService {
 		sessionId: string,
 		options: SetSessionSettledOptions,
 	): Effect.Effect<boolean, SessionManagerError>;
+	setSessionArchived(
+		sessionId: string,
+		options: SetSessionArchivedOptions,
+	): Effect.Effect<boolean, SessionManagerError>;
+	restoreSessionForSend(
+		sessionId: string,
+	): Effect.Effect<void, SessionManagerError>;
 	setSessionAutoSettleDisabled(
 		sessionId: string,
 		disabled: boolean,
@@ -1024,9 +1047,11 @@ export const SessionManagerServiceLive: Layer.Layer<
 				| SqlClient.SqlClient
 				| ConfigTag
 				| LoggerTag
+				| SessionActivityTag
 			>,
 		): Effect.Effect<A, E> => {
 			const provided = effect.pipe(
+				Effect.provideService(SessionActivityTag, activity),
 				Effect.provideService(AccountDirectory, accounts),
 				Effect.provideService(OpenCodeAPITag, api),
 				Effect.provideService(ReadQueryEffectTag, readQuery),
@@ -1171,6 +1196,40 @@ export const SessionManagerServiceLive: Layer.Layer<
 								: Effect.void,
 						),
 					),
+			setSessionArchived: (sessionId, options) =>
+				triageLock.withPermits(1)(
+					withSessionCommandServices(setSessionArchived(sessionId, options)),
+				),
+			restoreSessionForSend: (sessionId) =>
+				triageLock.withPermits(1)(
+					Effect.gen(function* () {
+						// A sweep must see either the old state or the fully restored state.
+						let changed = false;
+						for (const operation of [
+							setSessionArchived(sessionId, { archived: false, cause: "send" }),
+							unsnoozeSession(sessionId),
+							setSessionSettled(sessionId, { settled: false }),
+						]) {
+							const restored = yield* withSessionCommandServices(
+								operation,
+							).pipe(
+								Effect.catchAll((error) =>
+									Effect.sync(() =>
+										log.warn(
+											`Failed to restore ${sessionId} on send: ${String(error)}`,
+										),
+									).pipe(Effect.as(false)),
+								),
+							);
+							changed ||= restored;
+						}
+						if (changed)
+							yield* PubSub.publish(
+								eventBus,
+								DaemonEvent.DaemonSessionsChanged(),
+							);
+					}),
+				),
 			setSessionAutoSettleDisabled: (sessionId, disabled) =>
 				triageLock.withPermits(1)(
 					withSessionCommandServices(

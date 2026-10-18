@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { SqlClient } from "@effect/sql";
 import { Cause, Data, Deferred, Effect, Exit, FiberSet } from "effect";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
+import * as Failure from "../../effect/failure-classification.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { createLogger } from "../../logger.js";
 import { isRecord } from "../../utils.js";
@@ -300,7 +301,9 @@ export const stopRegisteredRunners = (
 			const failures = outcomes.filter(Exit.isFailure);
 			if (failures.length > 0) {
 				return yield* new RunnerProcessError({
-					message: failures.map((exit) => Cause.pretty(exit.cause)).join("\n"),
+					message: failures
+						.map((exit) => Failure.renderCause(exit.cause))
+						.join("\n"),
 				});
 			}
 		}),
@@ -889,7 +892,7 @@ export const makeProcessSessionRunner = (
 						failed(
 							sessionId,
 							entry,
-							runnerFailure("spawn runner", Cause.squash(cause)),
+							runnerFailure("spawn runner", Failure.squashCause(cause)),
 						);
 					}),
 				),
@@ -1368,7 +1371,7 @@ export const makeProcessSessionRunner = (
 							entry.recovering = false;
 							entry.failure = runnerFailure(
 								"recover runner",
-								Cause.squash(exit.cause),
+								Failure.squashCause(exit.cause),
 							);
 							entry.connection?.destroy();
 							evict(registration.sessionId, entry);
@@ -1892,14 +1895,14 @@ export const makeProcessSessionRunner = (
 							command.type !== "send-turn" ||
 							!turn ||
 							closing ||
-							Cause.isInterruptedOnly(cause)
+							Failure.isInterruptedOnly(cause)
 						)
 							return Effect.void;
 						const cleanup = failRunnerTurn(
 							emit,
 							command.sinkId,
 							turn,
-							runnerFailure(command.type, Cause.squash(cause)),
+							runnerFailure(command.type, Failure.squashCause(cause)),
 							driver.driverKind,
 						).pipe(
 							Effect.ensuring(Effect.sync(() => sinks.delete(command.sinkId))),

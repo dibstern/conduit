@@ -331,12 +331,13 @@ describe("Persistence Effect", () => {
 				{ migration_id: 60, name: "daemon_store_imports" },
 				{ migration_id: 61, name: "sessions_lineage" },
 				{ migration_id: 62, name: "legacy_forks" },
-				{ migration_id: 63, name: "goal_check_metadata" },
-				{ migration_id: 64, name: "message_part_surfacing" },
-				{ migration_id: 65, name: "sessions_settled_shelf_index" },
-				{ migration_id: 66, name: "surfacing_marks" },
-				{ migration_id: 67, name: "message_part_read" },
-				{ migration_id: 68, name: "turn_recaps" },
+				{ migration_id: 63, name: "sessions_archived" },
+				{ migration_id: 64, name: "goal_check_metadata" },
+				{ migration_id: 65, name: "message_part_surfacing" },
+				{ migration_id: 66, name: "sessions_settled_shelf_index" },
+				{ migration_id: 67, name: "surfacing_marks" },
+				{ migration_id: 68, name: "message_part_read" },
+				{ migration_id: 69, name: "turn_recaps" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

@@ -11,9 +11,9 @@ import {
 	selectInstance,
 } from "../../stores/discovery.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
-import { sessionState } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { mockClaudeAccount } from "../../stories/mocks.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import ModelVariant from "./ModelVariant.svelte";
 
 const onOpen = fn();
@@ -105,7 +105,7 @@ const meta = {
 		composerPickerState.request = null;
 		clearDiscoveryState();
 		// A draft changes local discovery state without a session or RPC connection.
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		onOpen.mockClear();
 		seed();
 		const width = Object.getOwnPropertyDescriptor(window, "innerWidth");
@@ -256,7 +256,7 @@ export const PhoneTapCycle: Story = {
 		await assertMeter(button, 4, 0);
 		for (const [variant, label, filled] of [
 			["low", "LOW", 1],
-			["medium", "MED", 2],
+			["medium", "MEDIUM", 2],
 			["high", "HIGH", 3],
 			["max", "MAX", 4],
 			["low", "LOW", 1],
@@ -367,7 +367,7 @@ export const PhoneKeyboard: Story = {
 		const button = within(canvasElement).getByTestId("variant-badge");
 		button.focus();
 		await userEvent.keyboard("{Enter} ");
-		await waitFor(() => expect(button).toHaveTextContent("MED"));
+		await waitFor(() => expect(button).toHaveTextContent("MEDIUM"));
 		await expect(
 			within(canvasElement.ownerDocument.body).queryByTestId(
 				"variant-dropdown",

@@ -123,15 +123,10 @@ describe("subscription RPC contracts", () => {
 		expect(Contracts.WsRpcGroup.requests.get("SubscribeShell")).toBe(member);
 		expect(Frontend.SubscribeShell).toBe(member);
 		const decodePayload = Schema.decodeUnknownSync(member.payloadSchema);
-		for (const payload of [
-			{ projectSlug: "project" },
-			{ projectSlug: "project", resumeFromSequence: 42 },
-		]) {
+		for (const payload of [{}, { resumeFromSequence: 42 }]) {
 			expect(decodePayload(payload)).toEqual(payload);
 		}
-		expect(() =>
-			decodePayload({ projectSlug: "project", resumeFromSequence: "42" }),
-		).toThrow();
+		expect(() => decodePayload({ resumeFromSequence: "42" })).toThrow();
 		expect(RpcSchema.isStreamSchema(member.successSchema)).toBe(true);
 		expect(member.successSchema.failure).toBe(Contracts.WsRpcError);
 		const decode = Schema.decodeUnknownSync(member.successSchema.success);

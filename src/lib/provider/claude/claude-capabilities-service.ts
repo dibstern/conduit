@@ -10,7 +10,6 @@ import {
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
-	Cause,
 	Clock,
 	Context,
 	Deferred,
@@ -22,6 +21,7 @@ import {
 	Ref,
 	Schema,
 } from "effect";
+import * as Failure from "../../effect/failure-classification.js";
 import { ClaudeBoundaryError } from "../event-sink-errors.js";
 import type { ProbeResult } from "./claude-capabilities-probe.js";
 import {
@@ -325,11 +325,11 @@ const makeClaudeCapabilitiesServiceWithCache = (
 							Exit.isFailure(exit)
 								? Effect.gen(function* () {
 										const error = Option.getOrElse(
-											Cause.failureOption(exit.cause),
+											Failure.firstFailure(exit.cause),
 											() =>
 												new ClaudeBoundaryError({
 													operation: "probeCapabilities",
-													cause: Cause.squash(exit.cause),
+													cause: Failure.squashCause(exit.cause),
 												}),
 										);
 										const failedAt = yield* Clock.currentTimeMillis;

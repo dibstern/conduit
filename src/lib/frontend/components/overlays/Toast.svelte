@@ -5,8 +5,9 @@
   Desktop: a stack of raised cards anchored bottom-right. Phone: one
   full-width sheet, its toasts divided by hairlines. Both sit on top of the
   composer, never over it: InputArea publishes --composer-clearance, which is
-  0 wherever no composer is mounted. The store keeps at most two toasts; the
-  newest is on top.
+  0 wherever no composer is mounted. The phone sheet publishes --toast-clearance
+  to lift the New session FAB. The store dedupes identical cards unless they
+  carry primary or secondary actions, and keeps two at most; newest on top.
 
   Each card is a bold title, an optional body line with one emphasised term,
   and an action row: primary and secondary actions in order from the left,
@@ -30,6 +31,23 @@
 	} as const;
 
 	const SWIPE_DISMISS_PX = 48;
+
+	function publishToastClearance(sheet: HTMLElement) {
+		const root = document.documentElement;
+		const phone = window.matchMedia("(max-width: 767.98px)");
+		const publish = () => {
+			root.style.setProperty("--toast-clearance", `${phone.matches ? sheet.offsetHeight : 0}px`);
+		};
+		const observer = new ResizeObserver(publish);
+		observer.observe(sheet);
+		phone.addEventListener("change", publish);
+		publish();
+		return () => {
+			observer.disconnect();
+			phone.removeEventListener("change", publish);
+			root.style.removeProperty("--toast-clearance");
+		};
+	}
 
 	// `translate`, not `transform`: the entry animation fills `both`, and an
 	// animated transform would override the inline one for the card's lifetime.
@@ -83,6 +101,7 @@
 
 {#if uiState.toasts.length > 0 && uiState.sheetToastHost === null}
 	<div
+		{@attach publishToastClearance}
 		class="pointer-events-none fixed z-[var(--z-toast)] flex flex-col max-md:pointer-events-auto max-md:inset-x-0 max-md:bottom-[var(--composer-clearance,0px)] max-md:divide-y max-md:divide-border-subtle max-md:rounded-t-[18px] max-md:border-t max-md:border-border max-md:bg-bg-alt max-md:pb-[max(0px,calc(env(safe-area-inset-bottom)_-_var(--composer-clearance,0px)))] max-md:shadow-modal md:right-[14px] md:bottom-[calc(var(--composer-clearance,0px)+14px)] md:w-[310px] md:gap-2"
 	>
 		{#each [...uiState.toasts].reverse() as toast (toast.id)}

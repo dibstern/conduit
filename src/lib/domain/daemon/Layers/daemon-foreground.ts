@@ -3,7 +3,6 @@ import { createServer } from "node:net";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import {
-	Cause,
 	Data,
 	Deferred,
 	Effect,
@@ -20,6 +19,7 @@ import {
 } from "../../../contracts/provider-instance.js";
 import {
 	type DaemonConfig,
+	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	defaultDaemonConfig,
 	loadDaemonConfigStartupResult,
@@ -29,6 +29,7 @@ import type {
 	DaemonStatus,
 } from "../../../daemon/daemon-types.js";
 import { isDaemonRunning } from "../../../daemon/daemon-utils.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../../../env.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { setLogFile, setLogFormat, setLogLevel } from "../../../logger.js";
@@ -152,6 +153,10 @@ const buildInitialRuntimeConfig = (
 			persisted?.autoSettleAfterDays === undefined
 				? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 				: persisted.autoSettleAfterDays,
+		autoArchiveAfterDays:
+			persisted?.autoArchiveAfterDays === undefined
+				? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS
+				: persisted.autoArchiveAfterDays,
 		...(persisted?.worktreeCleanup !== undefined && {
 			worktreeCleanup: persisted.worktreeCleanup,
 		}),
@@ -182,7 +187,7 @@ const runRuntimeEffect = <R, A, E>(
 					resolve(exit.value);
 					return;
 				}
-				reject(Cause.squash(exit.cause));
+				reject(Failure.squashCause(exit.cause));
 			},
 		});
 	});
@@ -519,7 +524,7 @@ export async function startForegroundDaemon(
 						}
 					}).pipe(
 						Effect.catchAllCause((cause) =>
-							Cause.isInterruptedOnly(cause)
+							Failure.isInterruptedOnly(cause)
 								? Effect.failCause(cause)
 								: Effect.logError(
 										`Failed to recover relay for project "${project.slug}"`,

@@ -18,6 +18,7 @@ import {
 import {
 	type DaemonConfigLoadError,
 	DaemonConfigUnreadable,
+	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	defaultDaemonConfig,
 	getConfigDir,
@@ -356,6 +357,10 @@ export function createProjectRelayLayers({
 									current.autoSettleAfterDays === undefined
 										? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 										: current.autoSettleAfterDays,
+								autoArchiveAfterDays:
+									current.autoArchiveAfterDays === undefined
+										? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS
+										: current.autoArchiveAfterDays,
 								...(current.worktreeCleanup !== undefined && {
 									worktreeCleanup: current.worktreeCleanup,
 								}),
@@ -493,16 +498,25 @@ export function createProjectRelayLayers({
 	const sharedStore = config.daemonConfigContext
 		? Context.getOption(config.daemonConfigContext, PersistenceStore)
 		: Option.none();
+	const sharedBus = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		SessionEventBusTag,
+	);
+	// Returning the daemon instance adds no ownership to the relay scope.
+	// Keep one layer reference so every writer and subscriber uses the same bus.
+	const sessionEventBusLayer = Option.isSome(sharedBus)
+		? Layer.sync(SessionEventBusTag, () => sharedBus.value)
+		: SessionEventBusLive;
 	const persistenceEffectLayer = (
 		Option.isSome(sharedStore)
 			? makePersistenceProjectLayer(config.slug, {
-					sessionEventBusLayer: SessionEventBusLive,
+					sessionEventBusLayer,
 				}).pipe(Layer.provideMerge(Layer.succeedContext(sharedStore.value)))
 			: makePersistenceEffectLayer(
 					config.persistenceDbPath,
 					config.slug,
 					undefined,
-					SessionEventBusLive,
+					sessionEventBusLayer,
 				)
 	).pipe(Layer.provideMerge(activityReaders));
 	// Standalone WebSocket routing resolves only sessions owned by this relay.
@@ -570,7 +584,7 @@ export function createProjectRelayLayers({
 				configLayer,
 				loggerLayer,
 				openCodeApiLayer,
-				SessionEventBusLive,
+				sessionEventBusLayer,
 			),
 		),
 	);
@@ -677,7 +691,7 @@ export function createProjectRelayLayers({
 			Layer.mergeAll(
 				persistenceEffectLayer,
 				sessionWorkspaceLayer,
-				SessionEventBusLive,
+				sessionEventBusLayer,
 				alertLedgerLayer,
 				// The same reference makeRelayStateLive merges, so it memoizes to the
 				// one PubSub SubscribeAlerts reads.
@@ -709,8 +723,8 @@ export function createProjectRelayLayers({
 		openCodeApiLayer,
 		persistenceEffectLayer,
 		// The engine commits input.sent through commit-and-signal, which
-		// announces on the relay's one bus.
-		SessionEventBusLive,
+		// announces on the same bus as the relay's subscribers.
+		sessionEventBusLayer,
 		providerRuntimeIngestionLayer,
 		openCodeInstancesLayer,
 		instanceManagementLayer,
@@ -781,7 +795,7 @@ export function createProjectRelayLayers({
 			Layer.mergeAll(
 				configLayer,
 				loggerLayer,
-				SessionEventBusLive,
+				sessionEventBusLayer,
 				persistenceEffectLayer,
 			),
 		),
@@ -873,6 +887,7 @@ export function createProjectRelayLayers({
 	// (provides sseTracker, getMonitoringState).
 	const relayStateAndBridges = Layer.provideMerge(
 		makeRelayStateLive({
+			sessionEventBusLayer,
 			titleQueryFactory: config.titleQuery ?? claudeSdk.titleQuery,
 			...(testSendLimit !== undefined && { testSendLimit }),
 		}),
@@ -958,8 +973,7 @@ export function createProjectRelayLayers({
 		PermissionTimeoutLive,
 		sessionLifecycleWiringLayer,
 	).pipe(Layer.provide(baseLayers));
-	// The inbox drains on the relay's one bus (memoised by layer reference).
-	const inboxLayer = SessionInboxLive.pipe(Layer.provide(SessionEventBusLive));
+	const inboxLayer = SessionInboxLive.pipe(Layer.provide(sessionEventBusLayer));
 	// The borrowed daemon tracer goes BENEATH everything, not beside it:
 	// Layer.setTracer patches a FiberRef in its own build fiber, so a merged
 	// tracer never reaches fibers forked while building sibling layers
@@ -972,32 +986,6 @@ export function createProjectRelayLayers({
 					wiringLayers,
 					inboxLayer,
 					SessionWorkspaceHintReactorLive,
-					// Post-commit row changes include status and attention stamps.
-					// Transcript-only deltas stay quiet; a dropped advance recovers conservatively.
-					Layer.scopedDiscard(
-						Effect.gen(function* () {
-							const activity = yield* SessionActivityTag;
-							const advances =
-								yield* (yield* SessionEventBusTag).subscribeAdvances();
-							yield* advances.pipe(
-								Stream.filter(
-									(advance) =>
-										advance.dropped === true ||
-										advance.collections.includes("sidebar"),
-								),
-								Stream.runForEach((advance) =>
-									Effect.sync(() => {
-										for (const id of [
-											...advance.sessionIds,
-											...advance.removedSessionIds,
-										])
-											activity.changed(id);
-									}),
-								),
-								Effect.forkScoped,
-							);
-						}),
-					),
 				),
 				fullBaseLayers,
 			),

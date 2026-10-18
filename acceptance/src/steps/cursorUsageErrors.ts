@@ -26,7 +26,6 @@ export const cursorUsageErrorsHandlers: StepHandler[] = [
 					input: 1_200,
 					output: 340,
 					cache: { read: 118_800, write: 0 },
-					context_window: 0,
 				},
 				contextTokens: 120_000,
 				...(match[1] === "unavailable" ? {} : { cost: Number(match[1]) }),

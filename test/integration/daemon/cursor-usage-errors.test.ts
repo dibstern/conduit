@@ -314,6 +314,9 @@ describe("Cursor usage, errors and cancellation through daemon and runner", () =
 				tokens: testCase.tokens,
 				contextTokens: testCase.contextTokens,
 			});
+			expect(completed.at(-1)?.data["tokens"]).not.toHaveProperty(
+				"contextWindow",
+			);
 			expect(completed.at(-1)?.data).not.toHaveProperty("cost");
 			const assistant = (await browser.history(id))
 				.filter(({ role }) => role === "assistant")
@@ -327,9 +330,9 @@ describe("Cursor usage, errors and cancellation through daemon and runner", () =
 						read: testCase.tokens.cacheRead,
 						write: testCase.tokens.cacheWrite,
 					},
-					context_window: 0,
 				},
 			});
+			expect(assistant?.tokens).not.toHaveProperty("context_window");
 			expect(
 				snapshot(fixture, id).events.filter(
 					({ type }) => type === "turn.error",

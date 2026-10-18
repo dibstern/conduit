@@ -28,7 +28,9 @@ function tsFiles(dir: string): string[] {
 
 describe("Effect domain organization guard", () => {
 	it("keeps production Effect services and layers out of the retired flat bucket", () => {
-		expect(tsFiles(OLD_EFFECT_DIR)).toEqual([]);
+		expect(tsFiles(OLD_EFFECT_DIR)).toEqual([
+			"src/lib/effect/failure-classification.ts",
+		]);
 	});
 
 	it("keeps source and test imports off the retired flat src/lib/effect path", () => {

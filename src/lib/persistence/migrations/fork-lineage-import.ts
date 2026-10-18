@@ -13,9 +13,10 @@ import { join } from "node:path";
 import { Reactivity } from "@effect/experimental";
 import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { Cause, type ConfigError, Data, Effect, Layer, Schema } from "effect";
+import { type ConfigError, Data, Effect, Layer, Schema } from "effect";
 import type { DaemonConfig } from "../../daemon/config-persistence.js";
 import { deserializeRecent } from "../../daemon/recent-projects.js";
+import * as Failure from "../../effect/failure-classification.js";
 import { refreshSidebar, rerootSession } from "../effect/sidebar-projection.js";
 import { projectEventsDbPath } from "../project-storage.js";
 
@@ -345,10 +346,10 @@ export const migrateForkLineage = (
 		if (warning !== undefined) yield* Effect.logWarning(warning);
 	}).pipe(
 		Effect.catchAllCause((cause) =>
-			Cause.isInterruptedOnly(cause)
+			Failure.isInterruptedOnly(cause)
 				? Effect.failCause(cause)
 				: Effect.logWarning(
-						`Fork lineage import incomplete; startup continues and the source is retained. ${Cause.pretty(cause)}`,
+						`Fork lineage import incomplete; startup continues and the source is retained. ${Failure.renderCause(cause)}`,
 					),
 		),
 	);

@@ -7,12 +7,12 @@ import {
 	getOrCreateSessionActivity,
 	getOrCreateSessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	applyTranscriptEnvelope,
 	deriveTranscriptMessages,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import { detailRowsOf } from "../../helpers/detail-rows.js";
 
@@ -48,7 +48,7 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 describe("RewindBanner", () => {
 	beforeEach(() => {
 		rpcSpy.mockClear();
-		sessionState.currentId = "session-1";
+		openSessionForSetup("session-1", "project-a");
 		getOrCreateSessionActivity("session-1");
 		uiState.rewindActive = true;
 		uiState.toasts = [];
@@ -67,7 +67,7 @@ describe("RewindBanner", () => {
 	afterEach(() => {
 		cleanup();
 		clearMessages();
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		uiState.rewindActive = false;
 		uiState.rewindSelectedUuid = null;
 	});

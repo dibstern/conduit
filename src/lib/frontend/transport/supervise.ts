@@ -29,7 +29,7 @@
 // show here — `resumeStream` hides them, and ends each one in `synchronized`.
 
 import {
-	Cause,
+	type Cause,
 	Chunk,
 	Clock,
 	Duration,
@@ -39,6 +39,7 @@ import {
 	Stream,
 } from "effect";
 import type { WsRpcError } from "../../contracts/ws-rpc.js";
+import * as Failure from "../../effect/failure-classification.js";
 
 export type FeedStatus =
 	| { readonly _tag: "cold" }
@@ -144,7 +145,7 @@ export const supervise = <A extends object>(
 				});
 
 			const restartAfter = (cause: Cause.Cause<WsRpcError>) => {
-				const defects = Cause.defects(cause);
+				const defects = Failure.defects(cause);
 				if (Chunk.isNonEmpty(defects)) {
 					const defect = Chunk.headNonEmpty(defects);
 					return Effect.zipRight(
@@ -152,7 +153,7 @@ export const supervise = <A extends object>(
 						backOff(defect instanceof Error ? defect.message : String(defect)),
 					);
 				}
-				const message = Cause.failureOption(cause).pipe(
+				const message = Failure.firstFailure(cause).pipe(
 					Option.match({
 						onNone: () => "The feed failed",
 						onSome: (error) => error.message,
@@ -177,8 +178,8 @@ export const supervise = <A extends object>(
 				// A bare interruption is the consumer letting go: resumeStream has
 				// already restarted every interruption the transport caused.
 				Stream.catchAllCause((cause) =>
-					Cause.isInterruptedOnly(cause)
-						? Stream.failCause(Cause.stripFailures(cause))
+					Failure.isInterruptedOnly(cause)
+						? Stream.failCause(Failure.withoutFailures(cause))
 						: Stream.execute(restartAfter(cause)),
 				),
 			);

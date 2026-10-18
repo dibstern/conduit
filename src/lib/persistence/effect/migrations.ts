@@ -45,6 +45,7 @@ import {
 	SESSION_PROJECT_SCOPE_MIGRATION,
 	SESSION_SIDEBAR_MIGRATION,
 	SESSION_SIDEBAR_TOMBSTONES_MIGRATION,
+	SESSIONS_ARCHIVED_MIGRATION,
 	SESSIONS_AUTO_SETTLE_MIGRATION,
 	SESSIONS_CLAUDE_WORKTREE_STATE_MIGRATION,
 	SESSIONS_FORKED_FROM_MIGRATION,
@@ -343,6 +344,9 @@ const expectedTableColumns = {
 		"seen_version",
 		"pending_rewind_message_id",
 		"forked_from",
+		"archived_at",
+		"archived_automatically",
+		"unarchived_at",
 	],
 	tool_content: ["tool_id", "session_id", "content", "created_at"],
 	turns: [
@@ -495,6 +499,9 @@ const appendedSessionColumns = [
 	"pending_rewind_message_id",
 	"project_id",
 	"forked_from",
+	"archived_at",
+	"archived_automatically",
+	"unarchived_at",
 ] as const;
 
 function sameStrings(
@@ -1234,7 +1241,12 @@ export const effectMigrationEntries = {
 			WHERE id IN (SELECT value FROM json_each(${JSON.stringify(changed.map(({ id }) => id))}))`;
 		yield* refreshSidebar([...affected], version);
 	}),
-	"0063_goal_check_metadata": Effect.gen(function* () {
+	"0063_sessions_archived": runAddColumnMigrationIfMissing(
+		"sessions",
+		"archived_at",
+		readMigrationSql(SESSIONS_ARCHIVED_MIGRATION),
+	),
+	"0064_goal_check_metadata": Effect.gen(function* () {
 		const statements = splitSqlStatements(
 			readMigrationSql(GOAL_CHECK_METADATA_MIGRATION),
 		);
@@ -1248,7 +1260,7 @@ export const effectMigrationEntries = {
 				);
 		}
 	}),
-	"0064_message_part_surfacing": Effect.gen(function* () {
+	"0065_message_part_surfacing": Effect.gen(function* () {
 		const statements = splitSqlStatements(
 			readMigrationSql(MESSAGE_PART_SURFACING_MIGRATION),
 		);
@@ -1267,16 +1279,16 @@ export const effectMigrationEntries = {
 				);
 		}
 	}),
-	"0065_sessions_settled_shelf_index": executeSqlStatements(
+	"0066_sessions_settled_shelf_index": executeSqlStatements(
 		readMigrationSql(SESSIONS_SETTLED_SHELF_INDEX_MIGRATION),
 	),
-	"0066_surfacing_marks": executeSqlStatements(
+	"0067_surfacing_marks": executeSqlStatements(
 		readMigrationSql(SURFACING_MARKS_MIGRATION),
 	),
-	"0067_message_part_read": executeSqlStatements(
+	"0068_message_part_read": executeSqlStatements(
 		readMigrationSql(MESSAGE_PART_READ_MIGRATION),
 	),
-	"0068_turn_recaps": executeSqlStatements(
+	"0069_turn_recaps": executeSqlStatements(
 		readMigrationSql(TURN_RECAPS_MIGRATION),
 	),
 } satisfies Record<

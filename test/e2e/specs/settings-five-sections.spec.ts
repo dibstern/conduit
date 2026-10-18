@@ -20,6 +20,7 @@ const sections = [
 		"[data-testid=claude-setting-defaultPermissionMode-select]",
 	],
 	["surfacing", "Surfacing", "[data-testid=surfacing-settings-general]"],
+	["archived", "Archived", "section[aria-label='Archived sessions']"],
 	["usage", "Usage", "#usage-settings"],
 	["server", "Server", "#instances-settings"],
 ] as const;
@@ -45,7 +46,7 @@ for (const [viewportName, viewport] of [
 	["desktop", { width: 1440, height: 900 }],
 	["phone", { width: 390, height: 844 }],
 ] as const) {
-	test.describe(`Settings five sections on ${viewportName}`, () => {
+	test.describe(`Settings sections on ${viewportName}`, () => {
 		test.use({ recording: "chat-simple", viewport });
 
 		test("visits every section with computer grouping, scroll and focus preserved", async ({

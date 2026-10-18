@@ -660,6 +660,46 @@ function projectSidebar(version = 0) {
 
 describe("ReadQueryEffect.listSessions", () => {
 	it.effect(
+		"uses the same archive filters for settled search rows and totals",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				for (const id of ["live", "archived", "pinned", "active"])
+					yield* seedSession(id, { title: "Match" });
+				yield* seedSession("child", { title: "Match", parentId: "archived" });
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`UPDATE sessions SET settled_at = 10 WHERE id != 'active'`;
+				yield* sql`UPDATE sessions SET archived_at = 20 WHERE id = 'archived'`;
+				yield* sql`UPDATE sessions SET pinned_at = 11 WHERE id = 'pinned'`;
+				yield* projectSidebar();
+				const readQuery = yield* makeReadQueryEffect;
+				for (const { archiveFilter, expected } of [
+					{ archiveFilter: { excludeArchived: true }, expected: ["live"] },
+					{
+						archiveFilter: { excludeArchived: false },
+						expected: ["archived", "child", "live"],
+					},
+					{ archiveFilter: {}, expected: ["archived", "child", "live"] },
+					{ archiveFilter: { archivedOnly: true }, expected: ["archived"] },
+				]) {
+					const options = { titleQuery: "match", ...archiveFilter };
+					const rows = yield* readQuery.listSessions(scope, options);
+					expect(
+						rows
+							.filter(
+								(row) => row.settled_at !== null && row.pinned_at === null,
+							)
+							.map((row) => row.id)
+							.sort(),
+					).toEqual(expected);
+					expect(yield* readQuery.countSettledSessions(scope, options)).toBe(
+						expected.length,
+					);
+				}
+			}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect(
 		"counts the full settled shelf with project, root, and literal title filters",
 		() =>
 			Effect.gen(function* () {
@@ -734,7 +774,7 @@ describe("ReadQueryEffect.listSessions", () => {
 			).toEqual(["z", "y"]);
 			expect(
 				(yield* readQuery.listSessions(scope, {
-					before: { updatedAt: 200, id: "y" },
+					before: { at: 200, id: "y" },
 					limit: 2,
 				})).map((row) => row.id),
 			).toEqual(["x", "a"]);

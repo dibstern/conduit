@@ -154,11 +154,15 @@ describe("Session Rows read paths", () => {
 						const cache = createSessionGitCache(async () => undefined);
 						const readAll = Effect.gen(function* () {
 							const relay = yield* operations.serviceListSessions();
-							const shell = yield* Stream.runHead(subscribeShell());
+							const shell = yield* Stream.runHead(
+								subscribeShell().pipe(
+									Stream.filter((frame) => frame._tag !== "projects"),
+								),
+							);
 							const family = yield* Stream.runHead(
 								subscribeSessionFamily({ sessionId }),
 							);
-							const daemon = yield* listDaemonSessions(configDir, {}, cache);
+							const daemon = yield* listDaemonSessions({}, cache);
 							expect(daemon.availability).toEqual([
 								{ projectSlug: slug, available: true },
 							]);

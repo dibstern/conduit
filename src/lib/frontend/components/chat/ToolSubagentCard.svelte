@@ -2,7 +2,7 @@
 
 <script lang="ts">
 	import type { ToolMessage } from "../../types.js";
-	import { switchToSession } from "../../stores/session.svelte.js";
+	import { selection } from "../../stores/selection.svelte.js";
 	import { subagentSessionId as findSubagentSessionId } from "../../utils/subagent-tools.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { fmtDuration, toolVerb } from "../../utils/turns.js";
@@ -73,7 +73,7 @@
 	function navigateToSubagent(e: MouseEvent) {
 		e.stopPropagation();
 		if (subagentSessionId) {
-			switchToSession(subagentSessionId);
+			selection.open(subagentSessionId);
 		}
 	}
 

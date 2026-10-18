@@ -1,4 +1,4 @@
-import { Cause, Effect, Either, PubSub } from "effect";
+import { Effect, Either, PubSub } from "effect";
 import { accountRefFromSelection } from "../account-directory.js";
 import type { Account, AccountRef } from "../contracts/account.js";
 import type { AccountId } from "../contracts/provider-instance.js";
@@ -28,6 +28,7 @@ import {
 	cleanupSessionWorktrees,
 	prepareSessionWorktreeDeletion,
 } from "../domain/relay/Services/session-worktree-deletion.js";
+import * as Failure from "../effect/failure-classification.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import {
@@ -350,7 +351,7 @@ export const deleteSessionForClient = ({
 					Effect.succeed({
 						plan: undefined,
 						warnings: [
-							`Worktrees kept because inspection failed: ${Cause.pretty(cause).slice(0, 2_000)}`,
+							`Worktrees kept because inspection failed: ${Failure.renderCause(cause).slice(0, 2_000)}`,
 						],
 					}),
 				),
@@ -369,7 +370,7 @@ export const deleteSessionForClient = ({
 					...(yield* cleanupSessionWorktrees(id, inspection.plan).pipe(
 						Effect.catchAllCause((cause) =>
 							Effect.succeed([
-								`Worktree cleanup failed: ${Cause.pretty(cause).slice(0, 2_000)}`,
+								`Worktree cleanup failed: ${Failure.renderCause(cause).slice(0, 2_000)}`,
 							]),
 						),
 					)),
@@ -437,6 +438,31 @@ export const setSessionSettledForClient = ({
 			if (bus._tag === "Some")
 				yield* PubSub.publish(bus.value, DaemonEvent.DaemonSessionsChanged());
 			log.info(`client=${clientId} Set settled=${settled}: ${sessionId}`);
+		}
+	});
+
+export const setSessionArchivedForClient = ({
+	clientId,
+	sessionId,
+	archived,
+}: {
+	readonly clientId: string;
+	readonly sessionId: string;
+	readonly archived: boolean;
+}) =>
+	Effect.gen(function* () {
+		const service = yield* SessionManagerServiceTag;
+		const log = yield* LoggerTag;
+		if (
+			yield* service.setSessionArchived(
+				sessionId,
+				archived ? { archived: true } : { archived: false },
+			)
+		) {
+			const bus = yield* Effect.serviceOption(DaemonEventBusTag);
+			if (bus._tag === "Some")
+				yield* PubSub.publish(bus.value, DaemonEvent.DaemonSessionsChanged());
+			log.info(`client=${clientId} Set archived=${archived}: ${sessionId}`);
 		}
 	});
 

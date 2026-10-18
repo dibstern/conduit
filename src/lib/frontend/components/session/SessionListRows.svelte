@@ -3,7 +3,8 @@
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import type { SessionProjection } from "../../stores/session.svelte.js";
-	import { isSessionSnoozed, isSessionWoken, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { isSessionSnoozed, isSessionWoken, sessionState } from "../../stores/session.svelte.js";
+	import { selection } from "../../stores/selection.svelte.js";
 	import { getSessionHref } from "../../stores/router.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
@@ -22,8 +23,9 @@
 	import Icon from "../ui/Icon.svelte";
 	import SessionStatusGlyph from "../ui/SessionStatusGlyph.svelte";
 
-	let { arrangement, settledCount, isEmpty, emptyMessage, statusFilter, searching, filteredLength, snoozedShelfOpen, settledShelfOpen, pagerPending, unavailableProjectLabels, selectMode, selectedSessionIds, menuOpenId, renamingSessionId, getProjectLabel, getProjectAccent, oncontextmenu, ontoggleselection, onrenamestart, onrenameend }: {
+	let { arrangement, fullArrangement, settledCount, isEmpty, emptyMessage, statusFilter, searching, filteredLength, snoozedShelfOpen, settledShelfOpen, pagerPending, unavailableProjectLabels, selectMode, selectedSessionIds, menuOpenId, renamingSessionId, getProjectLabel, getProjectAccent, oncontextmenu, ontoggleselection, onrenamestart, onrenameend }: {
 		arrangement: SessionProjection;
+		fullArrangement: SessionProjection;
 		settledCount: { count: number; exact: boolean };
 		isEmpty: boolean;
 		emptyMessage: string;
@@ -62,7 +64,7 @@
 			rpc("UnsnoozeSession", { sessionId: session.id, originId: getBrowserClientId() })
 				.catch(toastFailure("Couldn't clear the wake"));
 		}
-		if (session.id !== sessionState.currentId) switchToSession(session.id, session.projectSlug);
+		if (session.id !== sessionState.currentId) selection.open(session.id);
 	}
 </script>
 
@@ -136,12 +138,12 @@
 			</div>
 		{:else}
 			{#if arrangement.pinned.length > 0}
-				<div class="session-group-label flex items-center gap-[6px] pt-[12px] pb-[4px] px-[10px] text-[12px] font-medium text-text-dimmer font-sans"><span>Pinned</span>{" "}<span class="font-mono text-[11px] font-normal">{arrangement.pinned.length}</span></div>
+				<div class="session-group-label flex items-center gap-[6px] pt-[12px] pb-[4px] px-[10px] text-[12px] font-medium text-text-dimmer font-sans"><span>Pinned</span>{" "}<span class="font-mono text-[11px] font-normal">{fullArrangement.pinned.length}</span></div>
 				{#each arrangement.pinned as s (s.id)}{@render sessionRow(s)}{/each}
 			{/if}
 			{#each arrangement.sections as section (section.key)}
 					<div class="session-group-label flex items-center gap-[6px] pt-[12px] pb-[4px] px-[10px] text-[12px] font-medium text-text-dimmer font-sans">
-						<span>{section.label}</span>{" "}<span class="font-mono text-[11px] font-normal">{section.sessions.length}</span>
+						<span>{section.label}</span>{" "}<span class="font-mono text-[11px] font-normal">{fullArrangement.sections.find((group) => group.key === section.key)?.sessions.length ?? section.sessions.length}</span>
 					</div>
 					{#each section.sessions as s (s.id)}
 						{@render sessionRow(s)}
@@ -182,15 +184,15 @@
 				>
 					<Icon name={snoozedShelfOpen ? "chevron-down" : "chevron-right"} size={12} />
 					<SessionStatusGlyph snoozed />
-					<span>Snoozed</span>{" "}<span class="font-mono text-[11px] font-normal">{arrangement.snoozed.length}</span>
+					<span>Snoozed</span>{" "}<span class="font-mono text-[11px] font-normal">{fullArrangement.snoozed.length}</span>
 				</TextButton>
 				<div id="snoozed-shelf-rows">
 					{#if snoozedShelfOpen}
 						{#each searching || selectMode || snoozedExpanded ? arrangement.snoozed : arrangement.snoozed.slice(0, 2) as s (s.id)}
 							{@render sessionRow(s)}
 						{/each}
-						{#if !searching && !selectMode && !snoozedExpanded && arrangement.snoozed.length > 2}
-							<TextButton tone="dimmer" class="min-h-[44px] md:min-h-[30px] px-[34px] text-[12px]" data-testid="snoozed-shelf-more" onclick={() => { snoozedExpanded = true; }}>+ {arrangement.snoozed.length - 2} more</TextButton>
+						{#if !searching && !selectMode && !snoozedExpanded && fullArrangement.snoozed.length > 2}
+							<TextButton tone="dimmer" class="min-h-[44px] md:min-h-[30px] px-[34px] text-[12px]" data-testid="snoozed-shelf-more" onclick={() => { snoozedExpanded = true; }}>+ {fullArrangement.snoozed.length - 2} more</TextButton>
 						{/if}
 					{/if}
 				</div>
@@ -205,7 +207,7 @@
 		     intersection is the list's own viewport, and after the rows so it is
 		     only reached at the bottom. -->
 		<div id="session-list-sentinel" class="h-px" bind:this={sentinelEl}></div>
-		<SessionPager {sentinelEl} />
+		<SessionPager {sentinelEl} hasMore={pagerPending} />
 
 		{#if pagerPending && (searching || scrolled)}
 			<div

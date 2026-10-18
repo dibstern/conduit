@@ -49,13 +49,17 @@ import {
 	type SaveProjectResult,
 } from "../../relay/Services/project-management-service.js";
 import { ScanServiceTag } from "../../relay/Services/scan-service.js";
+import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
 import { CategorySet } from "../Services/category-set.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
-import { listDaemonSessions as listEffectDaemonSessions } from "../Services/daemon-session-reader.js";
+import {
+	listArchivedSessions,
+	listDaemonSessions as listEffectDaemonSessions,
+} from "../Services/daemon-session-reader.js";
 import { DaemonStoreAvailability } from "../Services/daemon-store-availability.js";
 import type { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
@@ -182,6 +186,7 @@ export const RelayFactoryLive = (
 	| InstanceHealthCheckTag
 	| DaemonEventBusTag
 	| SessionActivityTag
+	| SessionEventBusTag
 	| ConfigPersistenceTag
 	| PortScannerTag
 	| PushManagerTag
@@ -206,6 +211,7 @@ export const RelayFactoryLive = (
 			const instanceState = yield* InstanceManagerStateTag;
 			const eventBus = yield* DaemonEventBusTag;
 			const activity = yield* SessionActivityTag;
+			const sessionEventBus = yield* SessionEventBusTag;
 			const cleanupQueue = yield* Effect.serviceOption(WorktreeCleanupQueueTag);
 			const configPersistence = yield* ConfigPersistenceTag;
 			const portScanner = yield* PortScannerTag;
@@ -232,8 +238,15 @@ export const RelayFactoryLive = (
 			const daemonSessionQueryAdapter = Context.make(
 				DaemonSessionQueryServiceTag,
 				{
+					listArchived: (options) =>
+						listArchivedSessions(options).pipe(
+							Effect.provide(daemonContext),
+							Effect.mapError(
+								(cause) => new DaemonSessionQueryServiceError({ cause }),
+							),
+						),
 					list: (options) =>
-						listEffectDaemonSessions(configDir, options).pipe(
+						listEffectDaemonSessions(options).pipe(
 							Effect.provide(daemonContext),
 							Effect.mapError(
 								(cause) => new DaemonSessionQueryServiceError({ cause }),
@@ -344,12 +357,6 @@ export const RelayFactoryLive = (
 					Effect.gen(function* () {
 						const listProjects = getEffectProjectInfos.pipe(
 							Effect.provide(daemonContext),
-							Effect.map((projects) =>
-								projects.map(({ group, ...project }) => ({
-									...project,
-									...(group === undefined ? {} : { group }),
-								})),
-							),
 							Effect.mapError(
 								(cause) =>
 									new ProjectManagementServiceError({
@@ -504,6 +511,7 @@ export const RelayFactoryLive = (
 												: Context.empty(),
 										),
 										Context.add(SessionActivityTag, activity),
+										Context.add(SessionEventBusTag, sessionEventBus),
 										Context.add(DaemonEventBusTag, eventBus),
 										Context.add(ProjectRegistryTag, projectRegistry),
 										Context.add(PortScannerTag, portScanner),

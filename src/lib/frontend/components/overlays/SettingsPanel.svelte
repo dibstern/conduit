@@ -8,6 +8,7 @@
 	import Icon from "../ui/Icon.svelte";
 	import Tabs from "../ui/Tabs.svelte";
 	import ClaudeSettingsTab from "./ClaudeSettingsTab.svelte";
+	import ArchivedSettingsTab from "./ArchivedSettingsTab.svelte";
 	import UsageSettingsTab from "./UsageSettingsTab.svelte";
 	import NotificationsSettingsTab from "./NotificationsSettingsTab.svelte";
 	import AppearanceSettingsTab from "./AppearanceSettingsTab.svelte";
@@ -29,6 +30,7 @@
 		{ value: "models", label: "Models & agents", testId: "settings-tab-models", icon: "sliders-horizontal", iconTone: "purple" },
 		{ value: "claude", label: "Claude", testId: "settings-tab-claude", icon: "claude", iconTone: "clay" },
 		{ value: "surfacing", label: "Surfacing", testId: "settings-tab-surfacing", icon: "sparkle", iconTone: "purple" },
+		{ value: "archived", label: "Archived", testId: "settings-tab-archived", icon: "archive", iconTone: "neutral" },
 		{ value: "usage", label: "Usage", testId: "settings-tab-usage", groupLabel: "This computer", icon: "gauge", iconTone: "amber" },
 		{ value: "server", label: "Server", testId: "settings-tab-server", icon: "server", iconTone: "green" },
 	] as const;
@@ -161,6 +163,8 @@
 						<ClaudeSettingsTab />
 					{:else if shown === "surfacing"}
 						<SurfacingSettingsTab onPageChange={(page) => { surfacingPage = page; void scrollContent(); }} />
+					{:else if shown === "archived"}
+						<ArchivedSettingsTab {onClose} />
 					{:else if shown === "usage"}
 						<UsageSettingsTab />
 					{:else if shown === "server"}

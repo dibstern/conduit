@@ -16,13 +16,13 @@ import {
 	attachedProjectState,
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
+import { selection } from "../../../src/lib/frontend/stores/selection.svelte.js";
 import {
 	clearSessionState,
 	reloadProviderSession,
-	sessionState,
-	switchToSession,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { connectionState } from "../../../src/lib/frontend/transport/connection-status.svelte.js";
 import {
 	makeWsRpcClientsLayer,
@@ -196,7 +196,7 @@ describe("discovery catalogs over the RPC wire", () => {
 			})),
 		});
 		seedSessions([{ id: "A", title: "A", accountId }]);
-		switchToSession("A", "project-a");
+		selection.open("A");
 		for (const [account, name] of [
 			["claude", "Claude Sonnet 4"],
 			["claude-work", "Work account model"],
@@ -333,7 +333,7 @@ describe("discovery catalogs over the RPC wire", () => {
 
 	it("reloads by session id and refreshes the displayed model, agent and command lists", async () => {
 		seedSessions([{ id: "session", title: "Session", accountId: "one" }]);
-		switchToSession("session", "project-a");
+		selection.open("session");
 		const result = reloadProviderSession("session").catch(
 			(error: unknown) => error,
 		);
@@ -445,7 +445,7 @@ describe("discovery catalogs over the RPC wire", () => {
 			{ id: "A", title: "A", accountId: "one" },
 			{ id: "B", title: "B", accountId: "one" },
 		]);
-		switchToSession("A", "project-a");
+		selection.open("A");
 		stop = discovery.watchCatalogs();
 		await vi.waitFor(() => expect(modelReads).toHaveLength(1));
 		applyProjectSetting({
@@ -472,7 +472,7 @@ describe("discovery catalogs over the RPC wire", () => {
 					.flatMap((group) => group.models.map((model) => model.name)),
 			).toEqual(["Alpha model"]),
 		);
-		switchToSession("B", "project-a");
+		selection.open("B");
 		await vi.waitFor(() => expect(modelReads).toHaveLength(2));
 		modelReads[1]?.resolve(models("Server model"));
 		await vi.waitFor(() =>
@@ -521,7 +521,7 @@ describe("discovery catalogs over the RPC wire", () => {
 				.flatMap((group) => group.models.map((model) => model.name)),
 		).toEqual(["Replacement model"]);
 		clearSessionState();
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		discovery.selectInstance("two");
 		expect(
 			discovery
@@ -529,6 +529,7 @@ describe("discovery catalogs over the RPC wire", () => {
 				.flatMap((group) => group.models.map((model) => model.name)),
 		).toEqual(["Other account model"]);
 		attachedProjectState.slug = "project-b";
+		routerState.search = "?project=project-b";
 		expect(discovery.discoveryState.providers).toEqual([]);
 	});
 
@@ -540,14 +541,14 @@ describe("discovery catalogs over the RPC wire", () => {
 			{ id: "A", title: "A", accountId: "one" },
 			{ id: "B", title: "B", accountId: "one" },
 		]);
-		if (kind === "session") switchToSession("A", "project-a");
+		if (kind === "session") selection.open("A");
 		const firstRead = discovery.refreshCatalogs();
 		await vi.waitFor(() => expect(commandReads).toHaveLength(1));
-		if (kind === "session") switchToSession("B", "project-a");
+		if (kind === "session") selection.open("B");
 		else discovery.selectInstance("two");
 		stop = discovery.watchCatalogs();
 		await vi.waitFor(() => expect(commandReads).toHaveLength(2));
-		if (kind === "session") switchToSession("A", "project-a");
+		if (kind === "session") selection.open("A");
 		else discovery.selectInstance("one");
 		await vi.waitFor(() => expect(commandReads).toHaveLength(3));
 		modelReads[2]?.resolve(models("New model"));
@@ -592,7 +593,7 @@ describe("discovery catalogs over the RPC wire", () => {
 	});
 
 	it("keeps a settings-stream model list under the project that opened the subscription", async () => {
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		applyInstanceListResponse({
 			instances: [
 				{
@@ -611,6 +612,7 @@ describe("discovery catalogs over the RPC wire", () => {
 		viewProjectSettings("project-a");
 		await vi.waitFor(() => expect(settingsProjects).toEqual(["project-a"]));
 		attachedProjectState.slug = "project-b";
+		routerState.search = "?project=project-b";
 		settingsRead.resolve({
 			_tag: "snapshot",
 			sequence: 1,
@@ -639,6 +641,7 @@ describe("discovery catalogs over the RPC wire", () => {
 			),
 		).toEqual([]);
 		attachedProjectState.slug = "project-a";
+		routerState.search = "?project=project-a";
 		expect(
 			discovery.discoveryState.providers.flatMap((provider) =>
 				provider.models.map((model) => model.name),
@@ -684,7 +687,7 @@ describe("discovery catalogs over the RPC wire", () => {
 				},
 			},
 		]);
-		switchToSession("session", "project-a");
+		selection.open("session");
 		const oldRead = discovery.refreshCatalogs();
 		await vi.waitFor(() => expect(commandReads).toHaveLength(1));
 		stop = discovery.watchCatalogs();

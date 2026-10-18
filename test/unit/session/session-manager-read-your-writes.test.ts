@@ -61,6 +61,9 @@ type OperationsOutsideReadModelParity = keyof Pick<
 	| "addToParentMap"
 	| "getSessionParentMap"
 	| "refreshSessionLineage"
+	// Archive's read-model parity is covered by the real-relay session-archive E2E.
+	| "setSessionArchived"
+	| "restoreSessionForSend"
 >;
 
 type ReadModelMutation = Exclude<

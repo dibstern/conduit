@@ -19,7 +19,6 @@ import { fileURLToPath } from "node:url";
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import {
-	Cause,
 	Context,
 	Data,
 	Effect,
@@ -59,6 +58,7 @@ import {
 	makeStandaloneHttpRouterRequestHandler,
 	type RouterProjectInfo,
 } from "../domain/server/Layers/http-router-layer.js";
+import * as Failure from "../effect/failure-classification.js";
 import { ENV } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
 import { withCachedProjectGit } from "../git/session-git.js";
@@ -74,6 +74,7 @@ import {
 	RoutedWsRpcWebSocketHandlerTag,
 	type RpcWebSocketHandlerShape,
 } from "../server/ws-rpc-handler.js";
+import { archiveIdleSessions } from "../session/auto-archive-sweep.js";
 import { settleIdleSessions } from "../session/auto-settle-sweep.js";
 import type { ConnectionHealth, ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
@@ -300,6 +301,10 @@ export interface ProjectRelay {
 		idleWindowMs: number,
 		now: number,
 	): Effect.Effect<number, SqlError | SessionManagerError>;
+	archiveIdleSessions(
+		idleWindowMs: number,
+		now: number,
+	): Effect.Effect<number, SqlError | SessionManagerError>;
 	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
 	sseStream: SSEStreamPort;
@@ -368,6 +373,7 @@ export interface RelayStackConfig {
 }
 
 export interface RelayStack {
+	readonly archiveIdleSessions: ProjectRelay["archiveIdleSessions"];
 	server: EffectRelayServer;
 	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
@@ -488,7 +494,7 @@ export async function createProjectRelay(
 			Effect.zip(
 				continuation.sweepDueContinuations().pipe(
 					Effect.catchAllCause((cause) =>
-						Cause.isInterruptedOnly(cause)
+						Failure.isInterruptedOnly(cause)
 							? Effect.interrupt
 							: Effect.logError("Continuation sweep failed", cause),
 					),
@@ -564,6 +570,27 @@ export async function createProjectRelay(
 					startup.persistenceProject,
 				),
 			),
+		archiveIdleSessions: (idleWindowMs, now) =>
+			archiveIdleSessions(
+				{
+					hasLiveBackgroundWork: startup.activity.background.hasLiveWork,
+					setArchived: (id) =>
+						startup.sessionManagerService.setSessionArchived(id, {
+							archived: true,
+							automatic: true,
+							idleWindowMs,
+							now,
+						}),
+				},
+				idleWindowMs,
+				now,
+			).pipe(
+				Effect.provideService(SqlClient.SqlClient, startup.sql),
+				Effect.provideService(
+					PersistenceProjectTag,
+					startup.persistenceProject,
+				),
+			),
 		wsHandler,
 		rpcWsHandler,
 		sseStream,
@@ -590,7 +617,7 @@ export async function createProjectRelay(
 				layers.relayManagedRuntime
 					.runFork(Fiber.interrupt(continuationSweep))
 					.addObserver((exit) => {
-						if (Exit.isFailure(exit)) reject(Cause.squash(exit.cause));
+						if (Exit.isFailure(exit)) reject(Failure.squashCause(exit.cause));
 						else resolve();
 					});
 			});
@@ -938,6 +965,8 @@ export async function createRelayStack(
 	return {
 		server,
 		effectRuntime: relay.effectRuntime,
+		archiveIdleSessions: relay.archiveIdleSessions,
+		settleIdleSessions: relay.settleIdleSessions,
 		wsHandler: relay.wsHandler,
 		rpcWsHandler: relay.rpcWsHandler,
 		sseStream: relay.sseStream,
@@ -945,7 +974,6 @@ export async function createRelayStack(
 		translator: relay.translator,
 		orchestration: relay.orchestration,
 		initialSessionId: relay.initialSessionId,
-		settleIdleSessions: relay.settleIdleSessions,
 
 		getPort() {
 			const addr = httpServer.address();

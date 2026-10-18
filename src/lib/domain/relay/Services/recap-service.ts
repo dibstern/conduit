@@ -1,14 +1,5 @@
 import { SqlClient } from "@effect/sql";
-import {
-	Cause,
-	Context,
-	Data,
-	Effect,
-	Layer,
-	PubSub,
-	Schema,
-	Stream,
-} from "effect";
+import { Context, Data, Effect, Layer, PubSub, Schema, Stream } from "effect";
 import { surfacingLevel } from "../../../contracts/category-set.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import type {
@@ -20,6 +11,7 @@ import {
 	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
 } from "../../../daemon/config-persistence.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import type { StoredEvent } from "../../../persistence/events.js";
@@ -445,7 +437,7 @@ export const makeRecapServiceLive = (
 						yield* withTurn(target, generateLocked(target, true));
 					}).pipe(
 						Effect.catchAllCause((cause) =>
-							Cause.isInterruptedOnly(cause)
+							Failure.isInterruptedOnly(cause)
 								? Effect.interrupt
 								: Effect.sync(() =>
 										log.warn("Turn recap generation failed", cause),

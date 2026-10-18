@@ -12,14 +12,13 @@ import { WsRpcClients } from "../transport/shared-client.js";
 import { type FeedStatus, supervise } from "../transport/supervise.js";
 import type { SessionInfo } from "../types.js";
 import { flushPendingSeen } from "../utils/attention.js";
-import { getCurrentSlug } from "./router.svelte.js";
+import { projectState } from "./project-state.svelte.js";
 import { saveShell } from "./saved-shell.js";
 import {
 	clearSessionSearch,
+	DAEMON_SESSION_PAGE_SIZE,
 	getFilteredSessions,
 	getSettledSessionCount,
-	loadDaemonSessions,
-	loadMoreDaemonSessions,
 	loadMoreSearchResults,
 	searchSessions,
 	sessionState,
@@ -51,6 +50,9 @@ export interface SessionListView {
 	loadMore(project: ProjectRef): Promise<void>;
 }
 
+// This store is imported while session.svelte.ts is still initializing.
+export const browsePage = $state({ limit: 30 });
+
 let searchReady: Promise<void> = Promise.resolve();
 const searchQuery: SearchQuery = {
 	get results() {
@@ -80,7 +82,9 @@ export const sessionList: SessionListView = {
 		return getSettledSessionCount();
 	},
 	get settled() {
-		return sessionSubscription.status._tag === "live";
+		return (
+			sessionSubscription.settled && sessionSubscription.status._tag === "live"
+		);
 	},
 	get status() {
 		return sessionSubscription.status;
@@ -91,13 +95,16 @@ export const sessionList: SessionListView = {
 	},
 	search(query) {
 		if (query.trim()) searchReady = searchSessions(query, true);
-		else clearSessionSearch();
+		else {
+			clearSessionSearch();
+			browsePage.limit = DAEMON_SESSION_PAGE_SIZE;
+		}
 		return searchQuery;
 	},
-	loadMore(project) {
-		return project === getCurrentSlug()
-			? loadMoreDaemonSessions()
-			: Promise.resolve();
+	loadMore(_project) {
+		if (browsePage.limit < rows.length)
+			browsePage.limit += DAEMON_SESSION_PAGE_SIZE;
+		return Promise.resolve();
 	},
 };
 
@@ -105,8 +112,11 @@ let attachGeneration = 0;
 let shellFiber: RuntimeFiber<void, unknown> | null = null;
 let shellSaveTimer: ReturnType<typeof setTimeout> | undefined;
 let attachedProject: ProjectRef | null = null;
-accountSnapshotChangedListeners.add(() => {
-	if (attachedProject !== null) attachSessionList(attachedProject);
+accountSnapshotChangedListeners.add(({ firstList }) => {
+	if (firstList || attachedProject === null) return;
+	const project = attachedProject;
+	detachSessionList();
+	attachSessionList(project);
 });
 const shellSynchronizedListeners = new Set<(project: ProjectRef) => void>();
 
@@ -125,7 +135,11 @@ async function stopShell(): Promise<void> {
 	if (fiber) await runTransportEffect(Fiber.interrupt(fiber));
 }
 
-export function attachSessionList(project: ProjectRef): void {
+export function attachSessionList(project: ProjectRef = ""): void {
+	if (attachedProject !== null) {
+		attachedProject = project;
+		return;
+	}
 	const generation = ++attachGeneration;
 	discardForeignSavedShell(project);
 	if (attachedProject !== project) setShellFeedStatus({ _tag: "cold" });
@@ -135,8 +149,8 @@ export function attachSessionList(project: ProjectRef): void {
 		if (generation !== attachGeneration) return;
 		clearTimeout(shellSaveTimer);
 		shellSaveTimer = undefined;
-		if (synchronized)
-			void saveShell(project, [...sessionSubscription.rows.values()]);
+		if (synchronized && attachedProject)
+			void saveShell(attachedProject, [...sessionSubscription.rows.values()]);
 	};
 	void stopShell().then(async () => {
 		const runtime = await getRuntime();
@@ -166,6 +180,7 @@ export function attachSessionList(project: ProjectRef): void {
 							Effect.sync(() => {
 								if (generation !== attachGeneration) return;
 								applySessionChange(change);
+								if (change._tag === "projects") return;
 								if (change._tag === "snapshot") {
 									synchronized = false;
 									clearTimeout(shellSaveTimer);
@@ -174,12 +189,11 @@ export function attachSessionList(project: ProjectRef): void {
 								if (change._tag === "synchronized") {
 									synchronized = true;
 									save();
-									flushPendingSeen(project);
-									// Unary reads fail fast while the control socket is down; this
-									// marker rides that socket, so it is up. Repeats on every resume.
-									void loadDaemonSessions();
+									for (const { slug } of projectState.projects)
+										flushPendingSeen(slug);
 									for (const listener of shellSynchronizedListeners)
-										listener(project);
+										listener(attachedProject ?? "");
+									void refreshListedSessions();
 								} else if (synchronized && shellSaveTimer === undefined) {
 									shellSaveTimer = setTimeout(save, 3_000);
 								}
@@ -200,22 +214,13 @@ export function detachSessionList(): void {
 	setShellFeedStatus({ _tag: "cold" });
 }
 
-export function refreshSessionList(): Promise<void> {
-	return loadDaemonSessions();
-}
-
 export function currentSearchQuery(): SearchQuery | null {
 	return sessionState.searchResults === null ? null : searchQuery;
 }
 
-/** Re-fetches whichever list is on screen. Other projects' rows get no live
- *  updates on this socket, so a change made to one must be re-read to show. */
-export async function refreshListedSessions(): Promise<void> {
-	// A command in search also changes the browse rows and totals shown on clear.
-	await Promise.all([
-		refreshSessionList(),
-		currentSearchQuery() === null
-			? Promise.resolve()
-			: sessionList.search(sessionState.searchQuery).ready,
-	]);
+/** Only paged search needs a fresh read; browse rows follow the shell feed. */
+export function refreshListedSessions(): Promise<void> {
+	return currentSearchQuery() === null
+		? Promise.resolve()
+		: sessionList.search(sessionState.searchQuery).ready;
 }

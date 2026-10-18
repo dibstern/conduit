@@ -7,14 +7,12 @@ import {
 	attachedProjectState,
 	routerState,
 } from "../../stores/router.svelte.js";
-import {
-	clearSessionState,
-	sessionState,
-} from "../../stores/session.svelte.js";
+import { clearSessionState } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { applyUsageReadings } from "../../stores/usage.svelte.js";
 import { mockClaudeAccount } from "../../stories/mocks.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import Sidebar from "./Sidebar.svelte";
 
@@ -117,7 +115,7 @@ function seedFinalSidebar(phone = false, singleAccount = false) {
 		sequence: now + 1,
 	});
 	applySessionChange({ _tag: "synchronized" });
-	sessionState.currentId = "typed";
+	openSessionForSetup("typed", "conduit");
 	const accounts = singleAccount
 		? ["personal"]
 		: ["personal", "work", "lab", "codex"];

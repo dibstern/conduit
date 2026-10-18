@@ -3,7 +3,7 @@
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
-import { Cause, Effect, Runtime } from "effect";
+import { Effect, Runtime } from "effect";
 import {
 	type AlertsTag,
 	publishAlert,
@@ -15,6 +15,7 @@ import {
 	PROCESSING_TIMEOUT_DURATION,
 	resetProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
+import * as Failure from "../effect/failure-classification.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationSender } from "../server/push.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
@@ -256,7 +257,7 @@ export const wirePollersEffect = (deps: EffectPollerWiringDeps) =>
 							Effect.catchAllCause((cause) =>
 								Effect.sync(() =>
 									deps.pollerLog.warn(
-										`Message poller event handling failed: ${Cause.pretty(cause)}`,
+										`Message poller event handling failed: ${Failure.renderCause(cause)}`,
 									),
 								),
 							),

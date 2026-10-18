@@ -23,7 +23,7 @@ describe("Schema Migration", () => {
 			Effect.gen(function* () {
 				yield* makeEffectSqlMigrator(
 					Object.fromEntries(
-						Object.entries(effectMigrationEntries).slice(0, 64),
+						Object.entries(effectMigrationEntries).slice(0, 65),
 					),
 				);
 				const sql = yield* SqlClient.SqlClient;
@@ -34,10 +34,10 @@ describe("Schema Migration", () => {
 				('child', 'alpha', 'Child', 'claude', 'root', 10, NULL, 1, 1),
 				('other', 'beta', 'Other', 'claude', NULL, 10, NULL, 1, 1)`;
 				expect(yield* makeEffectSqlMigrator()).toEqual([
-					[65, "sessions_settled_shelf_index"],
-					[66, "surfacing_marks"],
-					[67, "message_part_read"],
-					[68, "turn_recaps"],
+					[66, "sessions_settled_shelf_index"],
+					[67, "surfacing_marks"],
+					[68, "message_part_read"],
+					[69, "turn_recaps"],
 				]);
 				for (const [filter, count] of [
 					["", 2],
@@ -57,9 +57,9 @@ describe("Schema Migration", () => {
 				expect(yield* sql`SELECT COUNT(*) AS count FROM sessions`).toEqual([
 					{ count: 5 },
 				]);
-				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 65`;
+				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 66`;
 				expect(yield* makeEffectSqlMigrator()).toEqual([
-					[65, "sessions_settled_shelf_index"],
+					[66, "sessions_settled_shelf_index"],
 				]);
 				expect(yield* makeEffectSqlMigrator()).toEqual([]);
 			}).pipe(Effect.provide(SqliteClient.layer({ filename: ":memory:" }))),
@@ -84,12 +84,13 @@ describe("Schema Migration", () => {
 					[60, "daemon_store_imports"],
 					[61, "sessions_lineage"],
 					[62, "legacy_forks"],
-					[63, "goal_check_metadata"],
-					[64, "message_part_surfacing"],
-					[65, "sessions_settled_shelf_index"],
-					[66, "surfacing_marks"],
-					[67, "message_part_read"],
-					[68, "turn_recaps"],
+					[63, "sessions_archived"],
+					[64, "goal_check_metadata"],
+					[65, "message_part_surfacing"],
+					[66, "sessions_settled_shelf_index"],
+					[67, "surfacing_marks"],
+					[68, "message_part_read"],
+					[69, "turn_recaps"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`

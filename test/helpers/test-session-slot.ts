@@ -6,12 +6,13 @@
  *
  * The helpers register the created objects into the sessionActivity/sessionMessages
  * maps so that `currentChat()` and derived getters (isProcessing, isStreaming, etc.)
- * reflect handler mutations. Tests must set `sessionState.currentId` to the test
+ * reflect handler mutations. Tests must call `openSessionForSetup` with the test
  * session ID (default: "test-session") before calling these.
  *
  * Usage:
  *   import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
- *   sessionState.currentId = "test-session";
+ *   import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+ *   openSessionForSetup("test-session");
  *   handleDelta(testActivity(), testMessages(), { type: "delta", ... });
  */
 

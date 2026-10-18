@@ -4,7 +4,6 @@
 
 import { NodeCommandExecutor, NodeFileSystem } from "@effect/platform-node";
 import {
-	Cause,
 	Context,
 	Data,
 	Deferred,
@@ -32,6 +31,7 @@ import {
 	startOnboardingServer,
 } from "../../../daemon/daemon-lifecycle.js";
 import { makeDaemonRpcSocketLayer } from "../../../daemon/daemon-rpc-server.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { ENV, resolveTraceConfig } from "../../../env.js";
 import { startContentionMetrics } from "../../../persistence/contention-metrics.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
@@ -44,6 +44,7 @@ import {
 	BrowserRpcConnectionsLive,
 	makeRoutedWsRpcServerLayer,
 } from "../../../server/ws-rpc.js";
+import { SessionEventBusLive } from "../../relay/Services/session-event-bus.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
 	DaemonHttpRequestHandlerTag,
@@ -168,7 +169,8 @@ export class DaemonLifecycleLayerError extends Data.TaggedError(
 	get message(): string {
 		let inner: string;
 		if (this.cause instanceof Error) inner = this.cause.message;
-		else if (Cause.isCause(this.cause)) inner = Cause.pretty(this.cause);
+		else if (Failure.isCause(this.cause))
+			inner = Failure.renderCause(this.cause);
 		else {
 			try {
 				inner = String(this.cause);
@@ -420,6 +422,8 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 						refreshGlobalDefaults: relay.refreshGlobalDefaults,
 						settleIdleSessions: (idleWindowMs: number, now: number) =>
 							relay.settleIdleSessions(idleWindowMs, now),
+						archiveIdleSessions: (idleWindowMs: number, now: number) =>
+							relay.archiveIdleSessions(idleWindowMs, now),
 						rpcWsHandler: relay.rpcWsHandler,
 						getStatusSnapshot: () => relay.getStatusSnapshot(),
 						setDefaultAgent: (agent: string) => relay.setDefaultAgent(agent),
@@ -673,7 +677,9 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 				),
 			),
 		),
-		SessionActivityDaemonLive.pipe(Layer.provideMerge(DaemonEventBusLive)),
+		SessionActivityDaemonLive.pipe(
+			Layer.provideMerge(Layer.merge(DaemonEventBusLive, SessionEventBusLive)),
+		),
 		BrowserRpcConnectionsLive,
 		PinoLoggerLive,
 		makeDaemonTracingLive(resolveTraceConfig(configDir)),

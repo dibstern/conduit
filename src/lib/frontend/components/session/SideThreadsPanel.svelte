@@ -5,7 +5,8 @@
   desktop, anchored right under the control it hangs from.
 -->
 <script lang="ts" module>
-	import { sessionAttention, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { sessionAttention, sessionState } from "../../stores/session.svelte.js";
+	import { selection } from "../../stores/selection.svelte.js";
 	import type { Immutable, SessionInfo } from "../../types.js";
 	import { ATTENTION_DISPLAY } from "./SessionItem.svelte";
 
@@ -33,7 +34,7 @@
 
 	function open(thread: Immutable<SessionInfo>) {
 		sideThreadsPanel.open = false;
-		switchToSession(thread.id);
+		selection.open(thread.id);
 	}
 
 	function remove(thread: Immutable<SessionInfo>, button: HTMLElement) {

@@ -2,11 +2,11 @@ import { cleanup, render } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ToolQuestionCard from "../../../src/lib/frontend/components/chat/ToolQuestionCard.svelte";
 import { permissionsState } from "../../../src/lib/frontend/stores/permissions.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	mockQuestionAnswered,
 	mockQuestionRunning,
 } from "../../../src/lib/frontend/stories/mocks.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { AskUserQuestion } from "../../../src/lib/frontend/types.js";
 
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
@@ -24,7 +24,7 @@ const sameText: AskUserQuestion[] = [
 ];
 
 function boundToolId(sessionId: string): string | null | undefined {
-	sessionState.currentId = "ses-b";
+	openSessionForSetup("ses-b", "project-a");
 	permissionsState.pendingQuestions = [
 		{ toolId: "que-a", sessionId, questions: sameText },
 	];
@@ -42,7 +42,7 @@ describe("ToolQuestionCard content match", () => {
 	afterEach(() => {
 		cleanup();
 		permissionsState.pendingQuestions = [];
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 	});
 
 	it("binds the viewed session's question by its text", () => {

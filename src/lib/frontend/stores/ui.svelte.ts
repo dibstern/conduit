@@ -77,9 +77,6 @@ export const uiState = $state({
 	// Image lightbox
 	lightboxSrc: null as string | null,
 
-	// Context usage
-	contextPercent: 0,
-
 	// Client count
 	clientCount: 0,
 
@@ -90,14 +87,6 @@ export const uiState = $state({
 });
 
 // Components should wrap in $derived() for reactive caching.
-
-/** Get the context bar color class based on usage percentage. */
-export function getContextColor(): string {
-	if (uiState.contextPercent >= 80) return "ctx-red";
-	if (uiState.contextPercent >= 50) return "ctx-yellow";
-	if (uiState.contextPercent > 0) return "ctx-green";
-	return "";
-}
 
 export function collapseSidebar(): void {
 	uiState.sidebarCollapsed = true;
@@ -183,7 +172,18 @@ export function showToast(
 	};
 	// At most two cards, so the stack never climbs over the transcript. Older
 	// toasts are dropped, actions and all, rather than queued out of sight.
-	uiState.toasts = [...uiState.toasts, toast].slice(-2);
+	uiState.toasts = [
+		...uiState.toasts.filter(
+			(existing) =>
+				existing.variant !== toast.variant ||
+				existing.title !== toast.title ||
+				existing.body !== toast.body ||
+				existing.emphasis !== toast.emphasis ||
+				existing.actions.some((action) => action.kind !== "dismiss") ||
+				toast.actions.some((action) => action.kind !== "dismiss"),
+		),
+		toast,
+	].slice(-2);
 
 	// Auto-dismiss
 	setTimeout(() => {
@@ -311,10 +311,6 @@ export function closeFileViewer(): void {
 	uiState.fileViewerRoot = null;
 }
 
-export function updateContextPercent(percent: number): void {
-	uiState.contextPercent = Math.max(0, Math.min(100, percent));
-}
-
 export function setClientCount(count: number): void {
 	uiState.clientCount = count;
 }
@@ -327,7 +323,6 @@ export function resetProjectUI(): void {
 	uiState.planContent = null;
 	uiState.planApproval = null;
 	uiState.lightboxSrc = null;
-	uiState.contextPercent = 0;
 	uiState.fileViewerOpen = false;
 	uiState.fileViewerPath = null;
 	uiState.fileViewerRoot = null;

@@ -222,6 +222,9 @@ export const sidebarRows = (
 	}
 	return new Map(
 		roots.flatMap((root, index) => {
+			// Older migrations build this projection before archive columns exist.
+			// An archived root leaves a tombstone while its session still exists.
+			if (root.archived_at != null) return [];
 			const item = items[index];
 			if (item === undefined) return [];
 			const {

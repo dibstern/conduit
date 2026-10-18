@@ -48,9 +48,9 @@ describe("normalizeRepositoryRemote", () => {
 
 	it("keeps nested groups", () => {
 		expect(
-			normalizeRepositoryRemote("ssh://git@GitLab.COM/Group/Sub/Repo.git"),
+			normalizeRepositoryRemote("ssh://git@GitLab.COM/Team/Sub/Repo.git"),
 		).toEqual({
-			key: "gitlab.com/group/sub/repo",
+			key: "gitlab.com/team/sub/repo",
 			name: "Repo",
 		});
 	});
@@ -178,10 +178,10 @@ describe("readRepositoryIdentity", () => {
 			"remote",
 			"set-url",
 			"origin",
-			"https://gitlab.com/Group/Sub/Child.git",
+			"https://gitlab.com/Team/Sub/Child.git",
 		);
 		expect(await readRepositoryIdentity(child)).toEqual({
-			key: "gitlab.com/group/sub/child",
+			key: "gitlab.com/team/sub/child",
 			name: "Child",
 			root: child,
 		});
@@ -208,10 +208,10 @@ describe("readRepositoryIdentity", () => {
 			"remote",
 			"set-url",
 			"origin",
-			"https://gitlab.com/Group/After.git",
+			"https://gitlab.com/Team/After.git",
 		);
 		expect(await readRepositoryIdentity(repo)).toEqual({
-			key: "gitlab.com/group/after",
+			key: "gitlab.com/team/after",
 			name: "After",
 			root: repo,
 		});

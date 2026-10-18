@@ -60,6 +60,7 @@ import {
 	makeUsage,
 	Usage,
 } from "../../src/lib/domain/daemon/Services/usage.js";
+import { SessionEventBusLive } from "../../src/lib/domain/relay/Services/session-event-bus.js";
 import { AuthManagerFromConfigLive } from "../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
 	makePersistenceStoreLayer,
@@ -80,7 +81,10 @@ export const makeDaemonStoreTestLayer = (filename = ":memory:") =>
 	Layer.effect(
 		PersistenceStore,
 		Effect.context<PersistenceStoreContext>(),
-	).pipe(Layer.provideMerge(makePersistenceStoreLayer(filename)));
+	).pipe(
+		Layer.provideMerge(makePersistenceStoreLayer(filename)),
+		Layer.merge(SessionEventBusLive),
+	);
 
 export const makeDaemonRpcTestLayer = (
 	projects: ReadonlyArray<StoredProject> = [],

@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
-import { Effect } from "effect";
+import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import {
 	AccountIdSchema,
 	MANAGED_OPENCODE_ACCOUNT_ID,
@@ -21,7 +21,21 @@ import {
 	defaultDaemonConfig,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
+import {
+	listArchivedSessions,
+	listDaemonSessions,
+} from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
+import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import {
+	DaemonSessionQueryServiceError,
+	DaemonSessionQueryServiceTag,
+} from "../../../src/lib/domain/relay/Services/daemon-session-query-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import {
+	makePersistenceStoreLayer,
+	PersistenceStore,
+	type PersistenceStoreContext,
+} from "../../../src/lib/persistence/effect/live.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
@@ -221,6 +235,8 @@ export async function createReplayHarness(
 	recordingName: string,
 	options: {
 		projectDir?: string;
+		/** Exercise the real daemon browse/search reads against this isolated store. */
+		daemonSessionQueries?: boolean;
 		/** Claude lane: open a Claude session whose SDK turns replay these
 		 *  committed traces. No live model call is possible. */
 		claudeReplay?: ClaudeReplayPlan;
@@ -291,7 +307,27 @@ export async function createReplayHarness(
 		}));
 	}
 
-	const startStack = (port: number) =>
+	const daemonReads = options.daemonSessionQueries
+		? ManagedRuntime.make(
+				Layer.mergeAll(
+					makeProjectRegistryLive([
+						{
+							folders: [options.projectDir ?? process.cwd()],
+							slug: "e2e-replay",
+							title: "E2E Replay",
+						},
+					]),
+					Layer.effect(
+						PersistenceStore,
+						Effect.context<PersistenceStoreContext>(),
+					).pipe(Layer.provideMerge(makePersistenceStoreLayer(eventsDbPath))),
+				),
+			)
+		: undefined;
+	const daemonReadContext = daemonReads
+		? (await daemonReads.runtime()).context
+		: undefined;
+	const startStack = (port: number): Promise<RelayStack> =>
 		createRelayStack({
 			port,
 			host: "127.0.0.1",
@@ -302,12 +338,44 @@ export async function createReplayHarness(
 			staticDir,
 			configDir,
 			persistenceDbPath: eventsDbPath,
+			...(daemonReadContext
+				? {
+						daemonConfigContext: Context.add(
+							daemonReadContext,
+							DaemonSessionQueryServiceTag,
+							{
+								listArchived: (query) =>
+									Effect.tryPromise({
+										try: () =>
+											stack.effectRuntime.runtime.runPromise(
+												listArchivedSessions(query).pipe(
+													Effect.provide(daemonReadContext),
+												),
+											),
+										catch: (cause) =>
+											new DaemonSessionQueryServiceError({ cause }),
+									}),
+								list: (query) =>
+									Effect.tryPromise({
+										try: () =>
+											stack.effectRuntime.runtime.runPromise(
+												listDaemonSessions(query).pipe(
+													Effect.provide(daemonReadContext),
+												),
+											),
+										catch: (cause) =>
+											new DaemonSessionQueryServiceError({ cause }),
+									}),
+							},
+						),
+					}
+				: {}),
 			...(claudeReplayer
 				? { claudeSdk: claudeReplayer.sdk }
 				: { titleQuery: fakeClaudeSdk.titleQuery }),
 			log: createSilentLogger(),
 		});
-	let stack = await startStack(0);
+	let stack: RelayStack = await startStack(0);
 
 	const relayPort = stack.getPort();
 	const relayBaseUrl = `http://127.0.0.1:${relayPort}`;
@@ -347,6 +415,7 @@ export async function createReplayHarness(
 				await stack.stop();
 				await mock.stop();
 			} finally {
+				await daemonReads?.dispose();
 				if (claudeReplayer) __setProbeOverrideForTesting(undefined);
 				await stopPtyHost({ configDir, force: true });
 			}

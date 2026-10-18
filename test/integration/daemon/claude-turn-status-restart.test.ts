@@ -20,9 +20,12 @@ const capabilityModels = ["sonnet", "claude-sonnet-4"].map((id) => ({
 
 async function sessionSnapshot(browser: ProcessBrowser, sessionId: string) {
 	const envelopes = await Effect.runPromise(
-		browser.rpc
-			.SubscribeShell({ projectSlug: "process-test" })
-			.pipe(Stream.take(1), Stream.runCollect, Effect.timeout("5 seconds")),
+		browser.rpc.SubscribeShell({}).pipe(
+			Stream.filter((frame) => frame._tag !== "projects"),
+			Stream.take(1),
+			Stream.runCollect,
+			Effect.timeout("5 seconds"),
+		),
 	);
 	const snapshot = [...envelopes][0];
 	if (snapshot?._tag !== "snapshot") throw new Error("Missing shell snapshot");

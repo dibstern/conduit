@@ -270,10 +270,6 @@ const globalSettingRows = (
 			_tag: "defaultSessionMode",
 			mode: settings.defaultSessionMode ?? "local",
 		},
-		defaultGroupingMode: {
-			_tag: "defaultGroupingMode",
-			mode: settings.defaultGroupingMode ?? "repository",
-		},
 		claudeSettings: {
 			_tag: "claudeSettings",
 			overrides: settings.claudeSettings ?? {},

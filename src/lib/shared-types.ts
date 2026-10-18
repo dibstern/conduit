@@ -351,6 +351,7 @@ export const SessionInfoSchema = Schema.Struct({
 	/** The send whose turn ended at `lastTurnEndVersion`, when known. */
 	lastTurnEndInputId: Schema.optional(Schema.String),
 	settledAt: Schema.optional(Schema.Number),
+	archivedAt: Schema.optional(Schema.Number),
 	settledAutomatically: Schema.optional(Schema.Boolean),
 	autoSettleDisabled: Schema.optional(Schema.Boolean),
 	pinnedAt: Schema.optional(Schema.Number),
@@ -377,8 +378,9 @@ export interface DaemonSessionQueryOptions {
 	readonly limit?: number;
 	readonly roots?: boolean;
 	readonly search?: string;
+	readonly includeArchived?: boolean;
 	readonly cursor?: DaemonSessionCursor;
-	/** Read one project slug or an encoded repository group scope. Filter projects
+	/** Read one project slug. Filter projects
 	 *  before merging their pages, so scoped search and paging remain complete. */
 	readonly scope?: string;
 	/** Skip one project. The browser already holds its own project's roots
@@ -389,6 +391,16 @@ export interface DaemonSessionQueryOptions {
 export interface DaemonSessionCursor {
 	readonly updatedAt: number;
 	readonly id: string;
+}
+
+export interface ArchivedSessionCursor {
+	readonly archivedAt: number;
+	readonly id: string;
+}
+
+export interface ArchivedSessionQueryOptions {
+	readonly limit?: number;
+	readonly cursor?: ArchivedSessionCursor;
 }
 
 export type ProjectSessionAvailability =
@@ -411,6 +423,11 @@ export interface DaemonSessionQueryResult {
 	readonly availability: ReadonlyArray<ProjectSessionAvailability>;
 	readonly hasMore: boolean;
 	readonly nextCursor: DaemonSessionCursor | null;
+}
+
+export interface ArchivedSessionQueryResult
+	extends Omit<DaemonSessionQueryResult, "nextCursor"> {
+	readonly nextCursor: ArchivedSessionCursor | null;
 }
 
 export interface AskUserQuestion {
@@ -559,20 +576,6 @@ export const RepositoryIdentitySchema = Schema.Struct({
 });
 export type RepositoryIdentity = typeof RepositoryIdentitySchema.Type;
 
-export const GroupingModeSchema = Schema.Literal(
-	"repository",
-	"repository+subfolder",
-	"off",
-);
-export type GroupingMode = typeof GroupingModeSchema.Type;
-
-export const ProjectGroupSchema = Schema.Struct({
-	key: Schema.String,
-	label: Schema.String,
-	needsProjectQualifier: Schema.Boolean,
-});
-export type ProjectGroup = typeof ProjectGroupSchema.Type;
-
 /** A project in the project list */
 export interface ProjectInfo {
 	slug: string;
@@ -581,10 +584,6 @@ export interface ProjectInfo {
 	folders: readonly [string, ...string[]];
 	setupScript?: string | undefined;
 	sessionMode?: SessionMode | undefined;
-	/** Unset inherits the daemon's global default. */
-	groupingMode?: GroupingMode | undefined;
-	effectiveGroupingMode?: GroupingMode;
-	group?: ProjectGroup;
 	/** Keys are Project Folder paths; absent entries have no Repository Identity. */
 	repositoryIdentities?: Readonly<Record<string, RepositoryIdentity>>;
 	missing?: boolean;
@@ -910,6 +909,7 @@ export interface HealthResponse {
 
 export interface InfoResponse {
 	version: string;
+	buildId: string;
 }
 
 export interface DashboardProjectResponse {

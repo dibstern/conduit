@@ -10,6 +10,7 @@ import {
 import { instanceState } from "../../stores/instance.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
 import { mockClaudeAccount, mockOpenCodeAccount } from "../../stories/mocks.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import AttachMenu from "./AttachMenu.svelte";
 
 function seedModel(provider: "claude" | "opencode"): void {
@@ -41,11 +42,11 @@ const meta = {
 		const previousSession = sessionState.currentId;
 		const previousInstances = instanceState.instances;
 		clearDiscoveryState();
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		seedModel("opencode");
 		return () => {
 			clearDiscoveryState();
-			sessionState.currentId = previousSession;
+			openSessionForSetup(previousSession);
 			instanceState.instances = previousInstances;
 		};
 	},

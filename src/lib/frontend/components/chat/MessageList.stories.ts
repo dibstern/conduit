@@ -8,7 +8,6 @@ import {
 	resetChatState,
 } from "../../stores/chat.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
-import { sessionState } from "../../stores/session.svelte.js";
 import {
 	mockAssistantSimple,
 	mockAssistantWithCode,
@@ -22,6 +21,7 @@ import {
 	mockToolRunning,
 	mockUserMessage,
 } from "../../stories/mocks.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import { turnFixtureMessages } from "../../stories/turn-fixtures.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import type { ChatMessage } from "../../types.js";
@@ -37,7 +37,6 @@ let sequence = 0;
 
 function seed(messages: ChatMessage[], processing = false) {
 	resetChatState();
-	sessionState.currentId = testId;
 	// The reply header names the provider of the viewed session's account.
 	instanceState.instances = [mockClaudeAccount];
 	applySessionChange({
@@ -52,6 +51,7 @@ function seed(messages: ChatMessage[], processing = false) {
 		],
 		sequence: ++sequence,
 	});
+	openSessionForSetup(testId, "conduit");
 	const activity = getOrCreateSessionActivity(testId);
 	const chat = getOrCreateSessionMessages(testId);
 	chat.messages = [...messages];

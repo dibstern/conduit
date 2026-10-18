@@ -20,6 +20,7 @@ import {
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { WsRpcError } from "../../../src/lib/frontend/transport/ws-rpc.js";
 import { rpc as callRpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import {
@@ -27,8 +28,8 @@ import {
 	formatTimeAgo,
 } from "../../../src/lib/frontend/utils/format.js";
 import {
+	applySessionSnapshot,
 	clearSessionSearch,
-	seedDaemonSessions,
 	seedFamilySessions,
 	seedRootSessions,
 	seedSearchResults,
@@ -92,10 +93,10 @@ beforeEach(() => {
 		},
 	]);
 	seedFamilySessions([...sessionState.rootSessions]);
-	seedDaemonSessions([]);
+
 	sessionState.searchQuery = "";
 	clearSessionSearch();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 	sessionState.now = Date.now();
 });
 afterEach(() => {
@@ -205,6 +206,37 @@ describe("session triage list", () => {
 		sessionState.searchQuery = "";
 		await tick();
 		expect(screen.queryByText("Sleeping work")).toBeNull();
+	});
+
+	it("allocates the first page to Settled before Snoozed and reveals its more rows", async () => {
+		const now = sessionState.now;
+		seedRootSessions([
+			...Array.from({ length: 4 }, (_, i) => ({
+				projectSlug: "current-project",
+				id: `settled-${i}`,
+				title: `Settled task ${i + 1}`,
+				settledAt: now - (i + 1) * 1_000,
+			})),
+			...Array.from({ length: 30 }, (_, i) => ({
+				projectSlug: "current-project",
+				id: `snoozed-${i}`,
+				title: `Snoozed task ${i + 1}`,
+				snoozedAt: now,
+				snoozedUntil: now + 3_600_000,
+			})),
+		]);
+		uiState.settledShelfOpen = true;
+		uiState.snoozedShelfOpen = true;
+		const { container } = render(SessionList);
+		expect(screen.getAllByText(/^Settled task/)).toHaveLength(2);
+		expect(screen.getByTestId("settled-shelf-more").textContent).toContain(
+			"+ 2 more",
+		);
+		await fireEvent.click(screen.getByTestId("settled-shelf-more"));
+		expect(screen.getAllByText(/^Settled task/)).toHaveLength(4);
+		await fireEvent.click(screen.getByTestId("snoozed-shelf-more"));
+		expect(screen.getAllByText(/^Snoozed task/)).toHaveLength(26);
+		expect(container.querySelectorAll("[data-session-id]")).toHaveLength(30);
 	});
 
 	it("wakes a timed row on the client clock without another list read", async () => {
@@ -460,14 +492,17 @@ describe("session triage list", () => {
 	});
 
 	it("addresses another project's row by its session", async () => {
-		seedDaemonSessions([
-			{
-				id: "foreign",
-				title: "Foreign work",
-				projectSlug: "other-project",
-				pinnedAt: 1,
-			},
-		]);
+		applySessionSnapshot(
+			[
+				{
+					id: "foreign",
+					title: "Foreign work",
+					projectSlug: "other-project",
+					pinnedAt: 1,
+				},
+			],
+			"partial",
+		);
 		render(SessionList);
 		const row = screen.getByText("Foreign work").closest("a");
 		if (!row) throw new Error("Missing foreign row");
@@ -647,7 +682,7 @@ describe("sidebar pick", () => {
 	});
 
 	it("reports an unread row seen up to its latest turn end, even when it is already open", async () => {
-		sessionState.currentId = "unread";
+		openSessionForSetup("unread", "current-project");
 		render(SessionList);
 		await pick("unread");
 		expect(callRpc).toHaveBeenCalledExactlyOnceWith("MarkSessionSeen", {

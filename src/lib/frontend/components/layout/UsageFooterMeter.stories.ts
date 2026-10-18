@@ -6,12 +6,12 @@ import {
 	type UsageReading,
 } from "../../../contracts/limit-recovery.js";
 import { applyInstanceListResponse } from "../../stores/instance.svelte.js";
-import { sessionState } from "../../stores/session.svelte.js";
 import {
 	applyUsageLimitsSetting,
 	applyUsageReadings,
 } from "../../stores/usage.svelte.js";
 import { mockClaudeAccount, mockSession } from "../../stories/mocks.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import UsageFooterMeterFrame from "./__fixtures__/UsageFooterMeterFrame.svelte";
 
@@ -56,7 +56,7 @@ function seed(
 		sequence: 1,
 	});
 	applySessionChange({ _tag: "synchronized" });
-	sessionState.currentId = mockSession.id;
+	openSessionForSetup(mockSession.id, "conduit");
 }
 
 const meta = {
@@ -72,7 +72,7 @@ const meta = {
 		return () => {
 			applyUsageReadings([]);
 			applyUsageLimitsSetting(DEFAULT_USAGE_LIMITS);
-			sessionState.currentId = null;
+			openSessionForSetup(null);
 		};
 	},
 } satisfies Meta<typeof UsageFooterMeterFrame>;

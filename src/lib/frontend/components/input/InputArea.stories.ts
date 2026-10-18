@@ -33,6 +33,7 @@ import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { turn as readTurn } from "../../stores/turn.svelte.js";
 import { usageState } from "../../stores/usage.svelte.js";
 import { mockClaudeAccount, mockOpenCodeAccount } from "../../stories/mocks.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import { connectedSocket } from "../../stories/sockets.js";
 import { runTransportEffect } from "../../transport/runtime.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
@@ -165,7 +166,7 @@ const meta = {
 		const instances = instanceState.instances;
 		setComposerPreferences({ controls: "icons", contextWarning: 80 });
 		seedSessionAccount(mockOpenCodeAccount);
-		sessionState.currentId = testId;
+		openSessionForSetup(testId, "conduit");
 		phaseToIdle(getOrCreateSessionActivity(testId));
 		getOrCreateSessionMessages(testId).contextPercent = 0;
 		setupDiscovery();
@@ -1249,7 +1250,7 @@ function narrowComposer(
 					await userEvent.click(send);
 					await waitFor(() => expect(textarea).toHaveValue(""));
 					if (mode !== "limited") {
-						await waitFor(() => expect(readTurn(testId).working).toBe(true));
+						await waitFor(() => expect(readTurn().working).toBe(true));
 					}
 					composer.dataset["sendVisibilityProof"] = JSON.stringify({
 						width,

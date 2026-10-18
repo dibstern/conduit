@@ -26,10 +26,6 @@ export const daemonOnlyHandlers = {
 	GetInstanceStatus: (_request) => daemonRequired("GetInstanceStatus"),
 	OpenCodeUseWorktree: (_request) => daemonRequired("OpenCodeUseWorktree"),
 	ResolveSessionMode: (_request) => daemonRequired("ResolveSessionMode"),
-	SetDefaultGroupingMode: (_request) =>
-		daemonRequired("SetDefaultGroupingMode"),
-	GetDefaultGroupingMode: (_request) =>
-		daemonRequired("GetDefaultGroupingMode"),
 	GetCategorySet: (_request) => daemonRequired("GetCategorySet"),
 	GetSurfacingFeedback: (_request) => daemonRequired("GetSurfacingFeedback"),
 	GetSurfacingLedger: (_request) => daemonRequired("GetSurfacingLedger"),
@@ -56,8 +52,6 @@ export const daemonOnlyHandlers = {
 	| "GetInstanceStatus"
 	| "OpenCodeUseWorktree"
 	| "ResolveSessionMode"
-	| "SetDefaultGroupingMode"
-	| "GetDefaultGroupingMode"
 	| "GetCategorySet"
 	| "GetSurfacingFeedback"
 	| "GetSurfacingLedger"

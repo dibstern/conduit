@@ -15,6 +15,7 @@ import { instanceState } from "../../stores/instance.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { mockClaudeAccount, mockOpenCodeAccount } from "../../stories/mocks.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import type { SessionPermissionMode } from "../../types.js";
 import PermissionModeSelector from "./PermissionModeSelector.svelte";
 
@@ -128,13 +129,13 @@ const meta = {
 		const previousInstances = instanceState.instances;
 		const restoreViewport = viewport(1280);
 		clearDiscoveryState();
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		seedModel("claude");
 		setMode("ask");
 		return () => {
 			restoreViewport();
 			clearDiscoveryState();
-			sessionState.currentId = previousSession;
+			openSessionForSetup(previousSession);
 			instanceState.instances = previousInstances;
 		};
 	},

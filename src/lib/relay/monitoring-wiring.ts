@@ -5,7 +5,7 @@
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
 import { SqlClient } from "@effect/sql";
-import { Cause, Deferred, Effect, FiberId, Option, Runtime } from "effect";
+import { Deferred, Effect, FiberId, Option, Runtime } from "effect";
 import type { Account, AccountRef } from "../contracts/account.js";
 import { getProviderDriver } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
@@ -20,6 +20,7 @@ import {
 	clearProcessingTimeout,
 	type OverridesStateTag,
 } from "../domain/relay/Services/session-overrides-state.js";
+import * as Failure from "../effect/failure-classification.js";
 import type { Message } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationSender } from "../server/push.js";
@@ -233,7 +234,7 @@ const processAndApplyDoneEffect = (
 				Effect.catchAllCause((cause) =>
 					Effect.sync(() => {
 						deps.statusLog.warn(
-							`Failed to identify poller completion: ${Cause.pretty(cause)}`,
+							`Failed to identify poller completion: ${Failure.renderCause(cause)}`,
 						);
 						return undefined;
 					}),
@@ -295,7 +296,7 @@ const processAndApplyDoneEffect = (
 					Effect.catchAllCause((cause) =>
 						Effect.sync(() =>
 							deps.statusLog.warn(
-								`Failed to identify provider completion: ${Cause.pretty(cause)}`,
+								`Failed to identify provider completion: ${Failure.renderCause(cause)}`,
 							),
 						),
 					),
@@ -741,7 +742,7 @@ export const wireMonitoringEffect = (
 					Effect.catchAllCause((cause) =>
 						Effect.sync(() =>
 							statusLog.warn(
-								`Status poller changed handler failed: ${Cause.pretty(cause)}`,
+								`Status poller changed handler failed: ${Failure.renderCause(cause)}`,
 							),
 						),
 					),

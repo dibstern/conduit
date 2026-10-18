@@ -10,6 +10,7 @@ import { setSessionSurfaceLevel } from "../../stores/message-surfacing.svelte.js
 import { reveal, revealedPart } from "../../stores/reveal.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
 import { setTurnMinimised } from "../../stores/turn-minimisation.svelte.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import { connectedSocket, replyRpc } from "../../stories/sockets.js";
 import type { ActivityPart, Segment, Turn } from "../../utils/turns.js";
 import TurnActivity from "./TurnActivity.svelte";
@@ -106,7 +107,7 @@ const meta = {
 			for (const restore of cleanup.reverse()) restore();
 			setTurnMinimised(SESSION, turn.id, null);
 			revealedPart.request = null;
-			sessionState.currentId = previousSession;
+			openSessionForSetup(previousSession);
 			if (previousMessages) sessionMessages.set(SESSION, previousMessages);
 			else sessionMessages.delete(SESSION);
 		};
@@ -219,7 +220,7 @@ export const MessageDestination: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		canvasElement.dataset["sessionId"] = SESSION;
-		sessionState.currentId = SESSION;
+		openSessionForSetup(SESSION);
 		getOrCreateSessionMessages(SESSION).messages = unread.activity.filter(
 			(part) => part.type !== "system",
 		);

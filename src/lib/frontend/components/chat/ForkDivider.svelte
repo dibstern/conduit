@@ -5,7 +5,7 @@
 
 <script lang="ts">
 	import Button from "../ui/Button.svelte";
-	import { switchToSession } from "../../stores/session.svelte.js";
+	import { selection } from "../../stores/selection.svelte.js";
 
 	interface Props {
 		sourceTitle: string;
@@ -28,7 +28,7 @@
 				hoverFill="none"
 				type="button"
 				class="underline decoration-dotted p-0 font-mono text-[11px]"
-				onclick={() => switchToSession(sourceId)}
+				onclick={() => selection.open(sourceId)}
 				title="Go to source session"
 			>
 				{sourceTitle}

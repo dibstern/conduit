@@ -122,6 +122,8 @@ export type SessionSettledPayload = PayloadOf<"session.settled">;
 export type SessionAutoSettleSetPayload = PayloadOf<"session.auto_settle_set">;
 
 export type SessionUnsettledPayload = PayloadOf<"session.unsettled">;
+export type SessionArchivedPayload = PayloadOf<"session.archived">;
+export type SessionUnarchivedPayload = PayloadOf<"session.unarchived">;
 
 export type SessionPinnedPayload = PayloadOf<"session.pinned">;
 
@@ -298,7 +300,7 @@ const TokensSchema = Schema.Struct({
 	output: Schema.optionalWith(Schema.Number, { exact: true }),
 	cacheRead: Schema.optionalWith(Schema.Number, { exact: true }),
 	cacheWrite: Schema.optionalWith(Schema.Number, { exact: true }),
-	/** Zero explicitly records an unavailable capacity; omission retains legacy display. */
+	/** Omission means capacity unknown; readers also treat legacy zero values as unknown. */
 	contextWindow: Schema.optionalWith(Schema.Number, { exact: true }),
 });
 
@@ -783,6 +785,18 @@ export const CanonicalEvents = {
 	"session.unsettled": live(
 		Schema.Struct({
 			sessionId: Schema.String,
+		}),
+	),
+	"session.archived": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			automatic: Schema.Boolean,
+		}),
+	),
+	"session.unarchived": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			cause: Schema.Literal("manual", "send"),
 		}),
 	),
 	"session.pinned": live(

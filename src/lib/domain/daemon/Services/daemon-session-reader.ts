@@ -1,6 +1,7 @@
 import { statSync } from "node:fs";
 import { SqlClient } from "@effect/sql";
-import { Cause, Data, Effect, Exit, Layer, Option } from "effect";
+import { Data, Effect, Exit, Layer, Option } from "effect";
+import * as Failure from "../../../effect/failure-classification.js";
 import {
 	type createSessionGitCache,
 	daemonSessionGitCache,
@@ -8,16 +9,17 @@ import {
 import type { PersistenceStore } from "../../../persistence/effect/live.js";
 import {
 	makeReadQueryEffect,
+	type ReadQueryEffect,
 	ReadQueryEffectTag,
 	type SessionScope,
 } from "../../../persistence/effect/read-query-effect.js";
-import { computeProjectGroups } from "../../../project-grouping.js";
-import { loadRelaySettings } from "../../../relay/relay-settings.js";
+import { shouldArchiveIdleSession } from "../../../session/auto-archive-policy.js";
+import { readPersistedAutoArchiveFacts } from "../../../session/auto-archive-sweep.js";
 import { getAutoSettleOutlook } from "../../../session/auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "../../../session/auto-settle-reader.js";
-import { getScopeGroupKey } from "../../../session-scope.js";
 import type {
-	DaemonSessionCursor,
+	ArchivedSessionQueryOptions,
+	ArchivedSessionQueryResult,
 	DaemonSessionQueryOptions,
 	DaemonSessionQueryResult,
 	SessionInfo,
@@ -48,13 +50,17 @@ class DaemonSessionReadError extends Data.TaggedError(
 }
 
 interface ProjectSessionCandidate {
-	readonly sortKey: DaemonSessionCursor;
+	readonly sortKey: { readonly at: number; readonly id: string };
 	readonly session: SessionInfo;
 }
 
+type SessionReadOptions = NonNullable<
+	Parameters<ReadQueryEffect["listSessionInfos"]>[1]
+>;
+
 const readProjectSessions = (
 	project: Pick<StoredProject, "slug" | "folders">,
-	options: DaemonSessionQueryOptions,
+	options: SessionReadOptions,
 	gitCache: ReturnType<typeof createSessionGitCache>,
 ) =>
 	Effect.gen(function* () {
@@ -91,21 +97,11 @@ const readProjectSessions = (
 			});
 			return yield* sql.withTransaction(
 				Effect.gen(function* () {
-					const filters = {
-						...(options.roots !== undefined ? { roots: options.roots } : {}),
-						...(options.search !== undefined
-							? { titleQuery: options.search }
-							: {}),
-					};
 					const settledCount = yield* readQuery.countSettledSessions(
 						{ projectIds: [projectSlug] },
-						filters,
+						options,
 					);
-					const sessions = yield* rows.list({
-						...filters,
-						...(options.limit !== undefined ? { limit: options.limit } : {}),
-						...(options.cursor !== undefined ? { before: options.cursor } : {}),
-					});
+					const sessions = yield* rows.list(options);
 					return { sessions, settledCount };
 				}),
 			);
@@ -114,7 +110,13 @@ const readProjectSessions = (
 			settledCount: result.settledCount,
 			sessions: result.sessions.map(
 				(session): ProjectSessionCandidate => ({
-					sortKey: { updatedAt: session.updatedAt, id: session.id },
+					sortKey: {
+						at:
+							options.orderColumn === "archived_at"
+								? (session.archivedAt ?? 0)
+								: session.updatedAt,
+						id: session.id,
+					},
 					session,
 				}),
 			),
@@ -184,40 +186,28 @@ export const hasColdAutoSettleCandidate = (
 		);
 	});
 
-export const listDaemonSessions = (
-	configDir: string,
-	options: DaemonSessionQueryOptions = {},
-	gitCache: ReturnType<typeof createSessionGitCache> = daemonSessionGitCache,
-): Effect.Effect<
-	DaemonSessionQueryResult,
-	never,
-	ProjectRegistryTag | AccountDirectory | SessionActivityTag | PersistenceStore
-> =>
+export const hasColdAutoArchiveCandidate = (
+	project: Pick<StoredProject, "slug" | "folders">,
+	now: number,
+	idleWindowMs: number,
+) =>
 	Effect.gen(function* () {
-		const registered = yield* allProjects;
-		const unavailable = yield* DaemonStoreAvailability;
-		const groupKey = getScopeGroupKey(options.scope);
-		const defaultMode =
-			loadRelaySettings(configDir).defaultGroupingMode ?? "repository";
-		const groups =
-			groupKey === null
-				? null
-				: computeProjectGroups(
-						registered.map((project) => ({
-							...project,
-							groupingMode: project.groupingMode ?? defaultMode,
-						})),
-					);
-		// Scope before querying or merging any project pages. The same pure
-		// function owns membership in the registry and in the frontend.
-		const projects = registered.filter(
-			(project) =>
-				(options.scope === undefined ||
-					(groupKey === null
-						? project.slug === options.scope
-						: groups?.[project.slug]?.key === groupKey)) &&
-				project.slug !== options.exclude,
+		const database = yield* projectReadDatabase(project);
+		const facts = yield* readPersistedAutoArchiveFacts(project.slug, now).pipe(
+			Effect.provide(database),
 		);
+		return [...facts.values()].some((item) =>
+			shouldArchiveIdleSession(item, now, idleWindowMs),
+		);
+	});
+
+const listProjectSessions = (
+	projects: readonly Pick<StoredProject, "slug" | "folders">[],
+	options: SessionReadOptions,
+	gitCache: ReturnType<typeof createSessionGitCache>,
+) =>
+	Effect.gen(function* () {
+		const unavailable = yield* DaemonStoreAvailability;
 		const limit =
 			options.limit === undefined
 				? undefined
@@ -263,19 +253,18 @@ export const listDaemonSessions = (
 						availability: {
 							projectSlug: project.slug,
 							available: false as const,
-							error: String(Cause.squash(exit.cause)),
+							error: String(Failure.squashCause(exit.cause)),
 						},
 					};
 				}),
 			{ concurrency: 4 },
 		);
 
-		// Merge with the raw SQL sort key. SessionInfo.updatedAt may be a parsed
-		// string or absent, which would disagree with the integer keyset predicate.
+		// Use the same timestamp column for project keysets and the global merge.
 		const candidates = projectResults
 			.flatMap((result) => result.sessions)
 			.sort((a, b) => {
-				const timestampOrder = b.sortKey.updatedAt - a.sortKey.updatedAt;
+				const timestampOrder = b.sortKey.at - a.sortKey.at;
 				if (timestampOrder !== 0) return timestampOrder;
 				if (a.sortKey.id === b.sortKey.id) return 0;
 				return a.sortKey.id < b.sortKey.id ? 1 : -1;
@@ -303,7 +292,74 @@ export const listDaemonSessions = (
 			hasMore,
 			nextCursor,
 		};
+	});
+
+export const listDaemonSessions = (
+	options: DaemonSessionQueryOptions = {},
+	gitCache: ReturnType<typeof createSessionGitCache> = daemonSessionGitCache,
+): Effect.Effect<
+	DaemonSessionQueryResult,
+	never,
+	ProjectRegistryTag | AccountDirectory | SessionActivityTag | PersistenceStore
+> =>
+	Effect.gen(function* () {
+		const registered = yield* allProjects;
+		// Scope before querying or merging any project pages.
+		const projects = registered.filter(
+			(project) =>
+				(options.scope === undefined || project.slug === options.scope) &&
+				project.slug !== options.exclude,
+		);
+		const result = yield* listProjectSessions(
+			projects,
+			{
+				excludeArchived: options.includeArchived !== true,
+				...(options.roots !== undefined ? { roots: options.roots } : {}),
+				...(options.limit !== undefined ? { limit: options.limit } : {}),
+				...(options.search !== undefined ? { titleQuery: options.search } : {}),
+				...(options.cursor !== undefined
+					? { before: { at: options.cursor.updatedAt, id: options.cursor.id } }
+					: {}),
+			},
+			gitCache,
+		);
+		return {
+			...result,
+			nextCursor: result.nextCursor
+				? { updatedAt: result.nextCursor.at, id: result.nextCursor.id }
+				: null,
+		};
 	}).pipe(Effect.withSpan("daemonSessions.list"));
+
+export const listArchivedSessions = (
+	options: ArchivedSessionQueryOptions = {},
+	gitCache: ReturnType<typeof createSessionGitCache> = daemonSessionGitCache,
+): Effect.Effect<
+	ArchivedSessionQueryResult,
+	never,
+	ProjectRegistryTag | AccountDirectory | SessionActivityTag | PersistenceStore
+> =>
+	Effect.gen(function* () {
+		const result = yield* listProjectSessions(
+			yield* allProjects,
+			{
+				roots: true,
+				archivedOnly: true,
+				orderColumn: "archived_at",
+				...(options.limit !== undefined ? { limit: options.limit } : {}),
+				...(options.cursor !== undefined
+					? { before: { at: options.cursor.archivedAt, id: options.cursor.id } }
+					: {}),
+			},
+			gitCache,
+		);
+		return {
+			...result,
+			nextCursor: result.nextCursor
+				? { archivedAt: result.nextCursor.at, id: result.nextCursor.id }
+				: null,
+		};
+	}).pipe(Effect.withSpan("daemonSessions.listArchived"));
 
 export const resolveDaemonSession = (sessionId: string) =>
 	Effect.gen(function* () {

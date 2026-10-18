@@ -113,12 +113,13 @@ describe("Bound project provenance", () => {
 			"0060_daemon_store_imports",
 			"0061_sessions_lineage",
 			"0062_legacy_forks",
-			"0063_goal_check_metadata",
-			"0064_message_part_surfacing",
-			"0065_sessions_settled_shelf_index",
-			"0066_surfacing_marks",
-			"0067_message_part_read",
-			"0068_turn_recaps",
+			"0063_sessions_archived",
+			"0064_goal_check_metadata",
+			"0065_message_part_surfacing",
+			"0066_sessions_settled_shelf_index",
+			"0067_surfacing_marks",
+			"0068_message_part_read",
+			"0069_turn_recaps",
 		]);
 	});
 

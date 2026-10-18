@@ -28,7 +28,7 @@
 
 	const knownLevels = [
 		{ value: "low", name: "Low", label: "LOW", description: "Quick, light reasoning" },
-		{ value: "medium", name: "Medium", label: "MED", description: "Balanced" },
+		{ value: "medium", name: "Medium", label: "MEDIUM", description: "Balanced" },
 		{ value: "high", name: "High", label: "HIGH", description: "Thinks harder, slower" },
 		{ value: "xhigh", name: "Extra high", label: "XHIGH", description: "Deeper still, for hard problems" },
 		{ value: "max", name: "Max", label: "MAX", description: "Most thorough, slowest" },
@@ -93,7 +93,7 @@
 				openPicker("effort");
 				if (composerPickerState.request && event.currentTarget instanceof HTMLElement) composerPickerState.request.opener = event.currentTarget;
 			}}
-		><span class="border-b border-dotted border-border-chip">{wordLabel ?? (currentVariant === "medium" ? "med" : currentVariant || "default")}</span></Button>
+		><span class="border-b border-dotted border-border-chip">{wordLabel ?? (currentVariant || "default")}</span></Button>
 {:else if showEffort && variant === "control" && sessionViewState.composerWidth >= 480}
 	<Button
 		variant="composer-model"

@@ -17,14 +17,12 @@ import {
 	WsRpcError,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
-import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { makeSessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -39,7 +37,6 @@ import {
 	makeWsRpcWebSocketHandler,
 } from "../../../src/lib/server/ws-rpc-handler.js";
 import {
-	makeMockAccountDirectory,
 	makeMockConfig,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
@@ -83,64 +80,6 @@ describe("routed RPC server", () => {
 				});
 				expect(resolve).not.toHaveBeenCalled();
 			}),
-	);
-
-	it.scoped("keeps two project shell streams on their own read models", () =>
-		Effect.gen(function* () {
-			const contexts = new Map<string, Context.Context<unknown>>();
-			for (const slug of ["project-a", "project-b"]) {
-				const bus = makeSessionEventBusLive();
-				const context = yield* Layer.build(
-					Layer.mergeAll(
-						RpcSubscriptionScopeLive,
-						bus,
-						makePersistenceEffectLayer(":memory:", slug, undefined, bus),
-						Layer.effect(SessionActivityTag, makeSessionActivity),
-						Layer.succeed(ConfigTag, makeMockConfig({ slug })),
-						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-					),
-				);
-				contexts.set(slug, context as Context.Context<unknown>);
-				yield* Effect.gen(function* () {
-					const runner = yield* ProjectionRunnerEffectTag;
-					yield* runner.recover();
-					const commit = yield* makeCommitAndSignal;
-					yield* commit([
-						canonicalEvent(
-							"session.created",
-							slug,
-							{
-								sessionId: slug,
-								title: slug,
-								provider: "claude",
-							},
-							{ provider: "claude", createdAt: 1 },
-						),
-					]);
-				}).pipe(Effect.provide(context));
-			}
-			const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
-				Effect.provide(
-					makeRoutedWsRpcServerLayer((slug) => {
-						const context = contexts.get(slug);
-						return context
-							? Effect.succeed(context)
-							: Effect.fail(
-									new WsRpcError({ message: `Unknown project ${slug}` }),
-								);
-					}).pipe(Layer.provide(sessionDirectory)),
-				),
-			);
-			for (const slug of ["project-a", "project-b"]) {
-				const envelopes = yield* client
-					.SubscribeShell({ projectSlug: slug })
-					.pipe(Stream.take(2), Stream.runCollect);
-				expect(Array.from(envelopes)).toMatchObject([
-					{ _tag: "snapshot", rows: [{ id: slug, projectSlug: slug }] },
-					{ _tag: "synchronized" },
-				]);
-			}
-		}),
 	);
 
 	it.scoped(

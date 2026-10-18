@@ -17,14 +17,12 @@ import {
 	instanceState,
 } from "../../../src/lib/frontend/stores/instance.svelte.js";
 import { projectState } from "../../../src/lib/frontend/stores/project.svelte.js";
-import {
-	clearSessionState,
-	sessionState,
-} from "../../../src/lib/frontend/stores/session.svelte.js";
+import { clearSessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	showBanner,
 	uiState,
 } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type {
 	OpenCodeInstance,
 	ProviderInfo,
@@ -149,7 +147,7 @@ describe("Banners", () => {
 				resumes: [{ at: 1, instanceId: "work-oc", reason: "user" }],
 			},
 		]);
-		sessionState.currentId = "session-work";
+		openSessionForSetup("session-work", "work");
 		applyGetModelsResponse(
 			{
 				projectSlug: "work",
@@ -193,7 +191,7 @@ describe("Banners", () => {
 				resumes: [{ at: 1, instanceId: "work-oc", reason: "user" }],
 			},
 		]);
-		sessionState.currentId = "session-work";
+		openSessionForSetup("session-work", "work");
 		applyGetModelsResponse(
 			{
 				projectSlug: "work",
@@ -226,7 +224,7 @@ describe("Banners", () => {
 				resumes: [{ at: 1, instanceId: "opencode", reason: "user" }],
 			},
 		]);
-		sessionState.currentId = "session-work";
+		openSessionForSetup("session-work", "work");
 		applyGetAgentsResponse(
 			{
 				projectSlug: "work",
@@ -273,7 +271,7 @@ describe("Banners", () => {
 		seedRootSessions([
 			{ id: "session-work", title: "Work session", accountId },
 		]);
-		sessionState.currentId = "session-work";
+		openSessionForSetup("session-work", "work");
 		applyGetModelsResponse(
 			{
 				projectSlug: "work",

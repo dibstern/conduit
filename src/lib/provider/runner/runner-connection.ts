@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { appendFileSync } from "node:fs";
 import { createConnection } from "node:net";
-import { Cause, Deferred, Effect } from "effect";
+import { Deferred, Effect } from "effect";
 import { observeTurnTimelineFrame } from "../../domain/daemon/Services/turn-timeline.js";
+import * as Failure from "../../effect/failure-classification.js";
 import {
 	RUNNER_PROTOCOL_VERSION,
 	type RunnerHello,
@@ -210,7 +211,10 @@ export const connectRunner = (options: {
 										Effect.sync(() => {
 											finish(
 												Effect.fail(
-													runnerFailure("restore runner", Cause.squash(cause)),
+													runnerFailure(
+														"restore runner",
+														Failure.squashCause(cause),
+													),
 												),
 											);
 											connection.destroy();
@@ -391,7 +395,7 @@ export const connectRunner = (options: {
 												if (
 													!active ||
 													resyncScheduled ||
-													Cause.isInterruptedOnly(cause)
+													Failure.isInterruptedOnly(cause)
 												)
 													return Effect.void;
 												// Keep the runner's waiter pending and replay from the durable

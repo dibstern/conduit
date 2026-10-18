@@ -31,10 +31,6 @@ import { getLogLevel } from "../../../logger.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
 import { makeCursorAuth } from "../../../provider/cursor/cursor-auth.js";
 import {
-	loadRelaySettings,
-	saveRelaySettings,
-} from "../../../relay/relay-settings.js";
-import {
 	getRestartAvailable,
 	isServerSupervised,
 	SERVER_BUILD_ID,
@@ -50,6 +46,7 @@ import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { getVersion } from "../../../version.js";
 import { makeCategoryTuning } from "../../relay/Services/category-tuning.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
+import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { readSurfacingFeedback } from "../../relay/Services/surfacing-feedback.js";
 import { AuthManagerTag } from "../../server/Layers/auth-middleware.js";
@@ -67,6 +64,7 @@ import { DaemonHandleTag } from "../Services/daemon-handle.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
 	findOpenCodeSession,
+	listArchivedSessions,
 	listDaemonSessions,
 	resolveDaemonOpenCodeSession,
 	resolveDaemonSession,
@@ -104,6 +102,7 @@ import {
 import { RelayCacheTag } from "../Services/relay-cache.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
 import type { SessionDirectory } from "../Services/session-directory.js";
+import { subscribeDaemonShell } from "../Services/shell-subscription.js";
 import { Usage } from "../Services/usage.js";
 import type { UserAvatar } from "../Services/user-avatar.js";
 import { KeepAwakeTag } from "./keep-awake-layer.js";
@@ -144,9 +143,12 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| TailscaleCliTag
 		>();
 		const activity = yield* SessionActivityTag;
+		const sessionEventBus = yield* SessionEventBusTag;
 		const context = Context.add(baseContext, SessionActivityTag, activity).pipe(
+			Context.add(SessionEventBusTag, sessionEventBus),
 			Context.merge(yield* persistenceStoreContext),
 		);
+		const shellContext = Context.merge(context, yield* PersistenceStore);
 		const bus = yield* DaemonEventBusTag;
 		const cache = yield* RelayCacheTag;
 		const handle = yield* DaemonHandleTag;
@@ -166,7 +168,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const invalidateBrowsers = () => {
 			for (const invalidate of browserConnections) invalidate();
 		};
-		// Every open SubscribeInstances / SubscribeProjects stream, across all
+		// Every open SubscribeInstances / SubscribeShell stream, across all
 		// connections and projects (conduit-test-ni8.14). A change wakes each
 		// one following that list; it re-reads the list itself.
 		const listSubscribers = new Set<{
@@ -346,19 +348,30 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			SubscribeUsage: () =>
 				usage.readings.pipe(Stream.map((readings) => ({ readings }))),
-			SubscribeProjects: () =>
-				followList(
-					"projects",
-					Effect.gen(function* () {
-						const projects = yield* projectInfos;
-						const { newSessionProject } = yield* Ref.get(
-							yield* DaemonConfigRefTag,
-						);
-						return {
-							projects,
-							...(newSessionProject !== undefined && { newSessionProject }),
-						};
-					}),
+			SubscribeShell: (request) =>
+				subscribeDaemonShell(
+					request,
+					followList(
+						"projects",
+						Effect.gen(function* () {
+							const projects = yield* projectInfos;
+							const { newSessionProject } = yield* Ref.get(
+								yield* DaemonConfigRefTag,
+							);
+							return {
+								_tag: "projects" as const,
+								projects,
+								...(newSessionProject !== undefined && { newSessionProject }),
+							};
+						}),
+					),
+				).pipe(
+					Stream.provideContext(shellContext),
+					Stream.mapError((error) =>
+						error instanceof WsRpcError
+							? error
+							: new WsRpcError({ message: formatErrorDetail(error) }),
+					),
 				),
 			sessionCreated: (projectSlug) =>
 				run(rememberNewSessionProject(projectSlug)).pipe(
@@ -583,9 +596,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						...(request.sessionMode !== undefined && {
 							sessionMode: request.sessionMode,
 						}),
-						...(request.groupingMode !== undefined && {
-							groupingMode: request.groupingMode,
-						}),
 					});
 					// Saving without a slug adds a project; its first session goes there.
 					if (request.slug === undefined && kind !== "existing")
@@ -761,13 +771,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(wsRpcHandlers.SetWorktreeCleanupSetting(request)),
 			CleanUpWorktreesNow: (request) =>
 				run(wsRpcHandlers.CleanUpWorktreesNow(request)),
-			GetDefaultGroupingMode: (_request) =>
-				run(
-					Effect.sync(() => ({
-						mode:
-							loadRelaySettings(configDir).defaultGroupingMode ?? "repository",
-					})),
-				),
 			GetCategorySet: () => categorySet.current(),
 			GetSurfacingFeedback: () =>
 				run(
@@ -789,23 +792,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				}),
 			ReplaceCategorySet: ({ expectedVersion, nextSet }) =>
 				categorySet.replace(expectedVersion, nextSet),
-			SetDefaultGroupingMode: ({ mode }) =>
-				run(
-					Effect.gen(function* () {
-						yield* Effect.try(() =>
-							saveRelaySettings({ defaultGroupingMode: mode }, configDir),
-						);
-						yield* PubSub.publish(
-							bus,
-							DaemonEvent.GlobalSettingChanged({
-								originSlug: "",
-								tag: "defaultGroupingMode",
-							}),
-						);
-						yield* PubSub.publish(bus, DaemonEvent.ProjectsChanged());
-						return { mode };
-					}),
-				),
 			GetUsageLimitsSetting: (request) =>
 				run(wsRpcHandlers.GetUsageLimitsSetting(request)),
 			SetUsageLimitsSetting: (request) =>
@@ -828,10 +814,13 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			ListDaemonSessions: (request) =>
 				run(
-					listDaemonSessions(configDir, {
+					listDaemonSessions({
 						...(request.limit !== undefined ? { limit: request.limit } : {}),
 						...(request.roots !== undefined ? { roots: request.roots } : {}),
 						...(request.search !== undefined ? { search: request.search } : {}),
+						...(request.includeArchived !== undefined
+							? { includeArchived: request.includeArchived }
+							: {}),
 						...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
 						...(request.scope !== undefined ? { scope: request.scope } : {}),
 						...(request.exclude !== undefined
@@ -843,6 +832,13 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 							...result,
 						})),
 					),
+				),
+			ListArchivedSessions: (request) =>
+				run(
+					listArchivedSessions({
+						...(request.limit !== undefined ? { limit: request.limit } : {}),
+						...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
+					}),
 				),
 			ResolveSession: (request) =>
 				run(

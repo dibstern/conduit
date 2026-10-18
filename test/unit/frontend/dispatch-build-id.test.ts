@@ -49,7 +49,6 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 	showBanner: mocks.showBanner,
 	removeBanner: mocks.removeBanner,
 	setClientCount: vi.fn(),
-	updateContextPercent: vi.fn(),
 }));
 vi.mock("../../../src/lib/frontend/transport/runtime.js", async () => {
 	const { Effect } = await import("effect");

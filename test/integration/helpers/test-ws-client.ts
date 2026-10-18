@@ -520,7 +520,7 @@ export class TestWsClient {
 		const projectSlug = this.projectSlug;
 		await this.follow(
 			"shell",
-			(client) => client.SubscribeShell({ projectSlug }),
+			(client) => client.SubscribeShell({}),
 			{ projectSlug },
 			(envelope) => {
 				const rows =

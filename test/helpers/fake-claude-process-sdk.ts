@@ -851,7 +851,11 @@ function query(params: {
 			const userUuid = input.uuid ?? randomUUID();
 			// The CLI starts every uuid-stamped prompt (recorded traces); the server
 			// places a send held behind an unsettled turn only on this start.
-			if (input.uuid || request.includes("correction"))
+			if (
+				input.uuid ||
+				request.includes("correction") ||
+				request === "after-mode-change"
+			)
 				yield {
 					type: "command_lifecycle",
 					state: "started",
