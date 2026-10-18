@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-	applyProjectList,
+	applyShellProjects,
 	getDraftProject,
 	projectState,
 } from "../../../src/lib/frontend/stores/project.svelte.js";
@@ -90,7 +90,7 @@ afterEach(() => {
 
 describe("project navigation", () => {
 	it("replaces a removed attached project's session with an unscoped list", async () => {
-		applyProjectList({ projects: [projectB] });
+		applyShellProjects({ _tag: "projects", projects: [projectB] });
 		await vi.waitFor(() => expect(attachedProjectState.slug).toBeNull());
 		expect(routerState.path).toBe("/");
 		expect(routerState.search).toBe("");
@@ -99,7 +99,7 @@ describe("project navigation", () => {
 	});
 
 	it("keeps the current session when another project is removed", async () => {
-		applyProjectList({ projects: [projectA] });
+		applyShellProjects({ _tag: "projects", projects: [projectA] });
 		// The handler checks the attachment after loading the router module.
 		await import("../../../src/lib/frontend/stores/router.svelte.js");
 		expect(attachedProjectState.slug).toBe("project-a");

@@ -44,6 +44,7 @@ import {
 	BrowserRpcConnectionsLive,
 	makeRoutedWsRpcServerLayer,
 } from "../../../server/ws-rpc.js";
+import { SessionEventBusLive } from "../../relay/Services/session-event-bus.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
 	DaemonHttpRequestHandlerTag,
@@ -671,7 +672,9 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 				),
 			),
 		),
-		SessionActivityDaemonLive.pipe(Layer.provideMerge(DaemonEventBusLive)),
+		SessionActivityDaemonLive.pipe(
+			Layer.provideMerge(Layer.merge(DaemonEventBusLive, SessionEventBusLive)),
+		),
 		BrowserRpcConnectionsLive,
 		PinoLoggerLive,
 		makeDaemonTracingLive(resolveTraceConfig(configDir)),

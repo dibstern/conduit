@@ -2155,30 +2155,29 @@ export class ProcessBrowser {
 		if (this.sessionsReady) return this.sessionsReady;
 		this.sessionsReady = (async () => {
 			const cursor = this.frames.length;
-			this.sessions = this.watch(
-				this.rpc.SubscribeShell({ projectSlug: this.projectSlug }),
-				(envelope) =>
-					Effect.gen(this, function* () {
-						this.record({ type: "shell", ...envelope });
-						if (envelope._tag === "snapshot")
-							this.record({ type: "session_snapshot" });
-						const rows =
-							envelope._tag === "snapshot"
-								? envelope.rows
-								: envelope._tag === "upsert"
-									? [envelope.item]
-									: [];
-						for (const row of rows)
-							this.record({ ...row, type: "session_row" });
-						if (this.followRows)
-							yield* Effect.forEach(
-								rows,
-								(row) => Effect.promise(() => this.followSession(row.id)),
-								{ discard: true },
-							);
-						if (envelope._tag === "remove")
-							this.record({ type: "session_removed", id: envelope.id });
-					}),
+			this.sessions = this.watch(this.rpc.SubscribeShell({}), (envelope) =>
+				Effect.gen(this, function* () {
+					this.record({ type: "shell", ...envelope });
+					if (envelope._tag === "snapshot")
+						this.record({ type: "session_snapshot" });
+					const rows =
+						envelope._tag === "snapshot"
+							? envelope.rows
+							: envelope._tag === "upsert"
+								? [envelope.item]
+								: [];
+					for (const row of rows) this.record({ ...row, type: "session_row" });
+					// The feed spans every project; following another project's
+					// rows would tie this browser to that project's lifetime.
+					if (this.followRows)
+						yield* Effect.forEach(
+							rows.filter((row) => row.projectSlug === this.projectSlug),
+							(row) => Effect.promise(() => this.followSession(row.id)),
+							{ discard: true },
+						);
+					if (envelope._tag === "remove")
+						this.record({ type: "session_removed", id: envelope.id });
+				}),
 			);
 			await this.waitFor(
 				(message) =>

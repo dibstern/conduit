@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -194,7 +194,7 @@ describe("daemon shared RPC routing", () => {
 						projectSlug: "project-a",
 						originId: "daemon-client",
 					}),
-				).toEqual({ projectSlug: "project-a" });
+				).toEqual({ projectSlug: "project-a", sessionSlug: null });
 				if (operation === "ViewSession") {
 					yield* rpcClient.SyncInputDraft({
 						sessionId: "session-b",
@@ -245,7 +245,7 @@ describe("daemon shared RPC routing", () => {
 			Effect.gen(function* () {
 				const directory = yield* Effect.acquireRelease(
 					Effect.sync(() =>
-						mkdtempSync(join(tmpdir(), "conduit-first-project-")),
+						realpathSync(mkdtempSync(join(tmpdir(), "conduit-first-project-"))),
 					),
 					(path) =>
 						Effect.sync(() => rmSync(path, { recursive: true, force: true })),

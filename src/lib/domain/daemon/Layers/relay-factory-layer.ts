@@ -49,6 +49,7 @@ import {
 	type SaveProjectResult,
 } from "../../relay/Services/project-management-service.js";
 import { ScanServiceTag } from "../../relay/Services/scan-service.js";
+import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
@@ -183,6 +184,7 @@ export const RelayFactoryLive = (
 	| InstanceHealthCheckTag
 	| DaemonEventBusTag
 	| SessionActivityTag
+	| SessionEventBusTag
 	| ConfigPersistenceTag
 	| PortScannerTag
 	| PushManagerTag
@@ -205,6 +207,7 @@ export const RelayFactoryLive = (
 			const instanceState = yield* InstanceManagerStateTag;
 			const eventBus = yield* DaemonEventBusTag;
 			const activity = yield* SessionActivityTag;
+			const sessionEventBus = yield* SessionEventBusTag;
 			const cleanupQueue = yield* Effect.serviceOption(WorktreeCleanupQueueTag);
 			const configPersistence = yield* ConfigPersistenceTag;
 			const portScanner = yield* PortScannerTag;
@@ -497,6 +500,7 @@ export const RelayFactoryLive = (
 										Context.add(ConfigPersistenceTag, configPersistence),
 										Context.add(AccountDirectory, accounts),
 										Context.add(SessionActivityTag, activity),
+										Context.add(SessionEventBusTag, sessionEventBus),
 										Context.add(DaemonEventBusTag, eventBus),
 										Context.add(ProjectRegistryTag, projectRegistry),
 										Context.add(PortScannerTag, portScanner),

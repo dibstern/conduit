@@ -14,9 +14,12 @@ import {
 
 async function sessionBackground(browser: ProcessBrowser, sessionId: string) {
 	const envelopes = await Effect.runPromise(
-		browser.rpc
-			.SubscribeShell({ projectSlug: "process-test" })
-			.pipe(Stream.take(1), Stream.runCollect, Effect.timeout("5 seconds")),
+		browser.rpc.SubscribeShell({}).pipe(
+			Stream.filter((frame) => frame._tag !== "projects"),
+			Stream.take(1),
+			Stream.runCollect,
+			Effect.timeout("5 seconds"),
+		),
 	);
 	const snapshot = [...envelopes][0];
 	const session =
@@ -64,6 +67,7 @@ describe("foreground daemon process harness", () => {
 		expect(harness.generations[0]?.pid).not.toBe(process.pid);
 		expect(harness.generations[0]?.instances).toEqual([
 			{ managed: false, url: "http://127.0.0.1:0" },
+			{ managed: false },
 		]);
 		expect(harness.generations[0]?.projects).toEqual([harness.projectDir]);
 	});
@@ -153,8 +157,11 @@ describe("foreground daemon process harness", () => {
 					type: "tool",
 					state: expect.objectContaining({
 						status: "completed",
-						output:
-							decision === "allow" ? "harness-approved" : "harness-denied",
+						output: {
+							_tag: "whole",
+							text:
+								decision === "allow" ? "harness-approved" : "harness-denied",
+						},
 					}),
 				}),
 			]),
@@ -455,7 +462,7 @@ describe("foreground daemon process harness", () => {
 				async () => {
 					after = await sessionBackground(browser, sessionId);
 					expect(after).toEqual({
-						backgroundWork: change === "replace" ? "working" : null,
+						backgroundWork: change === "replace" ? "monitoring" : null,
 						backgroundTasks: tasks.map((task) => ({
 							...task,
 							firstSeenAt: expect.any(Number),

@@ -43,8 +43,8 @@
 	import { attachedProjectState, getCurrentRoute, getCurrentSlug, getCurrentSearchParams, routerState } from "../../stores/router.svelte.js";
 	import { clearMessages, draftSendIn } from "../../stores/chat.svelte.js";
 	import { terminalState, destroyAll, viewPtys } from "../../stores/terminal.svelte.js";
-	import { clearSessionState, findSession, sessionState } from "../../stores/session.svelte.js";
-	import { attachSessionList, detachSessionList, drawSavedShell, onShellSynchronized } from "../../stores/session-list.svelte.js";
+	import { clearSessionSearch, findSession, resetSessionFamily, sessionState } from "../../stores/session.svelte.js";
+	import { attachSessionList, detachSessionList, drawSavedShell } from "../../stores/session-list.svelte.js";
 	import { attachApprovals, detachApprovals } from "../../stores/approvals.js";
 	import { selection, watchSelection } from "../../stores/selection.svelte.js";
 	import { openSavedShell } from "../../stores/saved-shell.js";
@@ -53,7 +53,7 @@
 	import { viewProjectSettings } from "../../stores/project-settings.js";
 	import { viewAlerts } from "../../stores/alerts.js";
 	import { clearFileTreeState, fileTreeState } from "../../stores/file-tree.svelte.js";
-	import { applyProjectList, followDaemonLists, getDraftProject, projectState } from "../../stores/project.svelte.js";
+	import { followDaemonLists, getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { FILES_PANE_MIN_WIDTH, isBarCollapsed, sessionViewState, setFilesOpen, setFilesPaneWidth, watchCompactViewport } from "../../stores/session-view.svelte.js";
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
@@ -377,7 +377,8 @@
 		};
 		if (loadProject) readShell(loadProject);
 		else readShell(lastProject);
-		// A page load starts clean; only a change of project clears state.
+		// The daemon shell starts even with no registered or attached project.
+		attachSessionList(loadProject ?? lastProject ?? "");
 		let previousSlug = attachedProjectState.slug;
 		const hydrateProject = (slug: string) => {
 			attachGeneration++;
@@ -386,7 +387,8 @@
 			} catch { /* device storage is optional */ }
 			if (previousSlug !== null && slug !== previousSlug) {
 				clearMessages();
-				clearSessionState();
+				clearSessionSearch();
+				resetSessionFamily();
 				destroyAll();
 				clearDiscoveryState();
 				clearTodoState();
@@ -394,32 +396,18 @@
 				resetProjectUI();
 			}
 			previousSlug = slug;
-			// Request initial state from server
-			// First page only. The cross-project read is keyset-paged now; the
-			// sidebar's scroll sentinel asks for the rest.
+			// Keep the daemon shell while switching project-owned subscriptions.
 			attachSessionList(slug);
 			attachApprovals(slug);
 		};
 		const unsubscribe = onProjectAttached(hydrateProject);
 		if (previousSlug !== null) hydrateProject(previousSlug);
-		const unsubscribeShell = onShellSynchronized((slug) => {
-			if (slug !== previousSlug) return;
-			const generation = attachGeneration;
-			void rpc("GetProjects", { projectSlug: slug })
-				.then((response) => {
-					if (generation === attachGeneration) applyProjectList(response);
-				})
-				.catch((error) => {
-					if (generation === attachGeneration) toastFailure("Failed to load projects")(error);
-				});
-		});
 		initSWMessageListener();
 		return () => {
 			attachGeneration++;
 			detachSessionList();
 			detachApprovals();
 			unsubscribe();
-			unsubscribeShell();
 		};
 	});
 

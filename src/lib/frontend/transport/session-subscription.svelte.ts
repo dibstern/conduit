@@ -18,6 +18,7 @@ import {
 } from "../stores/discovery.svelte.js";
 import { hydrateSessionGoal, sessionGoals } from "../stores/goal.svelte.js";
 import { followSessionResumes } from "../stores/handoff-review.svelte.js";
+import { applyShellProjects } from "../stores/project.svelte.js";
 import type { SavedShell } from "../stores/saved-shell.js";
 import {
 	forgetSession,
@@ -33,7 +34,6 @@ import {
 import type { SessionInfo } from "../types.js";
 import type { WsRpcSubscriptions } from "./shared-client.js";
 import {
-	type Change,
 	emptySubscription,
 	reduce,
 	type SubscriptionState,
@@ -129,9 +129,13 @@ export const sessionSubscription = {
 /**
  * Apply one change to the session map. The only writer.
  *
- * Takes only the versioned shell envelope.
+ * Project frames update project metadata without changing the row cursor.
  */
-export function applySessionChange(change: Change<SessionInfo>): void {
+export function applySessionChange(change: ShellEnvelope): void {
+	if (change._tag === "projects") {
+		applyShellProjects(change);
+		return;
+	}
 	if (change._tag === "synchronized") transportFailureSince = null;
 	const next = reduce(applied, change, identify);
 	if (next === applied) return;
@@ -194,7 +198,7 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 	settleReadMarks(next.rows);
 }
 
-/** Forget the project we were watching. */
+/** Clear the daemon shell when resetting the browser's session state. */
 export function resetSessionSubscription(): void {
 	sessionGoals.clear();
 	applied = emptySubscription();

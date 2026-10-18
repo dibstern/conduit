@@ -8,15 +8,14 @@ import {
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
-	applyListDaemonSessionsResponse,
 	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import {
+	applySessionSnapshot,
 	clearSessionSearch,
-	seedDaemonSessions,
 	seedFamilySessions,
 	seedRootSessions,
 } from "../stores/session-fixtures.js";
@@ -36,7 +35,7 @@ describe("SessionList daemon sessions", () => {
 			},
 		]);
 		seedFamilySessions([...sessionState.rootSessions]);
-		seedDaemonSessions([]);
+
 		clearSessionSearch();
 		sessionState.searchQuery = "";
 		openSessionForSetup("local-session", "current-project");
@@ -66,32 +65,35 @@ describe("SessionList daemon sessions", () => {
 	it("labels both worktree origins while keeping Local rows branch-free", () => {
 		seedRootSessions([]);
 		seedFamilySessions([]);
-		seedDaemonSessions([
-			...(["existing", "conduit"] as const).map((origin) => ({
-				id: origin,
-				title: `${origin} worktree`,
-				projectSlug: "another-project",
-				workspace: {
-					cause: "launch" as const,
-					origin,
-					worktrees: { "/projects/another": `/worktrees/${origin}` },
+		applySessionSnapshot(
+			[
+				...(["existing", "conduit"] as const).map((origin) => ({
+					id: origin,
+					title: `${origin} worktree`,
+					projectSlug: "another-project",
+					workspace: {
+						cause: "launch" as const,
+						origin,
+						worktrees: { "/projects/another": `/worktrees/${origin}` },
+					},
+					git: { branch: `feature/${origin}`, worktree: origin },
+				})),
+				{
+					id: "local",
+					title: "Local checkout",
+					projectSlug: "another-project",
+					git: { branch: "main", worktree: "project-is-a-worktree" },
 				},
-				git: { branch: `feature/${origin}`, worktree: origin },
-			})),
-			{
-				id: "local",
-				title: "Local checkout",
-				projectSlug: "another-project",
-				git: { branch: "main", worktree: "project-is-a-worktree" },
-			},
-			{
-				id: "local-fallback",
-				title: "Returned to Local",
-				projectSlug: "another-project",
-				workspace: { cause: "missing", origin: "existing", worktrees: {} },
-				git: { branch: "main" },
-			},
-		]);
+				{
+					id: "local-fallback",
+					title: "Returned to Local",
+					projectSlug: "another-project",
+					workspace: { cause: "missing", origin: "existing", worktrees: {} },
+					git: { branch: "main" },
+				},
+			],
+			"partial",
+		);
 		const { container } = render(SessionList);
 		for (const origin of ["existing", "conduit"]) {
 			const row = container.querySelector(`[data-session-id="${origin}"]`);
@@ -118,25 +120,28 @@ describe("SessionList daemon sessions", () => {
 		seedFamilySessions([]);
 		uiState.settledShelfOpen = true;
 		uiState.snoozedShelfOpen = true;
-		seedDaemonSessions([
-			{
-				id: "shelf-worktree",
-				title: "Parked work",
-				projectSlug: "another-project",
-				workspace: {
-					cause: "launch",
-					origin: "existing",
-					worktrees: { "/projects/another": "/worktrees/parked" },
+		applySessionSnapshot(
+			[
+				{
+					id: "shelf-worktree",
+					title: "Parked work",
+					projectSlug: "another-project",
+					workspace: {
+						cause: "launch",
+						origin: "existing",
+						worktrees: { "/projects/another": "/worktrees/parked" },
+					},
+					git: { branch: "feature/parked" },
+					...(shelf === "settled"
+						? { settledAt: Date.now() - 1_000 }
+						: {
+								snoozedAt: Date.now() - 1_000,
+								snoozedUntil: Date.now() + 60_000,
+							}),
 				},
-				git: { branch: "feature/parked" },
-				...(shelf === "settled"
-					? { settledAt: Date.now() - 1_000 }
-					: {
-							snoozedAt: Date.now() - 1_000,
-							snoozedUntil: Date.now() + 60_000,
-						}),
-			},
-		]);
+			],
+			"partial",
+		);
 		const { container } = render(SessionList);
 		const row = container.querySelector('[data-session-id="shelf-worktree"]');
 		expect(row?.textContent).toContain("feature/parked");
@@ -144,22 +149,17 @@ describe("SessionList daemon sessions", () => {
 	});
 
 	it("renders a foreign row as a session link with a project label", async () => {
-		applyListDaemonSessionsResponse({
-			projectSlug: "current-project",
-			sessions: [
+		applySessionSnapshot(
+			[
 				{
-					accountId: null,
 					id: "foreign-session",
 					title: "Foreign session",
-					status: "idle",
 					projectSlug: "unlisted-project",
 					updatedAt: Date.now() - 1,
 				},
 			],
-			availability: [{ projectSlug: "unlisted-project", available: true }],
-			hasMore: false,
-			nextCursor: null,
-		});
+			"partial",
+		);
 
 		const view = render(SessionList);
 		const foreignRow = view.container.querySelector<HTMLAnchorElement>(
@@ -229,71 +229,5 @@ describe("SessionList daemon sessions", () => {
 		expect(localRow).not.toBeNull();
 		if (!localRow) return;
 		expect(within(localRow).getByText("Current project")).toBeDefined();
-	});
-
-	it("says which projects are missing from the list, naming them by title", () => {
-		applyListDaemonSessionsResponse({
-			projectSlug: "current-project",
-			sessions: [],
-			availability: [
-				{ projectSlug: "current-project", available: true },
-				{
-					projectSlug: "another-project",
-					available: false,
-					error: "ENOENT: no such directory",
-				},
-			],
-			hasMore: false,
-			nextCursor: null,
-		});
-
-		const view = render(SessionList);
-		const notice = view.getByTestId("session-list-unavailable");
-		expect(notice.textContent).toContain("Another project");
-	});
-
-	// The case the notice exists for: an unreadable project leaves nothing to
-	// show, and the empty message would otherwise claim there is nothing to see.
-	it("still says a project is missing when that leaves the list empty", () => {
-		seedRootSessions([]);
-		seedFamilySessions([]);
-		applyListDaemonSessionsResponse({
-			projectSlug: "current-project",
-			sessions: [],
-			availability: [
-				{
-					projectSlug: "another-project",
-					available: false,
-					error: "ENOENT: no such directory",
-				},
-			],
-			hasMore: false,
-			nextCursor: null,
-		});
-
-		const view = render(SessionList);
-		expect(view.getByTestId("session-list-unavailable")).toBeDefined();
-	});
-
-	it("clears the missing-project notice once every project reads cleanly", () => {
-		applyListDaemonSessionsResponse({
-			projectSlug: "current-project",
-			sessions: [],
-			availability: [
-				{ projectSlug: "another-project", available: false, error: "gone" },
-			],
-			hasMore: false,
-			nextCursor: null,
-		});
-		applyListDaemonSessionsResponse({
-			projectSlug: "current-project",
-			sessions: [],
-			availability: [{ projectSlug: "another-project", available: true }],
-			hasMore: false,
-			nextCursor: null,
-		});
-
-		const view = render(SessionList);
-		expect(view.queryByTestId("session-list-unavailable")).toBeNull();
 	});
 });

@@ -188,7 +188,6 @@ vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
 	},
 	clearSessionState: vi.fn(),
 	findSession: vi.fn(),
-	loadDaemonSessions: vi.fn(async () => {}),
 }));
 
 vi.mock("../../../src/lib/frontend/stores/session-list.svelte.js", () => ({
@@ -197,7 +196,6 @@ vi.mock("../../../src/lib/frontend/stores/session-list.svelte.js", () => ({
 	onShellSynchronized: vi.fn(() => () => {}),
 	sessionList: { groups: [], settled: false, status: { _tag: "cold" } },
 	currentSearchQuery: vi.fn(() => null),
-	refreshSessionList: vi.fn(async () => {}),
 }));
 
 vi.mock("../../../src/lib/frontend/stores/approvals.js", () => ({
@@ -326,7 +324,6 @@ import {
 	replaceRoute,
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	attachSessionList,
 	detachSessionList,
@@ -405,13 +402,6 @@ describe("ChatLayout RPC lifecycle", () => {
 		expect(taskDrawer.task).toBeNull();
 	});
 
-	it("attaches the shell feed on project attach", async () => {
-		render(ChatLayout);
-
-		attach("test-project");
-		expect(attachSessionList).toHaveBeenCalledExactlyOnceWith("test-project");
-	});
-
 	it("uses the route-driven full-screen list layout on compact viewports", () => {
 		sessionViewState.compact = true;
 		const { container } = render(ChatLayout);
@@ -453,15 +443,6 @@ describe("ChatLayout RPC lifecycle", () => {
 		render(ChatLayout);
 		attach("test-project");
 		expect(clearMessages).not.toHaveBeenCalled();
-		expect(attachSessionList).toHaveBeenCalledExactlyOnceWith("test-project");
-	});
-
-	it("reattaches the shell after a remount with its retained project", () => {
-		render(ChatLayout).unmount();
-		attachedProjectState.slug = "test-project";
-		vi.clearAllMocks();
-		render(ChatLayout);
-		expect(attachSessionList).toHaveBeenCalledExactlyOnceWith("test-project");
 	});
 
 	it("rehydrates once on a reconnect attach to the same project without resetting", () => {

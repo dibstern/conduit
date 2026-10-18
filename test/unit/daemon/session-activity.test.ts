@@ -10,6 +10,7 @@ import {
 	SessionActivityDaemonLive,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
+import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 
 describe("Session Activity", () => {
@@ -171,7 +172,9 @@ describe("Session Activity", () => {
 				Effect.provide(
 					Layer.fresh(
 						SessionActivityDaemonLive.pipe(
-							Layer.provideMerge(DaemonEventBusLive),
+							Layer.provideMerge(
+								Layer.merge(DaemonEventBusLive, SessionEventBusLive),
+							),
 						),
 					),
 				),

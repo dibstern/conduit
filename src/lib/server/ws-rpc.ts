@@ -13,8 +13,8 @@ import {
 import type { UsageReading } from "../contracts/limit-recovery.js";
 import {
 	type OpenCodeInstance,
-	type ProjectInfo,
 	type ServerStatus,
+	type ShellEnvelope,
 	WsRpcError,
 	WsRpcGroup,
 } from "../contracts/ws-rpc.js";
@@ -79,10 +79,6 @@ const daemonOnlyStreamHandlers = {
 	SubscribeUsage: () =>
 		Stream.fail(
 			new WsRpcError({ message: "SubscribeUsage requires daemon mode" }),
-		),
-	SubscribeProjects: () =>
-		Stream.fail(
-			new WsRpcError({ message: "SubscribeProjects requires daemon mode" }),
 		),
 	SubscribeServerStatus: () =>
 		Stream.fail(
@@ -293,13 +289,9 @@ export type DaemonRpcHandlers = {
 		{ readonly readings: readonly UsageReading[] },
 		WsRpcError
 	>;
-	readonly SubscribeProjects: () => Stream.Stream<
-		{
-			readonly projects: readonly ProjectInfo[];
-			readonly newSessionProject?: string;
-		},
-		WsRpcError
-	>;
+	readonly SubscribeShell: (
+		request: Rpc.Payload<Rpc.ExtractTag<WsRpcs, "SubscribeShell">>,
+	) => Stream.Stream<ShellEnvelope, WsRpcError>;
 	readonly SubscribeServerStatus: () => Stream.Stream<ServerStatus, WsRpcError>;
 	/** Told after a session is created in `projectSlug`. */
 	readonly sessionCreated: (projectSlug: string) => Effect.Effect<void>;
@@ -436,11 +428,15 @@ export const makeRoutedWsRpcServerLayer = <
 			>(
 				payload: object,
 				make: () => Stream.Stream<A, E, R>,
+				fallbackProjectSlug?: string,
 			) =>
 				Rpc.fork(
 					Stream.unwrapScoped(
 						Effect.gen(function* () {
-							const projectSlug = yield* projectSlugFor(payload);
+							const projectSlug = yield* projectSlugFor(
+								payload,
+								fallbackProjectSlug,
+							);
 							const context = yield* resolveContext(projectSlug);
 							const queue = yield* Effect.acquireRelease(
 								Queue.bounded<Take.Take<A, E>>(2),
@@ -490,10 +486,11 @@ export const makeRoutedWsRpcServerLayer = <
 							(
 								request: never,
 							): Rpc.Wrapper<Stream.Stream<unknown, WsRpcError>> => {
-								if (daemonHandler) return Rpc.fork(daemonHandler());
+								if (daemonHandler) return Rpc.fork(daemonHandler(request));
 								return routeStream<unknown, unknown, StreamHandlerContext>(
 									request,
 									() => handler(request),
+									name === "SubscribeShell" ? defaultProjectSlug : undefined,
 								);
 							},
 						];

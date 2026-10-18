@@ -81,7 +81,6 @@ const makeSubscriptions = (
 		resumeStream(
 			(resumeFromSequence, resumeBase, resumePoint) =>
 				sockets.control("SubscribeShell", {
-					projectSlug,
 					...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
 					...(resumeBase === undefined ? {} : { resumeBase }),
 					...(resumePoint === undefined ? {} : { resumePoint }),
@@ -192,13 +191,11 @@ const makeSubscriptions = (
 			}),
 		),
 	/**
-	 * The daemon's instance and project lists. Daemon-global, so neither takes
-	 * the project; low-rate, so both ride the control socket.
+	 * The daemon's instance list and usage. Both ride the control socket.
 	 */
 	instances: () =>
 		resumeStream(() => sockets.control("SubscribeInstances", {})),
 	usage: () => resumeStream(() => sockets.control("SubscribeUsage", {})),
-	projects: () => resumeStream(() => sockets.control("SubscribeProjects", {})),
 	/** The daemon's protocol, build and restart state, plus a revision that
 	 *  moves when the cross-project session lists go stale. */
 	serverStatus: (options: { readonly onTransportDrop?: () => void } = {}) =>

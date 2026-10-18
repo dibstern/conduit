@@ -152,13 +152,11 @@ async function setup(page: Page) {
 					{ _tag: "synchronized" },
 				];
 			},
-			SubscribeShell: (params) => [
+			SubscribeShell: () => [
 				{
 					_tag: "snapshot",
 					sequence: 1,
-					rows: sessions.filter(
-						(session) => session.projectSlug === params["projectSlug"],
-					),
+					rows: sessions,
 				},
 				{ _tag: "synchronized" },
 			],

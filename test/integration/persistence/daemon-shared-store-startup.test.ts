@@ -65,6 +65,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { readColdWorktreeCleanupCandidates } from "../../../src/lib/domain/daemon/Services/worktree-cleanup-reader.js";
 import * as persistence from "../../../src/lib/domain/persistence/Services/persistence-service.js";
+import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import * as persistenceLayers from "../../../src/lib/persistence/effect/live.js";
@@ -196,6 +197,7 @@ function startup(root: string, projects: readonly StoredProject[]) {
 					DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
 					makeOpenCodeRuntimeStateLive(),
 					DaemonEventBusLive,
+					SessionEventBusLive,
 					ConfigPersistenceNoopLive,
 					InstanceHealthCheckLive,
 					Layer.succeed(PortScannerTag, {
