@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import {
-	Cause,
 	Clock,
 	Deferred,
 	Effect,
@@ -17,6 +16,7 @@ import {
 	type WorktreeCleanupEntry,
 	type WorktreeCleanupReport,
 } from "../../../contracts/worktree.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import { cleanUpProjectWorktrees } from "../../../session/worktree-cleanup-sweep.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
@@ -119,7 +119,7 @@ export const WorktreeCleanupLive = () =>
 								yield* PubSub.publish(bus, DaemonEvent.DaemonSessionsChanged());
 						}).pipe(
 							Effect.catchAllCause((cause) => {
-								if (Cause.isInterruptedOnly(cause))
+								if (Failure.isInterruptedOnly(cause))
 									return Effect.failCause(cause);
 								report.failed.push({
 									projectSlug: project.slug,
@@ -129,7 +129,10 @@ export const WorktreeCleanupLive = () =>
 								});
 								return Effect.logWarning(
 									"worktree cleanup failed for project",
-									{ projectSlug: project.slug, cause: Cause.pretty(cause) },
+									{
+										projectSlug: project.slug,
+										cause: Failure.renderCause(cause),
+									},
 								);
 							}),
 						);
@@ -159,11 +162,11 @@ export const WorktreeCleanupLive = () =>
 						);
 				const report = yield* sweep(slugs).pipe(
 					Effect.catchAllCause((cause) =>
-						Cause.isInterruptedOnly(cause)
+						Failure.isInterruptedOnly(cause)
 							? Effect.failCause(cause)
 							: Effect.logWarning(
 									"worktree cleanup sweep failed",
-									Cause.pretty(cause),
+									Failure.renderCause(cause),
 								).pipe(
 									Effect.as({
 										removed: [],

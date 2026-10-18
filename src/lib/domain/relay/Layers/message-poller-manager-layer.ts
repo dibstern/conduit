@@ -1,4 +1,5 @@
-import { Cause, Effect, Layer } from "effect";
+import { Effect, Layer } from "effect";
+import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { MessagePollerManager } from "../../../relay/message-poller-impl.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
@@ -50,7 +51,7 @@ export const makeMessagePollerManagerLive = (
 					Effect.catchAllCause((cause) =>
 						Effect.sync(() =>
 							pollerLog.warn(
-								`Defect while draining message pollers during shutdown: ${Cause.pretty(cause)}`,
+								`Defect while draining message pollers during shutdown: ${Failure.renderCause(cause)}`,
 							),
 						),
 					),

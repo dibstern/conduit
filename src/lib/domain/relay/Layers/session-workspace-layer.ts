@@ -1,7 +1,7 @@
 import { relative, resolve as resolvePath } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { SqlClient } from "@effect/sql";
-import { Cause, Effect, Either, Layer, Schema } from "effect";
+import { Effect, Either, Layer, Schema } from "effect";
 import type { Account } from "../../../contracts/account.js";
 import {
 	isKnownDriverKind,
@@ -13,6 +13,7 @@ import {
 	WorkspaceMoveError,
 } from "../../../contracts/session-workspace.js";
 import { WorktreeBranchRenameError } from "../../../contracts/worktree.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { daemonSessionGitCache } from "../../../git/session-git.js";
 import { readWorktrees, realWorkspacePath } from "../../../git/worktrees.js";
 import {
@@ -427,7 +428,7 @@ export const SessionWorkspaceLive = Layer.effect(
 											return yield* new WorktreeBranchRenameError({
 												folder: ownership[0]?.folder ?? config.projectDir,
 												reason: "git-failed",
-												message: `Git renamed the branch to ${branchName}, but its recorded ownership could not be checked. ${Cause.pretty(cause).slice(0, 2_000)}. ${String(recorded.left.cause).slice(0, 2_000)}`,
+												message: `Git renamed the branch to ${branchName}, but its recorded ownership could not be checked. ${Failure.renderCause(cause).slice(0, 2_000)}. ${String(recorded.left.cause).slice(0, 2_000)}`,
 											});
 										if (
 											recorded.right.length === renamed.length &&
@@ -446,7 +447,7 @@ export const SessionWorkspaceLive = Layer.effect(
 															new WorktreeBranchRenameError({
 																folder: error.folder,
 																reason: "git-failed",
-																message: `${Cause.pretty(cause).slice(0, 2_000)}. Branch rollback failed: ${error.message}`,
+																message: `${Failure.renderCause(cause).slice(0, 2_000)}. Branch rollback failed: ${error.message}`,
 															}),
 													),
 												);

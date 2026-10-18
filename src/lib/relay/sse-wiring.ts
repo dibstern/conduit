@@ -3,7 +3,7 @@
 // notifications using RPC viewer presence.
 
 import type { SqlError } from "@effect/sql/SqlError";
-import { Cause, Data, Effect, Either, Option, Runtime, Schema } from "effect";
+import { Data, Effect, Either, Option, Runtime, Schema } from "effect";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
 import { OpenCodeEventSchema } from "../contracts/providers/opencode-sdk.js";
 import type { OpenCodeConnectionStatus } from "../contracts/ws-rpc.js";
@@ -32,6 +32,7 @@ import {
 	resetProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
 import type { OpenCodeTerminalService } from "../domain/relay/Services/terminal-service.js";
+import * as Failure from "../effect/failure-classification.js";
 import type { Logger } from "../logger.js";
 import { notificationContent } from "../notification-content.js";
 import type {
@@ -844,7 +845,7 @@ export const wireSSEConsumerEffect = (
 							Effect.catchAllCause((cause) =>
 								Effect.sync(() =>
 									deps.log.warn(
-										`SSE event handling failed: ${Cause.pretty(cause)}`,
+										`SSE event handling failed: ${Failure.renderCause(cause)}`,
 									),
 								),
 							),
@@ -860,7 +861,7 @@ export const wireSSEConsumerEffect = (
 									Effect.catchAllCause((cause) =>
 										Effect.sync(() =>
 											deps.log.warn(
-												`OpenCode reconnect backfill scheduling failed: ${Cause.pretty(cause)}`,
+												`OpenCode reconnect backfill scheduling failed: ${Failure.renderCause(cause)}`,
 											),
 										),
 									),
