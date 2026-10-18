@@ -1421,8 +1421,8 @@ export const AttachMenuOpen: Story = {
 		const menu = await within(document.body).findByTestId("attach-menu");
 		await expect(within(menu).getByText("Take Photo")).toBeVisible();
 		await expect(within(menu).getByText("Add Photos")).toBeVisible();
+		await expect(within(menu).getByText("Add Files")).toBeVisible();
 		await expect(within(menu).getByText("Same as $goal")).toBeVisible();
-		await expect(within(menu).queryByText("Add Files")).toBeNull();
 	},
 };
 export const AttachMenuOpenLight: Story = {

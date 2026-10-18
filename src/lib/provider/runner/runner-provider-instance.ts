@@ -336,6 +336,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 								sessionId,
 								inputId: input.inputId,
 								text: input.text ?? input.prompt,
+								...(input.images ? { images: input.images } : {}),
 							}).pipe(
 								Effect.mapError(
 									(cause) =>
@@ -415,6 +416,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		readonly sessionId: string;
 		readonly inputId: string;
 		readonly text: string;
+		readonly images?: readonly string[];
 	}): Effect.Effect<void, ClaudeEventPersistFailure> {
 		return Effect.gen(this, function* () {
 			const persist = yield* Effect.serviceOption(ClaudeEventPersistEffectTag);
@@ -428,6 +430,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 				messageId: input.inputId,
 				inputId: input.inputId,
 				provider: this.providerId,
+				...(input.images ? { images: input.images } : {}),
 			}).pipe(
 				Effect.catchIf(
 					(error) => error._tag !== "ClaudeSessionLifecycleError",

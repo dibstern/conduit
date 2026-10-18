@@ -44,7 +44,11 @@ export function failRunnerTurn(
 	turn: {
 		sessionId: string;
 		userMessageId?: string;
-		placement?: { inputId: string; text: string };
+		placement?: {
+			inputId: string;
+			text: string;
+			images?: readonly string[];
+		};
 		messageId: string;
 		terminal: boolean;
 	},

@@ -29,7 +29,12 @@ export const makeClaudeThreadRead = Effect.gen(function* () {
 				forward: input.cursor === undefined ? {} : { from: input.cursor },
 			});
 			const first = page.messages[0];
-			if (offset > (first ? historicalMessageText(first).length : 0))
+			if (
+				offset >
+				(first
+					? historicalMessageText(first, { includeAttachments: true }).length
+					: 0)
+			)
 				return {
 					code: "InvalidOffset",
 					message: "Text offset is beyond this message's text.",
@@ -42,7 +47,9 @@ export const makeClaudeThreadRead = Effect.gen(function* () {
 			let budget = 20_000;
 			for (const [index, message] of page.messages.slice(0, limit).entries()) {
 				if (budget === 0) return { items, nextCursor: message.id };
-				const text = historicalMessageText(message);
+				const text = historicalMessageText(message, {
+					includeAttachments: true,
+				});
 				const start = index === 0 ? offset : 0;
 				let end = Math.min(text.length, start + budget);
 				// Keep a Unicode surrogate pair together at the page boundary.

@@ -1,5 +1,6 @@
 import { SqlClient } from "@effect/sql";
 import { Clock, Effect, Ref, Schema } from "effect";
+import { validateAttachmentDataUrls } from "../../attachment-data-url.js";
 import {
 	AccountUnroutable,
 	type ContinuationError,
@@ -812,6 +813,14 @@ export const sessionsHandlers = {
 		),
 	StartSideThread: (request) =>
 		Effect.gen(function* () {
+			// Validate before the fork creates any events or provider commands.
+			yield* Effect.try({
+				try: () => validateAttachmentDataUrls(request.images),
+				catch: (cause) =>
+					new WsRpcError({
+						message: cause instanceof Error ? cause.message : String(cause),
+					}),
+			});
 			// A retry (lost reply, crash before admission) resumes the thread its
 			// input already started; serialized so a concurrent duplicate cannot
 			// fork a second one.

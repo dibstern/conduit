@@ -637,6 +637,7 @@ export const SessionInboxLive = Layer.scoped(
 				yield* persist.persistUserMessage(sessionId, request.text, {
 					messageId: handoff.inputId,
 					inputId: handoff.inputId,
+					...(request.images ? { images: request.images } : {}),
 					...meta,
 				});
 				yield* persist.persistEvent(

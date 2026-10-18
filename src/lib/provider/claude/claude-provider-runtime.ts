@@ -743,6 +743,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				sessionId: input.sessionId,
 				inputId: input.inputId,
 				text: input.text ?? input.prompt,
+				...(input.images ? { images: input.images } : {}),
 			},
 		}).pipe(
 			Effect.asVoid,

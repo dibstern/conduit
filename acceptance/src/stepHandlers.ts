@@ -7,6 +7,7 @@ import { composerAccountsHandlers } from "./steps/composerAccounts.js";
 import { composerContextWarningHandlers } from "./steps/composerContextWarning.js";
 import { composerEffortHandlers } from "./steps/composerEffort.js";
 import { composerFieldWidthHandlers } from "./steps/composerFieldWidth.js";
+import { composerFilesHandlers } from "./steps/composerFiles.js";
 import { composerFinalDesignHandlers } from "./steps/composerFinalDesign.js";
 import { composerLiveStatusHandlers } from "./steps/composerLiveStatus.js";
 import { composerPickerHandlers } from "./steps/composerPicker.js";
@@ -96,6 +97,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	// feed's more specific "the transcript shows a loading skeleton".
 	...transcriptFeedHandlers,
 	...composerFieldWidthHandlers,
+	...composerFilesHandlers,
 	...composerFinalDesignHandlers,
 	...composerLiveStatusHandlers,
 	...pendingInputTrayHandlers,

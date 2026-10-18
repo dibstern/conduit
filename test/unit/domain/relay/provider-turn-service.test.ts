@@ -1024,8 +1024,14 @@ describe("ProviderTurnService", () => {
 	);
 
 	it.effect(
-		"places the user message when a thrown OpenCode prompt returns error status",
+		"places a file-only user message when a thrown OpenCode prompt returns error status",
 		() => {
+			// Failure mode: a provider rejects before echoing, consuming the input
+			// while leaving a blank transcript row without its attachments.
+			const images = [
+				"data:text/plain;name=notes.txt;base64,Y2Fmw6k=",
+				"data:application/pdf;name=guide.pdf;base64,JVBERi0xLjQ=",
+			];
 			const api = makeMockOpenCodeAPI();
 			api.session.prompt = vi.fn(async () => {
 				throw new Error("prompt unavailable");
@@ -1039,7 +1045,8 @@ describe("ProviderTurnService", () => {
 			return Effect.gen(function* () {
 				yield* sendTurn({
 					commandId: "cmd-error",
-					text: "ok",
+					text: "",
+					images,
 					model: { providerID: "opencode", modelID: "test" },
 				});
 				expect(api.session.prompt).toHaveBeenCalledOnce();
@@ -1054,11 +1061,12 @@ describe("ProviderTurnService", () => {
 				);
 				expect(persist.persistUserMessage).toHaveBeenCalledWith(
 					"session-1",
-					"ok",
+					"",
 					{
 						messageId: "cmd-error",
 						inputId: "cmd-error",
 						provider: "opencode",
+						images,
 					},
 				);
 			}).pipe(Effect.provide(layer));

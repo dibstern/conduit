@@ -133,6 +133,7 @@ export type SessionOutput =
 						readonly sessionId: string;
 						readonly inputId: string;
 						readonly text: string;
+						readonly images?: readonly string[];
 					};
 			  }
 			| {

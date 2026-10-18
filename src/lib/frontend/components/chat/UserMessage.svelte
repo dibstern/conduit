@@ -15,10 +15,11 @@
 		discoveryState,
 		getModelDisplayName,
 	} from "../../stores/discovery.svelte.js";
-	import { extractDisplayText } from "../../utils/format.js";
+	import { extractDisplayText, formatFileSize } from "../../utils/format.js";
 	import { tokenizeSkills } from "../../../skill-recognition.js";
 	import Badge from "../ui/Badge.svelte";
 	import TextButton from "../ui/TextButton.svelte";
+	import FileAttachmentChip from "../ui/FileAttachmentChip.svelte";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import MessageTime from "./MessageTime.svelte";
 	import UserAvatar from "../ui/UserAvatar.svelte";
@@ -65,8 +66,21 @@
 				</Badge>
 			{/if}
 		</div>
-		<div class="break-words whitespace-pre-wrap text-[15px] leading-[1.65] text-text max-md:col-span-2">
-			{#each segments as seg (seg.key)}{#if seg.kind === "skill"}<span class="skill-pill">{seg.text}</span>{:else}{seg.text}{/if}{/each}
-		</div>
+		{#if message.text}
+			<div class="break-words whitespace-pre-wrap text-[15px] leading-[1.65] text-text max-md:col-span-2">
+				{#each segments as seg (seg.key)}{#if seg.kind === "skill"}<span class="skill-pill">{seg.text}</span>{:else}{seg.text}{/if}{/each}
+			</div>
+		{/if}
+		{#if message.attachments?.length}
+			<div data-testid="user-message-attachments" class="mt-[8px] flex min-w-0 flex-wrap items-start gap-[8px] max-md:col-span-2">
+				{#each message.attachments as attachment (attachment.id)}
+					{#if attachment.mime.startsWith("image/")}
+						<img src={attachment.url} alt={attachment.name} class="size-[96px] rounded-[10px] border border-border bg-bg-raised object-contain" />
+					{:else}
+						<FileAttachmentChip testid="user-message-file" name={attachment.name} detail={attachment.size === undefined ? attachment.mime : `${attachment.mime} · ${formatFileSize(attachment.size)}`} />
+					{/if}
+				{/each}
+			</div>
+		{/if}
 	</div>
 </div>

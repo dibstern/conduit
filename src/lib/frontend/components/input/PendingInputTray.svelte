@@ -105,6 +105,7 @@
 		<ol aria-label="Queued messages" class="flex flex-col gap-[2px]">
 			{#each inputs as input, index (input.inputId)}
 				{@const images = input.request.images?.length ?? 0}
+				{@const hasFiles = input.request.images?.some((url) => !url.startsWith("data:image/")) ?? false}
 				{@const command = input.request.text.trimStart().startsWith("/")}
 				<ComposerQueueRow id={`${trayId}-row-${index}`} data-testid="pending-input-row" data-input-id={input.inputId}>
 					{#snippet badge()}
@@ -115,9 +116,9 @@
 					{#if images > 0}
 						<span
 							data-testid="pending-input-images"
-							aria-label={images === 1 ? "1 image" : `${images} images`}
+							aria-label={hasFiles ? `${images} ${images === 1 ? "attachment" : "attachments"}` : images === 1 ? "1 image" : `${images} images`}
 							class="flex items-center gap-1 shrink-0 text-text-muted"
-						><Icon name="image" size={12} />{images}</span>
+							><Icon name={hasFiles ? "file" : "image"} size={12} />{images}</span>
 					{/if}
 					{/snippet}
 					{#snippet time()}

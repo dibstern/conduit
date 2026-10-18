@@ -60,7 +60,8 @@
 		fileTreeState,
 		filterFiles,
 	} from "../../stores/file-tree.svelte.js";
-	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
+	import { fetchFileContent, fetchDirectoryListing, prepareFileAttachment } from "./input-utils.js";
+	import { parseAttachmentDataUrl } from "../../../attachment-data-url.js";
 	import { findSession, isSessionSnoozed, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { selection } from "../../stores/selection.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
@@ -83,7 +84,7 @@
 	import { switchSessionAccount } from "../../utils/account-switch.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
-	import type { PendingImage, SessionPermissionMode } from "../../types.js";
+	import type { PendingAttachment, SessionPermissionMode } from "../../types.js";
 	import type { InputDelivery, SteerBlocker } from "../../../contracts/stored-event.js";
 	import type { WorktreeInfo } from "../../../shared-types.js";
 
@@ -141,7 +142,9 @@
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
 	let fieldScroller: HTMLDivElement | undefined = $state();
 	let composerFocused = $state(false);
-	let pendingImages = $state<PendingImage[]>([]);
+	let pendingAttachments = $state<PendingAttachment[]>([]);
+	let readingAttachments = $state(0);
+	let attachmentError = $state("");
 	let commandMenuRef: CommandMenu | undefined = $state();
 	let fileMenuRef: FileMenu | undefined = $state();
 	let commandMenuActiveIndex = $state(0);
@@ -373,8 +376,8 @@
 		} while (inputText !== savedText || sessionState.currentId !== savedSessionId);
 		// Cancelling the debounce above dropped any pending new-session draft write.
 		if (!sessionState.currentId) storeNewSessionDraft(inputText);
-		// Images live only in this composer. Defer reload until sent or removed.
-		if (pendingImages.length > 0) return false;
+		// Attachments live only in this composer. Defer reload until sent or removed.
+		if (pendingAttachments.length > 0 || readingAttachments > 0) return false;
 		inputDrafts.set(sessionState.currentId ?? "", inputText);
 		sessionStorage.setItem(reloadDraftKey, JSON.stringify([...inputDrafts]));
 		return true;
@@ -489,7 +492,7 @@
 	);
 	// A session drawn from its saved page takes sends once the server places it.
 	const unplaced = $derived(selection.shown.kind === "placing" || selection.shown.kind === "drawn");
-	const canSend = $derived(!readOnlySubagent && !unsupportedDraftFolders && !unplaced && (sessionState.currentId !== null || getDraftPick() !== undefined || (instanceState.loaded && !getEffectiveInstanceId())) && (inputText.trim().length > 0 || pendingImages.length > 0));
+	const canSend = $derived(readingAttachments === 0 && !readOnlySubagent && !unsupportedDraftFolders && !unplaced && (sessionState.currentId !== null || getDraftPick() !== undefined || (instanceState.loaded && !getEffectiveInstanceId())) && (inputText.trim().length > 0 || pendingAttachments.length > 0));
 	const sendButtonLabel = $derived(
 		sendMode === "at-reset"
 			? `Send at ${sendAtTime}`
@@ -728,13 +731,13 @@
 		const expectedInstanceId = accountId;
 		if (!sessionId || !projectSlug || !expectedInstanceId || !canSend || switchingAccount) return false;
 		const draft = inputText;
-		const images = pendingImages;
+		const images = pendingAttachments;
 		switchingAccount = true;
 		try {
 			if (!(await switchSessionAccount({ sessionId, instanceId, expectedInstanceId }))) return false;
 			await tick();
 			// Navigation or edits during the handoff leave the draft for its owner.
-			if (sessionState.currentId !== sessionId || composerProjectSlug !== projectSlug || inputText !== draft || pendingImages !== images) return false;
+			if (sessionState.currentId !== sessionId || composerProjectSlug !== projectSlug || inputText !== draft || pendingAttachments !== images) return false;
 			return await sendMessage(undefined, delivery);
 		} finally {
 			switchingAccount = false;
@@ -767,7 +770,7 @@
 			return false;
 		}
 		const draftText = inputText;
-		const draftImages = pendingImages;
+		const draftImages = pendingAttachments;
 		const draft = JSON.stringify([parentSessionId, draftText, draftImages.map((image) => image.dataUrl)]);
 		if (sideThreadAttempt?.draft !== draft) sideThreadAttempt = { draft, inputId: crypto.randomUUID() };
 		const { inputId } = sideThreadAttempt;
@@ -782,7 +785,7 @@
 				...(images.length > 0 ? { images } : {}),
 				onCreated: (sessionId) => {
 					sideThreadAttempt = undefined;
-					if (sessionState.currentId === parentSessionId && inputText === draftText && pendingImages === draftImages) {
+					if (sessionState.currentId === parentSessionId && inputText === draftText && pendingAttachments === draftImages) {
 						clearComposer();
 						switchToSession(sessionId, projectSlug ?? undefined);
 					}
@@ -816,10 +819,14 @@
 	}
 
 	async function sendMessage(textOverride?: string, delivery: InputDelivery = "queue"): Promise<boolean> {
-		if (readOnlySubagent || unsupportedDraftFolders || unplaced) return false;
+		if (readingAttachments > 0 || readOnlySubagent || unsupportedDraftFolders || unplaced) return false;
+		if (textOverride === undefined && pendingAttachments.some((attachment) => !attachment.dataUrl.startsWith("data:image/")) && !getProviderDriver(composerDriver)?.supportsFileAttachments) {
+			attachmentError = "File attachments are available with Claude and OpenCode. Choose one of those harnesses before sending these files.";
+			return false;
+		}
 		if (!sessionState.currentId && getEffectiveInstanceId() && !getDraftPick()) return false;
 		let text = textOverride ?? inputText.trim();
-		if (!text) return false;
+		if (!text && (textOverride !== undefined || pendingAttachments.length === 0)) return false;
 		if (textOverride === undefined) {
 			const match = text.match(/^\$(\S+)(?:\s+([\s\S]*))?$/);
 			const command = conduitCommands.find((command) =>
@@ -831,9 +838,9 @@
 
 		const messageText = textOverride === undefined ? await withReferences(text, composerProjectSlug) : text;
 
-		// Collect image data URLs from pending images
-		const imageUrls = textOverride === undefined && pendingImages.length > 0
-			? pendingImages.map((img) => img.dataUrl)
+		// Send all attachments through the existing data URL field.
+		const imageUrls = textOverride === undefined && pendingAttachments.length > 0
+			? pendingAttachments.map((img) => img.dataUrl)
 			: undefined;
 
 		const sentFromSessionId = sessionState.currentId;
@@ -872,10 +879,18 @@
 				}
 				draft = { ...payload, ...(draftNewWorktree ? { newWorktree: true } : {}) };
 				requestDraftPreWarm();
-				draftSend.message = { type: "user", uuid: crypto.randomUUID(), text: messageText, createdAt: Date.now() };
+				draftSend.message = {
+					type: "user", uuid: crypto.randomUUID(), text: messageText, createdAt: Date.now(),
+					...(imageUrls ? {
+						attachments: imageUrls.map((url) => {
+							const { mime, name, size } = parseAttachmentDataUrl(url);
+							return { id: crypto.randomUUID(), name: name ?? "Attachment", mime, url, size };
+						}),
+					} : {}),
+				};
 				draftSend.sessionId = null;
 			}
-			const unsent = { text: inputText, images: pendingImages };
+			const unsent = { text: inputText, images: pendingAttachments };
 			if (!isProcessing()) requestScrollOnNextContent();
 			steerRefusal = null;
 			dismissedRefusal = null;
@@ -898,10 +913,10 @@
 			if (outcome.kind === "failed" || outcome.kind === "refused") {
 				const sameScope = sentToSessionId ? sessionState.currentId === sentToSessionId
 					: !sessionState.currentId && getDraftProject() === projectSlug;
-				if (textOverride === undefined && sameScope && !inputText && pendingImages.length === 0) {
+				if (textOverride === undefined && sameScope && !inputText && pendingAttachments.length === 0) {
 					inputText = unsent.text;
 					cursorPos = unsent.text.length;
-					pendingImages = unsent.images;
+					pendingAttachments = unsent.images;
 				}
 				return false;
 			}
@@ -917,7 +932,8 @@
 	}
 
 	function clearComposer() {
-		pendingImages = [];
+		pendingAttachments = [];
+		attachmentError = "";
 		inputText = "";
 		cursorPos = 0;
 		if (sessionState.currentId) {
@@ -962,6 +978,18 @@
 		fileInput.click();
 	}
 
+	function handleAttachFiles() {
+		if (!getProviderDriver(composerDriver)?.supportsFileAttachments) {
+			attachmentError = "File attachments are available with Claude and OpenCode. Choose one of those harnesses before attaching files.";
+			return;
+		}
+		const fileInput = document.createElement("input");
+		fileInput.type = "file";
+		fileInput.multiple = true;
+		fileInput.onchange = () => processSelectedFiles(fileInput.files);
+		fileInput.click();
+	}
+
 	function handleAttachSetGoal(condition = "") {
 		if (!discoveryState.currentTraits?.supportsGoalState) return;
 		inputText = `$goal ${condition}`;
@@ -989,16 +1017,18 @@
 		return () => window.removeEventListener("composer:goal", handleGoalAction);
 	});
 
-	/** Read selected files from a file input, auto-resizing if they exceed the API limit. */
-	function processSelectedFiles(files: FileList | null) {
+	/** All picker entries share one attachment row and one send path. */
+	async function processSelectedFiles(files: FileList | null) {
 		if (!files || files.length === 0) return;
-		for (const file of files) {
-			const reader = new FileReader();
-			reader.onload = async () => {
-				if (typeof reader.result !== "string") return;
+		const context = sessionModeContext;
+		attachmentError = "";
+		readingAttachments++;
+		try {
+			for (const file of Array.from(files)) {
 				try {
-					const { dataUrl, resized } = await resizeImageIfNeeded(reader.result);
-					pendingImages = [...pendingImages, {
+					const { dataUrl, resized } = await prepareFileAttachment(file);
+					if (context !== sessionModeContext) return;
+					pendingAttachments = [...pendingAttachments, {
 						id: crypto.randomUUID(),
 						dataUrl,
 						name: file.name,
@@ -1007,29 +1037,34 @@
 					if (resized) {
 						showToast(`"${file.name}" was resized to fit the 5 MB encoded size limit`, { variant: "warn" });
 					}
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : "Image too large";
-				showToast(msg, { variant: "error" });
+				} catch (err) {
+					if (context !== sessionModeContext) return;
+					const message = err instanceof Error ? err.message : "Could not read the file.";
+					attachmentError += `${attachmentError ? "\n" : ""}"${file.name}" could not be attached. ${message}`;
+				}
 			}
-			};
-			reader.readAsDataURL(file);
+		} finally {
+			readingAttachments--;
 		}
 	}
 
-	/** Edit on a queued row: its text and images come back to the composer. */
+	/** Edit on a queued row: its text and attachments come back to the composer. */
 	function takeBackQueuedInput(text: string, images: readonly string[]) {
 		inputText = inputText.trim() ? `${inputText}\n\n${text}` : text;
 		handleInput();
 		cursorPos = inputText.length;
-		pendingImages = [
-			...pendingImages,
-			...images.map((dataUrl) => ({ id: crypto.randomUUID(), dataUrl, name: "image", size: dataUrl.length })),
+		pendingAttachments = [
+			...pendingAttachments,
+			...images.map((dataUrl) => {
+				const { mime, name, size } = parseAttachmentDataUrl(dataUrl);
+				return { id: crypto.randomUUID(), dataUrl, name: name ?? (mime.startsWith("image/") ? "image" : "file"), size };
+			}),
 		];
 		textareaEl?.focus();
 	}
 
-	function removePendingImage(id: string) {
-		pendingImages = pendingImages.filter((img) => img.id !== id);
+	function removePendingAttachment(id: string) {
+		pendingAttachments = pendingAttachments.filter((img) => img.id !== id);
 	}
 
 	function handleCommandSelect(command: string) {
@@ -1306,9 +1341,18 @@
 			</ComposerStrip>
 		{/if}
 
+		{#if attachmentError}
+			<ComposerStrip tone="risk" role="alert" data-testid="attachment-error">
+				<div class="flex items-start gap-2">
+					<Icon name="file" size={14} class="shrink-0 text-error" />
+					<span class="min-w-0 flex-1 whitespace-pre-line break-words">{attachmentError}</span>
+					<Button variant="ghost" size="content" tone="muted" iconOnly icon="x" iconSize={12} ariaLabel="Dismiss attachment error" class="size-5 shrink-0" onclick={() => { attachmentError = ""; }} />
+				</div>
+			</ComposerStrip>
+		{/if}
 		<ComposerFrame id="input-row" compact={sessionViewState.compact} words={composerPreferences.controls === "words"} goal={goal.border}>
-			{#if pendingImages.length > 0}
-				<PastePreview images={pendingImages} onRemove={removePendingImage} />
+			{#if pendingAttachments.length > 0}
+				<PastePreview images={pendingAttachments} onRemove={removePendingAttachment} />
 			{/if}
 			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" splitFooter={composerPreferences.controls === "icons"} singleRow={composerPreferences.controls === "words"}>
 				{#snippet field()}
@@ -1404,7 +1448,7 @@
 						class="flex items-center gap-1 min-w-0"
 					>
 						<!-- Attach button + menu -->
-						<AttachMenu onCamera={handleAttachCamera} onPhotos={handleAttachPhotos} onSetGoal={() => handleAttachSetGoal()} />
+						<AttachMenu onCamera={handleAttachCamera} onPhotos={handleAttachPhotos} onFiles={handleAttachFiles} onSetGoal={() => handleAttachSetGoal()} />
 					</div>
 				{/snippet}
 				{#snippet controls()}

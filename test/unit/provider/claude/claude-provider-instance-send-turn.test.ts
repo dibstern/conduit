@@ -1,6 +1,6 @@
 // test/unit/provider/claude/claude-provider-instance-send-turn.test.ts
 
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
@@ -146,6 +146,65 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 	afterEach(() => {
 		rmSync(workspace, { recursive: true, force: true });
+	});
+
+	it("delivers attached text, PDF and JPEG bytes to the SDK prompt stream", async () => {
+		const text = readFileSync(
+			new URL("../../../fixtures/attachments/notes.txt", import.meta.url),
+			"utf8",
+		);
+		const pdf = readFileSync(
+			new URL("../../../fixtures/attachments/guide.pdf", import.meta.url),
+		);
+		let received: SDKUserMessage | undefined;
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: ({ prompt }) =>
+				createQueryFromGenerator(
+					(async function* () {
+						if (typeof prompt === "string")
+							throw new Error("Expected streamed content");
+						received = (await prompt[Symbol.asyncIterator]().next()).value;
+						yield makeSuccessResult();
+					})(),
+				),
+		});
+		try {
+			await Effect.runPromise(
+				instance.sendTurnEffect(
+					makeBaseSendTurnInput({
+						images: [
+							`data:text/plain;name=R%C3%A9sum%C3%A9%20notes.txt;base64,${Buffer.from(text).toString("base64")}`,
+							`data:application/pdf;name=guide.pdf;base64,${Buffer.from(pdf).toString("base64")}`,
+							"data:image/jpeg;base64,/9j/",
+						],
+					}),
+				),
+			);
+			expect(received?.message.content).toEqual([
+				{
+					type: "document",
+					title: "Résumé notes.txt",
+					source: { type: "text", media_type: "text/plain", data: text },
+				},
+				{
+					type: "document",
+					title: "guide.pdf",
+					source: {
+						type: "base64",
+						media_type: "application/pdf",
+						data: Buffer.from(pdf).toString("base64"),
+					},
+				},
+				{
+					type: "image",
+					source: { type: "base64", media_type: "image/jpeg", data: "/9j/" },
+				},
+				{ type: "text", text: makeBaseSendTurnInput().prompt },
+			]);
+		} finally {
+			await Effect.runPromise(instance.shutdownEffect());
+		}
 	});
 
 	it.each([

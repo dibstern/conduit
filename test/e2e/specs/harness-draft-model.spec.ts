@@ -347,6 +347,7 @@ test("an image attached in an OpenCode draft reaches OpenCode", async ({
 		{
 			type: "file",
 			mime: "image/png",
+			filename: "pixel.png",
 			url: `data:image/png;base64,${pixel}`,
 		},
 	]);
