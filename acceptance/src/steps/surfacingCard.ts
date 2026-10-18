@@ -1295,6 +1295,8 @@ export const surfacingCardHandlers: StepHandler[] = [
 							),
 						),
 				);
+				// r replies, which moves focus to the composer.
+				if (key === "r") await card(page).focus();
 				if (
 					(key === "+" || key === "−") &&
 					(await page.getByTestId("surfacing-mark-why").count()) > 0

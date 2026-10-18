@@ -12,12 +12,13 @@
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import Popover from "../ui/Popover.svelte";
 	import SheetChrome from "../ui/SheetChrome.svelte";
+	import SurfacingReplyActions from "./SurfacingReplyActions.svelte";
 
 	// jsdom has no matchMedia; real browsers always do.
 	const media = typeof matchMedia === "function";
 	const viewport = media ? new MediaQuery("(max-width: 599px)") : { current: false };
 	const desktop = media ? new MediaQuery("(min-width: 1024px)") : { current: true };
-	let { versions, selected, open, phone = viewport.current, live, view, start, settings, level = "balanced", generating = false, error = "", settingsError = "", saving = false, onclose, onversion, ongenerate, onretry, onsettings, oncite, onhover, foot }: {
+	let { versions, selected, open, phone = viewport.current, live, view, start, settings, level = "balanced", generating = false, error = "", settingsError = "", saving = false, onclose, onversion, ongenerate, onretry, onsettings, oncite, onhover, onreply, onquote, replies = new Map(), foot }: {
 		versions: readonly TurnRecap[];
 		selected: TurnRecap | undefined;
 		open: boolean;
@@ -38,6 +39,12 @@
 		onsettings: (patch: Partial<MessageSurfacingPreferences["recap"]>) => void;
 		oncite: (ordinal: number) => void;
 		onhover?: (ordinal: number | null) => void;
+		/** Reply to a cited message, whole or by an excerpt from the reader. */
+		onreply?: (ordinal: number, excerpt?: string) => void;
+		/** Reply with words selected in the summary itself. */
+		onquote?: (excerpt: string) => void;
+		/** Where the draft already replies to a message whole, by ordinal. */
+		replies?: ReadonlyMap<number, number>;
 		foot?: Snippet<[SurfaceTurn]> | undefined;
 	} = $props();
 	let followed = $state<number[]>([]);
@@ -45,6 +52,8 @@
 	let summaryEl: HTMLElement | undefined;
 	let readerHeight = $state<number | undefined>();
 	let citationTrigger: HTMLElement | null = null;
+	let readerBodyEl = $state<HTMLElement>();
+	let proseEl = $state<HTMLElement>();
 	const reading = $derived(view.numbers.find(({ number }) => number === readingOrdinal));
 	const citationPopover = $derived(!phone && desktop.current);
 	$effect(() => {
@@ -67,6 +76,17 @@
 		onhover?.(null);
 		oncite(ordinal);
 	}
+	// A reference that lands in the draft hands focus to the composer: the phone sheet covers it, and the
+	// desktop popover would trap focus, so both close without returning focus to their trigger.
+	let handedOff = false;
+	function afterReply(inserted: boolean) {
+		if (!inserted) return;
+		if (phone) onclose();
+		else if (citationPopover) {
+			handedOff = true;
+			readingOrdinal = null;
+		}
+	}
 	function closeCitation() {
 		readingOrdinal = null;
 		onhover?.(null);
@@ -83,7 +103,11 @@
 		<section class="summary-reader" data-testid="surfacing-recap-reader" data-ordinal={reading.number} aria-label={`Cited message #${reading.number}`}>
 			<div class="reader-head"><span>#{reading.number} · {surfaceTime((reading.part.createdAt ?? start) - start)}</span><Button variant="ghost" size="content" tone="muted" touchTarget class="ml-auto size-[24px] rounded-full" ariaLabel="Close cited message" onclick={closeCitation}><Icon name="x" size={14} /></Button></div>
 			{#if reading.belowLevel}<p class="reader-note">At {SURFACE_LABELS[reading.level]}, below {SURFACE_LABELS[level]} · opened directly</p>{/if}
-			<div class="reader-body md-content">{@html reading.part.html}</div>
+			<div class="reader-body md-content select-text" bind:this={readerBodyEl}>{@html reading.part.html}</div>
+			{#if onreply}
+				{@const ordinal = reading.number}
+				<div class="reader-foot"><SurfacingReplyActions source={reading.part.uuid} within={readerBodyEl} replied={replies.has(ordinal)} onreply={(excerpt) => { const inserted = excerpt !== undefined || !replies.has(ordinal); onreply(ordinal, excerpt); afterReply(inserted); }} /></div>
+			{/if}
 		</section>
 	{/if}
 {/snippet}
@@ -134,13 +158,13 @@
 			</div>
 		{/if}
 		{#if selected}
-			<p class="summary-prose" class:regenerating={generating}>
+			<p class="summary-prose select-text" class:regenerating={generating} bind:this={proseEl}>
 				{#each chunks as chunk}
 					{@const ordinal = /^\[#(\d+)\]$/.exec(chunk)?.[1]}
 					{@const message = ordinal ? view.numbers.find(({ number }) => number === Number(ordinal)) : undefined}
 					{#if message}
 						{#if citationPopover}
-							<Popover open={readingOrdinal === message.number} onopenchange={(nextOpen) => nextOpen ? cite(message.number) : closeCitation()} ariaLabel={`Cited message #${message.number}`} side="top" class="max-w-[380px]">
+							<Popover open={readingOrdinal === message.number} onopenchange={(nextOpen) => nextOpen ? cite(message.number) : closeCitation()} ariaLabel={`Cited message #${message.number}`} side="top" class="max-w-[380px]" onCloseAutoFocus={(event) => { if (handedOff) event.preventDefault(); handedOff = false; }}>
 								{#snippet trigger({ props })}{@render citationButton(message, props)}{/snippet}
 								{@render citationReader()}
 							</Popover>
@@ -152,6 +176,7 @@
 			</p>
 			<div class="summary-foot">
 				<span class="mr-auto"><span class="desk-only">{`${selected.model.charAt(0).toUpperCase()}${selected.model.slice(1)} · `}</span>{`${view.numbers.filter(({ number }) => number >= selected.firstOrdinal && number <= selected.lastOrdinal).length} updates`}<span class="desk-only">{` · ${(selected.durationMs / 1000).toFixed(1)}s`}</span>{" · "}<span class="desk-only">{"written at "}</span>{writtenAt(selected)}</span>
+				{#if onquote}<SurfacingReplyActions source="recap-{selected.version}" within={proseEl} onreply={(excerpt) => { if (excerpt) { onquote(excerpt); afterReply(true); } }} />{/if}
 				{@render foot?.(view)}
 				<Button variant="ghost" size="content" tone="secondary" touchTarget class="h-[24px] gap-[4px] rounded-full bg-chip px-[10px] font-sans text-[12px] font-medium" ariaLabel="Regenerate summary" disabled={generating} onclick={() => ongenerate(selected.scope, selected.version)}>↻<span class="desk-only">Regenerate</span></Button>
 			</div>
@@ -180,6 +205,7 @@
 	.summary-reader { margin-top:10px; padding:10px 12px; border:1px solid var(--color-border-subtle); border-radius:12px; background:var(--color-bg); }
 	.reader-head { display:flex; align-items:center; gap:8px; color:var(--color-text-muted); font:12px var(--font-mono); }
 	.reader-note { margin:6px 0; color:var(--color-text-muted); font-size:12px; }
+	.reader-foot { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:8px; }
 	.reader-body { max-height:40dvh; overflow:auto; font-size:14px; line-height:1.65; overflow-wrap:anywhere; }
 	.summary { margin-top:10px; padding:11px 14px 10px; border-radius:12px; background:var(--color-bg); }
 	.summary-head { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }

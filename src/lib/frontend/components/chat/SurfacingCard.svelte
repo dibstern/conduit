@@ -18,13 +18,14 @@
 	import { untrack } from "svelte";
 	import { surfacePinRows, SURFACE_LABELS, SURFACE_LEVELS, type SurfaceLevel, type SurfacePinGroup } from "../../utils/surface-turn.js";
 	import Button from "../ui/Button.svelte";
+	import SurfacingReplyActions from "./SurfacingReplyActions.svelte";
 	import Checkbox from "../ui/Checkbox.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import SegmentedControl from "../ui/SegmentedControl.svelte";
 	import { MARK_GLYPHS } from "../../stores/surfacing-feedback.svelte.js";
 
-	let { view, live, level, overridden, endTime, startTime, regions = {}, strip, onpick, onlevel, ondefault, onreset, onfold, onfollow, oncommand, onjump, onhover, onread, onautoread, onmarkread, readSaving = false, readError = "", canAutoRead = true, markReadInAxis = false }: {
+	let { view, live, level, overridden, endTime, startTime, regions = {}, strip, onpick, onlevel, ondefault, onreset, onfold, onfollow, oncommand, onjump, onhover, onread, onautoread, onmarkread, readSaving = false, readError = "", canAutoRead = true, markReadInAxis = false, onreply, replied = false }: {
 		view: SurfaceTurn;
 		live: boolean;
 		level: SurfaceLevel;
@@ -49,6 +50,9 @@
 		readError?: string;
 		canAutoRead?: boolean;
 		markReadInAxis?: boolean;
+		onreply?: (pin: SurfacePin, excerpt?: string) => void;
+		/** The draft already holds a whole-message reply to this card. */
+		replied?: boolean;
 	} = $props();
 	let scrubEl: HTMLDivElement;
 	let laneWidth = $state(0);
@@ -66,6 +70,7 @@
 	let error = $state("");
 	let drag: { id: number; x: number; y: number; moved: boolean; pin?: SurfacePin } | null = null;
 	let suppressClick = false;
+	let cardBodyEl: HTMLDivElement | undefined = $state();
 	const levelOptions = $derived(SURFACE_LEVELS.map((value) => ({
 		value,
 		label: SURFACE_LABELS[value],
@@ -182,9 +187,10 @@
 			{#if card.read !== undefined && onread}<label class="read-toggle"><Checkbox data-testid="surfacing-read-toggle" bind:checked={() => card.read === true, (read) => onread?.(card, read)} onchange={(event) => { event.currentTarget.checked = card.read === true; }} disabled={readSaving} class="size-[15px] rounded-[4px]" />Read</label>{/if}
 		</div>
 		{#if view.cardNote}<div class="card-note">{view.cardNote}</div>{/if}
-		<div class="card-body md-content">{@html card.part.html}</div>
+		<div class="card-body md-content select-text" bind:this={cardBodyEl}>{@html card.part.html}</div>
 		{@render regions.why?.(card)}
 		<div class="card-foot" data-surfacing-region="card-foot">
+			{#if onreply}<SurfacingReplyActions source={card.part.uuid} within={cardBodyEl} {replied} disabled={card.number === undefined} onreply={(excerpt) => onreply(card, excerpt)} />{/if}
 			{@render regions.cardFoot?.(card)}
 			<span class="grow"></span>
 			{#if live && !view.following}<Button variant="accent-soft" size="content" touchTarget class="h-[26px] max-md:h-[30px] rounded-full px-[9px] text-[12.5px] font-medium" ariaLabel="Follow latest" onclick={onfollow}>now ⇥</Button>{/if}

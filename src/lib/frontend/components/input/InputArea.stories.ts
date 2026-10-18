@@ -38,6 +38,10 @@ import { runTransportEffect } from "../../transport/runtime.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import { WsRpcClients } from "../../transport/shared-client.js";
 import type { OpenCodeInstance } from "../../types.js";
+import {
+	insertComposerReference,
+	type ReplyReference,
+} from "./composer-reference.svelte.js";
 import InputArea from "./InputArea.svelte";
 
 const testId = "story-input";
@@ -229,6 +233,154 @@ const STRICT_ARIA = {
 
 export const Empty: Story = {};
 export const EmptyLight: Story = { globals: { theme: "light" } };
+
+const replyAsk: ReplyReference = {
+	kind: "message",
+	ordinal: 24,
+	category: "Ask",
+	glyph: "?",
+	time: "31:02",
+	text: "The phone sidebar baseline shifts 2px because the unread badge now paints before the first frame. Recapture it, or keep the old paint order?",
+};
+
+async function showReferences(
+	canvasElement: HTMLElement,
+	references: ReplyReference[],
+) {
+	const canvas = within(canvasElement);
+	const input = canvas.getByRole<HTMLTextAreaElement>("textbox", {
+		name: "Message",
+	});
+	for (const [index, reference] of references.entries()) {
+		insertComposerReference(reference, testId);
+		await waitFor(() =>
+			expect(canvas.getAllByTestId("surfacing-ref-token")).toHaveLength(
+				index + 1,
+			),
+		);
+		await waitFor(() => expect(input.selectionStart).toBe(input.value.length));
+	}
+	await userEvent.type(input, "Recapture it. The 2px shift is expected.");
+	await userEvent.click(
+		canvas.getByRole("button", { name: "What the agent receives" }),
+	);
+	// Back to the draft, as a user would, so the header's focus ring is not drawn.
+	input.focus();
+	await expect(canvas.getAllByTestId("surfacing-ref-token")).toHaveLength(
+		references.length,
+	);
+}
+
+export const ReplyReferences: Story = {
+	play: async ({ canvasElement }) => showReferences(canvasElement, [replyAsk]),
+};
+export const ReplyReferencesLight: Story = {
+	...ReplyReferences,
+	globals: { theme: "light" },
+};
+export const ReplyExcerpt: Story = {
+	play: async ({ canvasElement }) =>
+		showReferences(canvasElement, [
+			{
+				...replyAsk,
+				kind: "excerpt",
+				text: "The phone sidebar baseline shifts 2px because the unread badge now paints before the first frame.",
+			},
+		]),
+};
+export const ReplyExcerptNarrow: Story = {
+	play: async ({ canvasElement }) => {
+		const input = within(canvasElement).getByRole<HTMLTextAreaElement>(
+			"textbox",
+			{ name: "Message" },
+		);
+		const field = input.parentElement as HTMLElement;
+		field.style.width = "220px";
+		await showReferences(canvasElement, [
+			{
+				...replyAsk,
+				kind: "excerpt",
+				text: "这是用于检查窄屏幕自动换行的中文引用内容请保留完整文字。",
+			},
+		]);
+		const mirror = field.querySelector(".mirror") as HTMLElement;
+		await expect(input.getBoundingClientRect().width).toBe(220);
+		await expect(getComputedStyle(mirror).whiteSpace).toBe(
+			getComputedStyle(input).whiteSpace,
+		);
+		await waitFor(() =>
+			expect(
+				Math.abs(input.scrollHeight - mirror.getBoundingClientRect().height),
+			).toBeLessThanOrEqual(1),
+		);
+		await expect(mirror.scrollWidth).toBeLessThanOrEqual(mirror.clientWidth);
+	},
+};
+export const ReplyRecap: Story = {
+	play: async ({ canvasElement }) =>
+		showReferences(canvasElement, [
+			{
+				kind: "recap-excerpt",
+				text: "The badge paints before the first frame.",
+			},
+		]),
+};
+export const ReplyMultiple: Story = {
+	play: async ({ canvasElement }) =>
+		showReferences(canvasElement, [
+			replyAsk,
+			{
+				kind: "excerpt",
+				ordinal: 18,
+				category: "Decision",
+				glyph: "◆",
+				time: "22:40",
+				text: "one subscribeSessionSummaries stream",
+			},
+		]),
+};
+export const ReplyReferencesPhone: Story = {
+	globals: { viewport: { value: "mobile1", isRotated: false } },
+	beforeEach: ({ canvasElement }) => setupWords(canvasElement, true),
+	play: async ({ canvasElement }) => showReferences(canvasElement, [replyAsk]),
+};
+export const ReplyAtomicEditing: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const input = canvas.getByRole<HTMLTextAreaElement>("textbox", {
+			name: "Message",
+		});
+		// The textarea's text for the token: no-break inside, narrow padding outside.
+		const label = "\u202f?\u00a0#24\u00a0Ask\u00a0×\u202f";
+		await userEvent.type(input, "Before  after");
+		input.setSelectionRange(7, 7);
+		insertComposerReference(replyAsk, testId);
+		await waitFor(() => expect(input.value).toBe(`Before ${label} after`));
+		await waitFor(() =>
+			expect(input.selectionStart).toBe(`Before ${label} `.length),
+		);
+		// The caret steps over the space, then over the whole token.
+		await userEvent.keyboard("{ArrowLeft}{ArrowLeft}");
+		await expect(input.selectionStart).toBe(7);
+		await userEvent.type(input, "left ", { skipClick: true });
+		await expect(input.value).toBe(`Before left ${label} after`);
+		await userEvent.click(canvas.getByTestId("surfacing-ref-remove"));
+		await expect(input.value).toBe("Before left after");
+		await waitFor(() =>
+			expect(input.selectionStart).toBe("Before left ".length),
+		);
+		insertComposerReference(replyAsk, testId);
+		await waitFor(() => expect(input.value).toBe(`Before left ${label} after`));
+		await waitFor(() =>
+			expect(input.selectionStart).toBe(`Before left ${label} `.length),
+		);
+		await userEvent.keyboard("{ArrowLeft}{Backspace}");
+		await expect(
+			canvas.queryByTestId("surfacing-ref-token"),
+		).not.toBeInTheDocument();
+		await expect(input.value).toBe("Before left  after");
+	},
+};
 
 /**
  * Text inserted in one go past the height cap, the way IME commits, dictation

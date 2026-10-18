@@ -96,6 +96,12 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 			"storybook play() guards that narrow the transcript queries, not executable production code",
 	},
 	{
+		path: "src/lib/frontend/components/chat/SurfacingSummary.stories.ts",
+		snippetPattern: /Recap prose moved/,
+		reason:
+			"storybook play() guard that narrows the recap prose query, not executable production code",
+	},
+	{
 		path: "src/lib/frontend/components/input/InputArea.stories.ts",
 		snippetPattern: /Composer is missing/,
 		reason:

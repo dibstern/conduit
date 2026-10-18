@@ -15,6 +15,7 @@
 	import { MARK_GLYPHS, SurfacingFeedback } from "../../stores/surfacing-feedback.svelte.js";
 	import SurfacingMarkActions from "./SurfacingMarkActions.svelte";
 	import SurfacingMarkWhy from "./SurfacingMarkWhy.svelte";
+	import { insertComposerReference, messageReplies, removeComposerReference } from "../input/composer-reference.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { reveal, revealedPart } from "../../stores/reveal.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
@@ -260,6 +261,14 @@
 		folded = false;
 	}
 	function followLatest() { picked = null; folded = false; }
+	const replies = $derived(messageReplies(sessionId));
+	// Reply toggles: a message already replied to in the draft takes its reference back out.
+	function replyTo(pin: Pick<SurfacePin, "number" | "label" | "glyph" | "time" | "part">, excerpt?: string) {
+		if (!sessionId || pin.number === undefined) return;
+		const replied = excerpt === undefined ? replies.get(pin.number) : undefined;
+		if (replied !== undefined) removeComposerReference(sessionId, replied);
+		else insertComposerReference({ kind: excerpt === undefined ? "message" : "excerpt", ordinal: pin.number, category: pin.label, glyph: pin.glyph, time: pin.time, text: excerpt ?? pin.part.rawText }, sessionId);
+	}
 	function foldMessage() {
 		folded = true;
 		void tick().then(() => panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-scrub"]')?.focus({ preventScroll: true }));
@@ -298,6 +307,7 @@
 		} else if (key === "a") revealMessage(surface.openAsk);
 		else if (key === "u") revealMessage(surface.nextUnread?.part ?? null);
 		else if (key === "m" && surface.card?.read !== undefined) readMessage(surface.card, !surface.card.read);
+		else if (key === "r" && surface.card) replyTo(surface.card);
 		else if (key === "Escape") foldMessage();
 		digits = "";
 	}
@@ -407,7 +417,9 @@
 			start={turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0} settings={summarySettings} {level}
 			generating={recap.generating} error={recap.error} settingsError={summarySettingsError} saving={summarySaving}
 			onclose={() => summaryOpen = false} onversion={(version) => recap.selected = version} ongenerate={generateSummary} onretry={retrySummary}
-			onsettings={updateSummarySettings} oncite={citeSummary} onhover={(ordinal) => { citedOrdinal = ordinal; cite(view.numbers.find(({ number }) => number === ordinal)?.part.uuid ?? null); }} foot={summaryMarkRead} />
+			onsettings={updateSummarySettings} oncite={citeSummary} {replies}
+			onreply={(ordinal, excerpt) => { const cited = view.numbers.find(({ number }) => number === ordinal); if (cited) replyTo(cited, excerpt); }}
+			onquote={(excerpt) => { if (sessionId) insertComposerReference({ kind: "recap-excerpt", text: excerpt }, sessionId); }} onhover={(ordinal) => { citedOrdinal = ordinal; cite(view.numbers.find(({ number }) => number === ordinal)?.part.uuid ?? null); }} foot={summaryMarkRead} />
 	{/if}
 {/snippet}
 
@@ -467,6 +479,7 @@
 				<SurfacingCard view={surface} {live} {level} overridden={override !== undefined} regions={{ ...surfacingRegions, cardHead: markHead, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
 					{readSaving} {readError} canAutoRead={autoReadAttempt !== readTarget} onread={readMessage} onautoread={(pin) => readMessage(pin, true)}
 					markReadInAxis={!summaryEnabled} onmarkread={() => { void writeRead(surface.unreadPartIds, true); }}
+					onreply={replyTo} replied={surface.card?.number !== undefined && replies.has(surface.card.number)}
 					startTime={surfaceTime((segment.activity[0]?.createdAt ?? turn.user?.createdAt ?? 0) - (turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0))}
 					endTime={surfaceTime(duration ?? 0)} onpick={pick} onlevel={selectLevel}
 					ondefault={async () => { if (sessionId) await makeSurfaceDefault(sessionId, level); }}

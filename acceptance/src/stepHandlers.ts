@@ -47,6 +47,7 @@ import { surfacingCardHandlers } from "./steps/surfacingCard.js";
 import { surfacingMarksHandlers } from "./steps/surfacingMarks.js";
 import { surfacingMinimiseHandlers } from "./steps/surfacingMinimise.js";
 import { surfacingRecapHandlers } from "./steps/surfacingRecap.js";
+import { surfacingReplyHandlers } from "./steps/surfacingReply.js";
 import { surfacingTuningHandlers } from "./steps/surfacingTuning.js";
 import { taskDrillInHandlers } from "./steps/taskDrillIn.js";
 import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
@@ -74,6 +75,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...surfacingMarksHandlers,
 	...surfacingMinimiseHandlers,
 	...surfacingRecapHandlers,
+	...surfacingReplyHandlers,
 	...surfacingTuningHandlers,
 	...sessionGoalDetailsHandlers,
 	...sessionGoalHandlers,

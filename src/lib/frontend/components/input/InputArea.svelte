@@ -15,6 +15,7 @@
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import Disclosure from "../ui/Disclosure.svelte";
 	import AccountDot from "../ui/AccountDot.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
@@ -32,6 +33,10 @@
 	import GitIdentity from "../session/GitIdentity.svelte";
 	import PermissionModeSelector from "./PermissionModeSelector.svelte";
 	import SkillHighlightBackdrop from "./SkillHighlightBackdrop.svelte";
+	import { projectReferences, serializeReferences } from "../../../composer-references.js";
+	import { referenceEditing } from "./reference-editing.js";
+	import { provideComposerDraft } from "./composer-reference.svelte.js";
+	import { messageSurfacing } from "../../stores/message-surfacing.svelte.js";
 	// biome-ignore lint/style/useImportType: SubagentBackBar is used as a value for bind:this
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
@@ -140,6 +145,9 @@
 	const supportsGoal = $derived(discoveryState.currentTraits?.supportsGoalState === true);
 	const isGoalCommand = $derived(supportsGoal && /^[/$]goal(?:\s|$)/.test(inputText));
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
+	const referenceEditor = referenceEditing({ read: () => inputText, write: (text) => { inputText = text; }, context: () => draftContext, element: () => textareaEl, changed: handleInput });
+	const referenceView = $derived(projectReferences(inputText));
+	$effect(() => provideComposerDraft({ sessionId: () => sessionState.currentId, draft: () => inputText, insert: (reference) => { if (!readOnlySubagent) referenceEditor.insert(reference); }, remove: referenceEditor.remove }));
 	let fieldScroller: HTMLDivElement | undefined = $state();
 	let composerFocused = $state(false);
 	let pendingAttachments = $state<PendingAttachment[]>([]);
@@ -263,7 +271,9 @@
 			? `Message${composerPresentation ? ` ${composerPresentation.label}` : ""}… sends at ${sendAtTime}`
 			: currentSession?.settledAt != null ? "Message to un-settle…" :
 			currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
-			sessionViewState.compact ? "Reply…" : composerPresentation ? `Reply to ${composerPresentation.label}…` : "Reply…",
+			sessionViewState.compact ? "Reply…" :
+			messageSurfacing.status.active ? "Reply… (↩ Reply on a message drops a reference here)" :
+			composerPresentation ? `Reply to ${composerPresentation.label}…` : "Reply…",
 	);
 
 	// Each session keeps its own unsent input text. Switching sessions saves the
@@ -414,6 +424,21 @@
 	);
 	const filteredCommands = $derived(filterCommands(menuCommands, commandQuery));
 	const commandListboxVisible = $derived(filteredCommands.length > 0);
+	// The preview prepares the text exactly as sending does, attached file
+	// contents included, so it only runs while open. The last result stays up
+	// while the next one loads.
+	let previewOpen = $state(false);
+	let preview = $state<string>();
+	$effect(() => {
+		if (!previewOpen || !referenceView.references.length) return;
+		let current = true;
+		void withReferences(toProviderCommands(inputText.trim(), providerBuiltinNameSet), composerProjectSlug).then((text) => {
+			if (current) preview = serializeReferences(text);
+		});
+		return () => {
+			current = false;
+		};
+	});
 
 	/** Known `/skill` and `$builtin` names, for inline recognition in the composer. */
 	const commandNameSet = $derived(
@@ -478,7 +503,7 @@
 	// whole draft out a second time, which costs ~300ms per megabyte. Fall back to
 	// the textarea's own (unhighlighted) text, exactly as during IME composition.
 	const HIGHLIGHT_MAX_CHARS = 20_000;
-	const plainText = $derived(inputText.length > HIGHLIGHT_MAX_CHARS);
+	const plainText = $derived(!referenceView.references.length && referenceView.text.length > HIGHLIGHT_MAX_CHARS);
 	// Set when the draft crosses into plain text; revealCaret() consumes it.
 	let enteredPlainText = false;
 	$effect(() => {
@@ -605,7 +630,7 @@
 
 	function handleInput() {
 		if (textareaEl) {
-			cursorPos = textareaEl.selectionStart ?? 0;
+			cursorPos = referenceEditor.selection().start;
 		}
 		void tick().then(revealCaret);
 		lastLocalEditAt = Date.now();
@@ -665,14 +690,16 @@
 	}
 
 	function handleKeyup() {
+		referenceEditor.select();
 		if (textareaEl) {
-			cursorPos = textareaEl.selectionStart ?? 0;
+			cursorPos = referenceEditor.selection().start;
 		}
 	}
 
 	function handleClick() {
+		referenceEditor.select();
 		if (textareaEl) {
-			cursorPos = textareaEl.selectionStart ?? 0;
+			cursorPos = referenceEditor.selection().start;
 		}
 	}
 
@@ -687,6 +714,7 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
+		if (referenceEditor.keydown(e)) return;
 		if (e.key === "Escape" && isGoalCommand) {
 			e.preventDefault();
 			inputText = inputText.replace(/^[/$]goal\s*/, "");
@@ -781,7 +809,7 @@
 				sideThread: { sessionId: parentSessionId, title: question },
 				delivery: "queue",
 				inputId,
-				text: await withReferences(toProviderCommands(question, providerBuiltinNameSet), projectSlug),
+				text: serializeReferences(await withReferences(toProviderCommands(question, providerBuiltinNameSet), projectSlug)),
 				...(images.length > 0 ? { images } : {}),
 				onCreated: (sessionId) => {
 					sideThreadAttempt = undefined;
@@ -836,7 +864,7 @@
 			text = toProviderCommands(text, providerBuiltinNameSet);
 		}
 
-		const messageText = textOverride === undefined ? await withReferences(text, composerProjectSlug) : text;
+		const messageText = textOverride === undefined ? serializeReferences(await withReferences(text, composerProjectSlug)) : text;
 
 		// Send all attachments through the existing data URL field.
 		const imageUrls = textOverride === undefined && pendingAttachments.length > 0
@@ -1086,8 +1114,7 @@
 			textareaEl.focus();
 			void tick().then(() => {
 				if (textareaEl) {
-					textareaEl.selectionStart = newCursorPos;
-					textareaEl.selectionEnd = newCursorPos;
+					referenceEditor.focusRaw(newCursorPos);
 					cursorPos = newCursorPos;
 				}
 			});
@@ -1117,8 +1144,7 @@
 		requestAnimationFrame(() => {
 			if (textareaEl) {
 				textareaEl.focus();
-				textareaEl.selectionStart = newCursorPos;
-				textareaEl.selectionEnd = newCursorPos;
+				referenceEditor.focusRaw(newCursorPos);
 				cursorPos = newCursorPos;
 			}
 		});
@@ -1374,6 +1400,7 @@
 						<div class="relative {plainText ? 'h-[120px]' : ''}" style:min-height={`max(${composerPreferences.controls === "words" ? 24 : sessionViewState.compact ? 34 : 36}px, var(--composer-placeholder-height, 0px))`}>
 							<SkillHighlightBackdrop
 								text={plainText ? "" : inputText}
+								onremove={referenceEditor.remove}
 								commandNames={commandNameSet}
 								builtinNames={builtinNameSet}
 								dimmed={composing || plainText}
@@ -1411,9 +1438,10 @@
 									: 'overflow-hidden'} {composing || plainText
 									? 'text-text'
 									: 'text-transparent'}"
-								bind:value={inputText}
+								bind:value={() => referenceView.text, referenceEditor.input}
 								bind:element={textareaEl}
-								oninput={handleInput}
+								onbeforeinput={referenceEditor.beforeInput}
+								onselect={referenceEditor.select}
 								onfocus={() => {
 									composerFocused = true;
 									requestSessionPreWarm(sessionState.currentId);
@@ -1430,6 +1458,17 @@
 							</div>
 						</div>
 					</div>
+
+					{#if referenceView.references.length}
+						<div data-testid="surfacing-ref-preview">
+							<Disclosure look="preview" density="tight" expanded={previewOpen} onToggle={() => (previewOpen = !previewOpen)}>What the agent receives</Disclosure>
+							{#if previewOpen && preview !== undefined}
+								{@const lines = preview.split("\n")}
+								<!-- Reference lines lead, one each; their `Re …:` prefix is bold. -->
+								<pre class="mx-[12px] mb-[8px] whitespace-pre-wrap break-words font-mono text-[12.5px] leading-[1.6] text-text-secondary">{#each lines as line, index (index)}{#if index < referenceView.references.length}<b class="font-semibold text-text">{line.slice(0, line.indexOf(': "') + 1)}</b>{line.slice(line.indexOf(': "') + 1)}{:else}{line}{/if}{index < lines.length - 1 ? "\n" : ""}{/each}</pre>
+							{/if}
+						</div>
+					{/if}
 
 					<!-- Model drift notice: own row, so it never crowds the controls below -->
 					{#if modelDrift}
