@@ -46,7 +46,7 @@ import { makeRpcStream, makeRpcWire } from "../../helpers/rpc-wire.js";
 import type { StubTable } from "../../helpers/stub-ws-rpc.js";
 
 interface Request {
-	id: string;
+	id: string | number;
 	tag: string;
 	payload: unknown;
 }
@@ -302,8 +302,8 @@ describe("transcript feed interface", () => {
 			() =>
 				first !== undefined &&
 				second !== undefined &&
-				wire.interrupted.includes(first.id) &&
-				wire.interrupted.includes(second.id),
+				wire.interrupted.includes(String(first.id)) &&
+				wire.interrupted.includes(String(second.id)),
 		);
 		expect(wire.requests.length - wire.interrupted.length).toBe(1);
 	});

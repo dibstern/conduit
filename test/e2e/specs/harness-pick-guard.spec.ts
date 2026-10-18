@@ -4665,6 +4665,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 						contextWindow: "",
 					}),
 				);
+				const ordinaryFiber = ordinary;
 				// An ordered request on this same RPC client fences handler delivery;
 				// health stays held, so neither use can complete its shared start.
 				await setup.browser.getModels("opencode");
@@ -4678,7 +4679,9 @@ test.describe("OpenCode draft inventory borrows", () => {
 				expect(
 					Option.isNone(
 						await Effect.runPromise(
-							Effect.sync(() => Option.fromUndefinedOr(ordinary.pollUnsafe())),
+							Effect.sync(() =>
+								Option.fromUndefinedOr(ordinaryFiber.pollUnsafe()),
+							),
 						),
 					),
 				).toBe(true);

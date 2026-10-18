@@ -6,13 +6,12 @@
 
 import { describe, it } from "@effect/vitest";
 import {
-	Chunk,
 	Duration,
 	Effect,
 	Fiber,
 	Layer,
 	Logger,
-	LogLevel,
+	type LogLevel,
 	Queue,
 	Stream,
 } from "effect";
@@ -95,11 +94,6 @@ const superviseShell = Effect.gen(function* () {
 /** Lets every runnable fiber settle before asserting that nothing happened. */
 const settle = Effect.repeat(Effect.yieldNow, { times: 50 });
 
-/** Waits until the supervisor is parked on its backoff timer. */
-const untilWaiting = Effect.gen(function* () {
-	while (Chunk.isEmpty(yield* TestClock.sleeps())) yield* Effect.yieldNow;
-});
-
 /**
  * Asserts the feed is asked for again exactly `millis` after it went down:
  * not a moment sooner, and without needing anything but the clock.
@@ -109,7 +103,7 @@ const restartsAfter = (
 	millis: number,
 ) =>
 	Effect.gen(function* () {
-		yield* untilWaiting;
+		yield* settle;
 		yield* TestClock.adjust(Duration.millis(millis - 1));
 		yield* settle;
 		expect(yield* feed.pending).toBe(0);
@@ -235,17 +229,17 @@ describe("supervise", () => {
 			const logged: LogLevel.LogLevel[] = [];
 			const feed = yield* superviseShell.pipe(
 				Effect.provide(
-					Logger.replace(
-						Logger.defaultLogger,
+					Logger.layer([
 						Logger.make(({ logLevel }) => {
 							logged.push(logLevel);
 						}),
-					),
+					]),
+					{ local: true },
 				),
 			);
 			yield* Effect.flatMap(feed.request, (served) => served.die("boom"));
 			yield* restartsAfter(feed, 1000);
-			expect(logged).toEqual([LogLevel.Error]);
+			expect(logged).toEqual(["Error"]);
 			expect(feed.statuses.at(-1)).toMatchObject({ _tag: "failing" });
 		}),
 	);
@@ -268,7 +262,7 @@ describe("supervise", () => {
 			Effect.gen(function* () {
 				const feed = yield* superviseShell;
 				yield* Effect.flatMap(feed.request, (served) => served.fail("busy"));
-				yield* untilWaiting;
+				yield* settle;
 				wake();
 				yield* feed.request;
 			}),
@@ -279,7 +273,7 @@ describe("supervise", () => {
 		Effect.gen(function* () {
 			const feed = yield* superviseShell;
 			yield* Effect.flatMap(feed.request, (served) => served.fail("busy"));
-			yield* untilWaiting;
+			yield* settle;
 			document.dispatchEvent(new Event("visibilitychange"));
 			window.dispatchEvent(
 				Object.assign(new Event("pageshow"), { persisted: false }),
@@ -307,7 +301,7 @@ describe("supervise", () => {
 		Effect.gen(function* () {
 			const feed = yield* superviseShell;
 			yield* Effect.flatMap(feed.request, (served) => served.fail("busy"));
-			yield* untilWaiting;
+			yield* settle;
 			yield* Fiber.interrupt(feed.consumer);
 			yield* TestClock.adjust(Duration.minutes(1));
 			retryFeedsNow();

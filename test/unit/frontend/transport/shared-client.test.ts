@@ -93,7 +93,7 @@ const withClients = <A>(
 ) =>
 	Effect.scoped(
 		Effect.flatMap(WsRpcClients, use).pipe(
-			Effect.provide(makeWsRpcClientsLayer(connect)),
+			Effect.provide(makeWsRpcClientsLayer(connect), { local: true }),
 		),
 	);
 
@@ -226,9 +226,8 @@ describe("shared two-socket RPC client in memory", () => {
 				Effect.gen(function* () {
 					const opening = yield* Effect.forkChild(clients.forProject("alpha"));
 					yield* Deferred.await(connecting);
-					expect(Exit.hasInterrupts(yield* Fiber.interrupt(opening))).toBe(
-						true,
-					);
+					yield* Fiber.interrupt(opening);
+					expect(Exit.hasInterrupts(yield* Fiber.await(opening))).toBe(true);
 					expect(transports.filter((t) => !t.closed)).toEqual([]);
 					yield* clients.forProject("alpha");
 					expect(transports.filter((t) => !t.closed)).toHaveLength(2);
@@ -358,6 +357,7 @@ describe("shared two-socket RPC client over WebSockets", () => {
 						),
 				}),
 			);
+			yield* Effect.yieldNow;
 
 			expect(fakeSockets.map((ws) => ws.url)).toEqual([
 				makeWsRpcUrl(),
@@ -375,7 +375,11 @@ describe("shared two-socket RPC client over WebSockets", () => {
 					ws.sent.some((sent) => sent.includes("SetLogLevel")),
 				),
 			).toHaveLength(1);
-		}).pipe(Effect.provide(WsRpcClientsLayer), Effect.scoped, Effect.orDie),
+		}).pipe(
+			Effect.provide(WsRpcClientsLayer, { local: true }),
+			Effect.scoped,
+			Effect.orDie,
+		),
 	);
 
 	// Wake must reach both sockets, ignore hidden tabs and healthy sockets, and
@@ -457,7 +461,7 @@ describe("shared two-socket RPC client over WebSockets", () => {
 						// WebSocket.close starts CLOSING now and emits close later.
 						// The existing visibility listener can initiate that close.
 						for (const socket of fakeSockets) socket.readyState = 2;
-					} else {
+					} else if (reason !== "registration") {
 						for (const socket of fakeSockets) socket.close(1006);
 					}
 					yield* Effect.yieldNow;
@@ -471,6 +475,10 @@ describe("shared two-socket RPC client over WebSockets", () => {
 						document.visibilityState = "visible";
 						document.dispatchEvent(new Event("visibilitychange"));
 						for (const socket of fakeSockets) socket.close(1006);
+					} else if (reason === "registration") {
+						// Both sockets must be down before the registration hook wakes them.
+						for (const socket of fakeSockets) socket.readyState = 2;
+						for (const socket of fakeSockets) socket.close(1006);
 					}
 					yield* Deferred.await(redialed);
 					expect(fakeSockets).toHaveLength(4);
@@ -480,7 +488,7 @@ describe("shared two-socket RPC client over WebSockets", () => {
 					expect(fakeSockets).toHaveLength(4);
 					yield* TestClock.adjust("1 second");
 					expect(fakeSockets).toHaveLength(6);
-				}).pipe(Effect.provide(WsRpcClientsLayer));
+				}).pipe(Effect.provide(WsRpcClientsLayer, { local: true }));
 			}),
 	);
 
@@ -551,6 +559,10 @@ describe("shared two-socket RPC client over WebSockets", () => {
 						}),
 					),
 				).toBe("sent");
-			}).pipe(Effect.provide(WsRpcClientsLayer), Effect.scoped, Effect.orDie),
+			}).pipe(
+				Effect.provide(WsRpcClientsLayer, { local: true }),
+				Effect.scoped,
+				Effect.orDie,
+			),
 	);
 });

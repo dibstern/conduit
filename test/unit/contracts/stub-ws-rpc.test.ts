@@ -1,6 +1,7 @@
 import {
 	Arbitrary,
 	Effect,
+	Exit,
 	ManagedRuntime,
 	Schema,
 	type SchemaAST,
@@ -112,11 +113,17 @@ it("round-trips every declared error class as its own instance", async () => {
 				throw new Error("untagged error");
 			if (checked.has(String(error._tag))) continue;
 			checked.add(String(error._tag));
+			const payloadSchema = Schema.toCodecJson(rpc.payloadSchema);
 			const [payload] = await Effect.runPromise(
-				Arbitrary.sampleEffect(Arbitrary.schema(rpc.payloadSchema), {
-					seed: 42,
-					count: 1,
-				}),
+				Arbitrary.sampleEffect(
+					Arbitrary.schema(Schema.toEncoded(payloadSchema)).pipe(
+						Arbitrary.filter((payload) =>
+							Exit.isSuccess(Schema.decodeUnknownExit(payloadSchema)(payload)),
+						),
+						Arbitrary.map(Schema.decodeUnknownSync(payloadSchema)),
+					),
+					{ seed: 42, count: 1 },
+				),
 			);
 			const { runtime: current } = serve({
 				[rpc._tag]: () => {

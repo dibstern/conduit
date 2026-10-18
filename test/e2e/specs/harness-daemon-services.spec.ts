@@ -323,7 +323,7 @@ test("project relays retain daemon services and their own default agent", async 
 		expect(invalidSave._tag).toBe("Failure");
 		if (invalidSave._tag !== "Failure")
 			throw new Error("Invalid save succeeded");
-		const projectError = Schema.decodeUnknownSync(SaveProject.failure)(
+		const projectError = Schema.decodeUnknownSync(SaveProject.errorSchema)(
 			invalidSave.cause.error,
 		);
 		await check(
@@ -405,7 +405,7 @@ test("project relays retain daemon services and their own default agent", async 
 		expect(missingUpdate._tag).toBe("Failure");
 		if (missingUpdate._tag !== "Failure")
 			throw new Error("Missing instance update succeeded");
-		const instanceError = Schema.decodeUnknownSync(UpdateInstance.failure)(
+		const instanceError = Schema.decodeUnknownSync(UpdateInstance.errorSchema)(
 			missingUpdate.cause.error,
 		);
 		await check(

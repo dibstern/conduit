@@ -1131,11 +1131,11 @@ test.describe("Claude replay lane", () => {
 				submit: (text: string, delivery: "queue" | "steer") => {
 					const inputId = randomUUID();
 					return rpc((client) =>
-						client.input.submit({ ...target, inputId, text, delivery }),
+						client["input.submit"]({ ...target, inputId, text, delivery }),
 					).then((response) => ({ inputId, response }));
 				},
 				sendNow: (inputId: string) =>
-					rpc((client) => client.input.sendNow({ ...target, inputId })),
+					rpc((client) => client["input.sendNow"]({ ...target, inputId })),
 				switchModel: (modelId: string) =>
 					rpc((client) =>
 						client.SwitchModel({ ...target, providerId: "claude", modelId }),

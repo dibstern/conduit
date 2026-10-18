@@ -149,7 +149,7 @@ it("rejects an in-flight call on socket drop instead of hanging", async () => {
 
 it.each([
 	"server bug",
-	new Cause.InterruptedException(),
+	Cause.squash(Cause.interrupt()),
 ])("normalizes a non-declared throw to the client error: %s", async (error) => {
 	wire.stub({
 		ListWorktrees: () => {
@@ -175,9 +175,10 @@ it("keeps caller cancellation as an interruption", async () => {
 		rpcEffect("ListWorktrees", { projectSlug: "alpha" }),
 	);
 	await wire.request("ListWorktrees");
-	expect(
-		Exit.hasInterrupts(await Effect.runPromise(Fiber.interrupt(fiber))),
-	).toBe(true);
+	await Effect.runPromise(Fiber.interrupt(fiber));
+	expect(Exit.hasInterrupts(await Effect.runPromise(Fiber.await(fiber)))).toBe(
+		true,
+	);
 });
 
 it("delivers a subscription and a unary response on the same client", async () => {

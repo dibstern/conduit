@@ -1,7 +1,6 @@
-import { Arbitrary, Schema } from "effect";
+import { Arbitrary, Effect, Schema, type SchemaAST } from "effect";
 import { RpcSchema } from "effect/rpc";
-import { RpcClientError } from "effect/rpc/RpcClientError";
-import * as fc from "fast-check";
+import { RpcClientDefect, RpcClientError } from "effect/rpc/RpcClientError";
 import { afterEach, expect, it, vi } from "vitest";
 import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
 import { WorktreeBranchRenameError } from "../../../src/lib/contracts/worktree.js";
@@ -36,54 +35,65 @@ it("requires copy or an explicit null for every declared tag", () => {
 
 const checked = new Set<string>();
 for (const rpc of WsRpcGroup.requests.values()) {
-	const stream = RpcSchema.getStreamSchemas(rpc.successSchema.ast);
-	const variants = [rpc.errorSchema.ast];
-	if (stream._tag === "Some") variants.push(stream.value.failure.ast);
+	const variants: SchemaAST.AST[] = [rpc.errorSchema.ast];
+	if (RpcSchema.isStreamSchema(rpc.successSchema))
+		variants.push(rpc.successSchema.error.ast);
 	for (const ast of variants) {
 		if (ast._tag === "Suspend") {
-			variants.push(ast.f());
+			variants.push(ast.thunk());
 			continue;
 		}
 		if (ast._tag === "Union") {
 			variants.push(...ast.types);
 			continue;
 		}
-		if (ast._tag === "NeverKeyword") continue;
-		const schema = Schema.make(ast);
-		const values = Arbitrary.make(Schema.encodedBoundSchema(schema)).map(
-			(wire) =>
-				Schema.decodeUnknownSync(schema)(JSON.parse(JSON.stringify(wire))),
+		if (ast._tag === "Never") continue;
+		const schema = Schema.toCodecJson(
+			Schema.make<Schema.Codec<unknown, unknown>>(ast),
 		);
-		const example = fc.sample(values, { seed: 42, numRuns: 1 })[0];
+		const values = Arbitrary.schema(Schema.toEncoded(schema)).pipe(
+			Arbitrary.map((wire) =>
+				Schema.decodeUnknownSync(schema)(JSON.parse(JSON.stringify(wire))),
+			),
+		);
+		const [example] = await Effect.runPromise(
+			Arbitrary.sampleEffect(values, { seed: 42, count: 1 }),
+		);
 		if (typeof example !== "object" || example === null || !("_tag" in example))
 			throw new Error("Expected tagged error");
 		const tag = String(example._tag);
 		if (checked.has(tag)) continue;
 		checked.add(tag);
-		it(`never throws for a decoded ${tag}`, () => {
+		it(`never throws for a decoded ${tag}`, async () => {
 			vi.useFakeTimers();
-			fc.assert(
-				fc.property(values, (error) => {
-					expect(() => failureLine(error, "Could not act")).not.toThrow();
-					expect(() => toastFailure("Could not act")(error)).not.toThrow();
-					expect(uiState.toasts.at(-1)?.title).toBe("Could not act");
-					// Message-owning classes retain their message, except branch rename
-					// whose existing inline sentence also includes the folder.
-					if (
-						typeof error === "object" &&
-						error !== null &&
-						"message" in error &&
-						!(error instanceof WorktreeBranchRenameError) &&
-						!(error instanceof WorkspaceMoveError) &&
-						!(error instanceof SetPinRejected) &&
-						error.message
-					) {
-						expect(failureLine(error, "Could not act")).toBe(error.message);
-						expect(uiState.toasts.at(-1)?.body).toBe(error.message);
-					}
-				}),
-				{ seed: 42, numRuns: 100 },
+			const result = await Effect.runPromise(
+				Arbitrary.checkEffect(
+					values,
+					(error) => {
+						expect(() => failureLine(error, "Could not act")).not.toThrow();
+						expect(() => toastFailure("Could not act")(error)).not.toThrow();
+						expect(uiState.toasts.at(-1)?.title).toBe("Could not act");
+						// Message-owning classes retain their message, except branch rename
+						// whose existing inline sentence also includes the folder.
+						if (
+							typeof error === "object" &&
+							error !== null &&
+							"message" in error &&
+							!(error instanceof WorktreeBranchRenameError) &&
+							!(error instanceof WorkspaceMoveError) &&
+							!(error instanceof SetPinRejected) &&
+							error.message
+						) {
+							expect(failureLine(error, "Could not act")).toBe(error.message);
+							expect(uiState.toasts.at(-1)?.body).toBe(error.message);
+						}
+						return true;
+					},
+					{ seed: 42, runs: 100 },
+				),
 			);
+			const failure = Arbitrary.formatCheckFailure(result);
+			if (failure !== undefined) throw new Error(failure);
 		});
 	}
 }
@@ -123,7 +133,9 @@ it.each([
 	null,
 	"broken",
 	new Error("private detail"),
-	new RpcClientError({ reason: "Protocol", message: "socket closed" }),
+	new RpcClientError({
+		reason: new RpcClientDefect({ message: "socket closed", cause: undefined }),
+	}),
 	new WsRpcError({ message: "" }),
 ])("falls back for %s", (error) => {
 	expect(failureLine(error, "Could not act")).toBe("Could not act");

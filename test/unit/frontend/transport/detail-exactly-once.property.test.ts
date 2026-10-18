@@ -1,5 +1,5 @@
 import { Effect, Stream } from "effect";
-import { RpcClientError } from "effect/rpc/RpcClientError";
+import { RpcClientDefect, RpcClientError } from "effect/rpc/RpcClientError";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import type { SessionDetailEnvelope } from "../../../../src/lib/contracts/ws-rpc.js";
@@ -62,7 +62,9 @@ const empty = (): TranscriptEntry => ({
 	partOrder: new Map(),
 });
 const lost = () =>
-	new RpcClientError({ reason: "Protocol", message: "scripted drop" });
+	new RpcClientError({
+		reason: new RpcClientDefect({ message: "scripted drop", cause: undefined }),
+	});
 
 // The event log owns state independently of the client. One event can fan out to
 // multiple envelopes with one sequence, and removals are durable tombstones.

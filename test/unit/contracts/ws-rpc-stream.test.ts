@@ -235,6 +235,26 @@ type Observation =
 	| { readonly _tag: "Chunk"; readonly values: ReadonlyArray<unknown> }
 	| { readonly _tag: "Exit"; readonly exit: Exit.Exit<unknown, unknown> }
 	| { readonly _tag: "Interrupt" };
+
+// Runtime span annotations are separate from the terminal failure contract.
+const withoutCauseAnnotations = <A, E>(
+	exit: Exit.Exit<A, E>,
+): Exit.Exit<A, E> =>
+	Exit.isFailure(exit)
+		? Exit.failCause(
+				Cause.fromReasons(
+					exit.cause.reasons.map(
+						(reason): Cause.Reason<E> =>
+							reason._tag === "Fail"
+								? Cause.makeFailReason(reason.error)
+								: reason._tag === "Die"
+									? Cause.makeDieReason(reason.defect)
+									: Cause.makeInterruptReason(reason.fiberId),
+					),
+				),
+			)
+		: exit;
+
 const makeObservedClient = (
 	messages: Observation[],
 	acknowledgements?: Queue.Queue<Effect.Effect<void>>,
@@ -343,7 +363,7 @@ describe("RpcTest subscription stream semantics", () => {
 					{ _tag: "Exit", exit: Exit.void },
 				]);
 				expect(chunks.flat()).toEqual([...initial, ...deltas(member)]);
-			}).pipe(Effect.provide(makeLayer({ member }))),
+			}).pipe(Effect.provide(makeLayer({ member }), { local: true })),
 		);
 		it.effect(`${member} waits for each chunk acknowledgement`, () =>
 			Effect.gen(function* () {
@@ -367,7 +387,7 @@ describe("RpcTest subscription stream semantics", () => {
 					...chunkMessages,
 					{ _tag: "Exit", exit: Exit.void },
 				]);
-			}).pipe(Effect.provide(makeLayer({ member }))),
+			}).pipe(Effect.provide(makeLayer({ member }), { local: true })),
 		);
 
 		it.effect(
@@ -376,7 +396,7 @@ describe("RpcTest subscription stream semantics", () => {
 				Effect.gen(function* () {
 					const expected = Exit.fail(
 						new WsRpcError({
-							message: `${member} failed: ReadQueryEffectError: An error has occurred`,
+							message: `${member} failed: ReadQueryEffectError`,
 						}),
 					);
 					const rpcTest = yield* RpcTest.makeClient(WsRpcGroup);
@@ -384,21 +404,31 @@ describe("RpcTest subscription stream semantics", () => {
 						Stream.runDrain,
 						Effect.exit,
 					);
-					expect(result).toEqual(expected);
+					expect(withoutCauseAnnotations(result)).toEqual(expected);
 					const messages: Observation[] = [];
 					const client = yield* makeObservedClient(messages);
 					const observed = yield* subscribe(client).pipe(
 						Stream.runDrain,
 						Effect.exit,
 					);
-					expect(messages).toEqual([
+					expect(
+						messages.map((message) =>
+							message._tag === "Exit"
+								? { ...message, exit: withoutCauseAnnotations(message.exit) }
+								: message,
+						),
+					).toEqual([
 						...(member === "SubscribeShell"
 							? [{ _tag: "Chunk", values: [initial[0]] }]
 							: []),
 						{ _tag: "Exit", exit: expected },
 					]);
-					expect(observed).toEqual(expected);
-				}).pipe(Effect.provide(makeLayer({ member, failRead: true }))),
+					expect(withoutCauseAnnotations(observed)).toEqual(expected);
+				}).pipe(
+					Effect.provide(makeLayer({ member, failRead: true }), {
+						local: true,
+					}),
+				),
 		);
 
 		it.effect(
@@ -480,7 +510,9 @@ describe("RpcTest subscription stream semantics", () => {
 										Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause),
 								),
 							).toEqual([true]);
-						}).pipe(Effect.provide(makeLayer({ member, advances })));
+						}).pipe(
+							Effect.provide(makeLayer({ member, advances }), { local: true }),
+						);
 					}
 				}),
 		);
