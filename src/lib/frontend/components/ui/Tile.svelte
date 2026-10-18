@@ -22,7 +22,7 @@
 		icon: string;
 		subLine?: string | undefined;
 		/** The caller decides: the phone sheet passes its hold hint, the desktop popover a shortcut. */
-		tag?: string;
+		tag?: string | undefined;
 		variant?: "default" | "primary" | "danger";
 		shape?: "square" | "wide";
 		held?: boolean;
@@ -42,12 +42,12 @@
 	<span aria-hidden="true" class:opacity-35={dimmed}><Icon name={icon} size={20} /></span>
 	<span class:opacity-35={dimmed}>{label}</span>
 	{#if subLine}<small id={detailId} class="-mt-[4px] text-[10.5px] font-normal leading-[1.2] text-text-dimmer">{subLine}</small>{/if}
-	{#if tag}<span class="absolute top-[6px] right-[8px] font-mono text-[9.5px] font-normal text-text-dimmer">{tag}</span>{/if}
+	{#if tag}<span class="absolute top-[6px] right-[8px] font-mono text-[9.5px] font-normal text-text-muted">{tag}</span>{/if}
 	</button>
 {/snippet}
 
 {#if triggerProps}
-	{@render tile(triggerProps)}
+	{@render tile({ ...rest, ...triggerProps })}
 {:else}
 	<DropdownMenu.Item
 		{...rest}

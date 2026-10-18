@@ -48,6 +48,18 @@ export type SessionCommand = {
 	disabledReason?: string | null;
 	checked?: boolean;
 	danger?: boolean;
+	options?: {
+		title: string;
+		hint: string;
+		items: readonly {
+			id: string;
+			label: string;
+			detail?: string;
+			icon?: string;
+			separated?: boolean;
+			run(returnFocus?: () => HTMLElement | null): void;
+		}[];
+	};
 	run(returnFocus?: () => HTMLElement | null): void;
 };
 export type SessionCommandEntry = Omit<SessionCommand, "section"> & {
@@ -414,6 +426,38 @@ export function getSessionCommands(
 					: null),
 			run: (returnFocus) =>
 				openSnoozePicker(session, snoozePlacement, returnFocus),
+			options: {
+				title: "Snooze until",
+				hint: "slide to a time, let go",
+				items: [
+					...getSnoozePresets(now)
+						.filter((preset) => preset.id !== "indefinite")
+						.map((preset) => ({
+							id: preset.id,
+							label: preset.label,
+							detail: formatSnoozeTime(preset.until, now),
+							run: () => {
+								void snooze(session, preset.until, now);
+							},
+						})),
+					{
+						id: "pick",
+						label: "Pick a date & time…",
+						icon: "pencil",
+						detail: "›",
+						separated: true,
+						run: (returnFocus) =>
+							openSnoozePicker(session, snoozePlacement, returnFocus, true),
+					},
+					{
+						id: "indefinite",
+						label: "Until something happens",
+						run: () => {
+							void snooze(session, null, now);
+						},
+					},
+				],
+			},
 		});
 		if (actions.snoozed)
 			items.push({

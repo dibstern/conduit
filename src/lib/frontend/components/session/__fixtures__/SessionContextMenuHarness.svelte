@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { SessionInfo, ToastCard } from "../../../types.js";
 	import SessionContextMenu from "../SessionContextMenu.svelte";
+	import SnoozePickerHost from "../SnoozePickerHost.svelte";
+	import { snoozePicker } from "../../../stores/snooze-picker.svelte.js";
 	import Button from "../../ui/Button.svelte";
 	import { chromeMenuActions } from "../../layout/chrome-actions.js";
 	import { featureFlags } from "../../../stores/feature-flags.svelte.js";
@@ -16,7 +18,7 @@
 			uiState.toasts = [];
 			for (const toast of toasts) showToast(toast);
 		});
-		return () => { featureFlags.debug = previous; uiState.toasts = []; };
+		return () => { featureFlags.debug = previous; uiState.toasts = []; snoozePicker.session = null; };
 	});
 
 	/**
@@ -39,6 +41,8 @@
 		…
 	</Button>
 </div>
+
+<SnoozePickerHost />
 
 {#if anchor}
 	<SessionContextMenu
