@@ -148,7 +148,7 @@ export class SqliteProviderSessionBindingReadModel
 		providerId: string,
 		bindingRevision: ProviderSessionBindingRevision,
 	): Effect.Effect<void> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const currentProvider = yield* this.getProviderForSession(sessionId);
 			const currentRevision = yield* this.getBindingRevision(sessionId);
 			if (

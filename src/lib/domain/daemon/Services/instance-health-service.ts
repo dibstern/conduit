@@ -11,10 +11,10 @@ export interface InstanceHealthCheckService {
 	readonly check: (input: InstanceHealthCheckInput) => Effect.Effect<boolean>;
 }
 
-export class InstanceHealthCheckTag extends Context.Tag("InstanceHealthCheck")<
+export class InstanceHealthCheckTag extends Context.Service<
 	InstanceHealthCheckTag,
 	InstanceHealthCheckService
->() {}
+>()("InstanceHealthCheck") {}
 
 // /health belongs to the OpenCode web UI, and since 1.18.x the SPA answers 200
 // with HTML for any unknown path — so it reports healthy even when the API is
@@ -57,7 +57,7 @@ export const InstanceHealthCheckLiveService: InstanceHealthCheckService = {
 				return body.healthy === true;
 			},
 			catch: () => false,
-		}).pipe(Effect.catchAll(() => Effect.succeed(false))),
+		}).pipe(Effect.catch(() => Effect.succeed(false))),
 };
 
 export const InstanceHealthCheckLive: Layer.Layer<InstanceHealthCheckTag> =

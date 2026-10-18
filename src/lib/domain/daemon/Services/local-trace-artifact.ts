@@ -6,7 +6,7 @@ import {
 	unlink,
 } from "node:fs/promises";
 import { dirname } from "node:path";
-import { Effect, Exit, Layer, Option, type Runtime, Tracer } from "effect";
+import { Effect, Exit, Layer, Option, Tracer } from "effect";
 import * as Failure from "../../../effect/failure-classification.js";
 import { DEFAULT_TRACE_MIN_MS } from "../../../env.js";
 import {
@@ -514,7 +514,7 @@ const exitToTraceRecordExit = (
 	exit: Exit.Exit<unknown, unknown>,
 ): TraceRecordExit => {
 	if (Exit.isSuccess(exit)) return { _tag: "Success" };
-	const causeSummary = Option.match(Exit.causeOption(exit), {
+	const causeSummary = Option.match(Exit.getCause(exit), {
 		onNone: () => "",
 		onSome: (value) =>
 			JSON.stringify(
@@ -551,7 +551,7 @@ const mapParentSpan = (
 const mapLinks = (
 	links: ReadonlyArray<Tracer.SpanLink>,
 	selector: (span: CompositeTraceSpan) => Tracer.Span,
-): ReadonlyArray<Tracer.SpanLink> =>
+): Array<Tracer.SpanLink> =>
 	links.map((link) => ({
 		...link,
 		span: isCompositeSpan(link.span) ? selector(link.span) : link.span,
@@ -562,32 +562,25 @@ export const makeCompositeTracer = (
 	upstreamTracer: Tracer.Tracer,
 ): Tracer.Tracer =>
 	Tracer.make({
-		span(name, parent, context, links, startTime, kind, options) {
-			const localSpan = localTracer.span(
-				name,
-				mapParentSpan(parent, (span) => span.localSpan),
-				context,
-				mapLinks(links, (span) => span.localSpan),
-				startTime,
-				kind,
-				options,
-			);
-			const upstreamSpan = upstreamTracer.span(
-				name,
-				mapParentSpan(parent, (span) => span.upstreamSpan),
-				context,
-				mapLinks(links, (span) => span.upstreamSpan),
-				startTime,
-				kind,
-				options,
-			);
+		span(options) {
+			const { name, parent, annotations, kind } = options;
+			const localSpan = localTracer.span({
+				...options,
+				parent: mapParentSpan(parent, (span) => span.localSpan),
+				links: mapLinks(options.links, (span) => span.localSpan),
+			});
+			const upstreamSpan = upstreamTracer.span({
+				...options,
+				parent: mapParentSpan(parent, (span) => span.upstreamSpan),
+				links: mapLinks(options.links, (span) => span.upstreamSpan),
+			});
 			return {
 				_tag: "Span" as const,
 				name,
 				spanId: localSpan.spanId,
 				traceId: localSpan.traceId,
 				parent,
-				context,
+				annotations,
 				get status() {
 					return localSpan.status;
 				},
@@ -621,19 +614,25 @@ export const makeCompositeTracer = (
 				},
 			} satisfies CompositeTraceSpan;
 		},
-		context(f, fiber) {
-			const currentSpan = fiber.currentSpan;
+		context(primitive, fiber) {
+			const currentSpan = fiber.cache.span;
 			const upstreamFiber =
 				currentSpan !== undefined && isCompositeSpan(currentSpan)
-					? ({
+					? {
 							...fiber,
-							currentSpan: currentSpan.upstreamSpan,
-						} as typeof fiber)
+							cache: { ...fiber.cache, span: currentSpan.upstreamSpan },
+						}
 					: fiber;
-			return upstreamTracer.context(
-				() => localTracer.context(f, fiber),
-				upstreamFiber,
-			);
+			const localPrimitive: typeof primitive = {
+				"~effect/Effect/evaluate"() {
+					return localTracer.context
+						? localTracer.context(primitive, fiber)
+						: primitive["~effect/Effect/evaluate"](fiber);
+				},
+			};
+			return upstreamTracer.context
+				? upstreamTracer.context(localPrimitive, upstreamFiber)
+				: localPrimitive["~effect/Effect/evaluate"](fiber);
 		},
 	});
 
@@ -670,11 +669,10 @@ export const spanToTraceRecord = (span: Tracer.Span): TraceRecord => {
 
 export const makeLocalFileTracer = (
 	options: LocalFileTracerOptions,
-	_runtime?: Runtime.Runtime<never>,
 ): Tracer.Tracer => {
 	const sink = options.sink;
 	return Tracer.make({
-		span(name, parent, context, links, startTime, kind) {
+		span({ name, parent, annotations, links, startTime, kind }) {
 			const attributes = new Map<string, unknown>();
 			let status: Tracer.SpanStatus = { _tag: "Started", startTime };
 			let spanLinks = links;
@@ -684,7 +682,7 @@ export const makeLocalFileTracer = (
 				spanId: makeSpanId(),
 				traceId: parentTraceId(parent) ?? makeSpanId() + makeSpanId(),
 				parent,
-				context,
+				annotations,
 				get status() {
 					return status;
 				},
@@ -706,7 +704,7 @@ export const makeLocalFileTracer = (
 					return spanLinks;
 				},
 				set _links(value: ReadonlyArray<Tracer.SpanLink>) {
-					spanLinks = value;
+					spanLinks = [...value];
 				},
 				end(endTime, exit) {
 					if (status._tag === "Ended") return;
@@ -748,25 +746,21 @@ export const makeLocalFileTracer = (
 			} satisfies MutableTraceSpan;
 			return span;
 		},
-		context(f, _fiber) {
-			return f();
-		},
 	});
 };
 
 export const makeLocalTraceArtifactLive = (
 	options: TraceSinkOptions,
 ): Layer.Layer<never> =>
-	Layer.unwrapScoped(
+	Layer.unwrap(
 		Effect.gen(function* () {
 			const sink = yield* makeTraceSink(options);
-			const runtime = yield* Effect.runtime<never>();
 			const detachTimeline = attachTurnTimeline(sink);
 			yield* Effect.addFinalizer(() =>
 				Effect.sync(detachTimeline).pipe(Effect.andThen(sink.close())),
 			);
-			return Layer.setTracer(
-				makeLocalFileTracer({ ...options, sink }, runtime),
+			return Layer.succeed(Tracer.Tracer)(
+				makeLocalFileTracer({ ...options, sink }),
 			);
 		}),
 	);

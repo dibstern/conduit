@@ -4,12 +4,12 @@ import type {
 	ProjectManagementDeps,
 } from "../../../handlers/types.js";
 
-export class InstanceMgmtTag extends Context.Tag("InstanceMgmt")<
+export class InstanceMgmtTag extends Context.Service<
 	InstanceMgmtTag,
 	InstanceManagementDeps
->() {}
+>()("InstanceMgmt") {}
 
-export class ProjectMgmtTag extends Context.Tag("ProjectMgmt")<
+export class ProjectMgmtTag extends Context.Service<
 	ProjectMgmtTag,
 	ProjectManagementDeps
->() {}
+>()("ProjectMgmt") {}

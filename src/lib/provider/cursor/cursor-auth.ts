@@ -1,4 +1,4 @@
-import { Effect, Result as Either, Option } from "effect";
+import { Effect, Option, Result, Semaphore } from "effect";
 import type { CursorAuthState } from "../../contracts/ws-rpc.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import {
@@ -15,7 +15,7 @@ export const makeCursorAuth = (
 ) =>
 	Effect.gen(function* () {
 		const scope = yield* Effect.scope;
-		const changes = yield* Effect.makeSemaphore(1);
+		const changes = yield* Semaphore.make(1);
 		let sdk: ReturnType<typeof createCursorSdkPort> | undefined;
 		const port = () => (sdk ??= createCursorSdkPort());
 		let login: CursorAuthState["login"] = { state: "idle" };
@@ -28,7 +28,7 @@ export const makeCursorAuth = (
 				? configuredTimeout
 				: 10 * 60 * 1_000;
 		const read = Effect.gen(function* () {
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				Effect.tryPromise(async () => {
 					const sdk = port();
 					const credential = cursorEnvironmentKey(sdk)
@@ -74,8 +74,8 @@ export const makeCursorAuth = (
 				}).pipe(Effect.timeout("15 seconds")),
 			);
 			const state: CursorAuthState = {
-				...(Either.isRight(result)
-					? result.right
+				...(Result.isSuccess(result)
+					? result.success
 					: {
 							source: sdk && cursorEnvironmentKey(sdk) ? "environment" : "none",
 							status: "error",
@@ -110,7 +110,7 @@ export const makeCursorAuth = (
 						login.state === "pending" &&
 						!flow.signal.aborted;
 					yield* Effect.gen(function* () {
-						const result = yield* Effect.either(
+						const result = yield* Effect.result(
 							Effect.tryPromise((signal) =>
 								port().authLogin({
 									openBrowser: false,
@@ -130,13 +130,13 @@ export const makeCursorAuth = (
 						);
 						if (!active()) return;
 						controller = undefined;
-						if (Either.isRight(result) && Option.isNone(result.right)) {
+						if (Result.isSuccess(result) && Option.isNone(result.success)) {
 							flow.abort();
 							login = {
 								state: "timed-out",
 								error: "Cursor login timed out. Try again.",
 							};
-						} else if (Either.isLeft(result)) {
+						} else if (Result.isFailure(result)) {
 							login = {
 								state: "error",
 								error: "Cursor login failed. Try again.",
@@ -144,7 +144,7 @@ export const makeCursorAuth = (
 						} else {
 							login = { state: "complete" };
 							yield* onChanged(true).pipe(
-								Effect.catchAll(() =>
+								Effect.catch(() =>
 									Effect.sync(() => {
 										login = {
 											state: "error",
@@ -159,7 +159,7 @@ export const makeCursorAuth = (
 					return { ...current, login };
 				}),
 			),
-			cancel: changes.withPermits(1)(cancel.pipe(Effect.zipRight(read))),
+			cancel: changes.withPermits(1)(cancel.pipe(Effect.andThen(read))),
 			logout: changes.withPermits(1)(
 				Effect.gen(function* () {
 					const current = yield* read;

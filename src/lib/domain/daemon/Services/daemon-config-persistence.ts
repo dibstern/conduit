@@ -52,16 +52,16 @@ const atomicWrite = (
 		if (dirPath.length > 0) {
 			yield* fs
 				.makeDirectory(dirPath, { recursive: true })
-				.pipe(Effect.catchAll(() => Effect.void));
+				.pipe(Effect.catch(() => Effect.void));
 		}
 
 		yield* fs.writeFileString(tmpPath, data).pipe(
-			Effect.catchAll((err) => {
+			Effect.catch((err) => {
 				return Effect.logWarning(`Failed to write temp file: ${err.message}`);
 			}),
 		);
 		yield* fs.rename(tmpPath, targetPath).pipe(
-			Effect.catchAll((err) => {
+			Effect.catch((err) => {
 				return Effect.logWarning(`Failed to rename temp file: ${err.message}`);
 			}),
 		);
@@ -97,7 +97,7 @@ const doSave = (
 
 			if (resaveNeeded) {
 				// Yield to scheduler before re-entering, ensuring stack safety
-				yield* Effect.yieldNow();
+				yield* Effect.yieldNow;
 			} else {
 				shouldContinue = false;
 			}

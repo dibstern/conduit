@@ -183,7 +183,7 @@ export class RunnerSinkBindings {
 			: undefined;
 	}
 	releaseSinkEffect(sink: EventSink | undefined): Effect.Effect<void> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			if (
 				!sink ||
 				!("runnerSinkId" in sink) ||
@@ -259,7 +259,7 @@ export class RunnerSinkBindings {
 			}
 		>,
 	): Effect.Effect<void> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			switch (command.type) {
 				case "answer-permission": {
 					const pending = this.sinkBindings
@@ -296,7 +296,7 @@ export class RunnerSinkBindings {
 		requestId: string,
 		decision: PermissionDecision,
 	): Effect.Effect<boolean, SessionFailure> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const binding = Array.from(this.sinkBindings.values()).find(
 				(binding) =>
 					binding.sessionId === sessionId && binding.permissions.has(requestId),
@@ -317,7 +317,7 @@ export class RunnerSinkBindings {
 		requestId: string,
 		answers: Record<string, unknown>,
 	): Effect.Effect<boolean, SessionFailure> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const binding = Array.from(this.sinkBindings.values()).find(
 				(binding) =>
 					binding.sessionId === sessionId && binding.questions.has(requestId),

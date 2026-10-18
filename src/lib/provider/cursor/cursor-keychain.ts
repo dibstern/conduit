@@ -39,7 +39,7 @@ const SubjectSchema = Schema.Struct({ sub: Schema.String });
 function decodeToken(token: string): CursorKeychainRead {
 	const payload = token.split(".")[1];
 	const subject = payload
-		? Schema.decodeUnknownOption(Schema.parseJson(SubjectSchema))(
+		? Schema.decodeUnknownOption(Schema.fromJsonString(SubjectSchema))(
 				Buffer.from(payload, "base64url").toString("utf8"),
 			)
 		: undefined;
@@ -59,7 +59,7 @@ function decodeToken(token: string): CursorKeychainRead {
 
 const FakeKeychainSchema = Schema.Struct({
 	token: Schema.optional(Schema.String),
-	outcome: Schema.optional(Schema.Literal("missing", "denied")),
+	outcome: Schema.optional(Schema.Literals(["missing", "denied"])),
 	delayMs: Schema.optional(Schema.Number),
 	reads: Schema.optional(Schema.Number),
 });
@@ -69,7 +69,7 @@ const readFakeKeychain = (path: string): Effect.Effect<CursorKeychainRead> =>
 		try: async () => {
 			const contents = await readFile(path, "utf8");
 			const fixture = Schema.decodeUnknownSync(
-				Schema.parseJson(FakeKeychainSchema),
+				Schema.fromJsonString(FakeKeychainSchema),
 			)(contents);
 			await writeFile(
 				path,
@@ -91,7 +91,7 @@ const readFakeKeychain = (path: string): Effect.Effect<CursorKeychainRead> =>
 				),
 			),
 		),
-		Effect.catchAll((failure) => Effect.succeed(failure)),
+		Effect.catch((failure) => Effect.succeed(failure)),
 	);
 
 /** The real adapter must never reach the login Keychain from a test process. */
@@ -106,7 +106,7 @@ export const readCursorKeychain = (
 		}
 		if (process.platform !== "darwin")
 			return Effect.succeed({ reason: cursorKeychainUnsupported });
-		return Effect.async<CursorKeychainRead>((resume) => {
+		return Effect.callback<CursorKeychainRead>((resume) => {
 			const child = execFile(
 				"/usr/bin/security",
 				[

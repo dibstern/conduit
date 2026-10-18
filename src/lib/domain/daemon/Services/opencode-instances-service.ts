@@ -2,13 +2,11 @@ import {
 	Context,
 	Data,
 	type Effect,
-	Option,
-	Runtime,
+	type Option,
 	type Scope,
 	type Stream,
 } from "effect";
 import type { OpenCodeConnectionStatus } from "../../../contracts/ws-rpc.js";
-import * as Failure from "../../../effect/failure-classification.js";
 import { OpenCodeConnectionError } from "../../../errors.js";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import type { ConnectionHealth } from "../../../types.js";
@@ -50,11 +48,7 @@ export class OpenCodeUnavailable extends Data.TaggedError(
 /** The background SDK boundary wraps this expected rejection in a fiber failure. */
 export const isOpenCodeNotRunningError = (error: unknown): boolean => {
 	const cause = error instanceof OpenCodeConnectionError ? error.cause : error;
-	const failure = Runtime.isFiberFailure(cause)
-		? Option.getOrUndefined(
-				Failure.firstFailure(cause[Runtime.FiberFailureCauseId]),
-			)
-		: cause;
+	const failure = cause;
 	return (
 		failure instanceof OpenCodeUnavailable && failure.reason === "not-running"
 	);
@@ -102,7 +96,7 @@ export interface OpenCodeInstances {
 	readonly stop: (instanceId: string) => Effect.Effect<void>;
 }
 
-export class OpenCodeInstancesTag extends Context.Tag("OpenCodeInstances")<
+export class OpenCodeInstancesTag extends Context.Service<
 	OpenCodeInstancesTag,
 	OpenCodeInstances
->() {}
+>()("OpenCodeInstances") {}

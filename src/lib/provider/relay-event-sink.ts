@@ -148,10 +148,10 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			if (!apply) return;
 			const mode = (event.data as { mode?: unknown }).mode;
 			if (typeof mode !== "string") return;
-			const result = yield* Effect.either(apply(mode as SessionPermissionMode));
-			if (result._tag === "Left") {
+			const result = yield* Effect.result(apply(mode as SessionPermissionMode));
+			if (result._tag === "Failure") {
 				log.warn(
-					`Failed to apply SDK-reported permission mode ${mode} (session=${sessionId}): ${result.left instanceof Error ? result.left.message : result.left}`,
+					`Failed to apply SDK-reported permission mode ${mode} (session=${sessionId}): ${result.failure instanceof Error ? result.failure.message : result.failure}`,
 				);
 			}
 		});
@@ -190,12 +190,12 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			);
 			if (persist && persistentEvents.length > 0) {
 				if (persist.persistEvents) {
-					const persistResult = yield* Effect.either(
+					const persistResult = yield* Effect.result(
 						persist.persistEvents(persistentEvents),
 					);
-					if (persistResult._tag === "Left") {
+					if (persistResult._tag === "Failure") {
 						yield* Effect.sync(() => {
-							const err = persistResult.left;
+							const err = persistResult.failure;
 							log.error(
 								`Persist failed for runtime event ${event.type} (session=${sessionId}): ${err instanceof Error ? err.message : err}`,
 							);
@@ -203,12 +203,12 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					}
 				} else {
 					for (const domainEvent of persistentEvents) {
-						const persistResult = yield* Effect.either(
+						const persistResult = yield* Effect.result(
 							persist.persistEvent(domainEvent),
 						);
-						if (persistResult._tag === "Left") {
+						if (persistResult._tag === "Failure") {
 							yield* Effect.sync(() => {
-								const err = persistResult.left;
+								const err = persistResult.failure;
 								log.error(
 									`Persist failed for ${domainEvent.type} (session=${sessionId}): ${err instanceof Error ? err.message : err}`,
 								);
@@ -243,7 +243,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			createdAt: Date.now(),
 			data,
 		}).pipe(
-			Effect.catchAll((cause) =>
+			Effect.catch((cause) =>
 				Effect.sync(() => {
 					log.warn(
 						`Failed to record ${type} ${String(data["id"])} (session=${sessionId}): ${cause instanceof Error ? cause.message : cause}`,
@@ -304,12 +304,12 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				);
 				if (persist && persistentEvents.length > 0) {
 					if (persist.persistEvents) {
-						const persistResult = yield* Effect.either(
+						const persistResult = yield* Effect.result(
 							persist.persistEvents(persistentEvents),
 						);
-						if (persistResult._tag === "Left") {
+						if (persistResult._tag === "Failure") {
 							yield* Effect.sync(() => {
-								const err = persistResult.left;
+								const err = persistResult.failure;
 								log.error(
 									`Persist failed for runtime event ${event.type} (session=${sessionId}): ${err instanceof Error ? err.message : err}`,
 								);
@@ -317,12 +317,12 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 						}
 					} else {
 						for (const domainEvent of persistentEvents) {
-							const persistResult = yield* Effect.either(
+							const persistResult = yield* Effect.result(
 								persist.persistEvent(domainEvent),
 							);
-							if (persistResult._tag === "Left") {
+							if (persistResult._tag === "Failure") {
 								yield* Effect.sync(() => {
-									const err = persistResult.left;
+									const err = persistResult.failure;
 									log.error(
 										`Persist failed for ${domainEvent.type} (session=${sessionId}): ${err instanceof Error ? err.message : err}`,
 									);
@@ -426,7 +426,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 								id: request.requestId,
 								decision: Exit.isSuccess(exit) ? exit.value.decision : "reject",
 							}).pipe(
-								Effect.locally(
+								Effect.provideService(
 									currentRunnerPermissionReply,
 									Exit.isSuccess(exit)
 										? {

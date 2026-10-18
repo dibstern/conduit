@@ -1,4 +1,4 @@
-import { type Deferred, Effect, References as FiberRef } from "effect";
+import { Context, type Deferred, Effect } from "effect";
 import type { SqlClient } from "effect/sql";
 import type { PermissionResponse } from "../types.js";
 import type { SessionOutputReply } from "./session-runner.js";
@@ -14,18 +14,18 @@ export interface RunnerOutputReceipt {
 	consumed: boolean;
 }
 
-export const currentRunnerOutput = FiberRef.unsafeMake<
+export const currentRunnerOutput = Context.Reference<
 	RunnerOutputReceipt | undefined
->(undefined);
+>("conduit/currentRunnerOutput", { defaultValue: () => undefined });
 
-export const currentRunnerPermissionReply = FiberRef.unsafeMake<
+export const currentRunnerPermissionReply = Context.Reference<
 	| {
 			readonly sessionId: string;
 			readonly requestId: string;
 			readonly response: PermissionResponse;
 	  }
 	| undefined
->(undefined);
+>("conduit/currentRunnerPermissionReply", { defaultValue: () => undefined });
 
 // Keep the persisted table names for retained runners and existing databases.
 // Ingestion writes this table for every runner, including in-process

@@ -1,4 +1,4 @@
-import { Effect, Result as Either } from "effect";
+import { Effect, Result } from "effect";
 import {
 	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
@@ -25,7 +25,7 @@ export const connectClaudeRunner = (
 			driverKind: options.driverKind ?? "claude",
 			wire: makeClaudeRunnerWire(() =>
 				resolveClaudeLaunchConfig(
-					Either.getOrElse(
+					Result.getOrElse(
 						loadDaemonConfigResult(options.deps.daemonConfigDir),
 						(error) => {
 							if (error._tag === "NotFound") return null;

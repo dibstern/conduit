@@ -85,7 +85,7 @@ export function makeRunnerUpgrade<
 				);
 				if (!committed) options.cancelled(sessionId, runner, replacement);
 			}).pipe(
-				Effect.catchAllCause((cause) =>
+				Effect.catchCause((cause) =>
 					Effect.sync(() => {
 						if (Failure.isInterruptedOnly(cause)) return;
 						runner.upgrade.failures++;

@@ -6,12 +6,12 @@ import {
 	Data,
 	Deferred,
 	Effect,
-	Result as Either,
 	Exit,
 	HashMap,
 	Layer,
 	ManagedRuntime,
 	Ref,
+	Result,
 } from "effect";
 import {
 	getProviderDriver,
@@ -228,10 +228,10 @@ export async function startForegroundDaemon(
 		options.claudeConfigDir,
 	);
 	const loaded = loadDaemonConfigStartupResult(configDir);
-	if (Either.isLeft(loaded) && loaded.left._tag !== "NotFound") {
-		throw loaded.left;
+	if (Result.isFailure(loaded) && loaded.failure._tag !== "NotFound") {
+		throw loaded.failure;
 	}
-	const persisted = Either.isRight(loaded) ? loaded.right.config : null;
+	const persisted = Result.isSuccess(loaded) ? loaded.success.config : null;
 	const initialConfig = buildInitialRuntimeConfig(options, persisted);
 	const socketPath = options.socketPath ?? join(configDir, "relay.sock");
 	// Check before acquiring runtime resources or replacing a stale RPC socket.
@@ -425,12 +425,12 @@ export async function startForegroundDaemon(
 			: {},
 		persistedConfig: persisted ?? defaultDaemonConfig(),
 		persistedConfigNeedsMigration:
-			Either.isLeft(loaded) || loaded.right.needsMigration,
+			Result.isFailure(loaded) || loaded.success.needsMigration,
 	};
 
 	// A native file lock excludes concurrent owners even across a stale RPC socket.
 	// SQLite releases it on process death; no process identity or stale lock cleanup is needed.
-	const serverLease = Layer.scopedDiscard(
+	const serverLease = Layer.effectDiscard(
 		Effect.acquireRelease(
 			Effect.try({
 				try: () => {
@@ -463,7 +463,7 @@ export async function startForegroundDaemon(
 							? Array.from(HashMap.values(yield* Ref.get(projectState)))
 							: [];
 						// Registrations include detached runners whose relay never started.
-						yield* Effect.validateAll(
+						yield* Effect.validate(
 							registered,
 							({ project }) =>
 								stopRegisteredRunners(project.folders[0], configDir),

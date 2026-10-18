@@ -131,7 +131,7 @@ export function failRunnerTurn(
 		});
 	}).pipe(
 		Effect.ensuring(emit({ type: "release-sink", sinkId }).pipe(Effect.ignore)),
-		Effect.catchAll((error) =>
+		Effect.catch((error) =>
 			Effect.logError("Failed to persist runner turn failure", error),
 		),
 	);

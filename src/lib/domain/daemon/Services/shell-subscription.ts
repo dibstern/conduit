@@ -4,12 +4,13 @@ import {
 	type Cause,
 	Duration,
 	Effect,
+	Exit,
 	Fiber,
 	Option,
 	Queue,
 	Schema,
 	Stream,
-	Take,
+	type Take,
 } from "effect";
 import type { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
@@ -44,14 +45,15 @@ export interface SidebarRead {
 
 const sidebarReads = channel("conduit:sidebar-read");
 
-const ResumePointBody = Schema.compose(
-	Schema.StringFromBase64Url,
-	Schema.parseJson(
-		Schema.Struct({
-			store: Schema.String,
-			membership: Schema.String,
-			sequence: Schema.Number,
-		}),
+const ResumePointBody = Schema.StringFromBase64Url.pipe(
+	Schema.decodeTo(
+		Schema.fromJsonString(
+			Schema.Struct({
+				store: Schema.String,
+				membership: Schema.String,
+				sequence: Schema.Number,
+			}),
+		),
 	),
 );
 
@@ -104,18 +106,18 @@ export const subscribeShellProjects = <E>(
 			yield* Effect.addFinalizer(() => Queue.shutdown(output));
 			let current: ShellProjectsFrame | undefined;
 			let membership: string | undefined;
-			let live: Fiber.RuntimeFiber<void, never> | undefined;
+			let live: Fiber.Fiber<void, never> | undefined;
 			let projectsDone = false;
 			let rowsDone = false;
 			const finish = Effect.suspend(() =>
 				projectsDone && rowsDone
-					? Queue.offer(output, Take.end).pipe(Effect.asVoid)
+					? Queue.offer(output, Exit.void).pipe(Effect.asVoid)
 					: Effect.void,
 			);
 			const fail = (cause: Cause.Cause<ShellSubscriptionError | E>) =>
 				Failure.isInterruptedOnly(cause)
 					? Effect.void
-					: Queue.offer(output, Take.failCause(cause)).pipe(Effect.asVoid);
+					: Queue.offer(output, Exit.failCause(cause)).pipe(Effect.asVoid);
 
 			yield* projects.pipe(
 				Stream.runForEach((frame) =>
@@ -126,7 +128,7 @@ export const subscribeShellProjects = <E>(
 						// row can arrive between that frame and its replacement snapshot.
 						if (changed && live !== undefined) yield* Fiber.interrupt(live);
 						current = frame;
-						yield* Queue.offer(output, Take.of<ShellEnvelope>(frame));
+						yield* Queue.offer(output, [frame]);
 						if (!changed) return;
 						const first = membership === undefined;
 						membership = nextMembership;
@@ -222,9 +224,7 @@ export const subscribeShellProjects = <E>(
 											}
 										: envelope,
 							),
-							Stream.runForEach((envelope) =>
-								Queue.offer(output, Take.of(envelope)),
-							),
+							Stream.runForEach((envelope) => Queue.offer(output, [envelope])),
 							Effect.tap(() => {
 								rowsDone = true;
 								return finish;

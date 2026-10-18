@@ -1,20 +1,25 @@
-import { Result as Either, Option, Schema } from "effect";
+import { Option, Result, Schema } from "effect";
 import type { UsageWindow } from "../../contracts/limit-recovery.js";
 import type { UsageRead } from "../usage-reader.js";
 
 const ClaudeUsageWindowSchema = Schema.Struct({
 	utilization: Schema.NullOr(
-		Schema.Number.pipe(Schema.finite(), Schema.nonNegative()),
+		Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0)),
 	),
 	resets_at: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
 const ClaudeModelLimitSchema = Schema.Struct({
 	kind: Schema.Literal("weekly_scoped"),
-	percent: Schema.Number.pipe(Schema.finite(), Schema.nonNegative()),
+	percent: Schema.Number.check(
+		Schema.isFinite(),
+		Schema.isGreaterThanOrEqualTo(0),
+	),
 	resets_at: Schema.optional(Schema.NullOr(Schema.String)),
 	scope: Schema.Struct({
-		model: Schema.Struct({ display_name: Schema.NonEmptyTrimmedString }),
+		model: Schema.Struct({
+			display_name: Schema.Trimmed.check(Schema.isNonEmpty()),
+		}),
 	}),
 });
 
@@ -36,16 +41,16 @@ export const ClaudeUsageResponseSchema = Schema.Struct({
 });
 
 export function decodeClaudeUsage(response: unknown): UsageRead {
-	const decoded = Schema.decodeUnknownEither(ClaudeUsageResponseSchema)(
+	const decoded = Schema.decodeUnknownResult(ClaudeUsageResponseSchema)(
 		response,
 	);
 	if (
-		Either.isLeft(decoded) ||
-		!decoded.right.rate_limits_available ||
-		!decoded.right.rate_limits
+		Result.isFailure(decoded) ||
+		!decoded.success.rate_limits_available ||
+		!decoded.success.rate_limits
 	)
 		return { status: "unknown", windows: [] };
-	const limits = decoded.right.rate_limits;
+	const limits = decoded.success.rate_limits;
 	const readWindow = (
 		kind: "five_hour" | "seven_day" | "seven_day_model",
 		window: typeof ClaudeUsageWindowSchema.Type | null | undefined,

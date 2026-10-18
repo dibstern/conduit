@@ -13,7 +13,15 @@ import {
 } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { promisify } from "node:util";
-import { Effect, Result as Either, Layer, Stream } from "effect";
+import {
+	Effect,
+	Layer,
+	Option,
+	Queue,
+	Result,
+	Semaphore,
+	Stream,
+} from "effect";
 import type { SessionWorktreeOwnership } from "../../../contracts/session-workspace.js";
 import {
 	type WorkspaceMissing,
@@ -119,9 +127,9 @@ export const makeWorktreeLive = (
 	Layer.effect(
 		WorktreeServiceTag,
 		Effect.sync(() => {
-			const checkoutUse = Effect.unsafeMakeSemaphore(1);
+			const checkoutUse = Semaphore.makeUnsafe(1);
 			const runSetup: WorktreeService["runSetup"] = (cwd, script, env) =>
-				Stream.asyncPush<WorktreeSetupUpdate>((emit) =>
+				Stream.callback<WorktreeSetupUpdate>((emit) =>
 					Effect.acquireRelease(
 						Effect.sync(() => {
 							const timeoutMs = options.setupTimeoutMs ?? 10 * 60_000;
@@ -135,7 +143,7 @@ export const makeWorktreeLive = (
 							const decoder = new StringDecoder("utf8");
 							const output = (text: string) => {
 								if (text && !finished)
-									emit.single({ _tag: "output", output: text });
+									Queue.offerUnsafe(emit, { _tag: "output", output: text });
 							};
 							const collect = (chunk: Buffer) => {
 								if (truncated || finished) return;
@@ -164,8 +172,8 @@ export const makeWorktreeLive = (
 								killGroup();
 								if (!truncated) output(decoder.end());
 								finished = true;
-								emit.single(result);
-								emit.end();
+								Queue.offerUnsafe(emit, result);
+								Queue.endUnsafe(emit);
 							};
 							const failedToStart = (cause: unknown) =>
 								finish({
@@ -420,7 +428,7 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 							"--quiet",
 							"HEAD",
 						]).pipe(
-							Effect.catchAll((error) =>
+							Effect.catch((error) =>
 								/Git symbolic-ref failed:/.test(error.message)
 									? failure(
 											owned,
@@ -445,11 +453,11 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 							yield* runGit(owned, ["branch", "-m", owned.branchName, newName]);
 						}
 					}).pipe(
-						Effect.catchAllCause((cause) =>
+						Effect.catchCause((cause) =>
 							Effect.gen(function* () {
 								const errors: string[] = [];
 								for (const owned of attempted.reverse()) {
-									const rollback = yield* Effect.either(
+									const rollback = yield* Effect.result(
 										Effect.gen(function* () {
 											// A timed-out Git command may have completed its rename.
 											const head = yield* runGit(owned, [
@@ -496,8 +504,8 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 											]);
 										}),
 									);
-									if (Either.isLeft(rollback))
-										errors.push(`${owned.folder}: ${rollback.left.message}`);
+									if (Result.isFailure(rollback))
+										errors.push(`${owned.folder}: ${rollback.failure.message}`);
 								}
 								if (errors.length > 0) {
 									const original = Failure.firstFailure(cause);
@@ -622,7 +630,7 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 					// not bypass Git's protection of another checkout on this branch.
 					const branchInUse =
 						branch && !usable
-							? yield* Effect.exists(entries, (other) => {
+							? yield* Effect.findFirst(entries, (other) => {
 									const fields = other.split("\0");
 									const otherPath = fields
 										.find((field) => field.startsWith("worktree "))
@@ -632,7 +640,7 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 										fields.includes(`branch refs/heads/${branch}`)
 										? pathStat(otherPath).pipe(Effect.map(Boolean))
 										: Effect.succeed(false);
-								})
+								}).pipe(Effect.map(Option.isSome))
 							: false;
 					const reason = !branch
 						? ("branch-unknown" as const)
@@ -721,12 +729,12 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 							state.path,
 							state.branch,
 						]).pipe(
-							Effect.zipRight(restore(Effect.succeed(state.directory))),
-							Effect.catchAllCause((cause) =>
+							Effect.andThen(restore(Effect.succeed(state.directory))),
+							Effect.catchCause((cause) =>
 								// Keep the branch and registration available for another attempt.
 								filesystem(state.path, () =>
 									rm(state.path, { recursive: true, force: true }),
-								).pipe(Effect.zipRight(Effect.failCause(cause))),
+								).pipe(Effect.andThen(Effect.failCause(cause))),
 							),
 						);
 					}),
@@ -764,12 +772,12 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 							),
 						{ discard: true },
 					).pipe(
-						Effect.catchAllCause((cause) =>
+						Effect.catchCause((cause) =>
 							Effect.gen(function* () {
 								// Retain prunable registrations and branch refs, just as single
 								// checkout recovery does on failure, so another attempt can retry.
-								const cleanup = yield* Effect.either(
-									Effect.validateAll(
+								const cleanup = yield* Effect.result(
+									Effect.validate(
 										[...recreated].reverse(),
 										({ folder, path }) =>
 											filesystem(path, () =>
@@ -781,7 +789,7 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 											),
 									),
 								);
-								if (Either.isLeft(cleanup)) {
+								if (Result.isFailure(cleanup)) {
 									const failure = Failure.firstFailure(cause);
 									return yield* new WorktreeRecoveryError({
 										path:
@@ -789,7 +797,7 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 												? failure.value.path
 												: (recreated[0]?.path ?? ""),
 										reason: "git-failed",
-										message: `${failure._tag === "Some" ? failure.value.message : Failure.renderCause(cause)}. Worktree rollback failed: ${cleanup.left.join("; ")}`,
+										message: `${failure._tag === "Some" ? failure.value.message : Failure.renderCause(cause)}. Worktree rollback failed: ${cleanup.failure.join("; ")}`,
 									});
 								}
 								return yield* Effect.failCause(cause);
@@ -1183,7 +1191,7 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 					),
 				);
 			const rollback: WorktreeService["rollback"] = (created) =>
-				Effect.validateAll([...created.ownership].reverse(), (owned) =>
+				Effect.validate([...created.ownership].reverse(), (owned) =>
 					Effect.gen(function* () {
 						const listed = yield* git(owned.folder, [
 							"worktree",
@@ -1452,7 +1460,7 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 								};
 								// An empty expected old ref creates only when absent. Its reflog marker
 								// proves ownership if Git writes the ref before failure or timeout.
-								const result = yield* Effect.either(
+								const result = yield* Effect.result(
 									git(target.source, [
 										"update-ref",
 										"--create-reflog",
@@ -1463,7 +1471,7 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 										"",
 									]),
 								);
-								if (Either.isRight(result)) {
+								if (Result.isSuccess(result)) {
 									owned = created;
 									reservedPath = undefined;
 									yield* git(target.source, [
@@ -1497,11 +1505,11 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 									if (reflog === creationMarker) {
 										owned = created;
 										reservedPath = undefined;
-										return yield* result.left;
+										return yield* result.failure;
 									}
 								}
 								if (!branchConflicts(branches, branchName))
-									return yield* result.left;
+									return yield* result.failure;
 								if (requestedBranch !== undefined || owned !== undefined)
 									return yield* new WorktreeCreationError({
 										path: target.folder.path,
@@ -1514,13 +1522,13 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 						}
 						// Observe pending interruption before transferring all ownership to the caller.
 						if (owned) return yield* restore(Effect.succeed(owned));
-						return yield* Effect.dieMessage(
-							"No worktrees created for discovered Git folders",
+						return yield* Effect.die(
+							new Error("No worktrees created for discovered Git folders"),
 						);
 					}).pipe(
-						Effect.catchAllCause((cause) => {
+						Effect.catchCause((cause) => {
 							const path = reservedPath;
-							const cleanup = Effect.validateAll(
+							const cleanup = Effect.validate(
 								[
 									owned ? rollback(owned) : Effect.void,
 									path
@@ -1541,7 +1549,7 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 											message: `${failure._tag === "Some" ? failure.value.message : Failure.renderCause(cause)}. Worktree rollback failed: ${errors.map((error) => error.message).join("; ")}`,
 										}),
 								),
-								Effect.zipRight(Effect.failCause(cause)),
+								Effect.andThen(Effect.failCause(cause)),
 							);
 						}),
 					);

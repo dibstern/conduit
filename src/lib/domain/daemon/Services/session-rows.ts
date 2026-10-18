@@ -189,7 +189,7 @@ export const makeSessionRows = (
 				>,
 			): Effect.Effect<
 				Omit<
-					Effect.Effect.Success<ReturnType<ReadQueryEffect["readSessionList"]>>,
+					Effect.Success<ReturnType<ReadQueryEffect["readSessionList"]>>,
 					"rows"
 				> & {
 					readonly rows: readonly {

@@ -34,7 +34,7 @@ import {
 import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js";
 
 export const WorktreeCleanupLive = () =>
-	Layer.scopedDiscard(
+	Layer.effectDiscard(
 		Effect.gen(function* () {
 			const configRef = yield* DaemonConfigRefTag;
 			const registry = yield* ProjectRegistryTag;
@@ -118,7 +118,7 @@ export const WorktreeCleanupLive = () =>
 							if (projectReport.removed.length > 0)
 								yield* PubSub.publish(bus, DaemonEvent.DaemonSessionsChanged());
 						}).pipe(
-							Effect.catchAllCause((cause) => {
+							Effect.catchCause((cause) => {
 								if (Failure.isInterruptedOnly(cause))
 									return Effect.failCause(cause);
 								report.failed.push({
@@ -161,7 +161,7 @@ export const WorktreeCleanupLive = () =>
 							),
 						);
 				const report = yield* sweep(slugs).pipe(
-					Effect.catchAllCause((cause) =>
+					Effect.catchCause((cause) =>
 						Failure.isInterruptedOnly(cause)
 							? Effect.failCause(cause)
 							: Effect.logWarning(

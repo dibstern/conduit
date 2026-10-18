@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { Effect, Schema, Semaphore } from "effect";
 import type { Account } from "../../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import { ProviderInstanceFailure } from "../errors.js";
@@ -108,7 +108,7 @@ let defaultPort: CursorSdkPort | undefined;
 const catalogs = new WeakMap<
 	CursorSdkPort,
 	{
-		lock: ReturnType<typeof Effect.unsafeMakeSemaphore>;
+		lock: ReturnType<typeof Semaphore.makeUnsafe>;
 		entries: Map<
 			string,
 			{
@@ -155,7 +155,7 @@ export const discoverCursorEffect = (
 		]);
 		let catalog = catalogs.get(adapter);
 		if (!catalog) {
-			catalog = { entries: new Map(), lock: Effect.unsafeMakeSemaphore(1) };
+			catalog = { entries: new Map(), lock: Semaphore.makeUnsafe(1) };
 			catalogs.set(adapter, catalog);
 		}
 		const { entries: cache, lock } = catalog;
@@ -177,9 +177,10 @@ export const discoverCursorEffect = (
 						);
 					},
 				}).pipe(
-					Effect.timeoutFail({
+					Effect.timeoutOrElse({
 						duration: "15 seconds",
-						onTimeout: () => discoveryFailure("Cursor model list failed"),
+						orElse: () =>
+							Effect.fail(discoveryFailure("Cursor model list failed")),
 					}),
 				);
 				if (listed.length === 0)
@@ -225,7 +226,7 @@ export const makeCursorRunnerDriver = (
 	prepareTurnEffect: (input) =>
 		Effect.gen(function* () {
 			const catalog = yield* discoverCursorEffect(port, input.account).pipe(
-				Effect.catchAll((failure) =>
+				Effect.catch((failure) =>
 					// The runner owns the auth error and its durable turn terminal.
 					failure.code === "auth_required"
 						? Effect.succeed({ models: [] })

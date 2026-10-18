@@ -1,14 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import {
-	Context,
-	Data,
-	Effect,
-	Result as Either,
-	Layer,
-	Ref,
-	Schema,
-} from "effect";
+import { Context, Data, Effect, Layer, Ref, Result, Schema } from "effect";
 import { formatErrorDetail } from "../../../errors.js";
 import {
 	commitDaemonRuntimeConfig,
@@ -21,14 +13,14 @@ export class TailscaleServeError extends Data.TaggedError(
 	readonly message: string;
 }> {}
 
-export class TailscaleCliTag extends Context.Tag("TailscaleCli")<
+export class TailscaleCliTag extends Context.Service<
 	TailscaleCliTag,
 	{
 		readonly exec: (
 			args: string[],
 		) => Effect.Effect<string, TailscaleServeError>;
 	}
->() {}
+>()("TailscaleCli") {}
 
 const execFileAsync = promisify(execFile);
 const isMissingBinary = (cause: unknown) =>
@@ -79,28 +71,28 @@ const TailscaleStatusSchema = Schema.Struct({
 const ServeStatusSchema = Schema.Struct({
 	Web: Schema.optional(
 		Schema.NullOr(
-			Schema.Record({
-				key: Schema.String,
-				value: Schema.Struct({
+			Schema.Record(
+				Schema.String,
+				Schema.Struct({
 					Handlers: Schema.optional(
 						Schema.NullOr(
-							Schema.Record({
-								key: Schema.String,
-								value: Schema.Struct({ Proxy: Schema.optional(Schema.String) }),
-							}),
+							Schema.Record(
+								Schema.String,
+								Schema.Struct({ Proxy: Schema.optional(Schema.String) }),
+							),
 						),
 					),
 				}),
-			}),
+			),
 		),
 	),
 });
 
 const getTailscaleStatus = Effect.gen(function* () {
 	const cli = yield* TailscaleCliTag;
-	return yield* Schema.decodeUnknown(Schema.parseJson(TailscaleStatusSchema))(
-		yield* cli.exec(["status", "--json"]),
-	).pipe(
+	return yield* Schema.decodeUnknownEffect(
+		Schema.fromJsonString(TailscaleStatusSchema),
+	)(yield* cli.exec(["status", "--json"])).pipe(
 		Effect.mapError(
 			() =>
 				new TailscaleServeError({
@@ -142,8 +134,8 @@ const reconcile = (port: number, enabled: boolean, tlsEnabled: boolean) =>
 					"Tailscale Self.DNSName is empty. Enable MagicDNS on the tailnet admin DNS page.",
 			});
 		}
-		const serve = yield* Schema.decodeUnknown(
-			Schema.parseJson(ServeStatusSchema),
+		const serve = yield* Schema.decodeUnknownEffect(
+			Schema.fromJsonString(ServeStatusSchema),
 		)(yield* cli.exec(["serve", "status", "--json"])).pipe(
 			Effect.mapError(
 				() =>
@@ -201,9 +193,9 @@ export const TailscaleServeLive = Layer.effectDiscard(
 		const config = yield* Ref.get(configRef);
 		const enabled = config.tailscaleServeEnabled === true;
 		if (!enabled && !config.tailscaleServeCleanupPending) return;
-		const result = yield* Effect.either(applyTailscaleServe(enabled));
-		if (Either.isLeft(result)) {
-			const error = `${result.left.message} Restart conduit with ${enabled ? "--tailscale-serve" : "--no-tailscale-serve"} to retry.`;
+		const result = yield* Effect.result(applyTailscaleServe(enabled));
+		if (Result.isFailure(result)) {
+			const error = `${result.failure.message} Restart conduit with ${enabled ? "--tailscale-serve" : "--no-tailscale-serve"} to retry.`;
 			yield* Effect.logWarning(error);
 			yield* commitDaemonRuntimeConfig((current) => ({
 				...current,

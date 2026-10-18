@@ -57,10 +57,10 @@ export interface EffectDaemonHandle {
 	readonly getInstances: () => Effect.Effect<ReadonlyArray<OpenCodeInstance>>;
 }
 
-export class DaemonHandleTag extends Context.Tag("DaemonHandle")<
+export class DaemonHandleTag extends Context.Service<
 	DaemonHandleTag,
 	EffectDaemonHandle
->() {}
+>()("DaemonHandle") {}
 
 const sortedStatusProjects = (
 	projects: DaemonStatus["projects"],

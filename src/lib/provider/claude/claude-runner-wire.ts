@@ -1,4 +1,4 @@
-import { Result as Either, Schema } from "effect";
+import { Result, Schema } from "effect";
 import type { Account } from "../../contracts/account.js";
 import {
 	loadDaemonConfigResult,
@@ -32,7 +32,7 @@ export function normalizeClaudeLaunchInput<
 	input: T,
 	defaultFolder: () => ClaudeLaunchConfig = () =>
 		resolveClaudeLaunchConfig(
-			Either.getOrElse(loadDaemonConfigResult(), (error) => {
+			Result.getOrElse(loadDaemonConfigResult(), (error) => {
 				if (error._tag === "NotFound") return null;
 				throw error;
 			}),
@@ -123,7 +123,7 @@ function normalizeClaudeSnapshotInput(
 export function makeClaudeRunnerWire(
 	defaultFolder: () => ClaudeLaunchConfig = () =>
 		resolveClaudeLaunchConfig(
-			Either.getOrElse(loadDaemonConfigResult(), (error) => {
+			Result.getOrElse(loadDaemonConfigResult(), (error) => {
 				if (error._tag === "NotFound") return null;
 				throw error;
 			}),

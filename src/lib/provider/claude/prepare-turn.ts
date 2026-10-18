@@ -368,7 +368,7 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 						needsCanonicalHandoff = true;
 					} else {
 						const testModule = yield* loadClaudeSdkTestModule.pipe(
-							Effect.catchAll(() => Effect.succeed(undefined)),
+							Effect.catch(() => Effect.succeed(undefined)),
 						);
 						const sdk =
 							testModule?.claudeSdk.fork ??
@@ -379,7 +379,7 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 								dir: workspaceRoot,
 								configDir: resumeConfigDir,
 							}),
-						).pipe(Effect.catchAll(() => Effect.succeed([])));
+						).pipe(Effect.catch(() => Effect.succeed([])));
 						needsCanonicalHandoff =
 							resolveRewindUpToUuid(
 								transcript,
@@ -423,9 +423,9 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 					limitRecovery:
 						session?.limit_recovery == null
 							? null
-							: Schema.decodeUnknownSync(Schema.parseJson(LimitRecoverySchema))(
-									session.limit_recovery,
-								),
+							: Schema.decodeUnknownSync(
+									Schema.fromJsonString(LimitRecoverySchema),
+								)(session.limit_recovery),
 					userText: userText ?? "",
 					options: turnOptions,
 				};
@@ -518,20 +518,21 @@ export const sendPreparedClaudeTurn = <
 			input.instanceId,
 			input.userText,
 		);
-		const result = yield* Effect.either(
+		const result = yield* Effect.result(
 			input.send(prepared, input.options.nativeResumeFallback === true),
 		);
-		const failure = result._tag === "Left" ? result.left : result.right?.error;
+		const failure =
+			result._tag === "Failure" ? result.failure : result.success?.error;
 		if (
 			input.options.rewind !== undefined ||
 			!prepared.resumeSessionId ||
 			!prepared.handoff ||
-			(result._tag === "Right" && !result.right?.nativeResumeRejected) ||
+			(result._tag === "Success" && !result.success?.nativeResumeRejected) ||
 			!isClaudeResumeFailure(failure)
 		)
-			return result._tag === "Left"
-				? yield* Effect.fail(result.left)
-				: result.right;
+			return result._tag === "Failure"
+				? yield* Effect.fail(result.failure)
+				: result.success;
 		const sql = yield* SqlClient.SqlClient;
 		// Keep other accounts' receipts intact. The marker also gives this one
 		// fallback its own runner deduplication key, including after a restart.

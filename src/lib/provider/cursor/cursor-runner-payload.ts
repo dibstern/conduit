@@ -1,13 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import {
-	Deferred,
-	Effect,
-	Result as Either,
-	Fiber,
-	Queue,
-	Schema,
-	Stream,
-} from "effect";
+import { Deferred, Effect, Fiber, Queue, Result, Schema, Stream } from "effect";
 import { createEventId } from "../../persistence/events.js";
 import { EventSinkIngestionError } from "../event-sink-errors.js";
 import { makeInProcessSessionRunner } from "../runner/in-process-session-runner.js";
@@ -78,14 +70,14 @@ interface CursorSession {
 		| undefined;
 }
 
-const decodeSteeredMessage = Schema.decodeUnknownEither(
+const decodeSteeredMessage = Schema.decodeUnknownResult(
 	Schema.Struct({
 		type: Schema.Literal("user-message-appended"),
 		userMessage: Schema.Struct({ text: Schema.String }),
 	}),
 );
 
-const decodeTerminal = Schema.decodeUnknownEither(
+const decodeTerminal = Schema.decodeUnknownResult(
 	Schema.Struct({
 		status: Schema.Literals(["finished", "cancelled", "error"]),
 		requestId: Schema.optional(Schema.String),
@@ -102,13 +94,15 @@ const decodeTerminal = Schema.decodeUnknownEither(
 );
 
 const BillingTokens = Schema.Struct({
-	inputTokens: Schema.NonNegative,
-	outputTokens: Schema.NonNegative,
-	cacheReadTokens: Schema.NonNegative,
-	cacheWriteTokens: Schema.NonNegative,
+	inputTokens: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)),
+	outputTokens: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)),
+	cacheReadTokens: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)),
+	cacheWriteTokens: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)),
 });
-const BillingCost = Schema.Struct({ chargedCents: Schema.NonNegative });
-const decodeBilling = Schema.decodeUnknownEither(
+const BillingCost = Schema.Struct({
+	chargedCents: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+const decodeBilling = Schema.decodeUnknownResult(
 	Schema.Struct({
 		usage: BillingTokens,
 		cost: Schema.optional(BillingCost),
@@ -135,7 +129,7 @@ type Update =
 	  }
 	| {
 			readonly channel: "wait";
-			readonly result: Either.Either<unknown, SessionFailure>;
+			readonly result: Result.Result<unknown, SessionFailure>;
 	  };
 
 const sdkCall = <A>(operation: string, run: () => Promise<A>) =>
@@ -179,7 +173,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 		sink: EventSink,
 		signal: AbortSignal,
 	): Effect.Effect<TurnResult, SessionFailure> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			let state = this.sessions.get(input.sessionId);
 			if (!state) {
 				const identity = yield* Effect.try({
@@ -275,7 +269,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 					const pending = steers.get(inputId);
 					if (!pending || pending.outcome !== undefined) return Effect.void;
 					pending.outcome = delivered;
-					return Effect.gen(this, function* () {
+					return Effect.gen({ self: this }, function* () {
 						if (delivered) {
 							yield* events.steerDelivered(pending.shellCalls);
 							yield* this.emit({
@@ -318,12 +312,12 @@ export class CursorRunnerPayload implements RunnerPayload {
 						yield* settleSteer(update.inputId, update.delivered);
 					} else if (update.channel === "delta") {
 						const message = decodeSteeredMessage(update.value);
-						if (Either.isRight(message)) {
+						if (Result.isSuccess(message)) {
 							const pending = [...steers.values()].find(
 								(steer) =>
 									!steer.landed &&
 									steer.outcome !== false &&
-									steer.input.prompt === message.right.userMessage.text,
+									steer.input.prompt === message.success.userMessage.text,
 							);
 							if (pending) {
 								pending.landed = true;
@@ -355,7 +349,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 				});
 
 			return yield* Effect.scoped(
-				Effect.gen(this, function* () {
+				Effect.gen({ self: this }, function* () {
 					const queue = yield* Queue.unbounded<Update>();
 					const customTools = {
 						ask_user: cursorAskUserTool(
@@ -363,7 +357,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 							events,
 							questionAbort.signal,
 							(answer) => {
-								Queue.unsafeOffer(queue, { channel: "question", answer });
+								Queue.offerUnsafe(queue, { channel: "question", answer });
 							},
 						),
 					};
@@ -540,15 +534,16 @@ export class CursorRunnerPayload implements RunnerPayload {
 							while (yield* Effect.sync(() => runnerPidAlive(controllerPid)))
 								yield* Effect.sleep("50 millis");
 						}).pipe(
-							Effect.timeoutFail({
+							Effect.timeoutOrElse({
 								duration: "5 seconds",
-								onTimeout: (): SessionFailure => ({
-									operation: "recover interrupted run",
-									message:
-										"Cursor's previous controller has not exited; retry after it stops",
-									code: "timeout",
-									retryable: true,
-								}),
+								orElse: () =>
+									Effect.fail<SessionFailure>({
+										operation: "recover interrupted run",
+										message:
+											"Cursor's previous controller has not exited; retry after it stops",
+										code: "timeout",
+										retryable: true,
+									}),
 							}),
 						);
 					}
@@ -593,7 +588,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 						Effect.timeout("2 seconds"),
 						Effect.map((value) => {
 							const decoded = decodeBilling(value);
-							return Either.isRight(decoded) ? decoded.right : undefined;
+							return Result.isSuccess(decoded) ? decoded.success : undefined;
 						}),
 						Effect.catch(() => Effect.succeed(undefined)),
 					);
@@ -609,7 +604,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 							},
 							(value) => {
 								if (acceptingUpdates)
-									Queue.unsafeOffer(queue, { channel: "delta", value });
+									Queue.offerUnsafe(queue, { channel: "delta", value });
 							},
 						),
 					);
@@ -621,7 +616,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 					const steer = run.steer?.bind(run);
 					session.steer = (steeredInput, steerSink) =>
 						Effect.scoped(
-							Effect.gen(this, function* () {
+							Effect.gen({ self: this }, function* () {
 								const sinkId = this.sinks.sinkId(steerSink);
 								const finished = yield* Deferred.make<
 									TurnResult,
@@ -662,11 +657,11 @@ export class CursorRunnerPayload implements RunnerPayload {
 						);
 					session.onCancel = () => {
 						if (acceptingUpdates)
-							Queue.unsafeOffer(queue, { channel: "cancel" });
+							Queue.offerUnsafe(queue, { channel: "cancel" });
 					};
 					if (session.cancelRequested) yield* this.interrupt(input.sessionId);
 					events.refs.providerTurnId = run.id;
-					const abort = Effect.async<void>((resume) => {
+					const abort = Effect.callback<void>((resume) => {
 						const onAbort = () => resume(Effect.void);
 						if (signal.aborted) onAbort();
 						else signal.addEventListener("abort", onAbort, { once: true });
@@ -700,7 +695,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 					yield* Effect.addFinalizer(() =>
 						Effect.suspend(() =>
 							abandoned
-								? Fiber.interruptFork(stream)
+								? Effect.sync(() => stream.interruptUnsafe())
 								: Fiber.interrupt(stream).pipe(Effect.asVoid),
 						),
 					);
@@ -712,7 +707,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 					const wait = waitForRun;
 					yield* Effect.forkScoped(
 						sdkCall("wait", wait).pipe(
-							Effect.either,
+							Effect.result,
 							Effect.flatMap((result) =>
 								Queue.offer(queue, { channel: "wait", result }),
 							),
@@ -770,33 +765,33 @@ export class CursorRunnerPayload implements RunnerPayload {
 						}
 						yield* declinePending();
 						acceptingUpdates = false;
-						if (Either.isLeft(update.result))
+						if (Result.isFailure(update.result))
 							return yield* finish(
 								"error",
-								cursorTurnError(update.result.left).code,
-								update.result.left.message,
-								update.result.left.retryable,
+								cursorTurnError(update.result.failure).code,
+								update.result.failure.message,
+								update.result.failure.retryable,
 							);
-						const terminal = decodeTerminal(update.result.right);
-						if (Either.isLeft(terminal))
+						const terminal = decodeTerminal(update.result.success);
+						if (Result.isFailure(terminal))
 							return yield* finish(
 								"error",
 								"provider_error",
 								"Cursor wait ended without a terminal status",
 							);
-						if (terminal.right.requestId)
-							events.refs.providerRequestId = terminal.right.requestId;
-						if (terminal.right.model?.id)
+						if (terminal.success.requestId)
+							events.refs.providerRequestId = terminal.success.requestId;
+						if (terminal.success.model?.id)
 							yield* events.push("turn.model_resolved", {
 								messageId: events.messageId,
 								requestedModel: input.model.modelId,
 								expectedModel:
 									input.model.modelId === "default"
-										? terminal.right.model.id
+										? terminal.success.model.id
 										: input.model.modelId,
-								actualModel: terminal.right.model.id,
+								actualModel: terminal.success.model.id,
 							});
-						events.reconcileUsage(terminal.right.usage);
+						events.reconcileUsage(terminal.success.usage);
 						const afterUsage = yield* readUsage;
 						if (beforeUsage?.cost && afterUsage?.cost) {
 							const previous = new Map(
@@ -865,12 +860,12 @@ export class CursorRunnerPayload implements RunnerPayload {
 							)
 								cost = chargedCents / 100;
 						}
-						if (terminal.right.status === "finished")
+						if (terminal.success.status === "finished")
 							return yield* finish("completed");
-						if (terminal.right.status === "cancelled")
+						if (terminal.success.status === "cancelled")
 							return yield* finish("interrupted");
 						const error = cursorTurnError(
-							terminal.right.error ?? { message: "Cursor run failed" },
+							terminal.success.error ?? { message: "Cursor run failed" },
 						);
 						return yield* finish(
 							"error",
@@ -991,7 +986,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 	}
 
 	endSession(sessionId: string) {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const session = this.sessions.get(sessionId);
 			if (!session) return;
 			yield* this.interrupt(sessionId);

@@ -87,7 +87,7 @@ export const prefetchSessionCounts: Effect.Effect<
 			return null;
 		}).pipe(
 			Effect.scoped,
-			Effect.catchAll(() => Effect.succeed(null)),
+			Effect.catch(() => Effect.succeed(null)),
 		);
 
 		if (count !== null && count > 0) {
@@ -110,7 +110,7 @@ export const prefetchSessionCounts: Effect.Effect<
 
 	return fetched;
 }).pipe(
-	Effect.catchAll((e) =>
+	Effect.catch((e) =>
 		Effect.logWarning("Session prefetch failed").pipe(
 			Effect.annotateLogs("error", String(e)),
 			Effect.as(0),
@@ -138,7 +138,7 @@ export const SessionPrefetchLive: Layer.Layer<
 	| ProjectRegistryTag
 	| AccountDirectory
 	| InstanceManagerStateTag
-> = Layer.scopedDiscard(
+> = Layer.effectDiscard(
 	Effect.gen(function* () {
 		yield* Effect.logInfo("Session prefetch layer initialized");
 

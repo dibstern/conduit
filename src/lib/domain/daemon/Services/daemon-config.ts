@@ -4,7 +4,6 @@
 
 import {
 	Config,
-	type ConfigError,
 	Context,
 	Effect,
 	Layer,
@@ -27,10 +26,10 @@ export interface DaemonEnvConfig {
 	readonly tlsKeyPath: string | undefined;
 }
 
-export class DaemonEnvConfigTag extends Context.Tag("DaemonEnvConfig")<
+export class DaemonEnvConfigTag extends Context.Service<
 	DaemonEnvConfigTag,
 	DaemonEnvConfig
->() {}
+>()("DaemonEnvConfig") {}
 
 /** Extract the value from a Config.option result, returning undefined for None. */
 const optionToUndefined = <A>(o: Option.Option<A>): A | undefined =>
@@ -38,7 +37,7 @@ const optionToUndefined = <A>(o: Option.Option<A>): A | undefined =>
 
 export const DaemonEnvConfigLive: Layer.Layer<
 	DaemonEnvConfigTag,
-	ConfigError.ConfigError
+	Config.ConfigError
 > = Layer.effect(
 	DaemonEnvConfigTag,
 	Effect.gen(function* () {
@@ -57,7 +56,7 @@ export const DaemonEnvConfigLive: Layer.Layer<
 			optionToUndefined,
 		);
 		const opencodePassword = yield* Effect.map(
-			Config.option(Config.redacted(Config.String("OPENCODE_SERVER_PASSWORD"))),
+			Config.option(Config.Redacted("OPENCODE_SERVER_PASSWORD")),
 			optionToUndefined,
 		);
 		const opencodeUsername = yield* Config.String(

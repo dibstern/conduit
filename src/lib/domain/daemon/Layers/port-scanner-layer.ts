@@ -1,23 +1,9 @@
-// Pure Effect replacement for the PortScanner class.
-// Periodically scans a port range and tracks which ports are alive.
-// A port must fail `removalThreshold` consecutive times before being removed
-// (hysteresis). Background fiber is fork-scoped — automatically interrupted
-// on scope close.
-//
-// Uses native Set/Map (not HashMap) because:
-// 1. Set<number> iteration order matters for deterministic scan sequences
-// 2. Map<number, number> eviction logic relies on insertion-order iteration
-// Documented exception per conventions.
-//
-// Defines its own Tag that will coexist with the one in services.ts until
-// Consumer migration.
-
 import { Context, type Duration, Effect, Layer, Ref, Schedule } from "effect";
 
 export interface PortScannerConfig {
 	probeFn: (port: number) => Effect.Effect<boolean>;
 	portRange: [number, number];
-	scanInterval: Duration.DurationInput;
+	scanInterval: Duration.Input;
 	removalThreshold: number; // Consecutive failures before removal
 	onDiscovered: (port: number) => Effect.Effect<void>;
 	onLost: (port: number) => Effect.Effect<void>;
@@ -37,10 +23,10 @@ interface PortScannerService {
 	scanNow: () => Effect.Effect<PortScanResult>;
 }
 
-export class PortScannerTag extends Context.Tag("PortScanner")<
+export class PortScannerTag extends Context.Service<
 	PortScannerTag,
 	PortScannerService
->() {}
+>()("PortScanner") {}
 
 interface ScanState {
 	knownPorts: Set<number>;
@@ -48,7 +34,7 @@ interface ScanState {
 }
 
 export const PortScannerLive = (config: PortScannerConfig) =>
-	Layer.scoped(
+	Layer.effect(
 		PortScannerTag,
 		Effect.gen(function* () {
 			const state = yield* Ref.make<ScanState>({
@@ -73,7 +59,7 @@ export const PortScannerLive = (config: PortScannerConfig) =>
 					(port) =>
 						config.probeFn(port).pipe(
 							Effect.map((alive) => ({ port, alive })),
-							Effect.catchAll(() => Effect.succeed({ port, alive: false })),
+							Effect.catch(() => Effect.succeed({ port, alive: false })),
 						),
 					{ concurrency: 10 },
 				);
@@ -95,7 +81,7 @@ export const PortScannerLive = (config: PortScannerConfig) =>
 							yield* config
 								.onDiscovered(port)
 								.pipe(
-									Effect.catchAll((e) =>
+									Effect.catch((e) =>
 										Effect.logWarning("onDiscovered error", e),
 									),
 								);
@@ -109,7 +95,7 @@ export const PortScannerLive = (config: PortScannerConfig) =>
 							yield* config
 								.onLost(port)
 								.pipe(
-									Effect.catchAll((e) => Effect.logWarning("onLost error", e)),
+									Effect.catch((e) => Effect.logWarning("onLost error", e)),
 								);
 						} else {
 							newFailures.set(port, failures);
@@ -126,7 +112,7 @@ export const PortScannerLive = (config: PortScannerConfig) =>
 				if (config.onScan != null) {
 					yield* config
 						.onScan(result)
-						.pipe(Effect.catchAll((e) => Effect.logWarning("onScan error", e)));
+						.pipe(Effect.catch((e) => Effect.logWarning("onScan error", e)));
 				}
 				return result;
 			});
@@ -135,11 +121,9 @@ export const PortScannerLive = (config: PortScannerConfig) =>
 			yield* runScan.pipe(
 				Effect.repeat(Schedule.spaced(config.scanInterval)),
 				Effect.retry(
-					Schedule.exponential("5 seconds").pipe(
-						Schedule.intersect(Schedule.recurs(3)),
-					),
+					Schedule.max([Schedule.exponential("5 seconds"), Schedule.recurs(3)]),
 				),
-				Effect.catchAll((e) =>
+				Effect.catch((e) =>
 					Effect.logWarning("Port scanner failed after retries", e),
 				),
 				Effect.forkScoped,
