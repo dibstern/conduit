@@ -222,7 +222,7 @@
 		if (!["effort", "context", "thinking", "fast"].includes(kind)) return [];
 		const options = row.values.map(({ value, label }) => ({
 			value,
-			label: kind === "effort" ? (value === "medium" ? "med" : value) :
+			label: kind === "effort" ? value :
 				kind === "thinking" || kind === "fast" ? (value === "true" ? "On" : "Off") : label,
 			testId: `picker-${kind}-option-${value}`,
 			disabled: effort.pending || !parameterCombination(row.id, value),
@@ -257,7 +257,7 @@
 	})));
 	const effortSegments = $derived(parameterEffort?.options ?? (parameters ? [] : effort.options.map((variant) => ({
 		value: variant,
-		label: variant === "medium" ? "med" : variant,
+		label: variant,
 		testId: `picker-effort-option-${variant}`,
 		disabled: effort.pending,
 	}))));

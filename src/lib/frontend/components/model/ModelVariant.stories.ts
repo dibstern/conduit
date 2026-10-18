@@ -194,7 +194,7 @@ export const PhoneTapCycle: Story = {
 		await assertMeter(button, 4, 0);
 		for (const [variant, label, filled] of [
 			["low", "LOW", 1],
-			["medium", "MED", 2],
+			["medium", "MEDIUM", 2],
 			["high", "HIGH", 3],
 			["max", "MAX", 4],
 			["low", "LOW", 1],
@@ -305,7 +305,7 @@ export const PhoneKeyboard: Story = {
 		const button = within(canvasElement).getByTestId("variant-badge");
 		button.focus();
 		await userEvent.keyboard("{Enter} ");
-		await waitFor(() => expect(button).toHaveTextContent("MED"));
+		await waitFor(() => expect(button).toHaveTextContent("MEDIUM"));
 		await expect(
 			within(canvasElement.ownerDocument.body).queryByTestId(
 				"variant-dropdown",
