@@ -30,7 +30,6 @@
 
 import {
 	type Cause,
-	Chunk,
 	Clock,
 	Duration,
 	Effect,
@@ -69,7 +68,7 @@ export const retryFeedsNow = (): void => {
 };
 
 /** Resolves on the next reason to stop waiting: a wake-up or a manual retry. */
-const nextWake = Effect.async<void>((resume) => {
+const nextWake = Effect.callback<void>((resume) => {
 	const wake = () => resume(Effect.void);
 	const onVisibility = () => {
 		if (document.visibilityState === "visible") wake();
@@ -112,7 +111,7 @@ export const supervise = <A extends object>(
 			const failures = yield* Ref.make(0);
 
 			const report = (next: FeedStatus) =>
-				Effect.zipRight(
+				Effect.andThen(
 					Ref.set(status, next),
 					Effect.sync(() => onStatus(next)),
 				);
@@ -120,7 +119,7 @@ export const supervise = <A extends object>(
 			const observe = (envelope: A) =>
 				Effect.flatMap(Ref.get(status), (current) =>
 					"_tag" in envelope && envelope._tag === "synchronized"
-						? Effect.zipRight(
+						? Effect.andThen(
 								Ref.set(failures, 0),
 								current._tag === "live"
 									? Effect.void
@@ -146,9 +145,9 @@ export const supervise = <A extends object>(
 
 			const restartAfter = (cause: Cause.Cause<WsRpcError>) => {
 				const defects = Failure.defects(cause);
-				if (Chunk.isNonEmpty(defects)) {
-					const defect = Chunk.headNonEmpty(defects);
-					return Effect.zipRight(
+				if (defects.length > 0) {
+					const defect = defects[0];
+					return Effect.andThen(
 						Effect.logError("feed died; restarting", cause),
 						backOff(defect instanceof Error ? defect.message : String(defect)),
 					);
@@ -159,7 +158,7 @@ export const supervise = <A extends object>(
 						onSome: (error) => error.message,
 					}),
 				);
-				return Effect.zipRight(
+				return Effect.andThen(
 					Effect.logWarning(`feed failed; restarting: ${message}`),
 					backOff(message),
 				);
@@ -168,8 +167,8 @@ export const supervise = <A extends object>(
 			const attempt = feed.pipe(
 				Stream.tap(observe),
 				Stream.concat(
-					Stream.execute(
-						Effect.zipRight(
+					Stream.fromEffectDrain(
+						Effect.andThen(
 							Effect.logWarning("feed ended; restarting"),
 							backOff("The feed ended"),
 						),
@@ -177,10 +176,10 @@ export const supervise = <A extends object>(
 				),
 				// A bare interruption is the consumer letting go: resumeStream has
 				// already restarted every interruption the transport caused.
-				Stream.catchAllCause((cause) =>
+				Stream.catchCause((cause) =>
 					Failure.isInterruptedOnly(cause)
 						? Stream.failCause(Failure.withoutFailures(cause))
-						: Stream.execute(restartAfter(cause)),
+						: Stream.fromEffectDrain(restartAfter(cause)),
 				),
 			);
 
