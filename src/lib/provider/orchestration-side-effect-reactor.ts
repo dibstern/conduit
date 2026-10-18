@@ -1,4 +1,5 @@
 import { SqlClient } from "@effect/sql";
+import type { SqlError } from "@effect/sql/SqlError";
 import { Clock, Data, Duration, Effect, Option, Schema } from "effect";
 import { AccountSchema } from "../contracts/account.js";
 import { getProviderDriver } from "../contracts/provider-instance.js";
@@ -10,6 +11,10 @@ import {
 	type ClaudeEventPersistEffect,
 	ClaudeEventPersistEffectTag,
 } from "../persistence/effect/claude-event-persist-effect.js";
+import type {
+	CommitAndSignal,
+	CommitAndSignalFailure,
+} from "../persistence/effect/commit-and-signal.js";
 import { requeueFailedSteers } from "../persistence/effect/input-requeue-effect.js";
 import {
 	makeProviderStateEffect,
@@ -132,6 +137,7 @@ export interface ProviderSideEffectReactorOptions {
 	readonly sql: SqlClient.SqlClient;
 	readonly registry: ProviderRegistry;
 	readonly ingestion: Pick<ProviderRuntimeIngestion, "ingest">;
+	readonly write?: CommitAndSignal["write"];
 	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
 	readonly claudeSessionForkSdk?: ClaudeSessionForkSdk;
 	readonly defaultClaudeLaunchConfig?: () => ClaudeLaunchConfig;
@@ -703,22 +709,21 @@ export class ProviderSideEffectReactor {
 		updatedAt: number,
 	): Effect.Effect<void, ProviderCommandStoreFailure> {
 		const { sql } = this.options;
-		return sql
-			.withTransaction(
-				Effect.all([
-					sql`
-						UPDATE provider_command_outbox
-						SET status = 'completed', updated_at = ${updatedAt}
-						WHERE request_sequence = ${row.request_sequence}
-							AND project_key = ${this.options.projectId}`,
-					sql`
-						UPDATE command_receipts
-						SET status = 'side_effect_completed', updated_at = ${updatedAt}
-						WHERE command_id = ${row.command_id}
-							AND project_key = ${this.options.projectId}`,
-				]),
-			)
-			.pipe(Effect.asVoid, Effect.mapError(storeFailure("markCompleted")));
+		return this.writeSettlement(
+			row,
+			Effect.all([
+				sql`
+					UPDATE provider_command_outbox
+					SET status = 'completed', updated_at = ${updatedAt}
+					WHERE request_sequence = ${row.request_sequence}
+						AND project_key = ${this.options.projectId}`,
+				sql`
+					UPDATE command_receipts
+					SET status = 'side_effect_completed', updated_at = ${updatedAt}
+					WHERE command_id = ${row.command_id}
+						AND project_key = ${this.options.projectId}`,
+			]),
+		).pipe(Effect.mapError(storeFailure("markCompleted")));
 	}
 
 	/** Failure from the Effect error channel (thrown/failed provider effect). */
@@ -764,25 +769,46 @@ export class ProviderSideEffectReactor {
 			? updatedAt + Duration.toMillis(retryBackoff(row.attempt_count + 1))
 			: null;
 		const { sql } = this.options;
-		return sql
-			.withTransaction(
-				Effect.all([
-					sql`
-						UPDATE provider_command_outbox
-						SET status = ${retryable ? "retryable_failed" : "failed"},
-						    error_code = ${errorCode},
-						    next_attempt_at = ${nextAttemptAt},
-						    updated_at = ${updatedAt}
-						WHERE request_sequence = ${row.request_sequence}
-							AND project_key = ${this.options.projectId}`,
-					sql`
-						UPDATE command_receipts
-						SET status = 'side_effect_failed', error_code = ${errorCode}, updated_at = ${updatedAt}
-						WHERE command_id = ${row.command_id}
-							AND project_key = ${this.options.projectId}`,
-				]),
-			)
-			.pipe(Effect.asVoid, Effect.mapError(storeFailure("markFailed")));
+		return this.writeSettlement(
+			row,
+			Effect.all([
+				sql`
+					UPDATE provider_command_outbox
+					SET status = ${retryable ? "retryable_failed" : "failed"},
+					    error_code = ${errorCode},
+					    next_attempt_at = ${nextAttemptAt},
+					    updated_at = ${updatedAt}
+					WHERE request_sequence = ${row.request_sequence}
+						AND project_key = ${this.options.projectId}`,
+				sql`
+					UPDATE command_receipts
+					SET status = 'side_effect_failed', error_code = ${errorCode}, updated_at = ${updatedAt}
+					WHERE command_id = ${row.command_id}
+						AND project_key = ${this.options.projectId}`,
+			]),
+		).pipe(Effect.mapError(storeFailure("markFailed")));
+	}
+
+	// The inbox reads send_turn status; a slash command's turn can end before
+	// settlement, so the settle commit must announce its session.
+	private writeSettlement(
+		row: ProviderCommandOutboxRow,
+		updates: Effect.Effect<unknown, SqlError>,
+	): Effect.Effect<void, CommitAndSignalFailure> {
+		const { sql, write } = this.options;
+		if (!write || row.effect_type !== "send_turn")
+			return sql.withTransaction(updates).pipe(Effect.asVoid);
+		return write((_project, stamp) =>
+			stamp((version) =>
+				Effect.gen(function* () {
+					yield* updates;
+					const sessions = yield* sql<{ id: string }>`
+						UPDATE sessions SET version = ${version}
+						WHERE id = ${row.session_id} RETURNING id`;
+					return sessions.map((session) => session.id);
+				}),
+			),
+		).pipe(Effect.asVoid);
 	}
 
 	/**
