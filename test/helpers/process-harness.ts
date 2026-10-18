@@ -476,6 +476,21 @@ Object.assign(ClaudeDriver, { create: deps => {
 		return join(this.configDir, "events.db");
 	}
 
+	/**
+	 * Turn off auto-settle and auto-archive before the next start. A seeded
+	 * store of old, read sessions is otherwise due for both all at once.
+	 */
+	disableIdlePolicies(): void {
+		writeFileSync(
+			join(this.configDir, "daemon.json"),
+			JSON.stringify({
+				...Either.getOrThrow(loadDaemonConfigResult(this.configDir)),
+				autoSettleAfterDays: null,
+				autoArchiveAfterDays: null,
+			}),
+		);
+	}
+
 	/** Offline source for startup-import fixtures, never a daemon runtime store. */
 	legacyProjectStorePath(slug = "process-test"): string {
 		return join(projectStorageDir(this.configDir, slug), "events.db");
