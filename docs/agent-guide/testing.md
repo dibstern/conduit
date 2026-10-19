@@ -251,10 +251,20 @@ pnpm test:storybook-visual
 
 ## Effect Migration Guardrails
 
+Static source guards live in `*.guard.test.ts` files and run in the `guards`
+project. Run them on every pre-commit check: `vitest related` cannot track files
+these tests read as text. Select related behavioral tests from the `unit`,
+`unit-sqlite`, and `components` projects separately.
+
+```bash
+pnpm exec vitest run --project guards
+pnpm exec vitest related --run --project unit --project unit-sqlite --project components <changed-files>
+```
+
 Run the static guardrail suite when touching Effect ownership, daemon/relay composition, provider adapters, persistence, or transport boundaries:
 
 ```bash
-pnpm exec vitest run test/unit/effect/runtime-boundary-grep.test.ts
+pnpm exec vitest run test/unit/effect/runtime-boundary-grep.guard.test.ts
 ```
 
 Final guardrail expectations as of 2026-05-15:

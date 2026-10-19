@@ -1,7 +1,5 @@
 // test/unit/provider/provider-registry.test.ts
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
@@ -11,8 +9,6 @@ import {
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
-
-const REPO_ROOT = process.cwd();
 
 function makeStubInstance(providerId: string): ProviderInstance {
 	return {
@@ -210,15 +206,5 @@ describe("ProviderRegistry", () => {
 
 		expect(first).toBe(true);
 		expect(second).toBe(false);
-	});
-
-	it("does not expose adapter-named registry shims", () => {
-		const source = readFileSync(
-			join(REPO_ROOT, "src/lib/provider/provider-registry.ts"),
-			"utf8",
-		);
-		expect(source).not.toMatch(
-			/\b(?:registerAdapter|getAdapter|getAdapterEffect|getAdapterOrThrow|hasAdapter|removeAdapter)\b/,
-		);
 	});
 });

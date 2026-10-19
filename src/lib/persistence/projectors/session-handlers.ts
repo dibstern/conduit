@@ -24,7 +24,7 @@
 //     thing a statement can do.
 //   - The one remaining way to remove a session silently is to write a second
 //     delete statement. That is what fails loudly:
-//     test/unit/persistence/session-removal-boundary-grep.test.ts allows
+//     test/unit/persistence/session-removal-boundary-grep.guard.test.ts allows
 //     exactly one `DELETE FROM sessions` in the whole of src — the
 //     REMOVE_SESSION_SQL declaration below — and allows it to be executed only
 //     by the two projectors. Being inside this file buys nothing: a raw delete
