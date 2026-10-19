@@ -124,6 +124,7 @@ import {
 } from "./claude-runtime-discovery.js";
 import { claudeRuntimeEvent } from "./claude-runtime-event.js";
 import {
+	claimSetupLock,
 	getOrUndefined,
 	getSession,
 	getSetupLock,
@@ -135,7 +136,6 @@ import {
 	removeSession,
 	removeSetupLock,
 	setSession,
-	setSetupLock,
 } from "./claude-runtime-state.js";
 import {
 	addTurnWaiter,
@@ -989,28 +989,37 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					}),
 				);
 			}
-			const expectedApiModelId = yield* expectedApiModelIdEffect(
-				this.deps.capabilitiesService,
-				input.model?.modelId,
-				input.contextWindow,
-				input.workspaceRoot,
-				input.agent,
-			);
-			yield* markStreamLive(this.stateRef, sessionId);
-
 			const deferred = yield* Deferred.make<TurnResult, Error>();
-			yield* addTurnWaiter(this.stateRef, sessionId, input.inputId, {
-				deferred,
-				started: false,
-			});
-
-			// Set session lock synchronously before any effectful boundary.
 			const setupLock = yield* Deferred.make<void, Error>();
-			yield* setSetupLock(this.stateRef, sessionId, setupLock);
-
+			const pending = yield* claimSetupLock(
+				this.stateRef,
+				sessionId,
+				setupLock,
+			);
+			if (pending) {
+				yield* Deferred.await(pending).pipe(
+					Effect.mapError(
+						(cause) =>
+							new ClaudeBoundaryError({ operation: "awaitSetup", cause }),
+					),
+				);
+				return yield* this.sendTurnLocalEffect(input);
+			}
 			let promptQueue: PromptQueueController | undefined;
 			let activeQuery: Query | undefined;
 			const setup = Effect.gen({ self: this }, function* () {
+				yield* markStreamLive(this.stateRef, sessionId);
+				yield* addTurnWaiter(this.stateRef, sessionId, input.inputId, {
+					deferred,
+					started: false,
+				});
+				const expectedApiModelId = yield* expectedApiModelIdEffect(
+					this.deps.capabilitiesService,
+					input.model?.modelId,
+					input.contextWindow,
+					input.workspaceRoot,
+					input.agent,
+				);
 				const userMessage = yield* Effect.try({
 					try: () => validateUserMessage(this.buildUserMessage(input)),
 					catch: (cause) =>

@@ -346,9 +346,14 @@ exec '${realGit}' "$@"
 		} finally {
 			writeFileSync(join(fixture.root, "git-resolution-release"), "release\n");
 		}
-		await vi.waitFor(() =>
-			expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBe(first),
+		await browser.waitFor(
+			(message) =>
+				message["type"] === "session_row" &&
+				message["id"] === sessionId &&
+				message["workspaceHint"] === first,
+			beforeDismiss,
 		);
+		expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBe(first);
 		expect(
 			storedEvents(fixture)
 				.filter(({ type }) => type === "session.workspace_hint_changed")

@@ -467,11 +467,22 @@ export class RunnerProviderInstance implements ProviderInstance {
 						this.preWarmFibers,
 						input.sessionId,
 					);
-					return Option.isSome(existing)
-						? existing.value
-						: runPreWarm(input.sessionId, Effect.interruptible(preWarm), {
-								onlyIfMissing: true,
+					if (Option.isSome(existing)) {
+						if (
+							process.env["NODE_ENV"] === "test" &&
+							process.env["CONDUIT_TEST_UPGRADE_SINK_PROOF"] === "1" &&
+							process.connected
+						)
+							process.send?.({
+								channel: "conduit-process-test",
+								kind: "pre-warm-joined",
+								sessionId: input.sessionId,
 							});
+						return existing.value;
+					}
+					return runPreWarm(input.sessionId, Effect.interruptible(preWarm), {
+						onlyIfMissing: true,
+					});
 				});
 				const exit = yield* restore(Fiber.await(fiber)).pipe(
 					Effect.onInterrupt(() => Fiber.interrupt(fiber)),
