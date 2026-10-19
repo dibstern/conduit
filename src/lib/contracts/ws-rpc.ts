@@ -274,6 +274,7 @@ export const CommandInfoSchema = Schema.Struct({
 export const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
+	addedAt: Schema.optional(Schema.Number),
 	folders: Schema.NonEmptyArray(Schema.String),
 	setupScript: Schema.optional(Schema.String),
 	sessionMode: Schema.optional(SessionModeSchema),
@@ -1247,6 +1248,14 @@ export const SaveProject = Rpc.make("SaveProject", {
 	error: Schema.Union([WsRpcError, ProjectSaveRejected]),
 });
 
+export const SetProjectOrder = Rpc.make("SetProjectOrder", {
+	payload: Schema.TaggedStruct("SetProjectOrder", {
+		projectOrder: Schema.Array(Schema.String),
+	}),
+	success: Schema.Void,
+	error: WsRpcError,
+});
+
 export const RemoveProject = Rpc.make("RemoveProject", {
 	payload: Schema.TaggedStruct("RemoveProject", {
 		projectSlug: Schema.optional(NonEmptyString),
@@ -1427,6 +1436,30 @@ export const SetAutoArchiveSetting = Rpc.make("SetAutoArchiveSetting", {
 	success: AutoArchiveSettingResponseSchema,
 	error: WsRpcError,
 });
+
+const AutoDeleteArchivedSettingResponseSchema = Schema.Struct({
+	autoDeleteArchivedAfterDays: Schema.NullOr(Schema.Number),
+});
+
+export const GetAutoDeleteArchivedSetting = Rpc.make(
+	"GetAutoDeleteArchivedSetting",
+	{
+		payload: Schema.TaggedStruct("GetAutoDeleteArchivedSetting", {}),
+		success: AutoDeleteArchivedSettingResponseSchema,
+		error: WsRpcError,
+	},
+);
+
+export const SetAutoDeleteArchivedSetting = Rpc.make(
+	"SetAutoDeleteArchivedSetting",
+	{
+		payload: Schema.TaggedStruct("SetAutoDeleteArchivedSetting", {
+			autoDeleteArchivedAfterDays: Schema.NullOr(Schema.Number),
+		}),
+		success: AutoDeleteArchivedSettingResponseSchema,
+		error: WsRpcError,
+	},
+);
 
 export const GetUsageLimitsSetting = Rpc.make("GetUsageLimitsSetting", {
 	payload: Schema.TaggedStruct("GetUsageLimitsSetting", {}),
@@ -2923,6 +2956,7 @@ const wsRpcRequests = [
 		}),
 	},
 	SaveProject,
+	SetProjectOrder,
 	RemoveProject,
 	StartInstance,
 	StopInstance,
@@ -2935,6 +2969,8 @@ const wsRpcRequests = [
 	SetAutoSettleSetting,
 	GetAutoArchiveSetting,
 	SetAutoArchiveSetting,
+	GetAutoDeleteArchivedSetting,
+	SetAutoDeleteArchivedSetting,
 	GetWorktreeCleanupSetting,
 	{
 		requests: [SetProjectWorktreeCleanupSetting, SetWorktreeCleanupSetting],
@@ -3043,6 +3079,7 @@ export const ShellProjectsFrameSchema = Schema.Struct({
 	projects: Schema.Array(ProjectInfoSchema),
 	/** The project a new session prefills, on every client. */
 	newSessionProject: Schema.optional(Schema.String),
+	projectOrder: Schema.optional(Schema.Array(Schema.String)),
 });
 export type ShellProjectsFrame = typeof ShellProjectsFrameSchema.Type;
 

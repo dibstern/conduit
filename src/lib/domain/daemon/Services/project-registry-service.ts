@@ -74,7 +74,10 @@ import {
 	ConfigPersistenceTag,
 	requestConfigSave,
 } from "./config-persistence-service.js";
-import { DaemonConfigRefTag } from "./daemon-config-ref.js";
+import {
+	commitDaemonRuntimeConfig,
+	DaemonConfigRefTag,
+} from "./daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 import { countRunningProjectSessions } from "./daemon-session-reader.js";
 import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
@@ -193,7 +196,10 @@ const toStoredProject = (project: DaemonProject): StoredProject => ({
 	slug: project.slug,
 	folders: project.folders,
 	title: project.title ?? project.slug,
-	lastUsed: project.addedAt,
+	...(project.lastUsed !== undefined || project.addedAt !== undefined
+		? { lastUsed: project.lastUsed ?? project.addedAt }
+		: {}),
+	...(project.addedAt !== undefined && { addedAt: project.addedAt }),
 	...(project.shellEnv !== undefined && { shellEnv: project.shellEnv }),
 	...(project.setupScript !== undefined && {
 		setupScript: project.setupScript,
@@ -404,6 +410,7 @@ export const projectInfos = Effect.gen(function* () {
 				...(unavailableReason !== undefined && { unavailableReason }),
 				folders: project.folders,
 				title: project.title,
+				...(project.addedAt !== undefined && { addedAt: project.addedAt }),
 				...(project.setupScript !== undefined && {
 					setupScript: project.setupScript,
 				}),
@@ -635,10 +642,22 @@ export const remove = (slug: string) =>
 						).pipe(Effect.andThen(requestConfigSave)),
 					),
 				);
+				const config = yield* Effect.serviceOption(DaemonConfigRefTag);
+				if (Option.isSome(config)) {
+					yield* commitDaemonRuntimeConfig((current) => ({
+						...current,
+						...(current.projectOrder !== undefined && {
+							projectOrder: current.projectOrder.filter(
+								(item) => item !== slug,
+							),
+						}),
+					})).pipe(Effect.provideService(DaemonConfigRefTag, config.value));
+				}
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.InstanceRemoved({ instanceId: slug }),
 				);
+				yield* PubSub.publish(bus, DaemonEvent.ProjectsChanged());
 
 				yield* requestConfigSave;
 				yield* Effect.logInfo("Project removed");
@@ -939,6 +958,24 @@ export const makeProjectRegistryFromDaemonStateLive: Layer.Layer<
 	Effect.gen(function* () {
 		const stateRef = yield* DaemonStateTag;
 		const state = yield* Ref.get(stateRef);
+		const missingDates = state.projects.filter(
+			(project) => project.addedAt === undefined,
+		);
+		const store = yield* Effect.serviceOption(PersistenceStore);
+		const dates =
+			missingDates.length > 0 && Option.isSome(store)
+				? yield* Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						return yield* sql<{ project_id: string; added_at: number }>`
+					SELECT project_id, MIN(created_at) AS added_at FROM sessions
+					WHERE project_id IN ${sql.in(missingDates.map(({ slug }) => slug))}
+					GROUP BY project_id`;
+					}).pipe(Effect.provide(store.value), Effect.orDie)
+				: [];
+		const addedAtBySlug = new Map(
+			dates.map((row) => [row.project_id, row.added_at]),
+		);
+		const now = Date.now();
 		// Refresh even cached identities before consumers (including HTTP/RPC) start.
 		const initialProjects = yield* Effect.forEach(
 			state.projects,
@@ -946,6 +983,7 @@ export const makeProjectRegistryFromDaemonStateLive: Layer.Layer<
 				deriveRepositoryIdentities(project.folders).pipe(
 					Effect.map((repositoryIdentities) => ({
 						...toStoredProject(project),
+						addedAt: project.addedAt ?? addedAtBySlug.get(project.slug) ?? now,
 						repositoryIdentities,
 					})),
 				),
@@ -1211,6 +1249,7 @@ export const saveProject = (input: SaveProjectInput) =>
 							sessionMode,
 							title: title ?? titleForDirectory(mainFolder),
 							lastUsed: Date.now(),
+							addedAt: Date.now(),
 						};
 				if (existing) {
 					yield* updateProject(slug, {

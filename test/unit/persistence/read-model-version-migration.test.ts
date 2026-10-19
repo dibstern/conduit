@@ -85,7 +85,8 @@ describe("read-model version migration", () => {
 					yield* sql`SELECT id, version FROM sessions ORDER BY id`,
 				).toEqual([
 					{ id: "recent", version: 30 },
-					{ id: "unknown", version: 0 },
+					// Human-recency backfill is a visible change after version 30.
+					{ id: "unknown", version: 31 },
 				]);
 				expect(
 					yield* sql`SELECT id, version FROM messages ORDER BY id`,
