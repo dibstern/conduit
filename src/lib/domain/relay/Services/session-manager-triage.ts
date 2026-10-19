@@ -1,15 +1,11 @@
-import { Effect, Option, Schema } from "effect";
+import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
-import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
-import { daemonSessionGitCache } from "../../../git/session-git.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { shouldArchiveIdleSession } from "../../../session/auto-archive-policy.js";
 import { readPersistedAutoArchiveFacts } from "../../../session/auto-archive-sweep.js";
-import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
-import { ConfigTag } from "./services.js";
 import { markSeen, markUnread } from "./session-attention.js";
 import { applySessionCommand } from "./session-command.js";
 import { SessionManagerError } from "./session-manager-error.js";
@@ -76,7 +72,7 @@ const readSessionForTriage = (sessionId: string) =>
 
 export const setSessionSettled = (
 	sessionId: string,
-	{ settled, automatic = false, mergedHead }: SetSessionSettledOptions,
+	{ settled, automatic = false }: SetSessionSettledOptions,
 ) =>
 	Effect.gen(function* () {
 		const row = yield* readSessionForTriage(sessionId);
@@ -94,25 +90,6 @@ export const setSessionSettled = (
 			});
 		}
 		if ((row.settled_at !== null) === settled) return unsnoozed;
-		let consumedHead = mergedHead;
-		if (settled && consumedHead === undefined && row.workspace !== null) {
-			const config = yield* ConfigTag;
-			const workspace = Schema.decodeUnknownOption(
-				Schema.fromJsonString(SessionWorkspaceSchema),
-			)(row.workspace);
-			if (Option.isSome(workspace)) {
-				const directory = effectiveWorkingDirectory(
-					config.projectDir,
-					workspace.value,
-				);
-				if (directory !== config.projectDir) {
-					const git = yield* Effect.tryPromise(() =>
-						daemonSessionGitCache.refresh(directory),
-					).pipe(Effect.orElseSucceed(() => undefined));
-					consumedHead = git?.mergedHead;
-				}
-			}
-		}
 		yield* applySessionCommand(
 			settled
 				? {
@@ -120,9 +97,6 @@ export const setSessionSettled = (
 						data: {
 							sessionId,
 							automatic,
-							...(consumedHead !== undefined
-								? { mergedHead: consumedHead }
-								: {}),
 						},
 					}
 				: { type: "session.unsettled", data: { sessionId } },
