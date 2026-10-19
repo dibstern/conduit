@@ -423,6 +423,8 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 							relay.settleIdleSessions(idleWindowMs, now),
 						archiveIdleSessions: (idleWindowMs: number, now: number) =>
 							relay.archiveIdleSessions(idleWindowMs, now),
+						deleteArchivedSessions: (windowMs: number, now: number) =>
+							relay.deleteArchivedSessions(windowMs, now),
 						rpcWsHandler: relay.rpcWsHandler,
 						getStatusSnapshot: () => relay.getStatusSnapshot(),
 						setDefaultAgent: (agent: string) => relay.setDefaultAgent(agent),

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	type AutoArchiveFacts,
 	shouldArchiveIdleSession,
+	shouldDeleteArchivedSessionTree,
 } from "../../../src/lib/session/auto-archive-policy.js";
 
 const day = 86_400_000;
@@ -50,5 +51,32 @@ describe("automatic session archive", () => {
 				30 * day,
 			),
 		).toBe(true);
+	});
+});
+
+describe("automatic archived tree deletion", () => {
+	const tree = {
+		rootArchivedAt: 70 * day,
+		pinned: false,
+		hasPendingWork: false,
+		hasLiveBackgroundWork: false,
+		hasSurvivingFork: false,
+	};
+	it("includes the retention boundary and supports Never", () => {
+		expect(shouldDeleteArchivedSessionTree(tree, now, 30 * day)).toBe(true);
+		expect(shouldDeleteArchivedSessionTree(tree, now, 31 * day)).toBe(false);
+		expect(shouldDeleteArchivedSessionTree(tree, now, null)).toBe(false);
+	});
+	it.each([
+		{ rootArchivedAt: null },
+		{ rootArchivedAt: 70 * day + 1 },
+		{ pinned: true },
+		{ hasPendingWork: true },
+		{ hasLiveBackgroundWork: true },
+		{ hasSurvivingFork: true },
+	])("keeps a tree with %j", (override) => {
+		expect(
+			shouldDeleteArchivedSessionTree({ ...tree, ...override }, now, 30 * day),
+		).toBe(false);
 	});
 });

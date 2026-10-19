@@ -11,6 +11,7 @@ import { DEFAULT_WORKTREE_CLEANUP } from "../../contracts/worktree.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import {
 	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
+	DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 } from "../../daemon/config-persistence.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
@@ -136,6 +137,32 @@ export const settingsHandlers = {
 			yield* persistence.flush;
 			return { autoArchiveAfterDays: days };
 		}).pipe(Effect.catch(mapRpcFailure("SetAutoArchiveSetting"))),
+	GetAutoDeleteArchivedSetting: (_request) =>
+		Effect.gen(function* () {
+			const config = yield* Ref.get(yield* DaemonConfigRefTag);
+			return {
+				autoDeleteArchivedAfterDays:
+					config.autoDeleteArchivedAfterDays === undefined
+						? DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS
+						: config.autoDeleteArchivedAfterDays,
+			};
+		}),
+	SetAutoDeleteArchivedSetting: ({ autoDeleteArchivedAfterDays: days }) =>
+		Effect.gen(function* () {
+			if (days !== null && (!Number.isInteger(days) || days < 1 || days > 90))
+				return yield* new WsRpcError({
+					message:
+						"Archived retention days must be an integer from 1 to 90, or Never",
+				});
+			yield* commitDaemonRuntimeConfig((config) => ({
+				...config,
+				autoDeleteArchivedAfterDays: days,
+			}));
+			const persistence = yield* ConfigPersistenceTag;
+			yield* persistence.requestSave;
+			yield* persistence.flush;
+			return { autoDeleteArchivedAfterDays: days };
+		}).pipe(Effect.catch(mapRpcFailure("SetAutoDeleteArchivedSetting"))),
 	SetAutoSettleSetting: (request) =>
 		Effect.gen(function* () {
 			const days = request.autoSettleAfterDays;
@@ -292,6 +319,8 @@ export const settingsHandlers = {
 	| "SetAutoSettleSetting"
 	| "GetAutoArchiveSetting"
 	| "SetAutoArchiveSetting"
+	| "GetAutoDeleteArchivedSetting"
+	| "SetAutoDeleteArchivedSetting"
 	| "GetWorktreeCleanupSetting"
 	| "SetWorktreeCleanupSetting"
 	| "CleanUpWorktreesNow"

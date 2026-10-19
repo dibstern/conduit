@@ -21,6 +21,7 @@ import {
 import {
 	type DaemonConfig,
 	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
+	DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	defaultDaemonConfig,
 	loadDaemonConfigStartupResult,
@@ -157,6 +158,10 @@ const buildInitialRuntimeConfig = (
 			persisted?.autoArchiveAfterDays === undefined
 				? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS
 				: persisted.autoArchiveAfterDays,
+		autoDeleteArchivedAfterDays:
+			persisted?.autoDeleteArchivedAfterDays === undefined
+				? DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS
+				: persisted.autoDeleteArchivedAfterDays,
 		...(persisted?.worktreeCleanup !== undefined && {
 			worktreeCleanup: persisted.worktreeCleanup,
 		}),

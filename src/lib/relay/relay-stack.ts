@@ -305,6 +305,10 @@ export interface ProjectRelay {
 		idleWindowMs: number,
 		now: number,
 	): Effect.Effect<number, SqlError | SessionManagerError>;
+	deleteArchivedSessions(
+		windowMs: number,
+		now: number,
+	): Effect.Effect<number, SqlError | SessionManagerError>;
 	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
 	sseStream: SSEStreamPort;
@@ -373,6 +377,7 @@ export interface RelayStackConfig {
 }
 
 export interface RelayStack {
+	deleteArchivedSessions: ProjectRelay["deleteArchivedSessions"];
 	archiveIdleSessions: ProjectRelay["archiveIdleSessions"];
 	settleIdleSessions: ProjectRelay["settleIdleSessions"];
 	server: EffectRelayServer;
@@ -569,6 +574,8 @@ export async function createProjectRelay(
 					startup.persistenceProject,
 				),
 			),
+		deleteArchivedSessions: (windowMs, now) =>
+			startup.sessionManagerService.deleteArchivedSessions(windowMs, now),
 		archiveIdleSessions: (idleWindowMs, now) =>
 			archiveIdleSessions(
 				{
@@ -964,6 +971,7 @@ export async function createRelayStack(
 		server,
 		effectRuntime: relay.effectRuntime,
 		archiveIdleSessions: relay.archiveIdleSessions,
+		deleteArchivedSessions: relay.deleteArchivedSessions,
 		settleIdleSessions: relay.settleIdleSessions,
 		wsHandler: relay.wsHandler,
 		rpcWsHandler: relay.rpcWsHandler,
