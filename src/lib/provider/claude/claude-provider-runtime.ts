@@ -124,6 +124,7 @@ import {
 } from "./claude-runtime-discovery.js";
 import { claudeRuntimeEvent } from "./claude-runtime-event.js";
 import {
+	claimSetupLock,
 	getOrUndefined,
 	getSession,
 	getSetupLock,
@@ -135,7 +136,6 @@ import {
 	removeSession,
 	removeSetupLock,
 	setSession,
-	setSetupLock,
 } from "./claude-runtime-state.js";
 import {
 	addTurnWaiter,
@@ -229,6 +229,7 @@ export interface ClaudeProviderInstanceDeps {
 	readonly subagentSdk?: ClaudeSubagentSdk;
 	readonly sessionForkSdk?: ClaudeSessionForkSdk;
 	readonly ensureClaudeSubagentSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
+	readonly readClaudeSubagentTranscript?: ClaudeEventPersistEffect["readClaudeSubagentTranscript"];
 	readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
 	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
 	readonly subagentPollTimeoutMs?: number;
@@ -327,6 +328,9 @@ export const makeClaudeProviderRuntime = (
 				accounts,
 				...(deps.ensureClaudeSubagentSession
 					? { ensureChildSession: deps.ensureClaudeSubagentSession }
+					: {}),
+				...(deps.readClaudeSubagentTranscript
+					? { readSubagentTranscript: deps.readClaudeSubagentTranscript }
 					: {}),
 			},
 			driver,
@@ -778,6 +782,43 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		);
 	}
 
+	private readSubagentTranscriptEffect(
+		ctx: ClaudeSessionContext,
+		childSessionId: string,
+	) {
+		const sinkId = this.sinks.sinkId(ctx.eventSink);
+		return Effect.gen({ self: this }, function* () {
+			if (!sinkId)
+				return yield* Effect.fail({
+					operation: "read-subagent-transcript",
+					message: "Missing Claude transcript sink",
+				});
+			const output = {
+				type: "read-subagent-transcript" as const,
+				sinkId,
+				childSessionId,
+			};
+			let reply = yield* this.emit(output);
+			// A reconnect can replay a read older than the last acknowledged output.
+			// Its reply is no longer retained, so ask again with a new sequence.
+			if (!reply.subagentTranscript) reply = yield* this.emit(output);
+			if (!reply.subagentTranscript)
+				return yield* Effect.fail({
+					operation: output.type,
+					message: "Missing persisted Claude subagent transcript reply",
+				});
+			return reply.subagentTranscript;
+		}).pipe(
+			Effect.mapError(
+				(cause) =>
+					new ClaudeBoundaryError({
+						operation: "readClaudeSubagentTranscript",
+						cause: new Error(cause.message),
+					}),
+			),
+		);
+	}
+
 	private removeSessionEffect(sessionId: string): Effect.Effect<void> {
 		return Effect.gen({ self: this }, function* () {
 			yield* this.warmedQueries.discardEffect(sessionId);
@@ -989,21 +1030,30 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					}),
 				);
 			}
-			yield* markStreamLive(this.stateRef, sessionId);
-
 			const deferred = yield* Deferred.make<TurnResult, Error>();
-			yield* addTurnWaiter(this.stateRef, sessionId, input.inputId, {
-				deferred,
-				started: false,
-			});
-
-			// Set session lock synchronously before any effectful boundary.
 			const setupLock = yield* Deferred.make<void, Error>();
-			yield* setSetupLock(this.stateRef, sessionId, setupLock);
-
+			const pending = yield* claimSetupLock(
+				this.stateRef,
+				sessionId,
+				setupLock,
+			);
+			if (pending) {
+				yield* Deferred.await(pending).pipe(
+					Effect.mapError(
+						(cause) =>
+							new ClaudeBoundaryError({ operation: "awaitSetup", cause }),
+					),
+				);
+				return yield* this.sendTurnLocalEffect(input);
+			}
 			let promptQueue: PromptQueueController | undefined;
 			let activeQuery: Query | undefined;
 			const setup = Effect.gen({ self: this }, function* () {
+				yield* markStreamLive(this.stateRef, sessionId);
+				yield* addTurnWaiter(this.stateRef, sessionId, input.inputId, {
+					deferred,
+					started: false,
+				});
 				const expectedApiModelId = yield* expectedApiModelIdEffect(
 					this.deps.capabilitiesService,
 					input.model?.modelId,
@@ -1842,6 +1892,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						ctx,
 						decision,
 						parentClaudeSessionId,
+						{
+							readTranscript: (childSessionId) =>
+								this.readSubagentTranscriptEffect(ctx, childSessionId),
+						},
 					);
 					if (childLink) parentChildLink = childLink;
 					continue;

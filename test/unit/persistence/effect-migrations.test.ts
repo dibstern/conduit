@@ -12,6 +12,10 @@ import {
 	makeEffectMigrationLoader,
 	makeEffectSqlMigrator,
 } from "../../../src/lib/persistence/effect/migrations.js";
+import {
+	PROJECT_TREE_DATA_MIGRATION,
+	readMigrationSql,
+} from "../../../src/lib/persistence/schema.js";
 import { seedLegacyEventStore } from "../../helpers/legacy-event-store.js";
 
 function makeFileSqlLayer(seed?: (filename: string) => void) {
@@ -32,6 +36,134 @@ function makeFileSqlLayer(seed?: (filename: string) => void) {
 const migrationEntries = Object.entries(effectMigrationEntries);
 const prefix = (count: number) =>
 	Object.fromEntries(migrationEntries.slice(0, count));
+
+it.effect(
+	"extracts synthetic message ids without a correlated event scan",
+	() =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator(prefix(65));
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at) VALUES ('s', 'opencode', 1, 1)`;
+			yield* sql`WITH RECURSIVE n(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM n WHERE value < 2000)
+			INSERT INTO messages (id, session_id, role, text, created_at, updated_at)
+			SELECT 'm-' || value, 's', 'user', 'prompt', value, value FROM n`;
+			yield* sql`INSERT INTO events (event_id, session_id, stream_version, type, data, metadata, provider, created_at)
+			SELECT id, session_id, created_at, 'message.created', json_object('messageId', id),
+				CASE WHEN created_at % 4 = 0 THEN '{"synthetic":true}' ELSE '{}' END, 'opencode', created_at FROM messages`;
+			const [query] = readMigrationSql(PROJECT_TREE_DATA_MIGRATION)
+				.split(";")
+				.filter((statement) => statement.includes("FROM events"));
+			expect(query).toBeDefined();
+			const plan = yield* sql.unsafe<{ detail: string }>(
+				`EXPLAIN QUERY PLAN ${query}`,
+			);
+			const samples: number[] = [];
+			for (let i = 0; i < 3; i++) {
+				yield* sql`UPDATE messages SET rest_payload = NULL`;
+				const started = performance.now();
+				yield* sql.unsafe(query ?? "");
+				samples.push(performance.now() - started);
+				expect(
+					yield* sql`SELECT COUNT(*) AS count FROM messages WHERE json_extract(rest_payload, '$.isSynthetic') = 1`,
+				).toEqual([{ count: 500 }]);
+			}
+			console.info(
+				`synthetic provenance: 2000 messages, 500 marked; median ${samples.sort((a, b) => a - b)[1]?.toFixed(2)} ms`,
+			);
+			expect(
+				plan
+					.map(({ detail }) => detail)
+					.filter((detail) => detail.includes("CORRELATED")),
+			).toEqual([]);
+		}).pipe(Effect.provide(makeFileSqlLayer())),
+	{ timeout: 30000 },
+);
+
+it.effect(
+	"backfills more changed sessions than SQLite's parameter limit",
+	() =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator(prefix(65));
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at, root_id)
+			VALUES ('root', 'opencode', 1, 1, 'root')`;
+			yield* sql`WITH RECURSIVE n(value) AS (
+			SELECT 1 UNION ALL SELECT value + 1 FROM n WHERE value < 32766
+		) INSERT INTO sessions (id, provider, parent_id, root_id, created_at, updated_at)
+			SELECT 's-' || value, 'opencode', 'root', 'root', 1, 1 FROM n`;
+			yield* sql`INSERT INTO messages (id, session_id, role, input_id, created_at, updated_at)
+			SELECT 'm-' || id, id, 'user', id, 100, 100 FROM sessions WHERE parent_id = 'root'`;
+			expect(yield* makeEffectSqlMigrator()).toEqual([
+				[66, "project_tree_data"],
+			]);
+			expect(
+				yield* sql`SELECT COUNT(*) AS count, COUNT(DISTINCT version) AS versions
+			FROM sessions WHERE last_user_message_at = 100 AND version > 0`,
+			).toEqual([{ count: 32766, versions: 1 }]);
+			expect(
+				yield* sql`SELECT session_id FROM session_sidebar WHERE row IS NOT NULL`,
+			).toEqual([{ session_id: "root" }]);
+			expect(
+				yield* sql`SELECT last_user_message_at FROM sessions WHERE id = 'root'`,
+			).toEqual([{ last_user_message_at: null }]);
+		}).pipe(Effect.provide(makeFileSqlLayer())),
+	{ timeout: 30000 },
+);
+
+it.effect(
+	"adds project tree data in one migration from main and preserves it on reopen",
+	() =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator(prefix(65));
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at) VALUES ('s', 'opencode', 1, 1)`;
+			yield* sql`INSERT INTO messages (id, session_id, role, text, created_at, updated_at, input_id, is_inherited, rest_payload)
+			VALUES ('human', 's', 'user', 'prompt', 100, 100, NULL, 0, NULL),
+			('synthetic', 's', 'user', 'context', 200, 200, NULL, 0, '{"isSynthetic":true}'),
+			('delivered', 's', 'user', '', 300, 300, 'input', 0, '{"isSynthetic":true}'),
+			('inherited', 's', 'user', 'copied', 400, 400, 'copy', 1, NULL),
+			('late-synthetic', 's', 'user', 'context', 600, 600, NULL, 0, NULL),
+			('part-human', 's', 'user', 'prompt', 250, 250, NULL, 0, NULL),
+			('part-synthetic', 's', 'user', 'context', 700, 700, NULL, 0, NULL),
+			('part-ignored', 's', 'user', '', 800, 800, NULL, 0, NULL),
+			('tool', 's', 'user', 'tool result', 900, 900, NULL, 0, NULL),
+			('ignored', 's', 'user', 'context', 500, 500, NULL, 0,
+			'{"parts":[{"type":"text","text":"context","ignored":true}]}')`;
+			yield* sql`INSERT INTO message_parts (id, message_id, type, text, metadata, rest_payload, sort_order, created_at, updated_at)
+			VALUES ('ordinary', 'part-human', 'text', 'prompt', NULL, NULL, 0, 250, 250),
+			('synthetic-part', 'part-synthetic', 'text', 'context', '{"synthetic":true}', NULL, 0, 700, 700),
+			('ignored-part', 'part-ignored', 'file', '', NULL, '{"ignored":true}', 0, 800, 800),
+			('tool-part', 'tool', 'tool', '', NULL, NULL, 0, 900, 900)`;
+			yield* sql`INSERT INTO events (event_id, session_id, stream_version, type, data, metadata, provider, created_at)
+			VALUES ('late-header', 's', 1, 'message.created', '{"messageId":"late-synthetic"}', '{"synthetic":true}', 'opencode', 601)`;
+			expect(yield* makeEffectSqlMigrator()).toEqual([
+				[66, "project_tree_data"],
+			]);
+			expect(
+				yield* sql`SELECT id, is_human_sent FROM messages ORDER BY id`,
+			).toEqual([
+				{ id: "delivered", is_human_sent: 1 },
+				{ id: "human", is_human_sent: 1 },
+				{ id: "ignored", is_human_sent: 0 },
+				{ id: "inherited", is_human_sent: 0 },
+				{ id: "late-synthetic", is_human_sent: 0 },
+				{ id: "part-human", is_human_sent: 1 },
+				{ id: "part-ignored", is_human_sent: 0 },
+				{ id: "part-synthetic", is_human_sent: 0 },
+				{ id: "synthetic", is_human_sent: 0 },
+				{ id: "tool", is_human_sent: 0 },
+			]);
+			expect(
+				yield* sql`SELECT last_user_message_at FROM sessions WHERE id = 's'`,
+			).toEqual([{ last_user_message_at: 300 }]);
+			const columns = yield* sql<{ name: string }>`PRAGMA table_info(messages)`;
+			expect(columns.map(({ name }) => name)).not.toContain("is_synthetic");
+			expect(
+				yield* sql`SELECT json_extract(rest_payload, '$.isSynthetic') AS synthetic FROM messages WHERE id = 'late-synthetic'`,
+			).toEqual([{ synthetic: 1 }]);
+			expect(yield* makeEffectSqlMigrator()).toEqual([]);
+		}).pipe(Effect.provide(makeFileSqlLayer())),
+);
 
 const expectedNames = [
 	"create_event_store_tables",
@@ -99,6 +231,7 @@ const expectedNames = [
 	"sessions_archived",
 	"prompt_provider_reference",
 	"tool_result_event_refs",
+	"project_tree_data",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -130,6 +263,7 @@ it.effect(
 				[63, "sessions_archived"],
 				[64, "prompt_provider_reference"],
 				[65, "tool_result_event_refs"],
+				[66, "project_tree_data"],
 			]);
 			yield* sql`UPDATE sessions SET forked_from = 'source' WHERE id = 'fork'`;
 			expect(yield* makeEffectSqlMigrator()).toEqual([]);
@@ -251,6 +385,7 @@ describe("Effect migration lineage", () => {
 					63,
 					64,
 					65,
+					66,
 				]);
 				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, workspace_hint, workspace_hint_sequence)
 					VALUES ('main-database', 'claude', 'Preserved', 'idle', 1, 1, '/repo/worktree', 123)`;
@@ -415,8 +550,8 @@ describe("Effect migration lineage", () => {
 			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it("registers the contiguous production chain from 1 through 65", () => {
-		expect(migrationEntries).toHaveLength(65);
+	it("registers the contiguous production chain from 1 through 66", () => {
+		expect(migrationEntries).toHaveLength(66);
 		expect(migrationEntries.map(([key]) => key)).toEqual(
 			expectedNames.map(
 				(name, index) => `${String(index + 1).padStart(4, "0")}_${name}`,
@@ -598,6 +733,7 @@ describe("Effect migration lineage", () => {
 					[63, "sessions_archived"],
 					[64, "prompt_provider_reference"],
 					[65, "tool_result_event_refs"],
+					[66, "project_tree_data"],
 				]);
 				expect(yield* sql`SELECT type FROM events WHERE sequence = 45`).toEqual(
 					[{ type: "thinking.end" }],
@@ -684,6 +820,7 @@ describe("Effect migration lineage", () => {
 					[63, "sessions_archived"],
 					[64, "prompt_provider_reference"],
 					[65, "tool_result_event_refs"],
+					[66, "project_tree_data"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace_hint, workspace_hint_sequence
@@ -749,6 +886,7 @@ describe("Effect migration lineage", () => {
 					[63, "sessions_archived"],
 					[64, "prompt_provider_reference"],
 					[65, "tool_result_event_refs"],
+					[66, "project_tree_data"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace, claude_worktree_state FROM sessions WHERE id = 'kept-workspace'`,
@@ -1348,6 +1486,7 @@ describe("Effect migration lineage", () => {
 				[63, "sessions_archived"],
 				[64, "prompt_provider_reference"],
 				[65, "tool_result_event_refs"],
+				[66, "project_tree_data"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -1450,6 +1589,7 @@ describe("Effect migration lineage", () => {
 					[63, "sessions_archived"],
 					[64, "prompt_provider_reference"],
 					[65, "tool_result_event_refs"],
+					[66, "project_tree_data"],
 				]);
 				const rows = yield* sql<{
 					id: string;

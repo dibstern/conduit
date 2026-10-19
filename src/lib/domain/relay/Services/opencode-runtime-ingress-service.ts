@@ -133,6 +133,7 @@ const BACKFILL_PENDING_MAX_ATTEMPTS = 3;
 
 type StoredMessage = {
 	id: string;
+	is_inherited: number;
 	rest_digest: string | null;
 	rest_event_id: string | null;
 };
@@ -523,8 +524,32 @@ export class EffectOpenCodeRuntimeIngress
 				Effect.flatMap(
 					SqlClient.SqlClient,
 					(sql) =>
-						sql<StoredMessage>`SELECT id, rest_digest, rest_event_id FROM messages WHERE session_id = ${sessionId}`,
+						sql<StoredMessage>`SELECT id, is_inherited, rest_digest, rest_event_id FROM messages WHERE session_id = ${sessionId}`,
 				),
+			);
+			// Native forks can arrive before their boundary row is projected. Resolve
+			// the copied provider history once per REST batch, then persist the fact.
+			const [fork] = yield* this.sql<{
+				fork_point_event: string | null;
+				fork_point_timestamp: number | null;
+			}>`
+				SELECT fork_point_event, fork_point_timestamp FROM sessions WHERE id = ${sessionId}`;
+			const boundary = rest.find(({ id }) => id === fork?.fork_point_event);
+			const boundaryTime =
+				boundary?.time?.created ?? fork?.fork_point_timestamp;
+			const inherited = new Set(
+				rest
+					.filter((message) => {
+						const created = message.time?.created;
+						return (
+							boundaryTime != null &&
+							created != null &&
+							(created < boundaryTime ||
+								(created === boundaryTime &&
+									message.id <= (fork?.fork_point_event ?? "")))
+						);
+					})
+					.map(({ id }) => id),
 			);
 			const stored = new Map(projected.map((row) => [row.id, row]));
 			const settled = rest.filter(isSettled);
@@ -538,15 +563,24 @@ export class EffectOpenCodeRuntimeIngress
 						// previous turn and clear its reply link. Reproject its owned
 						// history during recovery even when the snapshot is unchanged.
 						options?.restoreTurns ||
-						stored.get(message.id)?.rest_digest !== digests.get(message.id),
+						stored.get(message.id)?.rest_digest !== digests.get(message.id) ||
+						(inherited.has(message.id) &&
+							stored.get(message.id)?.is_inherited !== 1),
 				)
-				.map((message) =>
-					synthesizeSnapshotEvent(
+				.map((message) => {
+					const snapshot = synthesizeSnapshotEvent(
 						sessionId,
 						message,
 						stored.get(message.id)?.rest_event_id ?? undefined,
-					),
-				);
+					);
+					return inherited.has(message.id)
+						? {
+								...snapshot,
+								eventId: `${snapshot.eventId}_inherited`,
+								metadata: { inherited: true },
+							}
+						: snapshot;
+				});
 			// Even an unchanged snapshot may predate compaction ingestion. Always
 			// offer the summary outcome; append deduplicates its durable message ID.
 			for (const message of settled) {

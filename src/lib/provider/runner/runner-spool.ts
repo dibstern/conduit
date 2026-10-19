@@ -66,7 +66,9 @@ export class RunnerSpool {
 		if (this.connection !== connection) return;
 		this.connection = undefined;
 		this.writeSpool();
-		for (const [sequence] of this.retained) {
+		for (const [sequence, frame] of this.retained) {
+			// A transcript cursor needs the store's reply before it can emit.
+			if (frame.output.type === "read-subagent-transcript") continue;
 			const waiter = this.waiters.get(sequence);
 			if (waiter) Deferred.doneUnsafe(waiter, Effect.succeed({}));
 			this.waiters.delete(sequence);
@@ -131,7 +133,11 @@ export class RunnerSpool {
 					)
 						this.pendingInteractions.delete(id);
 			this.retained.set(sequence, frame);
-			if (waiter && this.connection) this.waiters.set(sequence, waiter);
+			if (
+				waiter &&
+				(this.connection || output.type === "read-subagent-transcript")
+			)
+				this.waiters.set(sequence, waiter);
 			if (this.connection) this.connection.write(frame);
 			else {
 				this.spooled = true;
@@ -139,7 +145,7 @@ export class RunnerSpool {
 				appendFileSync(this.filename, line);
 				this.spooledBytes += Buffer.byteLength(line);
 				this.spooledThroughSequence = sequence;
-				return {};
+				if (output.type !== "read-subagent-transcript") return {};
 			}
 			return waiter ? yield* Deferred.await(waiter) : {};
 		});

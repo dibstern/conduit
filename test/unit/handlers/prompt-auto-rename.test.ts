@@ -40,6 +40,8 @@ const makePersistService = (
 	persistEvents: vi.fn(() => Effect.void),
 	persistUserMessage,
 	ensureClaudeSubagentSession: vi.fn(() => Effect.void),
+	readClaudeSubagentTranscript: () =>
+		Effect.succeed({ messages: [], parts: [] }),
 });
 
 const makeTitleService = (): SessionTitleService => ({

@@ -23,7 +23,10 @@ import type {
 	RunnerLiveQueryConfiguration,
 	RunnerSettingsSnapshot,
 } from "../runner/runner-upgrade.js";
-import type { SessionFailure } from "../runner/session-runner.js";
+import type {
+	SessionFailure,
+	SessionRunner,
+} from "../runner/session-runner.js";
 import {
 	type ClaudeSessionRunnerDeps,
 	makeClaudeSessionRunner,
@@ -100,6 +103,7 @@ export const makeClaudeRunnerLaunch = (
 		let daemonConfigDir: string | undefined;
 		let launchSettings: RunnerSettingsSnapshot["claudeSettingsOverrides"];
 		let resumeSessionId: string | undefined;
+		let sessionRunner: SessionRunner | undefined;
 		let liveConfiguration: RunnerLiveQueryConfiguration | undefined;
 		const createQuery: NonNullable<ClaudeSessionRunnerDeps["queryFactory"]> = (
 			params,
@@ -328,7 +332,7 @@ export const makeClaudeRunnerLaunch = (
 			makeRunner: (config, emit) =>
 				Effect.gen(function* () {
 					daemonConfigDir = config.daemonConfigDir;
-					return yield* makeClaudeSessionRunner(
+					sessionRunner = yield* makeClaudeSessionRunner(
 						{
 							...config,
 							shellEnv: () => shellEnv,
@@ -395,9 +399,28 @@ export const makeClaudeRunnerLaunch = (
 									if (frozenSnapshot) frozenSnapshot = snapshot;
 								}
 							}
-							return emit(output);
+							if (
+								output.type !== "event" ||
+								output.event.sessionId !== sessionId
+							)
+								return emit(output);
+							return Effect.gen(function* () {
+								const cursor = yield* sessionRunner?.getResumeSessionIdEffect?.(
+									sessionId,
+								) ?? Effect.succeed(undefined);
+								if (
+									cursor !== undefined &&
+									(cursor ?? undefined) !== resumeSessionId
+								) {
+									resumeSessionId = cursor ?? undefined;
+									// A client may send again as soon as it sees this event.
+									reportUpgradeState();
+								}
+								return yield* emit(output);
+							});
 						},
 					);
+					return sessionRunner;
 				}),
 			acceptCommand: (command) => {
 				if (command.type === "send-turn" || command.type === "pre-warm")

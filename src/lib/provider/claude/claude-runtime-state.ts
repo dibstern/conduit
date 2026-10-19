@@ -45,7 +45,7 @@ export function setSession(
 ): Effect.Effect<void> {
 	return Ref.update(stateRef, (state) => ({
 		...state,
-		// Live SDK contexts are mutable resources, not structural values.
+		// Live contexts own mutable SDK resources and use identity for ownership.
 		sessions: HashMap.set(
 			state.sessions,
 			sessionId,
@@ -75,15 +75,23 @@ export function getSetupLock(
 	);
 }
 
-export function setSetupLock(
+export function claimSetupLock(
 	stateRef: Ref.Ref<ClaudeProviderRuntimeState>,
 	sessionId: string,
 	deferred: Deferred.Deferred<void, Error>,
-): Effect.Effect<void> {
-	return Ref.update(stateRef, (state) => ({
-		...state,
-		setupLocks: HashMap.set(state.setupLocks, sessionId, deferred),
-	}));
+): Effect.Effect<Deferred.Deferred<void, Error> | undefined> {
+	return Ref.modify(stateRef, (state) => {
+		const existing = getOrUndefined(HashMap.get(state.setupLocks, sessionId));
+		return existing
+			? [existing, state]
+			: [
+					undefined,
+					{
+						...state,
+						setupLocks: HashMap.set(state.setupLocks, sessionId, deferred),
+					},
+				];
+	});
 }
 
 export function removeSetupLock(

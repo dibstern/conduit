@@ -6,6 +6,7 @@ import type {
 	LegacyRunnerPermissionMode as LegacyPermissionMode,
 	LegacyRunnerSettings as Settings,
 } from "../claude/claude-runner-snapshot.js";
+import type { ClaudeSubagentTranscriptSnapshot } from "../claude/types.js";
 import type {
 	PermissionDecision,
 	PermissionRequest,
@@ -136,6 +137,10 @@ export type SessionOutput =
 					};
 			  }
 			| {
+					readonly type: "read-subagent-transcript";
+					readonly childSessionId: string;
+			  }
+			| {
 					readonly type: "ensure-subagent-session";
 					readonly input: {
 						readonly childSessionId: string;
@@ -149,7 +154,9 @@ export type SessionOutput =
 	  ));
 
 /** Plain-data reply to an output operation; events and notifications return {}. */
-export type SessionOutputReply = Readonly<Record<string, never>>;
+export interface SessionOutputReply {
+	readonly subagentTranscript?: ClaudeSubagentTranscriptSnapshot;
+}
 
 /** Failure replies preserve the SDK fields used by the side-effect reactor. */
 export interface SessionFailure {
