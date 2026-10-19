@@ -152,9 +152,7 @@ jobs:
           XDG_CONFIG_HOME: /tmp/opencode-ci-config
       - run: pnpm exec playwright test --config test/e2e/playwright-replay.config.ts
       - run: pnpm exec playwright test --config test/e2e/playwright-daemon.config.ts
-      - run: pnpm exec playwright test --config test/e2e/playwright-multi-instance.config.ts
-      - run: pnpm exec playwright test --config test/e2e/playwright-subagent.config.ts
-      - run: pnpm exec playwright test --config test/e2e/playwright-visual.config.ts
+      - run: pnpm exec playwright test --config test/e2e/playwright-preview.config.ts
 
   # ── Job 4: Storybook build + visual tests ──────────────────────────────────
   # Completely independent — no build or OpenCode needed.
