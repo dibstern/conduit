@@ -1117,7 +1117,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 		};
 
 		const triageLock = yield* Semaphore.make(1);
-		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 		const service: SessionManagerService = {
 			getDefaultSessionId: (title) =>
 				Effect.gen(function* () {
@@ -1283,9 +1282,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 								}),
 						),
 					);
-				return Option.isSome(workspace)
-					? workspace.value.withLaunch(sweep)
-					: sweep;
+				return workspace.withLaunch(sweep);
 			},
 			renameSession: (sessionId, title) =>
 				withSessionCommandServices(renameSession(sessionId, title)),
