@@ -497,7 +497,12 @@ export const sessionSkillsHandlers: StepHandler[] = [
 			await expect(chip).toHaveAccessibleName(
 				`${count} ${count === "1" ? "skill" : "skills"} used`,
 			);
-			await expect(chip).toHaveText(count);
+			const desktop = await world.page
+				.locator('#session-bar[data-compact="false"]')
+				.count();
+			await expect(chip).toHaveText(
+				desktop ? `${count} ${count === "1" ? "skill" : "skills"}` : count,
+			);
 		},
 	},
 	{

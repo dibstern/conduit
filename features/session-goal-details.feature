@@ -1,6 +1,6 @@
 Feature: Goal details reveal check history and goal actions
 
-Scenario Outline: The goal subtitle opens full-width details and both dismissal paths work
+Scenario Outline: The goal subtitle opens details and both dismissal paths work
   Given the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the composer status clock is frozen
@@ -9,8 +9,8 @@ Scenario Outline: The goal subtitle opens full-width details and both dismissal 
   When I click the session goal subtitle
   Then goal details are open below the full session header
   And the goal details condition reads All 38 scenarios pass
-  And the goal details metadata includes 41m and 1.24M tokens
-  And the goal details history shows all three checks in iteration order
+  And the goal details metadata describes its start, checks and tokens
+  And the goal details history shows all three checks in layout order
   And goal details offer Pause, Edit and Clear
   And the layout region visually matches <baseline> at <threshold> percent
   When I click the goal details scrim

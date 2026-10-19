@@ -151,7 +151,14 @@ export const sessionGoalHandlers: StepHandler[] = [
 		match: /^the (amber )?session goal subtitle reads (.+)$/,
 		run: async ({ world, match }) => {
 			const subtitle = world.page.getByTestId("session-goal-subtitle");
-			await expect(subtitle).toHaveText(match[2] ?? "");
+			// Desktop sets the label and the condition as separate flex items, so
+			// the space before the separator is layout, not text.
+			const parts = (match[2] ?? "")
+				.split(/\s*·\s*/)
+				.map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+			await expect(subtitle).toHaveText(
+				new RegExp(`^\\s*${parts.join("\\s*·\\s*")}\\s*$`),
+			);
 			// The tone follows the shell row, which arrives on its own socket,
 			// so the text can settle before the colour does.
 			const read = () =>

@@ -733,12 +733,18 @@ for (const mode of [
 			});
 			const group = page.locator(".session-bar-segments");
 			await expect(group.locator(":scope > *")).toHaveCount(2);
-			const borders = await group
+			// Phone segments divide with a border; the desktop capsule with a 1px rule.
+			const dividers = await group
 				.locator(":scope > *")
 				.evaluateAll((segments) =>
-					segments.map((segment) => getComputedStyle(segment).borderLeftWidth),
+					segments.map((segment) => {
+						const rule = getComputedStyle(segment, "::after");
+						return rule.content === "none"
+							? getComputedStyle(segment).borderLeftWidth
+							: rule.width;
+					}),
 				);
-			expect(borders).toEqual(["0px", "1px"]);
+			expect(dividers).toEqual(["0px", "1px"]);
 			const pulse = page.getByTestId("session-skills-chip-pulse");
 			await expect(pulse).toBeVisible();
 			const clipping = await pulse.evaluate((element) => {

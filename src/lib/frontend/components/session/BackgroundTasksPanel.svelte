@@ -15,8 +15,8 @@
 	let { tasks, compact, onstop, onstopall }: { tasks: readonly BackgroundTask[]; compact: boolean; onstop?: ((taskId: string) => void) | undefined; onstopall?: (() => void) | undefined } = $props();
 </script>
 
-<Surface id="background-tasks-panel" data-testid="background-tasks-panel" variant="plain" radius="none" elevation="panel" role="region" aria-label="Background tasks" class="absolute top-full z-[var(--z-popover)] max-h-[70dvh] overflow-y-auto whitespace-normal border-border px-[14px] pt-[12px] pb-[10px] text-[12px] {compact ? 'inset-x-0 rounded-b-[22px] border-b' : 'left-4 mt-1 w-[440px] max-w-[calc(100%-32px)] rounded-[14px] border'}">
-	<div class="flex items-center gap-[7px] font-sans text-[11px] font-semibold uppercase tracking-[0.08em] text-tool">
+<Surface id="background-tasks-panel" data-testid="background-tasks-panel" variant={compact ? "plain" : "floating"} radius="none" elevation={compact ? "panel" : "popover"} role="region" aria-label="Background tasks" class="absolute top-full z-[var(--z-popover)] max-h-[70dvh] overflow-y-auto whitespace-normal border-border px-[14px] pt-[12px] pb-[10px] text-[12px] {compact ? 'inset-x-0 rounded-b-[22px] border-b' : 'left-[20px] mt-[8px] w-[440px] max-w-[calc(100%-32px)] rounded-[16px]'}">
+	<div class="flex items-center gap-[7px] font-sans text-tool {compact ? 'text-[11px] font-semibold uppercase tracking-[0.08em]' : 'text-[12px] font-medium'}">
 		<TaskGlyph />{tasks.length === 1 ? "1 background task" : `${tasks.length} background tasks`}
 	</div>
 	<BackgroundTaskList {tasks} {onstop} />

@@ -1,8 +1,8 @@
 // A turn that left background work running says so: its head shows "N running"
 // beside the cost (nested tasks included) and the launching steps keep
 // breathing on the strip after the turn's result, until the tasks finish. The
-// session lists background agents beside shells in its tasks row, composer
-// dots and pull-down, nests an agent's tasks under it, reads as monitoring
+// session lists background agents beside shells in its tasks row and
+// pull-down, nests an agent's tasks under it, reads as monitoring
 // while they run. Task stops cross the real process runner in
 // harness-background-task-stop.spec.ts; recorded replay has no stopTask replies.
 // Spec: conduit-test-i7fy.8.
@@ -59,11 +59,8 @@ async function readSurfaces(page: Page, sessionId: string) {
 			.locator(`#session-list [data-session-id="${sessionId}"]`)
 			.getAttribute("aria-label"),
 		tasksRow: (await page.getByTestId("background-tasks-row").isVisible())
-			? await page
-					.getByTestId("background-tasks-row")
-					.getAttribute("aria-label")
+			? await page.getByTestId("background-tasks-row").innerText()
 			: null,
-		dots: await page.getByTestId("composer-task-dots").locator("i").count(),
 		pulldown: (await panel.isVisible())
 			? await panel.getByTestId("background-task").evaluateAll((nodes) =>
 					nodes.map((node) => ({
@@ -146,7 +143,9 @@ test.describe("Claude running tasks", () => {
 		if (!replayer) throw new Error("no Claude replayer");
 		const steps = recorder(page, testInfo, sessionId, harness.eventsDbPath);
 		const pill = page.locator(".turn-running");
-		const tasksRow = page.getByTestId("background-tasks-row");
+		const tasksRow = page.getByRole("button", {
+			name: /^\d+ background tasks?$/,
+		});
 		const sidebarRow = page.locator(
 			`#session-list [data-session-id="${sessionId}"]`,
 		);
@@ -162,13 +161,10 @@ test.describe("Claude running tasks", () => {
 			// The parent's result: the shell, both agents and agent A's first
 			// nested shell are live. The three launching steps still breathe.
 			await expect(pill).toHaveText(/^\s*4\s+running\s*$/);
-			await expect(tasksRow).toHaveAttribute(
-				"aria-label",
-				"4 background tasks",
-			);
+			await expect(tasksRow).toHaveAccessibleName("4 background tasks");
 			await expect(
-				page.getByTestId("composer-task-dots").locator("i"),
-			).toHaveCount(4);
+				page.getByRole("button", { name: "4 background tasks", exact: true }),
+			).toBeVisible();
 			const atResult = await steps.record("parent-result");
 			expect.soft(atResult.breathing, "launching steps breathing").toBe(3);
 
@@ -182,13 +178,10 @@ test.describe("Claude running tasks", () => {
 				sidebarRow,
 				"background agents ran after the turn but the session did not read as monitoring",
 			).toHaveAttribute("aria-label", /^Monitoring/);
-			await expect(tasksRow).toHaveAttribute(
-				"aria-label",
-				"5 background tasks",
-			);
+			await expect(tasksRow).toHaveAccessibleName("5 background tasks");
 			await expect(
-				page.getByTestId("composer-task-dots").locator("i"),
-			).toHaveCount(5);
+				page.getByRole("button", { name: "5 background tasks", exact: true }),
+			).toBeVisible();
 			await tasksRow.click();
 			await expect(page.getByTestId("background-tasks-panel")).toBeVisible();
 			const nested = await steps.record("nested-running");
@@ -255,7 +248,9 @@ test.describe("Claude running tasks", () => {
 			await chat.waitForStreamingComplete();
 			await expect(pill).toHaveCount(0);
 			await expect(tasksRow).toBeHidden();
-			await expect(page.getByTestId("composer-task-dots")).toBeHidden();
+			await expect(
+				page.getByRole("button", { name: /^\d+ background tasks?$/ }),
+			).toHaveCount(0);
 			await expect(sidebarRow).not.toHaveAttribute("aria-label", /^Monitoring/);
 			const finished = await steps.record("finished");
 			expect.soft(finished.breathing, "launching steps breathing").toBe(0);

@@ -41,7 +41,8 @@
 	<button {...props} type="button" disabled={disabled && !disabledReason} aria-disabled={dimmed || undefined} aria-describedby={subLine ? detailId : undefined} data-menu-tile data-held={held || undefined} class="relative flex h-[72px] min-w-0 cursor-pointer select-none touch-manipulation flex-col items-center justify-center gap-[6px] rounded-[14px] text-center text-[length:var(--tile-font,13px)] font-medium leading-[1.2] outline-hidden transition-transform motion-reduce:scale-100 motion-reduce:transition-none data-[disabled]:cursor-not-allowed aria-disabled:cursor-not-allowed {shape === 'wide' ? 'col-span-2' : ''} {variant === 'primary' ? 'text-accent' : variant === 'danger' ? 'text-error' : 'text-text'} {held ? 'scale-105 bg-popover-bg shadow-dropdown inset-ring-[1.5px] inset-ring-accent' : variant === 'primary' ? 'bg-accent/16' : variant === 'danger' ? 'bg-error/13' : 'bg-chip'} {held ? '' : 'data-[highlighted]:ring-[1.5px] data-[highlighted]:ring-accent'} {className}">
 	<span aria-hidden="true" class:opacity-35={dimmed}><Icon name={icon} size={20} /></span>
 	<span class:opacity-35={dimmed}>{label}</span>
-	{#if subLine}<small id={detailId} class="-mt-[4px] text-[10.5px] font-normal leading-[1.2] text-text-dimmer">{subLine}</small>{/if}
+	<!-- Muted, not dimmer: on the chip fill dimmer falls under even the quiet tier's 3:1. -->
+	{#if subLine}<small id={detailId} class="-mt-[4px] text-[10.5px] font-normal leading-[1.2] text-text-muted">{subLine}</small>{/if}
 	{#if tag}<span class="absolute top-[6px] right-[8px] font-mono text-[9.5px] font-normal text-text-muted">{tag}</span>{/if}
 	</button>
 {/snippet}

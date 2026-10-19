@@ -13,6 +13,7 @@
 	import { dragToDismiss } from "../../actions/drag-to-dismiss.js";
 	import {
 		FLOATING_MENU_CONTENT_CLASSES,
+		FINAL_MENU_CONTENT_CLASSES,
 		FLOATING_POSITIONING_DEFAULTS,
 	} from "./floating-styles.js";
 	import { menuDensityContextKey, type MenuDensityContext } from "./menu-context.js";
@@ -31,6 +32,7 @@
 		ariaLabel?: string | undefined;
 		/** MenuItem rows need DropdownMenu's dismissal model; a Modal sheet would require raw rows and a second model. */
 		presentation?: "popover" | "sheet" | undefined;
+		appearance?: "default" | "final";
 		side?: MenuSide | undefined;
 		align?: MenuAlign | undefined;
 		sideOffset?: number | undefined;
@@ -66,6 +68,7 @@
 		onopenchange,
 		ariaLabel,
 		presentation = "popover",
+		appearance = "default",
 		side,
 		align = FLOATING_POSITIONING_DEFAULTS.align,
 		sideOffset = FLOATING_POSITIONING_DEFAULTS.sideOffset,
@@ -80,12 +83,12 @@
 		...rest
 	}: MenuOwnProps = $props();
 	setContext<MenuDensityContext>(menuDensityContextKey, () =>
-		presentation === "sheet" ? "sheet" : "default",
+		presentation === "sheet" ? "sheet" : appearance === "final" ? "final" : "default",
 	);
 	const dialogTarget = getDialogTarget();
 
 	const contentClass = $derived(
-		[FLOATING_MENU_CONTENT_CLASSES, className].filter(Boolean).join(" "),
+		[appearance === "final" ? FINAL_MENU_CONTENT_CLASSES : FLOATING_MENU_CONTENT_CLASSES, className].filter(Boolean).join(" "),
 	);
 
 	/**

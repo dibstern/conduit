@@ -1671,14 +1671,6 @@
 		{#if composerNotice}
 			<p data-testid="composer-provider-notice" class="px-[6px] pt-2 text-[11px] text-text-muted">{composerNotice}</p>
 		{/if}
-		{#if currentSession?.backgroundTasks?.length}
-			<!-- One pulse per live background task; the header row lists them. -->
-			<div data-testid="composer-task-dots" aria-hidden="true" class="flex justify-center gap-1.5 pt-[7px]">
-				{#each currentSession.backgroundTasks as task, index (task.id)}
-					<i class="composer-task-dot" style:animation-delay="{(index % 3) * 0.35}s"></i>
-				{/each}
-			</div>
-		{/if}
 		{#if !sessionState.currentId && routeSessionId === null && !sessionViewState.compact}
 			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} focusComposer={() => textareaEl?.focus()} /></div>
 		{/if}
@@ -1689,13 +1681,4 @@
 <style>
 	#input-area[data-compact="true"] { padding: 6px 12px calc(env(safe-area-inset-bottom, 0px) + 8px); }
 	#input-area[data-compact="true"]:has(:global(textarea:focus)) { padding-bottom: 8px; }
-	.composer-task-dot {
-		width: 5px;
-		height: 5px;
-		border-radius: 50%;
-		background: var(--color-tool);
-		animation: composer-task-pulse 1.4s ease-in-out infinite;
-	}
-	@keyframes composer-task-pulse { 50% { opacity: 0.3; } }
-	@media (prefers-reduced-motion: reduce) { .composer-task-dot { animation: none; } }
 </style>

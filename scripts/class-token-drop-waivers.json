@@ -1,4 +1,63 @@
 {
+	"src/lib/frontend/components/ui/Tile.svelte :: text-text-dimmer": "conduit-test-aoqb.4: the tile sub-line lifts to text-muted; text-dimmer on the chip fill measured 2.52:1 over the dark popover, below even the quiet tier's 3:1.",
+	"src/lib/frontend/components/ui/button-recipes.ts :: bg-error/22": "conduit-test-aoqb.4: danger-soft's tint drops to bg-error/12, the lightest that keeps its error label at 4.5:1 on a dark popover and in the light theme (theme-contrast.test.ts).",
+	"src/lib/frontend/components/ui/button-recipes.ts :: hover:bg-error/30": "conduit-test-aoqb.4: danger-soft's hover tint drops to bg-error/20 to stay one step above the lowered /12 rest tint.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: bg-[rgba(var(--overlay-rgb),0.35)]": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "variant={sessionViewState.compact ? \"scrim\" : \"scrim-clear\"}",
+		"reason": "conduit-test-aoqb.4 fix: Button owns the phone scrim fill; desktop keeps a clear dismissal target."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: data-[state,open]:text-accent": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "variant=\"menu-trigger\"",
+		"reason": "conduit-test-aoqb.4 fix: Button's menu-trigger variant owns the open state."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: open]:bg-accent/16": "conduit-test-aoqb.4 fix: the menu trigger now uses the existing contrast-safe accent-bg token, owned by Button's menu-trigger variant.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: font-bold,h-[12px],min-w-[12px],px-[3px],text-[8px],text-bg": {
+		"movedTo": "src/lib/frontend/components/ui/Badge.svelte",
+		"requires": "variant=\"accent-solid\" size=\"indicator\"",
+		"reason": "conduit-test-aoqb.4 fix: Badge owns the tiny view-update count's fill and type."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: group-active:bg-accent/15,group-data-[state,group-focus-visible:bg-accent/10,group-hover:bg-accent/10,open]:bg-accent/15": {
+		"movedTo": "src/lib/frontend/components/ui/Badge.svelte",
+		"requires": "interactive>",
+		"reason": "conduit-test-aoqb.4 fix: interactive Badge owns the unread chip's hover, focus and open fills."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: justify-start,select-none,whitespace-nowrap": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "layout=\"block\" align=\"start\"",
+		"reason": "conduit-test-aoqb.4 fix: Button's block layout preserves the subtitle's display and interaction."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: min-w-[44px]": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "size=\"touch-icon\"",
+		"reason": "conduit-test-aoqb.4 fix: Button's touch sizes retain 44px targets."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: pl-1,pr-2,rounded-lg,text-base": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "\"navigation\" : \"navigation-pill\"",
+		"reason": "conduit-test-aoqb.4 fix: Button owns the phone and desktop navigation sizes."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: py-[6px],rounded-[9px]": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "size=\"card-action\"",
+		"reason": "conduit-test-aoqb.4 fix: goal-card actions use Button's public card-action size."
+	},
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: bg-tool/13,inline-flex,pl-[5px],pr-1.5,py-0,rounded-[6px]": {
+		"movedTo": "src/lib/frontend/components/ui/Badge.svelte",
+		"requires": "variant=\"task\" size=\"task\"",
+		"reason": "conduit-test-aoqb.4 fix: Badge owns the existing phone task-chip recipe."
+	},
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: justify-start,leading-[1.5],select-none,text-[11px],text-tool,whitespace-nowrap": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "variant=\"task-row\"",
+		"reason": "conduit-test-aoqb.4 fix: Button owns the phone task row's typography and interaction."
+	},
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: compact,min-w-full,w-0": "conduit-test-aoqb.4 fix: the phone-only branch always has compact=true, so its row uses w-full directly. Desktop command chips use the separate desktop branch.",
+	"src/lib/frontend/components/input/InputArea.svelte :: composer-task-dot,gap-1.5,justify-center,pt-[7px]": "conduit-test-aoqb.4: the approved 2026-10-16 audit removes composer task dots and their layout. Live tasks remain visible in the header row and its task panel.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: items-stretch,py-2,text-xs": "conduit-test-aoqb.4: the Final desktop capsule centers its segments; the state menu uses literal pixel padding and text sizes.",
+	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: border,left-4,mt-1,rounded-[14px]": "conduit-test-aoqb.4: desktop task details use the Final floating Surface with a border-chip ring, 16px corners, 20px inset and 8px anchor gap. The phone panel keeps its existing bottom border and geometry.",
+	"src/lib/frontend/components/session/SideThreadsPanel.svelte :: border,mt-1,right-4,rounded-[14px]": "conduit-test-aoqb.4: desktop side threads use the Final floating Surface with a border-chip ring, 16px corners, 16px right inset and 8px anchor gap. The phone panel keeps its existing bottom border and geometry.",
 	"src/lib/frontend/components/session/SessionContextMenu.svelte :: font-mono,grid,inline-flex,items-center,items-start,min-w-0,place-items-center,status.colour,text-text-secondary": {
 		"movedTo": "src/lib/frontend/components/session/SessionSheetBody.svelte",
 		"requires": "<SessionSheetBody",
@@ -217,11 +276,7 @@
 		"requires": "<MenuSeparator />",
 		"reason": "The phone sheet now uses Menu's separator, which carries the same three divider classes."
 	},
-	"src/lib/frontend/components/layout/SessionBar.svelte :: w-[13px]": {
-		"movedTo": "src/lib/frontend/components/ui/MenuCheckboxItem.svelte",
-		"requires": "<MenuCheckboxItem",
-		"reason": "The checkbox primitive owns the fixed-width leading check slot."
-	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: w-[13px]": "conduit-test-aoqb.4: AutoSettleRow replaces the plain checkbox and its empty check spacer with SwitchRow's icon, switch and server outlook.",
 	"src/lib/frontend/components/session/SessionContextMenu.svelte :: w-[13px]": {
 		"movedTo": "src/lib/frontend/components/session/SessionVerbItems.svelte",
 		"requires": "<SessionVerbItems",

@@ -669,54 +669,66 @@ body:has(dialog:modal) {
 	grid-area: more;
 }
 
-/* Desktop keeps the same controls mounted in one row. Only the title row grows:
-   the title, its ▾ and chip hug each other on its left, and its growth pushes
-   identity, Settle, the status dot and ⋯ to the end, so identity groups with
-   the controls on the right as it does on phones. Growing (not an auto margin)
-   gives the background-task line under the title a real box ending before the
-   skills chip, so its chips truncate rather than paint over the controls that
-   follow. The task line takes no intrinsic width, so it never sets the title
-   row's size or floor. When space runs out the identity
-   yields first (its large shrink factor) down to its own floor, then the
-   title down to its 110px floor. The title row keeps the default `min-width: auto`, so its floor is
-   its real contents; a fixed floor smaller than title + ▾ + chip let the
-   chip spill out of the row and paint over the identity. */
+/* Desktop keeps title and controls on one row. Only the title track yields;
+   background tasks occupy their own track across the whole header. */
 #session-bar[data-compact="false"] {
-	display: flex;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto auto auto;
+	grid-template-areas:
+		"title meta connection more"
+		"tasks tasks tasks tasks";
 	container: session-bar / inline-size;
-	min-height: 48px;
-	gap: 6px;
-	padding: 4px 12px;
+	min-height: 52px;
+	column-gap: 8px;
+	row-gap: 0;
+	padding: 4px 10px 4px 20px;
 	white-space: nowrap;
 }
-#session-bar[data-compact="false"] #session-bar-title-row {
-	flex: 1 1 auto;
+#session-bar[data-compact="false"]:has(#session-bar-back) {
+	grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+	grid-template-areas:
+		"back title meta connection more"
+		"tasks tasks tasks tasks tasks";
 }
+#session-bar[data-compact="false"] [data-testid="background-tasks-row"] {
+	grid-area: tasks;
+}
+#session-bar[data-compact="false"] #session-bar-title-row {
+	min-width: 0;
+}
+/* No width floor: in the grid the title track is the only one that yields, so a
+   floor would only overflow into the controls, and it parted short titles from ▾. */
 #session-bar[data-compact="false"] #session-bar-title {
-	min-width: 110px;
 	flex: 0 1 auto;
+	font-size: 14.5px;
+	letter-spacing: -0.01em;
 }
 /* The markup's negative block margin stays: the target overhangs instead of
    making the title line taller than its text. */
 #session-bar[data-compact="false"] [data-testid="session-bar-title-menu"] {
-	min-width: 30px;
+	min-width: 24px;
 	min-height: 32px;
+	width: 24px;
 }
 #session-bar[data-compact="false"] #session-bar-meta {
-	flex: 0 100 auto;
-	/* Floor at the contents' minimum (the pill's 4-letter floor plus the fixed
-	   controls), so the title yields next instead of the controls overflowing. */
 	min-width: auto;
 }
 #session-bar[data-compact="false"] #session-bar-settle {
 	flex: none;
 }
 #session-bar[data-compact="false"] #session-bar-more {
-	min-width: 32px;
-	min-height: 32px;
+	min-width: 44px;
+	min-height: 44px;
+}
+#session-bar[data-compact="false"] [data-testid="session-goal-subtitle"] {
+	font-size: 12.5px;
+}
+#session-bar[data-compact="false"] #session-bar-connection {
+	grid-area: connection;
+	font-size: 12px;
 }
 @container session-bar (max-width: 600px) {
-	#client-count-badge {
+	#session-bar-meta .segment-word {
 		display: none;
 	}
 }
@@ -740,7 +752,7 @@ body:has(dialog:modal) {
 }
 @media (max-width: 800px) {
 	#session-bar[data-compact="false"] {
-		gap: 4px;
+		column-gap: 4px;
 		padding-inline: 8px;
 	}
 }

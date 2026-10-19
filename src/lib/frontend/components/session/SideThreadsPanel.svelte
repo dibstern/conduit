@@ -41,9 +41,10 @@
 	}
 </script>
 
-<Surface id="side-threads-panel" data-testid="side-threads-panel" variant="plain" radius="none" elevation="panel" role="region" aria-label="Side Threads" class="absolute top-full z-[var(--z-popover)] max-h-[70dvh] overflow-y-auto whitespace-normal border-border px-[14px] pt-[12px] pb-[10px] text-[12px] {compact ? 'inset-x-0 rounded-b-[22px] border-b' : 'right-4 mt-1 w-[440px] max-w-[calc(100%-32px)] rounded-[14px] border'}">
-	<div class="flex items-center gap-[7px] font-sans text-[11px] font-semibold uppercase tracking-[0.08em] text-text-secondary">
-		<Icon name="messages-square" size={13} />Side Threads
+<Surface id="side-threads-panel" data-testid="side-threads-panel" variant={compact ? "plain" : "floating"} radius="none" elevation={compact ? "panel" : "popover"} role="region" aria-label="Side Threads" class="absolute top-full z-[var(--z-popover)] max-h-[70dvh] overflow-y-auto whitespace-normal border-border px-[14px] pt-[12px] pb-[10px] text-[12px] {compact ? 'inset-x-0 rounded-b-[22px] border-b' : 'right-[16px] mt-[8px] w-[440px] max-w-[calc(100%-32px)] rounded-[16px]'}">
+	<!-- Desktop heads its card in sentence case, like the goal card's "Checks". -->
+	<div class="flex items-center gap-[7px] font-sans text-text-secondary {compact ? 'text-[11px] font-semibold uppercase tracking-[0.08em]' : 'text-[12px] font-medium'}">
+		<Icon name="messages-square" size={13} />{compact ? "Side Threads" : "Side threads"}
 	</div>
 	{#if threads.length > 0}
 		<ul data-testid="side-threads-list" class="m-0 mt-2 list-none p-0">
