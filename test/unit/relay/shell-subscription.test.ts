@@ -1001,7 +1001,15 @@ describe("subscribeShell", () => {
 	it.effect("traffic that moves no session row emits nothing", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
-			yield* commit([sessionCreated(SID), messageCreated(SID, "m1")]);
+			yield* commit([
+				sessionCreated(SID),
+				canonicalEvent(
+					"message.created",
+					SID,
+					{ messageId: "m1", sessionId: SID, role: "assistant" },
+					{ provider: "claude" },
+				),
+			]);
 
 			const requeries = yield* Ref.make(0);
 			const real = yield* ReadQueryEffectTag;
@@ -1393,7 +1401,12 @@ describe("subscribeShell", () => {
 			yield* recoverProjections;
 			yield* commitThroughSeam([
 				sessionCreated(SID),
-				messageCreated(SID, "m1"),
+				canonicalEvent(
+					"message.created",
+					SID,
+					{ messageId: "m1", sessionId: SID, role: "assistant" },
+					{ provider: "claude" },
+				),
 			]);
 
 			const { q } = yield* openShell();

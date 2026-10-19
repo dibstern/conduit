@@ -96,6 +96,7 @@ export const PROMPT_PROVIDER_REFERENCE_MIGRATION =
 	"0063_prompt_provider_reference.sql";
 export const TOOL_RESULT_EVENT_REFS_MIGRATION =
 	"0064_tool_result_event_refs.sql";
+export const PROJECT_TREE_DATA_MIGRATION = "0065_project_tree_data.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

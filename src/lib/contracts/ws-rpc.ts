@@ -274,6 +274,7 @@ export const CommandInfoSchema = Schema.Struct({
 export const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
+	addedAt: Schema.optional(Schema.Number),
 	folders: Schema.NonEmptyArray(Schema.String),
 	setupScript: Schema.optional(Schema.String),
 	sessionMode: Schema.optional(SessionModeSchema),
@@ -1245,6 +1246,14 @@ export const SaveProject = Rpc.make("SaveProject", {
 	}),
 	success: SaveProjectResponseSchema,
 	error: Schema.Union([WsRpcError, ProjectSaveRejected]),
+});
+
+export const SetProjectOrder = Rpc.make("SetProjectOrder", {
+	payload: Schema.TaggedStruct("SetProjectOrder", {
+		projectOrder: Schema.Array(Schema.String),
+	}),
+	success: Schema.Void,
+	error: WsRpcError,
 });
 
 export const RemoveProject = Rpc.make("RemoveProject", {
@@ -2947,6 +2956,7 @@ const wsRpcRequests = [
 		}),
 	},
 	SaveProject,
+	SetProjectOrder,
 	RemoveProject,
 	StartInstance,
 	StopInstance,
@@ -3069,6 +3079,7 @@ export const ShellProjectsFrameSchema = Schema.Struct({
 	projects: Schema.Array(ProjectInfoSchema),
 	/** The project a new session prefills, on every client. */
 	newSessionProject: Schema.optional(Schema.String),
+	projectOrder: Schema.optional(Schema.Array(Schema.String)),
 });
 export type ShellProjectsFrame = typeof ShellProjectsFrameSchema.Type;
 

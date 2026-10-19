@@ -755,7 +755,10 @@ describe("Cursor text turns through the built daemon and detached runner", () =>
 		);
 		await expectTurns(fixture, id, ["completed"]);
 		expect(snapshot(fixture, id).eventCounts["thinking.delta"]).toBe(1);
-		expect(fixture.logTail).toContain("Skipped malformed Cursor delta update");
+		// Detached runners write their diagnostics before completing the turn.
+		expect(
+			readFileSync(join(fixture.configDir, "runners.log"), "utf8"),
+		).toContain("Skipped malformed Cursor delta update");
 		record("decode-failure-skipped-reported", {
 			malformedUpdateSkipped: true,
 			laterTextPreserved: true,

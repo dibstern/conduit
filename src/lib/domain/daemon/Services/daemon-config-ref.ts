@@ -38,6 +38,7 @@ export interface DaemonRuntimeConfig {
 	readonly keepAwakeCommand: string | undefined;
 	readonly keepAwakeArgs: string[] | undefined;
 	readonly newSessionProject?: string;
+	readonly projectOrder?: readonly string[];
 	readonly shuttingDown: boolean;
 	readonly startTime: number;
 	readonly hostExplicit: boolean;
@@ -97,6 +98,7 @@ export const makeDaemonConfigFromOptions = (options: {
 	keepAwakeCommand?: string;
 	keepAwakeArgs?: string[];
 	newSessionProject?: string;
+	projectOrder?: readonly string[];
 	startTime?: number;
 	persistedSessionCounts?: ReadonlyMap<string, number>;
 }): DaemonRuntimeConfig => ({
@@ -132,6 +134,9 @@ export const makeDaemonConfigFromOptions = (options: {
 	keepAwakeArgs: options.keepAwakeArgs,
 	...(options.newSessionProject !== undefined && {
 		newSessionProject: options.newSessionProject,
+	}),
+	...(options.projectOrder !== undefined && {
+		projectOrder: options.projectOrder,
 	}),
 	shuttingDown: false,
 	startTime: options.startTime ?? Date.now(),

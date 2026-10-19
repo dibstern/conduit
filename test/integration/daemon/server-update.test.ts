@@ -413,13 +413,13 @@ describe("supervised server build updates", () => {
 		expect((await browser.send(sessionId, prompt)).chunks.join("")).toBe(
 			responseChunks(prompt).join(""),
 		);
-		const runner = owned.marks.find(
+		const runner = await owned.waitForMark(
 			(mark) => mark.kind === "runner-started" && mark.sessionId === sessionId,
 		);
 		if (runner?.kind !== "runner-started")
 			throw new Error("Claude runner is missing");
 		expect(testRunnerAlive(runner.pid)).toBe(true);
-		const query = owned.marks.find((mark) => mark.kind === "query");
+		const query = await owned.waitForMark((mark) => mark.kind === "query");
 		if (query?.kind !== "query") throw new Error("Fake SDK query is missing");
 		const pin = "482615";
 		await sendRpcRequest(join(owned.configDir, "relay.sock"), {
@@ -456,7 +456,10 @@ describe("supervised server build updates", () => {
 						projectSlug: "process-test",
 						originId,
 					});
-					expect(attached).toEqual({ projectSlug: "process-test" });
+					expect(attached).toEqual({
+						projectSlug: "process-test",
+						sessionSlug: null,
+					});
 					return yield* client.RestartWithConfig({});
 				}),
 			).pipe(Effect.provide(protocol), Effect.timeout(10_000)),

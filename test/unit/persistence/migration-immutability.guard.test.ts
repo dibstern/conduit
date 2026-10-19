@@ -149,6 +149,8 @@ const SHIPPED_MIGRATION_HASHES = {
 		"335105d46d429c4e67d1f5ffe7823ff1bce3e3dcb7f734ec3ab7ffeacd010f84",
 	"0064_tool_result_event_refs.sql":
 		"b4909d3a9fb1b4bd3a80ca0b37c73d73818740d5941b27739ed9ee9ad1bef448",
+	"0065_project_tree_data.sql":
+		"3f13a228174941c05f74acf55e328e0004e85426bfead1c28809d17eb813bfda",
 } satisfies Record<string, string>;
 
 describe("shipped migrations are immutable", () => {
@@ -168,10 +170,10 @@ describe("shipped migrations are immutable", () => {
 			.filter((f) => f.endsWith(".sql"))
 			.sort();
 		expect(onDisk).toEqual(Object.keys(SHIPPED_MIGRATION_HASHES).sort());
-		// Effect key 10 is a code-only purge; SQL files run from 0001 to 0064.
-		expect(onDisk).toHaveLength(64);
+		// Effect key 10 is a code-only purge; SQL files run from 0001 to 0065.
+		expect(onDisk).toHaveLength(65);
 		expect(onDisk.map((file) => Number(file.slice(0, 4)))).toEqual(
-			Array.from({ length: 64 }, (_, index) => index + 1),
+			Array.from({ length: 65 }, (_, index) => index + 1),
 		);
 	});
 });

@@ -110,6 +110,11 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 		...(runtime.newSessionProject !== undefined && {
 			newSessionProject: runtime.newSessionProject,
 		}),
+		...(runtime.projectOrder !== undefined && {
+			projectOrder: runtime.projectOrder.filter((slug) =>
+				projects.some((project) => project.slug === slug),
+			),
+		}),
 		projects: projects.map((project) => {
 			const sessionCount =
 				runtime.persistedSessionCounts.get(project.slug) ?? 0;
@@ -121,7 +126,8 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 				}),
 				slug: project.slug,
 				title: project.title,
-				addedAt: project.lastUsed ?? Date.now(),
+				addedAt: project.addedAt ?? project.lastUsed ?? Date.now(),
+				...(project.lastUsed !== undefined && { lastUsed: project.lastUsed }),
 				...(project.shellEnv !== undefined && { shellEnv: project.shellEnv }),
 				...(project.setupScript !== undefined && {
 					setupScript: project.setupScript,

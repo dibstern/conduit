@@ -195,6 +195,9 @@ describe("readForkSource", () => {
 					"turn.model_resolved",
 				]);
 				expect(events.every((event) => event.createdAt < 114)).toBe(true);
+				expect(events.every((event) => event.metadata.inherited === true)).toBe(
+					true,
+				);
 				expect(events.every((event) => event.sessionId === "ses_fork_a")).toBe(
 					true,
 				);
