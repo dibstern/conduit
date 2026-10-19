@@ -131,6 +131,11 @@ describe("GetAgents active provider", () => {
 			yield* setAgent("session-1", "Explore");
 			const reply = yield* listAgents("session-1");
 			expect(client.app.agents).not.toHaveBeenCalled();
+			expect(engine.dispatchEffect).toHaveBeenCalledWith({
+				type: "discover",
+				providerId: "claude",
+				account: expect.objectContaining({ driver: "claude", id: "claude" }),
+			});
 			expect(reply).toEqual({
 				instanceId: "claude",
 				providerScope: { id: "claude", name: "Claude" },
@@ -211,6 +216,7 @@ describe("GetAgents active provider", () => {
 			const rawAgents = [
 				{ id: "build", name: "build", mode: "primary" as const },
 				{ id: "title", name: "title", mode: "subagent" as const, hidden: true },
+				{ id: "plan", name: "plan", mode: "all" as const },
 			];
 			const client = makeHandlerOpenCodeAPI({
 				app: { agents: vi.fn(async () => rawAgents) },
@@ -220,20 +226,25 @@ describe("GetAgents active provider", () => {
 				dispatchEffect: vi.fn(),
 			});
 
-			return listAgents("session-1").pipe(
+			return Effect.gen(function* () {
+				yield* setAgent("session-1", "plan");
+				const reply = yield* listAgents("session-1");
+				expect(client.app.agents).toHaveBeenCalledOnce();
+				expect(engine.dispatchEffect).not.toHaveBeenCalled();
+				expect(reply).toEqual({
+					instanceId: "opencode",
+					providerScope: { id: "opencode", name: "OpenCode" },
+					agents: [
+						{ id: "build", name: "build" },
+						{ id: "plan", name: "plan" },
+					],
+					activeAgentId: "plan",
+				});
+				expect(yield* getAgent("session-1")).toBe("plan");
+			}).pipe(
 				Effect.provide(agentHandlerLayer({ client, ws, engine }), {
 					local: true,
 				}),
-				Effect.tap((reply) =>
-					Effect.sync(() => {
-						expect(engine.dispatchEffect).not.toHaveBeenCalled();
-						expect(reply).toEqual({
-							instanceId: "opencode",
-							providerScope: { id: "opencode", name: "OpenCode" },
-							agents: [{ id: "build", name: "build" }],
-						});
-					}),
-				),
 			);
 		},
 	);

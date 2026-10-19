@@ -25,7 +25,14 @@ it("accepts plain sessions, subagents, Forks, Side Threads and forkPlacement", (
 		acceptsCreated({ ...base, ...forkPlacement("source", false) }),
 		acceptsCreated({ ...base, ...forkPlacement("source", true) }),
 	];
-	expect(commands).toHaveLength(6);
+	expect(commands.map(({ data }) => data)).toEqual([
+		base,
+		{ ...base, parentId: "owner" },
+		{ ...base, forkedFrom: "source" },
+		{ ...base, parentId: "source", forkedFrom: "source", sideThread: true },
+		{ ...base, forkedFrom: "source" },
+		{ ...base, parentId: "source", forkedFrom: "source", sideThread: true },
+	]);
 });
 
 it("rejects mixed placements at the real session.created command seam", () => {

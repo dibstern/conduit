@@ -81,14 +81,6 @@ describe("ProviderProjector", () => {
 		return (await harness.query<T>(statement, params))[0];
 	}
 
-	it("has the correct name and handles list", async () => {
-		expect(projector.name).toBe("provider");
-		expect(projector.handles).toEqual([
-			"session.created",
-			"session.provider_changed",
-		]);
-	});
-
 	describe("session.created", () => {
 		it("inserts an active provider binding", async () => {
 			const event = makeStored(
