@@ -256,7 +256,7 @@ async function openDraft(
 		`${harness.baseUrl}/?p=${encodeURIComponent(slug)}`,
 	);
 	await page.locator("#new-session-btn:visible").click();
-	await expect(page).toHaveURL(/\/new\?/);
+	await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 	const picker = page.locator(pickerSelector);
 	await expect(picker).toHaveAttribute("data-shown-model", /.+/);
 	if (expectedHarness)
@@ -1692,7 +1692,7 @@ test.describe("session composer owns its stored pick", () => {
 		async function showDraft(step: string) {
 			await showList();
 			await page.locator("#new-session-btn:visible").click();
-			await expect(page).toHaveURL(/\/new\?/);
+			await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 			await expect(picker).toHaveAttribute("data-shown-model", /.+/);
 			await openPickerRoot(page, picker);
 			await page.getByTestId("picker-harness-claude").click();
@@ -2449,7 +2449,7 @@ test.describe("draft owns one complete pick", () => {
 		if (!(await page.locator("#new-session-btn:visible").isVisible()))
 			await page.getByTestId("session-bar-back").click();
 		await page.locator("#new-session-btn:visible").click();
-		await expect(page).toHaveURL(/\/new\?/);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 		await expect(draft.picker).toHaveAttribute("data-instance-id", "opencode");
 		await expect(draft.picker).toHaveAttribute(
 			"data-shown-model",
@@ -3129,7 +3129,7 @@ test("pick-required-permission-create: missing permission mode rejects before se
 	expect(reply?.frame.exit?._tag).toBe("Failure");
 	expect(JSON.stringify(reply?.frame)).toContain("permissionMode");
 	expect(after).toEqual(before);
-	await expect(page).toHaveURL(/\/new\?/);
+	await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 });
 
 test("pick-required-create: no model rejects before session creation", async ({
@@ -3850,7 +3850,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 		await new AppPage(page).goto(
 			`${harness.baseUrl}/new?p=${encodeURIComponent(slug)}`,
 		);
-		await expect(page).toHaveURL(/\/new\?/);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 		const picker = page.locator(pickerSelector);
 		await expect(picker).toHaveAttribute("data-shown-harness", driver);
 		return picker;

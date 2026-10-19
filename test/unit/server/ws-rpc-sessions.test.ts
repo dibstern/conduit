@@ -342,7 +342,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				(id, project_id, provider, title, status, created_at, updated_at)
 				VALUES ('session-1', 'test-project', 'opencode', 'Session', 'idle', 1, 1)`;
 			yield* client.SyncInputDraft({
-				sessionId: "session-1",
+				key: { session: "session-1" },
 				text: "saved draft",
 			});
 

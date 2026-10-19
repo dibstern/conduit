@@ -238,8 +238,7 @@ for (const typed of [false, true]) {
 				window.callRpc(
 					"SubscribeInputDraft",
 					{
-						projectSlug: "p",
-						sessionId: "s",
+						key: { session: "s" },
 					},
 					take,
 				),
@@ -269,7 +268,7 @@ test("a control helper fails a typed stream with its declared error", async ({
 	});
 	await openClient(page);
 	const pending = page.evaluate(() =>
-		window.callRpc("SubscribeInputDraft", { projectSlug: "p", sessionId: "s" }),
+		window.callRpc("SubscribeInputDraft", { key: { session: "s" } }),
 	);
 	await expect
 		.poll(() => control.hasStream("SubscribeInputDraft", "s"))
@@ -293,11 +292,7 @@ test("an invalid typed stream chunk fails its owning spec", async ({
 	});
 	await openClient(page);
 	await page.evaluate(() =>
-		window.callRpc(
-			"SubscribeInputDraft",
-			{ projectSlug: "p", sessionId: "s" },
-			1,
-		),
+		window.callRpc("SubscribeInputDraft", { key: { session: "s" } }, 1),
 	);
 	test.fail(
 		true,
@@ -317,7 +312,7 @@ test("an invalid typed stream failure fails its owning spec", async ({
 	});
 	await openClient(page);
 	await page.evaluate(() =>
-		window.callRpc("SubscribeInputDraft", { projectSlug: "p", sessionId: "s" }),
+		window.callRpc("SubscribeInputDraft", { key: { session: "s" } }),
 	);
 	test.fail(
 		true,

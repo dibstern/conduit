@@ -13,6 +13,7 @@ import {
 import { Rpc, type RpcGroup, RpcSchema } from "effect/rpc";
 import type { UsageReading } from "../contracts/limit-recovery.js";
 import {
+	type InputDraftEnvelope,
 	type OpenCodeInstance,
 	type ServerStatus,
 	type ShellEnvelope,
@@ -140,9 +141,7 @@ const streamHandlers = {
 	SubscribeAlerts: () => subscribeAlerts(),
 	SubscribeInputDraft: (request) =>
 		Stream.unwrap(
-			Effect.map(InputDraftsTag, (drafts) =>
-				drafts.subscribe({ session: request.sessionId }),
-			),
+			Effect.map(InputDraftsTag, (drafts) => drafts.subscribe(request.key)),
 		),
 	...daemonOnlyStreamHandlers,
 } satisfies {
@@ -302,6 +301,9 @@ export type DaemonRpcHandlers = {
 		request: Rpc.Payload<Rpc.ExtractTag<WsRpcs, "SubscribeShell">>,
 	) => Stream.Stream<ShellEnvelope, WsRpcError>;
 	readonly SubscribeServerStatus: () => Stream.Stream<ServerStatus, WsRpcError>;
+	readonly SubscribeInputDraft?: (
+		request: Rpc.Payload<Rpc.ExtractTag<WsRpcs, "SubscribeInputDraft">>,
+	) => Stream.Stream<InputDraftEnvelope, WsRpcError>;
 	/** Told after a session is created in `projectSlug`. */
 	readonly sessionCreated: (projectSlug: string) => Effect.Effect<void>;
 };
@@ -319,8 +321,18 @@ export const makeRoutedWsRpcServerLayer = <
 			const directory = yield* SessionDirectory;
 			const projectSlugFor = (payload: object, fallback?: string) =>
 				Effect.gen(function* () {
-					if ("sessionId" in payload && typeof payload.sessionId === "string") {
-						const owner = yield* directory.projectOf(payload.sessionId).pipe(
+					const key = "key" in payload ? payload.key : undefined;
+					const sessionId =
+						"sessionId" in payload && typeof payload.sessionId === "string"
+							? payload.sessionId
+							: typeof key === "object" &&
+									key !== null &&
+									"session" in key &&
+									typeof key.session === "string"
+								? key.session
+								: undefined;
+					if (sessionId !== undefined) {
+						const owner = yield* directory.projectOf(sessionId).pipe(
 							Failure.mapEffectFailures(
 								(error) =>
 									new WsRpcError({
@@ -331,7 +343,7 @@ export const makeRoutedWsRpcServerLayer = <
 						if (Option.isNone(owner))
 							return yield* new WsRpcError({
 								code: "unknown-session",
-								message: `Unknown session: ${payload.sessionId}`,
+								message: `Unknown session: ${sessionId}`,
 							});
 						return owner.value;
 					}
@@ -517,7 +529,9 @@ export const makeRoutedWsRpcServerLayer = <
 								return routeStream<unknown, unknown, StreamHandlerContext>(
 									request,
 									() => handler(request),
-									name === "SubscribeShell" ? defaultProjectSlug : undefined,
+									name === "SubscribeShell" || name === "SubscribeInputDraft"
+										? defaultProjectSlug
+										: undefined,
 								);
 							},
 						];

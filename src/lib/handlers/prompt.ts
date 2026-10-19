@@ -1,9 +1,11 @@
 import { Effect } from "effect";
 import type { InputDelivery, SteerBlocker } from "../contracts/stored-event.js";
+import type { InputDraftKey } from "../contracts/ws-rpc.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
 import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
 import {
+	ConfigTag,
 	LoggerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
@@ -177,16 +179,17 @@ export {
 	undoSessionRewind,
 } from "../domain/relay/Services/session-rewind.js";
 
-export const syncInputDraftForSession = ({
-	sessionId,
+export const syncInputDraft = ({
+	key,
 	text,
 	from,
 }: {
-	sessionId: string;
+	key: InputDraftKey;
 	text: string;
 	from?: string;
 }) =>
 	Effect.gen(function* () {
 		const drafts = yield* InputDraftsTag;
-		yield* drafts.write({ session: sessionId }, text, from);
+		const projectId = "draft" in key ? (yield* ConfigTag).slug : undefined;
+		yield* drafts.write(key, text, from, projectId);
 	});

@@ -76,7 +76,7 @@ describe("input draft follower", () => {
 	it("ignores draft echoes from this browser tab", () => {
 		const before = {
 			_tag: "ServerTextReceived" as const,
-			sessionId: "s1",
+			key: { session: "s1" },
 			text: "before",
 		};
 		inputSyncState.received = before;
@@ -87,7 +87,7 @@ describe("input draft follower", () => {
 				text: "self echo",
 				from: getBrowserClientId(),
 			},
-			"s1",
+			{ session: "s1" },
 		);
 
 		expect(inputSyncState.received).toEqual(before);
@@ -100,12 +100,12 @@ describe("input draft follower", () => {
 				text: "other tab draft",
 				from: "browser-tab-b",
 			},
-			"s1",
+			{ session: "s1" },
 		);
 
 		expect(inputSyncState.received).toEqual({
 			_tag: "ServerTextReceived",
-			sessionId: "s1",
+			key: { session: "s1" },
 			text: "other tab draft",
 		});
 	});

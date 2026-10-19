@@ -532,6 +532,17 @@
 	});
 
 	$effect(() => {
+		function handleNewSessionShortcut(event: KeyboardEvent) {
+			if (event.defaultPrevented || event.repeat || event.altKey || !event.shiftKey || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "n") return;
+			event.preventDefault();
+			const shown = selection.shown;
+			selection.openDraft(getDraftProject(shown.kind === "placed" ? shown.project : null));
+		}
+		window.addEventListener("keydown", handleNewSessionShortcut);
+		return () => window.removeEventListener("keydown", handleNewSessionShortcut);
+	});
+
+	$effect(() => {
 		function handleViewShortcut(event: KeyboardEvent) {
 			const view = matchSessionViewShortcut(event);
 			if (!view || event.defaultPrevented) return;

@@ -1,6 +1,7 @@
 // The viewed session's stored composer draft, followed by live changes.
 
 import { Effect, FiberHandle, Scope, Stream } from "effect";
+import type { InputDraftKey } from "../../contracts/ws-rpc.js";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { supervise } from "../transport/supervise.js";
@@ -8,21 +9,22 @@ import type { InputDraftEnvelope } from "../transport/ws-rpc.js";
 import { handleInputSyncReceived } from "./chat.svelte.js";
 import { isOwnBrowserClientId } from "./client-identity.js";
 import { handleInputDraftStarted } from "./composer-draft/runner.svelte.js";
+import { draftKeyId } from "./composer-draft/state.js";
 
 export const applyInputDraft = (
 	envelope: InputDraftEnvelope,
-	sessionId: string,
+	key: InputDraftKey,
 ): void => {
 	// The writing tab already shows its own text.
 	if (envelope._tag === "synchronized" || !isOwnBrowserClientId(envelope.from))
 		handleInputSyncReceived({
-			sessionId,
+			key,
 			...envelope,
 			...(envelope._tag === "synchronized" ? { initial: true } : {}),
 		});
 };
 
-let viewed: { project: string; sessionId: string | null } | null = null;
+let viewed: { project: string; key: InputDraftKey | null } | null = null;
 
 async function makeFollower() {
 	const runtime = await getRuntime();
@@ -37,19 +39,24 @@ let follower: ReturnType<typeof makeFollower> | undefined;
 /** Follow one session's draft; a `null` session stops. */
 export function viewInputDraft(
 	project: string,
-	sessionId: string | null,
+	key: InputDraftKey | null,
 ): void {
-	if (viewed?.project === project && viewed.sessionId === sessionId) return;
-	const selection = { project, sessionId };
+	if (
+		viewed !== null &&
+		(viewed.key ? draftKeyId(viewed.key) : null) ===
+			(key ? draftKeyId(key) : null)
+	)
+		return;
+	const selection = { project, key };
 	viewed = selection;
-	if (!sessionId && !follower) return;
+	if (!key && !follower) return;
 	follower ??= makeFollower();
 	void follower.then(({ runtime, handle }) => {
 		if (viewed !== selection) return;
 		runtime.runFork(
 			Effect.suspend(() => {
 				if (viewed !== selection) return Effect.void;
-				if (!sessionId) return FiberHandle.clear(handle);
+				if (!key) return FiberHandle.clear(handle);
 				return Effect.asVoid(
 					FiberHandle.run(
 						handle,
@@ -58,15 +65,14 @@ export function viewInputDraft(
 								Stream.runForEach(
 									supervise(
 										Stream.suspend(() => {
-											handleInputDraftStarted(sessionId);
-											return subscriptions.inputDraft({ sessionId });
+											handleInputDraftStarted(key);
+											return subscriptions.inputDraft({ key });
 										}),
 										() => undefined,
 									),
 									(envelope) =>
 										Effect.sync(() => {
-											if (viewed === selection)
-												applyInputDraft(envelope, sessionId);
+											if (viewed === selection) applyInputDraft(envelope, key);
 										}),
 								),
 							),

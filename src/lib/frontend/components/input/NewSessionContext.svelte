@@ -107,7 +107,7 @@
 		newWorktree = false;
 		worktreeBase = null;
 		modeChosen = false;
-		selection.openDraft(next);
+		selection.moveDraft(next);
 	}
 
 	let addProjectOpen = $state(false);

@@ -25,7 +25,7 @@ async function openDraft(page: Page, relayUrl: string) {
 	await sidebar.waitForSessions();
 	const countBefore = await sidebar.getSessionCount();
 	await sidebar.newSessionBtn.click();
-	await expect(page).toHaveURL(/\/new\?(?:.*&)?project=[^&]+/);
+	await expect(page).toHaveURL(/\/draft\/[^/?]+\?(?:.*&)?project=[^&]+/);
 	return { app, sidebar, countBefore };
 }
 
@@ -160,7 +160,7 @@ test.describe("New session draft", () => {
 
 		await page.reload();
 
-		await expect(page).toHaveURL(/\/new\?(?:.*&)?project=/);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?(?:.*&)?project=/);
 		await expect(app.input).toHaveValue("Survive a reload");
 	});
 
@@ -178,7 +178,7 @@ test.describe("New session draft", () => {
 			await app.sessionBarBack.click();
 			await sidebar.waitForSessions();
 			await sidebar.newSessionBtn.click();
-			await expect(page).toHaveURL(/\/new\?(?:.*&)?project=[^&]+/);
+			await expect(page).toHaveURL(/\/draft\/[^/?]+\?(?:.*&)?project=[^&]+/);
 
 			await expect(app.input).toBeVisible();
 			await expect(page.getByTestId("draft-project-chip")).toBeVisible();

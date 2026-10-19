@@ -346,7 +346,7 @@ for (const viewport of [
 			const back = page.getByTestId("session-bar-back");
 			if (await back.isVisible()) await press(back);
 			await press(page.locator("#new-session-btn:visible"));
-			await expect(page).toHaveURL(/\/new\?/);
+			await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 			await input.focus();
 			const next = await rpc.waitForRequest(
 				({ tag, payload }) =>

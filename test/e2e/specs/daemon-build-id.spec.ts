@@ -77,9 +77,13 @@ function captureDraftCalls(page: Page) {
 		id?: string | number;
 		requestId?: string | number;
 		tag?: string;
-		payload?: { sessionId?: string; text?: string };
+		payload?: {
+			key?: { session?: string; draft?: string };
+			text?: string;
+			projectSlug?: string;
+		};
 		exit?: { _tag: string };
-		values?: Array<{ _tag?: string; text?: string }>;
+		values?: Array<{ _tag?: string; text?: string; projectId?: string }>;
 	};
 	const calls: Array<{
 		socket: number;
@@ -164,6 +168,7 @@ const test = base.extend<{
 		const root = mkdtempSync(join(tmpdir(), "conduit-build-id-"));
 		const staticDir = join(root, "frontend");
 		mkdirSync(join(root, "build-id-test"));
+		mkdirSync(join(root, "build-id-other"));
 		cpSync(resolve("dist/frontend"), staticDir, { recursive: true });
 		// Simulate an older worker that caches a shell. The mismatch must replace
 		// it, clear its cache, and navigate through the current network-only SW.
@@ -263,7 +268,7 @@ test("mismatching builds reload once, preserve the latest composer draft, and re
 	await page.goto(`${buildDaemon.baseUrl}/?p=build-id-test`);
 	await page.locator(".connect-overlay").waitFor({ state: "detached" });
 	await startNewSession(page);
-	await expect(page).toHaveURL(/\/new\b/);
+	await expect(page).toHaveURL(/\/draft\/[^/?]+\b/);
 	const input = page.locator("#input");
 	await expect(input).toBeVisible();
 	await page.evaluate(async () => {
@@ -376,7 +381,7 @@ test("a session draft reaches a new device after restart and stays cleared after
 		calls.some(
 			({ request, replies }) =>
 				request.frame.tag === tag &&
-				request.frame.payload?.sessionId === sessionId &&
+				request.frame.payload?.key?.session === sessionId &&
 				(tag !== "SyncInputDraft" || request.frame.payload?.text === text) &&
 				replies.some(({ frame }) =>
 					tag === "SyncInputDraft"
@@ -542,7 +547,7 @@ for (const sameBuild of [true, false]) {
 		};
 		await openSidebar();
 		await newSession.click();
-		await expect(page).toHaveURL(/\/new\b/);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\b/);
 		await openSidebar();
 		await page
 			.locator(
@@ -563,7 +568,7 @@ async function startNewSession(page: Page) {
 	if (!(await button.isVisible()))
 		await page.getByRole("button", { name: "Sessions", exact: true }).click();
 	await button.click();
-	await expect(page).toHaveURL(/\/new\b/);
+	await expect(page).toHaveURL(/\/draft\/[^/?]+\b/);
 }
 
 async function createDraftSession(page: Page, baseUrl: string) {
@@ -581,7 +586,7 @@ async function createDraftSession(page: Page, baseUrl: string) {
 			calls.some(
 				({ request, replies }) =>
 					request.frame.tag === "SubscribeInputDraft" &&
-					request.frame.payload?.sessionId === sessionId &&
+					request.frame.payload?.key?.session === sessionId &&
 					replies.some(({ frame }) =>
 						frame.values?.some((value) => value._tag === "synchronized"),
 					),
@@ -624,6 +629,254 @@ async function saveDraftEvidence(
 		contentType: "application/json",
 	});
 }
+
+test("a new-session draft survives a daemon restart for a device opening its URL", async ({
+	page,
+	browser,
+	buildDaemon,
+}, testInfo) => {
+	const callsA = captureDraftCalls(page);
+	const contextB = await browser.newContext({
+		viewport: page.viewportSize(),
+		isMobile: testInfo.project.use.isMobile ?? false,
+		hasTouch: testInfo.project.use.hasTouch ?? false,
+	});
+	const pageB = await contextB.newPage();
+	const callsB = captureDraftCalls(pageB);
+	const text = "A new-session draft persisted across the daemon restart";
+	let draftUrl = "";
+	try {
+		await page.goto(`${buildDaemon.baseUrl}/new?project=build-id-test`);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?project=build-id-test/);
+		draftUrl = page.url();
+		const draftId = new URL(draftUrl).pathname.split("/").pop();
+		await page.locator("#input").fill(text);
+		await expect.poll(() => syncCompleted(callsA, text)).toBe(true);
+		expect(
+			callsA.some(
+				({ request }) => request.frame.payload?.key?.draft === draftId,
+			),
+		).toBe(true);
+		await page.screenshot({
+			path: testInfo.outputPath("new-draft-written-A.png"),
+		});
+		// The second device must read the durable row, without A reconnecting
+		// and writing its in-memory copy back after the restart.
+		await page.goto("about:blank");
+		await buildDaemon.restart(buildDaemon.buildId);
+		await pageB.goto(draftUrl);
+		await expect(pageB.locator("#input")).toHaveValue(text);
+		await expect
+			.poll(() =>
+				callsB.some(
+					({ request, replies }) =>
+						request.frame.tag === "SubscribeInputDraft" &&
+						request.frame.payload?.key?.draft === draftId &&
+						replies.some(({ frame }) =>
+							frame.values?.some(
+								(value) =>
+									value._tag === "synchronized" &&
+									value.text === text &&
+									value.projectId === "build-id-test",
+							),
+						),
+				),
+			)
+			.toBe(true);
+		// A bare link must discover the stored project instead of moving the row
+		// to whichever project this new device currently defaults to.
+		const bareDraftUrl = new URL(draftUrl);
+		bareDraftUrl.search = "";
+		await pageB.goto(bareDraftUrl.href);
+		await expect(pageB.locator("#input")).toHaveValue(text);
+		await expect
+			.poll(() => new URL(pageB.url()).searchParams.get("project"))
+			.toBe("build-id-test");
+	} finally {
+		await saveDraftEvidence(testInfo, [page, pageB], {
+			draftUrl,
+			text,
+			A: callsA,
+			B: callsB,
+		});
+		await contextB.close();
+	}
+});
+
+test("New session twice on an empty draft keeps the draft URL", async ({
+	page,
+	buildDaemon,
+}, testInfo) => {
+	const calls = captureDraftCalls(page);
+	const urls: string[] = [];
+	try {
+		await page.goto(`${buildDaemon.baseUrl}/new?project=build-id-test`);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
+		await expect(page.locator("#input")).toHaveValue("");
+		const entry = page.url();
+		urls.push(entry);
+		await page.screenshot({
+			path: testInfo.outputPath("empty-draft-entry.png"),
+		});
+		for (const index of [1, 2]) {
+			await startNewSession(page);
+			urls.push(page.url());
+			// The phone list is "/", so its project falls back to the default; the id is what must hold.
+			expect(new URL(page.url()).pathname).toBe(new URL(entry).pathname);
+			await expect(page.locator("#input")).toHaveValue("");
+			await page.screenshot({
+				path: testInfo.outputPath(`empty-draft-new-${index}.png`),
+			});
+		}
+	} finally {
+		await saveDraftEvidence(testInfo, [page], { urls, calls });
+	}
+});
+
+test("the legacy localStorage new-session draft migrates once into a fresh server draft", async ({
+	page,
+	buildDaemon,
+}, testInfo) => {
+	const calls = captureDraftCalls(page);
+	const text =
+		"Legacy browser draft from before the server-stored draft upgrade";
+	let previousUrl = "";
+	let migratedUrl = "";
+	try {
+		await page.goto(`${buildDaemon.baseUrl}/new?project=build-id-test`);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
+		previousUrl = page.url();
+		await page.evaluate((value) => {
+			localStorage.setItem("conduit:new-session-draft", value);
+		}, text);
+		await page.screenshot({
+			path: testInfo.outputPath("legacy-before-upgrade.png"),
+		});
+		await page.reload();
+		await expect(page.locator("#input")).toHaveValue(text);
+		migratedUrl = page.url();
+		expect(new URL(migratedUrl).pathname).not.toBe(
+			new URL(previousUrl).pathname,
+		);
+		await expect.poll(() => syncCompleted(calls, text)).toBe(true);
+		expect(
+			await page.evaluate(() =>
+				localStorage.getItem("conduit:new-session-draft"),
+			),
+		).toBeNull();
+		await page.screenshot({
+			path: testInfo.outputPath("legacy-migrated-draft.png"),
+		});
+		const migrationCalls = calls.length;
+		await page.reload();
+		await expect(page).toHaveURL(migratedUrl);
+		await expect(page.locator("#input")).toHaveValue(text);
+		await expect
+			.poll(() =>
+				calls
+					.slice(migrationCalls)
+					.some(
+						({ request, replies }) =>
+							request.frame.tag === "SubscribeInputDraft" &&
+							replies.some(({ frame }) =>
+								frame.values?.some(
+									(value) =>
+										value._tag === "synchronized" && value.text === text,
+								),
+							),
+					),
+			)
+			.toBe(true);
+	} finally {
+		await saveDraftEvidence(testInfo, [page], {
+			previousUrl,
+			migratedUrl,
+			text,
+			calls,
+		});
+	}
+});
+
+test("moving a draft between projects keeps its text and draft ID", async ({
+	page,
+	buildDaemon,
+}, testInfo) => {
+	const calls = captureDraftCalls(page);
+	const text = "Keep this draft while moving between projects";
+	const urls: string[] = [];
+	try {
+		await page.goto(`${buildDaemon.baseUrl}/new?project=build-id-test`);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
+		const draftPath = new URL(page.url()).pathname;
+		const draftId = draftPath.split("/").pop();
+		await page.locator("#input").fill(text);
+		await expect.poll(() => syncCompleted(calls, text)).toBe(true);
+		await page.screenshot({
+			path: testInfo.outputPath("draft-first-project.png"),
+		});
+		for (const project of ["build-id-other", "build-id-test"]) {
+			const beforeMove = calls.length;
+			await page.getByTestId("draft-project-chip").click();
+			await page
+				.getByRole("menuitemradio", { name: project, exact: true })
+				.click();
+			await expect(page).toHaveURL(
+				`${buildDaemon.baseUrl}${draftPath}?project=${project}`,
+			);
+			await expect(page.locator("#input")).toHaveValue(text);
+			await expect
+				.poll(() =>
+					calls
+						.slice(beforeMove)
+						.some(
+							({ request, replies }) =>
+								request.frame.tag === "SyncInputDraft" &&
+								request.frame.payload?.key?.draft === draftId &&
+								request.frame.payload?.projectSlug === project &&
+								request.frame.payload?.text === text &&
+								replies.some(
+									({ frame }) =>
+										frame._tag === "Exit" && frame.exit?._tag === "Success",
+								),
+						),
+				)
+				.toBe(true);
+			urls.push(page.url());
+			await page.screenshot({
+				path: testInfo.outputPath(`draft-moved-${project}.png`),
+			});
+			const beforeReload = calls.length;
+			await page.reload();
+			await expect(page.locator("#input")).toHaveValue(text);
+			await expect(page.getByTestId("draft-project-chip")).toContainText(
+				project,
+			);
+			await expect
+				.poll(() =>
+					calls
+						.slice(beforeReload)
+						.some(
+							({ request, replies }) =>
+								request.frame.tag === "SubscribeInputDraft" &&
+								request.frame.payload?.key?.draft === draftId &&
+								replies.some(({ frame }) =>
+									frame.values?.some(
+										(value) =>
+											value._tag === "synchronized" &&
+											value.projectId === project,
+									),
+								),
+						),
+				)
+				.toBe(true);
+			await page.screenshot({
+				path: testInfo.outputPath(`draft-reloaded-${project}.png`),
+			});
+		}
+	} finally {
+		await saveDraftEvidence(testInfo, [page], { text, urls, calls });
+	}
+});
 
 // These drive the real browser/daemon wire. No component or machine internals.
 for (const serverWins of [false, true]) {

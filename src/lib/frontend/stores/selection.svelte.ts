@@ -1,6 +1,7 @@
 // The route owns the open session; replies only place the id they answered.
 import { untrack } from "svelte";
 import { SvelteMap } from "svelte/reactivity";
+import type { InputDraftKey } from "../../contracts/ws-rpc.js";
 import { effectiveWorkingDirectory } from "../../session/session-workspace.js";
 import { getIsConnected } from "../transport/connection-status.svelte.js";
 import { toastFailure } from "../transport/rpc-errors.js";
@@ -21,7 +22,9 @@ import {
 	getCurrentRoute,
 	getCurrentSearchParams,
 	getCurrentSessionId,
+	getNewDraftId,
 	navigate,
+	normalizeRoute,
 	replaceRoute,
 	routerState,
 } from "./router.svelte.js";
@@ -111,12 +114,24 @@ export const selection = {
 	},
 	openDraft(project: string | null): void {
 		const route = getCurrentRoute();
+		const draftId = getNewDraftId();
 		const params = getCurrentSearchParams();
 		if (project) params.set(DRAFT_PROJECT_PARAM, project);
 		else params.delete(DRAFT_PROJECT_PARAM);
-		const path = `/new${params.size ? `?${params}` : ""}`;
-		if (route.page === "chat" && route.draft) replaceRoute(path);
+		const path = `/draft/${draftId}${params.size ? `?${params}` : "?"}`;
+		if (route.page === "chat" && route.draftId === draftId) replaceRoute(path);
 		else navigate(path);
+	},
+	moveDraft(project: string | null): void {
+		const route = getCurrentRoute();
+		if (route.page !== "chat" || !route.draftId) {
+			selection.openDraft(project);
+			return;
+		}
+		const params = getCurrentSearchParams();
+		if (project) params.set(DRAFT_PROJECT_PARAM, project);
+		else params.delete(DRAFT_PROJECT_PARAM);
+		replaceRoute(`/draft/${route.draftId}${params.size ? `?${params}` : "?"}`);
 	},
 	follow(
 		from: typeof scope,
@@ -146,6 +161,12 @@ export function markSessionDeleted(sessionId: string): void {
 /** The shell owns this lifecycle, as it does catalog and subscription lifetimes. */
 export function watchSelection(): () => void {
 	return $effect.root(() => {
+		// Standalone shells and component fixtures do not mount App's route normalizer.
+		$effect.pre(() => {
+			const route = getCurrentRoute();
+			if (route.page === "chat" && route.draft && !route.draftId)
+				untrack(normalizeRoute);
+		});
 		let alive = true;
 		const attaching = new Set<string>();
 		const resolving = new Set<string>();
@@ -348,9 +369,33 @@ export function watchSelection(): () => void {
 				const id = key && current.kind === "placed" ? current.sessionId : null;
 				viewTranscript(project, id);
 				viewTodos(project, id);
-				viewInputDraft(project, id);
 				viewFamily(project, id);
 			});
+		});
+		const inputDraftScope = $derived.by<{
+			project: string;
+			key: InputDraftKey;
+		} | null>(() => {
+			const route = getCurrentRoute();
+			if (route.page === "chat" && route.draftId)
+				return {
+					project: getDraftProject() ?? attachedProjectState.slug ?? "",
+					key: { draft: route.draftId },
+				};
+			return shown.kind === "placed" &&
+				shown.project === attachedProjectState.slug
+				? { project: shown.project, key: { session: shown.sessionId } }
+				: null;
+		});
+		let followedDraft: string | undefined;
+		$effect(() => {
+			const current = inputDraftScope;
+			const key = JSON.stringify(current);
+			if (key === followedDraft) return;
+			followedDraft = key;
+			untrack(() =>
+				viewInputDraft(current?.project ?? "", current?.key ?? null),
+			);
 		});
 		$effect(() => () => {
 			viewTranscript("", null);

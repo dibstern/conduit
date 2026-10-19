@@ -46,7 +46,7 @@ async function toList(page: Page): Promise<void> {
 async function newSession(page: Page): Promise<void> {
 	await toList(page);
 	await page.locator("#new-session-btn:visible").click();
-	await expect(page).toHaveURL(/\/new(\?|$)/);
+	await expect(page).toHaveURL(/\/draft\/[^/?]+(\?|$)/);
 }
 
 test("a draft prefills the project last added or given a session, on every client", async ({
@@ -77,7 +77,7 @@ test("a draft prefills the project last added or given a session, on every clien
 	await dialog.getByRole("option", { name: folder, exact: true }).click();
 	await dialog.getByRole("button", { name: /^Add project/ }).click();
 	await expect(dialog).toBeHidden();
-	await expect(page).toHaveURL(/\/new\?/);
+	await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 	await expect(draftChip).toHaveText(/t3code\s*$/);
 	await expect(page.getByTestId("session-scope-chip")).toHaveText("t3code");
 	await page.waitForTimeout(1500);
@@ -161,7 +161,7 @@ test("a draft starts in the open session's project, keeps its pick, and lands in
 	else await draftChip.click();
 	await page.getByRole("menuitem", { name: "New project…" }).click();
 	await addFolder(page, beta);
-	await expect(page).toHaveURL(/\/new\?/);
+	await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 	await expect(draftChip).toHaveText(/beta\s*$/);
 	await expect(app.input).toBeFocused();
 	expect(new URL(page.url()).searchParams.get("p")).toBeNull();

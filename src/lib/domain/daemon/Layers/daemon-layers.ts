@@ -47,6 +47,7 @@ import {
 	BrowserRpcConnectionsLive,
 	makeRoutedWsRpcServerLayer,
 } from "../../../server/ws-rpc.js";
+import { InputDraftsLive } from "../../relay/Services/input-drafts.js";
 import { SessionEventBusLive } from "../../relay/Services/session-event-bus.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
@@ -823,6 +824,13 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			);
 		}),
 	).pipe(Layer.provideMerge(withOpenCodeInstances));
+	const withInputDrafts = Layer.unwrap(
+		Effect.gen(function* () {
+			return InputDraftsLive.pipe(
+				Layer.provide(Layer.succeedContext(yield* PersistenceStore)),
+			);
+		}),
+	).pipe(Layer.provideMerge(withSessionDirectory));
 	const registries = RelayFactoryLive(configDir).pipe(
 		Layer.provideMerge(
 			Layer.merge(
@@ -830,7 +838,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 					setupTimeoutMs: ENV.worktreeSetupTimeoutMs,
 				}),
 				UsageLive(),
-			).pipe(Layer.provideMerge(withSessionDirectory)),
+			).pipe(Layer.provideMerge(withInputDrafts)),
 		),
 	);
 

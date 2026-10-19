@@ -51,7 +51,7 @@ async function enterText(textarea: HTMLTextAreaElement, text: string) {
 }
 
 async function receiveDraft(text: string, initial = false) {
-	handleInputSyncReceived({ sessionId, text, initial });
+	handleInputSyncReceived({ key: { session: sessionId }, text, initial });
 	await tick();
 }
 
@@ -88,7 +88,7 @@ describe("InputArea build reload recovery", () => {
 		attachedProjectState.slug = "test";
 		connectionState.status = "connected";
 		phaseToIdle(getOrCreateSessionActivity(sessionId));
-		handleInputSyncReceived({ sessionId, initial: true });
+		handleInputSyncReceived({ key: { session: sessionId }, initial: true });
 		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
 			callback(0);
 			return 0;
@@ -122,7 +122,7 @@ describe("InputArea build reload recovery", () => {
 		expect(rpc).toHaveBeenCalledWith(
 			"SyncInputDraft",
 			expect.objectContaining({
-				sessionId,
+				key: { session: sessionId },
 				text: "draft for dotfiles",
 			}),
 		);
@@ -167,7 +167,7 @@ describe("InputArea build reload recovery", () => {
 		expect(
 			JSON.parse(sessionStorage.getItem(reloadDraftKey) ?? "null"),
 		).toContainEqual({
-			key: sessionId,
+			key: { session: sessionId },
 			text: "draft with an image",
 			acked: "draft with an image",
 		});

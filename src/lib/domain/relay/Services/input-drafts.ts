@@ -1,13 +1,14 @@
 // Composer work in progress lives beside the event log. Each subscription
 // opens with the stored text, followed by live changes.
-import { Context, Effect, Layer, PubSub, Stream } from "effect";
+import { Context, Effect, Layer, Option, PubSub, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
-import type { InputDraftEnvelope } from "../../../contracts/ws-rpc.js";
+import type {
+	InputDraftEnvelope,
+	InputDraftKey,
+} from "../../../contracts/ws-rpc.js";
 
-export type InputDraftKey =
-	| { readonly session: string }
-	| { readonly draft: string };
+export type { InputDraftKey } from "../../../contracts/ws-rpc.js";
 
 export interface InputDrafts {
 	readonly read: (
@@ -17,6 +18,7 @@ export interface InputDrafts {
 		key: InputDraftKey,
 		text: string,
 		from?: string,
+		projectId?: string,
 	) => Effect.Effect<void>;
 	/** Empty a session draft only if it still holds the text that was sent. */
 	readonly clearSent: (sessionId: string, sent: string) => Effect.Effect<void>;
@@ -38,23 +40,43 @@ export const makeInputDrafts: Effect.Effect<
 	never,
 	SqlClient.SqlClient
 > = Effect.gen(function* () {
+	// Daemon relays borrow one service so moving a draft between projects also
+	// reaches subscribers still attached to its previous project.
+	const shared = yield* Effect.serviceOption(InputDraftsTag);
+	if (Option.isSome(shared)) return shared.value;
 	const sql = yield* SqlClient.SqlClient;
 	const changes = yield* PubSub.unbounded<{
 		readonly key: InputDraftKey;
 		readonly text: string;
 		readonly from?: string;
+		readonly projectId?: string;
 	}>();
-	const read = (key: InputDraftKey) =>
-		sql<{ text: string }>`SELECT text FROM input_drafts
-			WHERE draft_key = ${keyOf(key)} AND kind = ${kindOf(key)}`.pipe(
-			Effect.map((rows) => rows[0]?.text),
-		);
+	const readRow = (key: InputDraftKey) =>
+		sql<{
+			text: string;
+			project_id: string;
+		}>`SELECT text, project_id FROM input_drafts
+			WHERE draft_key = ${keyOf(key)} AND kind = ${kindOf(key)}
+			AND promoted_session_id IS NULL`.pipe(Effect.map((rows) => rows[0]));
 
 	return {
-		read,
-		write: (key, text, from) =>
+		read: (key) => readRow(key).pipe(Effect.map((row) => row?.text)),
+		write: (key, text, from, projectId) =>
 			Effect.gen(function* () {
-				if (Buffer.byteLength(text, "utf8") > 1024 * 1024) {
+				const oversized = Buffer.byteLength(text, "utf8") > 1024 * 1024;
+				if ("draft" in key && (text === "" || oversized)) {
+					const promoted = yield* sql<{ promoted_session_id: string }>`
+						SELECT promoted_session_id FROM input_drafts
+						WHERE draft_key = ${key.draft} AND promoted_session_id IS NOT NULL`.pipe(
+						Effect.catch((cause) =>
+							Effect.logError(
+								`Could not read input draft ${key.draft}: ${cause}`,
+							).pipe(Effect.as([])),
+						),
+					);
+					if (promoted.length > 0) return;
+				}
+				if (oversized) {
 					yield* Effect.logWarning(
 						`Input draft ${keyOf(key)} exceeds 1 MiB; skipped storage`,
 					);
@@ -66,18 +88,46 @@ export const makeInputDrafts: Effect.Effect<
 					FROM sessions WHERE id = ${key.session}
 					ON CONFLICT (draft_key) DO UPDATE SET
 						project_id = excluded.project_id, kind = excluded.kind,
-						text = excluded.text, updated_at = excluded.updated_at`.pipe(
+						text = excluded.text, updated_at = excluded.updated_at
+					WHERE input_drafts.promoted_session_id IS NULL`.pipe(
 						Effect.catch((cause) =>
 							Effect.logError(
 								`Could not store input draft ${key.session}: ${cause}`,
 							),
 						),
 					);
+				} else if (projectId !== undefined) {
+					const writable = yield* (
+						text === ""
+							? sql<{ draft_key: string }>`DELETE FROM input_drafts
+							WHERE draft_key = ${key.draft} AND kind = 'draft'
+							AND promoted_session_id IS NULL RETURNING draft_key`
+							: sql<{ draft_key: string }>`INSERT INTO input_drafts
+							(draft_key, project_id, kind, text, updated_at)
+							VALUES (${key.draft}, ${projectId}, 'draft', ${text}, ${Date.now()})
+							ON CONFLICT (draft_key) DO UPDATE SET
+								project_id = excluded.project_id, text = excluded.text,
+								updated_at = excluded.updated_at
+							WHERE input_drafts.kind = 'draft'
+							AND input_drafts.promoted_session_id IS NULL
+							RETURNING draft_key`
+					).pipe(
+						Effect.catch((cause) =>
+							Effect.logError(
+								`Could not store input draft ${key.draft}: ${cause}`,
+							).pipe(Effect.as(undefined)),
+						),
+					);
+					// A promoted id cannot become writable or emit fresh draft text.
+					if (text !== "" && writable?.length === 0) return;
+				} else {
+					return;
 				}
 				yield* PubSub.publish(changes, {
 					key,
 					text,
 					...(from !== undefined ? { from } : {}),
+					...("draft" in key && projectId !== undefined ? { projectId } : {}),
 				});
 			}),
 		// A send's clear can land after the user has typed and synced the next
@@ -103,7 +153,7 @@ export const makeInputDrafts: Effect.Effect<
 				Effect.gen(function* () {
 					// Buffer writes made during the read so the snapshot has no gap.
 					const dequeue = yield* PubSub.subscribe(changes);
-					const text = yield* read(key).pipe(
+					const row = yield* readRow(key).pipe(
 						Effect.catch((cause) =>
 							Effect.logError(
 								`Could not read input draft ${keyOf(key)}: ${cause}`,
@@ -113,7 +163,10 @@ export const makeInputDrafts: Effect.Effect<
 					return Stream.concat(
 						Stream.make<[InputDraftEnvelope]>({
 							_tag: "synchronized",
-							...(text === undefined ? {} : { text }),
+							...(row === undefined ? {} : { text: row.text }),
+							...("draft" in key && row !== undefined
+								? { projectId: row.project_id }
+								: {}),
 						}),
 						Stream.fromSubscription(dequeue).pipe(
 							Stream.filter(
@@ -121,10 +174,11 @@ export const makeInputDrafts: Effect.Effect<
 									keyOf(change.key) === keyOf(key) &&
 									kindOf(change.key) === kindOf(key),
 							),
-							Stream.map(({ text, from }) => ({
+							Stream.map(({ text, from, projectId }) => ({
 								_tag: "draft" as const,
 								text,
 								...(from !== undefined ? { from } : {}),
+								...(projectId !== undefined ? { projectId } : {}),
 							})),
 						),
 					);

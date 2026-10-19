@@ -22,7 +22,7 @@ const open = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const q = yield* Queue.unbounded<InputDraftEnvelope>();
 			yield* Stream.runForEach(
-				client.SubscribeInputDraft({ sessionId }),
+				client.SubscribeInputDraft({ key: { session: sessionId } }),
 				(envelope) => Queue.offer(q, envelope),
 			).pipe(Effect.forkScoped);
 			expect(yield* Queue.take(q)).toEqual({
@@ -43,7 +43,7 @@ describe("SubscribeInputDraft", () => {
 			const elsewhere = yield* subscribe("s2");
 
 			yield* client.SyncInputDraft({
-				sessionId: "s1",
+				key: { session: "s1" },
 				text: "half a thought",
 				originId: "tab-a",
 			});
@@ -64,7 +64,7 @@ describe("SubscribeInputDraft", () => {
 			const q = yield* subscribe("s1");
 
 			yield* client.SyncInputDraft({
-				sessionId: "s1",
+				key: { session: "s1" },
 				text: "",
 			});
 
@@ -80,7 +80,7 @@ describe("SubscribeInputDraft", () => {
 				(id, project_id, provider, title, status, created_at, updated_at)
 				VALUES ('s1', 'test-project', 'opencode', 'Session', 'idle', 1, 1)`;
 			yield* client.SyncInputDraft({
-				sessionId: "s1",
+				key: { session: "s1" },
 				text: "typed before the tab subscribed",
 			});
 

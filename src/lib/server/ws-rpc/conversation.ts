@@ -24,7 +24,7 @@ import {
 import {
 	cancelSessionById,
 	sendMessageToSession,
-	syncInputDraftForSession,
+	syncInputDraft,
 } from "../../handlers/prompt.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import { ProviderRegistryTag } from "../../provider/provider-registry.js";
@@ -209,10 +209,16 @@ export const conversationHandlers = {
 			}),
 		),
 	SyncInputDraft: (request) =>
-		syncInputDraftForSession({
-			sessionId: request.sessionId,
-			text: request.text,
-			...(request.originId ? { from: request.originId } : {}),
+		Effect.gen(function* () {
+			if ("draft" in request.key && request.projectSlug === undefined)
+				return yield* new WsRpcError({
+					message: "projectSlug is required for a draft write",
+				});
+			yield* syncInputDraft({
+				key: request.key,
+				text: request.text,
+				...(request.originId ? { from: request.originId } : {}),
+			});
 		}).pipe(
 			Effect.as({ ok: true as const }),
 			Effect.catch((error) =>

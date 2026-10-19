@@ -1,9 +1,9 @@
-// Routes: /auth, /setup, / (session list), /new (draft session), /s/:sessionId.
+// Routes: /auth, /setup, / (session list), /draft/:draftId, /s/:sessionId.
 
 export type Route =
 	| { page: "auth" }
 	| { page: "setup" }
-	| { page: "chat"; sessionId?: string; draft?: true };
+	| { page: "chat"; sessionId?: string; draft?: true; draftId?: string };
 
 export interface RouteTransition {
 	from: string;
@@ -30,7 +30,7 @@ function splitPath(path: string): { pathname: string; search: string } {
 /** The sidebar's project scope (`?p=<scope>`). Read and written through
  *  stores/session-scope.ts; declared here because navigation has to carry it. */
 export const SCOPE_PARAM = "p";
-/** The project a draft (/new) will be created in; separate from the list scope. */
+/** The project a draft will be created in; separate from the list scope. */
 export const DRAFT_PROJECT_PARAM = "project";
 export const STATUS_PARAM = "status";
 export const GROUP_PARAM = "group";
@@ -59,6 +59,18 @@ function carryScope(pathname: string, search: string): string {
 // trace "how did I end up on this page?" in the browser console.
 
 const transitionLog: RouteTransition[] = [];
+
+let lastDraft: { id: string; text: string } | null = null;
+
+/** The composer reports its draft so routing needs no access to draft storage. */
+export function noteDraftNavigation(draft: typeof lastDraft): void {
+	lastDraft = draft;
+}
+
+/** Starting again reuses an empty draft and leaves a nonempty draft at its own URL. */
+export function getNewDraftId(): string {
+	return lastDraft?.text === "" ? lastDraft.id : crypto.randomUUID();
+}
 
 function recordTransition(from: string, to: string): void {
 	transitionLog.push({ from, to, timestamp: Date.now() });
@@ -108,6 +120,10 @@ export function getCurrentRoute(): Route {
 	if (path === "/new" || path === "/new/") {
 		return { page: "chat", draft: true };
 	}
+	const draftMatch = path.match(/^\/draft\/([^/]+)\/?$/);
+	if (draftMatch?.[1]) {
+		return { page: "chat", draft: true, draftId: draftMatch[1] };
+	}
 
 	// Legacy session links remain readable until App normalizes the address.
 	const sessionMatch = path.match(/^(?:\/p\/[^/]+)?\/s\/([^/]+)\/?$/);
@@ -134,6 +150,10 @@ export function normalizeRoute(): void {
 			? `?${params}`
 			: ""
 		: routerState.search;
+	if (path === "/new" || path === "/new/") {
+		replaceRoute(`/draft/${getNewDraftId()}${search || "?"}`);
+		return;
+	}
 	const legacySession = path.match(/^\/p\/[^/]+\/s\/([^/]+)\/?$/);
 	if (legacySession) {
 		replaceRoute(`/s/${legacySession[1]}${search || "?"}`);
@@ -145,7 +165,7 @@ export function normalizeRoute(): void {
 		replaceRoute(`/?${params}`);
 		return;
 	}
-	if (!/^\/(?:s\/[^/]+\/?|new\/?|auth\/?|setup\/?)?$/.test(path)) {
+	if (!/^\/(?:(?:s|draft)\/[^/]+\/?|auth\/?|setup\/?)?$/.test(path)) {
 		replaceRoute(`/${search || "?"}`);
 	} else if (search !== routerState.search) {
 		replaceRoute(`${path}${search || "?"}`);

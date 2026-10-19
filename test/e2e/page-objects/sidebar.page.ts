@@ -39,7 +39,7 @@ export class SidebarPage {
 	/** `+` opens a draft; the session exists once its first message is sent. */
 	async createNewSession(text = "New session"): Promise<void> {
 		await this.newSessionBtn.click();
-		await expect(this.page).toHaveURL(/\/new\?/);
+		await expect(this.page).toHaveURL(/\/draft\/[^/?]+\?/);
 		await this.page.locator("#input").fill(text);
 		await this.page.locator("#send").click();
 		await expect(this.page).toHaveURL(/\/s\/[^/?]+(?:\?.*)?$/);

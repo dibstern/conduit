@@ -76,7 +76,7 @@ async function openDraft(
 		`${harness.baseUrl}/?p=${encodeURIComponent(slug)}`,
 	);
 	await page.locator("#new-session-btn:visible").click();
-	await expect(page).toHaveURL(/\/new\?/);
+	await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 	return page.locator(
 		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
 	);
@@ -273,7 +273,7 @@ test("a model picked in the draft composer is the model OpenCode runs", async ({
 	if (!(await newSession.isVisible()))
 		await page.getByTestId("session-bar-back").click();
 	await newSession.click();
-	await expect(page).toHaveURL(/\/new\?/);
+	await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 	await expect(
 		picker,
 		"the next draft returns to the saved default harness",
@@ -523,7 +523,7 @@ test("an OpenCode draft with an empty catalog requires a model before send", asy
 	expect(evidence.sessionsAfter).toEqual(evidence.sessionsBefore);
 	expect(evidence.upstreamCreates).toEqual([]);
 	expect(evidence.promptModels).toEqual([]);
-	await expect(page).toHaveURL(/\/new(?:[/?]|$)/);
+	await expect(page).toHaveURL(/\/draft\/[^/?]+(?:[/?]|$)/);
 	await expect(
 		page.getByRole("textbox", { name: "Message", exact: true }),
 	).toHaveValue(testInfo.project.use.isMobile ? `${prompt}\n` : prompt);
@@ -873,7 +873,7 @@ test.describe("effort", () => {
 		if (!(await newSession.isVisible()))
 			await page.getByTestId("session-bar-back").click();
 		await newSession.click();
-		await expect(page).toHaveURL(/\/new\?/);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 		await openPickerRoot(page, picker);
 		await page.getByTestId("picker-row-model").click();
 		await page

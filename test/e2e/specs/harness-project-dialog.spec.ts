@@ -384,7 +384,7 @@ test("permission denied stays inline and keeps the selected folder", async ({
 	}
 	await dialog.getByRole("button", { name: /^Add project/ }).click();
 	await expect(dialog).toBeHidden();
-	await expect(page).toHaveURL(/\/new\?/);
+	await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 	expect(new URL(page.url()).searchParams.get("p")).toBe("denied-folder");
 	expect(new URL(page.url()).searchParams.get("project")).toBe("denied-folder");
 });

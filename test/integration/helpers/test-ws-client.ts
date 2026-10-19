@@ -24,6 +24,7 @@ import {
 	type GetModelsResponse,
 	type GetProjectsResponse,
 	type HistoryMessageSchema,
+	type InputDraftKey,
 	type LoadMoreHistoryResponse,
 	type PermissionDecision,
 	type PtyListResponse,
@@ -362,19 +363,25 @@ export class TestWsClient {
 	async syncInputDraft(
 		text: string,
 		opts: {
+			readonly key?: InputDraftKey;
 			readonly sessionId?: string;
+			readonly projectSlug?: string;
 			readonly originId?: string;
 		} = {},
 	): Promise<void> {
 		const sessionId = opts.sessionId ?? this.getActiveSessionId();
-		if (!sessionId) {
+		const key = opts.key ?? (sessionId ? { session: sessionId } : undefined);
+		if (!key) {
 			throw new Error("Cannot sync input draft before selecting a session");
 		}
-		await this.subscribeSessionDetail(sessionId);
+		if ("session" in key) await this.subscribeSessionDetail(key.session);
 		await this.rpcCall((client) =>
 			client.SyncInputDraft({
-				sessionId,
+				key,
 				text,
+				...("draft" in key
+					? { projectSlug: opts.projectSlug ?? this.projectSlug }
+					: {}),
 				...(opts.originId ? { originId: opts.originId } : {}),
 			}),
 		);
@@ -837,14 +844,19 @@ export class TestWsClient {
 	 * lands in `received` as `{ type: "input_draft", ...envelope }`.
 	 */
 	async subscribeInputDraft(
-		sessionId: string,
+		key: InputDraftKey | string,
 		projectSlug = this.projectSlug,
 	): Promise<void> {
-		await this.subscribeSessionDetail(sessionId, projectSlug);
+		const draftKey = typeof key === "string" ? { session: key } : key;
+		if ("session" in draftKey)
+			await this.subscribeSessionDetail(draftKey.session, projectSlug);
 		await this.follow(
 			"input_draft",
-			(client) => client.SubscribeInputDraft({ sessionId }),
-			{ projectSlug, sessionId },
+			(client) => client.SubscribeInputDraft({ key: draftKey }),
+			{
+				projectSlug,
+				...("session" in draftKey ? { sessionId: draftKey.session } : {}),
+			},
 		);
 	}
 

@@ -2581,10 +2581,17 @@ export const SendInputNow = Rpc.make("input.sendNow", {
 	error: WsRpcError,
 });
 
+export const InputDraftKeySchema = Schema.Union([
+	Schema.Struct({ session: NonEmptyString }),
+	Schema.Struct({ draft: NonEmptyString }),
+]);
+export type InputDraftKey = typeof InputDraftKeySchema.Type;
+
 export const SyncInputDraft = Rpc.make("SyncInputDraft", {
 	payload: Schema.TaggedStruct("SyncInputDraft", {
-		sessionId: NonEmptyString,
+		key: InputDraftKeySchema,
 		text: Schema.String,
+		projectSlug: Schema.optional(NonEmptyString),
 		originId: Schema.optional(NonEmptyString),
 	}),
 	success: OkResponseSchema,
@@ -3375,6 +3382,7 @@ const InputDraftEnvelopeSchema = Schema.Union([
 	}),
 	Schema.TaggedStruct("draft", {
 		text: Schema.String,
+		projectId: Schema.optional(Schema.String),
 		/** The writer's SyncInputDraft originId; that tab drops its own echo. */
 		from: Schema.optional(Schema.String),
 	}),
@@ -3386,7 +3394,7 @@ export type InputDraftEnvelope = typeof InputDraftEnvelopeSchema.Type;
  * merges snapshots with local edits, including text typed while disconnected.
  */
 export const SubscribeInputDraft = Rpc.make("SubscribeInputDraft", {
-	payload: { sessionId: NonEmptyString },
+	payload: { key: InputDraftKeySchema },
 	success: InputDraftEnvelopeSchema,
 	error: WsRpcError,
 	stream: true,

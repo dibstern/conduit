@@ -340,7 +340,7 @@ test("create AccountUnroutable keeps the new session draft", async ({
 	});
 	await page.locator("#new-session-btn").click();
 	await expect(page).toHaveURL(
-		new RegExp(`/new\\?(?:.*&)?project=${projectSlug}`),
+		new RegExp(`/draft/[^/?]+\\?(?:.*&)?project=${projectSlug}`),
 	);
 	await expect(page.locator("#model-display")).toContainText("Test model");
 	await page.locator("#input").fill(draft);
@@ -352,7 +352,7 @@ test("create AccountUnroutable keeps the new session draft", async ({
 	await expect(toast).toContainText(unroutable.message);
 	await expect(page.locator("#input")).toHaveValue(draft);
 	await expect(page).toHaveURL(
-		new RegExp(`/new\\?(?:.*&)?project=${projectSlug}`),
+		new RegExp(`/draft/[^/?]+\\?(?:.*&)?project=${projectSlug}`),
 	);
 	await capture(page, testInfo, "create-refusal-screen");
 });
@@ -474,7 +474,9 @@ test("warm session resolution refusal shows its server reason and keeps the curr
 			.getRequests()
 			.filter(
 				({ tag, payload }) =>
-					payload["sessionId"] === missing &&
+					(payload["sessionId"] === missing ||
+						(payload["key"] as { session?: string } | undefined)?.session ===
+							missing) &&
 					[
 						"ViewSession",
 						"SubscribeSessionDetail",

@@ -38,6 +38,7 @@
 		{
 			title: "Anywhere",
 			shortcuts: [
+				[globalKeyHint("n"), "New session"],
 				["⌘Z", "Undo latest action"],
 				["?", "Show keyboard shortcuts"],
 				["Esc", "Close menu or sheet"],

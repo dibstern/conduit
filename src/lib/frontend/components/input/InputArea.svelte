@@ -4,7 +4,6 @@
 <script module lang="ts">
 	// A composer remount must not repeat the same turn's diagnostic.
 	const reportedMissingPrompts = new Set<string>();
-	let draftId = crypto.randomUUID();
 </script>
 
 <script lang="ts">
@@ -115,7 +114,10 @@
 	});
 
 	const composerDraft = createComposerDraft({
-		sessionId: () => sessionState.currentId,
+		key: () => {
+			const route = getCurrentRoute();
+			return sessionState.currentId ? { session: sessionState.currentId } : route.page === "chat" && route.draftId ? { draft: route.draftId } : null;
+		},
 		projectSlug: getDraftProject,
 		hasAttachments: () => pendingImages.length > 0,
 	});
@@ -126,7 +128,8 @@
 	let draftSessionMode = $state<Awaited<ReturnType<typeof rpc<"ResolveSessionMode">>> | undefined>();
 	let pendingDraftSessionMode: Promise<void> | undefined;
 	const draftRoute = $derived(getCurrentRoute());
-	const draftContext = $derived(`${getDraftProject() ?? ""}:${sessionState.currentId ?? ""}:${draftRoute.page === "chat" && draftRoute.draft ? "draft" : "session"}`);
+	const draftId = $derived(draftRoute.page === "chat" ? draftRoute.draftId : undefined);
+	const draftContext = $derived(`${getDraftProject() ?? ""}:${sessionState.currentId ?? ""}:${draftId ?? "session"}`);
 	const sessionModeContext = $derived(`${draftContext}:${sessionState.currentId ? "" : getEffectiveInstanceId()}`);
 	$effect(() => {
 		draftContext;
@@ -231,7 +234,7 @@
 	});
 	function draftSessionPayload(projectSlug: string | null) {
 		const displayed = getDraftPick();
-		if (!projectSlug || !displayed) return undefined;
+		if (!projectSlug || !displayed || !draftId) return undefined;
 		return {
 			projectSlug,
 			originId: getBrowserClientId(),
@@ -719,7 +722,7 @@
 			steerRefusal = null;
 			dismissedRefusal = null;
 			const clearOnSend = textOverride === undefined && delivery !== "steer";
-			const unsentText = composerDraft.sendStarted(clearOnSend);
+			const unsentDraft = composerDraft.sendStarted(clearOnSend);
 			if (clearOnSend) {
 				pendingImages = [];
 				cursorPos = 0;
@@ -730,15 +733,11 @@
 				...(imageUrls ? { images: imageUrls } : {}),
 				...(draft ? {
 					draft,
-					onCreated: () => {
-						draftId = crypto.randomUUID();
-						composerDraft.sessionCreated();
-					},
 				} : { sessionId: sentFromSessionId! }),
 			});
 			const sentToSessionId = sentFromSessionId ?? draftSend.sessionId;
 			if (outcome.kind === "failed" || outcome.kind === "refused") {
-				if (composerDraft.sendFailed(unsentText, sentToSessionId, projectSlug, textOverride === undefined)) {
+				if (composerDraft.sendFailed(unsentDraft, sentToSessionId, textOverride === undefined)) {
 					cursorPos = composerDraft.text.length;
 					pendingImages = unsentImages;
 				}

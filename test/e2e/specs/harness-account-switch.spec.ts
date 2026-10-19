@@ -2057,7 +2057,7 @@ test("scenario 12: changing agents sends a budgeted hidden handoff to a fresh na
 		if (!slug) throw new Error("SaveProject did not return the project's slug");
 		await app.goto(`${harness.baseUrl}/?p=${encodeURIComponent(slug)}`);
 		await page.locator("#new-session-btn:visible").click();
-		await expect(page).toHaveURL(/\/new\?/);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 		const picker = page.locator(
 			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
 		);
@@ -2237,7 +2237,7 @@ test("scenario 13: the new agent reads omitted history through the registered MC
 		if (!slug) throw new Error("SaveProject did not return the project's slug");
 		await app.goto(`${harness.baseUrl}/?p=${encodeURIComponent(slug)}`);
 		await page.locator("#new-session-btn:visible").click();
-		await expect(page).toHaveURL(/\/new\?/);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 		const picker = page.locator(
 			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
 		);

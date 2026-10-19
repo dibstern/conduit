@@ -85,6 +85,7 @@ import {
 } from "../domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
 import { DraftPreWarmLive } from "../domain/relay/Services/draft-prewarm.js";
+import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import {
 	InstanceManagementServiceLive,
 	InstanceManagementServiceTag,
@@ -506,6 +507,10 @@ export function createProjectRelayLayers({
 		config.daemonConfigContext ?? Context.empty(),
 		SessionEventBusTag,
 	);
+	const sharedDrafts = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		InputDraftsTag,
+	);
 	// Returning the daemon instance adds no ownership to the relay scope.
 	// Keep one layer reference so every writer and subscriber uses the same bus.
 	const sessionEventBusLayer = Option.isSome(sharedBus)
@@ -522,7 +527,16 @@ export function createProjectRelayLayers({
 					undefined,
 					sessionEventBusLayer,
 				)
-	).pipe(Layer.provideMerge(activityReaders));
+	).pipe(
+		Layer.provideMerge(activityReaders),
+		// Relay writers and subscribers share the daemon instance, so a draft that
+		// moves between projects keeps one broadcast channel.
+		Layer.merge(
+			Option.isSome(sharedDrafts)
+				? Layer.sync(InputDraftsTag, () => sharedDrafts.value)
+				: Layer.empty,
+		),
+	);
 	// Standalone WebSocket routing resolves only sessions owned by this relay.
 	const sessionDirectoryLayer = Option.isSome(sharedDirectory)
 		? Layer.succeedContext(

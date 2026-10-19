@@ -31,7 +31,10 @@ import {
 } from "effect";
 import { RpcClient, RpcSerialization } from "effect/rpc";
 import { Socket } from "effect/socket";
-import type { SessionDetailEnvelope } from "../../contracts/ws-rpc.js";
+import type {
+	InputDraftKey,
+	SessionDetailEnvelope,
+} from "../../contracts/ws-rpc.js";
 import {
 	markControlSocketOpen,
 	trackControlSocket,
@@ -182,11 +185,11 @@ const makeSubscriptions = (
 	 *  never replays one, so a reconnect cannot re-fire a ding. */
 	alerts: () =>
 		resumeStream(() => sockets.control("SubscribeAlerts", { projectSlug })),
-	/** One session's composer draft as other tabs type it. Live-only. */
-	inputDraft: (options: { readonly sessionId: string }) =>
+	/** Stored composer text followed by live draft changes. */
+	inputDraft: (options: { readonly key: InputDraftKey }) =>
 		resumeStream(() =>
 			sockets.control("SubscribeInputDraft", {
-				sessionId: options.sessionId,
+				key: options.key,
 			}),
 		),
 	/**

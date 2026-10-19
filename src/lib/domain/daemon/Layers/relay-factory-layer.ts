@@ -26,7 +26,7 @@ import {
 	ProjectSaveRejected,
 	type SaveProjectInput,
 } from "../../../contracts/ws-rpc.js";
-import type { PersistenceStore } from "../../../persistence/effect/live.js";
+import { PersistenceStore } from "../../../persistence/effect/live.js";
 import {
 	daemonStorePath,
 	projectStorageDir,
@@ -38,6 +38,10 @@ import {
 	DaemonSessionQueryServiceError,
 	DaemonSessionQueryServiceTag,
 } from "../../relay/Services/daemon-session-query-service.js";
+import {
+	InputDraftsTag,
+	makeInputDrafts,
+} from "../../relay/Services/input-drafts.js";
 import {
 	InstanceManagementServiceError,
 	InstanceManagementServiceTag,
@@ -198,6 +202,10 @@ export const RelayFactoryLive = (
 			const accounts = yield* AccountDirectory;
 			const sessionDirectory = yield* Effect.serviceOption(SessionDirectory);
 			const storeContext = yield* persistenceStoreContext;
+			const sharedDrafts = yield* Effect.serviceOption(InputDraftsTag);
+			const inputDrafts = Option.isSome(sharedDrafts)
+				? sharedDrafts.value
+				: yield* makeInputDrafts.pipe(Effect.provide(yield* PersistenceStore));
 			const unavailable = yield* DaemonStoreAvailability;
 			const configRef = yield* DaemonConfigRefTag;
 			const envResolver = Option.getOrUndefined(
@@ -496,6 +504,7 @@ export const RelayFactoryLive = (
 										Context.add(AccountDirectory, accounts),
 										Context.add(SessionActivityTag, activity),
 										Context.add(SessionEventBusTag, sessionEventBus),
+										Context.add(InputDraftsTag, inputDrafts),
 										Context.add(DaemonEventBusTag, eventBus),
 										Context.add(ProjectRegistryTag, projectRegistry),
 										Context.add(PortScannerTag, portScanner),

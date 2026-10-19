@@ -38,12 +38,17 @@ async function setup(
 ) {
 	const rpc = await mockWsRpc(page, {
 		streams: {
-			SubscribeInputDraft: ({ sessionId }) => [
-				{
-					_tag: "synchronized",
-					text: sessionId === seed ? "Seed draft" : `Draft for ${sessionId}`,
-				},
-			],
+			SubscribeInputDraft: ({ key }) => {
+				const { session } = key as { session?: string };
+				return [
+					{
+						_tag: "synchronized",
+						...(session && {
+							text: session === seed ? "Seed draft" : `Draft for ${session}`,
+						}),
+					},
+				];
+			},
 		},
 		stubs: {
 			GetModels: () => ({
@@ -687,7 +692,7 @@ test("a draft's first send creates the session in its project and sends into it"
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	await page.locator("#new-session-btn").click();
 	await expect(page).toHaveURL(
-		new RegExp(`/new\\?(?:.*&)?project=${projectSlug}`),
+		new RegExp(`/draft/[^/?]+\\?(?:.*&)?project=${projectSlug}`),
 	);
 	await expect(page.locator("#input")).toHaveValue("");
 	expect(
@@ -1004,7 +1009,7 @@ test("a draft's first send places the session before any navigation frame", asyn
 	expect(
 		sampled.every(
 			(frame) =>
-				frame.path === "/new" ||
+				frame.path.startsWith("/draft/") ||
 				(frame.path === `/s/${created}` &&
 					frame.composer &&
 					!frame.home &&
@@ -1022,7 +1027,7 @@ test("a draft's first send places the session before any navigation frame", asyn
 	});
 	await page.goBack();
 	await expect(page).toHaveURL(
-		new RegExp(`/new\\?(?:.*&)?project=${projectSlug}`),
+		new RegExp(`/draft/[^/?]+\\?(?:.*&)?project=${projectSlug}`),
 	);
 });
 
@@ -1134,7 +1139,7 @@ test("a side-thread reply after opening another session leaves its route and com
 	await rpc.waitForRequest(
 		(request) =>
 			request.tag === "SyncInputDraft" &&
-			request.payload["sessionId"] === survivor &&
+			(request.payload["key"] as { session?: string })?.session === survivor &&
 			request.payload["text"] === "New text in the other session",
 	);
 });
@@ -1456,8 +1461,9 @@ test("New session pushes from a session and replaces an existing draft entry", a
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	await page.locator("#new-session-btn").click();
 	await expect(page).toHaveURL(
-		`${harness.relayBaseUrl}/new?keep=draft-history&project=${projectSlug}`,
+		new RegExp(`/draft/[^/?]+\\?keep=draft-history&project=${projectSlug}`),
 	);
+	const draftPath = new URL(page.url()).pathname;
 	await expect(page.getByTestId("draft-project-chip")).toContainText(
 		projectSlug,
 	);
@@ -1467,16 +1473,16 @@ test("New session pushes from a session and replaces an existing draft entry", a
 	);
 	await page.goForward();
 	// An unpinned draft is a valid link; New pins the project's default.
-	await page.evaluate(() => {
-		window.history.replaceState(null, "", "/new?keep=draft-history");
+	await page.evaluate((path) => {
+		window.history.replaceState(null, "", `${path}?keep=draft-history`);
 		window.dispatchEvent(new PopStateEvent("popstate"));
-	});
+	}, draftPath);
 	await expect(page.getByTestId("draft-project-chip")).toContainText(
 		projectSlug,
 	);
 	await page.locator("#new-session-btn").click();
 	await expect(page).toHaveURL(
-		`${harness.relayBaseUrl}/new?keep=draft-history&project=${projectSlug}`,
+		`${harness.relayBaseUrl}${draftPath}?keep=draft-history&project=${projectSlug}`,
 	);
 	await page.goBack();
 	await expect(page).toHaveURL(

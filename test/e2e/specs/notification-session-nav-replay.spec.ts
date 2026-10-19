@@ -57,8 +57,13 @@ test.describe("Notification → session navigation (replay)", () => {
 			const target = "notification-target";
 			const rpc = await mockWsRpc(page, {
 				streams: {
-					SubscribeInputDraft: ({ sessionId }) => [
-						{ _tag: "synchronized", text: `Shown ${String(sessionId)}` },
+					SubscribeInputDraft: ({ key }) => [
+						{
+							_tag: "synchronized",
+							...((key as { session?: string }).session && {
+								text: `Shown ${(key as { session?: string }).session}`,
+							}),
+						},
 					],
 				},
 				stubs: {
@@ -165,8 +170,13 @@ test.describe("Notification → session navigation (replay)", () => {
 		});
 		const rpc = await mockWsRpc(page, {
 			streams: {
-				SubscribeInputDraft: ({ sessionId }) => [
-					{ _tag: "synchronized", text: `Shown ${String(sessionId)}` },
+				SubscribeInputDraft: ({ key }) => [
+					{
+						_tag: "synchronized",
+						...((key as { session?: string }).session && {
+							text: `Shown ${(key as { session?: string }).session}`,
+						}),
+					},
 				],
 			},
 		});

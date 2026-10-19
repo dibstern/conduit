@@ -118,8 +118,13 @@ async function setup(page: Page) {
 			}),
 		},
 		streams: {
-			SubscribeInputDraft: ({ sessionId }) => [
-				{ _tag: "synchronized", text: `Prompt for ${String(sessionId)}` },
+			SubscribeInputDraft: ({ key }) => [
+				{
+					_tag: "synchronized",
+					...((key as { session?: string }).session && {
+						text: `Prompt for ${(key as { session?: string }).session}`,
+					}),
+				},
 			],
 			SubscribeProjectSettings: (params) => {
 				const modelId = `${catalogName(String(params["projectSlug"])).toLowerCase()}-model`;

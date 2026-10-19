@@ -35,6 +35,10 @@ interface EffectRpcRequest {
 	readonly payload?: Record<string, unknown>;
 }
 
+type DraftKey = { readonly session: string } | { readonly draft: string };
+const draftKeyId = (key: DraftKey): string =>
+	"session" in key ? `session:${key.session}` : `draft:${key.draft}`;
+
 export const MOCK_SERVER_STATUS: GetStatusResponse = {
 	uptime: 273_600,
 	version: "0.42.1",
@@ -132,6 +136,10 @@ export class RpcMockControl {
 	private readonly detailSequences = new Map<string, number>();
 	private readonly sessionTodos = new Map<string, readonly unknown[]>();
 	private sessionTodosSequence = 0;
+	private readonly inputDrafts = new Map<
+		string,
+		{ readonly text: string; readonly projectId?: string }
+	>();
 
 	stubs: StubTable = {};
 
@@ -340,16 +348,29 @@ export class RpcMockControl {
 		this.sendChunk("SubscribeAlerts", [alert]);
 	}
 
-	/** Publish a draft another tab typed on that session's SubscribeInputDraft. */
+	/** Persist and publish a draft as another tab's SyncInputDraft would. */
 	sendInputDraft(
-		sessionId: string,
-		draft: { readonly text: string; readonly from?: string },
+		key: DraftKey | string,
+		draft: {
+			readonly text: string;
+			readonly from?: string;
+			readonly projectId?: string;
+		},
 	): void {
-		this.sendChunk(
-			"SubscribeInputDraft",
-			[{ _tag: "draft", ...draft }],
-			sessionId,
-		);
+		const typedKey = typeof key === "string" ? { session: key } : key;
+		const id = draftKeyId(typedKey);
+		if (draft.text === "" && "draft" in typedKey) this.inputDrafts.delete(id);
+		else
+			this.inputDrafts.set(id, {
+				text: draft.text,
+				...(draft.projectId !== undefined && { projectId: draft.projectId }),
+			});
+		if (this.hasStream("SubscribeInputDraft", id))
+			this.sendChunk("SubscribeInputDraft", [{ _tag: "draft", ...draft }], id);
+	}
+
+	initialInputDraftFrames(key: DraftKey): readonly unknown[] {
+		return [{ _tag: "synchronized", ...this.inputDrafts.get(draftKeyId(key)) }];
 	}
 
 	/** Replace one session's todo list, the way a TodoWrite does: an upsert on
@@ -536,6 +557,8 @@ export class RpcMockControl {
 	}
 
 	private streamKey(tag: string, sessionId?: string): string {
+		if (tag === "SubscribeInputDraft" && sessionId)
+			return `${tag}:${/^(session|draft):/.test(sessionId) ? sessionId : `session:${sessionId}`}`;
 		return isSessionStream(tag) ? `${tag}:${sessionId ?? ""}` : tag;
 	}
 
@@ -671,21 +694,25 @@ export function sendMockProjectSetting(
 		]);
 }
 
-/** Mock-only input: once the page follows `sessionId`'s draft, deliver one
- *  typed in another tab. */
+/** Mock-only input: once the page follows the key, deliver another tab's edit. */
 export async function sendMockInputDraft(
 	page: Page,
-	sessionId: string,
-	draft: { readonly text: string; readonly from?: string },
+	key: DraftKey | string,
+	draft: {
+		readonly text: string;
+		readonly from?: string;
+		readonly projectId?: string;
+	},
 ): Promise<void> {
 	const control = controls.get(page);
 	if (!control) throw new Error("mockWsRpc is not installed on this page");
+	const typedKey = typeof key === "string" ? { session: key } : key;
 	await control.waitForRequest(
 		(request) =>
 			request.tag === "SubscribeInputDraft" &&
-			request.payload["sessionId"] === sessionId,
+			draftKeyId(request.payload["key"] as DraftKey) === draftKeyId(typedKey),
 	);
-	control.sendInputDraft(sessionId, draft);
+	control.sendInputDraft(typedKey, draft);
 }
 
 export function sendMockShellSnapshot(
@@ -765,7 +792,7 @@ function initialStream(
 				String(payload["sessionId"] ?? ""),
 			);
 		case "SubscribeInputDraft":
-			return [{ _tag: "synchronized" }];
+			return control.initialInputDraftFrames(payload["key"] as DraftKey);
 		case "SubscribeSessionFamily":
 			return control.initialFamilyFrames();
 		case "SubscribeProjectSettings":
@@ -809,9 +836,12 @@ function socketTable(
 				return Stream.unwrap(
 					Effect.gen(function* () {
 						const queue = yield* makeRpcStream<unknown, WsRpcError>();
-						const sessionId = isSessionStream(rpc._tag)
-							? String(payload["sessionId"] ?? "")
-							: undefined;
+						const sessionId =
+							rpc._tag === "SubscribeInputDraft"
+								? draftKeyId(payload["key"] as DraftKey)
+								: isSessionStream(rpc._tag)
+									? String(payload["sessionId"] ?? "")
+									: undefined;
 						control.registerStream(
 							rpc._tag,
 							ws,
@@ -931,6 +961,14 @@ export async function mockWsRpc(
 			sessionSlug: "sessionId" in payload ? control.projectSlug : null,
 		}),
 		ResolveSession: () => ({ projectSlug: control.projectSlug }),
+		SyncInputDraft: ({ key, text, projectSlug, originId }) => {
+			control.sendInputDraft(key, {
+				text,
+				...(originId !== undefined && { from: originId }),
+				...(projectSlug !== undefined && { projectId: projectSlug }),
+			});
+			return { ok: true };
+		},
 		ViewSession: () => ({ ok: true }),
 		InspectSessionWorktrees: () => ({
 			worktrees: [],

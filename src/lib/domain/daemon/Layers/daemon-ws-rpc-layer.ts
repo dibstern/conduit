@@ -46,6 +46,10 @@ import {
 import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { getVersion } from "../../../version.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
+import {
+	InputDraftsTag,
+	makeInputDrafts,
+} from "../../relay/Services/input-drafts.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { AuthManagerTag } from "../../server/Layers/auth-middleware.js";
@@ -95,7 +99,7 @@ import {
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
-import type { SessionDirectory } from "../Services/session-directory.js";
+import { SessionDirectory } from "../Services/session-directory.js";
 import { subscribeDaemonShell } from "../Services/shell-subscription.js";
 import { Usage } from "../Services/usage.js";
 import { KeepAwakeTag } from "./keep-awake-layer.js";
@@ -141,6 +145,11 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			Context.merge(yield* persistenceStoreContext),
 		);
 		const shellContext = Context.merge(context, yield* PersistenceStore);
+		const sharedDrafts = yield* Effect.serviceOption(InputDraftsTag);
+		const drafts = Option.isSome(sharedDrafts)
+			? sharedDrafts.value
+			: yield* makeInputDrafts.pipe(Effect.provide(yield* PersistenceStore));
+		const directory = yield* SessionDirectory;
 		const bus = yield* DaemonEventBusTag;
 		const cache = yield* RelayCacheTag;
 		const handle = yield* DaemonHandleTag;
@@ -322,6 +331,26 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			);
 
 		return {
+			SubscribeInputDraft: (request) =>
+				Stream.unwrap(
+					Effect.gen(function* () {
+						if ("session" in request.key) {
+							const owner = yield* directory
+								.projectOf(request.key.session)
+								.pipe(
+									Effect.mapError(
+										(error) => new WsRpcError({ message: error.message }),
+									),
+								);
+							if (Option.isNone(owner))
+								return yield* new WsRpcError({
+									code: "unknown-session",
+									message: `Unknown session: ${request.key.session}`,
+								});
+						}
+						return drafts.subscribe(request.key);
+					}),
+				),
 			SubscribeInstances: () =>
 				followList(
 					"instances",

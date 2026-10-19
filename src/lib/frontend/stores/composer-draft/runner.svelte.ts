@@ -1,31 +1,35 @@
 import { untrack } from "svelte";
+import type { InputDraftKey } from "../../../contracts/ws-rpc.js";
 import { connectionState } from "../../transport/connection-status.svelte.js";
 import { rpc } from "../../transport/ws-rpc-client.js";
 import { getBrowserClientId } from "../client-identity.js";
 import {
+	DRAFT_PROJECT_PARAM,
+	getCurrentRoute,
+	getCurrentSearchParams,
+	noteDraftNavigation,
+	replaceRoute,
+} from "../router.svelte.js";
+import {
 	type DraftCommand,
 	type DraftEvent,
+	draftKeyId,
 	initialState,
 	type ReloadDraft,
 	step,
 } from "./state.js";
 
-const NEW_SESSION_DRAFT_KEY = "conduit:new-session-draft";
+const LEGACY_DRAFT_KEY = "conduit:new-session-draft";
 const RELOAD_DRAFT_KEY = "conduit-reload-drafts";
-
 export const inputSyncState = $state({
 	received: null as Extract<
 		DraftEvent,
 		{ _tag: "ServerTextReceived" | "SubscriptionStarted" }
 	> | null,
 });
-
-// An initial snapshot and buffered live changes can arrive in one browser task.
-// Keep every transition even when Svelte batches the reactive notification.
+// Preserve initial and live transitions when Svelte batches a notification.
 const inputSyncEvents: DraftEvent[] = [];
-
 let persistInputDraftHook: (() => Promise<boolean>) | undefined;
-
 export function registerInputDraftPersistence(
 	persist: () => Promise<boolean>,
 ): () => void {
@@ -34,45 +38,41 @@ export function registerInputDraftPersistence(
 		if (persistInputDraftHook === persist) persistInputDraftHook = undefined;
 	};
 }
-
 /** False defers reload to keep pending attachments in the mounted composer. */
 export async function persistInputDraft(): Promise<boolean> {
 	return (await persistInputDraftHook?.()) ?? true;
 }
-
 export function handleInputSyncReceived(msg: {
-	sessionId: string;
+	key: InputDraftKey;
 	text?: string | undefined;
+	projectId?: string | undefined;
 	initial?: boolean;
 }): void {
 	inputSyncState.received = {
 		_tag: "ServerTextReceived",
-		sessionId: msg.sessionId,
+		key: msg.key,
 		...(msg.text === undefined ? {} : { text: msg.text }),
+		...(msg.projectId === undefined ? {} : { projectId: msg.projectId }),
 		...(msg.initial ? { initial: true } : {}),
 	};
 	inputSyncEvents.push(inputSyncState.received);
 }
-
-export function handleInputDraftStarted(sessionId: string): void {
-	inputSyncState.received = { _tag: "SubscriptionStarted", sessionId };
+export function handleInputDraftStarted(key: InputDraftKey): void {
+	inputSyncState.received = { _tag: "SubscriptionStarted", key };
 	inputSyncEvents.push(inputSyncState.received);
 }
-
 export function createComposerDraft(options: {
-	sessionId: () => string | null;
+	key: () => InputDraftKey | null;
 	projectSlug: () => string | null;
 	hasAttachments: () => boolean;
 }) {
 	let state = initialState();
 	let text = $state("");
 	let syncTimer: ReturnType<typeof setTimeout> | null = null;
-
 	function cancelSync() {
 		if (syncTimer) clearTimeout(syncTimer);
 		syncTimer = null;
 	}
-
 	function execute(commands: DraftCommand[]): Promise<void>[] {
 		const pending: Promise<void>[] = [];
 		for (const command of commands) {
@@ -88,20 +88,27 @@ export function createComposerDraft(options: {
 					}, command.delay);
 					break;
 				case "SyncDraft": {
-					if (connectionState.status !== "connected") {
+					if (
+						connectionState.status !== "connected" ||
+						("draft" in command.key && !command.projectSlug)
+					) {
 						dispatch({ _tag: "SyncFailed" });
 						break;
 					}
 					const sent = rpc("SyncInputDraft", {
-						sessionId: command.sessionId,
+						key: command.key,
 						text: command.text,
+						...(command.projectSlug
+							? { projectSlug: command.projectSlug }
+							: {}),
 						originId: getBrowserClientId(),
 					}).then(
 						() => {
 							dispatch({
 								_tag: "SyncSucceeded",
-								sessionId: command.sessionId,
+								key: command.key,
 								text: command.text,
+								projectSlug: command.projectSlug,
 							});
 						},
 						(error: unknown) => {
@@ -113,14 +120,44 @@ export function createComposerDraft(options: {
 					pending.push(sent);
 					break;
 				}
-				case "WriteNewSessionDraft":
-				case "ClearNewSessionDraft":
+				case "NavigateDraft": {
+					if (!("draft" in command.key)) break;
+					const params = getCurrentSearchParams();
+					const project = options.projectSlug();
+					if (project) params.set(DRAFT_PROJECT_PARAM, project);
+					replaceRoute(
+						`/draft/${command.key.draft}${params.size ? `?${params}` : ""}`,
+					);
+					break;
+				}
+				case "StartDraft": {
+					const params = getCurrentSearchParams();
+					const project = options.projectSlug();
+					if (project) params.set(DRAFT_PROJECT_PARAM, project);
+					replaceRoute(`/new${params.size ? `?${params}` : "?"}`);
+					break;
+				}
+				case "ApplyProject": {
+					const route = getCurrentRoute();
+					if (
+						!state.key ||
+						!("draft" in state.key) ||
+						route.page !== "chat" ||
+						route.draftId !== state.key.draft
+					)
+						break;
+					const params = getCurrentSearchParams();
+					if (params.get(DRAFT_PROJECT_PARAM) === command.projectSlug) break;
+					params.set(DRAFT_PROJECT_PARAM, command.projectSlug);
+					replaceRoute(`/draft/${state.key.draft}?${params}`);
+					break;
+				}
+				case "RemoveLegacyDraft":
 					try {
-						if (command._tag === "WriteNewSessionDraft" && command.text)
-							localStorage.setItem(NEW_SESSION_DRAFT_KEY, command.text);
-						else localStorage.removeItem(NEW_SESSION_DRAFT_KEY);
+						if (localStorage.getItem(LEGACY_DRAFT_KEY) === command.text)
+							localStorage.removeItem(LEGACY_DRAFT_KEY);
 					} catch {
-						// Storage can be unavailable; typing still works.
+						/* Storage restrictions must not interrupt typing. */
 					}
 					break;
 				case "SaveReloadBackup":
@@ -135,58 +172,84 @@ export function createComposerDraft(options: {
 		}
 		return pending;
 	}
-
 	function dispatch(event: DraftEvent) {
 		const [next, commands] = step(state, event);
 		state = next;
 		text = state.text;
+		// No key (the phone list) keeps the last draft; a session key ends it.
+		if (state.key)
+			noteDraftNavigation(
+				"draft" in state.key ? { id: state.key.draft, text: state.text } : null,
+			);
 		return { commands, pending: execute(commands) };
 	}
-
-	function readNewSessionDraft(): string {
-		try {
-			return localStorage.getItem(NEW_SESSION_DRAFT_KEY) ?? "";
-		} catch {
-			return "";
-		}
-	}
-
 	try {
 		const saved = sessionStorage.getItem(RELOAD_DRAFT_KEY);
 		if (saved) {
 			const entries: unknown = JSON.parse(saved);
-			if (Array.isArray(entries))
-				dispatch({
-					_tag: "ReloadRestored",
-					entries: entries.filter(
-						(entry: unknown): entry is ReloadDraft =>
-							typeof entry === "object" &&
-							entry !== null &&
-							"key" in entry &&
-							typeof entry.key === "string" &&
-							"text" in entry &&
-							typeof entry.text === "string" &&
-							"acked" in entry &&
-							typeof entry.acked === "string",
-					),
-				});
+			if (Array.isArray(entries)) {
+				const restored: ReloadDraft[] = [];
+				for (const entry of entries as unknown[]) {
+					if (
+						typeof entry !== "object" ||
+						entry === null ||
+						!("key" in entry) ||
+						!("text" in entry) ||
+						typeof entry.text !== "string" ||
+						!("acked" in entry) ||
+						typeof entry.acked !== "string"
+					)
+						continue;
+					// Backups from .4 contained session ids only. Tuple backups predate acked.
+					const key: unknown =
+						typeof entry.key === "string" && entry.key
+							? { session: entry.key }
+							: entry.key;
+					if (typeof key !== "object" || key === null) continue;
+					if (
+						"session" in key &&
+						typeof key.session === "string" &&
+						key.session
+					)
+						restored.push({
+							key: { session: key.session },
+							text: entry.text,
+							acked: entry.acked,
+						});
+					else if ("draft" in key && typeof key.draft === "string" && key.draft)
+						restored.push({
+							key: { draft: key.draft },
+							text: entry.text,
+							acked: entry.acked,
+						});
+				}
+				dispatch({ _tag: "ReloadRestored", entries: restored });
+			}
 			sessionStorage.removeItem(RELOAD_DRAFT_KEY);
 		}
 	} catch {
-		// A restricted browser can still use server draft sync.
+		/* A restricted browser can still use server draft sync. */
 	}
-
-	$effect(() => {
-		const sessionId = options.sessionId();
-		untrack(() =>
+	try {
+		const legacy = localStorage.getItem(LEGACY_DRAFT_KEY);
+		if (legacy)
 			dispatch({
-				_tag: "SessionSwitched",
-				sessionId,
-				newSessionText: sessionId ? "" : readNewSessionDraft(),
-			}),
+				_tag: "LegacyDraftFound",
+				key: { draft: crypto.randomUUID() },
+				text: legacy,
+			});
+		else if (legacy === "") localStorage.removeItem(LEGACY_DRAFT_KEY);
+	} catch {
+		/* Migration waits until storage is accessible. */
+	}
+	$effect(() => {
+		const key = options.key();
+		const projectSlug = options.projectSlug();
+		const projectChosen = getCurrentSearchParams().has(DRAFT_PROJECT_PARAM);
+		untrack(() =>
+			dispatch({ _tag: "KeySwitched", key, projectSlug, projectChosen }),
 		);
 	});
-
 	$effect(() => {
 		const received = inputSyncState.received;
 		untrack(() => {
@@ -194,15 +257,13 @@ export function createComposerDraft(options: {
 			if (received) for (const event of events) dispatch(event);
 		});
 	});
-
 	$effect(() => {
 		if (connectionState.status !== "connected")
 			untrack(() => {
-				if (state.sessionId)
-					dispatch({ _tag: "SubscriptionStarted", sessionId: state.sessionId });
+				if (state.key)
+					dispatch({ _tag: "SubscriptionStarted", key: state.key });
 			});
 	});
-
 	$effect(() => {
 		const hidden = () => {
 			dispatch({ _tag: "Hidden" });
@@ -218,38 +279,28 @@ export function createComposerDraft(options: {
 			cancelSync();
 		};
 	});
-
 	$effect(() =>
 		registerInputDraftPersistence(async () => {
 			cancelSync();
 			let savedText: string;
-			let savedSessionId: string | null;
+			let savedKey: string | null;
+			let savedProject: string | null;
 			do {
 				savedText = state.text;
-				savedSessionId = options.sessionId();
-				// Offline reloads use the backup without calling an incompatible daemon.
-				if (connectionState.status === "connected") {
-					await Promise.all(
-						dispatch({
-							_tag: "Flush",
-							serverOnly: true,
-						}).pending,
-					);
-				}
+				savedKey = state.key ? draftKeyId(state.key) : null;
+				savedProject = state.projectSlug;
+				if (connectionState.status === "connected")
+					await Promise.all(dispatch({ _tag: "Flush" }).pending);
 			} while (
 				state.text !== savedText ||
-				options.sessionId() !== savedSessionId
+				(state.key ? draftKeyId(state.key) : null) !== savedKey ||
+				state.projectSlug !== savedProject
 			);
 			const hasAttachments = options.hasAttachments();
-			dispatch({
-				_tag: "PersistBeforeReload",
-				sessionId: options.sessionId(),
-				hasAttachments,
-			});
+			dispatch({ _tag: "PersistBeforeReload", hasAttachments });
 			return !hasAttachments;
 		}),
 	);
-
 	return {
 		get text() {
 			return text;
@@ -258,31 +309,27 @@ export function createComposerDraft(options: {
 			dispatch({ _tag: "TextChanged", text: value });
 		},
 		edited(value?: string) {
-			// The input listener runs before Svelte updates bind:value.
 			if (value !== undefined) dispatch({ _tag: "TextChanged", text: value });
 			dispatch({ _tag: "LocalEdited" });
 		},
 		clear() {
-			dispatch({ _tag: "Cleared", sessionId: options.sessionId() });
+			dispatch({ _tag: "Cleared" });
 		},
-		sendStarted(clear: boolean): string {
-			const unsent = state.text;
-			dispatch({ _tag: "SendStarted", sessionId: options.sessionId(), clear });
+		sendStarted(clear: boolean) {
+			const unsent = { text: state.text, key: state.key ?? null };
+			dispatch({ _tag: "SendStarted", clear });
 			return unsent;
 		},
 		sendFailed(
-			unsent: string,
+			unsent: { text: string; key: InputDraftKey | null },
 			sentTo: string | null,
-			projectSlug: string | null,
 			restore: boolean,
 		): boolean {
 			const before = state;
 			dispatch({
 				_tag: "SendFailed",
-				text: unsent,
+				...unsent,
 				sentTo,
-				sessionId: options.sessionId(),
-				sameProject: options.projectSlug() === projectSlug,
 				hasAttachments: options.hasAttachments(),
 				restore,
 			});
@@ -296,28 +343,27 @@ export function createComposerDraft(options: {
 			const { commands } = dispatch({
 				_tag: "SendSucceeded",
 				sentTo,
-				sessionId: options.sessionId(),
 				steer,
 				clear,
 			});
 			return commands.some((command) => command._tag === "CancelSync");
-		},
-		sessionCreated() {
-			dispatch({ _tag: "SessionCreated" });
 		},
 		sideThreadSent(
 			parentSessionId: string,
 			sentText: string,
 			attachmentsUnchanged: boolean,
 		) {
-			const active = state.sessionId === parentSessionId;
+			const active =
+				state.key &&
+				"session" in state.key &&
+				state.key.session === parentSessionId;
 			const { commands } = dispatch({
 				_tag: "SideThreadSent",
 				parentSessionId,
 				text: sentText,
 				attachmentsUnchanged,
 			});
-			return { cleared: commands.length > 0, active };
+			return { cleared: commands.length > 0, active: Boolean(active) };
 		},
 	};
 }
