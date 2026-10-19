@@ -245,19 +245,31 @@ describe("SW push: in-app ding vs OS notification", () => {
 	});
 
 	it("accepts a delayed playback acknowledgement within the delivery deadline", async () => {
-		windowClients = [
-			{
-				focused: true,
-				visibilityState: "visible",
-				postMessage: (_message, ports) => {
-					const port = ports?.[0] as MessagePort;
-					port.onmessage = () =>
-						setTimeout(() => port.postMessage({ handled: true }), 50);
-					port.postMessage({ ready: true });
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		const granted = new Promise<void>((resolve) => {
+			windowClients = [
+				{
+					focused: true,
+					visibilityState: "visible",
+					postMessage: (_message, ports) => {
+						const port = ports?.[0] as MessagePort;
+						port.onmessage = () => {
+							setTimeout(() => port.postMessage({ handled: true }), 50);
+							resolve();
+						};
+						port.postMessage({ ready: true });
+					},
 				},
-			},
-		];
-		await push(doneAlert);
+			];
+		});
+		const completed = vi.fn();
+		const delivery = push(doneAlert).then(completed);
+		await granted;
+		await vi.advanceTimersByTimeAsync(49);
+		expect(completed).not.toHaveBeenCalled();
+		expect(showNotification).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1);
+		await delivery;
 		expect(showNotification).not.toHaveBeenCalled();
 	});
 
