@@ -8,6 +8,10 @@ import { createServer } from "node:net";
 const port = Number(process.argv[2]);
 const token = process.env["CONDUIT_OPENCODE_CONTROL_TOKEN"] ?? "";
 const { CONDUIT_OPENCODE_CONTROL_TOKEN: _token, ...env } = process.env;
+const stopGraceMs =
+	process.env["NODE_ENV"] === "test"
+		? Number(process.env["CONDUIT_TEST_OPENCODE_STOP_GRACE_MS"] ?? 1500)
+		: 1500;
 let child: ChildProcess | undefined;
 let stopping = false;
 let committed = false;
@@ -18,7 +22,7 @@ const stopGroup = () => {
 	stopping = true;
 	// This process is the session leader. Both signals address its own live
 	// group, never a PID read from config or supplied by a control client.
-	setTimeout(() => process.kill(0, "SIGKILL"), 1500);
+	setTimeout(() => process.kill(0, "SIGKILL"), stopGraceMs);
 	process.kill(0, "SIGTERM");
 };
 process.on("SIGTERM", () => {});
