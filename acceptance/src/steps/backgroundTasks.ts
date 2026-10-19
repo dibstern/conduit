@@ -360,12 +360,10 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert composer task dots",
-		match: /^the composer shows (no|[0-9]+) task dots$/,
-		run: async ({ world, match }) => {
-			const dots = world.page.getByTestId("composer-task-dots");
-			if (match[1] === "no") await expect(dots).toHaveCount(0);
-			else await expect(dots.locator("i")).toHaveCount(Number(match[1]));
+		name: "assert no composer task dots",
+		match: /^the composer shows no task dots$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("composer-task-dots")).toHaveCount(0);
 		},
 	},
 	{
