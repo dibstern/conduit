@@ -636,21 +636,30 @@ test.describe("Status Color Mapping", () => {
 		await openSettingsPanel(page);
 		await page.getByTestId("settings-tab-server").click();
 		const workDot = instanceDot(page, "Work");
+		const workRow = page.getByTestId("instance-row-work");
+		await workRow.getByRole("button").first().click();
+		const status = workRow.locator("dd").first();
+		await expect(workDot).toBeVisible();
+		await expect(status).toBeVisible();
 
 		// unhealthy (initial) = red
 		await expect(workDot).toHaveClass(/bg-red-500/);
+		await expect(status).toHaveText("unhealthy");
 
 		// starting = yellow
 		pushInstances(control.rpc, { work: "starting" });
 		await expect(workDot).toHaveClass(/bg-yellow-500/);
+		await expect(status).toHaveText("starting");
 
 		// healthy = green
 		pushInstances(control.rpc, { work: "healthy" });
 		await expect(workDot).toHaveClass(/bg-green-500/);
+		await expect(status).toHaveText("healthy");
 
 		// stopped = zinc/gray
 		pushInstances(control.rpc, { work: "stopped" });
 		await expect(workDot).toHaveClass(/bg-zinc-500/);
+		await expect(status).toHaveText("stopped");
 	});
 });
 
@@ -1005,40 +1014,6 @@ test.describe("Session List: Instance Status Banner", () => {
 
 		// Banner should disappear
 		await expect(banner).not.toBeVisible({ timeout: 5_000 });
-	});
-});
-
-test.describe("Settings: Instance Status Updates", () => {
-	test("instance list update changes status color in settings panel", async ({
-		page,
-		baseURL,
-	}) => {
-		const control = await setupMultiInstance(page, baseURL);
-
-		// Open settings and navigate to the Server section
-		await openSettingsPanel(page);
-		const settingsPanel = page.locator("#settings-panel");
-		await expect(settingsPanel).toBeVisible();
-		await settingsPanel.getByTestId("settings-tab-server").click();
-
-		// "Work" instance should show red dot (unhealthy status from fixture)
-		const instanceList = page.locator("#instance-settings-list");
-		const workRow = instanceList.locator("button", { hasText: "Work" });
-		await expect(workRow).toBeVisible();
-		const workDot = workRow.getByTestId("instance-status-dot");
-		await expect(workDot).toHaveClass(/bg-red-500/);
-
-		// Work becomes "starting" (yellow)
-		pushInstances(control.rpc, { work: "starting" });
-
-		// Dot should turn yellow
-		await expect(workDot).toHaveClass(/bg-yellow-500/, { timeout: 3_000 });
-
-		// Work becomes "healthy" (green)
-		pushInstances(control.rpc, { work: "healthy" });
-
-		// Dot should turn green
-		await expect(workDot).toHaveClass(/bg-green-500/, { timeout: 3_000 });
 	});
 });
 

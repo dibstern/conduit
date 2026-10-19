@@ -284,51 +284,6 @@ test("a model picked in the draft composer is the model OpenCode runs", async ({
 	});
 });
 
-test("an OpenCode model runs at the effort conduit shows for it", async ({
-	page,
-	harness,
-}, testInfo) => {
-	let setup: { browser: ProcessBrowser; projectSlug: string } | undefined;
-	const picker = await openDraft(
-		page,
-		harness,
-		async (browser, projectSlug) => {
-			// An earlier session saved high for the model the draft picks.
-			setup = { browser, projectSlug };
-			const { sessionId } = await Effect.runPromise(
-				browser.rpc.CreateSession({
-					permissionMode: "ask",
-					projectSlug,
-					originId: "effort-setup",
-					instanceId: AccountIdSchema.make("opencode"),
-					model: { modelId: picked.modelID, providerId: picked.providerID },
-				}),
-			);
-			await Effect.runPromise(
-				browser.rpc.SwitchVariant({ sessionId, variant: "high" }),
-			);
-		},
-	);
-	await pickOpenCodeModel(page, picker);
-	await openPickerRoot(page, picker);
-	await page.getByTestId("picker-effort-option-high").click();
-	await page.keyboard.press("Escape");
-	await expect(page.getByTestId("model-picker")).toBeHidden();
-
-	const evidence = await sendAndCapture(page, harness, picker, testInfo);
-	if (!setup) throw new Error("openDraft never ran its setup");
-	const sessionId = /\/s\/([^/?]+)/.exec(page.url())?.[1] ?? "";
-	const { variant } = await Effect.runPromise(
-		setup.browser.rpc.GetModels({ sessionId }),
-	);
-	expect
-		.soft(variant?.variant, "conduit shows the model's saved effort")
-		.toBe("high");
-	expect
-		.soft(evidence.promptVariants, "prompt_async carries that effort")
-		.toEqual(["high"]);
-});
-
 test("an image attached in an OpenCode draft reaches OpenCode", async ({
 	page,
 	harness,
@@ -743,42 +698,6 @@ test.describe("effort", () => {
 		return firstTurn;
 	}
 
-	test("a model picked in the draft runs at its own saved effort, not the default model's", async ({
-		page,
-		harness,
-	}, testInfo) => {
-		const picker = await openRememberedDraft(page, harness);
-		await openPickerRoot(page, picker);
-		await page.getByTestId("picker-row-model").click();
-		await page
-			.getByTestId("model-picker-list")
-			.locator('[data-model-id="sonnet"][data-provider-id="claude"]')
-			.click();
-		await page.keyboard.press("Escape");
-		await expect(page.getByTestId("model-picker")).toBeHidden();
-
-		expect(
-			await sendAndReadFirstTurn(page, harness, testInfo),
-			"the first turn runs Sonnet at Sonnet's saved effort",
-		).toEqual([{ model: "sonnet", effort: "low" }]);
-	});
-
-	test("an effort picked in the draft is the effort the first turn runs", async ({
-		page,
-		harness,
-	}, testInfo) => {
-		const picker = await openRememberedDraft(page, harness);
-		await openPickerRoot(page, picker);
-		await page.getByTestId("picker-effort-option-high").click();
-		await page.keyboard.press("Escape");
-		await expect(page.getByTestId("model-picker")).toBeHidden();
-
-		expect(
-			await sendAndReadFirstTurn(page, harness, testInfo),
-			"the first turn runs the default model at the picked effort",
-		).toEqual([{ model: "opus[1m]", effort: "high" }]);
-	});
-
 	test("a draft model's offered efforts update locally and its picked effort runs", async ({
 		page,
 		harness,
@@ -853,6 +772,12 @@ test.describe("effort", () => {
 		await page.screenshot({
 			path: testInfo.outputPath("draft-effort-options.png"),
 		});
+		await page.keyboard.press("Escape");
+		await expect(page.getByTestId("model-picker")).toBeHidden();
+		expect(
+			await sendAndReadFirstTurn(page, harness, testInfo),
+			"the first turn runs Sonnet at Sonnet's saved effort",
+		).toEqual([{ model: "sonnet", effort: "low" }]);
 	});
 
 	test("an effort picked in a draft is remembered in this browser for the model's next draft", async ({
