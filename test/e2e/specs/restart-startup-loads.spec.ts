@@ -133,15 +133,12 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 	});
 	restarting = true;
 	await harness.restart();
-	await page.evaluate(
-		() =>
-			new Promise<void>((resolve) => {
-				setTimeout(() => {
-					(window as ProbeWindow).__holdRpc = false;
-					resolve();
-				}, 2_000);
-			}),
-	);
+	await expect
+		.poll(() => page.evaluate(() => (window as ProbeWindow).__heldRpcDials))
+		.toBeGreaterThan(0);
+	await page.evaluate(() => {
+		(window as ProbeWindow).__holdRpc = false;
+	});
 	releasedAt = Date.now();
 	const hold = await page.evaluate(() => ({
 		heldRpcDials: (window as ProbeWindow).__heldRpcDials,

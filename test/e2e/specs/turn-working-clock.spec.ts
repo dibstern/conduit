@@ -47,11 +47,16 @@ const CLOCK = /^\d+:\d{2}(?::\d{2})?$/;
 async function expectMatchingClocks(page: Page, samples: number) {
 	const readings: Clocks[] = [];
 	for (let i = 0; i < samples; i++) {
+		const previous = readings.at(-1)?.composer;
 		await expect
 			.poll(
 				async () => {
 					const clocks = await readClocks(page);
-					return clocks.composer !== null && clocks.activity !== null;
+					return (
+						clocks.composer !== null &&
+						clocks.activity !== null &&
+						clocks.composer !== previous
+					);
 				},
 				// The panel appears with the first tool, a dozen replay gaps in.
 				{ timeout: 45_000 },
@@ -61,7 +66,6 @@ async function expectMatchingClocks(page: Page, samples: number) {
 		readings.push(clocks);
 		expect(clocks.composer).toMatch(CLOCK);
 		expect(clocks.activity).toBe(clocks.composer);
-		await page.waitForTimeout(700);
 	}
 	return readings;
 }
@@ -166,6 +170,7 @@ test.describe("Turn working clock", () => {
 	});
 
 	test("Stop ends the clock for good", async ({ page, relayUrl }, testInfo) => {
+		await page.clock.install();
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
 		await app.goto(relayUrl);
@@ -188,7 +193,8 @@ test.describe("Turn working clock", () => {
 		expect(settled).toBeLessThanOrEqual(
 			Math.ceil((stoppedAt - sentAt) / 1000) + 1,
 		);
-		await page.waitForTimeout(3_000);
+		// Advance three clock ticks so an incorrectly running clock can update.
+		await page.clock.fastForward(3_000);
 		expect(workedSeconds(await header.innerText())).toBe(settled);
 
 		await gotoRelay(page, page.url());
@@ -218,6 +224,7 @@ test.describe("Turn working clock", () => {
 			page,
 			relayUrl,
 		}, testInfo) => {
+			await page.clock.install();
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
 			await app.goto(relayUrl);
@@ -274,7 +281,8 @@ test.describe("Turn working clock", () => {
 			expect(workedB).toBeLessThanOrEqual(
 				Math.ceil((stoppedAt - takeover) / 1000) + 2,
 			);
-			await page.waitForTimeout(3_000);
+			// Advance three clock ticks so incorrectly running clocks can update.
+			await page.clock.fastForward(3_000);
 			expect(await worked()).toEqual([workedA, workedB]);
 
 			// History agrees: both turns settled, and the running one is the
@@ -432,6 +440,7 @@ test.describe("Turn working clock", () => {
 			await expect.poll(composer, { timeout: 5_000 }).toMatch(CLOCK);
 			const waitStartedAt = Date.now();
 			const paused = await composer();
+			// Real time must pass to verify persisted work excludes the server's approval wait.
 			await page.waitForTimeout(3_000);
 			expect(await composer()).toBe(paused);
 
@@ -442,6 +451,7 @@ test.describe("Turn working clock", () => {
 			});
 			await expect(allow).toBeVisible({ timeout: 30_000 });
 			await expect.poll(composer, { timeout: 5_000 }).toBe(paused);
+			// The restored server wait must stay excluded across another real clock tick.
 			await page.waitForTimeout(1_500);
 			expect(await composer()).toBe(paused);
 			await page.screenshot({ path: testInfo.outputPath("paused-clock.png") });

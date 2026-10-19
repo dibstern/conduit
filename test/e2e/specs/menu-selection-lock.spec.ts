@@ -35,7 +35,10 @@ async function swipeUp(page: Page, x: number, y: number, distance: number) {
 			type: "touchMove",
 			touchPoints: [{ x, y: y - (distance * step) / steps }],
 		});
-		await page.waitForTimeout(16);
+		await page.evaluate(
+			() =>
+				new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+		);
 	}
 	await cdp.send("Input.dispatchTouchEvent", {
 		type: "touchEnd",
@@ -79,8 +82,10 @@ test("phone: scrolling the session sheet, then tapping an item, keeps chat text 
 	await page.getByTestId("session-bar-title-menu").tap();
 	const sheet = page.getByTestId("session-action-sheet");
 	await expect(sheet).toBeVisible();
-	// Let the sheet finish sliding in so the swipe lands inside it.
-	await page.waitForTimeout(400);
+	await expect(page.getByTestId("menu-sheet-scrim")).toHaveCSS(
+		"pointer-events",
+		"auto",
+	);
 	const box = await sheet.boundingBox();
 	if (!box) throw new Error("sheet is not rendered");
 	await swipeUp(page, box.x + box.width * 0.6, box.y + box.height * 0.8, 100);

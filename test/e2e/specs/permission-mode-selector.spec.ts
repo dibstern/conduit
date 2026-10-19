@@ -340,11 +340,20 @@ test.describe("Permission mode selected before session bind (regression)", () =>
 		await page.locator("[data-testid='permission-mode-option-ask']").click();
 		await expect(pill(page)).toContainText("Ask");
 
-		await page.locator('[data-session-id="sess-pm-001"]').click();
+		await page
+			.locator('[data-session-id="sess-pm-001"] .session-item-title')
+			.click();
 
 		// Flushing "ask" (or nothing) is acceptable; flushing "full" is not.
-		// No elevated mode may be flushed during this observation window.
-		await page.waitForTimeout(500);
+		await rpc.waitForRequest(
+			(request) =>
+				request.tag === "ViewSession" &&
+				request.payload["sessionId"] === "sess-pm-001",
+		);
+		await expect(page.getByTestId("session-bar-title")).toHaveText(
+			"Existing session",
+		);
+		await expect(page).toHaveURL(/\/s\/sess-pm-001$/);
 		const flushed = switchCalls(rpc).map((c) => c.payload["mode"]);
 		expect(flushed).not.toContain("full");
 		await expect(pill(page)).toContainText("Ask");

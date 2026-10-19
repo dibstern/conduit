@@ -2737,6 +2737,9 @@ for (const behavior of [
 				queuedSend.catch((error) => {
 					evidence["queuedSendError"] = String(error);
 				});
+				// A later RPC on the same connection gives the held submit a chance to run.
+				const heldStop = await snapshot();
+				// The submit's permit wait has no public signal; retain a real pending-observation window.
 				expect(
 					await Promise.race([
 						queuedSend.then(() => true),
@@ -2745,7 +2748,7 @@ for (const behavior of [
 				).toBe(false);
 				expect(harness.claudeOptions()).toHaveLength(callsBefore);
 				expect(latest()?.resumes ?? []).toHaveLength(0);
-				evidence["heldStop"] = await snapshot();
+				evidence["heldStop"] = heldStop;
 				writeFileSync(join(harness.root, "release-switch-stop"), "release");
 			}
 			const result = await switching;

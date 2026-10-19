@@ -427,11 +427,19 @@ test.describe("Notification → session navigation (replay)", () => {
 			},
 		]);
 
-		// No notification for the watched session may arrive during this window.
-		await page.waitForTimeout(1500);
+		// The error must reach the watched session before its missing alert means anything.
+		await expect
+			.poll(() =>
+				receivedFrames
+					.slice(frameCountBefore)
+					.some((frame) => frame.includes("Error on watched session")),
+			)
+			.toBe(true);
 
 		// Filter frames received AFTER injection for an error alert targeting
 		// the watched session. There should be none.
+		// Suppressed alerts expose no completion signal after the SSE handler's async policy lookup.
+		await page.waitForTimeout(1500);
 		const newFrames = receivedFrames.slice(frameCountBefore);
 		expect(newFrames.filter((f) => isErrorAlertFor(f, watchedId))).toEqual([]);
 	});

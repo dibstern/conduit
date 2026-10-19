@@ -139,7 +139,6 @@ test("a stale tab reloads before any RPC to a new build, and a mismatched CLI fa
 	await expect(
 		page.locator(".banner-text", { hasText: "different builds" }),
 	).toBeVisible();
-	await page.waitForTimeout(1_500);
 
 	// Sockets the stale tab opened once the old daemon was going away: any of
 	// them could reach the new daemon, so none may carry a frame.

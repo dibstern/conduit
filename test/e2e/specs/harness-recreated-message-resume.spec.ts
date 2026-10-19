@@ -166,6 +166,12 @@ test("a recreated message resumes without its old parts or a checksum repair", a
 	await expect
 		.poll(() => envelopes(SESSION).some((e) => e._tag === "synchronized"))
 		.toBe(true);
+	// Mark the initial turn seen now, so the return cannot publish a competing attention update.
+	const initialRow = page.locator(
+		`#session-list [data-session-id="${SESSION}"]`,
+	);
+	await initialRow.locator(".session-item-title").click();
+	await expect(initialRow.getByTestId("session-unread-dot")).toHaveCount(0);
 	await open(OTHER, OTHER_TEXT);
 	await expect
 		.poll(() => envelopes(OTHER).some((e) => e._tag === "synchronized"))
@@ -206,8 +212,10 @@ test("a recreated message resumes without its old parts or a checksum repair", a
 			),
 		)
 		.toBe(true);
-	// Let a checksum-triggered re-subscription and its read finish too.
-	await page.waitForTimeout(1500);
+	// The transcript becomes interactive only after its checksum was accepted.
+	await expect(
+		messages.locator(":scope > div:not([inert]) .msg-assistant").first(),
+	).toBeVisible();
 	const after = await detailReads();
 	const kinds = [
 		"base",
@@ -381,6 +389,7 @@ test("an open recreated message catches up through overflow without replacing it
 	// never back up. Hold the page's main thread and rename this session until a
 	// delivery blocks the open view's stream: the burst then overflows its bus.
 	// A task queued now runs before any delivery the renames below send.
+	// Fault injection: blocking the browser thread is required to withhold RPC acknowledgements during the burst.
 	const heldUntil = await page.evaluate((ms) => {
 		const until = Date.now() + ms;
 		setTimeout(() => {
@@ -424,8 +433,7 @@ test("an open recreated message catches up through overflow without replacing it
 	await expect
 		.soft(messages.locator(".md-content p:visible"))
 		.toHaveText([TEXT_A]);
-	// Keep observing after convergence, including a delayed checksum repair.
-	await page.waitForTimeout(1500);
+	// The converged transcript above proves catch-up ran before counters are flushed.
 	const after = await detailReads();
 	const observed = await visibility.evaluate(({ state, observer }) => {
 		observer.disconnect();

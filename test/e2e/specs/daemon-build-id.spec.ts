@@ -284,6 +284,7 @@ test("mismatching builds reload once, preserve the latest composer draft, and re
 	page,
 	buildDaemon,
 }, testInfo) => {
+	await page.clock.install();
 	const handshakes = captureBuildHandshakes(page);
 	await page.goto(`${buildDaemon.baseUrl}/?p=build-id-test`);
 	await page.locator(".connect-overlay").waitFor({ state: "detached" });
@@ -319,7 +320,7 @@ test("mismatching builds reload once, preserve the latest composer draft, and re
 	);
 	// The reload notice lasts 750ms after SW activation. Edit near its end so
 	// the 300ms debounce cannot save this final text before the automatic reload.
-	await page.waitForTimeout(500);
+	await page.clock.fastForward(500);
 	await input.fill(draft);
 	await expect.poll(() => reloads).toBe(1);
 	await expect(input).toHaveValue(draft);
@@ -336,7 +337,8 @@ test("mismatching builds reload once, preserve the latest composer draft, and re
 		.poll(() => page.evaluate(() => caches.keys()))
 		.not.toContain("conduit-legacy-shell");
 	expect(await page.content()).not.toContain("<!-- stale shell -->");
-	await page.waitForTimeout(1_500);
+	// Run any delayed reload callback after the mismatched handshake was handled.
+	await page.clock.fastForward(1_500);
 	expect(reloads).toBe(1);
 	await page.screenshot({ path: testInfo.outputPath("build-id-reload.png") });
 	await attachBuildEvidence(testInfo, {
@@ -352,6 +354,7 @@ test("matching built page and server IDs never reload on reconnect", async ({
 	page,
 	buildDaemon,
 }, testInfo) => {
+	await page.clock.install();
 	const handshakes = captureBuildHandshakes(page);
 	let navigations = 0;
 	page.on("request", (request) => {
@@ -367,7 +370,8 @@ test("matching built page and server IDs never reload on reconnect", async ({
 		.poll(() => handshakes.length)
 		.toBeGreaterThan(connectionsBeforeRestart);
 	await page.locator(".connect-overlay").waitFor({ state: "detached" });
-	await page.waitForTimeout(1_500);
+	// A matching handshake must stay safe past the automatic reload deadline.
+	await page.clock.fastForward(1_500);
 	expect(navigations).toBe(1);
 	await expect(
 		page.locator(".banner-text", { hasText: "different builds" }),

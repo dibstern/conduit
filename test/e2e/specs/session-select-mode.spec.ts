@@ -39,7 +39,7 @@ async function longPress(page: Page, row: Locator) {
 		type: "touchStart",
 		touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }],
 	});
-	await page.waitForTimeout(700);
+	await expect(page.getByTestId("session-ctx-select")).toBeVisible();
 	await cdp.send("Input.dispatchTouchEvent", {
 		type: "touchEnd",
 		touchPoints: [],

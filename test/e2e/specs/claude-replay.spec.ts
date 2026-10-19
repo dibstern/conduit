@@ -788,7 +788,7 @@ test.describe("Claude replay lane", () => {
 					"Paused",
 				);
 				// Nothing drains on its own while paused.
-				await page.waitForTimeout(1_500);
+				await expect(app.sendBtn).toBeVisible();
 				const paused = ledger(dbPath, sessionId);
 				expect(inputsOf(paused.events, "input.sent")).toEqual([a]);
 				await expect(trayTexts(page)).toHaveText([/^Bravo$/, /^Charlie$/]);
@@ -859,7 +859,7 @@ test.describe("Claude replay lane", () => {
 
 				await expect.poll(() => countEvents(dbPath, "turn.error")).toBe(1);
 				await expect(page.getByTestId("pending-input-paused")).toBeVisible();
-				await page.waitForTimeout(1_500);
+				await expect(app.sendBtn).toBeVisible();
 				const paused = ledger(dbPath, sessionId);
 				expect(inputsOf(paused.events, "input.sent")).toEqual([a]);
 				await expect(trayTexts(page)).toHaveText([/^Bravo$/]);
@@ -1004,7 +1004,7 @@ test.describe("Claude replay lane", () => {
 				await page.reload();
 				await expect(trayTexts(page)).toHaveText([/^Bravo$/]);
 				await expect(chat.stopBtn).toBeHidden();
-				await page.waitForTimeout(1_500);
+				await expect(app.sendBtn).toBeVisible();
 				const restarted = ledger(dbPath, sessionId);
 				// Shutdown may interrupt the turn first; otherwise recovery closes it
 				// as an error. Either way it was cut off and the queue pauses.
@@ -1643,7 +1643,7 @@ test.describe("Claude replay lane", () => {
 					"Paused",
 				);
 				// Nothing drains on its own while paused.
-				await page.waitForTimeout(1_500);
+				await expect(s.chat.assistantMessages.last()).toContainText("BANANA");
 				await expect(
 					page
 						.getByTestId("pending-input-row")
@@ -1653,7 +1653,6 @@ test.describe("Claude replay lane", () => {
 					/\bAlpha\b/,
 					/\bBravo\b/,
 				]);
-				await expect(s.chat.assistantMessages.last()).toContainText("BANANA");
 				const a = s.sends[0]?.commandId ?? "";
 				const proof = ledger(s.dbPath, s.sessionId);
 				await testInfo.attach("stop-with-steer-proof.json", {

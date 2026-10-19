@@ -94,6 +94,7 @@ async function setupWithProjectManagement(
 				],
 			}),
 			ListDaemonSessions: async (params) => {
+				// Keep paging in flight so project switching exercises its cancellation race.
 				await new Promise((resolve) => setTimeout(resolve, 150));
 				const limit = Number(params["limit"] ?? Infinity);
 				const cursor = params["cursor"] as { id: string } | undefined;
@@ -128,8 +129,7 @@ async function setupWithProjectManagement(
 						projectSlug: "myapp",
 						sessionSlug: "sessionId" in params ? "myapp" : null,
 					};
-				// A real attach takes a round trip or two; an instant answer would
-				// hide anything that races it.
+				// Attach must overlap paging to expose socket-reconnect and cancellation races.
 				await new Promise((resolve) => setTimeout(resolve, 300));
 				return {
 					projectSlug: String(params["projectSlug"]),
@@ -580,6 +580,7 @@ test("switching projects while the list pages does not fail the switch", async (
 		many,
 	);
 	for (const target of ["mylib", "myapp", "mylib"]) {
+		const requestsBefore = control.rpc.getRequests().length;
 		await page.getByTestId("session-scope-chip").click();
 		await page
 			.getByRole("menuitemradio", { name: new RegExp(`^${target}\\b`) })
@@ -590,7 +591,23 @@ test("switching projects while the list pages does not fail the switch", async (
 				request.payload["projectSlug"] === target,
 		);
 		await expect(page.getByTestId("session-scope-chip")).toHaveText(target);
-		await page.waitForTimeout(800);
+		await expect
+			.poll(() =>
+				control.rpc
+					.getRequests()
+					.slice(requestsBefore)
+					.some(
+						(request) =>
+							request.tag === "GetFileTree" &&
+							request.payload["projectSlug"] === target,
+					),
+			)
+			.toBe(true);
+		await expect(
+			page.locator("#session-list .session-item").filter({
+				hasText: target === "myapp" ? "Test session" : "Library session",
+			}),
+		).toBeVisible();
 	}
 	await expect(page.getByText("Failed to switch projects")).toHaveCount(0);
 });
@@ -600,6 +617,7 @@ test("switching projects attaches once and loads the new project's file tree", a
 	baseURL,
 }) => {
 	const control = await setupWithProjectManagement(page, baseURL);
+	const connectionsBefore = control.rpc.connections;
 	await page.getByTestId("session-scope-chip").click();
 	await scopeRow(page, "mylib").click();
 	await control.rpc.waitForRequest(
@@ -607,9 +625,12 @@ test("switching projects attaches once and loads the new project's file tree", a
 			request.tag === "GetFileTree" &&
 			request.payload["projectSlug"] === "mylib",
 	);
-	// A switch that reopens the sockets fails the in-flight attach and retries it
-	// on every reconnect, so give a loop time to show.
-	await page.waitForTimeout(1000);
+	await expect(page.getByTestId("session-scope-chip")).toHaveText("mylib");
+	const sessions = page.locator("#session-list .session-item");
+	await expect(sessions).toHaveCount(1);
+	await expect(sessions).toContainText("Library session");
+	await expect(page.locator(".connect-overlay")).toBeHidden();
+	expect(control.rpc.connections).toBe(connectionsBefore);
 	const attaches = control.rpc
 		.getRequests()
 		.filter(
@@ -656,8 +677,8 @@ test.describe("Project Delete", () => {
 		await page.click("#confirm-modal button:has-text('Cancel')");
 		await expect(page.locator("#confirm-modal")).not.toBeVisible();
 
-		// No RemoveProject RPC may arrive during this observation window.
-		await page.waitForTimeout(300);
+		await page.getByTestId("session-scope-chip").click();
+		await expect(scopeRow(page, "mylib")).toBeVisible();
 		const removeRequests = control.rpc
 			.getRequests()
 			.filter((request) => request.tag === "RemoveProject");

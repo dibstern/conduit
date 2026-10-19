@@ -498,6 +498,7 @@ test("opens the heavy session after a restart under load", async ({
 	);
 	const warmStart = await serverMetrics(warmMetrics);
 	const warmFrom = Date.now();
+	// This fixed sampling window measures sustained stream load and read sharing.
 	await opener.waitForTimeout(SETTLE_MS);
 	const warmTo = Date.now();
 	const warm = await serverMetrics(warmMetrics);
@@ -567,6 +568,7 @@ test("opens the heavy session after a restart under load", async ({
 	await expect(
 		opener.locator(".msg-assistant").filter({ hasText: HEAVY_FINAL_TEXT }),
 	).toBeVisible();
+	// Match the warm sampling window to measure sustained load after reconnecting.
 	await opener.waitForTimeout(SETTLE_MS);
 	const restartTo = Date.now();
 	// Rows versioned past the stopped store whose session took no event since:
@@ -762,12 +764,16 @@ test("opens the heavy session after a restart under load", async ({
 			{ timeout: 30_000 },
 		)
 		.toBe(true);
-	await opener.waitForTimeout(SETTLE_MS);
+	await expect(
+		opener.locator("#messages > div:not([inert]) .turn-activity-toggle").last(),
+	).toContainText("Worked");
 	pinned = [];
 	await pick(opener, longSession);
 	const followUp = `load-tools-${FOLLOW_UP_CALLS}`;
 	await expect(opener.locator("#messages")).toContainText(followUp);
-	await opener.waitForTimeout(SETTLE_MS);
+	await expect(
+		opener.locator("#messages > div:not([inert]) .turn-activity-toggle").last(),
+	).toContainText(new RegExp(`Worked.*${FOLLOW_UP_CALLS} commands`));
 	const resumed = pinned;
 	pinned = undefined;
 
@@ -793,7 +799,9 @@ test("opens the heavy session after a restart under load", async ({
 		`${harness.baseUrl}/s/${longSession}?p=process-test`,
 	);
 	await expect(cold.locator("#messages")).toContainText(followUp);
-	await cold.waitForTimeout(SETTLE_MS);
+	await expect(
+		cold.locator("#messages > div:not([inert]) .turn-activity-toggle").last(),
+	).toContainText(new RegExp(`Worked.*${FOLLOW_UP_CALLS} commands`));
 	const transcriptOf = async (page: Page) => {
 		const collapsed = page.locator(
 			'#messages .turn-activity-toggle[aria-expanded="false"]',

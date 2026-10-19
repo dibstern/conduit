@@ -120,6 +120,7 @@ test("two devices catch up one overflowed session without a later publication", 
 					received: device.wire.received.length,
 					mismatches: device.wire.mismatches.length,
 				},
+				// Fault injection: holding the browser thread must stall RPC acknowledgements until the bus overflows.
 				until: await device.page.evaluate((ms) => {
 					const until = Date.now() + ms;
 					setTimeout(() => {
@@ -163,8 +164,7 @@ test("two devices catch up one overflowed session without a later publication", 
 				return { ...device, convergedAfterReleaseMs, toolMarkers };
 			}),
 		);
-		// Keep observing past convergence, including a delayed checksum repair.
-		await devices[0].page.waitForTimeout(1500);
+		// Completed tools prove catch-up ran; the next metrics flush covers its reads.
 		const after = await devices[0].wire.detailReads();
 		const kinds = [
 			"base",

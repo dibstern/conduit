@@ -661,11 +661,12 @@ test("resting on a turn activity block prefetches its tools, once loaded", async
 		...(hasTouch === undefined ? {} : { hasTouch }),
 	});
 	const page = await context.newPage();
+	await page.clock.install();
 	const rpc = await watchRpc(page);
 	const app = new AppPage(page);
 	const blocks = page.locator(".turn-activity");
-	/** Let a block rest on screen well past 2 s. */
-	const rest = () => page.waitForTimeout(3_000);
+	/** Run the block's 2 s dwell deadline before checking negative outcomes. */
+	const rest = () => page.clock.runFor(3_000);
 	const [, middle = [], newest = []] = TURN_TOOLS;
 
 	// None before the session's initial load completes: the transcript is on
@@ -689,12 +690,10 @@ test("resting on a turn activity block prefetches its tools, once loaded", async
 
 	// Scrolling past a block within 1 s asks for nothing; the one scrolled
 	// back to is already loaded.
-	await page.evaluate(async () => {
-		const [first, second] = document.querySelectorAll(".turn-activity");
-		first?.scrollIntoView({ block: "center" });
-		await new Promise((resolve) => setTimeout(resolve, 500));
-		second?.scrollIntoView({ block: "center" });
-	});
+	await blocks.first().scrollIntoViewIfNeeded();
+	await expect(blocks.first()).toBeInViewport();
+	await page.clock.runFor(500);
+	await blocks.nth(1).scrollIntoViewIfNeeded();
 	await expect(blocks.first()).not.toBeInViewport();
 	await rest();
 	expect(rpc.detailRequests).toEqual([newest, middle]);
@@ -732,8 +731,28 @@ test("resting on a turn activity block prefetches its tools, once loaded", async
 	writeFileSync(join(harness.root, "release-tool-long"), "release");
 	await expect.poll(() => liveBash()?.state?.status).toBe("completed");
 	const liveId = liveBash()?.callID ?? "missing";
-	await rest();
-	expect(rpc.detailRequests.slice(requestsBeforeLive).at(-1)).toEqual([liveId]);
+	await expect
+		.poll(() => rpc.detailRequests.slice(requestsBeforeLive).at(-1))
+		.toEqual([liveId]);
+	await expect
+		.poll(() =>
+			detailResponses(rpc.frames.slice(liveFrom)).some(({ value }) => {
+				const reply = JSON.stringify(value);
+				return (
+					reply.includes(liveId) &&
+					reply.includes('"settled":true') &&
+					reply.includes(endOf("result"))
+				);
+			}),
+		)
+		.toBe(true);
+	// The settled reply must reach the browser cache before expanding the tool.
+	await page.evaluate(
+		() =>
+			new Promise<void>((resolve) =>
+				requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+			),
+	);
 	await expect(blocks.last().locator(".turn-activity-toggle")).toHaveAttribute(
 		"aria-expanded",
 		"false",
