@@ -120,6 +120,7 @@ export interface EffectOpenCodeRuntimeIngressOptions {
 		messageId: string,
 	) => string | undefined;
 	readonly retryingOf?: (sessionId: string) => string | undefined;
+	readonly backfillRetryDelayMs?: number;
 	/** The default OpenCode binding aliases this relay's selected instance. */
 	readonly selectedInstanceId?: string;
 	readonly resolveSessionPick?: (
@@ -172,6 +173,7 @@ export class EffectOpenCodeRuntimeIngress
 		| EffectOpenCodeRuntimeIngressOptions["retryingOf"]
 		| undefined;
 	private readonly log: OpenCodeRuntimeIngressLog;
+	private readonly backfillRetryDelayMs: number;
 	private readonly selectedInstanceId: string;
 	private readonly resolveSessionPick:
 		| EffectOpenCodeRuntimeIngressOptions["resolveSessionPick"]
@@ -233,6 +235,7 @@ export class EffectOpenCodeRuntimeIngress
 		this.ingestion = opts.ingestion;
 		this.retryingOf = opts.retryingOf;
 		this.log = opts.log;
+		this.backfillRetryDelayMs = opts.backfillRetryDelayMs ?? 1_000;
 		this.resolveSessionPick = opts.resolveSessionPick;
 		this.selectedInstanceId =
 			opts.selectedInstanceId ?? MANAGED_OPENCODE_ACCOUNT_ID;
@@ -307,7 +310,10 @@ export class EffectOpenCodeRuntimeIngress
 			failures,
 			after:
 				Date.now() +
-				Math.min(1_000 * 2 ** (failures - 1), BACKFILL_RETRY_MAX_MS) *
+				Math.min(
+					this.backfillRetryDelayMs * 2 ** (failures - 1),
+					BACKFILL_RETRY_MAX_MS,
+				) *
 					(0.8 + Math.random() * 0.2),
 		});
 	}
@@ -1641,6 +1647,7 @@ export const makeEffectOpenCodeRuntimeIngress = (
 	fetchSessionMessages?: EffectOpenCodeRuntimeIngressOptions["fetchSessionMessages"],
 	inputIdForUserEcho?: EffectOpenCodeRuntimeIngressOptions["inputIdForUserEcho"],
 	resolveSessionPick?: EffectOpenCodeRuntimeIngressOptions["resolveSessionPick"],
+	backfillRetryDelayMs?: number,
 ): Effect.Effect<
 	EffectOpenCodeRuntimeIngress,
 	ProjectionRunnerError | SqlError,
@@ -1665,6 +1672,7 @@ export const makeEffectOpenCodeRuntimeIngress = (
 			projectionRunner,
 			ingestion,
 			log,
+			...(backfillRetryDelayMs !== undefined ? { backfillRetryDelayMs } : {}),
 			...(creationGate._tag === "Some"
 				? { sessionCreationGate: creationGate.value }
 				: {}),

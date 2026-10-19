@@ -70,7 +70,6 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type {
@@ -103,6 +102,8 @@ function userPrompt(
 function promptQueue() {
 	const pending: SDKUserMessage[] = [];
 	let wake: (() => void) | undefined;
+	let waiting = false;
+	const onWait: (() => void)[] = [];
 	let closed = false;
 	const iterable: AsyncIterable<SDKUserMessage> = {
 		async *[Symbol.asyncIterator]() {
@@ -113,9 +114,12 @@ function promptQueue() {
 					continue;
 				}
 				if (closed) return;
+				waiting = true;
+				for (const notify of onWait.splice(0)) notify();
 				await new Promise<void>((resolve) => {
 					wake = resolve;
 				});
+				waiting = false;
 			}
 		},
 	};
@@ -123,7 +127,13 @@ function promptQueue() {
 		iterable,
 		push(text: string, uuid?: SDKUserMessage["uuid"]) {
 			pending.push(userPrompt(text, uuid));
+			waiting = false;
 			wake?.();
+		},
+		waiting() {
+			return waiting
+				? Promise.resolve()
+				: new Promise<void>((resolve) => onWait.push(resolve));
 		},
 		close() {
 			closed = true;
@@ -139,7 +149,8 @@ async function readTurn(
 	name: ClaudeTraceName = "pong-thinking-text-turn",
 ): Promise<SDKMessage[]> {
 	const messages: SDKMessage[] = [];
-	while (messages.length < traceLineCount(name)) {
+	const messageCount = traceLineCount(name);
+	while (messages.length < messageCount) {
 		const next = await iterator.next();
 		if (next.done) return messages;
 		messages.push(next.value);
@@ -162,8 +173,10 @@ function envelopeIds(messages: readonly SDKMessage[]): string[] {
 	});
 }
 
-function traceLineCount(name: ClaudeTraceName): number {
-	const lines = traceJson(name);
+function traceLineCount(
+	name: ClaudeTraceName,
+	lines = traceJson(name),
+): number {
 	const recordsInput = lines.some(
 		(line) =>
 			line["type"] === "command_lifecycle" ||
@@ -219,9 +232,6 @@ async function read(
 	}
 	return messages;
 }
-
-const settlesWithin = (promise: Promise<unknown>, ms: number) =>
-	Promise.race([promise.then(() => true), sleep(ms).then(() => false)]);
 
 function writeTrace(lines: readonly Raw[]): string {
 	const dir = mkdtempSync(join(tmpdir(), "claude-trace-replayer-"));
@@ -519,11 +529,9 @@ describe("createClaudeTraceReplayer", () => {
 		prompts.push("read");
 		const beforeHold: SDKMessage[] = [];
 		let resumed = parentTurn.next();
+		const holding = replayer.held().then(() => undefined);
 		while (true) {
-			const next = await Promise.race([
-				resumed,
-				new Promise<undefined>((resolve) => setTimeout(resolve, 50)),
-			]);
+			const next = await Promise.race([resumed, holding]);
 			if (next === undefined) break;
 			if (next.done) throw new Error("Turn ended without a hold");
 			beforeHold.push(next.value);
@@ -718,7 +726,12 @@ describe("createClaudeTraceReplayer", () => {
 		prompts.push("first", SENT_A);
 		const first = await read(iterator, framesBefore(lines, recordedB));
 		const held = iterator.next();
-		expect(await settlesWithin(held, 50)).toBe(false);
+		expect(
+			await Promise.race([
+				held.then(() => "emitted"),
+				prompts.waiting().then(() => "waiting"),
+			]),
+		).toBe("waiting");
 		prompts.push("second", SENT_B);
 		const queued = await held;
 		expect(queued.value).toMatchObject({
@@ -784,7 +797,12 @@ describe("createClaudeTraceReplayer", () => {
 		prompts.push("a", SENT_A);
 		await read(iterator, framesBefore(lines, recordedB));
 		const held = iterator.next();
-		expect(await settlesWithin(held, 50)).toBe(false);
+		expect(
+			await Promise.race([
+				held.then(() => "emitted"),
+				prompts.waiting().then(() => "waiting"),
+			]),
+		).toBe("waiting");
 		expect(() => replayer.assertComplete()).toThrow(
 			/recorded input 2 of trace 1 \(second-input-held-to-turn-end\) was never sent \(1 of 2/,
 		);
@@ -900,9 +918,15 @@ describe("createClaudeTraceReplayer", () => {
 		prompts.push("b", SENT_B);
 		await read(iterator, 1);
 		const held = iterator.next();
-		expect(await settlesWithin(held, 50)).toBe(false);
+		const receipt = query.interrupt();
+		expect(
+			await Promise.race([
+				held.then(() => "emitted"),
+				receipt.then(() => "interrupted"),
+			]),
+		).toBe("interrupted");
 
-		await expect(query.interrupt()).resolves.toEqual({
+		await expect(receipt).resolves.toEqual({
 			still_queued: [SENT_B],
 		});
 		expect((await held).value).toMatchObject({ type: "user" });
@@ -944,8 +968,10 @@ describe("createClaudeTraceReplayer", () => {
 		};
 		const lengths: string[] = [];
 		const expected: string[] = [];
-		const compatibilityFrames = traceLineCount(name) - traceJson(name).length;
-		for (let emitted = 1; emitted <= traceLineCount(name); emitted++) {
+		const lines = traceJson(name);
+		const messageCount = traceLineCount(name, lines);
+		const compatibilityFrames = messageCount - lines.length;
+		for (let emitted = 1; emitted <= messageCount; emitted++) {
 			const next = await iterator.next();
 			if (next.done) throw new Error("trace ended early");
 			const played = emitted - compatibilityFrames;
@@ -1106,44 +1132,44 @@ describe("createClaudeTraceReplayer", () => {
 			})
 			[Symbol.asyncIterator]();
 		prompts.push("launch");
-		const tick = () =>
-			new Promise<"waiting">((resolve) => setTimeout(resolve, 50, "waiting"));
 		const played: SDKMessage[] = [];
 		let pending = iterator.next();
-		// Plays until the replay stalls.
-		const playUntilStall = async () => {
+		const playUntil = async (signal: Promise<void>) => {
+			const stopped = signal.then(() => undefined);
 			while (true) {
-				const next = await Promise.race([pending, tick()]);
-				if (next === "waiting") return;
+				const next = await Promise.race([pending, stopped]);
+				if (next === undefined) return;
 				if (next.done) throw new Error("replay ended");
 				played.push(next.value);
 				pending = iterator.next();
 			}
 		};
-		const holding = async () =>
-			(await Promise.race([replayer.held().then(() => "held"), tick()])) ===
-			"held";
 
-		await playUntilStall();
+		await playUntil(replayer.held());
 		expect(played.at(-1)?.type).toBe("result");
 		const firstResult = played.length;
-		expect(await holding()).toBe(true);
+		await expect(replayer.held()).resolves.toBeUndefined();
 
 		replayer.release();
-		await playUntilStall();
+		await playUntil(replayer.held());
 		const beforeHold = 112 + traceLineCount(name) - traceJson(name).length;
 		expect(played).toHaveLength(beforeHold);
 		expect(firstResult).toBeLessThan(beforeHold);
-		expect(await holding()).toBe(true);
+		await expect(replayer.held()).resolves.toBeUndefined();
 
 		// Played out, it waits for the next prompt: a stall, but not a hold.
 		replayer.release();
-		await playUntilStall();
+		await playUntil(prompts.waiting());
 		expect(played).toHaveLength(traceLineCount(name));
 		expect(
 			played.filter((message) => message.type === "result").length,
 		).toBeGreaterThan(2);
-		expect(await holding()).toBe(false);
+		expect(
+			await Promise.race([
+				replayer.held().then(() => "held"),
+				prompts.waiting().then(() => "waiting"),
+			]),
+		).toBe("waiting");
 		prompts.close();
 	});
 });

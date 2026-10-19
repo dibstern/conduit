@@ -105,7 +105,10 @@ export interface InstanceManagerConfig {
 
 const DEFAULT_CONFIG: InstanceManagerConfig = {
 	maxInstances: 5,
-	healthPollIntervalMs: 5000,
+	healthPollIntervalMs:
+		process.env["NODE_ENV"] === "test"
+			? Number(process.env["CONDUIT_TEST_HEALTH_POLL_INTERVAL_MS"] ?? 5000)
+			: 5000,
 	maxRestartsPerWindow: 5,
 	restartWindowMs: 60_000,
 };

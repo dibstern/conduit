@@ -7,6 +7,7 @@ import type { SavedTranscript } from "../../../src/lib/frontend/stores/saved-tra
 import { initSWMessageListener } from "../../../src/lib/frontend/stores/ws-notifications.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { makeWsRpcClientsLayer } from "../../../src/lib/frontend/transport/shared-client.js";
+import * as rpcClient from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import { makeRpcWire } from "../../helpers/rpc-wire.js";
 import type { StubTable } from "../../helpers/stub-ws-rpc.js";
 
@@ -100,14 +101,20 @@ import * as module from "../../../src/lib/frontend/stores/selection.svelte.js";
 
 let stop: (() => void) | undefined;
 let stopCatalogs: (() => void) | undefined;
+let pendingTransports = 0;
+const originalRpc = rpcClient.rpc;
+const rpcSpy = vi.spyOn(rpcClient, "rpc");
 const serviceWorker = new EventTarget();
 const calls = (tag: string) =>
 	wire.requests.filter((request) => request.tag === tag);
-const settle = async () => {
+const settle = async (pending = 0) => {
 	flushSync();
 	await tick();
-	await new Promise((resolve) => setTimeout(resolve, 20));
+	await vi.waitFor(() => expect(pendingTransports).toBe(pending), {
+		interval: 1,
+	});
 	flushSync();
+	await tick();
 };
 function start() {
 	stop = module.watchSelection();
@@ -133,6 +140,11 @@ beforeEach(async () => {
 	wire = makeRpcWire(table);
 	runtime = ManagedRuntime.make(makeWsRpcClientsLayer(wire.connect));
 	runtimeMock.getRuntime.mockResolvedValue(runtime);
+	rpcSpy.mockImplementation((tag, payload) => {
+		if (!table[tag]) return originalRpc(tag, payload);
+		pendingTransports++;
+		return originalRpc(tag, payload).finally(() => pendingTransports--);
+	});
 	runtimeMock.runTransportEffect.mockImplementation((effect) =>
 		runtime.runPromise(effect),
 	);
@@ -262,7 +274,7 @@ afterEach(async () => {
 	stop = undefined;
 	stopCatalogs?.();
 	stopCatalogs = undefined;
-	await settle();
+	await settle(pendingTransports);
 	if (runtime) await runtime.dispose();
 	runtimeMock.getRuntime.mockReset();
 	runtimeMock.runTransportEffect.mockReset();
@@ -374,7 +386,7 @@ describe("session selection at the browser RPC wire", () => {
 			originId: expect.any(String),
 		});
 		if (moved) module.selection.open(other.id);
-		await settle();
+		await settle(1);
 		const viewsBeforeReply = calls("ViewSession").length;
 		pending.resolve({
 			projectSlug: "ignored-response-project",
@@ -507,7 +519,8 @@ describe("session selection at the browser RPC wire", () => {
 		await vi.waitFor(() => expect(calls("AttachProject")).toHaveLength(1));
 		seedSessions([{ id: "attach-new", title: "New", projectSlug: "B" }]);
 		module.selection.open("attach-new");
-		await settle();
+		await vi.waitFor(() => expect(calls("AttachProject")).toHaveLength(2));
+		await settle(2);
 		pending.resolve({ projectSlug: "A", sessionSlug: "A" });
 		await settle();
 		expect(module.selection.shown).toEqual({
@@ -526,7 +539,7 @@ describe("session selection at the browser RPC wire", () => {
 		await vi.waitFor(() => expect(calls("ResolveSession")).toHaveLength(1));
 		seedSessions([{ id: "resolve-new", title: "New", projectSlug: "A" }]);
 		module.selection.open("resolve-new");
-		await settle();
+		await settle(1);
 		pending.resolve({ projectSlug: null });
 		await settle();
 		expect(module.selection.shown).toEqual({
@@ -551,7 +564,7 @@ describe("session selection at the browser RPC wire", () => {
 		module.selection.openDraft("C");
 		await vi.waitFor(() => expect(calls("AttachProject")).toHaveLength(2));
 		second.resolve({ projectSlug: "C", sessionSlug: null });
-		await settle();
+		await settle(1);
 		first.resolve({ projectSlug: "B", sessionSlug: null });
 		await settle();
 		expect(attachedProjectState.slug).toBe("C");
@@ -594,7 +607,8 @@ describe("session selection at the browser RPC wire", () => {
 		});
 		replaceRoute("/s/saved");
 		start();
-		await settle();
+		await vi.waitFor(() => expect(calls("AttachProject")).toHaveLength(1));
+		await settle(1);
 		expect(module.selection.shown).toEqual({
 			kind: "drawn",
 			sessionId: "saved",
@@ -635,7 +649,8 @@ describe("session selection at the browser RPC wire", () => {
 			],
 		});
 		start();
-		await settle();
+		await vi.waitFor(() => expect(calls("AttachProject")).toHaveLength(1));
+		await settle(1);
 		expect(module.selection.shown).toEqual({
 			kind: "placing",
 			sessionId: "saved-sidebar",
@@ -679,7 +694,8 @@ describe("session selection at the browser RPC wire", () => {
 		});
 		replaceRoute(`/s/foreign-saved-${project}`);
 		start();
-		await settle();
+		await vi.waitFor(() => expect(calls("AttachProject")).toHaveLength(1));
+		await settle(1);
 		expect(currentChat().messages).toHaveLength(1);
 		pending.resolve({ projectSlug: project ?? "A", sessionSlug: project });
 		await settle();

@@ -130,6 +130,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		fetchSessionMessages?: Parameters<
 			typeof makeEffectOpenCodeRuntimeIngress
 		>[1],
+		backfillRetryDelayMs?: number,
 	) {
 		if (!dir) {
 			dir = mkdtempSync(join(tmpdir(), "conduit-runtime-ingress-projection-"));
@@ -140,7 +141,13 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		const nextRuntime = makeRuntime(dbPath, projectors, sessionEventBusLayer);
 		runtime = nextRuntime;
 		hook = await nextRuntime.runPromise(
-			makeEffectOpenCodeRuntimeIngress(log, fetchSessionMessages),
+			makeEffectOpenCodeRuntimeIngress(
+				log,
+				fetchSessionMessages,
+				undefined,
+				undefined,
+				backfillRetryDelayMs,
+			),
 		);
 	}
 
@@ -1313,12 +1320,12 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		});
 	}
 
-	async function historyFlag() {
+	async function historyFlag(sessionId = SESSION_ID) {
 		return currentRuntime().runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				const rows = yield* sql<{ history_complete: number }>`
-					SELECT history_complete FROM sessions WHERE id = ${SESSION_ID}`;
+					SELECT history_complete FROM sessions WHERE id = ${sessionId}`;
 				return rows[0]?.history_complete;
 			}),
 		);
@@ -1697,19 +1704,23 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		}
 		await disposeRuntime();
 		let fetches = 0;
-		await startRuntime(createAllEffectProjectors(), undefined, () =>
-			Effect.sync(() => {
-				fetches++;
-				return [
-					{
-						id: messageId,
-						sessionID: SESSION_ID,
-						role: "assistant",
-						time: { created, ...(settled ? { completed: created + 1 } : {}) },
-						parts: [{ id: partId, type: "text", text: restText }],
-					},
-				];
-			}),
+		await startRuntime(
+			createAllEffectProjectors(),
+			undefined,
+			() =>
+				Effect.sync(() => {
+					fetches++;
+					return [
+						{
+							id: messageId,
+							sessionID: SESSION_ID,
+							role: "assistant",
+							time: { created, ...(settled ? { completed: created + 1 } : {}) },
+							parts: [{ id: partId, type: "text", text: restText }],
+						},
+					];
+				}),
+			10,
 		);
 		await ingest(
 			makeSSEEvent("session.status", {
@@ -1720,7 +1731,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		await waitForCondition(async () => fetches > 0);
 		if (expected === 1)
 			await waitForCondition(async () => (await historyFlag()) === 1);
-		else await new Promise((resolve) => setTimeout(resolve, 200));
+		else await waitForCondition(async () => fetches >= 2);
 		expect(await historyFlag()).toBe(expected);
 	});
 
@@ -1862,24 +1873,39 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 
 	it("counts stale REST fetches toward the pending attempt cap", async () => {
 		let fetches = 0;
+		const probeSessionId = "sess-retry-probe";
 		await disposeRuntime();
-		await startRuntime(createAllEffectProjectors(), undefined, () =>
-			Effect.promise(async () => {
-				fetches++;
-				await ingest(
-					makeSSEEvent("session.status", {
-						sessionID: SESSION_ID,
-						status: { type: "busy" },
-					}),
-				);
-				return [];
-			}),
+		await startRuntime(
+			createAllEffectProjectors(),
+			undefined,
+			(sessionId) =>
+				sessionId === probeSessionId
+					? Effect.sleep("80 millis").pipe(Effect.as([]))
+					: Effect.promise(async () => {
+							fetches++;
+							await ingest(
+								makeSSEEvent("session.status", {
+									sessionID: SESSION_ID,
+									status: { type: "busy" },
+								}),
+							);
+							return [];
+						}),
+			10,
 		);
 		await ingest(makeSSEEvent("session.created", { info: { id: SESSION_ID } }));
-		await new Promise((resolve) => setTimeout(resolve, 8_000));
-		expect(fetches).toBeLessThanOrEqual(3);
+		await waitForCondition(async () => log.warn.mock.calls.length === 3);
+		// The probe commits after the capped session's next retry would be due.
+		await ingest(
+			makeSSEEvent("session.created", { info: { id: probeSessionId } }),
+			probeSessionId,
+		);
+		await waitForCondition(
+			async () => (await historyFlag(probeSessionId)) === 1,
+		);
+		expect(fetches).toBe(3);
 		expect(await historyFlag()).toBe(0);
-	}, 12_000);
+	});
 
 	it("limits concurrent REST history requests across sessions", async () => {
 		let active = 0;

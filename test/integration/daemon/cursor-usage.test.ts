@@ -170,8 +170,11 @@ describe("Cursor monthly usage through the built daemon", () => {
 				response.end("{}");
 				return;
 			}
-			if (mode === "slow")
-				await new Promise<void>((done) => setTimeout(done, 8_000));
+			if (mode === "slow") {
+				// Leave the response pending until the usage deadline aborts it.
+				await new Promise<void>((done) => response.once("close", done));
+				return;
+			}
 			response.writeHead(mode === "500" ? 500 : 200, {
 				"content-type": "application/json",
 			});

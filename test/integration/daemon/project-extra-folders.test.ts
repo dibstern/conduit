@@ -208,17 +208,23 @@ describe("Claude project extra folders through the built daemon", () => {
 		}
 		expect(() => process.kill(original.pid, 0)).not.toThrow();
 		evidence["liveBeforeNextSend"] = true;
-		// Let relay adoption acknowledge the prior turn's remaining outputs.
-		await new Promise((resolve) => setTimeout(resolve, 2_000));
-		const firstHistory = await after.history(sessionId);
-		evidence["historyBeforeNextSend"] = firstHistory;
-		expect(firstHistory.map(({ role }) => role)).toEqual(["user", "assistant"]);
-		expect(
-			firstHistory[1]?.parts
-				?.filter(({ type }) => type === "text")
-				.map(({ text }) => text ?? "")
-				.join(""),
-		).toBe("pong");
+		await vi.waitFor(
+			async () => {
+				const firstHistory = await after.history(sessionId);
+				evidence["historyBeforeNextSend"] = firstHistory;
+				expect(firstHistory.map(({ role }) => role)).toEqual([
+					"user",
+					"assistant",
+				]);
+				expect(
+					firstHistory[1]?.parts
+						?.filter(({ type }) => type === "text")
+						.map(({ text }) => text ?? "")
+						.join(""),
+				).toBe("pong");
+			},
+			{ timeout: 10_000, interval: 20 },
+		);
 		const second = await after.send(sessionId, "Reply with pong again.");
 		evidence["secondReply"] = second;
 		expect(second.done["status"]).toBe("idle");

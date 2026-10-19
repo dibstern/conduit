@@ -233,6 +233,7 @@ export interface ClaudeProviderInstanceDeps {
 	readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
 	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
 	readonly subagentPollTimeoutMs?: number;
+	readonly subagentPollIntervalMs?: number;
 	readonly capabilitiesService?: ClaudeCapabilitiesService;
 	/** Tests can host the session engine locally; production defaults to a process. */
 	readonly runnerFactory?: typeof makeClaudeSessionRunner;
@@ -250,6 +251,7 @@ export type ClaudeSessionRunnerDeps = Pick<
 	| "subagentSdk"
 	| "sessionForkSdk"
 	| "subagentPollTimeoutMs"
+	| "subagentPollIntervalMs"
 	| "capabilitiesService"
 	| "readGoalStatus"
 	| "persistHandoffDelivered"
