@@ -143,12 +143,14 @@ describe("RecordingProxy", () => {
 			});
 			ws.on("message", (data, isBinary) => {
 				if (!isBinary) received.push(data.toString());
+				if (
+					received.includes("$ hello world\r\n") &&
+					received.includes("echo: ls -la")
+				) {
+					ws.close();
+				}
 			});
-			// Give time for messages to flow
-			setTimeout(() => {
-				ws.close();
-				resolve();
-			}, 200);
+			ws.once("close", () => resolve());
 			ws.on("error", reject);
 		});
 
