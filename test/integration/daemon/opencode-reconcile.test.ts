@@ -43,7 +43,8 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 	function requests(browser: ProcessBrowser, id: string) {
 		return browser.frames.filter(
 			({ message }) =>
-				message["type"] === "permission_pending" && message["requestId"] === id,
+				message["type"] === "permission_pending" &&
+				message["requestId"] === harness?.promptIdForProviderRequest(id),
 		).length;
 	}
 
@@ -118,8 +119,16 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 			directoryB,
 			permission("pa4-b", sessionB),
 		);
-		await a.waitFor((message) => message["requestId"] === "pa4-a");
-		await b.waitFor((message) => message["requestId"] === "pa4-b");
+		await a.waitFor(
+			(message) =>
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+				"pa4-a",
+		);
+		await b.waitFor(
+			(message) =>
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+				"pa4-b",
+		);
 
 		const cursorA = a.frames.length;
 		const cursorB = b.frames.length;
@@ -152,11 +161,15 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 			},
 		});
 		await a.waitFor(
-			(message) => message["requestId"] === "pa4-a-barrier",
+			(message) =>
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+				"pa4-a-barrier",
 			cursorA,
 		);
 		await b.waitFor(
-			(message) => message["requestId"] === "pa4-b-barrier",
+			(message) =>
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+				"pa4-b-barrier",
 			cursorB,
 		);
 		const counts = {
@@ -211,10 +224,10 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 								eventId: string;
 								sequence: number;
 							}
-						>(`SELECT type AS kind, json_extract(data, '$.id') AS requestId,
+						>(`SELECT type AS kind, json_extract(data, '$.providerRequestId') AS requestId,
 						event_id AS eventId, sequence FROM events
 						WHERE session_id = ? AND type IN ('permission.asked', 'question.asked')
-						AND json_extract(data, '$.id') IN (?, ?) ORDER BY type, sequence`)
+						AND json_extract(data, '$.providerRequestId') IN (?, ?) ORDER BY type, sequence`)
 						.all(sessionId, permissionId, questionId),
 				};
 			} finally {
@@ -231,11 +244,16 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 			fixture.projectDir,
 			question(questionId),
 		);
-		await browser.waitFor((message) => message["requestId"] === permissionId);
+		await browser.waitFor(
+			(message) =>
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+				permissionId,
+		);
 		await browser.waitFor(
 			(message) =>
 				message["type"] === "question_pending" &&
-				message["toolId"] === questionId,
+				fixture.providerRequestIdForPrompt(String(message["toolId"])) ===
+					questionId,
 		);
 		const initial = snapshot();
 		const expected = [
@@ -261,7 +279,8 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 			await browser.waitFor(
 				(message) =>
 					message["type"] === "question_pending" &&
-					message["toolId"] === markerId,
+					fixture.providerRequestIdForPrompt(String(message["toolId"])) ===
+						markerId,
 			);
 			const recovered = snapshot();
 			evidence[`reconnect${reconnect}`] = recovered;
@@ -280,7 +299,8 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 		await browser.waitFor(
 			(message) =>
 				message["type"] === "question_pending" &&
-				message["toolId"] === restartMarker,
+				fixture.providerRequestIdForPrompt(String(message["toolId"])) ===
+					restartMarker,
 		);
 		const restarted = snapshot();
 		evidence["restart"] = restarted;
@@ -327,7 +347,11 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 		const slugB = await addProject(fixture, directoryB);
 		// Project relays start lazily, so B's relay subscribes on first connect.
 		const b = await fixture.connect(undefined, undefined, slugB);
-		await b.waitFor((message) => message["requestId"] === "pa4-late");
+		await b.waitFor(
+			(message) =>
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+				"pa4-late",
+		);
 		await vi.waitFor(
 			() => expect(persistedStatus(fixture, slugB, sessionB)).toBe("busy"),
 			{ timeout: 15_000 },

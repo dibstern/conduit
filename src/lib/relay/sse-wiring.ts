@@ -34,6 +34,7 @@ import {
 import type { OpenCodeTerminalService } from "../domain/relay/Services/terminal-service.js";
 import type { Logger } from "../logger.js";
 import { notificationContent } from "../notification-content.js";
+import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import type {
 	PushDeliveryReport,
 	PushNotificationSender,
@@ -116,6 +117,7 @@ export interface SSEWiringDeps {
 			event: SSEEvent,
 			sessionId: string | undefined,
 			providerInstanceId: string,
+			providerProcessId?: string,
 		): Effect.Effect<OpenCodeRuntimeIngressResult>;
 		onReconnect(providerInstanceId?: string): Effect.Effect<void, SqlError>;
 		onInstanceStopped?(
@@ -390,23 +392,26 @@ const recordSSEEventStartEffect = (
 	deps: SSEWiringDeps,
 	event: SSEEvent,
 	eventSessionId: string | undefined,
+	providerProcessId?: string,
 ) =>
 	Effect.gen(function* () {
 		yield* Effect.sync(() =>
 			deps.log.verbose(`event=${event.type} session=${eventSessionId ?? "?"}`),
 		);
-		if (deps.opencodeRuntimeIngress) {
-			yield* deps.opencodeRuntimeIngress.onSSEEventEffect(
-				event,
-				eventSessionId,
-				deps.providerInstanceId,
-			);
-		}
+		const ingested = deps.opencodeRuntimeIngress
+			? yield* deps.opencodeRuntimeIngress.onSSEEventEffect(
+					event,
+					eventSessionId,
+					deps.providerInstanceId,
+					providerProcessId,
+				)
+			: undefined;
 
 		if (eventSessionId && event.type.startsWith("message.")) {
 			const sessionService = yield* SessionManagerServiceTag;
 			yield* sessionService.recordMessageActivity(eventSessionId, Date.now());
 		}
+		return ingested;
 	});
 
 function permissionRequestInput(
@@ -456,6 +461,7 @@ function permissionAskedPush(
 	event: SSEEvent,
 	eventSessionId: string | undefined,
 	pending: PendingPermission | null,
+	promptId?: string,
 ): Approval {
 	if (pending) {
 		return {
@@ -477,7 +483,7 @@ function permissionAskedPush(
 	return {
 		_tag: "permission",
 		sessionId: eventSessionId ?? "",
-		requestId: id as PermissionId,
+		requestId: (promptId ?? id) as PermissionId,
 		toolName: tool,
 		toolInput: {},
 	};
@@ -495,6 +501,7 @@ function questionAskedPush(
 	deps: SSEWiringDeps,
 	event: SSEEvent,
 	eventSessionId: string | undefined,
+	promptId?: string,
 ): Approval {
 	deps.log.debug(`question.asked: event received`);
 	if (!isQuestionAskedEvent(event)) {
@@ -505,14 +512,14 @@ function questionAskedPush(
 		return {
 			_tag: "question",
 			sessionId: eventSessionId ?? "",
-			toolId: typeof id === "string" ? id : "",
+			toolId: promptId ?? (typeof id === "string" ? id : ""),
 			questions: [],
 		};
 	}
 	return {
 		_tag: "question",
 		sessionId: eventSessionId ?? "",
-		toolId: event.properties.id,
+		toolId: promptId ?? event.properties.id,
 		questions: mapQuestionFields(event.properties.questions),
 	};
 }
@@ -664,11 +671,35 @@ const handleSSEEventAfterPendingEffect = (
 		}
 	});
 
-export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
+export const handleSSEEventEffect = (
+	deps: SSEWiringDeps,
+	event: SSEEvent,
+	providerProcessId?: string,
+) =>
 	Effect.gen(function* () {
 		const pendingInteractions = yield* PendingInteractionServiceTag;
 		const eventSessionId = extractSessionId(event);
-		yield* recordSSEEventStartEffect(deps, event, eventSessionId);
+		const ingested = yield* recordSSEEventStartEffect(
+			deps,
+			event,
+			eventSessionId,
+			providerProcessId,
+		);
+		const isPrompt =
+			event.type === "permission.asked" ||
+			event.type === "permission.replied" ||
+			event.type === "question.asked" ||
+			event.type === "question.replied" ||
+			event.type === "question.rejected";
+		const prompt = ingested?.ok ? ingested.prompt : undefined;
+		if (providerProcessId && deps.opencodeRuntimeIngress && isPrompt && !prompt)
+			return;
+		if (
+			(event.type === "permission.asked" || event.type === "question.asked") &&
+			prompt &&
+			prompt.status !== "pending"
+		)
+			return;
 
 		if (event.type === "permission.asked") {
 			const input = permissionRequestInput(event, eventSessionId);
@@ -676,25 +707,34 @@ export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
 				? yield* getPermissionMode(input.sessionId)
 				: ("ask" as const);
 			const reply = deps.replyPermission;
+			const providers = yield* Effect.serviceOption(ProviderRegistryTag);
+			const adapter = Option.isSome(providers)
+				? providers.value.getInstance("opencode")
+				: undefined;
 			let autoApproved = false;
-			if (
-				input?.sessionId &&
-				reply &&
-				opencodeModeCoversAsk(mode, input.toolName)
-			) {
-				const replied = yield* Effect.either(
-					Effect.tryPromise(() =>
-						reply(input.sessionId, input.requestId, "once"),
-					),
-				);
-				if (replied._tag === "Right") {
+			if (input?.sessionId && opencodeModeCoversAsk(mode, input.toolName)) {
+				const response: Effect.Effect<void, unknown> | undefined =
+					providerProcessId
+						? adapter?.resolvePermissionEffect(
+								input.sessionId,
+								input.requestId,
+								"once",
+								providerProcessId,
+							)
+						: reply
+							? Effect.tryPromise(() =>
+									reply(input.sessionId, input.requestId, "once"),
+								)
+							: undefined;
+				const replied = response ? yield* Effect.either(response) : undefined;
+				if (replied?._tag === "Right") {
 					autoApproved = true;
 					yield* Effect.sync(() =>
 						deps.log.info(
 							`auto-approved ${input.toolName} (mode=${mode}, session=${input.sessionId}, request=${input.requestId})`,
 						),
 					);
-				} else {
+				} else if (replied) {
 					yield* Effect.sync(() =>
 						deps.log.warn(
 							`auto-approve reply failed, falling back to card (request=${input.requestId}): ${replied.left}`,
@@ -704,13 +744,16 @@ export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
 			}
 			if (!autoApproved) {
 				const pending = input
-					? yield* pendingInteractions.recordPermissionRequest(input)
+					? yield* pendingInteractions.recordPermissionRequest({
+							...input,
+							requestId: (prompt?.id ?? input.requestId) as PermissionId,
+						})
 					: null;
 				const pushManager = deps.pushManager;
 				if (pushManager)
 					yield* sendPushForEventEffect(
 						pushManager,
-						permissionAskedPush(event, eventSessionId, pending),
+						permissionAskedPush(event, eventSessionId, pending, prompt?.id),
 						deps.log,
 						buildPushContext(deps.slug, pending?.sessionId ?? eventSessionId),
 					);
@@ -718,7 +761,7 @@ export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
 		}
 		if (event.type === "question.asked") {
 			const askMsg = yield* Effect.sync(() =>
-				questionAskedPush(deps, event, eventSessionId),
+				questionAskedPush(deps, event, eventSessionId, prompt?.id),
 			);
 			const pushManager = deps.pushManager;
 			if (pushManager)
@@ -731,7 +774,7 @@ export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
 		}
 		if (isPermissionRepliedEvent(event)) {
 			yield* pendingInteractions.markPermissionReplied(
-				event.properties.requestID,
+				prompt?.id ?? event.properties.requestID,
 			);
 		}
 
@@ -739,7 +782,7 @@ export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
 	});
 
 interface SSEConsumerCallbacks {
-	handleEvent(event: SSEEvent): void;
+	handleEvent(event: SSEEvent, providerProcessId?: string): void;
 	onReconnect?(): void;
 	/** The instance's lifecycle state, for the banner on every tab. */
 	onConnectionStatus(
@@ -779,7 +822,7 @@ function wireSSEConsumerWithCallbacks(
 	// a warning but ALWAYS forward the raw event — a hard fail-closed drop would
 	// silently lose live traffic (e.g. a future server event) and regress today's
 	// pass-through behavior. Field-level consumption stays guarded per translator.
-	consumer.on("event", (event: unknown) => {
+	consumer.on("event", (event: unknown, providerProcessId?: string) => {
 		if (Either.isLeft(decodeOpenCodeEvent(event))) {
 			const type =
 				typeof (event as { type?: unknown } | null)?.type === "string"
@@ -789,7 +832,7 @@ function wireSSEConsumerWithCallbacks(
 				`SSE event failed OpenCodeEventSchema decode (forwarded raw): type=${type}`,
 			);
 		}
-		callbacks.handleEvent(event as SSEEvent);
+		callbacks.handleEvent(event as SSEEvent, providerProcessId);
 	});
 }
 
@@ -834,13 +877,13 @@ export const wireSSEConsumerEffect = (
 						}),
 					);
 				},
-				handleEvent: (event) => {
+				handleEvent: (event, providerProcessId) => {
 					if (isPtyEvent(event)) {
 						deps.onPtysChanged?.(deps.providerInstanceId);
 						return;
 					}
 					runFork(
-						handleSSEEventEffect(deps, event).pipe(
+						handleSSEEventEffect(deps, event, providerProcessId).pipe(
 							Effect.catchAllCause((cause) =>
 								Effect.sync(() =>
 									deps.log.warn(

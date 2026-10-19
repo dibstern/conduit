@@ -51,15 +51,18 @@ describe("Integration: Send Message", () => {
 			await client.waitForInitialState();
 			const sessionId = client.getActiveSessionId();
 			if (!sessionId) throw new Error("Expected an active session");
-			const questionId = randomUUID();
+			const providerQuestionId = randomUUID();
 			harness.mock.emitTestEvent("question.asked", {
-				id: questionId,
+				id: providerQuestionId,
 				sessionID: sessionId,
 				questions: [{ question: "Continue?", header: "Continue", options: [] }],
 			});
-			await client.waitFor("question_pending", {
-				predicate: (message) => message["toolId"] === questionId,
+			const question = await client.waitFor("question_pending", {
+				predicate: (message) => message["sessionId"] === sessionId,
 			});
+			const questionId = question["toolId"];
+			expect(questionId).toBeTypeOf("string");
+			expect(questionId).not.toBe(providerQuestionId);
 
 			const inputId = randomUUID();
 			const result = await client.rpcCall((rpc) =>
@@ -79,7 +82,7 @@ describe("Integration: Send Message", () => {
 						rpc.input.cancel({ sessionId, inputId }),
 					);
 				harness.mock.emitTestEvent("question.rejected", {
-					requestID: questionId,
+					requestID: providerQuestionId,
 					sessionID: sessionId,
 				});
 				await client.waitFor("approval_removed", {
@@ -115,8 +118,9 @@ describe("Integration: Send Message", () => {
 		await client.sendMessage("Reply with just the word 'pong'. Nothing else.");
 
 		const message = await client.waitForAssistantText();
-		expect(message.text).toBeTruthy();
-		expect(typeof message.text).toBe("string");
+		const text = message.parts?.find((part) => part.type === "text")?.text;
+		expect(text).toBeTruthy();
+		expect(typeof text).toBe("string");
 
 		const done = await client.waitForTurnEnd();
 		expect(done.status).toBe("idle");

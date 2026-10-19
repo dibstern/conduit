@@ -216,13 +216,13 @@ describe("selected OpenCode stop through the relay graph", () => {
 					rows
 						.map((row) => ({
 							...row,
-							status:
-								row.id.endsWith("work") &&
-								(stoppedId === selectedId
+							status: (
+								stoppedId === selectedId
 									? row.provider === selectedId || row.provider === "opencode"
-									: row.provider === stoppedId)
-									? "idle"
-									: "busy",
+									: row.provider === stoppedId
+							)
+								? "idle"
+								: "busy",
 						}))
 						.sort((a, b) => a.id.localeCompare(b.id)),
 				);

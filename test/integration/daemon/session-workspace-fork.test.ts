@@ -368,7 +368,8 @@ describe("Forked session workspaces through the built daemon", () => {
 				const permission = await browser.waitFor(
 					(message) =>
 						message["type"] === "permission_pending" &&
-						message["requestId"] === permissionId,
+						fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+							permissionId,
 				);
 				await browser.answerApproval(permission, "allow_always");
 				const updated = (await readNative(`/session/${forkId}`)) as {
@@ -401,10 +402,11 @@ describe("Forked session workspaces through the built daemon", () => {
 					},
 					"managed-test",
 				);
-				await browser.waitFor(
+				const question = await browser.waitFor(
 					(message) =>
 						message["type"] === "question_pending" &&
-						message["toolId"] === questionId,
+						fixture.providerRequestIdForPrompt(String(message["toolId"])) ===
+							questionId,
 				);
 				expect(
 					await sendRpcRequest(
@@ -413,7 +415,7 @@ describe("Forked session workspaces through the built daemon", () => {
 							projectSlug: "process-test",
 							originId: browser.originId,
 							commandId: randomUUID(),
-							toolId: questionId,
+							toolId: String(question["toolId"]),
 							answers: { "0": "Yes" },
 						}),
 					),
@@ -427,7 +429,8 @@ describe("Forked session workspaces through the built daemon", () => {
 					expect(
 						forkEvents(fixture, forkId ?? "").some(
 							({ type, data }) =>
-								type === "question.resolved" && data["id"] === questionId,
+								type === "question.resolved" &&
+								data["id"] === fixture.promptIdForProviderRequest(questionId),
 						),
 					).toBe(true),
 				);
@@ -484,7 +487,8 @@ describe("Forked session workspaces through the built daemon", () => {
 				const rejected = await browser.waitFor(
 					(message) =>
 						message["type"] === "question_pending" &&
-						message["toolId"] === rejectedId,
+						fixture.providerRequestIdForPrompt(String(message["toolId"])) ===
+							rejectedId,
 				);
 				evidence["rejectTarget"] = {
 					sessionId: forkId,
@@ -494,10 +498,13 @@ describe("Forked session workspaces through the built daemon", () => {
 					sessionId: peer.id,
 					questionId: peerQuestionId,
 				};
-				await browser.rejectQuestion({
-					...rejected,
-					toolId: `que_${randomUUID()}`,
-				});
+				await expect(
+					browser.rejectQuestion({
+						...rejected,
+						toolId: `que_${randomUUID()}`,
+					}),
+				).rejects.toThrow("This prompt is no longer available");
+				await browser.rejectQuestion(rejected);
 				const remaining = (await readNative(
 					`/question?directory=${encodeURIComponent(worktree)}`,
 				)) as { id: string; sessionID: string }[];
@@ -509,7 +516,8 @@ describe("Forked session workspaces through the built daemon", () => {
 					expect(
 						forkEvents(fixture, forkId ?? "").some(
 							({ type, data }) =>
-								type === "question.resolved" && data["id"] === rejectedId,
+								type === "question.resolved" &&
+								data["id"] === fixture.promptIdForProviderRequest(rejectedId),
 						),
 					).toBe(true),
 				);
@@ -517,7 +525,8 @@ describe("Forked session workspaces through the built daemon", () => {
 				expect(
 					forkEvents(fixture, peer.id).some(
 						({ type, data }) =>
-							type === "question.resolved" && data["id"] === peerQuestionId,
+							type === "question.resolved" &&
+							data["id"] === fixture.promptIdForProviderRequest(peerQuestionId),
 					),
 				).toBe(false);
 			}

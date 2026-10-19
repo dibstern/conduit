@@ -50,6 +50,8 @@ export interface PendingPermissionRequestInput {
 
 export interface PendingQuestionInput {
 	readonly requestId: string;
+	readonly providerProcessId?: string;
+	readonly providerRequestId?: string;
 	readonly sessionId: string;
 	readonly questions: readonly PendingQuestionItemInput[];
 	readonly toolCallId?: string;
@@ -69,6 +71,8 @@ export interface PendingQuestionItemInput {
 
 export interface PendingQuestion {
 	readonly requestId: string;
+	readonly providerProcessId?: string;
+	readonly providerRequestId?: string;
 	readonly sessionId: string;
 	readonly questions: readonly PendingQuestionItem[];
 	readonly toolCallId?: string;
@@ -169,7 +173,10 @@ export interface PendingInteractionService {
 	cancelSessionInteractions(
 		sessionId: string,
 		reason: string,
-		options?: { readonly recoverQuestions?: boolean },
+		options?: {
+			readonly recoverQuestions?: boolean;
+			readonly requestIds?: ReadonlySet<string>;
+		},
 	): Effect.Effect<void>;
 }
 
@@ -235,6 +242,12 @@ export const makePendingInteractionServiceLive = (
 
 			const toPendingQuestion = (state: QuestionState): PendingQuestion => ({
 				requestId: state.requestId,
+				...(state.providerProcessId
+					? { providerProcessId: state.providerProcessId }
+					: {}),
+				...(state.providerRequestId
+					? { providerRequestId: state.providerRequestId }
+					: {}),
 				sessionId: state.sessionId,
 				questions: state.questions,
 				...(state.toolCallId != null ? { toolCallId: state.toolCallId } : {}),
@@ -310,6 +323,12 @@ export const makePendingInteractionServiceLive = (
 					const timestamp = input.timestamp ?? (yield* Clock.currentTimeMillis);
 					const entry: QuestionState = {
 						requestId: input.requestId,
+						...(input.providerProcessId
+							? { providerProcessId: input.providerProcessId }
+							: {}),
+						...(input.providerRequestId
+							? { providerRequestId: input.providerRequestId }
+							: {}),
 						sessionId: input.sessionId,
 						questions: input.questions.map((question) => ({
 							question: question.question,
@@ -406,7 +425,10 @@ export const makePendingInteractionServiceLive = (
 			const cancelSessionInteractions = (
 				sessionId: string,
 				reason: string,
-				options?: { readonly recoverQuestions?: boolean },
+				options?: {
+					readonly recoverQuestions?: boolean;
+					readonly requestIds?: ReadonlySet<string>;
+				},
 			) =>
 				Effect.gen(function* () {
 					const cancelledPermissions = yield* Ref.modify(
@@ -415,7 +437,10 @@ export const makePendingInteractionServiceLive = (
 							const next = new Map(current);
 							const cancelled: PermissionState[] = [];
 							for (const [id, entry] of current) {
-								if (entry.sessionId === sessionId) {
+								if (
+									entry.sessionId === sessionId &&
+									(!options?.requestIds || options.requestIds.has(id))
+								) {
 									cancelled.push(entry);
 									next.delete(id);
 								}
@@ -427,7 +452,10 @@ export const makePendingInteractionServiceLive = (
 						const next = new Map(current);
 						const cancelled: QuestionState[] = [];
 						for (const [id, entry] of current) {
-							if (entry.sessionId === sessionId) {
+							if (
+								entry.sessionId === sessionId &&
+								(!options?.requestIds || options.requestIds.has(id))
+							) {
 								cancelled.push(entry);
 								if (options?.recoverQuestions) {
 									const { waiter: _waiter, ...recoverable } = entry;

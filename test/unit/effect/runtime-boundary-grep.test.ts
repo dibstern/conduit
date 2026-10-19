@@ -2868,7 +2868,7 @@ describe("Effect runtime boundary grep", () => {
 			/Effect\.serviceOption\(ProviderRuntimeIngestionTag\)/,
 		);
 		expect(providerTurnServiceSource).toMatch(
-			/createRelayEventSink\(\{[\s\S]*ingestion: \{\s*ingest: \(event\) =>\s*ingestion\s*\.ingest\(event\)/,
+			/createRelayEventSink\(\{[\s\S]*ingestion: \{\s*ingest: \(event, onPrompt\) =>\s*ingestion\s*\.ingest\(event, onPrompt\)/,
 		);
 	});
 

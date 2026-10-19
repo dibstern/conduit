@@ -37,12 +37,12 @@ import {
 } from "../src/lib/persistence/effect/projector-cursor-effect.js";
 import {
 	createAllEffectProjectors,
-	UNPROJECTED_CANONICAL_EVENT_TYPES,
+	UNPROJECTED,
 } from "../src/lib/persistence/effect/projectors-effect.js";
 import { makeReadQueryEffect } from "../src/lib/persistence/effect/read-query-effect.js";
 import { rewriteStore } from "../src/lib/persistence/rewrite-store.js";
 import { messageRowsToHistory } from "../src/lib/persistence/session-history-adapter.js";
-import { makeClaudeRunnerReceiptStore } from "../src/lib/provider/claude/claude-runner-receipts.js";
+import { makeRunnerReceiptStore } from "../src/lib/provider/runner/runner-receipts.js";
 
 const { values } = parseArgs({
 	options: {
@@ -159,7 +159,7 @@ async function initialize(filename: string): Promise<void> {
 			const sql = yield* SqlClient.SqlClient;
 			yield* sql.unsafe("PRAGMA foreign_keys = OFF");
 			yield* makeEffectSqlMigrator();
-			yield* makeClaudeRunnerReceiptStore(sql);
+			yield* makeRunnerReceiptStore(sql);
 		}).pipe(Effect.provide(sqliteLayer(filename)), Effect.scoped),
 	);
 }
@@ -384,7 +384,7 @@ try {
 		for (const metric of subsetBeforeMetrics) {
 			assert(
 				handledTypes.has(metric.type) ||
-					UNPROJECTED_CANONICAL_EVENT_TYPES.includes(metric.type),
+					Object.hasOwn(UNPROJECTED, metric.type),
 				`Unhandled historical type: ${metric.type}`,
 			);
 		}

@@ -1016,6 +1016,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				"session-1",
 				"per-1",
 				"once",
+				undefined,
 			);
 		}).pipe(
 			Effect.scoped,

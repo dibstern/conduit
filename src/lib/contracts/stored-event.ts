@@ -946,6 +946,8 @@ export const CanonicalEvents = {
 	"permission.asked": live(
 		Schema.Struct({
 			id: Schema.String,
+			providerProcessId: Schema.optionalWith(Schema.String, { exact: true }),
+			providerRequestId: Schema.optionalWith(Schema.String, { exact: true }),
 			sessionId: Schema.String,
 			toolName: Schema.String,
 			input: Schema.Unknown,
@@ -955,6 +957,8 @@ export const CanonicalEvents = {
 	"permission.resolved": live(
 		Schema.Struct({
 			id: Schema.String,
+			providerProcessId: Schema.optionalWith(Schema.String, { exact: true }),
+			providerRequestId: Schema.optionalWith(Schema.String, { exact: true }),
 			decision: PermissionDecisionSchema,
 			resolvedBy: Schema.optionalWith(Schema.Literal("auto"), { exact: true }),
 		}),
@@ -962,6 +966,8 @@ export const CanonicalEvents = {
 	"question.asked": live(
 		Schema.Struct({
 			id: Schema.String,
+			providerProcessId: Schema.optionalWith(Schema.String, { exact: true }),
+			providerRequestId: Schema.optionalWith(Schema.String, { exact: true }),
 			sessionId: Schema.String,
 			questions: Schema.Unknown,
 			...QuestionAskedDetailsSchema.fields,
@@ -970,6 +976,8 @@ export const CanonicalEvents = {
 	"question.resolved": live(
 		Schema.Struct({
 			id: Schema.String,
+			providerProcessId: Schema.optionalWith(Schema.String, { exact: true }),
+			providerRequestId: Schema.optionalWith(Schema.String, { exact: true }),
 			answers: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 		}),
 	),

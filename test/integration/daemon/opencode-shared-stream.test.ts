@@ -63,7 +63,10 @@ describe("daemon shared OpenCode global stream", () => {
 		return browser.frames.filter(
 			({ message }) =>
 				message["type"] === "permission_pending" &&
-				String(message["requestId"]).startsWith(prefix),
+				(
+					harness?.providerRequestIdForPrompt(String(message["requestId"])) ??
+					""
+				).startsWith(prefix),
 		).length;
 	}
 
@@ -128,13 +131,21 @@ describe("daemon shared OpenCode global stream", () => {
 			project: slugB,
 			payload: permission("pa3r-a-1", sessionA),
 		});
-		await a.waitFor((message) => message["requestId"] === "pa3r-a-1");
+		await a.waitFor(
+			(message) =>
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+				"pa3r-a-1",
+		);
 		await fixture.emitOpenCodeEvent({
 			directory: realpathSync(directoryB),
 			project: "process-test",
 			payload: permission("pa3r-b-1", sessionB),
 		});
-		await b.waitFor((message) => message["requestId"] === "pa3r-b-1");
+		await b.waitFor(
+			(message) =>
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+				"pa3r-b-1",
+		);
 		await fixture.emitOpenCodeEvent({ payload: null });
 		await fixture.emitOpenCodeEvent({
 			directory: directoryB,
@@ -161,8 +172,16 @@ describe("daemon shared OpenCode global stream", () => {
 			directory: directoryB,
 			payload: permission("pa3r-b-2", sessionB),
 		});
-		await a.waitFor((message) => message["requestId"] === "pa3r-a-2");
-		await b.waitFor((message) => message["requestId"] === "pa3r-b-2");
+		await a.waitFor(
+			(message) =>
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+				"pa3r-a-2",
+		);
+		await b.waitFor(
+			(message) =>
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+				"pa3r-b-2",
+		);
 		const counts = {
 			a: { a: requests(a, "pa3r-a-"), b: requests(a, "pa3r-b-") },
 			b: { a: requests(b, "pa3r-a-"), b: requests(b, "pa3r-b-") },
@@ -216,7 +235,11 @@ describe("daemon shared OpenCode global stream", () => {
 			},
 			namedId,
 		);
-		await b.waitFor((message) => message["requestId"] === "pa3r-selected-b");
+		await b.waitFor(
+			(message) =>
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+				"pa3r-selected-b",
+		);
 		await fixture.emitOpenCodeEvent(
 			{
 				directory: fixture.projectDir,
@@ -224,7 +247,11 @@ describe("daemon shared OpenCode global stream", () => {
 			},
 			defaultId,
 		);
-		await a.waitFor((message) => message["requestId"] === "pa3r-default-a");
+		await a.waitFor(
+			(message) =>
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+				"pa3r-default-a",
+		);
 		const counts = {
 			a: {
 				own: requests(a, "pa3r-default-a"),
@@ -310,7 +337,11 @@ describe("daemon shared OpenCode global stream", () => {
 			{ directory: directoryB, payload: permission("pa3r-fresh-b", sessionB) },
 			replacement.id,
 		);
-		await b.waitFor((message) => message["requestId"] === "pa3r-fresh-b");
+		await b.waitFor(
+			(message) =>
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+				"pa3r-fresh-b",
+		);
 		evidence["routedEventCounts"] = { b: requests(b, "pa3r-fresh-b") };
 		expect(requests(b, "pa3r-fresh-b")).toBe(1);
 		await vi.waitFor(() => {
@@ -376,7 +407,9 @@ describe("daemon shared OpenCode global stream", () => {
 			await a.waitFor(
 				(message) =>
 					message["type"] === `${kind}_pending` &&
-					message[kind === "permission" ? "requestId" : "toolId"] === id,
+					fixture.providerRequestIdForPrompt(
+						String(message[kind === "permission" ? "requestId" : "toolId"]),
+					) === id,
 			);
 		}
 		const directoryB = join(fixture.root, "project-b");

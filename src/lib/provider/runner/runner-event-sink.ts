@@ -4,8 +4,12 @@ import type {
 	PermissionResolvedPayload,
 	QuestionResolvedPayload,
 } from "../../contracts/stored-event.js";
-import type { PendingInteractionService } from "../../domain/relay/Services/pending-interaction-service.js";
+import {
+	PendingInteractionCancelled,
+	type PendingInteractionService,
+} from "../../domain/relay/Services/pending-interaction-service.js";
 import type { ProviderRuntimeIngestion } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
+import { createEventId } from "../../persistence/events.js";
 import {
 	createRelayEventSink,
 	type RelayEventSinkDeps,
@@ -27,35 +31,11 @@ export const makeRecoveredEventSink = (options: {
 	>;
 }) => {
 	const { sessionId, sql, ingestion, pending } = options;
-	return createRelayEventSink({
+	const sink = createRelayEventSink({
 		sessionId,
 		providerId: options.driverKind ?? "claude",
 		...options.timeoutHooks,
-		ingestion: {
-			ingest: (event) =>
-				Effect.gen(function* () {
-					if (
-						event.type === "permission.asked" ||
-						event.type === "permission.resolved" ||
-						event.type === "question.asked" ||
-						event.type === "question.resolved"
-					) {
-						const id = (event.data as { id?: string }).id;
-						if (id) {
-							const existing =
-								yield* sql`SELECT 1 FROM events WHERE session_id = ${sessionId} AND type = ${event.type} AND json_extract(data, '$.id') = ${id} LIMIT 1`;
-							if (existing.length > 0)
-								// A replay still needs its cursor committed, even when the ask
-								// was restored separately from the sequenced output stream.
-								return yield* ingestion.ingestBatch([], {
-									publishToBus: false,
-									publishToRelay: false,
-								});
-						}
-					}
-					return yield* ingestion.ingest(event);
-				}),
-		},
+		ingestion,
 		pendingInteractions: {
 			beginPermissionRequest: (request) =>
 				Effect.gen(function* () {
@@ -78,7 +58,12 @@ export const makeRecoveredEventSink = (options: {
 							response,
 						);
 					}
-					yield* options.onRegistered(request.requestId);
+					const [row] = yield* sql<{
+						provider_request_id: string | null;
+					}>`SELECT provider_request_id FROM pending_approvals WHERE id = ${request.requestId} AND session_id = ${sessionId}`;
+					yield* options.onRegistered(
+						row?.provider_request_id ?? request.requestId,
+					);
 					return waiter;
 				}).pipe(Effect.orDie),
 			resolvePermissionRequest: (id, response) =>
@@ -98,7 +83,12 @@ export const makeRecoveredEventSink = (options: {
 							response.answers,
 						);
 					}
-					yield* options.onRegistered(request.requestId);
+					const [row] = yield* sql<{
+						provider_request_id: string | null;
+					}>`SELECT provider_request_id FROM pending_approvals WHERE id = ${request.requestId} AND session_id = ${sessionId}`;
+					yield* options.onRegistered(
+						row?.provider_request_id ?? request.requestId,
+					);
 					return waiter;
 				}).pipe(Effect.orDie),
 			resolveQuestionRequest: (id, answers) =>
@@ -111,4 +101,57 @@ export const makeRecoveredEventSink = (options: {
 				),
 		},
 	});
+	return {
+		...sink,
+		requestQuestion: (request: Parameters<typeof sink.requestQuestion>[0]) =>
+			sink.requestQuestion(request).pipe(
+				Effect.tapError((error) => {
+					if (
+						!(error instanceof PendingInteractionCancelled) ||
+						error.recovered ||
+						!request.toolUseId
+					)
+						return Effect.void;
+					return Effect.gen(function* () {
+						// An uncommitted ask can still have a durable tool snapshot. Its
+						// legacy recovery entry must not outlive this failed request.
+						const questions = yield* pending.listPendingQuestions(sessionId);
+						const recovered = questions.find(
+							(question) =>
+								question.recovered && question.requestId === request.toolUseId,
+						);
+						if (!recovered) return;
+						yield* pending.cancelSessionInteractions(
+							sessionId,
+							"Question request failed",
+							{ requestIds: new Set([recovered.requestId]) },
+						);
+						yield* ingestion.ingest({
+							eventId: createEventId(),
+							type: "tool.completed",
+							providerId: options.driverKind ?? "claude",
+							sessionId,
+							providerRefs: { providerToolUseId: request.toolUseId },
+							rawSource: { kind: "relay.recovered-question-failed" },
+							createdAt: Date.now(),
+							data: {
+								partId: recovered.partId ?? request.toolUseId,
+								...(recovered.messageId
+									? { messageId: recovered.messageId }
+									: {}),
+								result: null,
+								duration: 0,
+							},
+						});
+					}).pipe(
+						Effect.catchAll((cause) =>
+							Effect.logWarning(
+								"Failed to finish cancelled recovered question",
+								cause,
+							),
+						),
+					);
+				}),
+			),
+	};
 };

@@ -106,6 +106,7 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 			event,
 			"s1",
 			"opencode",
+			undefined,
 		);
 		expect(order).toEqual(["ingress-effect", "translator"]);
 	});
@@ -132,6 +133,7 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 			event,
 			"s1",
 			"opencode",
+			undefined,
 		);
 	});
 
@@ -153,6 +155,7 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 			event,
 			"s1",
 			"opencode",
+			undefined,
 		);
 		expect(deps.translator.translate).not.toHaveBeenCalled();
 	});
@@ -192,6 +195,7 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 			event,
 			"s1",
 			"opencode",
+			undefined,
 		);
 	});
 
@@ -227,6 +231,7 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 			event,
 			"s1",
 			"work-oc",
+			undefined,
 		);
 		expect(deps.translator.translate).not.toHaveBeenCalled();
 	});

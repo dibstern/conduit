@@ -29,6 +29,7 @@ import {
 	PENDING_INPUTS_MIGRATION,
 	PROJECT_PROVENANCE_MIGRATION,
 	PROJECTION_FAILURES_MIGRATION,
+	PROMPT_PROVIDER_REFERENCE_MIGRATION,
 	READ_MODEL_COUNTER_MIGRATION,
 	READ_MODEL_VERSION_MIGRATION,
 	READ_STATE_TO_TURN_ENDS_MIGRATION,
@@ -1239,6 +1240,11 @@ export const effectMigrationEntries = {
 		"sessions",
 		"archived_at",
 		readMigrationSql(SESSIONS_ARCHIVED_MIGRATION),
+	),
+	"0064_prompt_provider_reference": runAddColumnMigrationIfMissing(
+		"pending_approvals",
+		"provider_process_id",
+		readMigrationSql(PROMPT_PROVIDER_REFERENCE_MIGRATION),
 	),
 } satisfies Record<
 	string,

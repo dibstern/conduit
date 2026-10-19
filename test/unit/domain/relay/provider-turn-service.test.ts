@@ -532,7 +532,7 @@ describe("ProviderTurnService", () => {
 				);
 				const result = yield* Effect.either(sink.push(event));
 				expect(result._tag).toBe("Right");
-				expect(ingestion.ingest).toHaveBeenCalledWith(event);
+				expect(ingestion.ingest).toHaveBeenCalledWith(event, undefined);
 			}),
 	);
 
@@ -732,6 +732,7 @@ describe("ProviderTurnService", () => {
 						type: "text.delta",
 						sessionId: "session-1",
 					}),
+					undefined,
 				);
 			}).pipe(Effect.provide(layer));
 		},

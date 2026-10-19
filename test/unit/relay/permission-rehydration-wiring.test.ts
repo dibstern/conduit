@@ -13,6 +13,7 @@ import {
 } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
@@ -242,17 +243,30 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 	}, 10_000);
 
 	it("rehydrates pending permissions from OpenCode API into the Effect service on SSE connect", async () => {
-		const pending = await relay.effectRuntime.runtime.runPromise(
+		const { pending, rows } = await relay.effectRuntime.runtime.runPromise(
 			Effect.gen(function* () {
 				const pendingInteractions = yield* PendingInteractionServiceTag;
-				return yield* pendingInteractions.listPendingPermissions();
+				const sql = yield* SqlClient.SqlClient;
+				return {
+					pending: yield* pendingInteractions.listPendingPermissions(),
+					rows: yield* sql`SELECT id, provider_process_id, provider_request_id
+						FROM pending_approvals WHERE session_id = 'sess-1'`,
+				};
 			}),
 		);
 		expect(pending).toHaveLength(1);
 		expect(pending[0]).toMatchObject({
-			requestId: "perm-rehydrate-1",
+			requestId: expect.any(String),
 			sessionId: "sess-1",
 			toolName: "Bash",
 		});
+		expect(pending[0]?.requestId).not.toBe("perm-rehydrate-1");
+		expect(rows).toEqual([
+			{
+				id: pending[0]?.requestId,
+				provider_process_id: expect.any(String),
+				provider_request_id: "perm-rehydrate-1",
+			},
+		]);
 	});
 });

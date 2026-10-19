@@ -1490,17 +1490,23 @@ export const makeApprovalProjector = defineProjector(() => ({
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 
-			// The resolve statements find their approval by id and never name a
-			// session, so only the row can say whose it was.
 			// `version` is what the approvals subscription windows on (ni8.9);
 			// `details` keeps the rest of the asked payload for the card.
 			if (isEventType(event, "permission.asked")) {
-				const { id, sessionId, toolName, input, ...details } = event.data;
+				const {
+					id,
+					sessionId,
+					toolName,
+					input,
+					providerProcessId,
+					providerRequestId,
+					...details
+				} = event.data;
 				return yield* sql<OwnedRow & { created_at: number }>`
 						INSERT INTO pending_approvals
-						(id, session_id, type, status, tool_name, input, details, version, created_at)
-						VALUES (${id}, ${sessionId}, 'permission', 'pending', ${toolName}, ${encodeJson(input)}, ${encodeJson(details)}, ${ctx.version}, ${event.createdAt})
-						ON CONFLICT (id) DO NOTHING
+						(id, session_id, type, status, tool_name, input, details, version, created_at, provider_process_id, provider_request_id)
+						VALUES (${id}, ${sessionId}, 'permission', 'pending', ${toolName}, ${encodeJson(input)}, ${encodeJson(details)}, ${ctx.version}, ${event.createdAt}, ${providerProcessId ?? null}, ${providerRequestId ?? null})
+						ON CONFLICT DO NOTHING
 						RETURNING session_id, created_at`;
 			}
 
@@ -1508,17 +1514,24 @@ export const makeApprovalProjector = defineProjector(() => ({
 				return yield* sql<OwnedRow & { created_at: number }>`
 						UPDATE pending_approvals
 						SET status = 'resolved', decision = ${event.data.decision}, resolved_at = ${event.createdAt}, version = ${ctx.version}
-						WHERE id = ${event.data.id}
+						WHERE id = ${event.data.id} AND session_id = ${event.sessionId} AND type = 'permission'
 						RETURNING session_id, created_at`;
 			}
 
 			if (isEventType(event, "question.asked")) {
-				const { id, sessionId, questions, ...details } = event.data;
+				const {
+					id,
+					sessionId,
+					questions,
+					providerProcessId,
+					providerRequestId,
+					...details
+				} = event.data;
 				return yield* sql<OwnedRow & { created_at: number }>`
 						INSERT INTO pending_approvals
-						(id, session_id, type, status, input, details, version, created_at)
-						VALUES (${id}, ${sessionId}, 'question', 'pending', ${encodeJson(questions)}, ${encodeJson(details)}, ${ctx.version}, ${event.createdAt})
-						ON CONFLICT (id) DO NOTHING
+						(id, session_id, type, status, input, details, version, created_at, provider_process_id, provider_request_id)
+						VALUES (${id}, ${sessionId}, 'question', 'pending', ${encodeJson(questions)}, ${encodeJson(details)}, ${ctx.version}, ${event.createdAt}, ${providerProcessId ?? null}, ${providerRequestId ?? null})
+						ON CONFLICT DO NOTHING
 						RETURNING session_id, created_at`;
 			}
 
@@ -1527,7 +1540,7 @@ export const makeApprovalProjector = defineProjector(() => ({
 				return yield* sql<OwnedRow & { created_at: number }>`
 						UPDATE pending_approvals
 						SET status = 'resolved', decision = ${answersJson}, resolved_at = ${event.createdAt}, version = ${ctx.version}
-						WHERE id = ${event.data.id}
+						WHERE id = ${event.data.id} AND session_id = ${event.sessionId} AND type = 'question'
 						RETURNING session_id, created_at`;
 			}
 			return [];

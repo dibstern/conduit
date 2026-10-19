@@ -53,7 +53,8 @@ describe("OpenCode Instances use", () => {
 	const requests = (browser: ProcessBrowser, id: string) =>
 		browser.frames.filter(
 			({ message }) =>
-				message["type"] === "permission_pending" && message["requestId"] === id,
+				message["type"] === "permission_pending" &&
+				message["requestId"] === harness?.promptIdForProviderRequest(id),
 		).length;
 
 	afterEach(async ({ task }) => {
@@ -168,8 +169,16 @@ describe("OpenCode Instances use", () => {
 			{ directory: directoryB, payload: permission("own-b", sessionB) },
 			instanceB.id,
 		);
-		await a.waitFor((message) => message["requestId"] === "own-a");
-		await b.waitFor((message) => message["requestId"] === "own-b");
+		await a.waitFor(
+			(message) =>
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+				"own-a",
+		);
+		await b.waitFor(
+			(message) =>
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+				"own-b",
+		);
 		const events = {
 			a: { own: requests(a, "own-a"), cross: requests(a, "cross-a") },
 			b: { own: requests(b, "own-b"), cross: requests(b, "cross-b") },
@@ -242,7 +251,8 @@ describe("OpenCode Instances use", () => {
 		const delivered = await browser.waitFor(
 			(message) =>
 				message["type"] === "permission_pending" &&
-				message["requestId"] === "rqbc-2-live-on-b",
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+					"rqbc-2-live-on-b",
 		);
 		const recovered = new Database(fixture.daemonStorePath(), {
 			readonly: true,
@@ -250,7 +260,7 @@ describe("OpenCode Instances use", () => {
 		try {
 			const approval = recovered
 				.prepare(
-					"SELECT id, session_id, status FROM pending_approvals WHERE id = ?",
+					"SELECT id, session_id, status FROM pending_approvals WHERE provider_request_id = ?",
 				)
 				.get("rqbc-2-live-on-b");
 			evidence["recovered"] = {
@@ -262,7 +272,7 @@ describe("OpenCode Instances use", () => {
 				approval,
 			};
 			expect(approval).toEqual({
-				id: "rqbc-2-live-on-b",
+				id: fixture.promptIdForProviderRequest("rqbc-2-live-on-b"),
 				session_id: sessionB,
 				status: "pending",
 			});
@@ -334,11 +344,11 @@ describe("OpenCode Instances use", () => {
 				try {
 					const approval = db
 						.prepare(
-							"SELECT id, session_id, status FROM pending_approvals WHERE id = ?",
+							"SELECT id, session_id, status FROM pending_approvals WHERE provider_request_id = ?",
 						)
 						.get(id);
 					expect(approval).toEqual({
-						id,
+						id: fixture.promptIdForProviderRequest(id),
 						session_id: sessionB,
 						status: "pending",
 					});
@@ -359,7 +369,8 @@ describe("OpenCode Instances use", () => {
 		const browser = await fixture.connect();
 		evidence["delivered"] = await browser.waitFor(
 			(message) =>
-				message["type"] === "permission_pending" && message["requestId"] === id,
+				message["type"] === "permission_pending" &&
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) === id,
 		);
 	}, 90_000);
 

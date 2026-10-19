@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
 import { isRecord } from "../../utils.js";
 import {
@@ -208,7 +207,7 @@ export class ClaudePermissionService {
 		const questions = toQuestionRequestQuestions(toolInput ?? {});
 		return sink
 			.requestQuestion({
-				requestId: options.toolUseID,
+				requestId: options.requestId ?? options.toolUseID,
 				toolUseId: options.toolUseID,
 				questions,
 			})
@@ -248,7 +247,7 @@ export class ClaudePermissionService {
 		options: CanUseToolOptions,
 	): Effect.Effect<PermissionResult, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
-			const requestId = randomUUID();
+			const requestId = options.requestId ?? options.toolUseID;
 			const createdAt = new Date().toISOString();
 			const sink = ctx.eventSink ?? this.deps.sink;
 			if (!sink) {

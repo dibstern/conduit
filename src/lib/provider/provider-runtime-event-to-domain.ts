@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Either, Option, Schema } from "effect";
 import { getProviderDriver } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
@@ -29,6 +30,7 @@ export type ProviderRuntimeDomainMapperState = {
 	readonly currentAssistantMessageIds: ReadonlyMap<string, string>;
 	readonly itemMessageIds: ReadonlyMap<string, string>;
 	readonly startedToolPartIds: ReadonlySet<string>;
+	readonly promptIds?: ReadonlyMap<string, string>;
 };
 
 export const emptyProviderRuntimeDomainMapperState: ProviderRuntimeDomainMapperState =
@@ -511,8 +513,9 @@ export function translateProviderRuntimeEventToDomain(
 		}
 
 		case "permission.asked": {
-			return singleEvent(event, state, "permission.asked", {
-				id: requestId(event, data),
+			const prompt = promptIdentity(event, state, true);
+			return singleEvent(event, prompt.state, "permission.asked", {
+				...prompt.reference,
 				sessionId: event.sessionId,
 				toolName: stringField(data["toolName"]) ?? "Unknown",
 				input: data["input"],
@@ -522,7 +525,7 @@ export function translateProviderRuntimeEventToDomain(
 
 		case "permission.resolved": {
 			return singleEvent(event, state, "permission.resolved", {
-				id: requestId(event, data),
+				...promptIdentity(event, state, false).reference,
 				decision: permissionDecision(stringField(data["decision"]) ?? ""),
 				...(data["resolvedBy"] === "auto"
 					? { resolvedBy: "auto" as const }
@@ -531,8 +534,9 @@ export function translateProviderRuntimeEventToDomain(
 		}
 
 		case "question.asked": {
-			return singleEvent(event, state, "question.asked", {
-				id: requestId(event, data),
+			const prompt = promptIdentity(event, state, true);
+			return singleEvent(event, prompt.state, "question.asked", {
+				...prompt.reference,
 				sessionId: event.sessionId,
 				questions: data["questions"],
 				...cardDetails(QuestionAskedDetailsSchema, data),
@@ -541,7 +545,7 @@ export function translateProviderRuntimeEventToDomain(
 
 		case "question.resolved": {
 			return singleEvent(event, state, "question.resolved", {
-				id: requestId(event, data),
+				...promptIdentity(event, state, false).reference,
 				answers: isRecord(data["answers"]) ? data["answers"] : {},
 			});
 		}
@@ -976,7 +980,7 @@ function providerRefsMetadata(
 	};
 }
 
-function requestId(
+export function requestId(
 	event: ProviderRuntimeEvent,
 	data: Record<string, unknown>,
 ): string {
@@ -986,6 +990,38 @@ function requestId(
 		event.providerRefs.providerToolUseId ??
 		event.eventId
 	);
+}
+
+/** Provider ids are meaningful only within the process that issued them. */
+export function promptKey(event: ProviderRuntimeEvent): string {
+	return JSON.stringify([
+		event.sessionId,
+		event.providerRefs.providerProcessId ?? event.providerId,
+		requestId(event, dataRecord(event)),
+	]);
+}
+
+function promptIdentity(
+	event: ProviderRuntimeEvent,
+	state: ProviderRuntimeDomainMapperState,
+	asked: boolean,
+) {
+	const providerRequestId = requestId(event, dataRecord(event));
+	const providerProcessId = event.providerRefs.providerProcessId;
+	const key = promptKey(event);
+	const existing = state.promptIds?.get(key);
+	const id = existing ?? (asked ? randomUUID() : providerRequestId);
+	return {
+		reference: {
+			id,
+			providerRequestId,
+			...(providerProcessId ? { providerProcessId } : {}),
+		},
+		state:
+			asked && !existing
+				? { ...state, promptIds: new Map(state.promptIds).set(key, id) }
+				: state,
+	};
 }
 
 function permissionDecision(decision: string): PermissionDecision {
