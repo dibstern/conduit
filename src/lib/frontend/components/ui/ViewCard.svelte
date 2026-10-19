@@ -25,7 +25,7 @@
 		<!-- The current view has nothing unread to point at. -->
 		{@const showBadge = badge > 0 && !checked}
 		<button {...props} type="button" {disabled} aria-label={label} aria-describedby={showBadge ? badgeId : undefined} data-view-card class="relative min-h-[44px] min-w-0 cursor-pointer rounded-[14px] bg-chip p-[5px] text-left text-text outline-hidden disabled:cursor-not-allowed disabled:opacity-38 data-[highlighted]:ring-2 data-[highlighted]:ring-accent {checked ? 'inset-ring-[1.5px] inset-ring-accent' : ''} {className}">
-			<div aria-hidden="true" class="h-[60px] overflow-hidden whitespace-nowrap rounded-[9px] bg-bg px-[7px] py-[6px] font-mono text-[7.36px] leading-[1.5] text-text-secondary">
+			<div aria-hidden="true" class="h-[60px] overflow-hidden whitespace-nowrap rounded-[9px] bg-bg px-[7px] py-[6px] font-mono text-[8px] leading-[11.04px] text-text-secondary">
 				{#if preview === "chat"}
 					{#each [62, 92, 78, 50, 58] as width, index (index)}
 						<i class="mb-[5px] block h-[5px] rounded-[3px] bg-text-dimmer opacity-35" style:width={`${width}%`} style:margin-left={index === 0 || index === 4 ? `${100 - width}%` : undefined}></i>

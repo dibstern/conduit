@@ -266,6 +266,65 @@ export const sessionSheetSnoozeHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "set held snooze viewport",
+		match: /^the session sheet viewport is ([0-9]+) by ([0-9]+)$/,
+		run: async ({ world, match }) => {
+			await world.driver.setViewport(world.page, {
+				name: "phone",
+				width: Number(match[1]),
+				height: Number(match[2]),
+			});
+		},
+	},
+	{
+		name: "assert every held snooze choice fits",
+		match: /^every snooze choice is fully visible without scrolling$/,
+		run: async ({ world }) => {
+			const options = list(world.page).locator("[data-hold-menu-item]");
+			await expect(options).toHaveCount(7);
+			await expect
+				.poll(() =>
+					options.evaluateAll((nodes) =>
+						nodes
+							.filter((node) => {
+								const box = node.getBoundingClientRect();
+								const clip = node.parentElement?.getBoundingClientRect();
+								return (
+									!clip ||
+									box.left < 0 ||
+									box.right > innerWidth ||
+									box.top < Math.max(0, clip.top) ||
+									box.bottom > Math.min(innerHeight, clip.bottom) ||
+									document
+										.elementFromPoint(
+											box.left + box.width / 2,
+											box.top + box.height / 2,
+										)
+										?.closest("[data-hold-menu-item]") !== node
+								);
+							})
+							.map((node) => node.getAttribute("data-hold-menu-item")),
+					),
+				)
+				.toEqual([]);
+		},
+	},
+	{
+		name: "slide through every held snooze choice",
+		match: /^I slide the held touch across every snooze option$/,
+		run: async ({ world }) => {
+			for (const target of await list(world.page)
+				.locator("[data-hold-menu-item]")
+				.all()) {
+				await gesture(world.page).cdp.send("Input.dispatchTouchEvent", {
+					type: "touchMove",
+					touchPoints: [{ ...(await point(target)), id: 1 }],
+				});
+				await expect(target).toHaveAttribute("data-followed", "true");
+			}
+		},
+	},
+	{
 		name: "slide native snooze touch",
 		match: /^I slide the held touch to snooze option (evening|1h)$/,
 		run: async ({ world, match }) => {
@@ -356,9 +415,15 @@ export const sessionSheetSnoozeHandlers: StepHandler[] = [
 			await expect(
 				world.page.locator(sheets).locator("[data-sheet-footer]"),
 			).toHaveCSS("opacity", "0.28");
-			await expect(
-				world.page.locator(sheets).locator("[data-hold-menu-dim]"),
-			).toHaveCSS("opacity", "0.28");
+			const dimmed = await world.page
+				.locator(sheets)
+				.locator(
+					"[data-hold-menu-dim], [data-menu-tile]:not([data-hold-menu-trigger])",
+				)
+				.all();
+			expect(dimmed.length).toBeGreaterThan(0);
+			for (const region of dimmed)
+				await expect(region).toHaveCSS("opacity", "0.28");
 		},
 	},
 	{

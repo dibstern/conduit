@@ -11,7 +11,7 @@
 	let open = $state(true);
 	let picked = $state("chat");
 	const labels = { chat: "Chat", terminal: "Terminal", diff: "Diff", files: "Files" };
-	const icons = { chat: "message-square", terminal: "square-terminal", diff: "code", files: "folder-tree" };
+	const icons = { chat: "message-square", terminal: "terminal", diff: "code", files: "folder-tree" };
 </script>
 
 <output data-testid="picked-view" class="sr-only">{picked}</output>

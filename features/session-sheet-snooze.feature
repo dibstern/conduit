@@ -121,11 +121,14 @@ Examples:
 
 Scenario Outline: A held time highlights under the finger
   Given the session sheet theme is <theme>
+  And the session sheet viewport is <width> by <height>
   And the conduit app is served with the long-transcript mockup
   And the phone session sheet state is idle
   And the snooze relay accepts changes
-  When I open the overflow session sheet
+  When I open the <entry> session sheet
   And I hold the Snooze tile with a native touch
+  Then every snooze choice is fully visible without scrolling
+  When I slide the held touch across every snooze option
   And I slide the held touch to snooze option evening
   Then the held snooze gesture has not scrolled or dragged the sheet
   And the snooze list leaves the header clear and footer dimmed
@@ -134,6 +137,12 @@ Scenario Outline: A held time highlights under the finger
   Then exactly one snooze request sets evening and closes the session sheet
 
 Examples:
-  | theme | baseline                        | threshold |
-  | dark  | session-sheet-snooze-held-dark   | 98        |
-  | light | session-sheet-snooze-held-light  | 98        |
+  | theme | entry    | width | height | baseline                                | threshold |
+  | dark  | overflow | 390   | 844    | session-sheet-snooze-held-dark           | 98        |
+  | light | overflow | 390   | 844    | session-sheet-snooze-held-light          | 98        |
+  | dark  | chevron  | 390   | 844    | session-sheet-snooze-chevron-held-dark   | 98        |
+  | light | chevron  | 390   | 844    | session-sheet-snooze-chevron-held-light  | 98        |
+  | dark  | overflow | 375   | 667    | session-sheet-snooze-held-se-dark        | 98        |
+  | light | overflow | 375   | 667    | session-sheet-snooze-held-se-light       | 98        |
+  | dark  | chevron  | 375   | 667    | session-sheet-snooze-chevron-held-se-dark | 98        |
+  | light | chevron  | 375   | 667    | session-sheet-snooze-chevron-held-se-light| 98        |

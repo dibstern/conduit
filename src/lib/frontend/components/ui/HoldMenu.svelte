@@ -112,7 +112,7 @@
 				id={panelId}
 				aria-label={title}
 				side="bottom" align="start" sideOffset={12} alignOffset={-4}
-				customAnchor={anchorNode} strategy="fixed" avoidCollisions={activation === "click"} collisionPadding={activation === "click" ? 8 : 0}
+				customAnchor={anchorNode} strategy="fixed" avoidCollisions={following || activation === "click"} collisionPadding={activation === "click" ? 8 : 0}
 				preventOverflowTextSelection={false}
 				onInteractOutside={(event) => {
 					if (activation === "hold" && event.target instanceof Node && menuNode?.contains(event.target)) event.preventDefault();
@@ -130,8 +130,8 @@
 							{#each items as item (item.id)}
 								<DropdownMenu.Item textValue={item.label} onSelect={item.action} data-hold-menu-item={item.id} data-selected={activation === "click" && item.selected || undefined} aria-current={activation === "click" && item.selected ? "true" : undefined} data-followed={gestureState.phase === "following" && gestureState.highlighted === item.id || undefined}>
 									{#snippet child({ props })}
-										<div {...props} class={["hold-menu-row relative flex h-[38px] cursor-pointer select-none items-center gap-[10px] rounded-[10px] px-[10px] text-[14.5px] outline-hidden", item.separated && "mt-[7px] before:absolute before:inset-x-[10px] before:-top-[4px] before:border-t before:border-border-chip before:content-['']"]}>
-											<span aria-hidden="true" class="hold-menu-icon text-text-dimmer"><Icon name={item.icon ?? "clock"} size={16} /></span>{item.label}
+										<div {...props} class={["hold-menu-row relative flex cursor-pointer select-none items-center gap-[10px] rounded-[10px] px-[10px] text-[14.5px] outline-hidden", following ? "h-[38px]" : "h-[32px]", item.separated && "mt-[7px] before:absolute before:inset-x-[10px] before:-top-[4px] before:border-t before:border-border-chip before:content-['']"]}>
+											<span aria-hidden="true" class="hold-menu-icon text-text-dimmer"><Icon name={item.icon ?? "clock"} size={14} /></span>{item.label}
 											{#if item.detail}<small class="hold-menu-detail ml-auto font-mono text-[12px] text-text-dimmer">{item.detail}</small>{/if}
 										</div>
 									{/snippet}
@@ -157,6 +157,11 @@
 		background: var(--color-popover-bg);
 		box-shadow: -1px -1px 0 var(--color-border-chip);
 		transform: rotate(45deg);
+	}
+	.hold-menu-panel[data-side="top"]::before {
+		top: auto;
+		bottom: -6px;
+		box-shadow: 1px 1px 0 var(--color-border-chip);
 	}
 	.hold-menu-row:is([data-highlighted], [data-followed], [data-selected]) {
 		background: color-mix(in srgb, var(--color-accent) 16%, transparent);
