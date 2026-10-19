@@ -314,6 +314,20 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const row = world.page.getByTestId("background-tasks-row");
 			const chips = row.getByTestId("background-task-chip");
+			if (/^\d+ background tasks?$/.test(match[1] ?? "")) {
+				expect(match[2], "Phone task summaries have no overflow pill").toBe(
+					"no more pill",
+				);
+				await expect(row.getByTestId("background-tasks-toggle")).toHaveText(
+					match[1] ?? "",
+				);
+				await expect(
+					row.getByTestId("background-tasks-row-stop-all"),
+				).toBeVisible();
+				await expect(chips).toHaveCount(0);
+				await expect(row.getByTestId("background-tasks-more")).toHaveCount(0);
+				return;
+			}
 			const expected = (match[1] ?? "")
 				.split(", ")
 				.map((label) => new RegExp(`^\\s*${label}`));
@@ -360,12 +374,10 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert composer task dots",
-		match: /^the composer shows (no|[0-9]+) task dots$/,
-		run: async ({ world, match }) => {
-			const dots = world.page.getByTestId("composer-task-dots");
-			if (match[1] === "no") await expect(dots).toHaveCount(0);
-			else await expect(dots.locator("i")).toHaveCount(Number(match[1]));
+		name: "assert no composer task dots",
+		match: /^the composer shows no task dots$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("composer-task-dots")).toHaveCount(0);
 		},
 	},
 	{
@@ -477,10 +489,11 @@ export const backgroundTasksHandlers: StepHandler[] = [
 			/^the background tasks pull-down offers a named stop control for each task$/,
 		run: async ({ world }) => {
 			const panel = world.page.getByTestId("background-tasks-panel");
+			await expect(panel).toBeVisible();
 			for (const task of TASKS)
 				await expect(
-					panel.getByRole("button", {
-						name: `Stop ${task.description}`,
+					world.page.getByRole("button", {
+						name: `Stop background task ${task.description}`,
 						exact: true,
 					}),
 				).toBeVisible();
@@ -494,7 +507,10 @@ export const backgroundTasksHandlers: StepHandler[] = [
 				StopBackgroundTask: () => ({ ok: true }),
 			});
 			await world.page
-				.getByRole("button", { name: `Stop ${match[1]}`, exact: true })
+				.getByRole("button", {
+					name: `Stop background task ${match[1]}`,
+					exact: true,
+				})
 				.click();
 		},
 	},
@@ -518,21 +534,27 @@ export const backgroundTasksHandlers: StepHandler[] = [
 	},
 	{
 		name: "press Stop all",
-		match: /^I press Stop all in the background tasks pull-down$/,
-		run: async ({ world }) => {
+		match: /^I press Stop all in the background tasks (pull-down|row)$/,
+		run: async ({ world, match }) => {
 			requireRpcControl(world.page).setStubs({
 				StopBackgroundTask: () => ({ ok: true }),
 			});
-			await world.page.getByTestId("background-tasks-stop-all").click();
+			await world.page
+				.getByTestId(
+					match[1] === "row"
+						? "background-tasks-row-stop-all"
+						: "background-tasks-stop-all",
+				)
+				.click();
 		},
 	},
 	{
 		name: "assert task stops leave the session and rows intact",
 		match:
-			/^the background tasks pull-down asks to stop (.+) without cancelling the session$/,
+			/^the background tasks (pull-down|row) asks to stop (.+) without cancelling the session$/,
 		run: async ({ world, match }) => {
 			const rpc = requireRpcControl(world.page);
-			const ids = (match[1] ?? "").split(", ");
+			const ids = (match[2] ?? "").split(", ");
 			await expect
 				.poll(() =>
 					rpc
@@ -550,9 +572,9 @@ export const backgroundTasksHandlers: StepHandler[] = [
 			expect(
 				rpc.getRequests().some((request) => request.tag === "CancelSession"),
 			).toBe(false);
-			await expect(
-				world.page.getByTestId("background-tasks-panel"),
-			).toBeVisible();
+			const panel = world.page.getByTestId("background-tasks-panel");
+			if (match[1] === "row") await expect(panel).toBeHidden();
+			else await expect(panel).toBeVisible();
 		},
 	},
 ];

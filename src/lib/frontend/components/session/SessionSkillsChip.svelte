@@ -193,9 +193,9 @@
 				{...props}
 				id="session-skills-chip"
 				variant="ghost"
-				size={presentation === "popover" ? "capsule-segment" : "segment"}
-				icon={presentation === "popover" ? "book-open" : "sparkles"}
-				touchTarget
+				size={presentation === "popover" ? "capsule-segment" : "phone-capsule-segment"}
+				icon="book-open"
+				touchTarget={presentation === "sheet" ? "always" : true}
 				class="shrink-0 tabular-nums"
 				ariaLabel={label}
 				title={label}

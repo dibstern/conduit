@@ -124,8 +124,10 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"the Final badge is the same icon-only Ask shield at every width (aoqb.6); normalisation, the phone default and each breakpoint are asserted in play()",
 	"input-permissionmodeselector--light | input-permissionmodeselector--phone-default-light":
 		"the light pair of Default and PhoneDefault, identical for the same reason",
-	"layout-sessionbar--expanded-by-chevron | layout-sessionbar--goal-cleared | layout-sessionbar--phone-claude-header | layout-sessionbar--phone-no-checkout | layout-sessionbar--phone-open-code-header":
-		"a cleared goal renders no subtitle and the A1 header (bn6x.10) shows no checkout, account pill or instance badge for either harness, so all five end on the plain expanded phone bar; the header stories assert those absences in play()",
+	"layout-sessionbar--goal-cleared | layout-sessionbar--phone-claude-header | layout-sessionbar--phone-no-checkout | layout-sessionbar--phone-open-code-header":
+		"a cleared goal renders no subtitle and the Final phone header shows no checkout, account pill or instance badge for either harness, so these four end on the plain expanded bar; the header stories assert those absences in play()",
+	"layout-sessionbar--auto-settled-collapsed | layout-sessionbar--collapsed":
+		"the island hides state chips; AutoSettledCollapsed expands to assert the automatic state, then returns to the same island",
 
 	// Verified legitimate (conduit-test-dc8k.1). The A1 header is the same for
 	// every harness and has no checkout, so these stories now meet in one frame.

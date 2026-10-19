@@ -736,6 +736,7 @@ export const mockAppHandlers: StepHandler[] = [
 					GetSessionSkills: async () => ({
 						loads: mockSessionSkills.get(page) ?? [],
 					}),
+					GetSessionAutoSettleOutlook: () => ({ kind: "never" }),
 					GetSkillContent: async (payload) => ({
 						projectSlug:
 							"projectSlug" in payload ? payload.projectSlug : "myapp",

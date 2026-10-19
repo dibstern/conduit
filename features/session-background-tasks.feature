@@ -1,5 +1,13 @@
 Feature: Live background tasks show in the session header
 
+Scenario: Phone goal and task controls own separate touch areas
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And goal details are available for a working goal
+  And the session has 4 live background tasks with their commands
+  Then the phone header controls own separate touch areas of at least 24 pixels, using 44 where space permits
+
 Scenario: Stop uses the Claude session routing while the model selection names OpenCode
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
@@ -98,8 +106,8 @@ Scenario Outline: Tasks sit under the header, newest task first
 
 Examples:
   | viewport | count | chips                                           | more         | baseline                        | threshold | elbow |
-  | phone    | 1     | Start the Vite dev server                       | no more pill | session-background-tasks-1-phone   | 98        | hangs off the goal with an elbow |
-  | phone    | 4     | Review the router refactor                      | +3           | session-background-tasks-4-phone   | 98        | hangs off the goal with an elbow |
+  | phone    | 1     | 1 background task                              | no more pill | session-background-tasks-1-phone   | 98        | has no elbow |
+  | phone    | 4     | 4 background tasks                             | no more pill           | session-background-tasks-4-phone   | 98        | has no elbow |
   | desktop  | 4     | review workflow, Explore, pnpm vitest --watch, pnpm dev | responsive overflow | session-background-tasks-4-desktop | 98        | has no elbow |
 
 Scenario Outline: Without a goal the row sits under the title with no elbow
@@ -115,7 +123,7 @@ Scenario Outline: Without a goal the row sits under the title with no elbow
 
 Examples:
   | viewport | chips                                             | more         | baseline                               | threshold |
-  | phone    | Run vitest in watch mode                          | +1           | session-background-tasks-nogoal-phone   | 98        |
+  | phone    | 2 background tasks                               | no more pill           | session-background-tasks-nogoal-phone   | 98        |
   | desktop  | pnpm vitest --watch, pnpm dev                       | responsive overflow | session-background-tasks-nogoal-desktop | 98        |
 
 Scenario Outline: The pull-down lists every task with its kind, command or agent, and age
@@ -153,6 +161,17 @@ Scenario: Stop all requests each task and waits for the SDK without cancelling t
   Then the background tasks pull-down is closed
   And the composer shows no task dots
 
+Scenario: The phone task row stops tasks and waits for the SDK without cancelling the session
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the session has 2 live background tasks
+  When I press Stop all in the background tasks row
+  Then the background tasks row asks to stop b2, b1 without cancelling the session
+  And the background tasks row shows 2 background tasks and no more pill
+  When the session's last background task ends
+  Then the background tasks row is gone
+
 Scenario: Stopping one task leaves every other task until the SDK reports the change
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
@@ -165,7 +184,7 @@ Scenario: Stopping one task leaves every other task until the SDK reports the ch
   And the composer shows no task dots
   When the SDK reports the vitest task stopped
   Then the composer shows no task dots
-  And the background tasks row shows Start the Vite dev server and no more pill
+  And the background tasks row shows 1 background task and no more pill
 
 Scenario: Stopping an agent requests its nested tasks before the agent
   Given the conduit app is served with the connected mockup

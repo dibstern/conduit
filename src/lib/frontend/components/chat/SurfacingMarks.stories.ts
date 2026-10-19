@@ -225,6 +225,24 @@ export const RoutineInLog: Story = {
 		await expect(row.getByTestId("surfacing-mark-why")).toHaveTextContent(
 			"the log → All",
 		);
+		await canvasElement.ownerDocument.fonts.ready;
+		row
+			.getByTestId("surfacing-mark-why")
+			.scrollIntoView({ block: "nearest", behavior: "instant" });
+		const reasons = row.getAllByTestId("surfacing-mark-reason-chip");
+		await expect(reasons).toHaveLength(3);
+		for (const control of [
+			...reasons,
+			row.getByTestId("surfacing-mark-reason"),
+			row.getByTestId("surfacing-mark-no-reason"),
+		]) {
+			await expect(control).toBeVisible();
+			const bounds = control.getBoundingClientRect();
+			await expect(bounds.top).toBeGreaterThanOrEqual(0);
+			await expect(bounds.left).toBeGreaterThanOrEqual(0);
+			await expect(bounds.bottom).toBeLessThanOrEqual(window.innerHeight);
+			await expect(bounds.right).toBeLessThanOrEqual(window.innerWidth);
+		}
 	},
 };
 export const RoutineInLogLight: Story = {

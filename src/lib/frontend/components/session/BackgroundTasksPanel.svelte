@@ -23,7 +23,7 @@
 	<p class="m-0 mt-1.5 text-[11px] leading-[1.45] text-text-muted">Claude started these and moved on. They keep running between turns.</p>
 	{#if onstopall}
 		<div class="mt-2.5 flex">
-			<Button variant="secondary" size="content" tone="inherit" icon="square" iconSize={9} class="ml-auto gap-1.5 rounded-[9px] px-[10px] py-[6px] text-[11.5px] text-status-red" data-testid="background-tasks-stop-all" title="Stops all background tasks; the current turn keeps running" onclick={onstopall}>Stop all</Button>
+			<Button variant="task-stop-all" size="content" icon="square" iconSize={9} class="ml-auto" data-testid="background-tasks-stop-all" title="Stops all background tasks; the current turn keeps running" onclick={onstopall}>Stop all</Button>
 		</div>
 	{/if}
 	{#if compact}<div aria-hidden="true" class="mx-auto mt-[10px] h-[3px] w-[34px] rounded-full bg-text-dimmer/30"></div>{/if}

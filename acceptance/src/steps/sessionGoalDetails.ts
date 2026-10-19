@@ -1,19 +1,37 @@
-import { expect } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { SessionGoalChangedPayload } from "../../../src/lib/contracts/stored-event.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRelayControl, requireRpcControl } from "./shared.js";
 
 const CONDITION = "All 38 scenarios pass";
-const CHECK_REASONS = [
-	"29/38 pass. Three baselines are stale.",
-	"33/38. Focus ring regressed.",
-	"35/38. jump-to-live fails.",
-] as const;
-const CHECK_TEXT = [
-	/8m\s*Not yet\s*·\s*29\/38 pass\. Three baselines are stale\./,
-	/19m\s*Not yet\s*·\s*33\/38\. Focus ring regressed\./,
-	/31m\s*Not yet\s*·\s*35\/38\. jump-to-live fails\./,
+const goalFixtureTimes = new WeakMap<Page, { setAt: number; now: number }>();
+const fixtureClock = (at: number) =>
+	new Date(at).toLocaleTimeString("en-US", {
+		timeZone: "UTC",
+		hour: "numeric",
+		minute: "2-digit",
+	});
+const CHECKS = [
+	{ minutes: 8, reason: "29/38 pass. Three baselines are stale." },
+	{ minutes: 19, reason: "33/38. Focus ring regressed." },
+	{ minutes: 31, reason: "35/38. jump-to-live fails." },
 ];
+function fixtureTimes(page: Page) {
+	const times = goalFixtureTimes.get(page);
+	if (!times) throw new Error("Goal details fixture has not been seeded");
+	return times;
+}
+function checkText(page: Page) {
+	const { setAt } = fixtureTimes(page);
+	return [...CHECKS]
+		.reverse()
+		.map(
+			({ minutes, reason }) =>
+				new RegExp(
+					`Not yet.*${reason.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}.*${fixtureClock(setAt + minutes * 60_000).replace(/\s/g, "\\s")}`,
+				),
+		);
+}
 
 export const sessionGoalDetailsHandlers: StepHandler[] = [
 	{
@@ -26,12 +44,13 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 			const phase = match[1];
 			const now = await world.page.evaluate(() => Date.now());
 			const setAt = now - 41 * 60_000;
+			goalFixtureTimes.set(world.page, { setAt, now });
 			const goal = {
 				condition: CONDITION,
 				iterations: 3,
 				setAt,
 				tokensAtStart: 0,
-				lastReason: phase === "checking" ? undefined : CHECK_REASONS[2],
+				lastReason: phase === "checking" ? undefined : CHECKS[2]?.reason,
 			};
 			const facts: SessionGoalChangedPayload =
 				phase === "met"
@@ -55,11 +74,11 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 					judgeModel: "Sonnet 5",
 					setAt,
 					turnCount: 4,
-					checks: [8, 19, 31].map((minutes, index) => ({
+					checks: CHECKS.map(({ minutes, reason }, index) => ({
 						iteration: index + 1,
 						turnIndex: index + 1,
 						at: setAt + minutes * 60_000,
-						reason: CHECK_REASONS[index] ?? null,
+						reason,
 					})),
 					tokensSinceStart: 1_240_000,
 				}),
@@ -106,7 +125,7 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert open goal details and header anchoring",
-		match: /^goal details are open below the full session header$/,
+		match: /^goal details open in the session header popover or phone sheet$/,
 		run: async ({ world }) => {
 			await expect(world.page.getByTestId("goal-details")).toBeVisible();
 			await expect(world.page.getByTestId("goal-details-scrim")).toBeVisible();
@@ -140,7 +159,11 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 								panel.y >= header.y + header.height
 							: Math.abs(panel.x - header.x) < 2 &&
 								Math.abs(panel.width - header.width) < 2 &&
-								Math.abs(panel.y - (header.y + header.height)) < 2)
+								Math.abs(
+									panel.y +
+										panel.height -
+										(world.page.viewportSize()?.height ?? 0),
+								) < 2)
 					);
 				})
 				.toBe(true);
@@ -160,59 +183,41 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 		match: /^the goal details metadata describes its start, checks and tokens$/,
 		run: async ({ world }) => {
 			const metadata = world.page.getByTestId("goal-details-meta");
-			if (
-				await world.page.locator('#session-bar[data-compact="false"]').count()
-			) {
-				await expect(metadata).toContainText("Sonnet 5 judges");
-				await expect(metadata).toContainText("3 checks");
-				await expect(metadata).toHaveText(/^Set \d/);
-				await expect(world.page.getByTestId("goal-details")).toContainText(
-					"1.24M tokens",
-				);
-			} else {
-				await expect(metadata).toContainText("41m");
-				await expect(metadata).toContainText("1.24M");
-			}
+			await expect(metadata).toHaveText(
+				`Set ${fixtureClock(fixtureTimes(world.page).setAt)} · 3 checks · Sonnet 5 judges`,
+			);
+			await expect(world.page.getByTestId("goal-details")).toContainText(
+				"1.24M tokens",
+			);
 		},
 	},
 	{
 		name: "assert complete goal details history in layout order",
 		match: /^the goal details history shows all three checks in layout order$/,
 		run: async ({ world }) => {
-			const desktop = await world.page
-				.locator('#session-bar[data-compact="false"]')
-				.count();
 			await expect(
 				world.page
 					.getByTestId("goal-details-history")
 					.getByTestId("goal-details-check"),
-			).toHaveText(
-				desktop
-					? [...CHECK_REASONS]
-							.reverse()
-							.map(
-								(reason) =>
-									new RegExp(
-										`Not yet.*${reason.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
-									),
-							)
-					: CHECK_TEXT,
-			);
+			).toHaveText(checkText(world.page));
 		},
 	},
 	{
 		name: "assert checking goal details history",
 		match:
-			/^the goal details history shows three checks followed by Checking now$/,
+			/^the goal details history shows Checking now followed by three checks$/,
 		run: async ({ world }) => {
 			const checks = world.page
 				.getByTestId("goal-details-history")
 				.getByTestId("goal-details-check");
-			await expect(checks).toHaveText([...CHECK_TEXT, /now\s*Checking…/]);
+			await expect(checks).toHaveText([
+				/Checking.*now/,
+				...checkText(world.page),
+			]);
 			await expect
 				.poll(() =>
 					checks
-						.last()
+						.first()
 						.locator("svg")
 						.evaluate((el) => getComputedStyle(el).animationName),
 				)
@@ -250,6 +255,13 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 			await expect(world.page.getByTestId("goal-details-dismiss")).toHaveText(
 				"Dismiss",
 			);
+			await expect(
+				world.page
+					.getByTestId("goal-details-history")
+					.getByTestId("goal-details-check")
+					.first()
+					.locator("time"),
+			).toHaveText(fixtureClock(fixtureTimes(world.page).now));
 			for (const action of ["pause", "resume", "edit", "clear"])
 				await expect(
 					world.page.getByTestId(`goal-details-${action}`),
@@ -263,7 +275,15 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 			const scrim = world.page.getByTestId("goal-details-scrim");
 			const box = await scrim.boundingBox();
 			if (!box) throw new Error("Goal details scrim has no layout box");
-			await scrim.click({ position: { x: 10, y: box.height - 10 } });
+			const phoneSheet = world.page.locator(
+				'#session-bar[data-compact="true"] #goal-details',
+			);
+			const sheet = (await phoneSheet.count())
+				? await phoneSheet.boundingBox()
+				: null;
+			await scrim.click({
+				position: { x: 10, y: sheet ? (sheet.y - box.y) / 2 : box.height - 10 },
+			});
 		},
 	},
 	{

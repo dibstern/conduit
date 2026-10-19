@@ -44,6 +44,7 @@ import {
 	connectingSocket,
 	replyRpc,
 } from "../../stories/sockets.js";
+import { inspectTouchTarget } from "../../stories/touch-target.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import type { rpc } from "../../transport/ws-rpc-client.js";
 import type {
@@ -139,6 +140,13 @@ const goalCheckFixtures = [
 	{ minutes: 31, reason: "35/38. jump-to-live fails." },
 	{ minutes: 36, reason: "38/38 once. Needs a second run." },
 ];
+
+const fixtureClock = (at: number) =>
+	new Date(at).toLocaleTimeString("en-US", {
+		timeZone: "UTC",
+		hour: "numeric",
+		minute: "2-digit",
+	});
 
 const getGoalDetails = fn<
 	(input: Parameters<typeof rpc<"GetGoalDetails">>[1]) => Promise<GoalDetails>
@@ -354,7 +362,7 @@ export const GoalChecking: Story = {
 	play: async ({ canvasElement }) => {
 		const subtitle = await assertGoalSubtitle(
 			canvasElement,
-			"Checking goal · check 3",
+			"Checking· All 38 scenarios pass",
 			"--color-status-goal",
 		);
 		const spinner = subtitle.querySelector("svg");
@@ -368,7 +376,7 @@ export const GoalNotYet: Story = {
 	play: async ({ canvasElement }) => {
 		await assertGoalSubtitle(
 			canvasElement,
-			"All 38 scenarios pass · 2 checks",
+			"Pursuing· All 38 scenarios pass",
 			"--color-status-amber",
 		);
 	},
@@ -379,7 +387,7 @@ export const GoalPaused: Story = {
 	play: async ({ canvasElement }) => {
 		const subtitle = await assertGoalSubtitle(
 			canvasElement,
-			"Goal paused · All 38 scenarios pass",
+			"Paused· All 38 scenarios pass",
 			"--color-status-goal",
 		);
 		await expect(subtitle).toHaveAttribute(
@@ -394,7 +402,7 @@ export const GoalMet: Story = {
 	play: async ({ canvasElement }) => {
 		await assertGoalSubtitle(
 			canvasElement,
-			"Goal met · 7 checks · 41m",
+			"Goal met· All 38 scenarios pass",
 			"--color-status-green",
 		);
 	},
@@ -485,24 +493,59 @@ async function assertGoalDetails(
 		),
 	);
 	const checks = history.queryAllByTestId("goal-details-check");
+	const historyCount = Math.min(checkCount, phase === "Met" ? 4 : 3);
+	const completed =
+		phase === "Checking" || phase === "Met" ? checks.slice(1) : checks;
 	for (const [index, fixture] of goalCheckFixtures
-		.slice(0, Math.min(checkCount, 3))
+		.slice(0, historyCount)
+		.reverse()
 		.entries()) {
-		await expect(checks[index]).toHaveTextContent(`${fixture.minutes}m`);
-		await expect(checks[index]).toHaveTextContent(fixture.reason);
+		await expect(completed[index]).toHaveTextContent(fixture.reason);
+		const facts = sessionGoals.get(mockSession.id);
+		const goal = facts?.goal ?? facts?.endedGoal;
+		expect(goal).toBeDefined();
+		if (goal)
+			await expect(completed[index]?.querySelector("time")).toHaveTextContent(
+				fixtureClock(goal.setAt + fixture.minutes * 60_000),
+			);
 	}
 	return { panel, checks };
 }
 
+// Timestamps, counts and the card's section labels sit in the quiet tier (text-dimmer),
+// below AA by design and held to 3:1 by theme-contrast.test.ts. color-contrast skips
+// only those; it and every other rule stay on for the rest of the popover.
+const quietTierA11y = {
+	a11y: {
+		test: "error",
+		config: {
+			rules: [
+				{
+					id: "color-contrast",
+					selector:
+						'*:not([data-testid="goal-details-meta"], [data-testid="goal-details-tokens"], [data-compact="false"] [data-goal-checks-heading], [data-testid="goal-details-check"] time, [data-testid="goal-details-check"] small, [aria-label="Snooze until"] .hold-menu-detail, [data-testid="session-bar-state-menu"] [data-menu-item-detail])',
+				},
+			],
+		},
+	},
+};
+
 export const GoalDetailsOpen: Story = {
+	args: { island: true, height: 852 },
 	tags: ["viewport-capture"],
-	parameters: { docs: { story: { inline: false } } },
+	parameters: {
+		...quietTierA11y,
+		docs: { story: { inline: false } },
+	},
 	beforeEach: () => setupGoalDetails("not_yet"),
 	play: async ({ canvasElement }) => {
-		const { panel } = await assertGoalDetails(canvasElement, "Not yet", 3);
-		await expect(panel.getByTestId("goal-details-meta")).toHaveTextContent(
-			"Set 41m ago · 3 checks · 1.24M tokens",
-		);
+		const { panel } = await assertGoalDetails(canvasElement, "Pursuing", 3);
+		const setAt = sessionGoals.get(mockSession.id)?.goal?.setAt;
+		expect(setAt).toBeDefined();
+		if (setAt != null)
+			await expect(panel.getByTestId("goal-details-meta")).toHaveTextContent(
+				`Set ${fixtureClock(setAt)} · 3 checks · Sonnet 5 judges`,
+			);
 		await expect(panel.getByTestId("goal-details-pause")).toBeVisible();
 		await expect(panel.getByTestId("goal-details-edit")).toBeVisible();
 		await expect(panel.getByTestId("goal-details-clear")).toBeVisible();
@@ -515,9 +558,9 @@ export const GoalDetailsChecking: Story = {
 	beforeEach: () => setupGoalDetails("checking"),
 	play: async ({ canvasElement }) => {
 		const { checks } = await assertGoalDetails(canvasElement, "Checking", 4);
-		await expect(checks[3]).toHaveTextContent("now");
-		await expect(checks[3]).toHaveTextContent("Checking…");
-		const spinner = checks[3]?.querySelector("svg");
+		await expect(checks[0]).toHaveTextContent("now");
+		await expect(checks[0]).toHaveTextContent("Checking");
+		const spinner = checks[0]?.querySelector("svg");
 		await expect(spinner).toBeVisible();
 		if (!spinner) return;
 		await expect(getComputedStyle(spinner).animationName).toBe("spin");
@@ -543,19 +586,21 @@ export const GoalDetailsMet: Story = {
 	beforeEach: () => setupGoalDetails("met"),
 	play: async ({ canvasElement }) => {
 		const { panel, checks } = await assertGoalDetails(canvasElement, "Met", 5);
-		await expect(checks[3]).toHaveTextContent("36m");
-		await expect(checks[3]).toHaveTextContent(
+		await expect(checks[1]).toHaveTextContent(
 			"38/38 once. Needs a second run.",
 		);
-		await expect(checks[4]).toHaveTextContent("41m");
-		await expect(checks[4]).toHaveTextContent("38/38 on two runs in a row.");
-		const icon = checks[4]?.querySelector("svg");
+		await expect(checks[0]).toHaveTextContent("38/38 on two runs in a row.");
+		const endedAt = sessionGoals.get(mockSession.id)?.endedAt;
+		expect(endedAt).toBeDefined();
+		if (endedAt != null)
+			await expect(checks[0]?.querySelector("time")).toHaveTextContent(
+				fixtureClock(endedAt),
+			);
+		const icon = checks[0]?.querySelector("svg");
 		await expect(icon).toBeVisible();
 		if (!icon) return;
 		const expected = new Option().style;
-		expected.color = getComputedStyle(icon).getPropertyValue(
-			"--color-status-green",
-		);
+		expected.color = getComputedStyle(icon).getPropertyValue("--color-success");
 		await expect(getComputedStyle(icon).color).toBe(expected.color);
 		await expect(panel.getByTestId("goal-details-new")).toBeVisible();
 		await expect(panel.getByTestId("goal-details-dismiss")).toBeVisible();
@@ -570,7 +615,7 @@ export const GoalDetailsEmpty: Story = {
 	tags: ["viewport-capture"],
 	beforeEach: () => setupGoalDetails("starting"),
 	play: async ({ canvasElement }) => {
-		const { panel } = await assertGoalDetails(canvasElement, "Starting", 0);
+		const { panel } = await assertGoalDetails(canvasElement, "Pursuing", 0);
 		await expect(panel.getByTestId("goal-details-history")).toHaveTextContent(
 			"No checks yet. The first runs when Claude finishes a turn.",
 		);
@@ -698,6 +743,11 @@ function showState(overrides: Partial<typeof mockSession>) {
 
 export const Settled: Story = {
 	beforeEach: () => showState({ settledAt: Date.now() - 3_600_000 }),
+	play: ({ canvasElement }) => {
+		expectTouchTarget(
+			within(canvasElement).getByTestId("session-bar-state-chip"),
+		);
+	},
 };
 
 export const AutoSettled: Story = {
@@ -711,6 +761,11 @@ export const AutoSettled: Story = {
 export const Snoozed: Story = {
 	beforeEach: () =>
 		showState({ snoozedAt: Date.now(), snoozedUntil: Date.now() + 3_600_000 }),
+	play: ({ canvasElement }) => {
+		expectTouchTarget(
+			within(canvasElement).getByTestId("session-bar-state-chip"),
+		);
+	},
 };
 
 export const Woke: Story = {
@@ -718,6 +773,7 @@ export const Woke: Story = {
 };
 
 export const AutoSettledCollapsed: Story = {
+	args: { island: true },
 	beforeEach: () => {
 		showState({
 			settledAt: Date.now() - 3_600_000,
@@ -726,6 +782,19 @@ export const AutoSettledCollapsed: Story = {
 		sessionViewState.compact = true;
 		sessionViewState.atBottom = true;
 		sessionViewState.barOpen = false;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const bar = canvas.getByTestId("session-bar");
+		await expect(bar).toHaveAttribute("data-collapsed", "true");
+		expect(canvas.queryByTestId("session-bar-state-chip")).toBeNull();
+		await userEvent.click(canvas.getByTestId("session-bar-expand"));
+		await expect(canvas.getByTestId("session-bar-state-chip")).toHaveAttribute(
+			"data-state",
+			"auto-settled",
+		);
+		sessionViewState.barOpen = false;
+		await waitFor(() => expect(bar).toHaveAttribute("data-collapsed", "true"));
 	},
 };
 
@@ -991,12 +1060,251 @@ export const Collapsed: Story = {
 	},
 };
 
+function setupPhoneHeader() {
+	seedSkills();
+	instanceState.instances = mockInstances.slice(0, 1).map((instance) => ({
+		...instance,
+		id: "claude",
+		driver: "claude",
+		capabilities: {
+			supportsMultiFolder: false,
+			supportsWorktree: false,
+			supportsTaskStop: true,
+		},
+	}));
+	const cleanup = setupGoal("checking", true);
+	const facts = sessionGoals.get(mockSession.id);
+	seedSessions([
+		{
+			...mockSession,
+			title: "Typed session list",
+			accountId: "claude",
+			unread: true,
+			backgroundTasks: [
+				{
+					id: "phone-task-1",
+					type: "local_bash",
+					description: "pnpm test:e2e",
+					firstSeenAt: Date.now(),
+				},
+				{
+					id: "phone-task-2",
+					type: "local_bash",
+					description: "pnpm check",
+					firstSeenAt: Date.now(),
+				},
+			],
+		},
+		{ ...mockSession, id: "phone-needs-reply", pendingQuestionCount: 1 },
+		{
+			...mockSession,
+			id: "phone-side-1",
+			parentID: mockSession.id,
+			sideThread: true,
+		},
+		{
+			...mockSession,
+			id: "phone-side-2",
+			parentID: mockSession.id,
+			sideThread: true,
+		},
+		{ ...mockSession, id: "phone-needs-approval", pendingPermissionCount: 1 },
+	]);
+	if (facts) handleGoalChanged(facts);
+	return cleanup;
+}
+
+// Verify actual ownership, including edges, rather than nominal CSS dimensions.
+function expectTouchTarget(control: HTMLElement, minimum = 44) {
+	const target = inspectTouchTarget(control, minimum);
+	expect(target.width, control.dataset["testid"]).toBeGreaterThanOrEqual(
+		minimum,
+	);
+	expect(target.height, control.dataset["testid"]).toBeGreaterThanOrEqual(
+		minimum,
+	);
+	expect(target.missing, JSON.stringify(target.failures)).toBe(0);
+}
+
+export const PhoneTop: Story = {
+	beforeEach: setupPhoneHeader,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const bar = canvas.getByTestId("session-bar");
+		const back = canvas.getByTestId("session-bar-back").getBoundingClientRect();
+		const title = canvas.getByTestId("session-bar-title");
+		const goal = canvas.getByTestId("session-goal-subtitle");
+		const tasks = canvas.getByTestId("background-tasks-row");
+		const pill = canvas.getByTestId("session-controls-pill");
+		expect(pill.getBoundingClientRect().left).toBeGreaterThanOrEqual(
+			back.right,
+		);
+		expect(pill.getBoundingClientRect().right).toBeLessThanOrEqual(
+			canvas.getByTestId("session-bar-island-overflow").getBoundingClientRect()
+				.left,
+		);
+		await expect(bar).toHaveAttribute("data-collapsed", "false");
+		expect(getComputedStyle(title).fontSize).toBe("17px");
+		expect(title.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+			back.bottom,
+		);
+		expect(goal.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+			title.getBoundingClientRect().bottom,
+		);
+		expect(tasks.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+			goal.getBoundingClientRect().bottom,
+		);
+		await expect(tasks).toHaveTextContent("2 background tasks");
+		expect(goal.getBoundingClientRect().width).toBe(
+			bar.getBoundingClientRect().width - 20,
+		);
+		for (const id of [
+			"session-bar-back",
+			"session-skills-chip",
+			"side-threads-control",
+			"session-bar-settle",
+			"session-bar-title-menu",
+			"session-bar-unread-chip",
+			"session-bar-island-overflow",
+			"session-goal-subtitle",
+			"background-tasks-toggle",
+			"background-tasks-row-stop-all",
+		]) {
+			expectTouchTarget(
+				canvas.getByTestId(id),
+				[
+					"session-skills-chip",
+					"side-threads-control",
+					"session-bar-settle",
+					"session-bar-title-menu",
+					"session-bar-unread-chip",
+					"session-goal-subtitle",
+				].includes(id)
+					? 24
+					: 44,
+			);
+		}
+	},
+};
+
+export const PhoneTopLight: Story = {
+	...PhoneTop,
+	globals: { theme: "light" },
+};
+
+export const PhoneTopNarrowest: Story = { ...PhoneTop, args: { width: 320 } };
+export const PhoneTopNarrowestLight: Story = {
+	...PhoneTopNarrowest,
+	globals: { theme: "light" },
+};
+
+export const PhoneIslandBadge: Story = {
+	args: { island: true },
+	beforeEach: () => {
+		const cleanup = setupPhoneHeader();
+		sessionViewState.barOpen = false;
+		return cleanup;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const bar = canvas.getByTestId("session-bar");
+		await expect(bar).toHaveAttribute("data-collapsed", "true");
+		expect(bar.getBoundingClientRect().height).toBe(46);
+		expect(bar.getBoundingClientRect().width).toBe(369);
+		expect(getComputedStyle(bar).borderRadius).toBe("23px");
+		const badge = canvas.getByTestId("session-bar-attention");
+		await expect(badge).toHaveTextContent("2");
+		const chevron = canvas.getByTestId("session-bar-back").querySelector("svg");
+		expect(chevron).not.toBeNull();
+		if (!chevron) return;
+		expect(
+			badge.getBoundingClientRect().left -
+				chevron.getBoundingClientRect().right,
+		).toBeGreaterThanOrEqual(4);
+		await expect(canvas.queryByTestId("session-goal-subtitle")).toBeNull();
+		await expect(canvas.queryByTestId("background-tasks-row")).toBeNull();
+		const heading = canvas.getByRole("heading", { level: 1 });
+		expect(getComputedStyle(heading).fontSize).toBe("15px");
+		await userEvent.click(canvas.getByTestId("session-bar-expand"));
+		expect(canvas.getByRole("heading", { level: 1 })).toBe(heading);
+		await expect(canvas.getByTestId("session-goal-subtitle")).toBeVisible();
+		await expect(bar).toHaveFocus();
+		sessionViewState.barOpen = false;
+	},
+};
+
+export const PhoneIslandBadgeLight: Story = {
+	...PhoneIslandBadge,
+	globals: { theme: "light" },
+};
+
+export const PhoneGoalSheet: Story = {
+	args: { island: true, height: 852 },
+	parameters: quietTierA11y,
+	tags: ["viewport-capture"],
+	beforeEach: () => setupGoal("checking"),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const goal = canvas.getByTestId("session-goal-subtitle");
+		await userEvent.click(goal);
+		const sheet = await canvas.findByTestId("goal-details");
+		await waitFor(() => expect(sheet).toHaveTextContent("Sonnet 5 judges"));
+		const box = sheet.getBoundingClientRect();
+		expect(box.x).toBe(0);
+		expect(box.width).toBe(393);
+		expect(box.bottom).toBe(852);
+		expect(
+			getComputedStyle(sheet.querySelector("[data-sheet-chrome]") ?? sheet)
+				.borderTopLeftRadius,
+		).toBe("22px");
+		for (const id of [
+			"goal-details-pause",
+			"goal-details-edit",
+			"goal-details-clear",
+		]) {
+			expectTouchTarget(canvas.getByTestId(id));
+		}
+		await userEvent.keyboard("{Escape}");
+		await expect(canvas.queryByTestId("goal-details")).toBeNull();
+		await expect(goal).toHaveFocus();
+		await userEvent.click(goal);
+		await userEvent.click(canvas.getByTestId("goal-details-scrim"));
+		await expect(canvas.queryByTestId("goal-details")).toBeNull();
+		await expect(goal).toHaveFocus();
+		await userEvent.click(goal);
+	},
+};
+
+export const PhoneGoalSheetLight: Story = {
+	...PhoneGoalSheet,
+	globals: { theme: "light" },
+};
+
+export const PhoneLongTitleLight: Story = {
+	...LongTitle,
+	globals: { theme: "light" },
+};
+
+export const PhoneIslandLongTitle: Story = {
+	...LongTitle,
+	args: { island: true },
+	beforeEach: () => {
+		openSessionForSetup(mockSessionLongTitle.id, "conduit");
+		sessionViewState.barOpen = false;
+	},
+};
+export const PhoneIslandLongTitleLight: Story = {
+	...PhoneIslandLongTitle,
+	globals: { theme: "light" },
+};
+
 /**
  * Pressing the chevron expands the bar. It also unmounts the chevron, so this
  * pins where focus lands: on the named region, which announces as a state
  * change rather than as the control the user just pressed disappearing.
  */
 export const ExpandedByChevron: Story = {
+	args: { island: true },
 	beforeEach: () => {
 		sessionViewState.compact = true;
 		sessionViewState.atBottom = true;
@@ -1382,6 +1690,7 @@ export const CollapsedWithBanners: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const row = canvas.getByTestId("session-bar-banners-row");
+		expectTouchTarget(row);
 		await expect(row).toHaveTextContent("Restart the server");
 		await expect(row).toHaveClass(/text-warning/);
 		await expect(
@@ -1493,6 +1802,8 @@ export const DesktopBackgroundTasks: Story = {
 };
 
 export const BackgroundTasks: Story = {
+	args: { island: true, height: 852 },
+	tags: ["viewport-capture"],
 	beforeEach: () => {
 		seedSessions([
 			{
@@ -1510,10 +1821,24 @@ export const BackgroundTasks: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const box = (id: string) => canvas.getByTestId(id).getBoundingClientRect();
-		expect(
-			box("background-task-chip").top - box("session-bar-title").bottom,
-		).toBeGreaterThanOrEqual(6);
+		const tasks = canvas.getByTestId("background-tasks-row");
+		await expect(tasks).toHaveTextContent("1 background task");
+		expect(tasks.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+			canvas.getByTestId("session-bar-title").getBoundingClientRect().bottom,
+		);
+		await userEvent.click(canvas.getByTestId("background-tasks-toggle"));
+		await expect(canvas.getByTestId("background-tasks-panel")).toBeVisible();
+		sessionViewState.atBottom = true;
+		sessionViewState.barOpen = false;
+		await tick();
+		await expect(canvas.getByTestId("session-bar")).toHaveAttribute(
+			"data-collapsed",
+			"false",
+		);
+		await userEvent.keyboard("{Escape}");
+		await expect(canvas.getByTestId("background-tasks-toggle")).toHaveFocus();
+		await userEvent.click(canvas.getByTestId("background-tasks-toggle"));
+		await expect(canvas.getByTestId("background-tasks-panel")).toBeVisible();
 	},
 };
 
@@ -1896,23 +2221,6 @@ export const DesktopSidebarCollapsedLight: Story = {
 export const DesktopBannersLight: Story = {
 	...DesktopBanners,
 	globals: { theme: "light" },
-};
-
-// Timestamps, counts and the card's section labels sit in the quiet tier (text-dimmer),
-// below AA by design and held to 3:1 by theme-contrast.test.ts. color-contrast skips
-// only those; it and every other rule stay on for the rest of the popover.
-const quietTierA11y = {
-	a11y: {
-		test: "error",
-		config: {
-			rules: [
-				{
-					id: "color-contrast",
-					selector: "*:not(.text-text-dimmer, .text-text-dimmer *)",
-				},
-			],
-		},
-	},
 };
 
 export const DesktopGoalDetails: Story = {

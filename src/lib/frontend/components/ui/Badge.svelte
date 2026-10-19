@@ -14,8 +14,8 @@
   (that one is a Button).
 -->
 <script module lang="ts">
-	type BadgeVariant = "neutral" | "quiet" | "accent" | "accent-solid" | "ask" | "tag" | "chip" | "success" | "error" | "snoozed" | "pinned" | "goal" | "task";
-	type BadgeSize = "xs" | "sm" | "count" | "status" | "label" | "session" | "command" | "task" | "indicator";
+	type BadgeVariant = "neutral" | "quiet" | "accent" | "accent-solid" | "ask-solid" | "ask" | "tag" | "chip" | "success" | "error" | "snoozed" | "pinned" | "goal";
+	type BadgeSize = "xs" | "sm" | "count" | "navigation-count" | "status" | "label" | "session" | "command" | "indicator";
 	type BadgeShape = "rounded" | "pill";
 
 	const VARIANT_CLASSES: Record<BadgeVariant, string> = {
@@ -25,9 +25,9 @@
 		// the colour, so the chip itself recedes.
 		quiet: "bg-bg-alt text-text-muted border border-border",
 		chip: "bg-chip text-text-secondary",
-		task: "bg-tool/13 text-tool",
 		accent: "bg-accent-bg text-accent",
 		"accent-solid": "bg-accent text-bg",
+		"ask-solid": "bg-status-ask text-bg",
 		ask: "bg-status-ask/18 text-status-ask",
 		success: "bg-success/14 text-success",
 		error: "bg-error/14 text-error",
@@ -51,7 +51,6 @@
 	const SIZE_CLASSES: Record<BadgeSize, string> = {
 		indicator: "h-[12px] min-w-[12px] justify-center px-[3px] text-[8px] font-bold tabular-nums",
 		command: "h-[24px] gap-[6px] pl-[9px] pr-[4px] font-mono text-[11.5px]",
-		task: "rounded-[6px] py-0 pr-1.5 pl-[5px] text-[10.5px]",
 		session: "h-[22px] px-[8px] text-[12px] font-medium leading-none",
 		status: "h-[20px] px-[7px] text-[11.5px] font-semibold leading-none",
 		xs: "px-[6px] py-[1px] text-[10px] font-medium",
@@ -63,6 +62,7 @@
 		// weight class is ever emitted -- two would leave the winner up to
 		// Tailwind's emission order rather than this file.
 		count: "min-w-[18px] h-[18px] px-[5px] text-xs font-semibold leading-none justify-center",
+		"navigation-count": "min-w-[17px] h-[17px] px-[5px] text-[10.5px] font-semibold leading-none justify-center",
 	};
 
 	// Two shapes, not three. A rounded-panel (10px) radius on an
@@ -112,7 +112,7 @@
 			VARIANT_CLASSES[variant],
 			size === "command" ? "" : "gap-1",
 			SIZE_CLASSES[size],
-			size === "task" ? "" : SHAPE_CLASSES[shape],
+			SHAPE_CLASSES[shape],
 			interactive ? "group-hover:bg-accent/10 group-focus-visible:bg-accent/10 group-active:bg-accent/15 group-data-[state=open]:bg-accent/15" : "",
 			className,
 		]

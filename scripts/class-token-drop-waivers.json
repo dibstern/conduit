@@ -120,7 +120,7 @@
 	},
 	"src/lib/persistence/effect/projectors-effect.ts :: tool.input_updated": "Not a class token. The scanner reads any dotted string in a changed .ts file as one; this is a provider event type the turn projector stopped subscribing to, because a tool metadata update is not new work and must not reopen a settled turn.",
 	"src/lib/frontend/components/layout/SessionBar.svelte :: flex-1,pb-2,pt-1,px-3": "The bar's two flex bands became one CSS grid so the collapsed and expanded layouts can share a single DOM tree and the <h1> never unmounts. The same 3px/12px/6px padding and the flex-1 spacer are now `padding` and a `minmax(0, 1fr)` track on #session-bar in style.css. Not a `movedTo`: the destination is a stylesheet, and recipeTokens only reads quoted class literals.",
-	"src/lib/frontend/components/layout/SessionBar.svelte :: text-lg": "Still on the title, now as `class:text-lg={!collapsed}` \u2014 the collapsed row shares its width with two 44px controls, so the title drops to text-base there, matching the mock's smallest state. The gate reports it because it does not read `class:` directives. Moving the size into style.css instead is a trap worth remembering: Tailwind v4 emits a theme variable only when a generated utility references it, so removing `text-lg` from the markup pruned --text-lg and the title silently rendered at the inherited 12px.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: text-lg": "Still on the title, now as `class:text-lg={!collapsed}` — the collapsed row shares its width with two 44px controls, so the title drops to text-base there, matching the mock's smallest state. The gate reports it because it does not read `class:` directives. Moving the size into style.css instead is a trap worth remembering: Tailwind v4 emits a theme variable only when a generated utility references it, so removing `text-lg` from the markup pruned --text-lg and the title silently rendered at the inherited 12px.",
 	"src/lib/frontend/components/session/SessionItem.svelte :: animate-pulse-dot,bg-accent,bg-brand-a,bg-brand-b,bg-transparent,border-[1.5px],border-brand-b,h-[7px],rounded-full,session-processing-dot,w-[7px]": "conduit-test-vik1.2 replaced the row's three indicator dots (attention filled, unread outlined, processing pulsing) with one server-derived status word. The dots were client-side re-derivations of state the server now decides in one place, and three colours of 7px circle never said which of six things a row wanted. The appearance did not move to a recipe: it is gone, and the word carries the signal instead.",
 	"src/lib/frontend/components/session/SessionItem.svelte :: align-[-1px],ml-1,text-xs": "The fork glyph moved into the title line's declared 6px inline gap; its fixed 11px icon no longer needs a baseline offset or text-sized wrapper, and the former text-xs status and project text are text-sm now.",
 	"src/lib/frontend/components/session/SessionItem.svelte :: flex-1,gap-1,px-2.5": "The old flex row's sizing, gap and padding moved into the two-line grid contract and its declared density classes. `group-hover:text-clip` did NOT move: it is still at the call site, on the inner title span, because style.css supplies the marquee animation but deliberately leaves the hover `text-overflow: clip` to whichever element owns the ellipsis.",
@@ -206,7 +206,7 @@
 	"src/lib/frontend/components/layout/SessionBar.stories.ts :: tab": "An ARIA role in getByRole, not a class. The phone views are menuitemradio items in the Views sheet now, not tabs (17xt.11).",
 	"src/lib/frontend/components/layout/SessionBar.svelte :: session-view-label": "The phone views tab row it labelled was removed with its style.css rules; views live in the Views sheet (17xt.11).",
 	"src/lib/frontend/components/layout/SessionBar.svelte :: session-view-shortcut": "Removed with the phone views tab row and its style.css rule. Phones have no keyboard shortcuts to hint (17xt.11).",
-	"src/lib/frontend/components/layout/SessionBar.svelte :: ml-auto,text-text-muted": "Styled the \u2318\u21e7U shortcut hint in the phone overflow menu. Phones have no keyboard, so the hint was removed, not restyled (17xt.11).",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: ml-auto,text-text-muted": "Styled the ⌘⇧U shortcut hint in the phone overflow menu. Phones have no keyboard, so the hint was removed, not restyled (17xt.11).",
 	"src/lib/frontend/components/layout/ChatLayout.svelte :: border-border,border-l": "The fixed-width Files pane became resizable (17xt.14). The divider's centred 1px bg-border line now draws the edge between chat and pane.",
 	"src/lib/frontend/components/layout/ChatLayout.svelte :: w-[clamp(280px,40%,640px)]": "The fixed-width Files pane became resizable (17xt.14). paneDefaultWidth (40% of the row, capped at 640px, floored at FILES_PANE_MIN_WIDTH) and the remembered per-session width set it inline.",
 	"acceptance/src/stepHandlers.ts :: header": "The 'global header is not rendered' step was retired with the Header component (17xt.15); no header exists at any width, so there is nothing to assert absent.",
@@ -312,8 +312,8 @@
 	"src/lib/frontend/components/session/SessionSearchField.svelte :: border-border,gap-1.5,h-8,pl-1,pr-2,rounded-lg": "Search field resized to the design's .sfield (38px/32px tall, 11px radius, border-subtle, 8px gap, 11px side padding).",
 	"src/lib/frontend/components/layout/Sidebar.svelte :: font-medium,gap-2,justify-between,no-underline,pb-2,pt-2.5,px-3,sidebar-logo,text-sm,tracking-[0.14em]": "The desktop header's conduit logo link gave way to the design's 'Sessions <count>' title, and the header's rem padding to the design's literal px (phone 2px/12px over a 40px bar, desktop 10px over 34px); a flex-1 spacer already does justify-between's job.",
 	"src/lib/frontend/components/session/SessionListFilters.svelte :: filterSurfaceClass(false,,filterSurfaceClass(needsAttention,,true)": "Not classes: the two-argument filterSurfaceClass calls. Selected chips now share the brand tint, so it takes one 'coloured' flag.",
-	"src/lib/frontend/components/session/SessionListHeader.svelte :: bg-bg-surface,gap-0.5,justify-between,px-2,session-list-header-actions,text-text-dimmer,tracking-[0.5px],uppercase": "The uppercase SESSIONS label row duplicated the sidebar header's title and is gone; Select moved to the desktop header (phone keeps \u22ef Select). The select-mode header drops its surface fill so it sits on the phone list's black.",
-	"src/lib/frontend/components/session/SessionSearchField.svelte :: h-5,w-5": "The scope clear \u2715 now sits inside the chip as a removable token, sized in literal px (16px) to fit the pill.",
+	"src/lib/frontend/components/session/SessionListHeader.svelte :: bg-bg-surface,gap-0.5,justify-between,px-2,session-list-header-actions,text-text-dimmer,tracking-[0.5px],uppercase": "The uppercase SESSIONS label row duplicated the sidebar header's title and is gone; Select moved to the desktop header (phone keeps ⋯ Select). The select-mode header drops its surface fill so it sits on the phone list's black.",
+	"src/lib/frontend/components/session/SessionSearchField.svelte :: h-5,w-5": "The scope clear ✕ now sits inside the chip as a removable token, sized in literal px (16px) to fit the pill.",
 	"src/lib/frontend/components/session/SessionContextMenu.svelte :: pb-3": "Phone sheet header takes the design's .sh-h.rich vertical padding (8px top, 11px bottom) in literal px; it had no top padding, so the title crowded the sheet's top edge.",
 	"src/lib/frontend/components/ui/Menu.svelte :: h-1,mb-2,mt-2": "Sheet grab handle matches the design's .sheet/.grab (8px above, 4px bar, 6px below). The old -mb-2 pulled content up under the handle.",
 	"src/lib/frontend/components/session/SessionSearchField.svelte :: gap-3,justify-between,text-xs": {
@@ -332,24 +332,12 @@
 	"src/lib/frontend/components/input/InputArea.svelte :: h-8,min-h-6,w-8": "conduit-test-3oqa: send and stop become literal 32px squares (root font is 12px, so h-8/w-8 rendered 24px) and the field floor is 32px to centre the placeholder on the controls row.",
 	"src/lib/frontend/components/model/AgentSelector.svelte :: agent-dropdown-panel,flex-1,font-bold,font-brand,font-medium,font-semibold,gap-[2px],h-9,max-w-[160px],max-w-[calc(100vw-16px)],min-w-0,ml-auto,opacity-50,pb-1.5,pt-1,px-2,px-3.5,py-1.5,py-4,rounded-panel,text-accent,text-center,text-ellipsis,text-sm,text-text-dimmer,text-xs,tracking-[0.5px],uppercase,w-[12px],whitespace-nowrap": "conduit-test-3oqa: the final composer design moves agent choice into the model picker's Agent row, so the standalone AgentSelector component is deleted.",
 	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: duration-150,font-medium,h-9,hidden,hover:bg-bg-alt,md:inline,px-2": "conduit-test-3oqa: the trigger follows the final design, a 32px tag (logo plus short model tag) on phones and a name chip with context and chevron on desktop, replacing the old 36px pill with a desktop-only label.",
-	"src/lib/frontend/components/layout/SessionBar.svelte :: font-medium,h-[22px],px-[8px],rounded-none": {
-		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
-		"reason": "conduit-test-fnrs cleanup: the session header's segmented cells (skills | checkout | Settle) share one Button size=\"segment\" recipe instead of three copies of the same 22px, square-cornered, 10px geometry.",
-		"requires": "size=\"segment\""
-	},
-	"src/lib/frontend/components/session/GitIdentity.svelte :: font-medium,gap-[5px],h-[22px],rounded-none": {
-		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
-		"reason": "conduit-test-fnrs cleanup: the session header's segmented cells (skills | checkout | Settle) share one Button size=\"segment\" recipe instead of three copies of the same 22px, square-cornered, 10px geometry.",
-		"requires": "size=\"segment\""
-	},
-	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: gap-[5px],h-[22px],px-[8px],rounded-none,text-[10px]": {
-		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
-		"reason": "conduit-test-fnrs cleanup: the session header's segmented cells (skills | checkout | Settle) share one Button size=\"segment\" recipe instead of three copies of the same 22px, square-cornered, 10px geometry.",
-		"requires": "size=\"segment\""
-	},
-	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: segmented": "Not a class: the dead `segmented` prop, which every call site passed as true. Its square-cornered geometry now comes from Button size=\"segment\".",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: font-medium,h-[22px],px-[8px],rounded-none": "conduit-test-aoqb.5 review: the Final capsule replaces the old 22px, square-cornered session-header cells; their unused shared recipe is removed.",
+	"src/lib/frontend/components/session/GitIdentity.svelte :: font-medium,gap-[5px],h-[22px],rounded-none": "conduit-test-aoqb.5 review: the Final capsule replaces the old 22px, square-cornered session-header cells; their unused shared recipe is removed.",
+	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: gap-[5px],h-[22px],px-[8px],rounded-none,text-[10px]": "conduit-test-aoqb.5 review: the Final capsule replaces the old 22px, square-cornered session-header cells; their unused shared recipe is removed.",
+	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: segmented": "Not a class: the removed segmented prop. The Final header now supplies capsule presentation; the old square-cornered recipe has no consumers and is removed in conduit-test-aoqb.5.",
 	"src/lib/frontend/components/chat/UserMessage.svelte :: items-center,mt-2,queued-shimmer,text-text-muted": "conduit-test-jyr9.5 deletes the queued-send shimmer label under a user message. Queued sends now wait in the pending-input tray above the composer (PendingInputTray.svelte), so the transcript never shows an unplaced message and the label, its layout and its animation go.",
-	"src/lib/frontend/components/layout/Sidebar.svelte :: left-1,min-w-[240px],mt-0.5,right-1,top-full,z-[var(--z-dropdown)]": "conduit-test-usg5.11 retires the old projects panel: the scope pill menu plus ProjectDialog is the only way to manage projects. These positioned the Projects\u2026 panel surface under the sidebar header; the surface and its route are deleted.",
+	"src/lib/frontend/components/layout/Sidebar.svelte :: left-1,min-w-[240px],mt-0.5,right-1,top-full,z-[var(--z-dropdown)]": "conduit-test-usg5.11 retires the old projects panel: the scope pill menu plus ProjectDialog is the only way to manage projects. These positioned the Projects… panel surface under the sidebar header; the surface and its route are deleted.",
 	"src/lib/frontend/components/project/DirectoryAutocomplete.stories.ts :: bg-bg-alt,rounded-lg,z-[var(--z-dropdown)],z-[var(--z-popover)]": "conduit-test-usg5.11 retires the old projects panel: the scope pill menu plus ProjectDialog is the only way to manage projects. The stories probed the deleted directory autocomplete; ProjectDialog's folder picker has its own stories.",
 	"src/lib/frontend/components/project/DirectoryAutocomplete.svelte :: bottom-full,dir-autocomplete-list,flex,flex-1,font-mono,items-baseline,left-0,max-h-[200px],mb-1,md:min-h-0,min-h-[44px],min-w-0,overflow-y-auto,right-0,shrink,text-[12px],text-ellipsis,text-text,text-text-muted,text-warning,whitespace-nowrap": "conduit-test-usg5.11 retires the old projects panel: the scope pill menu plus ProjectDialog is the only way to manage projects. The directory autocomplete and its ListDirectories RPC are deleted; ProjectDialog's FindFolders picker replaced it.",
 	"src/lib/frontend/components/project/ProjectContextMenu.svelte :: md:min-h-0,min-h-[44px],min-w-[160px]": "conduit-test-usg5.11 retires the old projects panel: the scope pill menu plus ProjectDialog is the only way to manage projects. The panel row's rename/remove menu is deleted; remove lives on the pill menu and rename on the Edit dialog.",
@@ -463,26 +451,14 @@
 		"requires": "size=\"touch-icon\"",
 		"reason": "conduit-test-aoqb.4 fix: Button's touch sizes retain 44px targets."
 	},
-	"src/lib/frontend/components/layout/SessionBar.svelte :: pl-1,pr-2,rounded-lg,text-base": {
-		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
-		"requires": "\"navigation\" : \"navigation-pill\"",
-		"reason": "conduit-test-aoqb.4 fix: Button owns the phone and desktop navigation sizes."
-	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: pl-1,pr-2,rounded-lg,text-base": "conduit-test-aoqb.5: the compact phone Back pill replaces the unused navigation size; desktop retains navigation-pill.",
 	"src/lib/frontend/components/layout/SessionBar.svelte :: py-[6px],rounded-[9px]": {
 		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
 		"requires": "size=\"card-action\"",
 		"reason": "conduit-test-aoqb.4 fix: goal-card actions use Button's public card-action size."
 	},
-	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: bg-tool/13,inline-flex,pl-[5px],pr-1.5,py-0,rounded-[6px]": {
-		"movedTo": "src/lib/frontend/components/ui/Badge.svelte",
-		"requires": "variant=\"task\" size=\"task\"",
-		"reason": "conduit-test-aoqb.4 fix: Badge owns the existing phone task-chip recipe."
-	},
-	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: justify-start,leading-[1.5],select-none,text-[11px],text-tool,whitespace-nowrap": {
-		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
-		"requires": "variant=\"task-row\"",
-		"reason": "conduit-test-aoqb.4 fix: Button owns the phone task row's typography and interaction."
-	},
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: bg-tool/13,inline-flex,pl-[5px],pr-1.5,py-0,rounded-[6px]": "conduit-test-aoqb.5: the Final phone count and Stop all strip replaces individual task chips; the unused task recipes are removed.",
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: justify-start,leading-[1.5],select-none,text-[11px],text-tool,whitespace-nowrap": "conduit-test-aoqb.5: the Final phone count and Stop all strip replaces individual task chips; the unused task recipes are removed.",
 	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: compact,min-w-full,w-0": "conduit-test-aoqb.4 fix: the phone-only branch always has compact=true, so its row uses w-full directly. Desktop command chips use the separate desktop branch.",
 	"src/lib/frontend/components/input/InputArea.svelte :: composer-task-dot,gap-1.5,justify-center,pt-[7px]": "conduit-test-aoqb.4: the approved 2026-10-16 audit removes composer task dots and their layout. Live tasks remain visible in the header row and its task panel.",
 	"src/lib/frontend/components/layout/SessionBar.svelte :: items-stretch,py-2,text-xs": "conduit-test-aoqb.4: the Final desktop capsule centers its segments; the state menu uses literal pixel padding and text sizes.",
@@ -965,7 +941,7 @@
 		"requires": "<ComposerToken ",
 		"reason": "conduit-test-aoqb.6 review moves recognized-token appearance, including the goal variant, into ui/ComposerToken. The feature supplies the token text and goal state."
 	},
-	"src/lib/frontend/components/input/InputArea.svelte :: pl-[4px]": "conduit-test-aoqb.6 review: the Words context percentage follows a literal middle-dot separator like the spec's `feat/typed-session-list \u25cf \u00b7 38%`, so the dot supplies the spacing through the row gap and the left padding goes.",
+	"src/lib/frontend/components/input/InputArea.svelte :: pl-[4px]": "conduit-test-aoqb.6 review: the Words context percentage follows a literal middle-dot separator like the spec's `feat/typed-session-list ● · 38%`, so the dot supplies the spacing through the row gap and the left padding goes.",
 	"src/lib/frontend/components/input/UsageLimitStrip.svelte :: gap-[5px],px-[10px]": "conduit-test-aoqb.6 review: Button has no class merging, so call-site gap and padding fought the composer-chip size recipe in stylesheet order. The composer-chip size now owns the 5px gap and 9px sides for every strip chip.",
 	"src/lib/frontend/components/input/UsageWarningStrip.svelte :: gap-[5px],justify-center": "conduit-test-aoqb.6 review: the composer-chip size recipe owns the 5px gap, and phone centring stays on the compact branch (flex-1 justify-center); the always-on justify-center duplicated it.",
 	"src/lib/frontend/components/input/UsageLimitStrip.svelte :: min-w-0": "conduit-test-aoqb.6: the limit copy keeps a readable minimum width (min-w-[min(100%,16em)]) so the recovery actions wrap below it instead of squeezing it to a sliver.",
@@ -973,5 +949,15 @@
 	"src/lib/frontend/components/chat/UserMessage.svelte :: bg-linear-to-br,from-accent,md:size-[28px],md:text-[13px],place-items-center,size-[20px],text-[11px],text-white,to-status-snoozed": "conduit-test-aoqb.3: the You avatar is drawn by UserAvatar, which sizes itself from a px size prop (letter at size x .44) and paints the chosen face; the placeholder accent-to-snoozed gradient is replaced by the initial on a name-picked preset orb gradient.",
 	"src/lib/frontend/components/ui/Tile.svelte :: text-[13px]": "Still 13px by default. The label size now reads --tile-font, so a 5-column grid (LabelledGridGroup columns=5) can set 12px labels as the spec's .sm-five does.",
 	"src/lib/frontend/components/input/InputArea.svelte :: leading-[1.35],mb-2,px-[10px],py-[7px],rounded-2xl,text-[11.5px]": "conduit-test-aoqb.17: the refused-steer notice is a ComposerStrip fused to the composer, so the strip primitive owns its padding, top corners, type size and line height, and it sits flush on #input-row with no gap.",
-	"src/lib/frontend/components/input/UsageLimitStrip.svelte :: sessionViewState.compact": "conduit-test-aoqb.17: the Switch account trigger takes the shared stretch geometry, which already centres it on phone strips; the tray keeps natural-width trailing actions."
+	"src/lib/frontend/components/input/UsageLimitStrip.svelte :: sessionViewState.compact": "conduit-test-aoqb.17: the Switch account trigger takes the shared stretch geometry, which already centres it on phone strips; the tray keeps natural-width trailing actions.",
+	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: gap-1.5,px-[10px],py-[6px],rounded-[9px],text-[11.5px],text-status-red": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "variant=\"task-stop-all\"",
+		"reason": "conduit-test-aoqb.22: Stop all keeps its appearance in Button's task-stop-all recipe."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: bg-text-dimmer/30,border,border-current/40,font-sans,goalTone,h-[3px],mb-[4px],mb-[5px],min-w-full,mt-[10px],mt-[6px],mx-auto,normal-case,pb-[8px],pt-[12px],px-[14px],px-[6px],rotate-180,rounded-[6px],rounded-b-[22px],text-status-amber,text-status-green,tracking-[0.08em],tracking-normal,transition-transform,uppercase,w-0,w-[34px]": "conduit-test-aoqb.5: replace the old phone goal header, ascending elapsed-time history, and bottom handle with the Final shared goal content and ui/SheetChrome bottom sheet. The goal line spans a dedicated grid row, its indicator is the goal icon, and phone geometry uses px sizes in style.css. Desktop content retains its existing classes.",
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: font-semibold,gap-1,max-w-[168px],max-w-[210px],ml-1,mr-px,mt-[6px],opacity-65,opacity-75,opacity-85,px-0.5,rotate-180,shrink,tasks.length,tasksPanel.open,text-[10.5px],text-status-goal,text-text,text-text-muted,transition-transform,underGoal": "conduit-test-aoqb.5: the Final phone task strip replaces its elbow, task preview, overflow count, and chevron with a task count and Stop all. The complete descriptions, kinds, ages, and individual controls remain in the task panel. Surface task-strip owns the new appearance.",
+	"src/lib/frontend/components/ui/Badge.svelte :: bg-tool/13,pl-[5px],pr-1.5,py-0,rounded-[6px],text-[10.5px],text-tool": "conduit-test-aoqb.5: remove the task variant and size after the Final phone task strip replaces their last consumer.",
+	"src/lib/frontend/components/ui/Surface.svelte :: h-[24px],items-stretch,rounded-lg": "conduit-test-aoqb.5: remove the segments variant after its last consumer moved to the Final capsule.",
+	"src/lib/frontend/components/ui/button-recipes.ts :: bg-warning-bg,border-warning/30,rounded-none,text-[10px],text-base,text-tool,text-warning": "conduit-test-aoqb.5 review: remove task-row, navigation, segment and pill-warning after confirming zero production consumers; remove the warning-pill story and its baselines as well."
 }

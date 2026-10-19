@@ -318,7 +318,7 @@ export const taskDrillInHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			await expect(panel(world.page)).toBeVisible();
 			await expect(
-				world.page.getByTestId("background-tasks-row"),
+				world.page.getByTestId("background-tasks-toggle"),
 			).toHaveAttribute("aria-expanded", "true");
 		},
 	},
