@@ -10,17 +10,24 @@ import {
 } from "../../helpers/process-harness.js";
 
 describe("streaming cost through the fake Claude process", () => {
-	it("records WebSocket frame payload bytes and committed SQLite WAL bytes per text chunk", async () => {
+	it("records WebSocket payload bytes and coalesced SQLite WAL writes", async () => {
 		const harness = ProcessHarness.create();
 		const metricsFile = join(harness.root, "streaming-metrics.json");
 		try {
-			await harness.restart({ metricsFile, profile: true });
+			// Allow cold process imports on a busy development machine.
+			await harness.restart({
+				metricsFile,
+				profile: true,
+				startupTimeoutMs: 30_000,
+				runnerStartupTimeoutMs: 20_000,
+			});
 			const browser = await harness.connect();
 			const sessionId = await browser.createSession();
 			await browser.followFamily(sessionId);
 			const messageCursor = browser.frames.length;
 			const cursor = harness.rpcDiagnostics.wireFrames.length;
-			const finalText = responseChunks("streaming-cost").join("");
+			const chunks = responseChunks("streaming-cost");
+			const finalText = chunks.join("");
 			const submitted = await Effect.runPromise(
 				browser.rpc["input.submit"]({
 					sessionId,
@@ -42,6 +49,7 @@ describe("streaming cost through the fake Claude process", () => {
 						.map((part) => part.text ?? "")
 						.join("") === finalText,
 				messageCursor,
+				30_000,
 			);
 			await browser.waitForTurnEnd(sessionId, messageCursor);
 			const end = harness.rpcDiagnostics.wireFrames.length;
@@ -61,7 +69,9 @@ describe("streaming cost through the fake Claude process", () => {
 					writes = metrics.streamingWrites.filter(
 						(write) => write.messageId === messageId,
 					);
-					expect(writes).toHaveLength(responseChunks("streaming-cost").length);
+					expect(writes.length).toBeGreaterThanOrEqual(2);
+					expect(writes.length).toBeLessThan(chunks.length);
+					expect(writes.at(-1)?.textChars).toBe(finalText.length);
 				},
 				{ timeout: 5000 },
 			);
@@ -92,6 +102,8 @@ describe("streaming cost through the fake Claude process", () => {
 							"received WebSocket JSON payload bytes before suffix decoding; excludes compression and frame headers",
 						finalTextChars: finalText.length,
 						finalTextBytes: Buffer.byteLength(finalText),
+						persistedTextDeltaRows: writes.length,
+						chunkCount: chunks.length,
 						frames,
 						totalBytes,
 						detailBytes,
@@ -113,5 +125,5 @@ describe("streaming cost through the fake Claude process", () => {
 		} finally {
 			await harness.dispose();
 		}
-	}, 60_000);
+	}, 90_000);
 });

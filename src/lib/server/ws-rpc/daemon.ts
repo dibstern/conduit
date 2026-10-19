@@ -6,6 +6,7 @@ const daemonRequired = (operation: string) =>
 	Effect.fail(new WsRpcError({ message: `${operation} requires daemon mode` }));
 
 export const daemonOnlyHandlers = {
+	SetProjectOrder: (_request) => daemonRequired("SetProjectOrder"),
 	GetStatus: (_request) => daemonRequired("GetStatus"),
 	SetPin: (_request): Effect.Effect<never, WsRpcError | SetPinRejected> =>
 		daemonRequired("SetPin"),
@@ -25,6 +26,7 @@ export const daemonOnlyHandlers = {
 	ResolveSessionMode: (_request) => daemonRequired("ResolveSessionMode"),
 } satisfies Pick<
 	WsRpcHandlerMap,
+	| "SetProjectOrder"
 	| "GetStatus"
 	| "SetPin"
 	| "SetKeepAwake"

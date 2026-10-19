@@ -24,6 +24,13 @@ const ALLOWED_DELETES = [
 		reason:
 			"ADR-0005 permits migration 0057 to compact later empty deltas and thinking endings, retaining part openers. Its pinned hash, migration fixture and real-store replay parity constrain this exception.",
 	},
+	{
+		path: "src/lib/session/auto-delete-archived-sweep.ts",
+		statement:
+			/^delete\s+from\s+events\s+where\s+session_id\s+in\s*\(select\s+value\s+from\s+json_each\(\$\{JSON\.stringify\(sessionIds\)\}\)\)`;/i,
+		reason:
+			"Retention (conduit-test-iujk.7) removes events of a session tree after session.deleted; a deleted tree's events replay to nothing, and trees with surviving forks are excluded.",
+	},
 ];
 
 interface Source {
@@ -87,9 +94,16 @@ describe("permanent event log", () => {
 			path: compactionPath,
 			text: readFileSync(join(REPO_ROOT, compactionPath), "utf8"),
 		};
+		const retentionPath = ALLOWED_DELETES[2]?.path;
+		if (!retentionPath) throw new Error("Missing retention exception");
+		const retention = {
+			path: retentionPath,
+			text: readFileSync(join(REPO_ROOT, retentionPath), "utf8"),
+		};
 		expect(
 			scan([
 				compaction,
+				retention,
 				{
 					path: "src/lib/persistence/effect/migrations.ts",
 					text: `yield* sql\`DELETE FROM events WHERE session_id = \${id}\`;`,
@@ -104,6 +118,7 @@ describe("permanent event log", () => {
 		expect(
 			scan([
 				compaction,
+				retention,
 				{
 					path: "src/lib/persistence/effect/migrations.ts",
 					text: `yield* sql\`DELETE FROM events WHERE session_id = \${id}\`;\nsql\`DELETE FROM events WHERE created_at < 1\`;`,

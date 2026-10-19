@@ -20,6 +20,7 @@ export interface SessionRow {
 	fork_point_timestamp?: number | null;
 	fork_point_message_id?: string | null;
 	last_message_at: number | null;
+	last_user_message_at?: number | null;
 	last_turn_error_at: number | null;
 	permission_mode: string | null;
 	model_id?: string | null;
@@ -138,7 +139,7 @@ export interface MessagePartRow {
 	updated_at: number;
 	version: PartVersion;
 	rest_payload?: string | null;
-	/** Set when a previewing read cut `result`: the whole output's UTF-8 size. */
+	/** Set when stored or read as a preview: the whole output's UTF-8 size. */
 	result_bytes?: number | null;
 }
 

@@ -21,6 +21,7 @@ import {
 import {
 	type DaemonConfigLoadError,
 	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
+	DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	defaultDaemonConfig,
 	getConfigDir,
@@ -365,6 +366,10 @@ export function createProjectRelayLayers({
 									current.autoArchiveAfterDays === undefined
 										? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS
 										: current.autoArchiveAfterDays,
+								autoDeleteArchivedAfterDays:
+									current.autoDeleteArchivedAfterDays === undefined
+										? DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS
+										: current.autoDeleteArchivedAfterDays,
 								...(current.worktreeCleanup !== undefined && {
 									worktreeCleanup: current.worktreeCleanup,
 								}),
@@ -863,6 +868,7 @@ export function createProjectRelayLayers({
 
 	const coreBridgeLayers = Layer.mergeAll(
 		sessionDirectoryLayer,
+		sessionWorkspaceLayer,
 		daemonConfigLayer,
 		config.worktreeContext
 			? Layer.succeedContext(config.worktreeContext)

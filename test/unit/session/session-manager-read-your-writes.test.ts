@@ -64,6 +64,8 @@ type OperationsOutsideReadModelParity = keyof Pick<
 	// Archive's read-model parity is covered by the real-relay session-archive E2E.
 	| "setSessionArchived"
 	| "restoreSessionForSend"
+	// Retention parity and event reclamation are covered by auto-delete-archived-sweep.
+	| "deleteArchivedSessions"
 >;
 
 type ReadModelMutation = Exclude<

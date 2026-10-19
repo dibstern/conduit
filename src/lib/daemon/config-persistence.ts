@@ -61,6 +61,7 @@ import {
 /** Days of inactivity before automatic settlement when no value is persisted. */
 export const DEFAULT_AUTO_SETTLE_AFTER_DAYS = 3;
 export const DEFAULT_AUTO_ARCHIVE_AFTER_DAYS = 30;
+export const DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS = 30;
 
 export const CURRENT_CONFIG_VERSION = 2;
 
@@ -92,7 +93,8 @@ const ProjectSchema = Schema.Struct({
 	),
 	slug: Schema.String,
 	title: Schema.optionalKey(Schema.String),
-	addedAt: Schema.Number,
+	addedAt: Schema.optionalKey(Schema.Number),
+	lastUsed: Schema.optionalKey(Schema.Number),
 	shellEnv: Schema.optionalKey(ProjectShellEnvConfigSchema),
 	setupScript: Schema.optionalKey(Schema.String),
 	sessionMode: Schema.optionalKey(SessionModeSchema),
@@ -199,6 +201,14 @@ const DaemonConfigFields = {
 			),
 		),
 	),
+	autoDeleteArchivedAfterDays: Schema.optionalKey(
+		Schema.NullOr(
+			Schema.Number.pipe(
+				Schema.check(Schema.isInt()),
+				Schema.check(Schema.isBetween({ minimum: 1, maximum: 90 })),
+			),
+		),
+	),
 	worktreeCleanup: Schema.optionalKey(WorktreeCleanupSchema),
 	usageLimits: Schema.optionalKey(UsageLimitsSettingSchema),
 	cursorUsageBinding: Schema.optionalKey(CursorUsageBindingSchema),
@@ -207,6 +217,7 @@ const DaemonConfigFields = {
 		Schema.mutable(Schema.Array(Schema.String)),
 	),
 	newSessionProject: Schema.optionalKey(Schema.String),
+	projectOrder: Schema.optionalKey(Schema.Array(Schema.String)),
 	projects: Schema.mutable(Schema.Array(DaemonProjectSchema)),
 	instances: Schema.optionalKey(
 		Schema.mutable(Schema.Array(DaemonInstanceSchema)),
@@ -414,6 +425,7 @@ export function defaultDaemonConfig(): DaemonConfig {
 		keepAwake: false,
 		autoSettleAfterDays: DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 		autoArchiveAfterDays: DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
+		autoDeleteArchivedAfterDays: DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS,
 		worktreeCleanup: DEFAULT_WORKTREE_CLEANUP,
 		projects: [],
 		instances: [
@@ -534,6 +546,8 @@ function readDaemonConfigResult(
 						raw["claudeConfigDir"] !== undefined ||
 						raw["autoSettleAfterDays"] !== config.autoSettleAfterDays ||
 						raw["autoArchiveAfterDays"] !== config.autoArchiveAfterDays ||
+						raw["autoDeleteArchivedAfterDays"] !==
+							config.autoDeleteArchivedAfterDays ||
 						!isDeepStrictEqual(raw["instances"], config.instances) ||
 						!isDeepStrictEqual(
 							raw["accountDefaults"],
@@ -563,6 +577,10 @@ function normalizeDaemonConfig(decoded: DaemonConfig): DaemonConfig {
 			decoded.autoArchiveAfterDays === undefined
 				? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS
 				: decoded.autoArchiveAfterDays,
+		autoDeleteArchivedAfterDays:
+			decoded.autoDeleteArchivedAfterDays === undefined
+				? DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS
+				: decoded.autoDeleteArchivedAfterDays,
 	};
 }
 

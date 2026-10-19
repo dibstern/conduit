@@ -45,6 +45,7 @@ function makeSampleConfig(overrides?: Partial<DaemonConfig>): DaemonConfig {
 		keepAwake: false,
 		autoSettleAfterDays: 3,
 		autoArchiveAfterDays: 30,
+		autoDeleteArchivedAfterDays: 30,
 		projects: [],
 		...overrides,
 	};
@@ -82,6 +83,35 @@ describe("daemon config load errors", () => {
 });
 
 describe("loadDaemonConfigResult", () => {
+	it.each([
+		undefined,
+		null,
+		7,
+		90,
+	])("defaults or persists archived retention %s", async (days) => {
+		const { autoDeleteArchivedAfterDays: _days, ...legacy } =
+			makeSampleConfig();
+		await saveDaemonConfig(
+			days === undefined
+				? legacy
+				: makeSampleConfig({ autoDeleteArchivedAfterDays: days }),
+			tempDir,
+		);
+		const config = Either.getOrThrowWith(
+			loadDaemonConfigResult(tempDir),
+			(error) => error,
+		);
+		expect(config.autoDeleteArchivedAfterDays).toBe(
+			days === undefined ? 30 : days,
+		);
+	});
+	it.each([0, -1, 1.5, 91])("rejects invalid archived retention %s", (days) => {
+		writeFileSync(
+			join(tempDir, "daemon.json"),
+			JSON.stringify(makeSampleConfig({ autoDeleteArchivedAfterDays: days })),
+		);
+		expect(loadDaemonConfigResult(tempDir)._tag).toBe("Failure");
+	});
 	it("round-trips per-folder repository identities and accepts old projects without them", async () => {
 		const project = {
 			path: "/tmp/repo",

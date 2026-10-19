@@ -71,6 +71,7 @@ function planTurn(input: {
 	readonly instanceId: string;
 	readonly nativeThread: NativeThread | undefined;
 	readonly hasAccountSwitch: boolean;
+	readonly hasWorkspaceMove: boolean;
 	readonly deliveredAgent: string | undefined;
 	readonly limitRecovery: LimitRecovery | null;
 	readonly cutOffDismissed: boolean;
@@ -182,13 +183,16 @@ function planTurn(input: {
 					resumeSessionId,
 				}
 			: undefined;
-	// A receipt from another or unknown folder may be unresumable on this login.
+	// A receipt from another or unknown login folder may be unresumable. So may
+	// one from before a workspace move: Claude finds transcripts only from their
+	// own cwd or a live sibling worktree, and the old worktree may be gone.
 	// Catch up so a rejected native resume can fall back to a fresh handoff.
 	const root = options.workspaceRoot ?? process.cwd();
 	const catchingUp =
 		!!resuming &&
 		!!nativeThread &&
 		(input.hasAccountSwitch ||
+			input.hasWorkspaceMove ||
 			nativeThread.configDir === undefined ||
 			!sameClaudeLogin(
 				{ configDir: nativeThread.configDir, root },
@@ -417,6 +421,13 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 								OR ${nativeThread?.deliveredThrough ?? null} IS NULL
 								AND json_extract(data, '$.newProvider') = ${instanceId})
 						LIMIT 1`;
+				const workspaceMoves = nativeThread
+					? yield* sql<{ moved: number }>`
+						SELECT 1 AS moved FROM events
+						WHERE session_id = ${sessionId} AND type = 'session.workspace_changed'
+							AND sequence > ${nativeThread.deliveredThrough}
+						LIMIT 1`
+					: [];
 				const cutOff = options.continuation?.cutOffMessageId ?? null;
 				// A message can be cut off again after an earlier Dismiss; only a
 				// dismissal after its latest cut-off closes it.
@@ -437,6 +448,7 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 					instanceId,
 					nativeThread,
 					hasAccountSwitch: accountSwitches.length > 0,
+					hasWorkspaceMove: workspaceMoves.length > 0,
 					deliveredAgent: providerState[`claudeAgent:${instanceId}`],
 					limitRecovery:
 						session?.limit_recovery == null
