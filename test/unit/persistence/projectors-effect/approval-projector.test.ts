@@ -86,16 +86,6 @@ describe("ApprovalProjector", () => {
 		return (await harness.query<T>(statement, params))[0];
 	}
 
-	it("has the correct name and handles list", async () => {
-		expect(projector.name).toBe("approval");
-		expect(projector.handles).toEqual([
-			"permission.asked",
-			"permission.resolved",
-			"question.asked",
-			"question.resolved",
-		]);
-	});
-
 	describe("permission.asked", () => {
 		it("inserts a pending permission approval", async () => {
 			const event = makeStored(

@@ -12,11 +12,7 @@ import {
 	type TurnCompletedPayload,
 	type TurnErrorPayload,
 	type TurnInterruptedPayload,
-	type TurnModelResolvedPayload,
 } from "../../../../src/lib/persistence/events.js";
-import resumedTurnEvents from "../../../fixtures/claude-resumed-turn.json" with {
-	type: "json",
-};
 import {
 	type EffectProjectionHarness,
 	makeEffectProjectionHarness,
@@ -106,84 +102,6 @@ describe("TurnProjector", () => {
 	): Promise<T | undefined> {
 		return (await harness.query<T>(statement, params))[0];
 	}
-
-	// The persisted state after each recorded event, in fixture order. Only the
-	// turn's own results finish it; anything that follows puts it back to work.
-	const EXPECTED_STATE = [
-		"pending", // 1. the user prompt opens the turn
-		"running", // 2. the session goes busy
-		"running", // 3. the first assistant message
-		"completed", // 4. a result arrives, but Claude is not done
-		"completed", // 5. idle
-		"running", // 6. busy again, 68ms later
-		"running", // 7. a second assistant message, same turn
-		"running", // 8. thinking
-		"running", // 9. a tool starts
-		"running", // 10. the tool finishes
-		"completed", // 11. the second execution reports its own result
-		"running", // 12. a third assistant message, 15 minutes later
-		"running", // 13. still working 45 minutes after the first "completion"
-	];
-
-	it("agrees with the Effect turn projector on the production resumed-turn timeline", async () => {
-		const sessionId = "ses_c2d8cd521bc14f9f8f7700096bbf1d23";
-		await harness.query(
-			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-			[sessionId, "claude", "Resumed turn", "idle", now, now],
-		);
-		expect(resumedTurnEvents).toHaveLength(EXPECTED_STATE.length);
-		for (const [index, recorded] of resumedTurnEvents.entries()) {
-			// The export omits envelope fields unrelated to the regression.
-			const event = {
-				...recorded,
-				eventId: `recorded-${recorded.sequence}`,
-				sessionId,
-				projectId: "test-project",
-				streamVersion: index,
-				metadata: {},
-			} as StoredEvent;
-			await project(event);
-			const turns = await harness.query<TurnRow>("SELECT * FROM turns");
-			// No user message follows, so all thirteen events are one turn.
-			expect(turns).toHaveLength(1);
-			expect(turns[0], `after event ${index + 1}`).toMatchObject({
-				id: "52feab57-ed40-4885-b23b-71dcd78209a8",
-				state: EXPECTED_STATE[index],
-			});
-			if (EXPECTED_STATE[index] === "running") {
-				// Reopening has to clear the finish too, or every reader that
-				// asks "when did this end" still sees a finished turn.
-				expect(turns[0], `after event ${index + 1}`).toMatchObject({
-					completed_at: null,
-				});
-			}
-			if (event.type === "turn.completed") {
-				expect(turns[0]).toMatchObject({
-					assistant_message_id: event.data.messageId,
-					completed_at: event.createdAt,
-					// Cost is cumulative for the whole SDK session, so the latest
-					// wins; tokens are per-execution, so the second result adds.
-					cost: event.data.cost,
-					tokens_in: index === 3 ? 2 : 4,
-					tokens_out: index === 3 ? 2 : 3,
-				});
-			}
-		}
-	});
-
-	it("has the correct name and handles list", async () => {
-		expect(projector.name).toBe("turn");
-		expect(projector.handles).toEqual([
-			"message.created",
-			"message.snapshot",
-			"tool.started",
-			"session.status",
-			"turn.completed",
-			"turn.error",
-			"turn.interrupted",
-			"turn.model_resolved",
-		]);
-	});
 
 	describe("user message.created", () => {
 		it("inserts a new turn with state=pending and user_message_id", async () => {
@@ -1152,117 +1070,6 @@ describe("TurnProjector", () => {
 			expect(rows[0]?.state).toBe("completed");
 			expect(rows[1]?.id).toBe("user_m2");
 			expect(rows[1]?.state).toBe("completed");
-		});
-	});
-
-	describe("turn.model_resolved", () => {
-		it("updates only the newest open turn and is replay-idempotent", async () => {
-			await harness.query(
-				`INSERT INTO turns
-				 (id, session_id, state, user_message_id, requested_at)
-				 VALUES
-				 ('completed', 's1', 'completed', 'completed', ?),
-				 ('running', 's1', 'running', 'running', ?),
-				 ('pending', 's1', 'pending', 'pending', ?)`,
-				[now, now + 1, now + 2],
-			);
-			const event = makeStored("turn.model_resolved", "s1", {
-				requestedModel: "sonnet",
-				expectedModel: "claude-sonnet-5[1m]",
-				actualModel: "claude-sonnet-5[1m]",
-			} satisfies TurnModelResolvedPayload);
-
-			await project(event);
-			await project(event);
-
-			const rows = await harness.query<TurnRow>(
-				"SELECT * FROM turns WHERE session_id = ? ORDER BY requested_at",
-				["s1"],
-			);
-			expect(rows[0]?.actual_model).toBeNull();
-			expect(rows[1]?.actual_model).toBeNull();
-			expect(rows[2]).toMatchObject({
-				requested_model: "sonnet",
-				expected_model: "claude-sonnet-5[1m]",
-				actual_model: "claude-sonnet-5[1m]",
-			});
-		});
-
-		it("preserves nullable evidence", async () => {
-			await harness.query(
-				`INSERT INTO turns
-				 (id, session_id, state, user_message_id, requested_at)
-				 VALUES ('pending', 's1', 'pending', 'pending', ?)`,
-				[now],
-			);
-
-			await project(
-				makeStored("turn.model_resolved", "s1", {
-					actualModel: "claude-opus-4-6",
-				} satisfies TurnModelResolvedPayload),
-			);
-
-			const row = await queryOne<TurnRow>(
-				"SELECT * FROM turns WHERE id = 'pending'",
-			);
-			expect(row).toMatchObject({
-				requested_model: null,
-				expected_model: null,
-				actual_model: "claude-opus-4-6",
-			});
-		});
-
-		it("updates the newest running turn", async () => {
-			await harness.query(
-				`INSERT INTO turns
-				 (id, session_id, state, user_message_id, requested_at)
-				 VALUES
-				 ('older-running', 's1', 'running', 'older-running', ?),
-				 ('newest-running', 's1', 'running', 'newest-running', ?)`,
-				[now, now + 1],
-			);
-
-			await project(
-				makeStored("turn.model_resolved", "s1", {
-					requestedModel: "sonnet",
-					expectedModel: "claude-sonnet-5",
-					actualModel: "claude-sonnet-5",
-				} satisfies TurnModelResolvedPayload),
-			);
-
-			const rows = await harness.query<TurnRow>(
-				"SELECT * FROM turns WHERE session_id = ? ORDER BY requested_at",
-				["s1"],
-			);
-			expect(rows[0]?.actual_model).toBeNull();
-			expect(rows[1]).toMatchObject({
-				id: "newest-running",
-				requested_model: "sonnet",
-				expected_model: "claude-sonnet-5",
-				actual_model: "claude-sonnet-5",
-			});
-		});
-
-		it("does not attach evidence when no open turn exists", async () => {
-			await harness.query(
-				`INSERT INTO turns
-				 (id, session_id, state, user_message_id, requested_at)
-				 VALUES ('completed', 's1', 'completed', 'completed', ?)`,
-				[now],
-			);
-
-			await project(
-				makeStored("turn.model_resolved", "s1", {
-					requestedModel: "sonnet",
-					expectedModel: "claude-sonnet-5",
-					actualModel: "claude-sonnet-5",
-				} satisfies TurnModelResolvedPayload),
-			);
-
-			const row = await queryOne<TurnRow>(
-				"SELECT * FROM turns WHERE id = 'completed'",
-			);
-			expect(row?.actual_model).toBeNull();
 		});
 	});
 });

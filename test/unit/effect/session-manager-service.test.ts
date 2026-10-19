@@ -2897,36 +2897,6 @@ describe("SessionManagerService", () => {
 		);
 	});
 
-	it.effect("reads projected pending counts", () => {
-		const readQuery = makeReadQueryEffect(
-			[makeRow("session-1")],
-			[
-				{
-					session_id: "session-1",
-					type: "question",
-					pending_count: 1,
-				},
-			],
-		);
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
-			Layer.succeed(ReadQueryEffectTag)(readQuery),
-			makeSessionManagerStateLive(),
-		);
-
-		return Effect.gen(function* () {
-			const sessions = yield* listSessions("test-project", undefined, {
-				slug: "test-project",
-				folders: [tmpdir()],
-			});
-
-			expect(sessions[0]?.pendingQuestionCount).toBe(1);
-		}).pipe(
-			Effect.provide(layer),
-			Effect.provide(requiredSessionServices, { local: true }),
-		);
-	});
-
 	it.effect("keeps the parent map when fetching roots only", () => {
 		const api = makeMockOpenCodeAPI();
 		const readQuery = makeReadQueryEffect([

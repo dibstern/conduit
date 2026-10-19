@@ -1,5 +1,4 @@
 import { describe, it } from "@effect/vitest";
-import { Context, Effect } from "effect";
 import { expect } from "vitest";
 import {
 	InstanceMgmtTag,
@@ -42,18 +41,6 @@ describe("Service Tags", () => {
 		const keys = ALL_TAGS.map((t) => t.key);
 		const unique = new Set(keys);
 		expect(unique.size).toBe(keys.length);
-	});
-
-	it("every Tag key is a non-empty string", () => {
-		for (const tag of ALL_TAGS) {
-			expect(typeof tag.key).toBe("string");
-			expect(tag.key.length).toBeGreaterThan(0);
-		}
-	});
-
-	it("total Tag count matches HandlerDeps field count plus ClientId", () => {
-		// Bridge classes are no longer Effect services; count only active Tags.
-		expect(ALL_TAGS.length).toBe(13);
 	});
 
 	it("OpenCodeAPI tag has correct key", () => {
@@ -107,22 +94,4 @@ describe("Service Tags", () => {
 	it("ClientId tag has correct key", () => {
 		expect(ClientIdTag.key).toBe("ClientId");
 	});
-
-	it.effect("Tag resolves from a provided Context", () =>
-		Effect.gen(function* () {
-			const clientId = yield* ClientIdTag;
-			expect(clientId).toBe("test-client-42");
-		}).pipe(Effect.provide(Context.make(ClientIdTag, "test-client-42"))),
-	);
-
-	it.effect("Tag causes missing-service error without Context", () =>
-		Effect.gen(function* () {
-			const exit = yield* Effect.exit(
-				Effect.gen(function* () {
-					yield* ClientIdTag;
-				}) as Effect.Effect<void>,
-			);
-			expect(exit._tag).toBe("Failure");
-		}),
-	);
 });

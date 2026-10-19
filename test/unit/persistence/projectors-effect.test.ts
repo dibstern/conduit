@@ -1917,7 +1917,6 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 				yield* runner.markRecovered();
 
 				yield* seedSession("parent-session");
-				yield* seedSession("claude-subagent-abc");
 				const parent = yield* store.append(
 					makeSessionCreated("parent-session", {
 						provider: "claude",
@@ -2472,6 +2471,7 @@ describe("Effect Turn Projector (via ProjectionRunner)", () => {
 				const sessionId = "ses_c2d8cd521bc14f9f8f7700096bbf1d23";
 				yield* seedSession(sessionId);
 				yield* runner.markRecovered();
+				expect(resumedTurnEvents).toHaveLength(EXPECTED_STATE.length);
 				for (const [index, recorded] of resumedTurnEvents.entries()) {
 					// The export omits envelope fields unrelated to the regression.
 					const event = {
