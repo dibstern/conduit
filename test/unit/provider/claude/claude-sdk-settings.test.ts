@@ -1,5 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { createRequire } from "node:module";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -66,37 +65,8 @@ describe("buildClaudeFlagSettings", () => {
 			expect(
 				buildClaudeFlagSettings(relaySettings.claudeSettings),
 			).not.toHaveProperty("defaultPermissionMode");
-
-			const contractSource = readFileSync(
-				new URL(
-					"../../../../src/lib/contracts/claude-settings.ts",
-					import.meta.url,
-				),
-				"utf8",
-			);
-			expect(contractSource).not.toContain("defaultPermissionMode");
 		} finally {
 			rmSync(configDir, { recursive: true, force: true });
-		}
-	});
-});
-
-describe("CLAUDE_TRUST_TIERED_SETTINGS_KEYS", () => {
-	// The grill record requires this list to be verified against the pinned SDK
-	// rather than trusted from the ADR. `Settings` has an index signature, so a
-	// type-level check accepts anything and `autoMode` is not in the published
-	// types at all -- it lives only in the CLI bundle. Read the bundle instead:
-	// an SDK bump that renames or drops one of these keys turns this red and
-	// forces the exclusion list to be re-derived, rather than silently letting
-	// a trust-tiered key through the flag layer.
-	it("names keys the pinned SDK bundle still recognises", () => {
-		const bundle = readFileSync(
-			createRequire(import.meta.url).resolve("@anthropic-ai/claude-agent-sdk"),
-			"utf8",
-		);
-
-		for (const key of CLAUDE_TRUST_TIERED_SETTINGS_KEYS) {
-			expect(bundle, `${key} missing from the SDK bundle`).toContain(key);
 		}
 	});
 });

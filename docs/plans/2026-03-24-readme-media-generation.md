@@ -8,7 +8,12 @@
 
 **Resilience design:** Scenes never screenshot blindly. Every scene declares DOM assertions that must pass before capture. The scene runner logs each phase with timing, captures debug screenshots on failure, collects browser console errors, and tracks all WS messages exchanged. Mock fixtures use the strict `RelayMessage` union type from `shared-types.ts` for compile-time validation.
 
-**Tech Stack:** Playwright (Chromium, video recording), existing WS mock infrastructure (`ws-mock.ts`, `mockup-state.ts`), ffmpeg (WebM→GIF conversion), vite preview (serves built frontend on port 4173).
+**Tech Stack:** Playwright (Chromium, video recording), existing WS mock infrastructure (`ws-mock.ts`, `mockup-state.ts`), ffmpeg (WebM→GIF conversion), vite preview (serves built frontend on a free loopback port).
+
+**Current verification:** `pnpm test:media` runs `test/media/media-generation.test.ts`
+as an opt-in lane. It rebuilds `dist/frontend`; it is outside the integration
+suite. The implementation sketches below predate dynamic preview ports. The
+runner now uses `--port 0 --strictPort` and stops only its own preview process group.
 
 ---
 

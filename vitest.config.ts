@@ -2,17 +2,19 @@ import { resolve } from "node:path";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig } from "vitest/config";
 
+const guardTests = ["test/unit/**/*.guard.test.ts"];
+
 export default defineConfig({
 	plugins: [svelte()],
 	test: {
-		// Suppress pino log noise across all test projects.
+		// Suppress pino log noise in projects that use the runtime setup.
 		setupFiles: ["test/setup.ts"],
 		// Component tests need jsdom + browser resolve condition so
 		// Svelte resolves to its client bundle (which provides mount()).
 		// All other tests run in the default node environment.
 		projects: [
 			// Explicit lifecycle invocations run the process harness; the default
-			// unit sweep remains limited to the unit projects below.
+			// sweep remains limited to guards and the unit projects below.
 			...(process.argv.some((arg) =>
 				arg.includes(
 					"test/integration/daemon/claude-process-runner-lifecycle.test.ts",
@@ -23,6 +25,7 @@ export default defineConfig({
 							extends: true as const,
 							test: {
 								name: "runner-lifecycle",
+								exclude: guardTests,
 								include: [
 									"test/integration/daemon/claude-process-runner-lifecycle.test.ts",
 								],
@@ -35,9 +38,21 @@ export default defineConfig({
 					]
 				: []),
 			{
+				// Static guards need no source imports or runtime setup.
+				extends: false,
+				test: {
+					name: "guards",
+					include: guardTests,
+					environment: "node",
+					testTimeout: 10_000,
+					hookTimeout: 10_000,
+				},
+			},
+			{
 				extends: true,
 				test: {
 					name: "components",
+					exclude: guardTests,
 					include: ["test/unit/components/**/*.test.ts"],
 					environment: "jsdom",
 					testTimeout: 10_000,
@@ -51,6 +66,7 @@ export default defineConfig({
 				extends: true,
 				test: {
 					name: "unit-sqlite",
+					exclude: guardTests,
 					include: [
 						"test/unit/persistence/**/*.test.ts",
 						"test/unit/pipeline/thinking-lifecycle-pipeline.test.ts",
@@ -72,6 +88,7 @@ export default defineConfig({
 					name: "unit",
 					include: ["test/unit/**/*.test.ts", "test/fixture/**/*.test.ts"],
 					exclude: [
+						...guardTests,
 						"test/unit/components/**/*.test.ts",
 						"test/unit/persistence/**/*.test.ts",
 						"test/unit/pipeline/thinking-lifecycle-pipeline.test.ts",
