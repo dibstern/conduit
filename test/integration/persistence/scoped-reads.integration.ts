@@ -5,10 +5,10 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcTest } from "effect/rpc";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import Database from "better-sqlite3";
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { RpcTest } from "effect/rpc";
 import { SqlClient } from "effect/sql";
 import {
 	afterEach,

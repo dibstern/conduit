@@ -409,7 +409,7 @@ describe("Claude turn status before the model streams", () => {
 				expect(
 					db
 						.prepare(
-							"SELECT 1 FROM events WHERE session_id = ? AND type = 'session.permission_mode_changed' AND metadata LIKE '%claude.sdk.translator%'",
+							"SELECT 1 FROM events WHERE session_id = ? AND type = 'session.permission_mode_changed' AND json_extract(metadata, '$.source') IS NOT 'relay'",
 						)
 						.get(sessionId),
 				).toBeDefined();
