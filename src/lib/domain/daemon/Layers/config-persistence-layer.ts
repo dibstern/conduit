@@ -20,6 +20,7 @@ import { DEFAULT_WORKTREE_CLEANUP } from "../../../contracts/worktree.js";
 import {
 	type DaemonConfig,
 	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
+	DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	loadDaemonConfigResult,
 	saveDaemonConfig,
@@ -89,6 +90,10 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 			runtime.autoArchiveAfterDays === undefined
 				? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS
 				: runtime.autoArchiveAfterDays,
+		autoDeleteArchivedAfterDays:
+			runtime.autoDeleteArchivedAfterDays === undefined
+				? DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS
+				: runtime.autoDeleteArchivedAfterDays,
 		worktreeCleanup: runtime.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP,
 		...(runtime.usageLimits !== undefined && {
 			usageLimits: runtime.usageLimits,

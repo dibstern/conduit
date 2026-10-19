@@ -15,6 +15,7 @@ import {
 } from "../../../contracts/worktree.js";
 import {
 	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
+	DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 } from "../../../daemon/config-persistence.js";
 import type { DaemonStatus } from "../../../daemon/daemon-types.js";
@@ -30,6 +31,7 @@ export interface DaemonRuntimeConfig {
 	readonly keepAwake: boolean;
 	readonly autoSettleAfterDays?: number | null;
 	readonly autoArchiveAfterDays?: number | null;
+	readonly autoDeleteArchivedAfterDays?: number | null;
 	readonly worktreeCleanup?: WorktreeCleanup;
 	readonly usageLimits?: UsageLimitsSetting;
 	readonly cursorUsageBinding?: CursorUsageBinding;
@@ -89,6 +91,7 @@ export const makeDaemonConfigFromOptions = (options: {
 	keepAwake?: boolean;
 	autoSettleAfterDays?: number | null;
 	autoArchiveAfterDays?: number | null;
+	autoDeleteArchivedAfterDays?: number | null;
 	worktreeCleanup?: WorktreeCleanup;
 	usageLimits?: UsageLimitsSetting;
 	cursorUsageBinding?: CursorUsageBinding;
@@ -116,6 +119,10 @@ export const makeDaemonConfigFromOptions = (options: {
 		options.autoArchiveAfterDays === undefined
 			? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS
 			: options.autoArchiveAfterDays,
+	autoDeleteArchivedAfterDays:
+		options.autoDeleteArchivedAfterDays === undefined
+			? DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS
+			: options.autoDeleteArchivedAfterDays,
 	worktreeCleanup: options.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP,
 	...(options.usageLimits !== undefined && {
 		usageLimits: options.usageLimits,

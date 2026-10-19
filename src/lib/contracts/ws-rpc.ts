@@ -1437,6 +1437,30 @@ export const SetAutoArchiveSetting = Rpc.make("SetAutoArchiveSetting", {
 	error: WsRpcError,
 });
 
+const AutoDeleteArchivedSettingResponseSchema = Schema.Struct({
+	autoDeleteArchivedAfterDays: Schema.NullOr(Schema.Number),
+});
+
+export const GetAutoDeleteArchivedSetting = Rpc.make(
+	"GetAutoDeleteArchivedSetting",
+	{
+		payload: Schema.TaggedStruct("GetAutoDeleteArchivedSetting", {}),
+		success: AutoDeleteArchivedSettingResponseSchema,
+		error: WsRpcError,
+	},
+);
+
+export const SetAutoDeleteArchivedSetting = Rpc.make(
+	"SetAutoDeleteArchivedSetting",
+	{
+		payload: Schema.TaggedStruct("SetAutoDeleteArchivedSetting", {
+			autoDeleteArchivedAfterDays: Schema.NullOr(Schema.Number),
+		}),
+		success: AutoDeleteArchivedSettingResponseSchema,
+		error: WsRpcError,
+	},
+);
+
 export const GetUsageLimitsSetting = Rpc.make("GetUsageLimitsSetting", {
 	payload: Schema.TaggedStruct("GetUsageLimitsSetting", {}),
 	success: UsageLimitsSettingResponseSchema,
@@ -2945,6 +2969,8 @@ const wsRpcRequests = [
 	SetAutoSettleSetting,
 	GetAutoArchiveSetting,
 	SetAutoArchiveSetting,
+	GetAutoDeleteArchivedSetting,
+	SetAutoDeleteArchivedSetting,
 	GetWorktreeCleanupSetting,
 	{
 		requests: [SetProjectWorktreeCleanupSetting, SetWorktreeCleanupSetting],
