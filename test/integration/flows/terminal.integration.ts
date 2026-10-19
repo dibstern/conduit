@@ -593,16 +593,29 @@ describe("Integration: Terminal (PTY)", () => {
 	it("new PTY output does not contain cursor metadata characters", async () => {
 		const client = await connect(harness);
 
-		await client.createPty();
+		// Keep interactive login hooks and line-editor startup out of this framing check.
+		vi.stubEnv("SHELL", "/bin/sh");
+		try {
+			await client.createPty();
+		} finally {
+			vi.unstubAllEnvs();
+		}
 		const ptyId = await waitForCreated(client);
 
-		// Wait for the shell's first output before checking its framing.
+		// Request output explicitly instead of relying on an unsolicited prompt.
+		// The marker is absent from the echoed command and must be printed by the shell.
+		const marker = "PTY_FRAMING_READY";
+		await client.ptyInput(ptyId, "printf 'PTY_FRAMING_%s\\n' READY\n");
 		await client.waitFor("pty", {
 			timeout: 5_000,
-			predicate: (m) => m["_tag"] === "output" && m["ptyId"] === ptyId,
+			predicate: (m) =>
+				m["_tag"] === "output" &&
+				m["ptyId"] === ptyId &&
+				collectOutput(client.getReceived(), ptyId).includes(marker),
 		});
 
 		const output = collectOutput(client.getReceived(), ptyId);
+		expect(output).toContain(marker);
 		// No null bytes (0x00), which are cursor metadata.
 		for (let i = 0; i < output.length; i++) {
 			expect(output.charCodeAt(i)).not.toBe(0);
