@@ -553,11 +553,10 @@ export async function createProjectRelay(
 					projectDir: config.projectDir,
 					hasViewer: (id) => wsHandler.getClientsForSession(id).length > 0,
 					hasLiveBackgroundWork: startup.activity.background.hasLiveWork,
-					setSettled: (id, mergedHead) =>
+					setSettled: (id) =>
 						startup.sessionManagerService.setSessionSettled(id, {
 							settled: true,
 							automatic: true,
-							...(mergedHead !== undefined ? { mergedHead } : {}),
 						}),
 				},
 				idleWindowMs,

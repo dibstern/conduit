@@ -118,17 +118,65 @@ describe("readSessionGit", () => {
 	it.each([
 		"--no-ff",
 		"--ff-only",
-	])("marks a feature merged via %s", async (strategy) => {
+	])("dates a %s merge from its commit or default ref reflog", async (strategy) => {
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z");
 		const directory = repo();
 		commit(directory, "initial");
 		git(directory, "checkout", "-qb", "feature");
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:01:00Z");
 		commit(directory, "feature-file");
 		git(directory, "checkout", "-q", "main");
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:02:00Z");
 		git(directory, "merge", strategy, "-q", "feature");
+		const mergedAt = Date.parse("2026-01-01T00:02:00Z");
+		expect(Number(git(directory, "log", "-1", "--format=%ct")) * 1_000).toBe(
+			strategy === "--no-ff" ? mergedAt : Date.parse("2026-01-01T00:01:00Z"),
+		);
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:03:00Z");
+		commit(directory, "later-default-work");
 		git(directory, "checkout", "-q", "feature");
 		expect(await readSessionGit(directory)).toMatchObject({
 			branch: "feature",
 			merged: true,
+			mergedAt,
+		});
+	});
+	it("dates a fast-forward from a reflog entry containing a descendant of the tip", async () => {
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z");
+		const directory = repo();
+		commit(directory, "initial");
+		git(directory, "checkout", "-qb", "feature");
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:01:00Z");
+		commit(directory, "feature-file");
+		git(directory, "checkout", "-qb", "integration");
+		commit(directory, "integration-file");
+		git(directory, "checkout", "-q", "main");
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:02:00Z");
+		git(directory, "merge", "--ff-only", "-q", "integration");
+		git(directory, "checkout", "-q", "feature");
+		expect(await readSessionGit(directory)).toMatchObject({
+			merged: true,
+			mergedAt: Date.parse("2026-01-01T00:02:00Z"),
+		});
+	});
+	it("uses the earliest merge time across containing default refs", async () => {
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z");
+		const directory = repo();
+		commit(directory, "initial");
+		git(directory, "branch", "master");
+		git(directory, "checkout", "-qb", "feature");
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:01:00Z");
+		commit(directory, "feature-file");
+		git(directory, "checkout", "-q", "master");
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:02:00Z");
+		git(directory, "merge", "--no-ff", "-qm", "Merge feature", "feature");
+		git(directory, "checkout", "-q", "main");
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:03:00Z");
+		git(directory, "merge", "--no-ff", "-qm", "Merge feature", "feature");
+		git(directory, "checkout", "-q", "feature");
+		expect(await readSessionGit(directory)).toMatchObject({
+			merged: true,
+			mergedAt: Date.parse("2026-01-01T00:02:00Z"),
 		});
 	});
 	it("does not mark a fresh branch merged after main advances", async () => {
@@ -386,6 +434,41 @@ describe("readSessionGit", () => {
 });
 
 describe("createSessionGitCache", () => {
+	// Reflog expiry must not move a known merge time; a changed branch tip must
+	// compute a new one, and an uncached fast-forward must fall back safely.
+	it("reuses mergedAt for an unchanged merged head after its reflog expires", async () => {
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z");
+		const directory = repo();
+		commit(directory, "initial");
+		git(directory, "checkout", "-qb", "feature");
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:01:00Z");
+		commit(directory, "feature-file");
+		git(directory, "checkout", "-q", "main");
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:02:00Z");
+		git(directory, "merge", "--ff-only", "-q", "feature");
+		git(directory, "checkout", "-q", "feature");
+		const cache = createSessionGitCache();
+		const mergedAt = Date.parse("2026-01-01T00:02:00Z");
+		expect(await cache.refresh(directory)).toMatchObject({ mergedAt });
+		git(directory, "reflog", "expire", "--expire=all", "refs/heads/main");
+		expect(await readSessionGit(directory)).toMatchObject({
+			mergedAt: Date.parse("2026-01-01T00:01:00Z"),
+		});
+		expect(await cache.refresh(directory)).toMatchObject({ mergedAt });
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:03:00Z");
+		commit(directory, "more-work");
+		const unmerged = await cache.refresh(directory);
+		expect(unmerged).toMatchObject({ merged: false });
+		expect(unmerged).not.toHaveProperty("mergedAt");
+		git(directory, "checkout", "-q", "main");
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:04:00Z");
+		git(directory, "merge", "--ff-only", "-q", "feature");
+		git(directory, "checkout", "-q", "feature");
+		expect(await cache.refresh(directory)).toMatchObject({
+			mergedAt: Date.parse("2026-01-01T00:04:00Z"),
+		});
+	});
+
 	it("shares one in-flight read and keeps peek synchronous", async () => {
 		let finish: (value: { branch: string }) => void = () => {
 			throw new Error("not started");
