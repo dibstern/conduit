@@ -584,6 +584,8 @@ export const sessionsHandlers = {
 								createSessionForClient({
 									...options,
 									sessionId,
+									directory:
+										created.worktrees[config.projectDir] ?? config.projectDir,
 									initializeWorkspace: (id: string) =>
 										Effect.forEach(
 											Object.entries(created.worktrees),
@@ -630,6 +632,7 @@ export const sessionsHandlers = {
 						...(path === undefined
 							? {}
 							: {
+									directory: path,
 									initializeWorkspace: (sessionId: string) =>
 										workspace
 											.move(sessionId, path, "launch")

@@ -3,7 +3,9 @@ import { Context, Deferred, Effect, Fiber, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { AccountDirectory } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
+import { OpenCodeInstancesTag } from "../../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import { AlertsLive } from "../../../../src/lib/domain/relay/Services/alerts.js";
 import { PendingInteractionServiceLive } from "../../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import {
@@ -46,14 +48,19 @@ import {
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
 	makeMockWebSocketHandler,
+	makeOpenCodeInstancesStub,
 } from "../../../helpers/mock-factories.js";
 
 const persistence = makePersistenceEffectLayer(":memory:", "test-project");
-const services = Layer.mergeAll(
+const api = makeMockOpenCodeAPI();
+const baseServices = Layer.mergeAll(
 	Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 	persistence,
 	makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
-	Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+	Layer.succeed(OpenCodeAPITag)(api),
+	Layer.succeed(OpenCodeInstancesTag)(
+		makeOpenCodeInstancesStub({ opencode: api }),
+	),
 	Layer.succeed(OpenCodeModelServiceTag)(
 		makeMockOpenCodeModelService({
 			providers: [
@@ -78,6 +85,7 @@ const services = Layer.mergeAll(
 	makeOverridesStateLive(),
 	AlertsLive,
 );
+const services = Layer.provideMerge(SessionWorkspaceLive, baseServices);
 
 const backfill = (
 	messageId: string,

@@ -74,6 +74,7 @@ import {
 	makeOverridesStateLive,
 	setDefaultModel,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
 import { OpenCodeApiError } from "../../../src/lib/errors.js";
 import type { SessionStatus } from "../../../src/lib/instance/sdk-types.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
@@ -403,6 +404,9 @@ const sessionConfigLayer = Layer.succeed(ConfigTag)(
 const sessionLoggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
 const openCodeApi = makeMockOpenCodeAPI();
 const requiredSessionServices = Layer.mergeAll(
+	Layer.mock(SessionWorkspaceTag, {
+		get: () => Effect.succeed("/tmp/project"),
+	}),
 	Layer.succeed(AccountDirectory)(
 		makeAccountDirectory(
 			Effect.succeed(
@@ -553,7 +557,10 @@ describe("SessionManagerService", () => {
 				});
 
 				expect(session.id).toBe("created-session");
-				expect(api.session.create).toHaveBeenCalledWith({ title: "Created" });
+				expect(api.session.create).toHaveBeenCalledWith({
+					title: "Created",
+					directory: tmpdir(),
+				});
 				const event = (yield* PubSub.takeUpTo(sub, 1))[0] ?? null;
 				expect(event).toMatchObject({
 					_tag: "SessionCreated",
@@ -716,6 +723,7 @@ describe("SessionManagerService", () => {
 				});
 				expect(api.session.create).toHaveBeenCalledWith({
 					title: "OpenCode Session",
+					directory: tmpdir(),
 				});
 				expect(bindSession).toHaveBeenCalledWith(
 					"opencode-session",
@@ -1273,10 +1281,11 @@ describe("SessionManagerService", () => {
 					}
 				});
 
-				expect(use).toHaveBeenCalledWith("work-oc");
+				expect(use).toHaveBeenCalledWith("work-oc", "/tmp/project");
 				expect(api.session.create).not.toHaveBeenCalled();
 				expect(namedApi.session.create).toHaveBeenCalledWith({
 					title: "Named",
+					directory: "/tmp/project",
 				});
 				expect(bindings).toEqual([
 					{
@@ -1341,6 +1350,7 @@ describe("SessionManagerService", () => {
 				expect(result._tag).toBe("Failure");
 				expect(api.session.create).toHaveBeenCalledWith({
 					title: "OpenCode Session",
+					directory: tmpdir(),
 				});
 				expect(sessions).toEqual([]);
 			}).pipe(
@@ -2161,7 +2171,7 @@ describe("SessionManagerService", () => {
 				expect(
 					yield* engine.getProviderForSessionEffect(sessionId),
 				).toBeUndefined();
-				expect(use).toHaveBeenCalledWith("work-oc");
+				expect(use).toHaveBeenCalledWith("work-oc", "/tmp/project");
 				expect(namedApi.session.delete).toHaveBeenCalledWith(sessionId);
 				expect(events.map((event) => event.type)).toEqual(["session.deleted"]);
 			}).pipe(

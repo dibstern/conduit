@@ -1,3 +1,4 @@
+import { setImmediate } from "node:timers/promises";
 import { Effect, Exit, Layer, Option, Scope } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
@@ -10,8 +11,11 @@ import {
 	type PollerManagerShape,
 	PollerManagerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Message } from "../../../src/lib/instance/sdk-types.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
 import {
 	MessagePoller,
 	MessagePollerManager,
@@ -23,8 +27,8 @@ import {
 import { partialFake } from "../../helpers/partial-fake.js";
 
 const flushMicrotasks = async () => {
-	await Promise.resolve();
-	await Promise.resolve();
+	await setImmediate();
+	await setImmediate();
 };
 
 function textMessage(sessionId: string, text: string): Message {
@@ -45,7 +49,7 @@ function expectRealManager(
 async function buildLayerHarness(options?: {
 	readonly interval?: number;
 	readonly hasViewers?: (sessionId: string) => boolean;
-	readonly messages?: (sessionId: string) => Promise<Message[]>;
+	readonly messages?: OpenCodeAPI["session"]["messages"];
 }) {
 	const messages = vi.fn(
 		options?.messages ??
@@ -54,8 +58,34 @@ async function buildLayerHarness(options?: {
 	const api = partialFake<OpenCodeAPI>({
 		session: partialFake<OpenCodeAPI["session"]>({ messages }),
 	});
+	const workspaceGet = vi.fn((sessionId: string) =>
+		Effect.succeed(`/tmp/${sessionId}`),
+	);
+	const released = vi.fn();
+	const useIfRunning = vi.fn(() =>
+		Effect.acquireRelease(Effect.succeed(Option.some(api)), () =>
+			Effect.sync(released),
+		),
+	);
 	const dependencyLayer = Layer.mergeAll(
 		Layer.succeed(OpenCodeAPITag)(api),
+		Layer.succeed(OpenCodeInstancesTag)(
+			partialFake<OpenCodeInstancesTag["Service"]>({ useIfRunning }),
+		),
+		Layer.succeed(SessionWorkspaceTag)(
+			partialFake<SessionWorkspaceTag["Service"]>({
+				get: workspaceGet,
+				withLaunch: (effect) => effect,
+			}),
+		),
+		Layer.succeed(ReadQueryEffectTag)(
+			partialFake<ReadQueryEffectTag["Service"]>({
+				getSession: (sessionId) =>
+					Effect.succeed(
+						partialFake<SessionRow>({ id: sessionId, provider: "named-test" }),
+					),
+			}),
+		),
 		Layer.succeed(ConfigTag)(
 			makeMockConfig({
 				messagePollerInterval: options?.interval ?? 1_000,
@@ -75,7 +105,15 @@ async function buildLayerHarness(options?: {
 	) => Effect.runPromise(Effect.provide(effect, context));
 	const close = () => Effect.runPromise(Scope.close(scope, Exit.void));
 
-	return { api, close, messages, runWithContext };
+	return {
+		api,
+		close,
+		messages,
+		released,
+		runWithContext,
+		useIfRunning,
+		workspaceGet,
+	};
 }
 
 describe("MessagePollerManagerLive", () => {
@@ -85,7 +123,10 @@ describe("MessagePollerManagerLive", () => {
 	});
 
 	it("constructs a real manager that seeds REST polling and emits only new synthesized events", async () => {
-		vi.useFakeTimers({ now: 1_000 });
+		vi.useFakeTimers({
+			now: 1_000,
+			toFake: ["Date", "setInterval", "clearInterval"],
+		});
 		const seed = [textMessage("s1", "hello")];
 		const harness = await buildLayerHarness({
 			messages: async () => [textMessage("s1", "hello world")],
@@ -101,7 +142,11 @@ describe("MessagePollerManagerLive", () => {
 		manager.startPolling("s1", seed);
 		await flushMicrotasks();
 
-		expect(harness.messages).toHaveBeenCalledWith("s1");
+		expect(harness.messages).toHaveBeenCalledWith("s1", {
+			signal: expect.any(AbortSignal),
+		});
+		expect(harness.workspaceGet).toHaveBeenCalledWith("s1");
+		expect(harness.useIfRunning).toHaveBeenCalledWith("named-test", "/tmp/s1");
 		expect(events).toEqual([
 			{
 				sessionId: "s1",
@@ -120,7 +165,10 @@ describe("MessagePollerManagerLive", () => {
 	});
 
 	it("drains active pollers when the layer scope closes", async () => {
-		vi.useFakeTimers({ now: 1_000 });
+		vi.useFakeTimers({
+			now: 1_000,
+			toFake: ["Date", "setInterval", "clearInterval"],
+		});
 		const drainSpy = vi.spyOn(MessagePollerManager.prototype, "drain");
 		const harness = await buildLayerHarness({
 			messages: async () => [textMessage("s1", "hello")],
@@ -135,10 +183,39 @@ describe("MessagePollerManagerLive", () => {
 
 		expect(drainSpy).toHaveBeenCalledTimes(1);
 		expect(manager.isPolling("s1")).toBe(false);
+		expect(harness.messages).not.toHaveBeenCalled();
 	});
 
+	it("cancels a blocked read and releases its instance hold when the layer closes", async () => {
+		vi.useFakeTimers({
+			now: 1_000,
+			toFake: ["Date", "setInterval", "clearInterval"],
+		});
+		let signal: AbortSignal | undefined;
+		const harness = await buildLayerHarness({
+			messages: (_sessionId, options) => {
+				signal = options?.signal;
+				return new Promise(() => {});
+			},
+		});
+		const manager = await harness.runWithContext(PollerManagerTag);
+		manager.startPolling("s1");
+		await flushMicrotasks();
+		expect(signal?.aborted).toBe(false);
+		expect(harness.released).not.toHaveBeenCalled();
+
+		await harness.close();
+
+		expect(signal?.aborted).toBe(true);
+		expect(harness.released).toHaveBeenCalledTimes(1);
+		expect(manager.isPolling("s1")).toBe(false);
+	}, 2_000);
+
 	it("keeps fallback polling quiet while OpenCode is stopped and resumes reads when running", async () => {
-		vi.useFakeTimers({ now: 1_000 });
+		vi.useFakeTimers({
+			now: 1_000,
+			toFake: ["Date", "setInterval", "clearInterval"],
+		});
 		let running = false;
 		const fetch = vi
 			.spyOn(globalThis, "fetch")
@@ -189,7 +266,10 @@ describe("MessagePollerManagerLive", () => {
 	});
 
 	it("suppresses duplicate REST synthesis after SSE activity until silence reseeds the snapshot", async () => {
-		vi.useFakeTimers({ now: 1_000 });
+		vi.useFakeTimers({
+			now: 1_000,
+			toFake: ["Date", "setInterval", "clearInterval"],
+		});
 		const seed = [textMessage("s1", "hello")];
 		let currentMessages = seed;
 		const harness = await buildLayerHarness({

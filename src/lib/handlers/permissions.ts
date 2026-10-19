@@ -28,6 +28,7 @@ import {
 	PROCESSING_TIMEOUT_DURATION,
 	startProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
+import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import { makeFailTurn } from "../domain/relay/Services/turn-failure.js";
 import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
 import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
@@ -372,18 +373,24 @@ const resolveOpenCodeQuestionTarget = (sessionId: string) =>
 		const defaultClient = yield* OpenCodeAPITag;
 		const engine = yield* Effect.serviceOption(OrchestrationEngineTag);
 		const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
+		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+		const directory =
+			workspace._tag === "Some"
+				? yield* workspace.value.get(sessionId)
+				: undefined;
 		if (engine._tag === "None" || instances._tag === "None") {
-			return { client: defaultClient, directory: undefined };
+			return { client: defaultClient, directory };
 		}
 		const instanceId =
 			yield* engine.value.getProviderForSessionEffect(sessionId);
 		const client = yield* instances.value.use(
 			instanceId ?? MANAGED_OPENCODE_ACCOUNT_ID,
+			directory,
 		);
 		const session = yield* Effect.tryPromise(() =>
 			client.session.get(sessionId),
 		);
-		return { client, directory: session.directory };
+		return { client, directory: directory ?? session.directory };
 	});
 
 export const handleAskUserResponse = (

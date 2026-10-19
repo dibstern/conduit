@@ -110,7 +110,7 @@ export interface SSEWiringDeps {
 		sessionId: string,
 		permissionId: string,
 		response: "once",
-	) => Promise<void>;
+	) => Effect.Effect<void, unknown>;
 	/** Effect-native OpenCode runtime ingress owned by the relay runtime. */
 	opencodeRuntimeIngress?: {
 		onSSEEventEffect(
@@ -684,9 +684,7 @@ export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
 				opencodeModeCoversAsk(mode, input.toolName)
 			) {
 				const replied = yield* Effect.result(
-					Effect.tryPromise(() =>
-						reply(input.sessionId, input.requestId, "once"),
-					),
+					reply(input.sessionId, input.requestId, "once"),
 				);
 				if (replied._tag === "Success") {
 					autoApproved = true;

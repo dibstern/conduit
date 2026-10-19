@@ -155,7 +155,11 @@ const switchClientToSession = (
 			!options?.skipPollerSeed &&
 			!pollerManager.isPolling(sessionId)
 		) {
-			pollerManager.startPolling(sessionId);
+			const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+			const start = Effect.sync(() => pollerManager.startPolling(sessionId));
+			yield* workspace._tag === "Some"
+				? workspace.value.withLaunch(start)
+				: start;
 		}
 	});
 
@@ -200,6 +204,7 @@ export const createSessionForClient = <E = never>({
 	account: resolvedAccount,
 	model,
 	permissionMode,
+	directory,
 	initializeWorkspace,
 	sessionId,
 	resolvedCreation,
@@ -211,6 +216,7 @@ export const createSessionForClient = <E = never>({
 	readonly accountRef?: AccountRef;
 	readonly account?: Account;
 	readonly sessionId?: string;
+	readonly directory?: string;
 	readonly resolvedCreation?: Effect.Success<
 		ReturnType<typeof resolveSessionCreation>
 	>;
@@ -240,6 +246,7 @@ export const createSessionForClient = <E = never>({
 			account,
 			pick,
 			permissionMode,
+			...(directory === undefined ? {} : { directory }),
 			...(sessionId === undefined ? {} : { sessionId }),
 		});
 

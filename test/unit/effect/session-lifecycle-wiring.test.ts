@@ -37,9 +37,12 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { MonitoringState } from "../../../src/lib/relay/monitoring-types.js";
@@ -56,6 +59,7 @@ import {
 	makeMockStatusPoller,
 	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 const waitForAssertion = (assertion: () => void) =>
 	Effect.promise(() => vi.waitFor(assertion));
@@ -123,6 +127,14 @@ function makeTestLayer(
 	});
 
 	const bridgeLayers = Layer.mergeAll(
+		Layer.mock(SessionWorkspaceTag, {
+			get: () => Effect.succeed(tmpdir()),
+			withLaunch: (effect) => effect,
+		}),
+		Layer.mock(ReadQueryEffectTag, {
+			getSession: (id) =>
+				Effect.succeed(partialFake<SessionRow>({ id, provider: "opencode" })),
+		}),
 		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: client }),
 		),
@@ -151,6 +163,10 @@ function makeServiceLifecycleLayers<ROut, E, RIn>(
 	});
 
 	const baseLayer = Layer.mergeAll(
+		Layer.mock(SessionWorkspaceTag, {
+			get: () => Effect.succeed(tmpdir()),
+			withLaunch: (effect) => effect,
+		}),
 		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		Layer.succeed(ConfigTag)(makeMockConfig()),
 		Layer.effect(SessionActivityTag, makeSessionActivity),
@@ -250,7 +266,7 @@ describe("SessionLifecycleWiringLive", () => {
 						return api;
 					}),
 				),
-				ifRunning: vi.fn(() =>
+				useIfRunning: vi.fn(() =>
 					Effect.sync(() => (running ? Option.some(api) : Option.none())),
 				),
 			} satisfies OpenCodeInstances;
@@ -271,7 +287,7 @@ describe("SessionLifecycleWiringLive", () => {
 					},
 				});
 				yield* waitForAssertion(() =>
-					expect(instances.ifRunning).toHaveBeenCalledOnce(),
+					expect(instances.useIfRunning).toHaveBeenCalledOnce(),
 				);
 				expect(instances.use).not.toHaveBeenCalled();
 				expect(api.session.create).not.toHaveBeenCalled();
@@ -398,6 +414,7 @@ describe("SessionLifecycleWiringLive", () => {
 
 				expect(api.session.create).toHaveBeenCalledWith({
 					title: "Service Created",
+					directory: tmpdir(),
 				});
 				expect(api.session.messages).toHaveBeenCalledWith("service-created");
 				expect(deps.translator.reset).toHaveBeenCalledWith("service-created");

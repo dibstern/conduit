@@ -8,7 +8,7 @@ import { formatErrorDetail } from "../../../errors.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { createEventId } from "../../../persistence/events.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
-import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
+import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import {
 	PendingInteractionServiceTag,
 	type PendingQuestion,
@@ -26,6 +26,7 @@ import {
 } from "./services.js";
 import { SessionManagerServiceTag } from "./session-manager-service.js";
 import { clearProcessingTimeout } from "./session-overrides-state.js";
+import { SessionWorkspaceTag } from "./session-workspace.js";
 
 export const completeRecoveredQuestion = (
 	question: PendingQuestion,
@@ -209,10 +210,24 @@ export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 
 const interruptLegacyTurn = (input: ProviderTurnServiceInterruptInput) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
 		const log = yield* LoggerTag;
 		const abortResult = yield* Effect.result(
-			Effect.tryPromise(() => client.session.abort(input.sessionId)),
+			Effect.gen(function* () {
+				const read = yield* ReadQueryEffectTag;
+				const row = yield* read.getSession(input.sessionId);
+				if (!row)
+					return yield* Effect.fail(
+						new Error(`Session ${input.sessionId} not found`),
+					);
+				const directory = yield* (yield* SessionWorkspaceTag).get(
+					input.sessionId,
+				);
+				const client = yield* (yield* OpenCodeInstancesTag).use(
+					row.provider,
+					directory,
+				);
+				yield* Effect.tryPromise(() => client.session.abort(input.sessionId));
+			}).pipe(Effect.scoped),
 		);
 		if (abortResult._tag === "Failure") {
 			log.warn(

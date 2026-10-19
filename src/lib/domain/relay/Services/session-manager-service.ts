@@ -129,6 +129,7 @@ import {
 	loadServerSessionPick,
 	resolveSessionCreationInstance,
 } from "./session-pick.js";
+import { SessionWorkspaceTag } from "./session-workspace.js";
 
 const PROVIDER_CLEANUP_TIMEOUT = "2 seconds";
 // Provider response bodies are untrusted; bound both durable receipts and the
@@ -176,6 +177,7 @@ export interface CreateSessionOptions {
 	readonly pick?: TurnSettings;
 	readonly permissionMode?: SessionPermissionMode;
 	readonly sourceSessionId?: string;
+	readonly directory?: string;
 	/** Reserved locally before a draft creates its workspace. */
 	readonly sessionId?: string;
 }
@@ -325,8 +327,6 @@ export const deleteSession = (sessionId: string) =>
 		const logOption = yield* Effect.serviceOption(LoggerTag);
 		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
 		const configOption = yield* Effect.serviceOption(ConfigTag);
-		const instanceClientsOption =
-			yield* Effect.serviceOption(OpenCodeInstancesTag);
 		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
 		const projectId = (yield* EventStoreEffectTag).projectId;
@@ -411,6 +411,21 @@ export const deleteSession = (sessionId: string) =>
 				: undefined;
 		const provider = account?.driver;
 		const capturedInstanceId = account?.id;
+		const capturedDirectory =
+			account !== undefined &&
+			PROVIDER_DRIVERS[account.driver].runsOpenCodeServer
+				? yield* (yield* SessionWorkspaceTag).get(sessionId).pipe(
+						Effect.mapError(
+							(cause) =>
+								new SessionManagerError({
+									operation: "deleteSession.workspace",
+									cause,
+								}),
+						),
+					)
+				: undefined;
+		const instanceClients =
+			capturedDirectory === undefined ? undefined : yield* OpenCodeInstancesTag;
 		if (
 			providerResolutionExit !== undefined &&
 			Exit.isFailure(providerResolutionExit)
@@ -466,19 +481,11 @@ export const deleteSession = (sessionId: string) =>
 				const providerDeleteExit = yield* Effect.exit(
 					Effect.gen(function* () {
 						let deleteApi = api;
-						if (
-							getProviderDriver(provider)?.runsOpenCodeServer &&
-							capturedInstanceId !== MANAGED_OPENCODE_ACCOUNT_ID
-						) {
-							if (instanceClientsOption._tag === "None") {
-								return yield* Effect.fail(
-									new Error(
-										`OpenCode instance client registry is unavailable for "${capturedInstanceId}"`,
-									),
-								);
-							}
-							deleteApi =
-								yield* instanceClientsOption.value.use(capturedInstanceId);
+						if (instanceClients !== undefined) {
+							deleteApi = yield* instanceClients.use(
+								capturedInstanceId,
+								capturedDirectory,
+							);
 						}
 
 						const adapter = yield* sessionUpstreamAdapter(provider, deleteApi);
@@ -786,13 +793,19 @@ const makeServiceCreateSession = ({
 							permissionMode,
 						);
 					if (PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
-						const instanceApi = yield* instanceClients.use(instanceId);
+						const config = yield* ConfigTag;
+						const directory = options?.directory ?? config.projectDir;
+						const instanceApi = yield* instanceClients.use(
+							instanceId,
+							directory,
+						);
 						return yield* createOpenCodeSession(
 							title,
 							instanceId,
 							pick,
 							options?.sessionId,
 							permissionMode,
+							directory,
 						).pipe(Effect.provideService(OpenCodeAPITag, instanceApi));
 					}
 					return yield* new SessionManagerError({
@@ -850,6 +863,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 	| EventStoreEffectTag
 	| ProjectionRunnerEffectTag
 	| SqlClient.SqlClient
+	| SessionWorkspaceTag
 > = Layer.effect(
 	SessionManagerServiceTag,
 	Effect.gen(function* () {
@@ -870,6 +884,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const instanceClients = yield* OpenCodeInstancesTag;
 		const accounts = yield* AccountDirectory;
 		const overrides = yield* OverridesStateTag;
+		const workspace = yield* SessionWorkspaceTag;
 		const modelService = yield* Effect.serviceOption(OpenCodeModelServiceTag);
 		// Captured here, not read at call time: the auto-settle sweep calls in from
 		// a daemon fiber that lacks the project's bus, and a commit without it
@@ -1157,6 +1172,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 								),
 								Effect.provideService(SqlClient.SqlClient, sql),
 								Effect.provideService(ConfigTag, config),
+								Effect.provideService(SessionWorkspaceTag, workspace),
 								Effect.provideService(LoggerTag, log),
 								Effect.provideService(RelayStatusSnapshotTag, snapshot),
 							);
@@ -1276,7 +1292,10 @@ export const SessionManagerServiceLive: Layer.Layer<
 					const instanceApi =
 						account !== undefined &&
 						PROVIDER_DRIVERS[account.driver].runsOpenCodeServer
-							? yield* instanceClients.use(account.id).pipe(
+							? yield* Effect.gen(function* () {
+									const directory = yield* workspace.get(sessionId);
+									return yield* instanceClients.use(account.id, directory);
+								}).pipe(
 									Effect.mapError(
 										(cause) =>
 											new SessionManagerError({

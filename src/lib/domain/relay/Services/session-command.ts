@@ -52,6 +52,7 @@ import {
 	PickRequired,
 	type TurnSettings,
 } from "../../../provider/turn-settings.js";
+import { storedWorkingDirectory } from "../../../session/session-workspace.js";
 import type { SessionPermissionMode } from "../../../shared-types.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
@@ -354,6 +355,13 @@ export const applySessionCommand = (
 
 			if (adapter !== null) {
 				const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
+				const config = yield* Effect.serviceOption(ConfigTag);
+				// WorkspaceLive calls this command seam, so resolving through it here
+				// would create a service cycle. The captured row also survives deletion.
+				const directory =
+					config._tag === "Some"
+						? storedWorkingDirectory(config.value.projectDir, row?.workspace)
+						: undefined;
 				const sync =
 					options.upstreamAdapter === undefined &&
 					(command.type === "session.renamed" ||
@@ -362,8 +370,9 @@ export const applySessionCommand = (
 					PROVIDER_DRIVERS[account.driver].runsOpenCodeServer &&
 					instances._tag === "Some"
 						? Effect.scoped(
-								Effect.flatMap(instances.value.use(account.id), (client) =>
-									openCodeUpstreamAdapter(client).sync(command),
+								Effect.flatMap(
+									instances.value.use(account.id, directory),
+									(client) => openCodeUpstreamAdapter(client).sync(command),
 								),
 							)
 						: adapter.sync(command);
@@ -412,6 +421,7 @@ export const createOpenCodeSession = (
 	pick?: TurnSettings,
 	reservedSessionId?: string,
 	permissionMode?: SessionPermissionMode,
+	directory?: string,
 ) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
@@ -424,6 +434,7 @@ export const createOpenCodeSession = (
 				// "Untitled" keeps OpenCode's own titler off sessions Conduit titles.
 				api.session.create({
 					title: normalizeSessionTitle(title),
+					...(directory === undefined ? {} : { directory }),
 					...(reservedSessionId === undefined ? {} : { id: reservedSessionId }),
 				}),
 			).pipe(
@@ -707,7 +718,10 @@ const forkSessionInWorkspace = (
 						)
 					: undefined);
 			const instances = yield* OpenCodeInstancesTag;
-			const api = yield* instances.use(account.id).pipe(
+			const directory = yield* (yield* SessionWorkspaceTag).get(
+				parentSessionId,
+			);
+			const api = yield* instances.use(account.id, directory).pipe(
 				Effect.mapError(
 					(cause) =>
 						new SessionCommandError({

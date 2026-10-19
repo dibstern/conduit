@@ -1,4 +1,8 @@
-import type { SessionWorkspace } from "../contracts/session-workspace.js";
+import { Schema } from "effect";
+import {
+	type SessionWorkspace,
+	SessionWorkspaceSchema,
+} from "../contracts/session-workspace.js";
 
 /** Project order and identity stay stable while each directory follows its workspace. */
 export const effectiveSessionFolders = (
@@ -24,4 +28,19 @@ export function effectiveWorkingDirectory(
 	if (workspace?.origin === "conduit") return primary;
 	const paths = Object.values(worktrees ?? {});
 	return paths.length === 1 ? (paths[0] ?? primary) : primary;
+}
+
+/** Resolve a persisted session mapping without checking or changing its workspace. */
+export function storedWorkingDirectory(
+	primary: string,
+	workspace: string | null | undefined,
+): string {
+	return effectiveWorkingDirectory(
+		primary,
+		workspace == null
+			? null
+			: Schema.decodeUnknownSync(Schema.fromJsonString(SessionWorkspaceSchema))(
+					workspace,
+				),
+	);
 }

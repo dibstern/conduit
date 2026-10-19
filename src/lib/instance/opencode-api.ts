@@ -260,23 +260,35 @@ class SessionNamespace {
 		title?: string;
 		parentID?: string;
 		id?: string;
+		directory?: string;
 	}): Promise<SessionDetail> {
 		if (options?.id !== undefined) {
 			const id = options.id;
+			const scope =
+				options.directory === undefined ? {} : { directory: options.directory };
 			// v2 accepts the id reserved for a worktree launch. Read the legacy
 			// shape used by the existing event and history adapters afterwards.
 			return this.api.sdk(
 				"session.create",
 				decodeSessionDetailResponse,
 				async () => {
-					const created = await this.api._sdk.v2.session.create({ id });
+					const created = await this.api._sdk.v2.session.create({
+						id,
+						...(options.directory === undefined
+							? {}
+							: { location: { directory: options.directory } }),
+					});
 					if (created.error !== undefined) return created;
 					return options.title
 						? this.api._sdk.session.update({
 								sessionID: id,
 								title: options.title,
+								...scope,
 							})
-						: this.api._sdk.session.get({ sessionID: id });
+						: this.api._sdk.session.get({
+								sessionID: id,
+								...scope,
+							});
 				},
 			);
 		}

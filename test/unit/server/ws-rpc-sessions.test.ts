@@ -1046,10 +1046,28 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 	it.effect("answers an ask-user question for the originating tab", () => {
 		const api = makeMockOpenCodeAPI();
+		const config = makeMockConfig({ projectDir: "/project" });
 		const wsHandler = makeMockWebSocketHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
 		return Effect.gen(function* () {
+			yield* applySessionCommand({
+				type: "session.created",
+				data: {
+					sessionId: "session-1",
+					title: "Question",
+					provider: "opencode",
+				},
+			});
+			yield* applySessionCommand({
+				type: "session.workspace_changed",
+				data: {
+					sessionId: "session-1",
+					cause: "user",
+					origin: "existing",
+					worktrees: { "/project": "/project-worktree" },
+				},
+			});
 			const client = yield* rpcClient;
 			const result = yield* client.AnswerQuestion({
 				projectSlug: "project-a",
@@ -1063,13 +1081,13 @@ describe("WsRpcServerLayer ListSessions", () => {
 			expect(api.question.reply).toHaveBeenCalledWith(
 				"que-1",
 				[["PostgreSQL"]],
-				undefined,
+				"/project-worktree",
 			);
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ api, wsHandler })),
+					Layer.provideMerge(makeTestHandlerLayer({ api, config, wsHandler })),
 				),
 				{ local: true },
 			),
@@ -1078,10 +1096,28 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 	it.effect("rejects an ask-user question for the originating tab", () => {
 		const api = makeMockOpenCodeAPI();
+		const config = makeMockConfig({ projectDir: "/project" });
 		const wsHandler = makeMockWebSocketHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
 		return Effect.gen(function* () {
+			yield* applySessionCommand({
+				type: "session.created",
+				data: {
+					sessionId: "session-1",
+					title: "Question",
+					provider: "opencode",
+				},
+			});
+			yield* applySessionCommand({
+				type: "session.workspace_changed",
+				data: {
+					sessionId: "session-1",
+					cause: "user",
+					origin: "existing",
+					worktrees: { "/project": "/project-worktree" },
+				},
+			});
 			const client = yield* rpcClient;
 			const result = yield* client.RejectQuestion({
 				projectSlug: "project-a",
@@ -1091,12 +1127,15 @@ describe("WsRpcServerLayer ListSessions", () => {
 			});
 
 			expect(result).toEqual({ ok: true });
-			expect(api.question.reject).toHaveBeenCalledWith("que-1", undefined);
+			expect(api.question.reject).toHaveBeenCalledWith(
+				"que-1",
+				"/project-worktree",
+			);
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ api, wsHandler })),
+					Layer.provideMerge(makeTestHandlerLayer({ api, config, wsHandler })),
 				),
 				{ local: true },
 			),
