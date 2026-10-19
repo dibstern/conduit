@@ -8,13 +8,25 @@ import { supervise } from "../transport/supervise.js";
 import type { InputDraftEnvelope } from "../transport/ws-rpc.js";
 import { handleInputSyncReceived } from "./chat.svelte.js";
 import { isOwnBrowserClientId } from "./client-identity.js";
-import { handleInputDraftStarted } from "./composer-draft/runner.svelte.js";
+import {
+	handleDraftPromoted,
+	handleDraftRetired,
+	handleInputDraftStarted,
+} from "./composer-draft/runner.svelte.js";
 import { draftKeyId } from "./composer-draft/state.js";
 
 export const applyInputDraft = (
 	envelope: InputDraftEnvelope,
 	key: InputDraftKey,
 ): void => {
+	if (envelope._tag === "promoted") {
+		handleDraftPromoted(key, envelope.sessionId, envelope.text);
+		return;
+	}
+	if (envelope._tag === "synchronized" && envelope.promotedSessionId) {
+		handleDraftRetired(key, envelope.promotedSessionId);
+		return;
+	}
 	// The writing tab already shows its own text.
 	if (envelope._tag === "synchronized" || !isOwnBrowserClientId(envelope.from))
 		handleInputSyncReceived({
@@ -72,7 +84,8 @@ export function viewInputDraft(
 									),
 									(envelope) =>
 										Effect.sync(() => {
-											if (viewed === selection) applyInputDraft(envelope, key);
+											if (viewed === selection || envelope._tag === "promoted")
+												applyInputDraft(envelope, key);
 										}),
 								),
 							),

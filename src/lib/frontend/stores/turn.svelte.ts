@@ -7,6 +7,7 @@ import type {
 	SteerBlocker,
 } from "../../contracts/stored-event.js";
 import { WorktreeCreationError } from "../../contracts/worktree.js";
+import { DraftAlreadySent } from "../../contracts/ws-rpc.js";
 import { stopBackgroundTasks } from "../components/session/background-tasks.svelte.js";
 import { toastFailure } from "../transport/rpc-errors.js";
 import { rpc } from "../transport/ws-rpc-client.js";
@@ -40,7 +41,7 @@ export type SendOutcome =
 	| { readonly kind: "started" }
 	| { readonly kind: "waiting" }
 	| { readonly kind: "refused"; readonly reason: SteerBlocker }
-	| { readonly kind: "failed" };
+	| { readonly kind: "failed"; readonly alreadySent?: boolean };
 
 type SendInput = {
 	readonly text: string;
@@ -252,8 +253,10 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 			intents.set(inputId, intent);
 		refusals.delete(sessionId);
 		if ("draft" in input) {
-			input.onCreated?.(sessionId);
+			// follow records the session's project and only moves a sender who
+			// stayed put; the composer's promotion then lands on the same path.
 			selection.follow(from, sessionId, "push");
+			input.onCreated?.(sessionId);
 		}
 		const sentToSessionId = sessionId;
 		const sentFrom =
@@ -303,7 +306,10 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 						: "Failed to create session"
 					: "Failed to send message",
 		)(error);
-		return { kind: "failed" };
+		return {
+			kind: "failed",
+			...(Schema.is(DraftAlreadySent)(error) ? { alreadySent: true } : {}),
+		};
 	} finally {
 		pendingReplies.delete(inputId);
 		settledInputs.delete(inputId);

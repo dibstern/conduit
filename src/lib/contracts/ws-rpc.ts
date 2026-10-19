@@ -1052,6 +1052,15 @@ export class WsRpcError extends Schema.TaggedError<WsRpcError>()("WsRpcError", {
 	code: Schema.optional(Schema.Literal("unknown-session")),
 }) {}
 
+export class DraftAlreadySent extends Schema.TaggedError<DraftAlreadySent>()(
+	"DraftAlreadySent",
+	{ draftId: Schema.String },
+) {
+	override get message() {
+		return "This draft was already sent";
+	}
+}
+
 export const GetStatus = Rpc.make("GetStatus", {
 	payload: Schema.TaggedStruct("GetStatus", {}),
 	success: GetStatusResponseSchema,
@@ -2300,12 +2309,14 @@ const CreateSessionWire = Rpc.make("CreateSession", {
 	payload: Schema.TaggedStruct("CreateSession", {
 		...draftSessionPayload,
 		draftId: Schema.optional(NonEmptyString),
+		draftText: Schema.optional(Schema.String),
 		title: Schema.optional(Schema.String),
 		newWorktree: Schema.optional(Schema.Boolean),
 	}),
 	success: CreateSessionResponseSchema,
 	error: Schema.Union([
 		WsRpcError,
+		DraftAlreadySent,
 		Schema.suspend(() => AccountUnroutable),
 		WorkspaceMoveError,
 		WorktreeCreationError,
@@ -3379,12 +3390,18 @@ const InputDraftEnvelopeSchema = Schema.Union([
 		_tag: Schema.Literal("synchronized"),
 		text: Schema.optional(Schema.String),
 		projectId: Schema.optional(Schema.String),
+		/** A durable retirement marker; promoted draft text is never replayed. */
+		promotedSessionId: Schema.optional(NonEmptyString),
 	}),
 	Schema.TaggedStruct("draft", {
 		text: Schema.String,
 		projectId: Schema.optional(Schema.String),
 		/** The writer's SyncInputDraft originId; that tab drops its own echo. */
 		from: Schema.optional(Schema.String),
+	}),
+	Schema.TaggedStruct("promoted", {
+		sessionId: NonEmptyString,
+		text: Schema.String,
 	}),
 ]);
 export type InputDraftEnvelope = typeof InputDraftEnvelopeSchema.Type;

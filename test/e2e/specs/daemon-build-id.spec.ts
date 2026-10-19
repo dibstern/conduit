@@ -81,9 +81,21 @@ function captureDraftCalls(page: Page) {
 			key?: { session?: string; draft?: string };
 			text?: string;
 			projectSlug?: string;
+			draftId?: string;
+			draftText?: string;
 		};
-		exit?: { _tag: string };
-		values?: Array<{ _tag?: string; text?: string; projectId?: string }>;
+		exit?: {
+			_tag: string;
+			value?: { sessionId?: string };
+			cause?: unknown;
+		};
+		values?: Array<{
+			_tag?: string;
+			text?: string;
+			projectId?: string;
+			sessionId?: string;
+			promotedSessionId?: string;
+		}>;
 	};
 	const calls: Array<{
 		socket: number;
@@ -102,6 +114,7 @@ function captureDraftCalls(page: Page) {
 				if (
 					frame._tag !== "Request" ||
 					(frame.tag !== "SyncInputDraft" &&
+						frame.tag !== "CreateSession" &&
 						frame.tag !== "ViewSession" &&
 						frame.tag !== "SubscribeInputDraft")
 				)
@@ -162,6 +175,7 @@ const test = base.extend<{
 		baseUrl: string;
 		buildId: string;
 		restart(buildId: string): Promise<void>;
+		failSessionCreates(): void;
 	};
 }>({
 	buildDaemon: async ({ browserName: _browserName }, use) => {
@@ -235,6 +249,11 @@ const test = base.extend<{
 			await use({
 				baseUrl: `http://127.0.0.1:${started.port}`,
 				buildId: started.buildId,
+				failSessionCreates() {
+					mock.setExactResponse("POST", "/session", 500, {
+						error: "Injected provider session creation failure",
+					});
+				},
 				async restart(buildId) {
 					await stop();
 					await start(started.port, buildId);
@@ -629,6 +648,460 @@ async function saveDraftEvidence(
 		contentType: "application/json",
 	});
 }
+
+async function readDaemonSessionIds(baseUrl: string): Promise<string[]> {
+	const socket = new WebSocket(`${baseUrl.replace("http:", "ws:")}/rpc`);
+	try {
+		return await new Promise<string[]>((resolve, reject) => {
+			socket.once("open", () =>
+				socket.send(
+					JSON.stringify({
+						_tag: "Request",
+						id: "sessions",
+						tag: "ListDaemonSessions",
+						payload: {
+							_tag: "ListDaemonSessions",
+							projectSlug: "build-id-test",
+							limit: 100,
+						},
+						headers: [],
+					}),
+				),
+			);
+			socket.on("message", (data) => {
+				const frames = [JSON.parse(String(data))].flat() as Array<{
+					_tag?: string;
+					requestId?: string;
+					exit?: {
+						_tag?: string;
+						value?: { sessions?: Array<{ id: string }> };
+					};
+				}>;
+				for (const frame of frames) {
+					if (frame._tag !== "Exit" || frame.requestId !== "sessions") continue;
+					if (frame.exit?._tag !== "Success" || !frame.exit.value?.sessions)
+						reject(new Error(`ListDaemonSessions failed: ${String(data)}`));
+					else resolve(frame.exit.value.sessions.map(({ id }) => id));
+				}
+			});
+			socket.once("error", reject);
+			socket.once("close", () => reject(new Error("No daemon session list")));
+		});
+	} finally {
+		if (socket.readyState !== WebSocket.CLOSED) {
+			const closed = once(socket, "close");
+			socket.close();
+			await closed;
+		}
+	}
+}
+
+test("sending a shared draft moves the matching device to the created session", async ({
+	page,
+	browser,
+	buildDaemon,
+}, testInfo) => {
+	const callsA = captureDraftCalls(page);
+	const contextB = await browser.newContext({
+		viewport: page.viewportSize(),
+		isMobile: testInfo.project.use.isMobile ?? false,
+		hasTouch: testInfo.project.use.hasTouch ?? false,
+	});
+	const pageB = await contextB.newPage();
+	const callsB = captureDraftCalls(pageB);
+	const text = "Send this shared new-session draft once";
+	let draftUrl = "";
+	try {
+		await page.goto(`${buildDaemon.baseUrl}/new?project=build-id-test`);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
+		draftUrl = page.url();
+		await page.locator("#input").fill(text);
+		await expect.poll(() => syncCompleted(callsA, text)).toBe(true);
+		await pageB.goto(draftUrl);
+		await expect(pageB.locator("#input")).toHaveValue(text);
+		await page.screenshot({
+			path: testInfo.outputPath("matching-before-send-A.png"),
+		});
+		await pageB.screenshot({
+			path: testInfo.outputPath("matching-before-send-B.png"),
+		});
+		await pageB.locator("#send").click();
+		await expect(pageB).toHaveURL(/\/s\/ses_/);
+		await expect
+			.poll(() => new URL(page.url()).pathname)
+			.toBe(new URL(pageB.url()).pathname);
+		await expect(page.locator("#input")).toHaveValue("");
+		await expect(pageB.locator("#input")).toHaveValue("");
+		const sessionId = new URL(pageB.url()).pathname.split("/").pop();
+		expect(
+			callsA.some(({ replies }) =>
+				replies.some(({ frame }) =>
+					frame.values?.some(
+						(value) =>
+							value._tag === "promoted" &&
+							value.sessionId === sessionId &&
+							value.text === text,
+					),
+				),
+			),
+		).toBe(true);
+	} finally {
+		await saveDraftEvidence(testInfo, [page, pageB], {
+			draftUrl,
+			text,
+			A: callsA,
+			B: callsB,
+		});
+		await contextB.close();
+	}
+});
+
+test("scenario 2b keeps another device's unsent edits under a fresh draft ID", async ({
+	page,
+	browser,
+	buildDaemon,
+}, testInfo) => {
+	let oldDraftId = "";
+	const routed: Array<{
+		direction: string;
+		at: number;
+		data: string;
+		dropped?: boolean;
+	}> = [];
+	await page.routeWebSocket(/\/rpc$/, (ws) => {
+		const server = ws.connectToServer();
+		ws.onMessage((data) => {
+			const frames = [JSON.parse(String(data))].flat() as Array<{
+				tag?: string;
+				payload?: { key?: { draft?: string } };
+			}>;
+			for (const frame of frames) {
+				const dropped =
+					frame.tag === "SyncInputDraft" &&
+					!!oldDraftId &&
+					frame.payload?.key?.draft === oldDraftId;
+				routed.push({
+					direction: "sent",
+					at: Date.now(),
+					data: JSON.stringify(frame),
+					dropped,
+				});
+				if (!dropped) server.send(JSON.stringify(frame));
+			}
+		});
+		server.onMessage((data) => {
+			routed.push({
+				direction: "received",
+				at: Date.now(),
+				data: String(data),
+			});
+			ws.send(data);
+		});
+	});
+	const callsA = captureDraftCalls(page);
+	const contextB = await browser.newContext({
+		viewport: page.viewportSize(),
+		isMobile: testInfo.project.use.isMobile ?? false,
+		hasTouch: testInfo.project.use.hasTouch ?? false,
+	});
+	const pageB = await contextB.newPage();
+	const pageC = await contextB.newPage();
+	const callsB = captureDraftCalls(pageB);
+	const callsC = captureDraftCalls(pageC);
+	const text = "The shared text B sends";
+	const localText = `${text}; A is still adding an unsent thought`;
+	let draftUrl = "";
+	try {
+		await page.goto(`${buildDaemon.baseUrl}/new?project=build-id-test`);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
+		draftUrl = page.url();
+		await page.locator("#input").fill(text);
+		await expect.poll(() => syncCompleted(callsA, text)).toBe(true);
+		await pageB.goto(draftUrl);
+		await expect(pageB.locator("#input")).toHaveValue(text);
+		oldDraftId = new URL(draftUrl).pathname.split("/").pop() ?? "";
+		await page.locator("#input").fill(localText);
+		await expect.poll(() => routed.some(({ dropped }) => dropped)).toBe(true);
+		await page.screenshot({
+			path: testInfo.outputPath("diverged-unsent-A.png"),
+		});
+		await pageB.locator("#send").click();
+		await expect(pageB).toHaveURL(/\/s\/ses_/);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
+		await expect
+			.poll(() => new URL(page.url()).pathname)
+			.not.toBe(new URL(draftUrl).pathname);
+		await expect(page.locator("#input")).toHaveValue(localText);
+		expect(new URL(page.url()).searchParams.get("project")).toBe(
+			"build-id-test",
+		);
+		const newDraftId = new URL(page.url()).pathname.split("/").pop();
+		await expect
+			.poll(() =>
+				callsA.some(
+					({ request, replies }) =>
+						request.frame.tag === "SyncInputDraft" &&
+						request.frame.payload?.key?.draft === newDraftId &&
+						request.frame.payload?.text === localText &&
+						replies.some(({ frame }) => frame.exit?._tag === "Success"),
+				),
+			)
+			.toBe(true);
+		await page.screenshot({
+			path: testInfo.outputPath("diverged-fresh-draft-A.png"),
+		});
+		// The durable tombstone redirects an old link without reviving its text.
+		await pageC.goto(draftUrl);
+		await expect
+			.poll(() => new URL(pageC.url()).pathname)
+			.toBe(new URL(pageB.url()).pathname);
+		await expect(pageC.locator("#input")).toHaveValue("");
+		const sessionId = new URL(pageB.url()).pathname.split("/").pop();
+		await expect
+			.poll(() =>
+				callsC.some(
+					({ request, replies }) =>
+						request.frame.payload?.key?.draft === oldDraftId &&
+						replies.some(({ frame }) =>
+							frame.values?.some(
+								(value) =>
+									value._tag === "synchronized" &&
+									value.text === undefined &&
+									value.promotedSessionId === sessionId,
+							),
+						),
+				),
+			)
+			.toBe(true);
+	} finally {
+		await saveDraftEvidence(testInfo, [page, pageB, pageC], {
+			draftUrl,
+			oldDraftId,
+			text,
+			localText,
+			A: callsA,
+			B: callsB,
+			reopened: callsC,
+			routed,
+		});
+		await contextB.close();
+	}
+});
+
+test("near-simultaneous draft sends create one session and show the loser a toast", async ({
+	page,
+	browser,
+	buildDaemon,
+}, testInfo) => {
+	const pendingCreates: Array<() => void> = [];
+	const pendingPromotions: Array<() => void> = [];
+	let releasePromotions = false;
+	const routed: Array<{
+		device: string;
+		direction: string;
+		at: number;
+		data: string;
+		held?: boolean;
+	}> = [];
+	const route = async (device: string, tab: Page) =>
+		tab.routeWebSocket(/\/rpc$/, (ws) => {
+			const server = ws.connectToServer();
+			type Frame = { tag?: string; values?: Array<{ _tag?: string }> };
+			ws.onMessage((data) => {
+				for (const frame of [JSON.parse(String(data))].flat() as Frame[]) {
+					const held = frame.tag === "CreateSession";
+					routed.push({
+						device,
+						direction: "sent",
+						at: Date.now(),
+						data: JSON.stringify(frame),
+						held,
+					});
+					if (held)
+						pendingCreates.push(() => server.send(JSON.stringify(frame)));
+					else server.send(JSON.stringify(frame));
+				}
+			});
+			server.onMessage((data) => {
+				for (const frame of [JSON.parse(String(data))].flat() as Frame[]) {
+					const promotions =
+						frame.values?.filter((value) => value._tag === "promoted") ?? [];
+					routed.push({
+						device,
+						direction: "received",
+						at: Date.now(),
+						data: JSON.stringify(frame),
+						held: promotions.length > 0,
+					});
+					if (!promotions.length || releasePromotions)
+						ws.send(JSON.stringify(frame));
+					else {
+						pendingPromotions.push(() =>
+							ws.send(JSON.stringify({ ...frame, values: promotions })),
+						);
+						const others = frame.values?.filter(
+							(value) => value._tag !== "promoted",
+						);
+						if (others?.length)
+							ws.send(JSON.stringify({ ...frame, values: others }));
+					}
+				}
+			});
+		});
+	await route("A", page);
+	const callsA = captureDraftCalls(page);
+	const contextB = await browser.newContext({
+		viewport: page.viewportSize(),
+		isMobile: testInfo.project.use.isMobile ?? false,
+		hasTouch: testInfo.project.use.hasTouch ?? false,
+	});
+	const pageB = await contextB.newPage();
+	await route("B", pageB);
+	const callsB = captureDraftCalls(pageB);
+	const text = "One shared draft, one created session";
+	let draftUrl = "";
+	let before: string[] = [];
+	let after: string[] = [];
+	try {
+		await page.goto(`${buildDaemon.baseUrl}/new?project=build-id-test`);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
+		draftUrl = page.url();
+		await page.locator("#input").fill(text);
+		await expect.poll(() => syncCompleted(callsA, text)).toBe(true);
+		await pageB.goto(draftUrl);
+		await expect(pageB.locator("#input")).toHaveValue(text);
+		before = await readDaemonSessionIds(buildDaemon.baseUrl);
+		await Promise.all([
+			page.locator("#send").click(),
+			pageB.locator("#send").click(),
+		]);
+		await expect.poll(() => pendingCreates.length).toBe(2);
+		for (const send of pendingCreates.splice(0)) send();
+		const creates = () =>
+			[...callsA, ...callsB].filter(
+				({ request }) => request.frame.tag === "CreateSession",
+			);
+		await expect
+			.poll(
+				() =>
+					creates().filter(({ replies }) =>
+						replies.some(({ frame }) => frame._tag === "Exit"),
+					).length,
+			)
+			.toBe(2);
+		const successful = creates().filter(({ replies }) =>
+			replies.some(({ frame }) => frame.exit?._tag === "Success"),
+		);
+		const failed = creates().filter(({ replies }) =>
+			JSON.stringify(replies).includes("DraftAlreadySent"),
+		);
+		expect(successful).toHaveLength(1);
+		expect(failed).toHaveLength(1);
+		const loser = callsA.some((call) => call === failed[0]) ? page : pageB;
+		await expect(
+			loser
+				.getByTestId("toast")
+				.filter({ hasText: "This draft was already sent" }),
+		).toBeVisible();
+		await loser.screenshot({
+			path: testInfo.outputPath("double-send-loser-toast.png"),
+		});
+		// The mock OpenCode server also surfaces its recorded session once a create
+		// triggers discovery, so name the created session from the winning reply.
+		const winner = JSON.stringify(successful[0]?.replies).match(
+			/"sessionId":"(ses_[^"]+)"/,
+		)?.[1];
+		expect(winner).toBeDefined();
+		after = await readDaemonSessionIds(buildDaemon.baseUrl);
+		expect(after.filter((id) => !before.includes(id))).toContain(winner);
+		const created = [winner];
+		await expect.poll(() => pendingPromotions.length).toBeGreaterThan(0);
+		releasePromotions = true;
+		for (const send of pendingPromotions.splice(0)) send();
+		for (const tab of [page, pageB]) {
+			await expect(tab).toHaveURL(new RegExp(`/s/${created[0]}(?:\\?|$)`));
+			await expect(tab.locator("#input")).toHaveValue("");
+		}
+	} finally {
+		await saveDraftEvidence(testInfo, [page, pageB], {
+			draftUrl,
+			text,
+			before,
+			after,
+			A: callsA,
+			B: callsB,
+			routed,
+		});
+		await contextB.close();
+	}
+});
+
+test("a failed session create releases the claim and keeps the shared draft text", async ({
+	page,
+	buildDaemon,
+}, testInfo) => {
+	const calls = captureDraftCalls(page);
+	const text = "Keep this draft after the provider refuses session creation";
+	let draftUrl = "";
+	let before: string[] = [];
+	let after: string[] = [];
+	buildDaemon.failSessionCreates();
+	try {
+		await page.goto(`${buildDaemon.baseUrl}/new?project=build-id-test`);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
+		draftUrl = page.url();
+		await page.locator("#input").fill(text);
+		await expect.poll(() => syncCompleted(calls, text)).toBe(true);
+		before = await readDaemonSessionIds(buildDaemon.baseUrl);
+		for (const attempt of [1, 2]) {
+			await page.locator("#send").click();
+			await expect
+				.poll(
+					() =>
+						calls.filter(
+							({ request, replies }) =>
+								request.frame.tag === "CreateSession" &&
+								replies.some(({ frame }) => frame.exit?._tag === "Failure"),
+						).length,
+				)
+				.toBe(attempt);
+			await expect(
+				page
+					.getByTestId("toast")
+					.filter({ hasText: "Failed to create session" })
+					.first(),
+			).toBeVisible();
+			await expect(
+				page
+					.getByTestId("toast")
+					.filter({ hasText: "This draft was already sent" }),
+			).toHaveCount(0);
+			await expect(page).toHaveURL(draftUrl);
+			await expect(page.locator("#input")).toHaveValue(text);
+			await page.screenshot({
+				path: testInfo.outputPath(`create-failed-${attempt}.png`),
+			});
+			if (attempt === 1) {
+				await page.reload();
+				await expect(page.locator("#input")).toHaveValue(text);
+				await page.screenshot({
+					path: testInfo.outputPath("create-failed-reloaded-draft.png"),
+				});
+			}
+		}
+		after = await readDaemonSessionIds(buildDaemon.baseUrl);
+		expect(after.sort()).toEqual(before.sort());
+		expect(JSON.stringify(calls)).not.toContain("DraftAlreadySent");
+	} finally {
+		await saveDraftEvidence(testInfo, [page], {
+			draftUrl,
+			text,
+			before,
+			after,
+			calls,
+		});
+	}
+});
 
 test("a new-session draft survives a daemon restart for a device opening its URL", async ({
 	page,

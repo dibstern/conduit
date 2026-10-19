@@ -116,7 +116,7 @@
 	const composerDraft = createComposerDraft({
 		key: () => {
 			const route = getCurrentRoute();
-			return sessionState.currentId ? { session: sessionState.currentId } : route.page === "chat" && route.draftId ? { draft: route.draftId } : null;
+			return route.page !== "chat" ? null : route.sessionId ? { session: route.sessionId } : route.draftId ? { draft: route.draftId } : null;
 		},
 		projectSlug: getDraftProject,
 		hasAttachments: () => pendingImages.length > 0,
@@ -712,7 +712,7 @@
 					showToast("Select model", { variant: "error" });
 					return false;
 				}
-				draft = { ...payload, ...(draftNewWorktree ? { newWorktree: true } : {}) };
+				draft = { ...payload, draftText: composerDraft.text, ...(draftNewWorktree ? { newWorktree: true } : {}) };
 				requestDraftPreWarm();
 				draftSend.message = { type: "user", uuid: crypto.randomUUID(), text: messageText, createdAt: Date.now() };
 				draftSend.sessionId = null;
@@ -733,11 +733,12 @@
 				...(imageUrls ? { images: imageUrls } : {}),
 				...(draft ? {
 					draft,
+					onCreated: (sessionId: string) => composerDraft.created(unsentDraft, sessionId),
 				} : { sessionId: sentFromSessionId! }),
 			});
 			const sentToSessionId = sentFromSessionId ?? draftSend.sessionId;
 			if (outcome.kind === "failed" || outcome.kind === "refused") {
-				if (composerDraft.sendFailed(unsentDraft, sentToSessionId, textOverride === undefined)) {
+				if (composerDraft.sendFailed(unsentDraft, sentToSessionId, textOverride === undefined, outcome.kind === "failed" && outcome.alreadySent === true)) {
 					cursorPos = composerDraft.text.length;
 					pendingImages = unsentImages;
 				}

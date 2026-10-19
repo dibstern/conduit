@@ -1,6 +1,14 @@
 // Composer work in progress lives beside the event log. Each subscription
 // opens with the stored text, followed by live changes.
-import { Context, Effect, Layer, Option, PubSub, Stream } from "effect";
+import {
+	Context,
+	Effect,
+	Layer,
+	Option,
+	PubSub,
+	Semaphore,
+	Stream,
+} from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type {
@@ -22,6 +30,16 @@ export interface InputDrafts {
 	) => Effect.Effect<void>;
 	/** Empty a session draft only if it still holds the text that was sent. */
 	readonly clearSent: (sessionId: string, sent: string) => Effect.Effect<void>;
+	readonly claim: (
+		draftId: string,
+		projectId: string,
+	) => Effect.Effect<boolean, SqlError>;
+	readonly releaseClaim: (draftId: string) => Effect.Effect<void, SqlError>;
+	readonly promote: (
+		draftId: string,
+		sessionId: string,
+		sentText: string,
+	) => Effect.Effect<void, SqlError>;
 	readonly subscribe: (key: InputDraftKey) => Stream.Stream<InputDraftEnvelope>;
 	readonly forget: (sessionId: string) => Effect.Effect<void, SqlError>;
 }
@@ -35,6 +53,22 @@ const keyOf = (key: InputDraftKey) =>
 	"session" in key ? key.session : key.draft;
 const kindOf = (key: InputDraftKey) => ("session" in key ? "session" : "draft");
 
+// Session ids are always ses_<UUID>; this reserved value can never name one.
+const claimMarker = ":input-draft-claim:";
+
+/** No in-flight create can survive the daemon process that owned its claim. */
+export const releaseInputDraftClaims = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	yield* sql.withTransaction(
+		Effect.gen(function* () {
+			yield* sql`DELETE FROM input_drafts
+				WHERE promoted_session_id = ${claimMarker} AND text = ''`;
+			yield* sql`UPDATE input_drafts SET promoted_session_id = NULL
+				WHERE promoted_session_id = ${claimMarker}`;
+		}),
+	);
+});
+
 export const makeInputDrafts: Effect.Effect<
 	InputDrafts,
 	never,
@@ -47,24 +81,34 @@ export const makeInputDrafts: Effect.Effect<
 	const sql = yield* SqlClient.SqlClient;
 	const changes = yield* PubSub.unbounded<{
 		readonly key: InputDraftKey;
-		readonly text: string;
-		readonly from?: string;
-		readonly projectId?: string;
+		readonly envelope: InputDraftEnvelope;
 	}>();
+	// A snapshot cannot observe a committed promotion before its live publication.
+	const snapshotGate = yield* Semaphore.make(1);
 	const readRow = (key: InputDraftKey) =>
 		sql<{
 			text: string;
 			project_id: string;
-		}>`SELECT text, project_id FROM input_drafts
-			WHERE draft_key = ${keyOf(key)} AND kind = ${kindOf(key)}
-			AND promoted_session_id IS NULL`.pipe(Effect.map((rows) => rows[0]));
+			promoted_session_id: string | null;
+		}>`SELECT text, project_id, promoted_session_id FROM input_drafts
+			WHERE draft_key = ${keyOf(key)} AND kind = ${kindOf(key)}`.pipe(
+			Effect.map((rows) => rows[0]),
+		);
 
 	return {
-		read: (key) => readRow(key).pipe(Effect.map((row) => row?.text)),
+		read: (key) =>
+			readRow(key).pipe(
+				Effect.map((row) =>
+					row?.promoted_session_id != null &&
+					row.promoted_session_id !== claimMarker
+						? undefined
+						: row?.text,
+				),
+			),
 		write: (key, text, from, projectId) =>
 			Effect.gen(function* () {
 				const oversized = Buffer.byteLength(text, "utf8") > 1024 * 1024;
-				if ("draft" in key && (text === "" || oversized)) {
+				if ("draft" in key && oversized) {
 					const promoted = yield* sql<{ promoted_session_id: string }>`
 						SELECT promoted_session_id FROM input_drafts
 						WHERE draft_key = ${key.draft} AND promoted_session_id IS NOT NULL`.pipe(
@@ -99,9 +143,18 @@ export const makeInputDrafts: Effect.Effect<
 				} else if (projectId !== undefined) {
 					const writable = yield* (
 						text === ""
-							? sql<{ draft_key: string }>`DELETE FROM input_drafts
-							WHERE draft_key = ${key.draft} AND kind = 'draft'
-							AND promoted_session_id IS NULL RETURNING draft_key`
+							? sql.withTransaction(
+									Effect.gen(function* () {
+										yield* sql`DELETE FROM input_drafts
+											WHERE draft_key = ${key.draft} AND kind = 'draft'
+											AND promoted_session_id IS NULL`;
+										const blocked = yield* sql<{ draft_key: string }>`
+											SELECT draft_key FROM input_drafts
+											WHERE draft_key = ${key.draft}
+											AND promoted_session_id IS NOT NULL`;
+										return blocked.length === 0;
+									}),
+								)
 							: sql<{ draft_key: string }>`INSERT INTO input_drafts
 							(draft_key, project_id, kind, text, updated_at)
 							VALUES (${key.draft}, ${projectId}, 'draft', ${text}, ${Date.now()})
@@ -110,7 +163,7 @@ export const makeInputDrafts: Effect.Effect<
 								updated_at = excluded.updated_at
 							WHERE input_drafts.kind = 'draft'
 							AND input_drafts.promoted_session_id IS NULL
-							RETURNING draft_key`
+							RETURNING draft_key`.pipe(Effect.map((rows) => rows.length > 0))
 					).pipe(
 						Effect.catch((cause) =>
 							Effect.logError(
@@ -119,15 +172,18 @@ export const makeInputDrafts: Effect.Effect<
 						),
 					);
 					// A promoted id cannot become writable or emit fresh draft text.
-					if (text !== "" && writable?.length === 0) return;
+					if (writable === false) return;
 				} else {
 					return;
 				}
 				yield* PubSub.publish(changes, {
 					key,
-					text,
-					...(from !== undefined ? { from } : {}),
-					...("draft" in key && projectId !== undefined ? { projectId } : {}),
+					envelope: {
+						_tag: "draft",
+						text,
+						...(from !== undefined ? { from } : {}),
+						...("draft" in key && projectId !== undefined ? { projectId } : {}),
+					},
 				});
 			}),
 		// A send's clear can land after the user has typed and synced the next
@@ -140,7 +196,10 @@ export const makeInputDrafts: Effect.Effect<
 				RETURNING draft_key`.pipe(
 				Effect.flatMap((rows) =>
 					rows.length > 0
-						? PubSub.publish(changes, { key: { session: sessionId }, text: "" })
+						? PubSub.publish(changes, {
+								key: { session: sessionId },
+								envelope: { _tag: "draft", text: "" },
+							})
 						: Effect.void,
 				),
 				Effect.asVoid,
@@ -148,46 +207,97 @@ export const makeInputDrafts: Effect.Effect<
 					Effect.logError(`Could not clear input draft ${sessionId}: ${cause}`),
 				),
 			),
+		claim: (draftId, projectId) =>
+			sql<{ text: string }>`INSERT INTO input_drafts
+				(draft_key, project_id, kind, text, updated_at, promoted_session_id)
+				VALUES (${draftId}, ${projectId}, 'draft', '', ${Date.now()}, ${claimMarker})
+				ON CONFLICT (draft_key) DO UPDATE SET promoted_session_id = ${claimMarker}
+				WHERE input_drafts.kind = 'draft' AND input_drafts.promoted_session_id IS NULL
+				RETURNING text`.pipe(Effect.map((rows) => rows.length > 0)),
+		releaseClaim: (draftId) =>
+			sql.withTransaction(
+				Effect.gen(function* () {
+					yield* sql`DELETE FROM input_drafts WHERE draft_key = ${draftId}
+						AND promoted_session_id = ${claimMarker} AND text = ''`;
+					yield* sql`UPDATE input_drafts SET promoted_session_id = NULL
+						WHERE draft_key = ${draftId} AND promoted_session_id = ${claimMarker}`;
+				}),
+			),
+		promote: (draftId, sessionId, sentText) =>
+			snapshotGate.withPermits(1)(
+				sql<{ draft_key: string }>`UPDATE input_drafts
+				SET promoted_session_id = ${sessionId}, text = '', updated_at = ${Date.now()}
+				WHERE draft_key = ${draftId} AND kind = 'draft'
+				AND promoted_session_id = ${claimMarker} RETURNING draft_key`.pipe(
+					Effect.flatMap((rows) =>
+						rows.length > 0
+							? PubSub.publish(changes, {
+									key: { draft: draftId },
+									envelope: { _tag: "promoted", sessionId, text: sentText },
+								})
+							: Effect.void,
+					),
+					Effect.asVoid,
+				),
+			),
 		subscribe: (key) =>
 			Stream.unwrap(
 				Effect.gen(function* () {
 					// Buffer writes made during the read so the snapshot has no gap.
 					const dequeue = yield* PubSub.subscribe(changes);
-					const row = yield* readRow(key).pipe(
-						Effect.catch((cause) =>
-							Effect.logError(
-								`Could not read input draft ${keyOf(key)}: ${cause}`,
-							).pipe(Effect.as(undefined)),
-						),
-					);
-					return Stream.concat(
-						Stream.make<[InputDraftEnvelope]>({
-							_tag: "synchronized",
-							...(row === undefined ? {} : { text: row.text }),
-							...("draft" in key && row !== undefined
-								? { projectId: row.project_id }
-								: {}),
+					return yield* snapshotGate.withPermits(1)(
+						Effect.gen(function* () {
+							const row = yield* readRow(key).pipe(
+								Effect.catch((cause) =>
+									Effect.logError(
+										`Could not read input draft ${keyOf(key)}: ${cause}`,
+									).pipe(Effect.as(undefined)),
+								),
+							);
+							const promotedSessionId =
+								"draft" in key &&
+								row?.promoted_session_id != null &&
+								row.promoted_session_id !== claimMarker
+									? row.promoted_session_id
+									: undefined;
+							const sameKey = (change: { readonly key: InputDraftKey }) =>
+								keyOf(change.key) === keyOf(key) &&
+								kindOf(change.key) === kindOf(key);
+							const buffered = (yield* PubSub.takeUpTo(
+								dequeue,
+								Infinity,
+							)).filter(sameKey);
+							const live = Stream.concat(
+								Stream.fromIterable(buffered),
+								Stream.fromSubscription(dequeue).pipe(Stream.filter(sameKey)),
+							).pipe(Stream.map(({ envelope }) => envelope));
+							// A promotion concurrent with this read has the exact sent text.
+							// Deliver it before retirement metadata can discard that comparison.
+							if (buffered.some(({ envelope }) => envelope._tag === "promoted"))
+								return live;
+							return Stream.concat(
+								Stream.make<[InputDraftEnvelope]>({
+									_tag: "synchronized",
+									...(row === undefined || promotedSessionId !== undefined
+										? {}
+										: { text: row.text }),
+									...("draft" in key && row !== undefined
+										? { projectId: row.project_id }
+										: {}),
+									...(promotedSessionId === undefined
+										? {}
+										: { promotedSessionId }),
+								}),
+								live,
+							);
 						}),
-						Stream.fromSubscription(dequeue).pipe(
-							Stream.filter(
-								(change) =>
-									keyOf(change.key) === keyOf(key) &&
-									kindOf(change.key) === kindOf(key),
-							),
-							Stream.map(({ text, from, projectId }) => ({
-								_tag: "draft" as const,
-								text,
-								...(from !== undefined ? { from } : {}),
-								...(projectId !== undefined ? { projectId } : {}),
-							})),
-						),
 					);
 				}),
 			),
 		forget: (sessionId) =>
-			sql`DELETE FROM input_drafts WHERE draft_key = ${sessionId} AND kind = 'session'`.pipe(
-				Effect.asVoid,
-			),
+			sql`DELETE FROM input_drafts
+				WHERE (draft_key = ${sessionId} AND kind = 'session')
+				OR promoted_session_id = ${sessionId}`.pipe(Effect.asVoid),
 	} satisfies InputDrafts;
 });
 

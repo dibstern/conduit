@@ -21,6 +21,8 @@ export interface DraftState {
 	drafts: ReadonlyMap<string, Draft>;
 	reloadBases: ReadonlyMap<string, string>;
 	legacy: { key: InputDraftKey; text: string } | null;
+	inFlight: ReadonlyMap<string, string>;
+	promoted: ReadonlySet<string>;
 	throttled: boolean;
 	pending: boolean;
 	snapshot: "waiting" | "overlapped" | "ready";
@@ -36,6 +38,19 @@ export type DraftEvent =
 			initial?: boolean;
 	  }
 	| { _tag: "SubscriptionStarted"; key: InputDraftKey }
+	| {
+			_tag: "Promoted";
+			key: InputDraftKey;
+			sessionId: string;
+			text: string;
+			freshDraftId: string;
+	  }
+	| {
+			_tag: "Retired";
+			key: InputDraftKey;
+			sessionId: string;
+			freshDraftId: string;
+	  }
 	| {
 			_tag: "SyncSucceeded";
 			key: InputDraftKey;
@@ -61,6 +76,7 @@ export type DraftEvent =
 			restore: boolean;
 			sentTo: string | null;
 			hasAttachments: boolean;
+			alreadySent: boolean;
 	  }
 	| {
 			_tag: "SendSucceeded";
@@ -87,7 +103,8 @@ export type DraftCommand =
 			text: string;
 			projectSlug: string | null;
 	  }
-	| { _tag: "NavigateDraft"; key: InputDraftKey }
+	| { _tag: "NavigateDraft"; key: InputDraftKey; projectSlug?: string | null }
+	| { _tag: "NavigateSession"; sessionId: string }
 	| { _tag: "ApplyProject"; projectSlug: string }
 	| { _tag: "RemoveLegacyDraft"; text: string }
 	| { _tag: "SaveReloadBackup"; entries: readonly ReloadDraft[] };
@@ -101,6 +118,8 @@ export function initialState(): DraftState {
 		drafts: new Map(),
 		reloadBases: new Map(),
 		legacy: null,
+		inFlight: new Map(),
+		promoted: new Set(),
 		throttled: false,
 		pending: false,
 		snapshot: "waiting",
@@ -123,7 +142,9 @@ function clear(state: DraftState): [DraftState, DraftCommand[]] {
 		},
 		[
 			{ _tag: "CancelSync" },
-			...(state.key
+			...(state.key &&
+			!state.promoted.has(draftKeyId(state.key)) &&
+			!state.inFlight.has(draftKeyId(state.key))
 				? [
 						{
 							_tag: "SyncDraft" as const,
@@ -144,12 +165,15 @@ export function step(
 	event: DraftEvent,
 ): [DraftState, DraftCommand[]] {
 	const id = state.key ? draftKeyId(state.key) : null;
+	const writable =
+		id !== null && !state.promoted.has(id) && !state.inFlight.has(id);
 	switch (event._tag) {
 		case "TextChanged":
 			return [{ ...state, text: event.text }, []];
 		case "LocalEdited":
 			if (!state.key)
 				return [state, state.text ? [{ _tag: "StartDraft" }] : []];
+			if (!writable) return [state, []];
 			if (state.snapshot !== "ready" || state.throttled)
 				return [{ ...state, pending: true }, []];
 			return [
@@ -172,7 +196,16 @@ export function step(
 					]
 				: [state, []];
 		case "ServerTextReceived": {
-			if (draftKeyId(event.key) !== id) return [state, []];
+			if (
+				draftKeyId(event.key) !== id ||
+				state.promoted.has(draftKeyId(event.key))
+			)
+				return [state, []];
+			if (!writable)
+				return [
+					{ ...state, snapshot: event.initial ? "ready" : state.snapshot },
+					[],
+				];
 			// A missing draft row is empty; a missing session row remains unknown.
 			const incoming =
 				"draft" in event.key && event.initial ? (event.text ?? "") : event.text;
@@ -211,6 +244,7 @@ export function step(
 		}
 		case "SyncSucceeded": {
 			const syncedId = draftKeyId(event.key);
+			if (state.promoted.has(syncedId)) return [state, []];
 			let next = state;
 			const commands: DraftCommand[] = [];
 			if (syncedId === id)
@@ -243,6 +277,60 @@ export function step(
 			}
 			return [next, commands];
 		}
+		case "Promoted":
+		case "Retired": {
+			if (!("draft" in event.key)) return [state, []];
+			const promotedId = draftKeyId(event.key);
+			const drafts = new Map(state.drafts);
+			const reloadBases = new Map(state.reloadBases);
+			const inFlight = new Map(state.inFlight);
+			const promoted = new Set(state.promoted);
+			const sentText = inFlight.get(promotedId);
+			const sending =
+				sentText !== undefined &&
+				(event._tag === "Retired" || sentText === event.text);
+			drafts.delete(promotedId);
+			reloadBases.delete(promotedId);
+			inFlight.delete(promotedId);
+			promoted.add(promotedId);
+			const next = { ...state, drafts, reloadBases, inFlight, promoted };
+			if (promotedId !== id) return [next, []];
+			const localText = state.text || sentText || "";
+			// A reconnect knows the destination but the tombstone holds no sent text.
+			// Clean cached text can follow; dirty text keeps its own fresh draft.
+			const follow =
+				event._tag === "Retired"
+					? sending || state.text === state.acked || !state.text
+					: sending || localText === event.text;
+			const key = follow
+				? { session: event.sessionId }
+				: { draft: event.freshDraftId };
+			return [
+				{
+					...next,
+					key,
+					text: follow
+						? sending && state.text !== sentText
+							? state.text
+							: ""
+						: localText,
+					acked: "",
+					projectChanged: false,
+					pending: false,
+					throttled: false,
+					snapshot: "waiting",
+				},
+				[
+					{ _tag: "CancelSync" },
+					follow
+						? {
+								_tag: "NavigateSession",
+								sessionId: event.sessionId,
+							}
+						: { _tag: "NavigateDraft", key, projectSlug: state.projectSlug },
+				],
+			];
+		}
 		case "SyncFailed":
 			return [state, []];
 		case "KeySwitched": {
@@ -261,7 +349,7 @@ export function step(
 					: [moved, []];
 			}
 			const drafts = new Map(state.drafts);
-			if (id && state.key)
+			if (id && state.key && !state.promoted.has(id))
 				drafts.set(id, {
 					key: state.key,
 					text: state.text,
@@ -269,7 +357,8 @@ export function step(
 					projectSlug: state.projectSlug,
 					projectChanged: state.projectChanged,
 				});
-			const saved = nextId ? drafts.get(nextId) : undefined;
+			const saved =
+				nextId && !state.promoted.has(nextId) ? drafts.get(nextId) : undefined;
 			return [
 				{
 					...state,
@@ -289,6 +378,7 @@ export function step(
 					{ _tag: "CancelSync" },
 					...(state.key &&
 					id &&
+					writable &&
 					!state.reloadBases.has(id) &&
 					(state.text !== state.acked || state.projectChanged)
 						? [
@@ -304,7 +394,7 @@ export function step(
 			];
 		}
 		case "SyncDue":
-			if (!state.key || state.snapshot !== "ready")
+			if (!state.key || !writable || state.snapshot !== "ready")
 				return [{ ...state, throttled: false }, []];
 			return [
 				{ ...state, throttled: state.pending, pending: false },
@@ -337,7 +427,9 @@ export function step(
 				},
 				[
 					{ _tag: "CancelSync" },
-					...(state.key && (state.text !== state.acked || state.projectChanged)
+					...(state.key &&
+					writable &&
+					(state.text !== state.acked || state.projectChanged)
 						? [
 								{
 									_tag: "SyncDraft" as const,
@@ -351,17 +443,41 @@ export function step(
 			];
 		case "Cleared":
 			return clear(state);
-		case "SendStarted":
-			return event.clear ? clear(state) : [state, []];
+		case "SendStarted": {
+			if (!state.key || !("draft" in state.key) || !id)
+				return event.clear ? clear(state) : [state, []];
+			const inFlight = new Map(state.inFlight);
+			inFlight.set(id, state.text);
+			return [
+				{
+					...state,
+					inFlight,
+					...(event.clear ? { text: "" } : {}),
+					pending: false,
+					throttled: false,
+				},
+				[{ _tag: "CancelSync" }],
+			];
+		}
 		case "SendFailed": {
+			if (event.alreadySent) return [state, []];
+			const inFlight = new Map(state.inFlight);
+			if (event.key) inFlight.delete(draftKeyId(event.key));
+			const next = { ...state, inFlight };
+			if (
+				!event.sentTo &&
+				event.key &&
+				state.promoted.has(draftKeyId(event.key))
+			)
+				return [next, []];
 			const sameScope = event.sentTo
 				? state.key &&
 					"session" in state.key &&
 					state.key.session === event.sentTo
 				: event.key && draftKeyId(event.key) === id;
 			if (!event.restore || !sameScope || state.text || event.hasAttachments)
-				return [state, []];
-			return step({ ...state, text: event.text }, { _tag: "LocalEdited" });
+				return [next, []];
+			return step({ ...next, text: event.text }, { _tag: "LocalEdited" });
 		}
 		case "SendSucceeded": {
 			if (!event.steer) return [state, []];
@@ -434,6 +550,7 @@ export function step(
 			const reloadBases = new Map(state.reloadBases);
 			for (const entry of event.entries) {
 				const entryId = draftKeyId(entry.key);
+				if (state.promoted.has(entryId)) continue;
 				drafts.set(entryId, {
 					...entry,
 					projectSlug: null,
@@ -460,7 +577,7 @@ export function step(
 		case "PersistBeforeReload": {
 			if (event.hasAttachments) return [state, []];
 			const drafts = new Map(state.drafts);
-			if (state.key && id)
+			if (state.key && id && !state.promoted.has(id))
 				drafts.set(id, {
 					key: state.key,
 					text: state.text,

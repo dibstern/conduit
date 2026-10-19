@@ -13,6 +13,7 @@ export const copy: {
 		| ((error: Extract<DeclaredError, { _tag: T }>) => string)
 		| null;
 } = {
+	DraftAlreadySent: (error) => error.message,
 	WorkspaceMoveError: (error) =>
 		({
 			missing: "That worktree no longer exists.",

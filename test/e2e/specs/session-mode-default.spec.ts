@@ -286,6 +286,7 @@ for (const viewport of [
 					expect(request.payload).toEqual({
 						...warm.payload,
 						_tag: "CreateSession",
+						draftText: "Use the default workspace",
 					});
 			});
 		}
@@ -318,6 +319,7 @@ for (const viewport of [
 			expect(failed.payload).toEqual({
 				...warm.payload,
 				_tag: "CreateSession",
+				draftText: "Keep this message after failure",
 			});
 
 			rpc.setStubs({
@@ -341,6 +343,7 @@ for (const viewport of [
 			expect(created?.payload).toEqual({
 				...warm.payload,
 				_tag: "CreateSession",
+				draftText: "Keep this message after failure",
 			});
 			await expect(page).toHaveURL(/\/s\/created-session$/);
 			const back = page.getByTestId("session-bar-back");

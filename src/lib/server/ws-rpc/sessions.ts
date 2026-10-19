@@ -16,7 +16,7 @@ import {
 	WorktreeCreationError,
 	WorktreeRecoveryError,
 } from "../../contracts/worktree.js";
-import { WsRpcError } from "../../contracts/ws-rpc.js";
+import { DraftAlreadySent, WsRpcError } from "../../contracts/ws-rpc.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { Usage } from "../../domain/daemon/Services/usage.js";
 import { WorktreeServiceTag } from "../../domain/daemon/Services/worktree-service.js";
@@ -29,6 +29,7 @@ import {
 	DraftPreWarmTag,
 	draftLaunchKey,
 } from "../../domain/relay/Services/draft-prewarm.js";
+import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
 import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import { forkSession } from "../../domain/relay/Services/session-command.js";
 import { SessionGitServiceTag } from "../../domain/relay/Services/session-git-service.js";
@@ -503,166 +504,210 @@ export const sessionsHandlers = {
 		),
 	CreateSession: (request) =>
 		Effect.gen(function* () {
-			if (request.worktreeBase !== undefined && !request.newWorktree)
-				return yield* new WsRpcError({
-					message: "worktreeBase requires newWorktree: true.",
-				});
-			if (
-				request.permissionMode == null ||
-				!request.model?.modelId.trim() ||
-				!request.model.providerId.trim()
-			)
-				return yield* new PickRequired();
-			const workspace = yield* SessionWorkspaceTag;
-			const path = request.worktreePath;
-			const account = yield* resolveSessionCreationAccount(request);
-			const drafts = yield* Effect.serviceOption(DraftPreWarmTag);
-			const draftId = request.draftId;
-			const resolvedCreation =
-				draftId &&
-				!request.newWorktree &&
-				PROVIDER_DRIVERS[account.driver].supportsNativeResume
-					? yield* resolveSessionCreation({ ...request, account }).pipe(
-							Effect.onError(() =>
-								drafts._tag === "Some"
-									? drafts.value
-											.take(request.originId, draftId, undefined)
-											.pipe(Effect.asVoid)
-									: Effect.void,
+			const create = Effect.gen(function* () {
+				if (request.worktreeBase !== undefined && !request.newWorktree)
+					return yield* new WsRpcError({
+						message: "worktreeBase requires newWorktree: true.",
+					});
+				if (
+					request.permissionMode == null ||
+					!request.model?.modelId.trim() ||
+					!request.model.providerId.trim()
+				)
+					return yield* new PickRequired();
+				const workspace = yield* SessionWorkspaceTag;
+				const path = request.worktreePath;
+				const account = yield* resolveSessionCreationAccount(request);
+				const drafts = yield* Effect.serviceOption(DraftPreWarmTag);
+				const draftId = request.draftId;
+				const resolvedCreation =
+					draftId &&
+					!request.newWorktree &&
+					PROVIDER_DRIVERS[account.driver].supportsNativeResume
+						? yield* resolveSessionCreation({ ...request, account }).pipe(
+								Effect.onError(() =>
+									drafts._tag === "Some"
+										? drafts.value
+												.take(request.originId, draftId, undefined)
+												.pipe(Effect.asVoid)
+										: Effect.void,
+								),
+							)
+						: undefined;
+				const launchKey = resolvedCreation
+					? yield* resolveDraftLaunchInput(resolvedCreation, path).pipe(
+							Effect.map(draftLaunchKey),
+							Effect.catchCause((cause) =>
+								Effect.gen(function* () {
+									const log = yield* LoggerTag;
+									log.debug(`Draft launch comparison failed: ${String(cause)}`);
+									return undefined;
+								}),
 							),
 						)
 					: undefined;
-			const launchKey = resolvedCreation
-				? yield* resolveDraftLaunchInput(resolvedCreation, path).pipe(
-						Effect.map(draftLaunchKey),
-						Effect.catchCause((cause) =>
+				// A mismatched or missing key discards the reservation instead of adopting it.
+				const takeReservation =
+					draftId && drafts._tag === "Some"
+						? drafts.value.take(request.originId, draftId, launchKey)
+						: Effect.succeed(undefined);
+				const options = {
+					clientId: request.originId,
+					account,
+					...(request.title != null ? { title: request.title } : {}),
+					...(request.model != null ? { model: request.model } : {}),
+					permissionMode: request.permissionMode,
+					...(resolvedCreation === undefined ? {} : { resolvedCreation }),
+				};
+				if (request.newWorktree) {
+					yield* takeReservation;
+					if (path !== undefined)
+						return yield* new WsRpcError({
+							message: "Choose either a new worktree or an existing worktree.",
+						});
+					const config = yield* ConfigTag;
+					if (
+						!PROVIDER_SESSION_CAPABILITIES[account.driver].supportsNewWorktree
+					)
+						return yield* new WorkspaceMoveError({
+							path: config.projectDir,
+							reason: "unsupported-provider",
+						});
+					const worktrees = yield* WorktreeServiceTag;
+					const sessionId = createLocalSessionId();
+					const session = yield* workspace.withLaunch(
+						Effect.uninterruptibleMask((restore) =>
 							Effect.gen(function* () {
-								const log = yield* LoggerTag;
-								log.debug(`Draft launch comparison failed: ${String(cause)}`);
-								return undefined;
+								// The id belongs to this launch, but no session exists until Git succeeds.
+								const created = yield* restore(
+									worktrees.create(
+										[config.projectDir, ...(config.extraFolders ?? [])].map(
+											(folder) => ({
+												path: folder,
+												projectSlug: config.slug,
+												sessionId,
+											}),
+										),
+										request.worktreeBase === undefined
+											? undefined
+											: { [config.projectDir]: request.worktreeBase },
+									),
+								);
+								const session = yield* restore(
+									createSessionForClient({
+										...options,
+										sessionId,
+										directory:
+											created.worktrees[config.projectDir] ?? config.projectDir,
+										initializeWorkspace: (id: string) =>
+											Effect.forEach(
+												Object.entries(created.worktrees),
+												([folder, path], index) =>
+													workspace.move(
+														id,
+														path,
+														"launch",
+														"conduit",
+														folder,
+														index === 0 ? created.ownership : undefined,
+													),
+												{ discard: true },
+											),
+									}),
+								).pipe(
+									Effect.catchCause((cause) =>
+										worktrees
+											.rollback(created)
+											.pipe(Effect.andThen(Effect.failCause(cause))),
+									),
+								);
+								const setup = yield* Effect.serviceOption(SessionSetupTag);
+								if (setup._tag === "Some")
+									yield* setup.value.start(
+										session.id,
+										created.worktrees[config.projectDir] ?? config.projectDir,
+									);
+								return session;
 							}),
 						),
-					)
-				: undefined;
-			// A mismatched or missing key discards the reservation instead of adopting it.
-			const takeReservation =
-				draftId && drafts._tag === "Some"
-					? drafts.value.take(request.originId, draftId, launchKey)
-					: Effect.succeed(undefined);
-			const options = {
-				clientId: request.originId,
-				account,
-				...(request.title != null ? { title: request.title } : {}),
-				...(request.model != null ? { model: request.model } : {}),
-				permissionMode: request.permissionMode,
-				...(resolvedCreation === undefined ? {} : { resolvedCreation }),
-			};
-			if (request.newWorktree) {
-				yield* takeReservation;
-				if (path !== undefined)
-					return yield* new WsRpcError({
-						message: "Choose either a new worktree or an existing worktree.",
-					});
-				const config = yield* ConfigTag;
-				if (!PROVIDER_SESSION_CAPABILITIES[account.driver].supportsNewWorktree)
-					return yield* new WorkspaceMoveError({
-						path: config.projectDir,
-						reason: "unsupported-provider",
-					});
-				const worktrees = yield* WorktreeServiceTag;
-				const sessionId = createLocalSessionId();
-				const session = yield* workspace.withLaunch(
-					Effect.uninterruptibleMask((restore) =>
-						Effect.gen(function* () {
-							// The id belongs to this launch, but no session exists until Git succeeds.
-							const created = yield* restore(
-								worktrees.create(
-									[config.projectDir, ...(config.extraFolders ?? [])].map(
-										(folder) => ({
-											path: folder,
-											projectSlug: config.slug,
-											sessionId,
-										}),
-									),
-									request.worktreeBase === undefined
-										? undefined
-										: { [config.projectDir]: request.worktreeBase },
-								),
-							);
-							const session = yield* restore(
-								createSessionForClient({
-									...options,
-									sessionId,
-									directory:
-										created.worktrees[config.projectDir] ?? config.projectDir,
-									initializeWorkspace: (id: string) =>
-										Effect.forEach(
-											Object.entries(created.worktrees),
-											([folder, path], index) =>
-												workspace.move(
-													id,
-													path,
-													"launch",
-													"conduit",
-													folder,
-													index === 0 ? created.ownership : undefined,
-												),
-											{ discard: true },
-										),
-								}),
-							).pipe(
-								Effect.catchCause((cause) =>
-									worktrees
-										.rollback(created)
-										.pipe(Effect.andThen(Effect.failCause(cause))),
-								),
-							);
-							const setup = yield* Effect.serviceOption(SessionSetupTag);
-							if (setup._tag === "Some")
-								yield* setup.value.start(
-									session.id,
-									created.worktrees[config.projectDir] ?? config.projectDir,
-								);
-							return session;
-						}),
-					),
+					);
+					return { projectSlug: request.projectSlug, sessionId: session.id };
+				}
+				// Taking a reservation and arming its rollback must not be split by interruption.
+				const session = yield* Effect.uninterruptibleMask((restore) =>
+					Effect.gen(function* () {
+						const reservedSessionId = yield* takeReservation;
+						const create = createSessionForClient({
+							...options,
+							...(reservedSessionId === undefined
+								? {}
+								: { sessionId: reservedSessionId }),
+							...(path === undefined
+								? {}
+								: {
+										directory: path,
+										initializeWorkspace: (sessionId: string) =>
+											workspace
+												.move(sessionId, path, "launch")
+												.pipe(Effect.asVoid),
+									}),
+						});
+						return yield* restore(
+							path === undefined ? create : workspace.withLaunch(create),
+						).pipe(
+							Effect.onError(() =>
+								reservedSessionId && drafts._tag === "Some"
+									? drafts.value.discardSession(reservedSessionId)
+									: Effect.void,
+							),
+						);
+					}),
 				);
-				return { projectSlug: request.projectSlug, sessionId: session.id };
-			}
-			// Taking a reservation and arming its rollback must not be split by interruption.
-			const session = yield* Effect.uninterruptibleMask((restore) =>
+				return {
+					projectSlug: request.projectSlug,
+					sessionId: session.id,
+				};
+			});
+			if (request.draftId === undefined) return yield* create;
+			const draftId = request.draftId;
+			const inputDrafts = yield* InputDraftsTag;
+			const config = yield* ConfigTag;
+			return yield* Effect.uninterruptibleMask((restore) =>
 				Effect.gen(function* () {
-					const reservedSessionId = yield* takeReservation;
-					const create = createSessionForClient({
-						...options,
-						...(reservedSessionId === undefined
-							? {}
-							: { sessionId: reservedSessionId }),
-						...(path === undefined
-							? {}
-							: {
-									directory: path,
-									initializeWorkspace: (sessionId: string) =>
-										workspace
-											.move(sessionId, path, "launch")
-											.pipe(Effect.asVoid),
-								}),
-					});
-					return yield* restore(
-						path === undefined ? create : workspace.withLaunch(create),
-					).pipe(
+					const claimed = yield* inputDrafts.claim(draftId, config.slug);
+					if (!claimed) {
+						// The loser's prewarmed session would otherwise linger until its TTL.
+						const prewarm = yield* Effect.serviceOption(DraftPreWarmTag);
+						if (prewarm._tag === "Some")
+							yield* prewarm.value.take(request.originId, draftId, undefined);
+						return yield* new DraftAlreadySent({ draftId });
+					}
+					const session = yield* restore(create).pipe(
 						Effect.onError(() =>
-							reservedSessionId && drafts._tag === "Some"
-								? drafts.value.discardSession(reservedSessionId)
-								: Effect.void,
+							inputDrafts
+								.releaseClaim(draftId)
+								.pipe(
+									Effect.catch((cause) =>
+										Effect.logError(
+											`Could not release draft claim ${draftId}: ${cause}`,
+										),
+									),
+								),
 						),
 					);
+					// Once creation succeeds the claim must stay a tombstone, even if
+					// finalizing it fails. Releasing it would permit a duplicate create,
+					// and failing the request would report a send that happened.
+					yield* inputDrafts
+						.promote(draftId, session.sessionId, request.draftText ?? "")
+						.pipe(
+							Effect.catch((cause) =>
+								Effect.logError(`Could not promote draft ${draftId}: ${cause}`),
+							),
+						);
+					return session;
 				}),
 			);
-			return {
-				projectSlug: request.projectSlug,
-				sessionId: session.id,
-			};
 		}).pipe(
 			Effect.tap(() =>
 				Effect.gen(function* () {
@@ -695,8 +740,10 @@ export const sessionsHandlers = {
 					| WorkspaceMoveError
 					| WorktreeCreationError
 					| AccountUnroutable
+					| DraftAlreadySent
 					| WsRpcError
 				> =>
+					error instanceof DraftAlreadySent ||
 					error instanceof AccountUnroutable ||
 					error instanceof WorkspaceMoveError ||
 					error instanceof WorktreeCreationError

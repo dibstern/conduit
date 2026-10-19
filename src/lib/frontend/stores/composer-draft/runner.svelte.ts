@@ -24,7 +24,13 @@ const RELOAD_DRAFT_KEY = "conduit-reload-drafts";
 export const inputSyncState = $state({
 	received: null as Extract<
 		DraftEvent,
-		{ _tag: "ServerTextReceived" | "SubscriptionStarted" }
+		{
+			_tag:
+				| "ServerTextReceived"
+				| "SubscriptionStarted"
+				| "Promoted"
+				| "Retired";
+		}
 	> | null,
 });
 // Preserve initial and live transitions when Svelte batches a notification.
@@ -59,6 +65,32 @@ export function handleInputSyncReceived(msg: {
 }
 export function handleInputDraftStarted(key: InputDraftKey): void {
 	inputSyncState.received = { _tag: "SubscriptionStarted", key };
+	inputSyncEvents.push(inputSyncState.received);
+}
+export function handleDraftPromoted(
+	key: InputDraftKey,
+	sessionId: string,
+	text: string,
+): void {
+	inputSyncState.received = {
+		_tag: "Promoted",
+		key,
+		sessionId,
+		text,
+		freshDraftId: crypto.randomUUID(),
+	};
+	inputSyncEvents.push(inputSyncState.received);
+}
+export function handleDraftRetired(
+	key: InputDraftKey,
+	sessionId: string,
+): void {
+	inputSyncState.received = {
+		_tag: "Retired",
+		key,
+		sessionId,
+		freshDraftId: crypto.randomUUID(),
+	};
 	inputSyncEvents.push(inputSyncState.received);
 }
 export function createComposerDraft(options: {
@@ -123,11 +155,19 @@ export function createComposerDraft(options: {
 				case "NavigateDraft": {
 					if (!("draft" in command.key)) break;
 					const params = getCurrentSearchParams();
-					const project = options.projectSlug();
+					const project = command.projectSlug ?? options.projectSlug();
 					if (project) params.set(DRAFT_PROJECT_PARAM, project);
 					replaceRoute(
 						`/draft/${command.key.draft}${params.size ? `?${params}` : ""}`,
 					);
+					break;
+				}
+				case "NavigateSession": {
+					// The sender is already there via selection.follow; a same-path
+					// replace would drop the scope params.
+					const route = getCurrentRoute();
+					if (route.page !== "chat" || route.sessionId !== command.sessionId)
+						replaceRoute(`/s/${command.sessionId}`);
 					break;
 				}
 				case "StartDraft": {
@@ -276,6 +316,12 @@ export function createComposerDraft(options: {
 		return () => {
 			window.removeEventListener("pagehide", hidden);
 			document.removeEventListener("visibilitychange", visibilityChanged);
+			dispatch({
+				_tag: "KeySwitched",
+				key: null,
+				projectSlug: null,
+				projectChosen: false,
+			});
 			cancelSync();
 		};
 	});
@@ -320,10 +366,24 @@ export function createComposerDraft(options: {
 			dispatch({ _tag: "SendStarted", clear });
 			return unsent;
 		},
+		created(
+			unsent: { key: InputDraftKey | null; text: string },
+			sessionId: string,
+		) {
+			if (unsent.key)
+				dispatch({
+					_tag: "Promoted",
+					key: unsent.key,
+					text: unsent.text,
+					sessionId,
+					freshDraftId: crypto.randomUUID(),
+				});
+		},
 		sendFailed(
 			unsent: { text: string; key: InputDraftKey | null },
 			sentTo: string | null,
 			restore: boolean,
+			alreadySent = false,
 		): boolean {
 			const before = state;
 			dispatch({
@@ -332,8 +392,9 @@ export function createComposerDraft(options: {
 				sentTo,
 				hasAttachments: options.hasAttachments(),
 				restore,
+				alreadySent,
 			});
-			return state !== before;
+			return state.text !== before.text;
 		},
 		sendSucceeded(
 			sentTo: string | null,
