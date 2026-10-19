@@ -244,21 +244,6 @@ export interface AttentionGroups {
 	idle: SessionInfo[];
 }
 
-export interface TerminalAdapter {
-	mount(container: HTMLElement): void;
-	write(data: string): void;
-	onData(cb: (data: string) => void): void;
-	onResize(cb: (size: { cols: number; rows: number }) => void): void;
-	resize(): { cols: number; rows: number };
-	focus(): void;
-	dispose(): void;
-	scrollLines(n: number): void;
-	setFontSize(px: number): { cols: number; rows: number };
-	setTheme(theme: Record<string, string>): void;
-	readonly cols: number;
-	readonly rows: number;
-}
-
 export interface TabEntry {
 	ptyId: string;
 	title: string;

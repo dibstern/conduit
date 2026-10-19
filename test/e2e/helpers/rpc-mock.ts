@@ -4,6 +4,7 @@ import { Cause, Effect, Exit, Schema, Scope, Stream } from "effect";
 import { DEFAULT_CATEGORY_SET } from "../../../src/lib/contracts/category-set.js";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/message-surfacing.js";
+import { DEFAULT_TERMINAL_KEYS } from "../../../src/lib/contracts/terminal-keys.js";
 import type { Avatar } from "../../../src/lib/contracts/user-avatar.js";
 import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import {
@@ -124,6 +125,7 @@ export class RpcMockControl {
 	familyRows: readonly unknown[] | null = null;
 	private familySequence = 0;
 	catalog: MockCatalog = {};
+	terminalKeys = DEFAULT_TERMINAL_KEYS;
 	avatar: Avatar = {
 		choice: { kind: "initial" },
 		name: "David",
@@ -326,6 +328,8 @@ export class RpcMockControl {
 	/** Publish one project-setting fact, the way another tab's or the CLI's
 	 *  write reaches every open SubscribeProjectSettings stream. */
 	setProjectSetting(setting: ProjectSetting): void {
+		if (setting._tag === "terminalKeys")
+			this.terminalKeys = setting.terminalKeys;
 		this.projectSettings.set(setting._tag, setting);
 		this.projectSettingsSequence++;
 		if (this.streams.has("SubscribeProjectSettings"))
@@ -964,6 +968,11 @@ export async function mockWsRpc(
 		SetAvatar: ({ choice }) => {
 			control.avatar = { ...control.avatar, choice };
 			return control.avatar;
+		},
+		GetTerminalKeys: () => ({ terminalKeys: control.terminalKeys }),
+		SetTerminalKeys: ({ terminalKeys }) => {
+			control.setProjectSetting({ _tag: "terminalKeys", terminalKeys });
+			return { terminalKeys };
 		},
 		GetWorktreeCleanupSetting: () => ({
 			worktreeCleanup: DEFAULT_WORKTREE_CLEANUP,

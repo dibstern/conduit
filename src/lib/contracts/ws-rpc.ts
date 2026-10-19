@@ -81,6 +81,7 @@ import {
 	STEER_BLOCKERS,
 	TextSurfacedPayloadSchema,
 } from "./stored-event.js";
+import { TerminalKeysSetting } from "./terminal-keys.js";
 import { ToolCallId, ToolDetail, ToolInput, ToolText } from "./tool-wire.js";
 import {
 	RecapScopeSchema,
@@ -1773,6 +1774,24 @@ export class ResolveSessionMode extends Schema.TaggedRequest<ResolveSessionMode>
 	},
 ) {}
 
+export class SetTerminalKeys extends Schema.TaggedRequest<SetTerminalKeys>()(
+	"SetTerminalKeys",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({ terminalKeys: TerminalKeysSetting }),
+		payload: { terminalKeys: TerminalKeysSetting },
+	},
+) {}
+
+export class GetTerminalKeys extends Schema.TaggedRequest<GetTerminalKeys>()(
+	"GetTerminalKeys",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({ terminalKeys: TerminalKeysSetting }),
+		payload: {},
+	},
+) {}
+
 export class GetMessageSurfacing extends Schema.TaggedRequest<GetMessageSurfacing>()(
 	"GetMessageSurfacing",
 	{ failure: WsRpcError, success: MessageSurfacingStatusSchema, payload: {} },
@@ -3199,6 +3218,8 @@ const wsRpcRequests = [
 	SetDefaultPermissionMode,
 	SetDefaultSessionMode,
 	ResolveSessionMode,
+	SetTerminalKeys,
+	GetTerminalKeys,
 	GetCategorySet,
 	SetSurfacingMark,
 	GetSurfacingFeedback,
@@ -3708,6 +3729,9 @@ export const ProjectSettingSchema = Schema.Union(
 	Schema.TaggedStruct("defaultSessionMode", {
 		mode: DefaultSessionModeSchema,
 	}),
+	Schema.TaggedStruct("terminalKeys", {
+		terminalKeys: TerminalKeysSetting,
+	}),
 	Schema.TaggedStruct("claudeSettings", {
 		overrides: ClaudeSettingsOverridesSchema,
 	}),
@@ -3745,6 +3769,7 @@ export type GlobalProjectSetting = Extract<
 			| "defaultModel"
 			| "defaultPermissionMode"
 			| "defaultSessionMode"
+			| "terminalKeys"
 			| "visibility"
 			| "claudeSettings";
 	}

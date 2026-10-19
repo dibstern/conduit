@@ -9,6 +9,9 @@ const REGION_SELECTORS: Record<string, string> = {
 	"last-user-message": "#messages .msg-user >> nth=-1",
 	// Menus portal to <body>, so a sheet or popover is only inside the whole screen.
 	screen: "body",
+	"terminal-tab-bar": "#terminal-panel .term-tab-bar",
+	"terminal-keys-menu": '[role="menu"][aria-label="Terminal keys"]',
+	"terminal-key-row": "#terminal-panel .term-key-row",
 	"session-sheet":
 		'[data-testid="session-bar-island-menu"], [data-testid="session-action-sheet"]',
 };

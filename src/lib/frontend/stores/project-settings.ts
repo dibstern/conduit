@@ -18,6 +18,7 @@ import {
 	handleModelList,
 	handleVisibilityInfo,
 } from "./discovery.svelte.js";
+import { projectState } from "./project-state.svelte.js";
 import { getCurrentSlug } from "./router.svelte.js";
 import { setClientCount, uiState } from "./ui.svelte.js";
 
@@ -40,6 +41,10 @@ export const applyProjectSetting = (
 			break;
 		case "defaultSessionMode":
 			applyDefaultSessionMode(setting.mode);
+			break;
+		case "terminalKeys":
+			projectState.terminalKeys = setting.terminalKeys;
+			projectState.terminalKeysRevision++;
 			break;
 		case "claudeSettings":
 			handleClaudeSettingsInfo(setting);

@@ -3,10 +3,12 @@
 <script lang="ts">
 	import { tick, untrack } from "svelte";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
+	import { uiState, markTerminalSettingsSeen } from "../../stores/ui.svelte.js";
 	import Dialog from "../ui/Dialog.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Tabs from "../ui/Tabs.svelte";
+	import Badge from "../ui/Badge.svelte";
 	import ClaudeSettingsTab from "./ClaudeSettingsTab.svelte";
 	import ArchivedSettingsTab from "./ArchivedSettingsTab.svelte";
 	import UsageSettingsTab from "./UsageSettingsTab.svelte";
@@ -15,6 +17,7 @@
 	import AvatarSettings from "./AvatarSettings.svelte";
 	import ComposerSettingsTab from "./ComposerSettingsTab.svelte";
 	import SessionsSettingsTab from "./SessionsSettingsTab.svelte";
+	import TerminalSettingsTab from "./TerminalSettingsTab.svelte";
 	import VisibilitySettingsTab from "./VisibilitySettingsTab.svelte";
 	import ServerSettingsTab from "./ServerSettingsTab.svelte";
 	import DebugSettingsTab from "./DebugSettingsTab.svelte";
@@ -27,6 +30,7 @@
 		{ visible: boolean; initialTab?: SettingsSection | undefined; initialAnchor?: "instances" | undefined; onClose?: () => void } = $props();
 	const SETTINGS_TABS = [
 		{ value: "general", label: "General", testId: "settings-tab-general", icon: "settings", iconTone: "neutral" },
+		{ value: "terminal", label: "Terminal", testId: "settings-tab-terminal", icon: "terminal", iconTone: "neutral" },
 		{ value: "models", label: "Models & agents", testId: "settings-tab-models", icon: "sliders-horizontal", iconTone: "purple" },
 		{ value: "claude", label: "Claude", testId: "settings-tab-claude", icon: "claude", iconTone: "clay" },
 		{ value: "surfacing", label: "Surfacing", testId: "settings-tab-surfacing", icon: "sparkle", iconTone: "purple" },
@@ -49,6 +53,10 @@
 		if (!visible) return;
 		section = initialTab ?? (untrack(() => sessionViewState.compact) ? null : "general");
 		void scrollContent(initialAnchor);
+	});
+
+	$effect(() => {
+		if (visible && section === "terminal") markTerminalSettingsSeen();
 	});
 
 	async function scrollContent(anchor?: "instances"): Promise<void> {
@@ -126,6 +134,9 @@
 					>
 						{#snippet optionContent(option)}
 							<span class="flex-1">{option.label}</span>
+							{#if option.value === "terminal" && !uiState.terminalSettingsSeen}
+								<Badge variant="accent" size="xs" data-testid="settings-terminal-new">New</Badge>
+							{/if}
 							{#if option.value === "usage" && alert}
 								<span data-testid="settings-usage-dot" class="inline-block size-[7px] shrink-0 rounded-full {alert.level === 'limited' ? 'bg-fill-red' : 'bg-fill-amber'}"></span>
 							{:else if option.value === "server" && unhealthyInstance}
@@ -157,6 +168,8 @@
 						<NotificationsSettingsTab />
 						<SessionsSettingsTab />
 						<DebugSettingsTab />
+					{:else if shown === "terminal"}
+						<TerminalSettingsTab />
 					{:else if shown === "models"}
 						<VisibilitySettingsTab />
 					{:else if shown === "claude"}

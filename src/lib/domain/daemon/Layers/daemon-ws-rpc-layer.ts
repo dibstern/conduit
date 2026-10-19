@@ -16,6 +16,7 @@ import {
 	PROVIDER_SESSION_CAPABILITIES,
 } from "../../../contracts/provider-instance.js";
 import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
+import { DEFAULT_TERMINAL_KEYS } from "../../../contracts/terminal-keys.js";
 import {
 	ProjectSaveRejected,
 	SetPinRejected,
@@ -30,6 +31,10 @@ import { formatErrorDetail } from "../../../errors.js";
 import { getLogLevel } from "../../../logger.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
 import { makeCursorAuth } from "../../../provider/cursor/cursor-auth.js";
+import {
+	loadRelaySettings,
+	saveRelaySettings,
+} from "../../../relay/relay-settings.js";
 import {
 	getRestartAvailable,
 	isServerSupervised,
@@ -771,6 +776,30 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(wsRpcHandlers.SetWorktreeCleanupSetting(request)),
 			CleanUpWorktreesNow: (request) =>
 				run(wsRpcHandlers.CleanUpWorktreesNow(request)),
+			GetTerminalKeys: (_request) =>
+				run(
+					Effect.sync(() => ({
+						terminalKeys:
+							loadRelaySettings(configDir).terminalKeys ??
+							DEFAULT_TERMINAL_KEYS,
+					})),
+				),
+			SetTerminalKeys: ({ terminalKeys }) =>
+				run(
+					Effect.gen(function* () {
+						yield* Effect.try(() =>
+							saveRelaySettings({ terminalKeys }, configDir),
+						);
+						yield* PubSub.publish(
+							bus,
+							DaemonEvent.GlobalSettingChanged({
+								originSlug: "",
+								tag: "terminalKeys",
+							}),
+						);
+						return { terminalKeys };
+					}),
+				),
 			GetCategorySet: () => categorySet.current(),
 			GetSurfacingFeedback: () =>
 				run(

@@ -27,6 +27,7 @@ import { rpc } from "../../transport/ws-rpc-client.js";
 
 export type SettingsSection =
 	| "general"
+	| "terminal"
 	| "models"
 	| "claude"
 	| "surfacing"

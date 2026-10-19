@@ -273,7 +273,13 @@ export const providerInstancesHandlers: StepHandler[] = [
 					return { ok: true };
 				},
 			});
-			await world.page.getByTestId("views-rail-terminal").click();
+			// A phone has no views rail; the terminal is in the session bar's overflow.
+			const rail = world.page.getByTestId("views-rail-terminal");
+			if (await rail.isVisible()) await rail.click();
+			else {
+				await world.page.getByTestId("session-bar-island-overflow").click();
+				await world.page.getByTestId("overflow-view-terminal").click();
+			}
 			await expect(world.page.locator("#terminal-panel .term-tab")).toHaveCount(
 				1,
 			);

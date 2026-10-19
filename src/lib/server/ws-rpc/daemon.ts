@@ -26,6 +26,8 @@ export const daemonOnlyHandlers = {
 	GetInstanceStatus: (_request) => daemonRequired("GetInstanceStatus"),
 	OpenCodeUseWorktree: (_request) => daemonRequired("OpenCodeUseWorktree"),
 	ResolveSessionMode: (_request) => daemonRequired("ResolveSessionMode"),
+	SetTerminalKeys: (_request) => daemonRequired("SetTerminalKeys"),
+	GetTerminalKeys: (_request) => daemonRequired("GetTerminalKeys"),
 	GetCategorySet: (_request) => daemonRequired("GetCategorySet"),
 	GetSurfacingFeedback: (_request) => daemonRequired("GetSurfacingFeedback"),
 	GetSurfacingLedger: (_request) => daemonRequired("GetSurfacingLedger"),
@@ -52,6 +54,8 @@ export const daemonOnlyHandlers = {
 	| "GetInstanceStatus"
 	| "OpenCodeUseWorktree"
 	| "ResolveSessionMode"
+	| "SetTerminalKeys"
+	| "GetTerminalKeys"
 	| "GetCategorySet"
 	| "GetSurfacingFeedback"
 	| "GetSurfacingLedger"

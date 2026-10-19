@@ -673,7 +673,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert the six settings sections and computer grouping",
+		name: "assert the settings sections and computer grouping",
 		match: /^the settings sections place Usage and Server under This computer$/,
 		run: async ({ world }) => {
 			const panel = world.page.locator("#settings-panel");
@@ -683,6 +683,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 			);
 			expect(ids).toEqual([
 				"settings-tab-general",
+				"settings-tab-terminal",
 				"settings-tab-models",
 				"settings-tab-claude",
 				"settings-tab-surfacing",

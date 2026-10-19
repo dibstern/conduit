@@ -9,6 +9,7 @@ import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 const sections = [
 	["general", "General", "[data-testid=settings-composer-controls-icons]"],
+	["terminal", "Terminal", "#settings-terminal-desktop"],
 	[
 		"models",
 		"Models & agents",

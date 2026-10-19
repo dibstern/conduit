@@ -1,6 +1,7 @@
 // The project list and draft-project lookup, kept free of other stores so
 // low-level stores (discovery) can read them without an import cycle.
 
+import { DEFAULT_TERMINAL_KEYS } from "../../contracts/terminal-keys.js";
 import type { ProjectInfo } from "../types.js";
 import {
 	DRAFT_PROJECT_PARAM,
@@ -14,6 +15,8 @@ import {
 export const projectState = $state({
 	projects: [] as ProjectInfo[],
 	currentSlug: null as string | null,
+	terminalKeys: DEFAULT_TERMINAL_KEYS,
+	terminalKeysRevision: 0,
 	/** The project the daemon says a new session prefills, on every client. */
 	newSessionProject: null as string | null,
 });

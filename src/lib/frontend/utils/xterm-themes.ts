@@ -53,3 +53,22 @@ export const XTERM_THEMES = {
 		brightWhite: "#868692",
 	},
 } as const satisfies Record<ResolvedTheme, Record<string, string>>;
+
+/** Find highlights, literal for the same reason: every match tinted gold, the
+ *  current one stronger and outlined. The search addon takes #RRGGBB only. */
+export const FIND_DECORATIONS = {
+	dark: {
+		matchBackground: "#4a3f1f",
+		matchOverviewRuler: "#8a6d1f",
+		activeMatchBackground: "#7a6020",
+		activeMatchBorder: "#f2c14e",
+		activeMatchColorOverviewRuler: "#f2c14e",
+	},
+	light: {
+		matchBackground: "#f6e7b4",
+		matchOverviewRuler: "#d9b44a",
+		activeMatchBackground: "#ecc85e",
+		activeMatchBorder: "#8d6400",
+		activeMatchColorOverviewRuler: "#8d6400",
+	},
+} as const;

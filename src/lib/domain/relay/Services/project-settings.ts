@@ -22,6 +22,7 @@ import {
 	Stream,
 } from "effect";
 import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
+import { DEFAULT_TERMINAL_KEYS } from "../../../contracts/terminal-keys.js";
 import type {
 	GlobalProjectSetting,
 	GlobalSettingTag,
@@ -269,6 +270,10 @@ const globalSettingRows = (
 		defaultSessionMode: {
 			_tag: "defaultSessionMode",
 			mode: settings.defaultSessionMode ?? "local",
+		},
+		terminalKeys: {
+			_tag: "terminalKeys",
+			terminalKeys: settings.terminalKeys ?? DEFAULT_TERMINAL_KEYS,
 		},
 		claudeSettings: {
 			_tag: "claudeSettings",
