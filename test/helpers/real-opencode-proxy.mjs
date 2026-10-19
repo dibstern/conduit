@@ -6,7 +6,7 @@
 // ledgers as the fake. Both processes stay in the supervisor's process group,
 // so an idle stop signals the real binary directly.
 import { spawn } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
 import { createServer, request as forward } from "node:http";
 import { join } from "node:path";
 
@@ -24,12 +24,33 @@ const log = (file, entry) =>
 	);
 
 // Every OpenCode data, config, state and cache path stays inside the root.
+// Match ProcessBrowser's model selection without fetching a public catalog.
+const modelsPath = join(root, "opencode-models.json");
+writeFileSync(modelsPath, "{}");
 const real = spawn(
 	join(root, "bin", "opencode-real"),
 	["serve", "--hostname", "127.0.0.1", "--port", "0"],
 	{
 		env: {
 			...process.env,
+			OPENCODE_MODELS_PATH: modelsPath,
+			OPENCODE_DISABLE_MODELS_FETCH: "true",
+			OPENCODE_DISABLE_DEFAULT_PLUGINS: "true",
+			OPENCODE_CONFIG_CONTENT: JSON.stringify({
+				provider: {
+					fake: {
+						name: "Lifecycle fixture",
+						npm: "@ai-sdk/openai-compatible",
+						options: { apiKey: "fixture", baseURL: "http://127.0.0.1:1" },
+						models: {
+							"fake-model": {
+								name: "Lifecycle fixture model",
+								limit: { context: 128_000, output: 8_000 },
+							},
+						},
+					},
+				},
+			}),
 			XDG_CONFIG_HOME: join(root, "config"),
 			XDG_DATA_HOME: join(root, "data"),
 			XDG_STATE_HOME: join(root, "state"),
