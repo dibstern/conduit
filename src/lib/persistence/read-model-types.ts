@@ -139,7 +139,7 @@ export interface MessagePartRow {
 	updated_at: number;
 	version: PartVersion;
 	rest_payload?: string | null;
-	/** Set when a previewing read cut `result`: the whole output's UTF-8 size. */
+	/** Set when stored or read as a preview: the whole output's UTF-8 size. */
 	result_bytes?: number | null;
 }
 

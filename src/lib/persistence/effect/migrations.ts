@@ -67,8 +67,13 @@ import {
 	STARTUP_RESTORE_INDEXES_MIGRATION,
 	STORE_IDENTITY_MIGRATION,
 	TOOL_CALL_INDEX_MIGRATION,
+	TOOL_RESULT_EVENT_REFS_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
+import {
+	NEVER_CUT_TOOL_NAMES,
+	PREVIEW_CODE_POINTS,
+} from "../tool-wire-projection.js";
 import { refreshSidebar, rerootSession } from "./sidebar-projection.js";
 
 export const EFFECT_SQL_MIGRATIONS_TABLE = "effect_sql_migrations";
@@ -1247,7 +1252,19 @@ export const effectMigrationEntries = {
 		"provider_process_id",
 		readMigrationSql(PROMPT_PROVIDER_REFERENCE_MIGRATION),
 	),
-	"0065_project_tree_data": Effect.gen(function* () {
+	"0065_tool_result_event_refs": runAddColumnMigrationIfMissing(
+		"message_parts",
+		"result_event_seq",
+		readMigrationSql(TOOL_RESULT_EVENT_REFS_MIGRATION)
+			.replaceAll("{{PREVIEW_CODE_POINTS}}", String(PREVIEW_CODE_POINTS))
+			.replaceAll(
+				"{{NEVER_CUT_TOOL_NAMES}}",
+				NEVER_CUT_TOOL_NAMES.map(
+					(name) => `'${name.replaceAll("'", "''")}'`,
+				).join(", "),
+			),
+	),
+	"0066_project_tree_data": Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		// Ledger repairs can replay migrations against the final schema.
 		const columns = yield* sql.unsafe<{ name: string }>(

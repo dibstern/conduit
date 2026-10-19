@@ -17,6 +17,10 @@ import {
 	SESSION_SUBTREE_SQL,
 } from "../projectors/session-handlers.js";
 import { PAGE_MESSAGES } from "../session-history-adapter.js";
+import {
+	NEVER_CUT_TOOL_NAMES,
+	PREVIEW_CODE_POINTS,
+} from "../tool-wire-projection.js";
 import { rerootSession } from "./sidebar-projection.js";
 
 export class ProjectionError extends Data.TaggedError("ProjectionError")<{
@@ -756,7 +760,7 @@ export const makeMessageProjector = defineProjector(() => ({
 							: undefined;
 					yield* sql`
 						INSERT INTO message_parts
-						(id, message_id, type, text, tool_name, call_id, input, result,
+						(id, message_id, type, text, tool_name, call_id, input, result, result_event_seq, result_bytes,
 						 status, sort_order, created_at, updated_at, metadata, rest_payload, version)
 						VALUES (${part.id}, ${message.id}, ${part.type},
 						 ${typeof part["text"] === "string" ? part["text"] : ""},
@@ -764,6 +768,7 @@ export const makeMessageProjector = defineProjector(() => ({
 						 ${typeof part["callID"] === "string" ? part["callID"] : null},
 						 ${toolState && "input" in toolState ? encodeJson(toolState.input) : null},
 						 ${toolState && "output" in toolState ? encodeJson(toolState.output) : null},
+						 NULL, NULL,
 						 ${toolState && "status" in toolState && typeof toolState.status === "string" ? toolState.status : null},
 						 ${index}, ${start}, ${end},
 						 ${toolState && "metadata" in toolState ? encodeJson(toolState.metadata) : null},
@@ -1045,8 +1050,29 @@ export const makeMessageProjector = defineProjector(() => ({
 					event.data.metadata["isError"] === true
 						? "error"
 						: "completed";
-				const rows = yield* sql<{ metadata: string | null }>`
-					SELECT metadata FROM message_parts WHERE id = ${event.data.partId}`;
+				const rows = yield* sql<{
+					metadata: string | null;
+					result: string;
+					result_bytes: number | null;
+				}>`
+					WITH completed AS (SELECT ${resultJson} AS result),
+					output AS (
+						SELECT result, CASE WHEN json_type(result) = 'text'
+							THEN json_extract(result, '$') ELSE result END AS output
+						FROM completed
+					)
+					SELECT mp.metadata,
+						CASE WHEN mp.type = 'tool'
+							AND mp.tool_name NOT IN ${sql.in(NEVER_CUT_TOOL_NAMES)}
+							AND length(output) > ${PREVIEW_CODE_POINTS}
+							THEN json_quote(substr(output, 1, ${PREVIEW_CODE_POINTS}))
+							ELSE output.result END AS result,
+						CASE WHEN mp.type = 'tool'
+							AND mp.tool_name NOT IN ${sql.in(NEVER_CUT_TOOL_NAMES)}
+							AND length(output) > ${PREVIEW_CODE_POINTS}
+							THEN length(CAST(output AS BLOB)) END AS result_bytes
+					FROM message_parts mp CROSS JOIN output
+					WHERE mp.id = ${event.data.partId}`;
 				const metadata = yield* mergeMetadata(
 					rows[0]?.metadata ?? null,
 					event.data.metadata,
@@ -1055,7 +1081,10 @@ export const makeMessageProjector = defineProjector(() => ({
 				);
 				yield* sql`
 					UPDATE message_parts
-					SET result = ${resultJson}, duration = ${event.data.duration}, status = ${toolStatus}, metadata = ${metadata}, updated_at = ${event.createdAt}, version = ${ctx.version},
+					SET result = ${rows[0]?.result ?? resultJson},
+						result_event_seq = ${rows[0]?.result_bytes == null ? null : event.sequence},
+						result_bytes = ${rows[0]?.result_bytes ?? null},
+						duration = ${event.data.duration}, status = ${toolStatus}, metadata = ${metadata}, updated_at = ${event.createdAt}, version = ${ctx.version},
 						input = COALESCE(${event.data.input === undefined ? null : encodeJson(event.data.input)}, input)
 					WHERE id = ${event.data.partId}`;
 				return ids(
