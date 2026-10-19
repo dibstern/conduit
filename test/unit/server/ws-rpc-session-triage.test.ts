@@ -1,6 +1,6 @@
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Option } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
@@ -11,7 +11,7 @@ import {
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
-const sessionDirectory = Layer.succeed(SessionDirectory, {
+const sessionDirectory = Layer.succeed(SessionDirectory)({
 	projectOf: (sessionId) =>
 		Effect.succeed(
 			sessionId === "s1" || sessionId === "s"
@@ -20,7 +20,7 @@ const sessionDirectory = Layer.succeed(SessionDirectory, {
 		),
 });
 describe("session triage RPCs", () => {
-	it.scoped("routes the triage setters by session ownership", () =>
+	it.effect("routes the triage setters by session ownership", () =>
 		Effect.gen(function* () {
 			const service = makeMockSessionManagerService({
 				setSessionSettled: vi.fn(() => Effect.succeed(true)),
@@ -37,6 +37,7 @@ describe("session triage RPCs", () => {
 					makeRoutedWsRpcServerLayer(resolve).pipe(
 						Layer.provide(sessionDirectory),
 					),
+					{ local: true },
 				),
 			);
 			for (const value of [true, false]) {
@@ -79,7 +80,7 @@ describe("session triage RPCs", () => {
 		}),
 	);
 
-	it.scoped("returns a WsRpcError explaining the pin guard", () =>
+	it.effect("returns a WsRpcError explaining the pin guard", () =>
 		Effect.gen(function* () {
 			const service = makeMockSessionManagerService({
 				setSessionSettled: () =>
@@ -98,24 +99,25 @@ describe("session triage RPCs", () => {
 					makeRoutedWsRpcServerLayer(() => Effect.succeed(context)).pipe(
 						Layer.provide(sessionDirectory),
 					),
+					{ local: true },
 				),
 			);
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				client.SetSessionSettled({
 					sessionId: "s1",
 					settled: true,
 				}),
 			);
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left")
-				expect(result.left).toMatchObject({
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure")
+				expect(result.failure).toMatchObject({
 					_tag: "WsRpcError",
 					message: expect.stringMatching(/pinned.*unpinned first/),
 				});
 		}),
 	);
 
-	it.scoped("succeeds for idempotent requests", () =>
+	it.effect("succeeds for idempotent requests", () =>
 		Effect.gen(function* () {
 			const service = makeMockSessionManagerService();
 			const context = yield* Layer.build(
@@ -126,6 +128,7 @@ describe("session triage RPCs", () => {
 					makeRoutedWsRpcServerLayer(() => Effect.succeed(context)).pipe(
 						Layer.provide(sessionDirectory),
 					),
+					{ local: true },
 				),
 			);
 			expect(
@@ -159,7 +162,7 @@ describe("session triage RPCs", () => {
 		["question", "Session is waiting on you"],
 		["past", "Snooze time must be in the future"],
 	] as const) {
-		it.scoped(`maps ${reason} refusal to WsRpcError`, () =>
+		it.effect(`maps ${reason} refusal to WsRpcError`, () =>
 			Effect.gen(function* () {
 				const service = makeMockSessionManagerService({
 					snoozeSession: () =>
@@ -178,17 +181,18 @@ describe("session triage RPCs", () => {
 						makeRoutedWsRpcServerLayer(() => Effect.succeed(context)).pipe(
 							Layer.provide(sessionDirectory),
 						),
+						{ local: true },
 					),
 				);
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					client.SnoozeSession({
 						sessionId: "s1",
 						until: null,
 					}),
 				);
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left")
-					expect(result.left).toMatchObject({
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure")
+					expect(result.failure).toMatchObject({
 						_tag: "WsRpcError",
 						message: expect.stringContaining(message),
 					});

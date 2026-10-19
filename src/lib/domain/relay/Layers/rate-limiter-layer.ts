@@ -23,10 +23,10 @@ interface RateLimiterService {
 	checkLimit: (ip: string) => Effect.Effect<RateLimitResult>;
 }
 
-export class RateLimiterTag extends Context.Tag("RateLimiter")<
+export class RateLimiterTag extends Context.Service<
 	RateLimiterTag,
 	RateLimiterService
->() {}
+>()("RateLimiter") {}
 
 interface BucketEntry {
 	tokens: ReadonlyArray<number>;
@@ -67,7 +67,7 @@ const tryConsume =
 	};
 
 export const RateLimiterLive = (config: RateLimiterConfig) =>
-	Layer.scoped(
+	Layer.effect(
 		RateLimiterTag,
 		Effect.gen(function* () {
 			const state = yield* Ref.make<RateLimiterState>({
@@ -90,7 +90,7 @@ export const RateLimiterLive = (config: RateLimiterConfig) =>
 					}),
 				),
 				Effect.repeat(Schedule.spaced(Duration.minutes(1))),
-				Effect.forkScoped,
+				Effect.forkScoped({ uninterruptible: "inherit" }),
 			);
 
 			return {

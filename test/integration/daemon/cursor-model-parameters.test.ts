@@ -5,11 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-	AddInstance,
-	SaveProject,
-	SwitchVariant,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import { cursorModelInfo } from "../../../src/lib/provider/cursor/cursor-runner-driver.js";
 import type { CursorModel } from "../../../src/lib/provider/cursor/sdk-port.js";
@@ -120,9 +116,11 @@ describe("Cursor model parameters, instance catalog cache and reroute", () => {
 					: { CONDUIT_TEST_CURSOR_CATALOG_TTL_MS: String(options.ttlMs) }),
 			},
 		});
-		const added = await harness.requestRpc(
-			new AddInstance({ name: "Cursor parameters", driver: "cursor" }),
-		);
+		const added = await harness.requestRpc({
+			_tag: "AddInstance",
+			name: "Cursor parameters",
+			driver: "cursor",
+		});
 		if (!added.addedInstanceId) throw new Error("Missing Cursor account");
 		return {
 			fixture: harness,
@@ -179,13 +177,12 @@ describe("Cursor model parameters, instance catalog cache and reroute", () => {
 			{ modelId: "grok-4.7", variant: "256K · low", contextWindow: "" },
 		);
 		await browser.send(id, "Say hi.", TIMEOUT);
-		await fixture.requestRpc(
-			new SwitchVariant({
-				sessionId: id,
-				variant: "500K · high · Fast",
-				originId: browser.originId,
-			}),
-		);
+		await fixture.requestRpc({
+			_tag: "SwitchVariant",
+			sessionId: id,
+			variant: "500K · high · Fast",
+			originId: browser.originId,
+		});
 		await browser.send(id, "Say hi again.", TIMEOUT);
 		const sends = calls("send.options").map(({ data }) => data);
 		expect(sends).toEqual([
@@ -284,9 +281,10 @@ describe("Cursor model parameters, instance catalog cache and reroute", () => {
 		expect(calls("models.list.call")).toHaveLength(before);
 		const directory = join(fixture.root, "second-project");
 		mkdirSync(directory);
-		const addedProject = await fixture.requestRpc(
-			new SaveProject({ folders: [directory] }),
-		);
+		const addedProject = await fixture.requestRpc({
+			_tag: "SaveProject",
+			folders: [directory],
+		});
 		const secondProject = await fixture.connect(
 			undefined,
 			undefined,
@@ -294,9 +292,11 @@ describe("Cursor model parameters, instance catalog cache and reroute", () => {
 		);
 		expect(await catalogModels(secondProject, accountId)).toHaveLength(47);
 		expect(calls("models.list.call")).toHaveLength(before);
-		const second = await fixture.requestRpc(
-			new AddInstance({ name: "Second Cursor", driver: "cursor" }),
-		);
+		const second = await fixture.requestRpc({
+			_tag: "AddInstance",
+			name: "Second Cursor",
+			driver: "cursor",
+		});
 		if (!second.addedInstanceId)
 			throw new Error("Missing second Cursor account");
 		await browser.getModels(second.addedInstanceId);

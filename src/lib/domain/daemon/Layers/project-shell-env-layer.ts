@@ -6,15 +6,15 @@ import {
 	type ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
 
-export class ProjectShellEnvTag extends Context.Tag("ProjectShellEnv")<
+export class ProjectShellEnvTag extends Context.Service<
 	ProjectShellEnvTag,
 	ProjectShellEnvResolver
->() {}
+>()("ProjectShellEnv") {}
 
 export const makeProjectShellEnvLive = (
 	options?: ConstructorParameters<typeof ProjectShellEnvResolver>[0],
 ) =>
-	Layer.scoped(
+	Layer.effect(
 		ProjectShellEnvTag,
 		Effect.acquireRelease(
 			Effect.sync(() => new ProjectShellEnvResolver(options)),
@@ -27,7 +27,7 @@ export const ProjectShellEnvWiringLive: Layer.Layer<
 	never,
 	never,
 	ProjectShellEnvTag | ProjectRegistryTag | DaemonEventBusTag
-> = Layer.scopedDiscard(
+> = Layer.effectDiscard(
 	Effect.gen(function* () {
 		const resolver = yield* ProjectShellEnvTag;
 		const bus = yield* DaemonEventBusTag;
@@ -49,7 +49,7 @@ export const ProjectShellEnvWiringLive: Layer.Layer<
 		// register() schedules subprocess I/O; no resolution is awaited here.
 		yield* reconcile;
 		yield* Effect.forkScoped(
-			Stream.fromQueue(sub).pipe(
+			Stream.fromSubscription(sub).pipe(
 				Stream.filter(
 					(event) =>
 						event._tag === "InstanceAdded" ||

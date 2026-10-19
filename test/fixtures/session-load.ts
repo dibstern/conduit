@@ -243,9 +243,11 @@ export const seedSessionLoadFixture = async (
 			let count = 0;
 			const write = (batch: readonly CanonicalEvent[]) =>
 				commit(batch, { publish: false }).pipe(
-					Effect.tap(() => {
-						count += batch.length;
-					}),
+					Effect.tap(() =>
+						Effect.sync(() => {
+							count += batch.length;
+						}),
+					),
 				);
 			for (let first = 0; first < families; first += 500) {
 				yield* write(

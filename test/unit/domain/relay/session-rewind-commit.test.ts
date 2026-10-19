@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
 import { it } from "@effect/vitest";
 import { Context, Deferred, Effect, Fiber, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { AccountDirectory } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -50,12 +50,11 @@ import {
 
 const persistence = makePersistenceEffectLayer(":memory:", "test-project");
 const services = Layer.mergeAll(
-	Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+	Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 	persistence,
 	makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
-	Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-	Layer.succeed(
-		OpenCodeModelServiceTag,
+	Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+	Layer.succeed(OpenCodeModelServiceTag)(
 		makeMockOpenCodeModelService({
 			providers: [
 				{
@@ -68,14 +67,13 @@ const services = Layer.mergeAll(
 			connected: ["opencode"],
 		}),
 	),
-	Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-	Layer.succeed(LoggerTag, makeMockLogger()),
-	Layer.succeed(
-		ConfigTag,
+	Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+	Layer.succeed(LoggerTag)(makeMockLogger()),
+	Layer.succeed(ConfigTag)(
 		makeMockConfig({ configDir: "/tmp/conduit-rewind-commit-no-config" }),
 	),
-	Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
-	Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
+	Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()),
+	Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
 	PendingInteractionServiceLive,
 	makeOverridesStateLive(),
 	AlertsLive,
@@ -97,7 +95,7 @@ const backfill = (
 
 // Late provider/backfill rows can arrive after preparation but before acceptance.
 // They must receive tombstones with the original suffix and resist later import.
-it.scoped(
+it.effect(
 	"commits a late hidden backfill with the rewind and prevents resurrection",
 	() =>
 		Effect.gen(function* () {

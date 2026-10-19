@@ -58,7 +58,7 @@ export function makeHandlerLogger(): Logger {
 export function makeSessionSettingsLayer() {
 	return Layer.mergeAll(
 		makePersistenceEffectLayer(":memory:", "test-project"),
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-		Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+		Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()),
 	);
 }

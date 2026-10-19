@@ -1,8 +1,8 @@
 // Per-projector sequence cursors, stored in projector_cursors via @effect/sql.
 
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 
 export class CursorError extends Data.TaggedError("CursorError")<{
 	readonly operation: string;
@@ -39,9 +39,10 @@ export interface ProjectorCursorEffect {
 	readonly minCursor: () => Effect.Effect<number, CursorError | SqlError>;
 }
 
-export class ProjectorCursorEffectTag extends Context.Tag(
-	"ProjectorCursorEffect",
-)<ProjectorCursorEffectTag, ProjectorCursorEffect>() {}
+export class ProjectorCursorEffectTag extends Context.Service<
+	ProjectorCursorEffectTag,
+	ProjectorCursorEffect
+>()("ProjectorCursorEffect") {}
 
 function rowToCursor(row: CursorRow): ProjectorCursor {
 	return {

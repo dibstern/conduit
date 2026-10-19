@@ -10,9 +10,11 @@ import {
 
 /** Build a test layer with the given env var map. */
 const testLayer = (vars: ReadonlyArray<readonly [string, string]>) =>
-	DaemonEnvConfigLive.pipe(
+	Layer.fresh(DaemonEnvConfigLive).pipe(
 		Layer.provide(
-			Layer.setConfigProvider(ConfigProvider.fromMap(new Map(vars))),
+			ConfigProvider.layer(
+				ConfigProvider.fromUnknown(Object.fromEntries(vars)),
+			),
 		),
 	);
 

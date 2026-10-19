@@ -6,9 +6,9 @@
 
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
+import { RpcClient, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -85,7 +85,7 @@ test.describe("OpenCode steering", () => {
 		const refused = await Effect.runPromise(
 			Effect.scoped(
 				Effect.flatMap(RpcClient.make(WsRpcGroup), (client) =>
-					client.input.submit({
+					client["input.submit"]({
 						sessionId,
 						inputId: randomUUID(),
 						text: "Bravo",

@@ -7,9 +7,10 @@
  * with the real JSON serialization and the real server handlers and terminal
  * service. Production splits them across the control and stream sockets.
  */
-import { Socket, SocketServer } from "@effect/platform";
-import { RpcClient, RpcSerialization, RpcServer } from "@effect/rpc";
+
 import { Deferred, Effect, Fiber, Layer, Stream } from "effect";
+import { RpcClient, RpcSerialization, RpcServer } from "effect/rpc";
+import { Socket, SocketServer } from "effect/socket";
 import { describe, expect, it, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import type {
@@ -79,7 +80,9 @@ describe("PTY output storm", () => {
 				Effect.gen(function* () {
 					const connection = yield* makeFakeSocketServer;
 					yield* RpcServer.make(WsRpcGroup, { concurrency: 32 }).pipe(
-						Effect.provide(RpcServer.layerProtocolSocketServer),
+						Effect.provide(RpcServer.layerProtocolSocketServer, {
+							local: true,
+						}),
 						Effect.provideService(
 							SocketServer.SocketServer,
 							connection.socketServer,
@@ -91,7 +94,7 @@ describe("PTY output storm", () => {
 					const protocol = yield* Layer.build(
 						RpcClient.layerProtocolSocket().pipe(
 							Layer.provide(
-								Layer.succeed(Socket.Socket, connection.clientSocket),
+								Layer.succeed(Socket.Socket)(connection.clientSocket),
 							),
 							Layer.provide(RpcSerialization.layerJson),
 						),

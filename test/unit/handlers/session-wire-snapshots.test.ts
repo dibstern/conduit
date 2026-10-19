@@ -28,7 +28,9 @@ describe("ViewSession handler", () => {
 
 		await Effect.runPromise(
 			handleViewSession("client-1", { sessionId: "session-1" }).pipe(
-				Effect.provide(makeTestHandlerLayer({ api, wsHandler, sessionMgr })),
+				Effect.provide(makeTestHandlerLayer({ api, wsHandler, sessionMgr }), {
+					local: true,
+				}),
 			),
 		);
 

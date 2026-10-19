@@ -33,9 +33,10 @@ export interface DaemonSessionQueryService {
 	>;
 }
 
-export class DaemonSessionQueryServiceTag extends Context.Tag(
-	"DaemonSessionQueryService",
-)<DaemonSessionQueryServiceTag, DaemonSessionQueryService>() {}
+export class DaemonSessionQueryServiceTag extends Context.Service<
+	DaemonSessionQueryServiceTag,
+	DaemonSessionQueryService
+>()("DaemonSessionQueryService") {}
 
 export const DaemonSessionQueryServiceLive: Layer.Layer<DaemonSessionQueryServiceTag> =
 	Layer.succeed(DaemonSessionQueryServiceTag, {

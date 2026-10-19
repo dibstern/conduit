@@ -104,15 +104,13 @@ test("measures writes across three projects during six streaming turns", async (
 			// Use the send RPC directly so history reads in browser.send are not timed.
 			const [submitted, { done, completedAt }] = await Promise.all([
 				Effect.runPromise(
-					browser.rpc.input
-						.submit({
-							sessionId,
-							originId: browser.originId,
-							inputId: randomUUID(),
-							delivery: "queue",
-							text: "Run the recorded streaming turn.",
-						})
-						.pipe(Effect.timeout(60_000)),
+					browser.rpc["input.submit"]({
+						sessionId,
+						originId: browser.originId,
+						inputId: randomUUID(),
+						delivery: "queue",
+						text: "Run the recorded streaming turn.",
+					}).pipe(Effect.timeout(60_000)),
 				),
 				completion,
 			]);
@@ -256,15 +254,13 @@ test.describe("write contention", () => {
 			const started = performance.now();
 			const [submitted, done] = await Promise.all([
 				Effect.runPromise(
-					browser.rpc.input
-						.submit({
-							sessionId,
-							originId: browser.originId,
-							inputId: randomUUID(),
-							delivery: "queue",
-							text: "Run the recorded streaming turn.",
-						})
-						.pipe(Effect.timeout(90_000)),
+					browser.rpc["input.submit"]({
+						sessionId,
+						originId: browser.originId,
+						inputId: randomUUID(),
+						delivery: "queue",
+						text: "Run the recorded streaming turn.",
+					}).pipe(Effect.timeout(90_000)),
 				),
 				browser.waitForTurnEnd(sessionId, cursor, 90_000),
 			]);

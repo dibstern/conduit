@@ -1,7 +1,7 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
-import { GetProjects } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { ProjectManagementServiceLive } from "../../../src/lib/domain/relay/Services/project-management-service.js";
 import {
@@ -32,12 +32,12 @@ describe("settings reads with Effect-native settings service", () => {
 			};
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-				Layer.succeed(OpenCodeSettingsServiceTag, settingsService),
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
-				Layer.succeed(LoggerTag, makeMockLogger()),
-				Layer.succeed(ConfigTag, makeMockConfig()),
-				Layer.succeed(SessionWorkspaceTag, {
+				Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+				Layer.succeed(OpenCodeSettingsServiceTag)(settingsService),
+				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({})),
+				Layer.succeed(LoggerTag)(makeMockLogger()),
+				Layer.succeed(ConfigTag)(makeMockConfig()),
+				Layer.succeed(SessionWorkspaceTag)({
 					renameBranch: () => Effect.die("unused"),
 					get: () => Effect.succeed("/workspace"),
 					move: () => Effect.succeed("/workspace"),
@@ -51,13 +51,15 @@ describe("settings reads with Effect-native settings service", () => {
 			);
 
 			return getCommandsForSession(undefined).pipe(
-				Effect.provide(layer),
-				Effect.tap((commands) => {
-					expect(settingsService.listCommands).toHaveBeenCalledOnce();
-					expect(commands).toEqual([
-						{ name: "build", description: "Run build" },
-					]);
-				}),
+				Effect.provide(layer, { local: true }),
+				Effect.tap((commands) =>
+					Effect.sync(() => {
+						expect(settingsService.listCommands).toHaveBeenCalledOnce();
+						expect(commands).toEqual([
+							{ name: "build", description: "Run build" },
+						]);
+					}),
+				),
 			);
 		},
 	);
@@ -74,11 +76,10 @@ describe("settings reads with Effect-native settings service", () => {
 			const config = makeMockConfig({
 				slug: "test-project",
 			});
-			const settingsLayer = Layer.succeed(
-				OpenCodeSettingsServiceTag,
+			const settingsLayer = Layer.succeed(OpenCodeSettingsServiceTag)(
 				settingsService,
 			);
-			const configLayer = Layer.succeed(ConfigTag, config);
+			const configLayer = Layer.succeed(ConfigTag)(config);
 			const projectServiceLayer = ProjectManagementServiceLive.pipe(
 				Layer.provide(Layer.mergeAll(configLayer, settingsLayer)),
 			);
@@ -90,17 +91,19 @@ describe("settings reads with Effect-native settings service", () => {
 			);
 
 			return projectsHandlers
-				.GetProjects(new GetProjects({ projectSlug: "test-project" }))
+				.GetProjects({ _tag: "GetProjects", projectSlug: "test-project" })
 				.pipe(
-					Effect.provide(layer),
-					Effect.tap((reply) => {
-						expect(settingsService.listProjects).not.toHaveBeenCalled();
-						expect(reply).toEqual({
-							projectSlug: "test-project",
-							projects: [],
-							current: "test-project",
-						});
-					}),
+					Effect.provide(layer, { local: true }),
+					Effect.tap((reply) =>
+						Effect.sync(() => {
+							expect(settingsService.listProjects).not.toHaveBeenCalled();
+							expect(reply).toEqual({
+								projectSlug: "test-project",
+								projects: [],
+								current: "test-project",
+							});
+						}),
+					),
 				);
 		},
 	);

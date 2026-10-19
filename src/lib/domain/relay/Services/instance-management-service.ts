@@ -75,9 +75,10 @@ export interface InstanceManagementService {
 	>;
 }
 
-export class InstanceManagementServiceTag extends Context.Tag(
-	"InstanceManagementService",
-)<InstanceManagementServiceTag, InstanceManagementService>() {}
+export class InstanceManagementServiceTag extends Context.Service<
+	InstanceManagementServiceTag,
+	InstanceManagementService
+>()("InstanceManagementService") {}
 
 export const InstanceManagementServiceLive: Layer.Layer<InstanceManagementServiceTag> =
 	Layer.succeed(InstanceManagementServiceTag, {

@@ -238,27 +238,27 @@ describe("createProjectRelay override-state defaults", () => {
 				const projects = yield* ProjectManagementServiceTag;
 				const instances = yield* InstanceManagementServiceTag;
 				return {
-					scan: yield* Effect.either(scan.scanNow()),
-					sessions: yield* Effect.either(sessions.list({ limit: 5 })),
+					scan: yield* Effect.result(scan.scanNow()),
+					sessions: yield* Effect.result(sessions.list({ limit: 5 })),
 					projects: yield* projects.list(),
-					save: yield* Effect.either(
+					save: yield* Effect.result(
 						projects.save({ folders: ["/standalone"] }),
 					),
-					instances: yield* Effect.either(instances.list()),
+					instances: yield* Effect.result(instances.list()),
 				};
 			}),
 		);
 		expect(unsupported).toMatchObject({
 			scan: {
-				_tag: "Left",
-				left: {
+				_tag: "Failure",
+				failure: {
 					_tag: "ScanServiceNotAvailable",
 					message: "Port scanning not available",
 				},
 			},
 			sessions: {
-				_tag: "Left",
-				left: {
+				_tag: "Failure",
+				failure: {
 					_tag: "DaemonSessionQueryNotSupported",
 					message:
 						"Cross-project session listing is not supported in this mode",
@@ -266,15 +266,15 @@ describe("createProjectRelay override-state defaults", () => {
 			},
 			projects: [],
 			save: {
-				_tag: "Left",
-				left: {
+				_tag: "Failure",
+				failure: {
 					_tag: "ProjectManagementNotSupported",
 					message: "Saving projects is not supported in this mode",
 				},
 			},
 			instances: {
-				_tag: "Left",
-				left: {
+				_tag: "Failure",
+				failure: {
 					_tag: "InstanceManagementServiceError",
 					cause: expect.objectContaining({
 						message: "Instance management not available",

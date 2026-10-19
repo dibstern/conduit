@@ -1,12 +1,12 @@
-import { Context, Effect, Layer, PubSub, type Queue, type Scope } from "effect";
+import { Context, Effect, Layer, PubSub, type Scope } from "effect";
 import type { RelayEvent } from "./relay-domain-model.js";
 
 export const RELAY_EVENT_BUS_CAPACITY = 256;
 
-export class RelayEventBusTag extends Context.Tag("RelayEventBus")<
+export class RelayEventBusTag extends Context.Service<
 	RelayEventBusTag,
 	PubSub.PubSub<RelayEvent>
->() {}
+>()("RelayEventBus") {}
 
 export const makeRelayEventBusLive = (
 	options: { readonly capacity?: number } = {},
@@ -29,7 +29,7 @@ export const publishRelayEvents = (events: readonly RelayEvent[]) =>
 	Effect.forEach(events, publishRelayEvent, { discard: true });
 
 export const subscribeToRelayEvents: Effect.Effect<
-	Queue.Dequeue<RelayEvent>,
+	PubSub.Subscription<RelayEvent>,
 	never,
 	RelayEventBusTag | Scope.Scope
 > = Effect.gen(function* () {

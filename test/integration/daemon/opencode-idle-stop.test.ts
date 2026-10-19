@@ -194,7 +194,7 @@ describe("Managed OpenCode stops when idle", () => {
 		// This fixture emits session status updates without a stored turn terminal.
 		const cursor = browser.frames.length;
 		const accepted = await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId,
 				text: "hello",
 				inputId: randomUUID(),

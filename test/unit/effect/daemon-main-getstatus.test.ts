@@ -1,10 +1,10 @@
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TlsCerts } from "../../../src/lib/cli/tls.js";
-import { RestartWithConfig } from "../../../src/lib/contracts/ws-rpc.js";
+
 import {
 	type DaemonConfig,
 	loadDaemonConfigResult,
@@ -122,10 +122,9 @@ describe("daemon main runtime config status", () => {
 			smartDefault: false,
 		});
 
-		const response = await sendRpcRequest(
-			socketPath,
-			new RestartWithConfig({}),
-		);
+		const response = await sendRpcRequest(socketPath, {
+			_tag: "RestartWithConfig",
+		});
 
 		expect(response).toEqual({ ok: true });
 		expect(daemon.getStatus().tlsEnabled).toBe(false);

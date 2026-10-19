@@ -1,4 +1,4 @@
-import { Either, Option, Schema } from "effect";
+import { Option, Result, Schema } from "effect";
 import { getProviderDriver } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import {
@@ -416,22 +416,27 @@ export function translateProviderRuntimeEventToDomain(
 		}
 
 		case "session.usage_limited": {
-			const decoded = Schema.decodeUnknownEither(
+			const decoded = Schema.decodeUnknownResult(
 				SessionUsageLimitedPayloadSchema,
 			)(event.data);
-			if (Either.isLeft(decoded))
+			if (Result.isFailure(decoded))
 				throw new TypeError("Invalid usage limit signal");
-			return singleEvent(event, state, "session.usage_limited", decoded.right);
+			return singleEvent(
+				event,
+				state,
+				"session.usage_limited",
+				decoded.success,
+			);
 		}
 		case "session.goal_changed": {
-			const decoded = Schema.decodeUnknownEither(
+			const decoded = Schema.decodeUnknownResult(
 				SessionGoalChangedPayloadSchema,
 			)({
 				...data,
 				sessionId: event.sessionId,
 			});
-			if (Either.isLeft(decoded)) return { events: [], state };
-			return singleEvent(event, state, "session.goal_changed", decoded.right);
+			if (Result.isFailure(decoded)) return { events: [], state };
+			return singleEvent(event, state, "session.goal_changed", decoded.success);
 		}
 
 		case "session.permission_mode_changed": {
@@ -582,8 +587,8 @@ function isSessionPermissionMode(
 }
 
 /** What an approval card shows beyond the ask itself; none of it if malformed. */
-function cardDetails<A, I>(
-	schema: Schema.Schema<A, I>,
+function cardDetails<A>(
+	schema: Schema.Decoder<A>,
 	data: Record<string, unknown>,
 ): A | Record<never, never> {
 	return Option.getOrElse(Schema.decodeUnknownOption(schema)(data), () => ({}));

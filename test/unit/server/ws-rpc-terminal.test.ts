@@ -1,6 +1,6 @@
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Chunk, Effect, Fiber, Layer, Stream } from "effect";
+import { Effect, Fiber, Layer, Stream } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import {
@@ -78,6 +78,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -133,7 +134,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 				const client = yield* rpcClient;
 				const announced = yield* client
 					.SubscribePtys({ projectSlug: "proj-1" })
-					.pipe(Stream.take(4), Stream.runCollect, Effect.fork);
+					.pipe(Stream.take(4), Stream.runCollect, Effect.forkChild);
 				yield* Effect.sleep("10 millis");
 
 				expect(
@@ -171,7 +172,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 				).toEqual({ ok: true });
 				expect(upstream.close).toHaveBeenCalledWith(1000, "Proxy closed");
 				expect(api.pty.delete).not.toHaveBeenCalled();
-				expect(Chunk.toReadonlyArray(yield* Fiber.join(announced))).toEqual([
+				expect([...(yield* Fiber.join(announced))]).toEqual([
 					{ _tag: "snapshot", rows: [] },
 					{ _tag: "synchronized" },
 					{
@@ -201,6 +202,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -235,6 +237,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 					WsRpcServerLayer.pipe(
 						Layer.provideMerge(makeTestHandlerLayer({ wsHandler, localPty })),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -282,6 +285,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 					WsRpcServerLayer.pipe(
 						Layer.provideMerge(makeTestHandlerLayer({ ptyManager })),
 					),
+					{ local: true },
 				),
 			);
 		},

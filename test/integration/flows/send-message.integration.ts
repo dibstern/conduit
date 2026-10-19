@@ -2,7 +2,7 @@
 // prompt_async endpoint. If this test passes, messages actually work.
 
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -11,16 +11,13 @@ import {
 describe("Integration: Send Message", () => {
 	let harness: RelayHarness;
 
-	beforeAll(async () => {
+	beforeEach(async () => {
 		harness = await createRelayHarness();
+		harness.mock.resetQueues();
 	}, 30_000);
 
-	afterAll(async () => {
+	afterEach(async () => {
 		if (harness) await harness.stop();
-	});
-
-	beforeEach(() => {
-		harness.mock.resetQueues();
 	});
 
 	it("reports handed off when sending to an idle session", async () => {
@@ -30,7 +27,7 @@ describe("Integration: Send Message", () => {
 		if (!sessionId) throw new Error("Expected an active session");
 
 		const result = await client.rpcCall((rpc) =>
-			rpc.input.submit({
+			rpc["input.submit"]({
 				sessionId,
 				text: "Reply with just 'ok'",
 				inputId: randomUUID(),
@@ -63,7 +60,7 @@ describe("Integration: Send Message", () => {
 
 			const inputId = randomUUID();
 			const result = await client.rpcCall((rpc) =>
-				rpc.input.submit({ sessionId, text: "Continue", inputId, delivery }),
+				rpc["input.submit"]({ sessionId, text: "Continue", inputId, delivery }),
 			);
 			try {
 				expect(result).toEqual(
@@ -76,7 +73,7 @@ describe("Integration: Send Message", () => {
 			} finally {
 				if (delivery === "queue")
 					await client.rpcCall((rpc) =>
-						rpc.input.cancel({ sessionId, inputId }),
+						rpc["input.cancel"]({ sessionId, inputId }),
 					);
 				harness.mock.emitTestEvent("question.rejected", {
 					requestID: questionId,

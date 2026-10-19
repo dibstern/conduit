@@ -45,10 +45,8 @@ function makeTestRuntime(
 	sessionEventBus: SessionEventBus,
 ) {
 	const persistenceLayer = makePersistenceEffectLayer(dbPath, "test-project");
-	const sessionEventBusLayer = Layer.succeed(
-		SessionEventBusTag,
-		sessionEventBus,
-	);
+	const sessionEventBusLayer =
+		Layer.succeed(SessionEventBusTag)(sessionEventBus);
 	return ManagedRuntime.make(
 		Layer.mergeAll(
 			persistenceLayer,
@@ -77,8 +75,8 @@ describe("OpenCode runtime ingress does not publish to relay/browser", () => {
 			{
 				publish: publishToBus,
 				publishAdvance: () => Effect.void,
-				subscribe: () => Effect.dieMessage("unused in this test"),
-				subscribeAdvances: () => Effect.dieMessage("unused in this test"),
+				subscribe: () => Effect.die(new Error("unused in this test")),
+				subscribeAdvances: () => Effect.die(new Error("unused in this test")),
 			},
 		);
 		runtime = rt;

@@ -30,6 +30,7 @@ import { mockAppHandlers } from "./steps/mockApp.js";
 import { modelDriftHandlers } from "./steps/modelDrift.js";
 import { opencodeConnectionBannerHandlers } from "./steps/opencodeConnectionBanner.js";
 import { pendingInputTrayHandlers } from "./steps/pendingInputTray.js";
+import { phoneToastsHandlers } from "./steps/phoneToasts.js";
 import { providerInstancesHandlers } from "./steps/providerInstances.js";
 import { sessionGoalHandlers } from "./steps/sessionGoal.js";
 import { sessionGoalDetailsHandlers } from "./steps/sessionGoalDetails.js";
@@ -52,6 +53,7 @@ const driver = new PlaywrightDriver();
 
 export const conduitVisualHandlers: StepHandler[] = [
 	...sessionPresentationHandlers,
+	...phoneToastsHandlers,
 	...sessionRowsHandlers,
 	...sessionModeDefaultHandlers,
 	...backgroundTasksHandlers,

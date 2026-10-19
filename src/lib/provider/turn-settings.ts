@@ -1,4 +1,4 @@
-import { Data, Either } from "effect";
+import { Data, Result } from "effect";
 import {
 	isKnownDriverKind,
 	type KnownProviderDriverKind,
@@ -162,16 +162,16 @@ export function findCatalogModel(
 export function resolveTurnSettings(
 	pick: TurnPick,
 	catalog: readonly ModelInfo[] | undefined,
-): Either.Either<TurnSettings, PickRejection> {
+): Result.Result<TurnSettings, PickRejection> {
 	if (harnessForModelProvider(pick.model.providerId) !== pick.harness) {
-		return Either.left(
+		return Result.fail(
 			new ModelNotInCatalog({ harness: pick.harness, ...pick.model }),
 		);
 	}
-	if (catalog === undefined) return Either.right(pick);
+	if (catalog === undefined) return Result.succeed(pick);
 	const model = findCatalogModel(pick.harness, pick.model, catalog);
 	if (!model) {
-		return Either.left(
+		return Result.fail(
 			new ModelNotInCatalog({ harness: pick.harness, ...pick.model }),
 		);
 	}
@@ -189,13 +189,13 @@ export function resolveTurnSettings(
 	const modelId = isRoutingOption ? pick.model.modelId : model.id;
 	const { efforts, contextWindows } = offeredOptions(model);
 	if (pick.effort !== "" && !efforts.includes(pick.effort)) {
-		return Either.left(
+		return Result.fail(
 			new EffortNotOffered({ modelId, effort: pick.effort, offered: efforts }),
 		);
 	}
 	const offeredWindows = contextWindows.map((option) => option.value);
 	if (contextWindow !== "" && !offeredWindows.includes(contextWindow)) {
-		return Either.left(
+		return Result.fail(
 			new ContextWindowNotOffered({
 				modelId,
 				contextWindow,
@@ -203,7 +203,7 @@ export function resolveTurnSettings(
 			}),
 		);
 	}
-	return Either.right({
+	return Result.succeed({
 		harness: pick.harness,
 		model: { providerId: model.providerId, modelId },
 		effort: pick.effort,

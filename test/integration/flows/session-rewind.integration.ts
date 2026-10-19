@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { SqlClient } from "@effect/sql";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionDetailEnvelopeSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import {

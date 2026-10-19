@@ -1,6 +1,6 @@
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { RpcTest } from "effect/rpc";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
@@ -77,6 +77,7 @@ describe("WsRpcServerLayer ReloadProviderSession", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});

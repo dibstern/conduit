@@ -4,11 +4,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	ListDaemonSessions,
-	SaveProject,
-	SubmitInput,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
 	effectMigrationEntries,
@@ -134,7 +130,9 @@ async function stagePreProvenanceStore(
 		const names = db
 			.prepare(`SELECT name FROM sqlite_master
 			WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-			AND name != 'effect_sql_migrations' ORDER BY name`)
+			AND name != 'effect_sql_migrations'
+			AND name IN (SELECT name FROM previous.sqlite_master WHERE type = 'table')
+			ORDER BY name`)
 			.all() as Array<{ name: string }>;
 		db.transaction(() => {
 			for (const { name } of names) {
@@ -202,12 +200,10 @@ describe("Project provenance through the built daemon", () => {
 		harness = await ProcessHarness.start();
 		const second = join(harness.root, "provenance-two");
 		mkdirSync(second);
-		await sendRpcRequest(
-			join(harness.configDir, "relay.sock"),
-			new SaveProject({
-				folders: [second],
-			}),
-		);
+		await sendRpcRequest(join(harness.configDir, "relay.sock"), {
+			_tag: "SaveProject",
+			folders: [second],
+		});
 		return harness;
 	}
 
@@ -232,16 +228,14 @@ describe("Project provenance through the built daemon", () => {
 			// Replay the identical command through RPC. Its durable receipt must
 			// suppress a second provider execution, including after the next turn.
 			const replay = () =>
-				sendRpcRequest(
-					join(fixture.configDir, "relay.sock"),
-					new SubmitInput({
-						sessionId,
-						originId: `provenance-${slug}`,
-						inputId: commandId ?? "missing-command",
-						delivery: "queue",
-						text: "stream-parity",
-					}),
-				);
+				sendRpcRequest(join(fixture.configDir, "relay.sock"), {
+					_tag: "input.submit",
+					sessionId,
+					originId: `provenance-${slug}`,
+					inputId: commandId ?? "missing-command",
+					delivery: "queue",
+					text: "stream-parity",
+				});
 			await replay();
 			const cursor = browser.frames.length;
 			const approvalsBefore = fixture.marks.filter(
@@ -327,7 +321,7 @@ describe("Project provenance through the built daemon", () => {
 			);
 			const { sessions } = await sendRpcRequest(
 				join(fixture.configDir, "relay.sock"),
-				new ListDaemonSessions({ projectSlug: slug, scope: slug }),
+				{ _tag: "ListDaemonSessions", projectSlug: slug, scope: slug },
 			);
 			histories.push({
 				slug,
@@ -355,10 +349,11 @@ describe("Project provenance through the built daemon", () => {
 			expect(await browser.history(before.sessionId)).toEqual(before.history);
 			const { sessions } = await sendRpcRequest(
 				join(fixture.configDir, "relay.sock"),
-				new ListDaemonSessions({
+				{
+					_tag: "ListDaemonSessions",
 					projectSlug: before.slug,
 					scope: before.slug,
-				}),
+				},
 			);
 			expect(sessions).toEqual(before.sessions);
 			const manifest = provenance(fixture, before.slug);

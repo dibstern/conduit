@@ -160,7 +160,7 @@ export function discoverCapabilitiesEffect(
 			workspaceRoot,
 			options,
 		).pipe(
-			Effect.catchAll((err) =>
+			Effect.catch((err) =>
 				Effect.sync(() => {
 					log.warn(
 						`Capability probe failed; using fallback model list: ${err instanceof Error ? err.message : err}`,
@@ -238,6 +238,6 @@ export function expectedApiModelIdEffect(
 				probe.models,
 			),
 		),
-		Effect.catchAll(() => Effect.succeed(undefined)),
+		Effect.catch(() => Effect.succeed(undefined)),
 	);
 }

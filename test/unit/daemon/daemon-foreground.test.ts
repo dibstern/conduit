@@ -9,15 +9,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import {
-	AddInstance,
-	GetInstanceStatus,
-	GetInstances,
-	RemoveInstance,
-	StartInstance,
-	StopInstance,
-	UpdateInstance,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 
@@ -174,10 +166,10 @@ describe("startForegroundDaemon", () => {
 				expect.objectContaining({ id: "claude", driver: "claude" }),
 			]);
 			expect(requests).toEqual([]);
-			await sendRpcRequest(
-				socketPath,
-				new StartInstance({ instanceId: "opencode" }),
-			);
+			await sendRpcRequest(socketPath, {
+				_tag: "StartInstance",
+				instanceId: "opencode",
+			});
 			await vi.waitFor(() => {
 				expect(daemon.getInstances()).toEqual([
 					expect.objectContaining({
@@ -230,10 +222,10 @@ describe("startForegroundDaemon", () => {
 		});
 
 		try {
-			await sendRpcRequest(
-				socketPath,
-				new StartInstance({ instanceId: "opencode" }),
-			);
+			await sendRpcRequest(socketPath, {
+				_tag: "StartInstance",
+				instanceId: "opencode",
+			});
 			await vi.waitFor(() => {
 				expect(daemon.getInstances()).toEqual([
 					expect.objectContaining({
@@ -285,15 +277,13 @@ describe("startForegroundDaemon", () => {
 		});
 
 		try {
-			const addResult = await sendRpcRequest(
-				socketPath,
-				new AddInstance({
-					name: "Alt Provider",
-					port: 4555,
-					managed: false,
-					url: "http://127.0.0.1:4555",
-				}),
-			);
+			const addResult = await sendRpcRequest(socketPath, {
+				_tag: "AddInstance",
+				name: "Alt Provider",
+				port: 4555,
+				managed: false,
+				url: "http://127.0.0.1:4555",
+			});
 			const added = addResult.instances.find(
 				(instance) => instance.id === addResult.addedInstanceId,
 			);
@@ -308,14 +298,12 @@ describe("startForegroundDaemon", () => {
 				status: "starting",
 			});
 
-			const updateResult = await sendRpcRequest(
-				socketPath,
-				new UpdateInstance({
-					instanceId: added.id,
-					name: "Renamed Provider",
-					port: 4556,
-				}),
-			);
+			const updateResult = await sendRpcRequest(socketPath, {
+				_tag: "UpdateInstance",
+				instanceId: added.id,
+				name: "Renamed Provider",
+				port: 4556,
+			});
 			expect(
 				updateResult.instances.find((instance) => instance.id === added.id),
 			).toMatchObject({
@@ -324,12 +312,10 @@ describe("startForegroundDaemon", () => {
 				port: 4556,
 			});
 
-			const stopResult = await sendRpcRequest(
-				socketPath,
-				new StopInstance({
-					instanceId: added.id,
-				}),
-			);
+			const stopResult = await sendRpcRequest(socketPath, {
+				_tag: "StopInstance",
+				instanceId: added.id,
+			});
 			expect(stopResult.instances).toEqual(
 				expect.arrayContaining([
 					expect.objectContaining({ id: added.id, status: "stopped" }),
@@ -337,18 +323,18 @@ describe("startForegroundDaemon", () => {
 				]),
 			);
 
-			const statusResult = await sendRpcRequest(
-				socketPath,
-				new GetInstanceStatus({
-					instanceId: added.id,
-				}),
-			);
+			const statusResult = await sendRpcRequest(socketPath, {
+				_tag: "GetInstanceStatus",
+				instanceId: added.id,
+			});
 			expect(statusResult.instance).toMatchObject({
 				id: added.id,
 				status: "stopped",
 			});
 
-			const listResult = await sendRpcRequest(socketPath, new GetInstances({}));
+			const listResult = await sendRpcRequest(socketPath, {
+				_tag: "GetInstances",
+			});
 			expect(listResult.instances).toEqual(
 				expect.arrayContaining([
 					expect.objectContaining({
@@ -360,12 +346,10 @@ describe("startForegroundDaemon", () => {
 				]),
 			);
 
-			const removeResult = await sendRpcRequest(
-				socketPath,
-				new RemoveInstance({
-					instanceId: added.id,
-				}),
-			);
+			const removeResult = await sendRpcRequest(socketPath, {
+				_tag: "RemoveInstance",
+				instanceId: added.id,
+			});
 			expect(removeResult.instances).toEqual([
 				expect.objectContaining({ id: "claude", driver: "claude" }),
 			]);

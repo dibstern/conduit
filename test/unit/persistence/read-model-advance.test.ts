@@ -7,8 +7,8 @@ import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Effect, Exit, Layer, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, it } from "vitest";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -41,7 +41,7 @@ import {
 } from "../../helpers/mock-factories.js";
 
 const recordingBus = (advances: ReadModelAdvance[]) =>
-	Layer.succeed(SessionEventBusTag, {
+	Layer.succeed(SessionEventBusTag)({
 		publish: () => Effect.void,
 		publishAdvance: (advance) => Effect.sync(() => void advances.push(advance)),
 		subscribe: () => Effect.succeed(Stream.empty),
@@ -77,10 +77,10 @@ const withPersistence = async <A>(
 					Layer.mergeAll(
 						persistence,
 						bus,
-						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-						Layer.succeed(ConfigTag, makeMockConfig()),
-						Layer.succeed(LoggerTag, makeMockLogger()),
-						Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+						Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+						Layer.succeed(ConfigTag)(makeMockConfig()),
+						Layer.succeed(LoggerTag)(makeMockLogger()),
+						Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 					),
 				),
 				Effect.orDie,
@@ -683,7 +683,7 @@ it("a write body cannot announce rows its own rollback took back", async () => {
 								return yield* Effect.fail("inner failed" as const);
 							}),
 						)
-						.pipe(Effect.catchAll(() => Effect.void)),
+						.pipe(Effect.catch(() => Effect.void)),
 				),
 			);
 

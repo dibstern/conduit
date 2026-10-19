@@ -22,7 +22,7 @@ describe("streaming cost through the fake Claude process", () => {
 			const cursor = harness.rpcDiagnostics.wireFrames.length;
 			const finalText = responseChunks("streaming-cost").join("");
 			const submitted = await Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId,
 					originId: browser.originId,
 					inputId: randomUUID(),

@@ -107,7 +107,7 @@ export const makeClaudeUsageReader = (
 					}),
 				closeClaudeEmptyQuery,
 			).pipe(
-				Effect.catchAll((error) => Effect.succeed(usageFailure(error, stderr))),
+				Effect.catch((error) => Effect.succeed(usageFailure(error, stderr))),
 			);
 		}),
 });

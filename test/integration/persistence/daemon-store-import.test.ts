@@ -11,8 +11,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import Database from "better-sqlite3";
-import { Effect, Either, ManagedRuntime } from "effect";
+import { Effect, Result as Either, ManagedRuntime } from "effect";
 import { expect, it } from "vitest";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -79,7 +80,7 @@ it("imports complete projects without changing sources and rolls back rejected p
 		passed: false,
 	};
 	let walWriter: Database.Database | undefined;
-	const symlinkWriters: Database.Database[] = [];
+	const symlinkWriters: DatabaseSync[] = [];
 	writeImportArtifact(artifact, evidence);
 	try {
 		const configDir = join(root, "daemon");
@@ -216,9 +217,9 @@ it("imports complete projects without changing sources and rolls back rejected p
 			sessionId: "ses_beta",
 		});
 		const rejected = await Effect.runPromise(
-			Effect.either(importProjectStore(configDir, collision)),
+			Effect.result(importProjectStore(configDir, collision)),
 		);
-		expect(Either.isRight(rejected) && rejected.right).toMatchObject({
+		expect(Either.isSuccess(rejected) && rejected.success).toMatchObject({
 			outcome: "imported",
 			importedEvents: 0,
 			sharedSessions: [
@@ -260,9 +261,9 @@ it("imports complete projects without changing sources and rolls back rejected p
 		const lagging = await fixture(root, "lagging", { unprojected: true });
 		let stableCounts = storeTableCounts(destination);
 		const tail = await Effect.runPromise(
-			Effect.either(importProjectStore(configDir, lagging)),
+			Effect.result(importProjectStore(configDir, lagging)),
 		);
-		expect(Either.isRight(tail) && tail.right.outcome).toBe("imported");
+		expect(Either.isSuccess(tail) && tail.success.outcome).toBe("imported");
 		const recovered = new Database(destination, { readonly: true });
 		try {
 			expect(
@@ -278,9 +279,11 @@ it("imports complete projects without changing sources and rolls back rejected p
 		const seedConfig = join(root, "bad-seed");
 		mkdirSync(seedConfig);
 		const seedTail = await Effect.runPromise(
-			Effect.either(seedDaemonStore(seedConfig, lagging)),
+			Effect.result(seedDaemonStore(seedConfig, lagging)),
 		);
-		expect(Either.isRight(seedTail) && seedTail.right.outcome).toBe("seeded");
+		expect(Either.isSuccess(seedTail) && seedTail.success.outcome).toBe(
+			"seeded",
+		);
 
 		for (const mutation of [
 			"UPDATE provider_command_sessions SET last_sequence = 1",
@@ -297,15 +300,17 @@ it("imports complete projects without changing sources and rolls back rejected p
 				source.close();
 			}
 			const failed = await Effect.runPromise(
-				Effect.either(importProjectStore(configDir, unsupported)),
+				Effect.result(importProjectStore(configDir, unsupported)),
 			);
 			if (mutation.startsWith("UPDATE")) {
-				expect(Either.isLeft(failed) && failed.left.kind).toBe(
+				expect(Either.isFailure(failed) && failed.failure.kind).toBe(
 					"unsupported-source",
 				);
 				expect(storeTableCounts(destination)).toEqual(stableCounts);
 			} else {
-				expect(Either.isRight(failed) && failed.right.outcome).toBe("imported");
+				expect(Either.isSuccess(failed) && failed.success.outcome).toBe(
+					"imported",
+				);
 				stableCounts = storeTableCounts(destination);
 			}
 		}
@@ -319,12 +324,12 @@ it("imports complete projects without changing sources and rolls back rejected p
 			tombstoneDb.close();
 		}
 		const tombstone = await Effect.runPromise(
-			Effect.either(importProjectStore(configDir, tombstoneCollision)),
+			Effect.result(importProjectStore(configDir, tombstoneCollision)),
 		);
-		expect(Either.isLeft(tombstone)).toBe(true);
-		if (Either.isLeft(tombstone)) {
-			expect(tombstone.left).toBeInstanceOf(DaemonStoreImportError);
-			expect(tombstone.left.kind).toBe("collision");
+		expect(Either.isFailure(tombstone)).toBe(true);
+		if (Either.isFailure(tombstone)) {
+			expect(tombstone.failure).toBeInstanceOf(DaemonStoreImportError);
+			expect(tombstone.failure.kind).toBe("collision");
 		}
 		expect(storeTableCounts(destination)).toEqual(stableCounts);
 		const orphanCollision = await fixture(root, "orphan-collision");
@@ -339,9 +344,9 @@ it("imports complete projects without changing sources and rolls back rejected p
 			orphanDb.close();
 		}
 		const orphan = await Effect.runPromise(
-			Effect.either(importProjectStore(configDir, orphanCollision)),
+			Effect.result(importProjectStore(configDir, orphanCollision)),
 		);
-		expect(Either.isRight(orphan) && orphan.right).toMatchObject({
+		expect(Either.isSuccess(orphan) && orphan.success).toMatchObject({
 			outcome: "imported",
 			sharedSessions: ["ses_beta"],
 		});
@@ -362,9 +367,9 @@ it("imports complete projects without changing sources and rolls back rejected p
 		}
 		const retainedCounts = storeTableCounts(destination);
 		const retained = await Effect.runPromise(
-			Effect.either(importProjectStore(configDir, retainedCollision)),
+			Effect.result(importProjectStore(configDir, retainedCollision)),
 		);
-		expect(Either.isLeft(retained) && retained.left.kind).toBe(
+		expect(Either.isFailure(retained) && retained.failure.kind).toBe(
 			"unsupported-source",
 		);
 		expect(storeTableCounts(destination)).toEqual(retainedCounts);
@@ -442,9 +447,9 @@ it("imports complete projects without changing sources and rolls back rejected p
 			const source = await fixture(root, projectId, {
 				large: projectId === "symlink-seed",
 			});
-			const writer = new Database(source.sourcePath);
+			const writer = new DatabaseSync(source.sourcePath);
 			symlinkWriters.push(writer);
-			writer.pragma("wal_autocheckpoint = 0");
+			writer.exec("PRAGMA wal_autocheckpoint = 0");
 			writer.exec("BEGIN");
 			writer.prepare("SELECT COUNT(*) FROM events").get();
 			const runtime = ManagedRuntime.make(
@@ -473,9 +478,13 @@ it("imports complete projects without changing sources and rolls back rejected p
 			// Empty optimizer statistics force optimize to consider this attached
 			// source. An importer must never try to ANALYZE a read-only source.
 			writer.exec("COMMIT");
-			writer.exec(
-				"ANALYZE; DELETE FROM sqlite_stat1; DELETE FROM sqlite_stat4;",
-			);
+			writer.exec("ANALYZE; DELETE FROM sqlite_stat1;");
+			if (
+				writer
+					.prepare("SELECT 1 FROM sqlite_master WHERE name = 'sqlite_stat4'")
+					.get()
+			)
+				writer.exec("DELETE FROM sqlite_stat4;");
 			expect(statSync(`${source.sourcePath}-wal`).size).toBeGreaterThan(0);
 			const mainOnlyPath = join(root, `${projectId}-main-only.db`);
 			copyFileSync(source.sourcePath, mainOnlyPath);
@@ -582,9 +591,9 @@ it("imports complete projects without changing sources and rolls back rejected p
 		}
 		const epsilon = await fixture(root, "epsilon");
 		const destTail = await Effect.runPromise(
-			Effect.either(importProjectStore(configDir, epsilon)),
+			Effect.result(importProjectStore(configDir, epsilon)),
 		);
-		expect(Either.isLeft(destTail) && destTail.left.kind).toBe(
+		expect(Either.isFailure(destTail) && destTail.failure.kind).toBe(
 			"unprojected-tail",
 		);
 		expect(storeTableCounts(destination)).toEqual(stableCounts);

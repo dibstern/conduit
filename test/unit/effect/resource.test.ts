@@ -1,5 +1,6 @@
 import { describe, it } from "@effect/vitest";
-import { Duration, Effect, TestClock } from "effect";
+import { Duration, Effect } from "effect";
+import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 
 import {

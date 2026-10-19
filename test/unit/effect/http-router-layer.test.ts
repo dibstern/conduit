@@ -64,7 +64,7 @@ const startServer = (handler: {
 	) => Promise<void>;
 }) =>
 	Effect.acquireRelease(
-		Effect.async<{ readonly server: Server; readonly port: number }>(
+		Effect.callback<{ readonly server: Server; readonly port: number }>(
 			(resume) => {
 				const server = createServer((req, res) => {
 					void handler.handleRequest(req, res);
@@ -76,7 +76,7 @@ const startServer = (handler: {
 			},
 		),
 		({ server }) =>
-			Effect.async<void>((resume) => {
+			Effect.callback<void>((resume) => {
 				server.close(() => resume(Effect.void));
 			}),
 	);
@@ -93,7 +93,7 @@ const makeStaticDir = Effect.acquireRelease(
 		}),
 );
 
-const daemonHandleStub = Layer.succeed(DaemonHandleTag, {
+const daemonHandleStub = Layer.succeed(DaemonHandleTag)({
 	port: Effect.succeed(2633),
 	onboardingPort: Effect.succeed(null),
 	saveProject: () => Effect.die("unused"),
@@ -169,7 +169,7 @@ const makeDaemonRouterLayer = (
 			}),
 		),
 		Layer.provideMerge(
-			Layer.succeed(TlsCertTag, {
+			Layer.succeed(TlsCertTag)({
 				certs: null,
 				caRootPath: null,
 				caCertDer: options.caCertDer ?? null,
@@ -184,7 +184,7 @@ const makeDaemonRouterLayer = (
 			),
 		),
 		Layer.provideMerge(
-			Layer.succeed(RelayCacheTag, {
+			Layer.succeed(RelayCacheTag)({
 				get: () => Effect.die("daemon project listing must not start relays"),
 				peek: (slug: string) => {
 					const snapshot = options.relaySnapshots?.get(slug);
@@ -198,7 +198,7 @@ const makeDaemonRouterLayer = (
 			}),
 		),
 		Layer.provideMerge(
-			Layer.succeed(PushManagerTag, {
+			Layer.succeed(PushManagerTag)({
 				broadcast: () => Effect.void,
 				subscribe: () => Effect.void,
 				unsubscribe: () => Effect.void,
@@ -225,7 +225,7 @@ const makeDaemonRouterLayer = (
 	);
 
 describe("makeDaemonHttpRouterLive", () => {
-	it.scoped("serves daemon CA DER material from TlsCertTag", () =>
+	it.effect("serves daemon CA DER material from TlsCertTag", () =>
 		Effect.gen(function* () {
 			const staticDir = yield* makeStaticDir;
 			const caPayload = Buffer.from("daemon-router-ca-der");
@@ -253,7 +253,7 @@ describe("makeDaemonHttpRouterLive", () => {
 		}),
 	);
 
-	it.scoped("serves nested SSE health from the daemon status response", () =>
+	it.effect("serves nested SSE health from the daemon status response", () =>
 		Effect.gen(function* () {
 			const staticDir = yield* makeStaticDir;
 			const routerLayer = makeDaemonRouterLayer(staticDir, { projects: [] });
@@ -278,7 +278,7 @@ describe("makeDaemonHttpRouterLive", () => {
 			}).pipe(Effect.provide(Layer.fresh(routerLayer)));
 		}),
 	);
-	it.scoped(
+	it.effect(
 		"serves daemon project list from Effect-owned registry and relay snapshots",
 		() =>
 			Effect.gen(function* () {
@@ -375,7 +375,7 @@ describe("makeDaemonHttpRouterLive", () => {
 			}),
 	);
 
-	it.scoped("serves the root SPA and reads daemon-owned project status", () =>
+	it.effect("serves the root SPA and reads daemon-owned project status", () =>
 		Effect.gen(function* () {
 			const staticDir = yield* makeStaticDir;
 			const routerLayer = makeDaemonRouterLayer(staticDir, {
@@ -430,7 +430,7 @@ describe("makeDaemonHttpRouterLive", () => {
 		}),
 	);
 
-	it.scoped("serves push routes from the Effect-owned push manager", () =>
+	it.effect("serves push routes from the Effect-owned push manager", () =>
 		Effect.gen(function* () {
 			const staticDir = yield* makeStaticDir;
 			const added: Array<{

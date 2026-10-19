@@ -141,7 +141,7 @@ describe("smart default", () => {
 							}),
 							DaemonEventBusLive,
 							ConfigPersistenceNoopLive,
-							Layer.succeed(InstanceHealthCheckTag, {
+							Layer.succeed(InstanceHealthCheckTag)({
 								check: () => Effect.succeed(true),
 							}),
 						),

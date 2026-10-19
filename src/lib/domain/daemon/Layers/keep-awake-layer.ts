@@ -1,18 +1,18 @@
 // Each keep-awake child owns a scope attached to the daemon's layer scope.
 
-import { Command, CommandExecutor } from "@effect/platform";
 import {
 	Context,
 	Effect,
-	Either,
-	ExecutionStrategy,
 	Exit,
 	Layer,
 	Option,
 	Ref,
+	Result,
 	Scope,
+	Semaphore,
 	Stream,
 } from "effect";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import {
 	type KeepAwakeOptions,
 	resolveKeepAwakeCommand,
@@ -28,28 +28,28 @@ interface KeepAwakeService {
 	isSupported: () => Effect.Effect<boolean>;
 }
 
-export class KeepAwakeTag extends Context.Tag("KeepAwake")<
+export class KeepAwakeTag extends Context.Service<
 	KeepAwakeTag,
 	KeepAwakeService
->() {}
+>()("KeepAwake") {}
 
 export const KeepAwakeLive = (
 	config?: KeepAwakeOptions & { enabled?: boolean },
 ) =>
-	Layer.scoped(
+	Layer.effect(
 		KeepAwakeTag,
 		Effect.gen(function* () {
-			const executor = yield* CommandExecutor.CommandExecutor;
+			const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 			const scope = yield* Effect.scope;
-			const lock = yield* Effect.makeSemaphore(1);
+			const lock = yield* Semaphore.make(1);
 			const enabled = yield* Ref.make(false);
 			const resolved = yield* Ref.make(
-				Option.fromNullable(resolveKeepAwakeCommand(config)),
+				Option.fromNullishOr(resolveKeepAwakeCommand(config)),
 			);
 			const current = yield* Ref.make<
 				Option.Option<{
-					scope: Scope.CloseableScope;
-					process: CommandExecutor.Process;
+					scope: Scope.Closeable;
+					process: ChildProcessSpawner.ChildProcessHandle;
 				}>
 			>(Option.none());
 
@@ -60,7 +60,7 @@ export const KeepAwakeLive = (
 						onSome: (child) => child.process.isRunning,
 					}),
 				),
-				Effect.catchAll(() => Effect.succeed(false)),
+				Effect.catch(() => Effect.succeed(false)),
 			);
 			const stop = Effect.gen(function* () {
 				const child = yield* Ref.getAndSet(current, Option.none());
@@ -75,33 +75,30 @@ export const KeepAwakeLive = (
 				}
 				const { command: executable, args } = command.value;
 				const commandLine = [executable, ...args].join(" ");
-				const childScope = yield* Scope.fork(
-					scope,
-					ExecutionStrategy.sequential,
-				);
-				const result = yield* executor
-					.start(
-						Command.make(executable, ...args).pipe(
-							Command.stdin(Stream.empty),
-							Command.stdout("inherit"),
-							Command.stderr("inherit"),
-						),
+				const childScope = yield* Scope.fork(scope, "sequential");
+				const result = yield* spawner
+					.spawn(
+						ChildProcess.make(executable, args, {
+							stdin: Stream.empty,
+							stdout: "inherit",
+							stderr: "inherit",
+						}),
 					)
-					.pipe(Scope.extend(childScope), Effect.either);
-				if (Either.isLeft(result)) {
+					.pipe(Scope.provide(childScope), Effect.result);
+				if (Result.isFailure(result)) {
 					yield* Scope.close(childScope, Exit.void);
 					yield* Effect.logWarning(
 						`Could not start keep-awake command: ${commandLine}`,
-						result.left,
+						result.failure,
 					);
 					return;
 				}
-				const child = result.right;
+				const child = result.success;
 				// Kill the group even if its leader exited or ignores SIGTERM.
 				// This finalizer runs before the executor's own release waits for exit.
 				yield* Scope.addFinalizer(
 					childScope,
-					child.kill("SIGKILL").pipe(Effect.ignore),
+					child.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore),
 				);
 				yield* Ref.set(
 					current,
@@ -166,7 +163,7 @@ export const KeepAwakeLive = (
 						Effect.gen(function* () {
 							yield* Ref.set(
 								resolved,
-								Option.fromNullable(
+								Option.fromNullishOr(
 									resolveKeepAwakeCommand({ command, args: [...args] }),
 								),
 							);

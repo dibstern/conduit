@@ -11,9 +11,9 @@ import {
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect, Schema } from "effect";
+import { RpcClient, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import { describe, expect, it, vi } from "vitest";
 import {
 	PtyInfoSchema,
@@ -126,8 +126,8 @@ import {existsSync,readFileSync,writeFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url);
 const {Effect,Schema}=require(${JSON.stringify(requireFromHere.resolve("effect"))});
-const {Socket}=require(${JSON.stringify(requireFromHere.resolve("@effect/platform"))});
-const {RpcClient,RpcSerialization}=require(${JSON.stringify(requireFromHere.resolve("@effect/rpc"))});
+const {Socket}=require(${JSON.stringify(requireFromHere.resolve("effect/socket"))});
+const {RpcClient,RpcSerialization}=require(${JSON.stringify(requireFromHere.resolve("effect/rpc"))});
 __setProbeOverrideForTesting(async()=>({models:[],commands:[],agents:[]}));
 test('actual replay fixture worker',async({harness})=>{
  const browser=new TestWsClient('ws://127.0.0.1:'+harness.relayPort+'/rpc?p=e2e-replay',harness.stack.initialSessionId);

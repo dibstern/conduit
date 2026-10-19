@@ -39,7 +39,7 @@ describe("Self-constructing service layers", () => {
 		PtyManagerStateLive,
 	);
 
-	it.scoped("composes all Effect-native state layers without error", () =>
+	it.effect("composes all Effect-native state layers without error", () =>
 		Effect.gen(function* () {
 			const registryRef = yield* SessionRegistryStateTag;
 			const registry = yield* Ref.get(registryRef);
@@ -47,7 +47,7 @@ describe("Self-constructing service layers", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("PtyManagerStateTag starts empty", () =>
+	it.effect("PtyManagerStateTag starts empty", () =>
 		Effect.gen(function* () {
 			const ref = yield* PtyManagerStateTag;
 			const state = yield* Ref.get(ref);
@@ -55,7 +55,7 @@ describe("Self-constructing service layers", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("OverridesStateTag starts with empty sessions Map", () =>
+	it.effect("OverridesStateTag starts with empty sessions Map", () =>
 		Effect.gen(function* () {
 			const ref = yield* OverridesStateTag;
 			const state = yield* Ref.get(ref);
@@ -63,7 +63,7 @@ describe("Self-constructing service layers", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("SessionManagerStateTag starts empty", () =>
+	it.effect("SessionManagerStateTag starts empty", () =>
 		Effect.gen(function* () {
 			const ref = yield* SessionManagerStateTag;
 			const state = yield* Ref.get(ref);

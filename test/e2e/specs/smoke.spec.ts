@@ -42,7 +42,8 @@ test.describe("E2E Smoke Test", () => {
 				const message = parse(frame.payload);
 				if (
 					message["_tag"] === "Defect" ||
-					(requestId !== undefined && message["requestId"] === requestId)
+					(requestId !== undefined &&
+						String(message["requestId"]) === requestId)
 				) {
 					attachReplies.push(message);
 				}
@@ -62,7 +63,7 @@ test.describe("E2E Smoke Test", () => {
 			.toEqual([
 				{
 					_tag: "Exit",
-					requestId: expect.any(String),
+					requestId: expect.anything(),
 					exit: {
 						_tag: "Success",
 						value: { projectSlug: "e2e-replay", sessionSlug: "e2e-replay" },

@@ -221,7 +221,7 @@ export class RunnerSendJournal {
 					retryable: false,
 				}),
 			});
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const existing = this.records.get(filename);
 			if (!existing && this.retained.has(filename))
 				return yield* Effect.fail(uncertain);

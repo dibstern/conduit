@@ -1,8 +1,8 @@
 // Each projector's `project` method is an Effect program over @effect/sql SqlClient.
 
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Effect } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import type { ReadModelCollection } from "../../contracts/read-model-advance.js";
 import { persistedTurnState } from "../../contracts/turn-phase.js";
 import { CLAUDE_WORKTREE_EVENTS } from "../../session/claude-worktree-state.js";

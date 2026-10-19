@@ -1,14 +1,14 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import {
 	Context,
 	Deferred,
 	Effect,
-	FiberRef,
 	Layer,
 	Ref,
 	Schema,
+	Semaphore,
 } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
@@ -99,9 +99,10 @@ export interface ProviderRuntimeIngestion {
 	readonly drain: () => Effect.Effect<void>;
 }
 
-export class ProviderRuntimeIngestionTag extends Context.Tag(
-	"ProviderRuntimeIngestion",
-)<ProviderRuntimeIngestionTag, ProviderRuntimeIngestion>() {}
+export class ProviderRuntimeIngestionTag extends Context.Service<
+	ProviderRuntimeIngestionTag,
+	ProviderRuntimeIngestion
+>()("ProviderRuntimeIngestion") {}
 
 export interface ProviderRuntimeRelayPublisher {
 	readonly publish: (
@@ -150,7 +151,7 @@ export const makeProviderRuntimeIngestionLive = (
 			const mapperStateRef = yield* Ref.make(
 				emptyProviderRuntimeDomainMapperState,
 			);
-			const ingestSemaphore = yield* Effect.makeSemaphore(1);
+			const ingestSemaphore = yield* Semaphore.make(1);
 
 			const ingestBatch = (
 				events: readonly ProviderRuntimeEvent[],
@@ -189,10 +190,8 @@ export const makeProviderRuntimeIngestionLive = (
 					);
 					return yield* ingestSemaphore.withPermits(1)(
 						Effect.gen(function* () {
-							const context = yield* FiberRef.get(currentRunnerOutput);
-							const permissionReply = yield* FiberRef.get(
-								currentRunnerPermissionReply,
-							);
+							const context = yield* currentRunnerOutput;
+							const permissionReply = yield* currentRunnerPermissionReply;
 							const receipt =
 								context && !context.consumed ? context : undefined;
 							const currentState = yield* Ref.get(mapperStateRef);
@@ -278,7 +277,7 @@ export const makeProviderRuntimeIngestionLive = (
 										const [session] = yield* sql<{ provider: string }>`
 											SELECT provider FROM sessions WHERE id = ${event.sessionId}
 										`.pipe(
-											Effect.catchAll((error) =>
+											Effect.catch((error) =>
 												Effect.logWarning(
 													"Could not refresh usage after turn",
 													error,
@@ -375,7 +374,7 @@ export const makeProviderRuntimeIngestionLive = (
 													// deletion too. Keep its tombstone for parentless late events.
 													event = {
 														...event,
-														eventId: Schema.decodeSync(EventId)(
+														eventId: Schema.decodeUnknownSync(EventId)(
 															`evt_parent_deleted_session_${event.sessionId}`,
 														),
 														type: "session.deleted",
@@ -548,7 +547,7 @@ export const makeProviderRuntimeIngestionLive = (
 								{ discard: true },
 							).pipe(
 								Effect.provide(services),
-								Effect.catchAllCause((cause) =>
+								Effect.catchCause((cause) =>
 									Effect.logWarning(
 										"failed to announce transient status",
 										cause,

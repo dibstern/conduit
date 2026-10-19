@@ -23,6 +23,7 @@ export interface SessionStateProjectionNotifier {
 	) => Effect.Effect<void>;
 }
 
-export class SessionStateProjectionNotifierTag extends Context.Tag(
-	"SessionStateProjectionNotifier",
-)<SessionStateProjectionNotifierTag, SessionStateProjectionNotifier>() {}
+export class SessionStateProjectionNotifierTag extends Context.Service<
+	SessionStateProjectionNotifierTag,
+	SessionStateProjectionNotifier
+>()("SessionStateProjectionNotifier") {}

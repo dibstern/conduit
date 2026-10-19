@@ -4,21 +4,19 @@ import type { InstanceMgmtTag } from "../Services/management-service.js";
 // Creates a scoped Layer that runs startup and keeps alive until interrupted.
 //
 // Design points:
-//   - Layer.scopedDiscard — side-effect-only Layer (no output service)
+//   - Layer.effectDiscard — side-effect-only Layer (no output service)
 //   - Effect.tapDefect — logs defects without swallowing them
 //   - Effect.never — keeps the fiber alive until SIGINT/SIGTERM
 //   - Layer.provide(daemonLayer) — provides all deps to the program
 
-import type { Fiber } from "effect";
 import {
 	Context,
 	Data,
 	Effect,
+	FiberSet,
 	Layer,
-	RuntimeFlags,
-	RuntimeFlagsPatch,
+	References,
 	Schedule,
-	Supervisor,
 } from "effect";
 import { runStartupSequence } from "../Services/daemon-startup.js";
 import { OpenCodeUnavailableError } from "../Services/opencode-smart-default.js";
@@ -26,22 +24,20 @@ import { OpenCodeUnavailableError } from "../Services/opencode-smart-default.js"
 export { resolveDefaultStaticDir } from "../Services/daemon-static-dir.js";
 export { OpenCodeUnavailableError };
 
-// Context.Tag for the daemon-wide Supervisor.track instance.
-// Allows any fiber in the daemon scope to query tracked fiber diagnostics.
-
-export class SupervisorTag extends Context.Tag("DaemonSupervisor")<
+// Explicit fiber tracking replaces the removed ambient supervisor.
+export class SupervisorTag extends Context.Service<
 	SupervisorTag,
-	Supervisor.Supervisor<Array<Fiber.RuntimeFiber<unknown, unknown>>>
->() {}
+	FiberSet.FiberSet<unknown, unknown>
+>()("DaemonSupervisor") {}
 
 /**
- * Live Layer that creates a Supervisor.track instance and provides it
+ * Live Layer that creates a scoped FiberSet and provides it
  * via SupervisorTag. Use `Layer.provide(makeSupervisorLive)` to make
  * the supervisor available to the daemon program.
  */
 export const makeSupervisorLive: Layer.Layer<SupervisorTag> = Layer.effect(
 	SupervisorTag,
-	Supervisor.track,
+	FiberSet.make(),
 );
 
 // Minimal: lists only the Tags used by the current startup sequence.
@@ -50,9 +46,10 @@ export const makeSupervisorLive: Layer.Layer<SupervisorTag> = Layer.effect(
 export type DaemonDeps = DaemonStateTag | InstanceMgmtTag;
 
 /** Exponential backoff with 3 retries for startup. */
-export const startupRetry = Schedule.exponential("1 second").pipe(
-	Schedule.intersect(Schedule.recurs(3)),
-);
+export const startupRetry = Schedule.max([
+	Schedule.exponential("1 second"),
+	Schedule.recurs(3),
+]);
 
 // export const sessionPrefetch: Effect.Effect<void, never, ...> = ...
 
@@ -71,13 +68,8 @@ export const startupRetry = Schedule.exponential("1 second").pipe(
 export const makeDaemonProgramLayer = (
 	daemonLayer: Layer.Layer<DaemonDeps>,
 ): Layer.Layer<never> =>
-	Layer.scopedDiscard(
+	Layer.effectDiscard(
 		Effect.gen(function* () {
-			// Enable cooperative yielding so long-running effects yield to siblings
-			yield* Effect.withRuntimeFlagsPatchScoped(
-				RuntimeFlagsPatch.enable(RuntimeFlags.CooperativeYielding),
-			);
-
 			// Run startup sequence with retry
 			yield* runStartupSequence.pipe(
 				Effect.retry(startupRetry),
@@ -86,7 +78,10 @@ export const makeDaemonProgramLayer = (
 
 			yield* Effect.logInfo("Daemon started — awaiting interruption");
 			yield* Effect.never; // Keep alive until interrupted
-		}).pipe(Effect.annotateLogs("component", "daemon-main")),
+		}).pipe(
+			Effect.provideService(References.PreventSchedulerYield, false),
+			Effect.annotateLogs("component", "daemon-main"),
+		),
 	).pipe(Layer.provide(Layer.merge(daemonLayer, makeSupervisorLive)));
 
 export {

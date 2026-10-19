@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Array as Arr, Effect } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import {
 	type createSessionGitCache,
 	withCachedSessionGit,
@@ -189,7 +189,7 @@ export const makeSessionRows = (
 				>,
 			): Effect.Effect<
 				Omit<
-					Effect.Effect.Success<ReturnType<ReadQueryEffect["readSessionList"]>>,
+					Effect.Success<ReturnType<ReadQueryEffect["readSessionList"]>>,
 					"rows"
 				> & {
 					readonly rows: readonly {

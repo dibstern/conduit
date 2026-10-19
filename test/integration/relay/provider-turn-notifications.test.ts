@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
-import { Chunk, Effect, Layer, PubSub, Queue } from "effect";
+import { Effect, Layer, PubSub } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
 import {
 	AlertLedgerLive,
@@ -33,7 +33,7 @@ it.each([
 		expired: [],
 	}));
 	const persistence = makePersistenceEffectLayer(":memory:", "test-project");
-	const layer = Layer.unwrapEffect(
+	const layer = Layer.unwrap(
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const alerts = yield* AlertsTag;
@@ -76,7 +76,9 @@ it.each([
 					error: "failed",
 				}),
 			);
-			return Chunk.toArray(yield* Queue.takeAll(subscribed));
+			return [
+				...(yield* PubSub.takeUpTo(subscribed, Number.POSITIVE_INFINITY)),
+			];
 		}).pipe(Effect.scoped, Effect.provide(layer)),
 	);
 	expect(alerts).toEqual([

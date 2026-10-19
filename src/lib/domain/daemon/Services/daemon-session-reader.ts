@@ -1,6 +1,6 @@
 import { statSync } from "node:fs";
-import { SqlClient } from "@effect/sql";
 import { Data, Effect, Exit, Layer, Option } from "effect";
+import { SqlClient } from "effect/sql";
 import * as Failure from "../../../effect/failure-classification.js";
 import {
 	type createSessionGitCache,

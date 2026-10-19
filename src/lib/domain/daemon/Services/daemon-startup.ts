@@ -7,7 +7,7 @@ import { InstanceMgmtTag } from "./management-service.js";
 // Error isolation policy:
 //   - Effect.catchTag for specific expected errors (tagged)
 //   - Programming defects (untagged) propagate up
-//   - Effect.catchAll is NOT used
+//   - Effect.catch is NOT used
 
 import { Data, Effect, Ref } from "effect";
 import {

@@ -1,8 +1,8 @@
-import { type RpcClient, RpcTest } from "@effect/rpc";
-import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { type RpcClient, RpcTest } from "effect/rpc";
+import { SqlClient } from "effect/sql";
 import { afterEach, expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
@@ -117,15 +117,18 @@ const runTest = <E>(
 								orchestrationEngine: engine,
 								readQueryEffect,
 							}),
-							Layer.succeed(ReadQueryEffectTag, readQueryEffect),
+							Layer.succeed(ReadQueryEffectTag)(readQueryEffect),
 						),
 					),
 				),
+				{ local: true },
 			),
 		);
 	}).pipe(
 		Effect.scoped,
-		Effect.provide(SqliteClient.layer({ filename: ":memory:" })),
+		Effect.provide(SqliteClient.layer({ filename: ":memory:" }), {
+			local: true,
+		}),
 	);
 
 const seedMessage = (
@@ -526,21 +529,21 @@ describe("WsRpcServerLayer GetSessionSkills with SQLite", () => {
 								input: '{"tool":"Skill","name":"review"}',
 								at: 11,
 							});
-							const result = yield* Effect.either(
+							const result = yield* Effect.result(
 								client.GetSessionSkills({
 									sessionId: "session",
 								}),
 							);
-							expect(result._tag).toBe("Left");
-							if (result._tag === "Left") {
-								expect(result.left._tag).toBe("WsRpcError");
-								expect(result.left.message).toContain(
+							expect(result._tag).toBe("Failure");
+							if (result._tag === "Failure") {
+								expect(result.failure._tag).toBe("WsRpcError");
+								expect(result.failure.message).toContain(
 									"GetSessionSkills failed:",
 								);
-								expect(result.left.message).toContain(
+								expect(result.failure.message).toContain(
 									provider === "claude"
 										? "discovery unavailable"
-										: "UnknownException",
+										: "UnknownError",
 								);
 							}
 						}),

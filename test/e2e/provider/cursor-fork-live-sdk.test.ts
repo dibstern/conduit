@@ -14,10 +14,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
-import {
-	AddInstance,
-	ForkSessionForSession,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import {
 	cursorSessionStorePath,
 	readCursorSessionIdentity,
@@ -110,9 +107,11 @@ describe.skipIf(!RUN_SMOKE)("Cursor fork recall through the real SDK", () => {
 					},
 				});
 				evidence.serverPid = harness.generations[0]?.pid ?? null;
-				const { addedInstanceId } = await harness.requestRpc(
-					new AddInstance({ name: "Cursor fork live smoke", driver: "cursor" }),
-				);
+				const { addedInstanceId } = await harness.requestRpc({
+					_tag: "AddInstance",
+					name: "Cursor fork live smoke",
+					driver: "cursor",
+				});
 				if (!addedInstanceId) throw new Error("Missing Cursor account");
 				const browser = await harness.connect();
 				const sourceId = await browser.createSession(
@@ -145,12 +144,11 @@ describe.skipIf(!RUN_SMOKE)("Cursor fork recall through the real SDK", () => {
 				);
 				if (!sourceIdentity) throw new Error("Missing source agent identity");
 				evidence.sourceAgentId = sourceIdentity.agentId;
-				const { sessionId: forkId } = await harness.requestRpc(
-					new ForkSessionForSession({
-						originId: browser.originId,
-						sessionId: sourceId,
-					}),
-				);
+				const { sessionId: forkId } = await harness.requestRpc({
+					_tag: "ForkSession",
+					originId: browser.originId,
+					sessionId: sourceId,
+				});
 				evidence.forkSessionId = forkId;
 				expect(forkId).not.toBe(sourceId);
 				expect(evidence.recallPrompt).not.toContain(marker);

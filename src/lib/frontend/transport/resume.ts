@@ -101,17 +101,8 @@
 // the same place: the whole cause goes on as defects, because a cause that
 // killed us is not half a retryable thing.
 
-import type { RpcClientError } from "@effect/rpc/RpcClientError";
-import {
-	Chunk,
-	Data,
-	Duration,
-	Effect,
-	Option,
-	Ref,
-	Schema,
-	Stream,
-} from "effect";
+import { Data, Duration, Effect, Option, Ref, Schema, Stream } from "effect";
+import type { RpcClientError } from "effect/rpc/RpcClientError";
 import {
 	digestRows,
 	PartRemovalId,
@@ -462,11 +453,11 @@ export const resumeStream = <A extends object>(
 							return true;
 						}),
 					),
-					Stream.catchAllCause((cause): Stream.Stream<A, WsRpcError> => {
+					Stream.catchCause((cause): Stream.Stream<A, WsRpcError> => {
 						// A defect is nobody's contract, and it decides before anything
 						// else can be picked out of the cause. The rest goes with it: a
 						// cause that killed us is not half a retryable thing.
-						if (Chunk.isNonEmpty(Failure.defects(cause)))
+						if (Failure.defects(cause).length > 0)
 							return Stream.failCause(Failure.failuresAsDefects(cause));
 
 						// A suffix can only be decoded against the exact sent prefix,
@@ -474,8 +465,7 @@ export const resumeStream = <A extends object>(
 						// Ask the existing cold-start path for whole rows, even if the
 						// cursor claims they were delivered.
 						if (
-							Chunk.some(
-								Failure.failures(cause),
+							Failure.failures(cause).some(
 								(failure) =>
 									failure._tag === "DetailLengthMismatch" ||
 									failure._tag === "ResumeChecksumMismatch",
@@ -487,9 +477,11 @@ export const resumeStream = <A extends object>(
 									open: undefined,
 									seen: nothingSeen,
 								}).pipe(
-									Effect.tap(() => {
-										if (ledger !== undefined) clearLedger(ledger);
-									}),
+									Effect.tap(
+										Effect.sync(() => {
+											if (ledger !== undefined) clearLedger(ledger);
+										}),
+									),
 									Effect.as(reissue()),
 								),
 							);
@@ -497,11 +489,10 @@ export const resumeStream = <A extends object>(
 
 						// The server declining to serve this subscription is a domain
 						// failure, deterministic, and re-issuing it would loop.
-						const domain = Chunk.findFirst(
-							Failure.failures(cause),
+						const domain = Failure.failures(cause).find(
 							(failure): failure is WsRpcError => failure._tag === "WsRpcError",
 						);
-						if (Option.isSome(domain)) return Stream.fail(domain.value);
+						if (domain !== undefined) return Stream.fail(domain);
 
 						// What is left is transport class. An interruption is the
 						// ambiguous one: a torn-down socket and an unsubscribe look

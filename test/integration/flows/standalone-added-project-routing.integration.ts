@@ -8,7 +8,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Either, Option } from "effect";
+import { Effect, Result as Either, Option } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
@@ -72,9 +72,9 @@ describe("Integration: standalone added-project routing", () => {
 			expect(Option.isNone(initialOwner)).toBe(true);
 
 			const read = await client.rpcCall((c) =>
-				Effect.either(c.MarkSessionRead({ sessionId })),
+				Effect.result(c.MarkSessionRead({ sessionId })),
 			);
-			expect(Either.isRight(read)).toBe(true);
+			expect(Either.isSuccess(read)).toBe(true);
 		} finally {
 			await client.close();
 		}

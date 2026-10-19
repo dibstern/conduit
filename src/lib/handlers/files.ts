@@ -18,11 +18,11 @@ const loadGitignore = (directory?: string, startIfStopped = true) =>
 	Effect.gen(function* () {
 		const files = yield* OpenCodeFileServiceTag;
 		const ig = ignore();
-		const readResult = yield* Effect.either(
+		const readResult = yield* Effect.result(
 			files.read(".gitignore", directory, { startIfStopped }),
 		);
-		if (readResult._tag === "Right" && readResult.right.content) {
-			ig.add(readResult.right.content);
+		if (readResult._tag === "Success" && readResult.success.content) {
+			ig.add(readResult.success.content);
 		}
 		return ig;
 	});
@@ -81,7 +81,7 @@ export const getFileTreeEntries = (directory?: string) =>
 		const startedAt = yield* Clock.currentTimeMillis;
 		let currentPath = ".gitignore";
 
-		const walkResult = yield* Effect.either(
+		const walkResult = yield* Effect.result(
 			Effect.gen(function* () {
 				const ig = yield* loadGitignore(directory, false);
 				const queue: Array<{ dir: string; depth: number }> = [
@@ -124,9 +124,9 @@ export const getFileTreeEntries = (directory?: string) =>
 		);
 
 		const elapsed = (yield* Clock.currentTimeMillis) - startedAt;
-		if (walkResult._tag === "Left") {
-			log.warn(`Error walking directory: ${walkResult.left}`);
-		} else if (Option.isNone(walkResult.right)) {
+		if (walkResult._tag === "Failure") {
+			log.warn(`Error walking directory: ${walkResult.failure}`);
+		} else if (Option.isNone(walkResult.success)) {
 			log.warn(
 				`File tree deadline reached: ${JSON.stringify(currentPath)} after ${elapsed} ms`,
 			);

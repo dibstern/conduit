@@ -2,18 +2,17 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import {
 	Deferred,
 	Effect,
 	Exit,
 	Fiber,
-	FiberRef,
 	Layer,
 	ManagedRuntime,
 	Option,
 	Stream,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, expect, it } from "vitest";
 import { BUILD_ID } from "../../../../src/lib/build-id.js";
 import {
@@ -71,10 +70,10 @@ const terminalOutput = (id: string): SessionOutput => ({
 async function fixture(beforePublish: Effect.Effect<void> = Effect.void) {
 	const directory = mkdtempSync(join(tmpdir(), "conduit-runner-race-"));
 	const published: unknown[] = [];
-	const bus = Layer.succeed(SessionEventBusTag, {
+	const bus = Layer.succeed(SessionEventBusTag)({
 		publish: (events) =>
 			beforePublish.pipe(
-				Effect.zipRight(Effect.sync(() => void published.push(...events))),
+				Effect.andThen(Effect.sync(() => void published.push(...events))),
 			),
 		publishAdvance: () => Effect.void,
 		subscribe: () => Effect.succeed(Stream.empty),
@@ -105,7 +104,7 @@ async function fixture(beforePublish: Effect.Effect<void> = Effect.void) {
 	const closedPeers = new Set<ClaudeRunnerSocket>();
 	const frames: RunnerMessage[] = [];
 	let closing = false;
-	const fibers: Fiber.RuntimeFiber<void, unknown>[] = [];
+	const fibers: Fiber.Fiber<void, unknown>[] = [];
 	const spool = new RunnerSpool(join(directory, "runner.spool"));
 	const socketPath = join(directory, "runner.sock");
 	const server = createServer((socket) => {
@@ -193,7 +192,7 @@ it("acknowledges a durable terminal output while its event publication is still 
 	const release = await Effect.runPromise(Deferred.make<void>());
 	const f = await fixture(
 		Deferred.succeed(publishing, undefined).pipe(
-			Effect.zipRight(Deferred.await(release)),
+			Effect.andThen(Deferred.await(release)),
 		),
 	);
 	cleanups.push(async () => {
@@ -262,7 +261,7 @@ it("fires durable callbacks only for a claimed terminal receipt, never a fenced 
 	await f.runtime.runPromise(f.receipts.attach("runner", "replacement"));
 	const output = terminalOutput("claimed");
 	await f.runtime.runPromise(
-		f.ingest(output).pipe(Effect.locally(currentRunnerOutput, receipt)),
+		f.ingest(output).pipe(Effect.provideService(currentRunnerOutput, receipt)),
 	);
 	expect(callbacks).toBe(0);
 	expect(
@@ -275,12 +274,14 @@ it("fires durable callbacks only for a claimed terminal receipt, never a fenced 
 		committed: await f.runtime.runPromise(Deferred.make<void>()),
 	};
 	await f.runtime.runPromise(
-		f.ingest(output).pipe(Effect.locally(currentRunnerOutput, replacement)),
+		f
+			.ingest(output)
+			.pipe(Effect.provideService(currentRunnerOutput, replacement)),
 	);
 	expect(callbacks).toBe(1);
 	await f.runtime.runPromise(
 		f.ingest(output).pipe(
-			Effect.locally(currentRunnerOutput, {
+			Effect.provideService(currentRunnerOutput, {
 				...replacement,
 				consumed: false,
 				committed: await f.runtime.runPromise(Deferred.make<void>()),
@@ -298,7 +299,7 @@ it("does not acknowledge a rolled-back terminal transaction before its successfu
 	const releaseRetry = await Effect.runPromise(Deferred.make<void>());
 	const f = await fixture(
 		Deferred.succeed(publishing, undefined).pipe(
-			Effect.zipRight(Deferred.await(releasePublication)),
+			Effect.andThen(Deferred.await(releasePublication)),
 		),
 	);
 	cleanups.push(async () => {
@@ -374,8 +375,8 @@ it("fences a disconnected attachment before its pending event can commit", async
 	const output = eventOutput("overlap");
 	const first = await f.attach((event) =>
 		Deferred.succeed(entered, undefined).pipe(
-			Effect.zipRight(Deferred.await(release)),
-			Effect.zipRight(f.ingest(event)),
+			Effect.andThen(Deferred.await(release)),
+			Effect.andThen(f.ingest(event)),
 			Effect.ensuring(Deferred.succeed(staleFinished, undefined)),
 		),
 	);
@@ -418,7 +419,7 @@ it("accepts a sequence already durably appended without publishing it twice", as
 		consumed: false,
 	};
 	await f.runtime.runPromise(
-		f.ingest(output).pipe(Effect.locally(currentRunnerOutput, receipt)),
+		f.ingest(output).pipe(Effect.provideService(currentRunnerOutput, receipt)),
 	);
 	const duplicate = {
 		...receipt,
@@ -426,7 +427,9 @@ it("accepts a sequence already durably appended without publishing it twice", as
 		committed: await f.runtime.runPromise(Deferred.make<void>()),
 	};
 	const result = await f.runtime.runPromiseExit(
-		f.ingest(output).pipe(Effect.locally(currentRunnerOutput, duplicate)),
+		f
+			.ingest(output)
+			.pipe(Effect.provideService(currentRunnerOutput, duplicate)),
 	);
 	expect(Exit.isSuccess(result)).toBe(true);
 	expect(
@@ -515,7 +518,7 @@ it("fences a pending approval's later resolution after its ask receipt was consu
 				toolName: "Bash",
 				toolInput: { command: "pwd" },
 			})
-			.pipe(Effect.locally(currentRunnerOutput, receipt)),
+			.pipe(Effect.provideService(currentRunnerOutput, receipt)),
 	);
 	cleanups.push(async () => {
 		await f.runtime.runPromise(Fiber.interrupt(request));
@@ -544,14 +547,14 @@ it("fences later events inherited from a previous hello restoration", async () =
 	await f.attach(
 		undefined,
 		Effect.gen(function* () {
-			restored = yield* FiberRef.get(currentRunnerOutput);
+			restored = yield* currentRunnerOutput;
 		}),
 	);
 	await f.attach();
 	await f.runtime.runPromise(
 		f
 			.ingest(eventOutput("restored"))
-			.pipe(Effect.locally(currentRunnerOutput, restored)),
+			.pipe(Effect.provideService(currentRunnerOutput, restored)),
 	);
 	expect(
 		await f.runtime.runPromise(f.sql`SELECT event_id FROM events`),

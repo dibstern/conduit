@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Effect, Option, Schema } from "effect";
+import { SqlClient } from "effect/sql";
 import { SessionWorkspaceSchema } from "../contracts/session-workspace.js";
 import { daemonSessionGitCache } from "../git/session-git.js";
 import { deriveSessionSnooze } from "../persistence/effect/read-query-effect.js";
@@ -90,7 +90,7 @@ export const readPersistedAutoSettleFacts = (
 			for (const row of rows) {
 				if (row.workspace === null || row.settled_at !== null) continue;
 				const workspace = Schema.decodeUnknownOption(
-					Schema.parseJson(SessionWorkspaceSchema),
+					Schema.fromJsonString(SessionWorkspaceSchema),
 				)(row.workspace);
 				if (Option.isNone(workspace)) continue;
 				const directory = effectiveWorkingDirectory(

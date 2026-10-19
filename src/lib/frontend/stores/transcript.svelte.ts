@@ -1,5 +1,4 @@
 import { Effect, Fiber, Option, Schema, Stream } from "effect";
-import type { RuntimeFiber } from "effect/Fiber";
 import { ProjectSetupStateSchema } from "../../contracts/project-setup.js";
 import {
 	PartRemovalId,
@@ -759,7 +758,7 @@ function transcriptView(): {
 		issue: () => void;
 	} | null = null;
 	let generation = 0;
-	let fiber: RuntimeFiber<void, unknown> | null = null;
+	let fiber: Fiber.Fiber<void, unknown> | null = null;
 	let pendingFrame: number | ReturnType<typeof setTimeout> | null = null;
 	/** This view's stops, chained: its feed starts only after every earlier
 	 *  feed of this view is confirmed dead, so two feeds never share a ledger. */

@@ -449,7 +449,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 
 		const outcome = await Effect.runPromise(
-			Effect.either(
+			Effect.result(
 				instance.sendTurnEffect(
 					makeRawBaseSendTurnInput({
 						sessionId: "session-model-required",
@@ -458,9 +458,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			),
 		);
 
-		expect(outcome._tag).toBe("Left");
-		if (outcome._tag === "Left") {
-			expect(outcome.left.message).toContain("model");
+		expect(outcome._tag).toBe("Failure");
+		if (outcome._tag === "Failure") {
+			expect(outcome.failure.message).toContain("model");
 		}
 		expect(queryFactorySpy).not.toHaveBeenCalled();
 	});
@@ -986,7 +986,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 
 		const result = await Effect.runPromise(
-			Effect.either(
+			Effect.result(
 				instance.sendTurnEffect(
 					makeBaseSendTurnInput({
 						sessionId: "parent-no-result",
@@ -996,7 +996,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				),
 			),
 		);
-		expect(result._tag).toBe("Left");
+		expect(result._tag).toBe("Failure");
 		await vi.waitFor(() =>
 			expect(subagentSdk.getSubagentMessages).toHaveBeenCalled(),
 		);
@@ -1126,7 +1126,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 		const sink = createMockEventSink();
 		const turnPromise = Effect.runPromise(
-			Effect.either(
+			Effect.result(
 				instance.sendTurnEffect(
 					makeBaseSendTurnInput({
 						sessionId: "parent-final-poll-timeout",
@@ -1169,11 +1169,11 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			expect(turnResult).not.toBe("timeout");
 			if (turnResult === "timeout")
 				throw new Error("Turn cleanup waited for a transcript");
-			if (ending === "stream-end") expect(turnResult._tag).toBe("Left");
+			if (ending === "stream-end") expect(turnResult._tag).toBe("Failure");
 			else {
-				expect(turnResult._tag).toBe("Right");
-				if (turnResult._tag === "Right")
-					expect(turnResult.right.status).toBe(
+				expect(turnResult._tag).toBe("Success");
+				if (turnResult._tag === "Success")
+					expect(turnResult.success.status).toBe(
 						ending === "Stop" ? "interrupted" : "completed",
 					);
 			}
@@ -1650,12 +1650,14 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 						variant: "turbo",
 					}),
 				)
-				.pipe(Effect.either),
+				.pipe(Effect.result),
 		);
 
-		expect(result._tag).toBe("Left");
-		if (result._tag === "Left") {
-			expect(result.left.message).toContain("Claude SDK options decode failed");
+		expect(result._tag).toBe("Failure");
+		if (result._tag === "Failure") {
+			expect(result.failure.message).toContain(
+				"Claude SDK options decode failed",
+			);
 		}
 		expect(queryFactorySpy).not.toHaveBeenCalled();
 	});
@@ -2261,10 +2263,15 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		const result = await Effect.runPromise(
 			instance.sendTurnEffect(input).pipe(
-				Effect.timeoutFail({
+				Effect.timeoutOrElse({
 					duration: "500 millis",
-					onTimeout: () =>
-						new Error("sendTurnEffect did not settle after sink failure"),
+					orElse: () =>
+						Effect.fail(
+							(() =>
+								new Error(
+									"sendTurnEffect did not settle after sink failure",
+								))(),
+						),
 				}),
 			),
 		);
@@ -2337,12 +2344,12 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 						sessionId: "session-invalid-user-message",
 					}),
 				)
-				.pipe(Effect.either),
+				.pipe(Effect.result),
 		);
 
-		expect(result._tag).toBe("Left");
-		if (result._tag === "Left") {
-			expect(result.left.message).toContain(
+		expect(result._tag).toBe("Failure");
+		if (result._tag === "Failure") {
+			expect(result.failure.message).toContain(
 				"Claude SDK user message decode failed",
 			);
 		}
@@ -2480,7 +2487,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		queryFactorySpy = vi.fn(() => {
 			secondPromise ??= Effect.runPromise(
-				instance.sendTurnEffect(input2).pipe(Effect.either),
+				instance.sendTurnEffect(input2).pipe(Effect.result),
 			);
 			throw new Error("query setup failed");
 		});
@@ -2490,9 +2497,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 
 		const first = await Effect.runPromise(
-			instance.sendTurnEffect(input1).pipe(Effect.either),
+			instance.sendTurnEffect(input1).pipe(Effect.result),
 		);
-		expect(first._tag).toBe("Left");
+		expect(first._tag).toBe("Failure");
 
 		const second = await Promise.race([
 			secondPromise,
@@ -2501,7 +2508,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			),
 		]);
 		expect(second).not.toBe("timeout");
-		expect(second).toMatchObject({ _tag: "Left" });
+		expect(second).toMatchObject({ _tag: "Failure" });
 	});
 
 	// Test 8: sendTurn() without persistence (eventSink only)

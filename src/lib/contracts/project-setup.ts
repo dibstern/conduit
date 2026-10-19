@@ -1,15 +1,15 @@
 import { Schema } from "effect";
 
-export const ProjectSetupSourceSchema = Schema.Literal("daemon", "file");
-export const ProjectSetupOutcomeSchema = Schema.Literal(
+export const ProjectSetupSourceSchema = Schema.Literals(["daemon", "file"]);
+export const ProjectSetupOutcomeSchema = Schema.Literals([
 	"succeeded",
 	"failed",
 	"timed_out",
 	"skipped",
-);
+]);
 export const ProjectSetupStateSchema = Schema.Struct({
 	source: ProjectSetupSourceSchema,
-	status: Schema.Union(Schema.Literal("running"), ProjectSetupOutcomeSchema),
+	status: Schema.Union([Schema.Literal("running"), ProjectSetupOutcomeSchema]),
 	exitCode: Schema.optional(Schema.Int),
 	message: Schema.optional(Schema.String),
 });

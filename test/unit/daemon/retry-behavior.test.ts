@@ -2,20 +2,21 @@
 // number of attempts with correct exponential backoff timing.
 
 import { describe, it } from "@effect/vitest";
-import { Duration, Effect, Fiber, Ref, Schedule, TestClock } from "effect";
+import { Duration, Effect, Fiber, Ref, Schedule } from "effect";
+import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 
 describe("Retry Behavior with TestClock", () => {
-	it.scoped("retries 3 times with exponential backoff", () =>
+	it.effect("retries 3 times with exponential backoff", () =>
 		Effect.gen(function* () {
 			const attempts = yield* Ref.make(0);
 
 			// Schedule: exponential(1s) intersected with recurs(3)
 			// This means up to 3 retries with delays: 1s, 2s, 4s
-			const schedule = Schedule.intersect(
+			const schedule = Schedule.max([
 				Schedule.exponential(Duration.seconds(1)),
 				Schedule.recurs(3),
-			);
+			]);
 
 			// An effect that always fails, counting each attempt
 			const failing = Effect.gen(function* () {
@@ -26,8 +27,8 @@ describe("Retry Behavior with TestClock", () => {
 			// Fork the retrying effect so we can control time
 			const fiber = yield* failing.pipe(
 				Effect.retry(schedule),
-				Effect.catchAll(() => Effect.void),
-				Effect.fork,
+				Effect.catch(() => Effect.void),
+				Effect.forkChild,
 			);
 
 			// Initial attempt runs immediately
@@ -54,7 +55,7 @@ describe("Retry Behavior with TestClock", () => {
 		}),
 	);
 
-	it.scoped("no retries when schedule has zero recurrences", () =>
+	it.effect("no retries when schedule has zero recurrences", () =>
 		Effect.gen(function* () {
 			const attempts = yield* Ref.make(0);
 
@@ -67,7 +68,7 @@ describe("Retry Behavior with TestClock", () => {
 
 			yield* failing.pipe(
 				Effect.retry(schedule),
-				Effect.catchAll(() => Effect.void),
+				Effect.catch(() => Effect.void),
 			);
 
 			// Only the initial attempt
@@ -75,14 +76,14 @@ describe("Retry Behavior with TestClock", () => {
 		}),
 	);
 
-	it.scoped("succeeding on second attempt stops retrying", () =>
+	it.effect("succeeding on second attempt stops retrying", () =>
 		Effect.gen(function* () {
 			const attempts = yield* Ref.make(0);
 
-			const schedule = Schedule.intersect(
+			const schedule = Schedule.max([
 				Schedule.exponential(Duration.seconds(1)),
 				Schedule.recurs(5),
-			);
+			]);
 
 			// Fails on first attempt, succeeds on second
 			const sometimesFailing = Effect.gen(function* () {
@@ -95,7 +96,7 @@ describe("Retry Behavior with TestClock", () => {
 
 			const fiber = yield* sometimesFailing.pipe(
 				Effect.retry(schedule),
-				Effect.fork,
+				Effect.forkChild,
 			);
 
 			// Initial attempt fails

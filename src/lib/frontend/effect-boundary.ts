@@ -47,18 +47,18 @@ const getMessageType = (raw: unknown): string | undefined => {
 const getDecoder = (): ((raw: unknown) => unknown) => {
 	if (_decoder) return _decoder;
 
-	const decode = Schema.decodeUnknownEither(RelayMessageSchema);
+	const decode = Schema.decodeUnknownResult(RelayMessageSchema);
 
 	_decoder = (raw: unknown): unknown => {
 		const result = decode(raw);
-		if (result._tag === "Right") return result.right;
+		if (result._tag === "Success") return result.success;
 
 		const messageType = getMessageType(raw);
 		if (messageType && KNOWN_RELAY_MESSAGE_TYPES.has(messageType)) {
 			throw new ProtocolDecodeError({
 				messageType,
 				raw,
-				cause: result.left,
+				cause: result.failure,
 			});
 		}
 

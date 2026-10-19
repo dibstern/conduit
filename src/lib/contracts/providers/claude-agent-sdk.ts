@@ -45,7 +45,7 @@ import type {
 	SDKUserMessageReplay,
 	SDKWorkerShuttingDownMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 type AssertExtends<_A extends B, B> = true;
 type OptionalKeys<T> = {
@@ -217,20 +217,20 @@ function isClaudeSDKReadStreamEvent(
 // Stream event fields read by the translator are strict. Fields the translator
 // ignores remain provider-owned and pass through unchanged.
 export const ClaudeOpaqueRawStreamEventSchema = Schema.Unknown.pipe(
-	Schema.filter(isClaudeSDKReadStreamEvent),
+	Schema.refine(isClaudeSDKReadStreamEvent),
 );
 
-export const ClaudeSDKPermissionModeSchema = Schema.Literal(
+export const ClaudeSDKPermissionModeSchema = Schema.Literals([
 	"default",
 	"acceptEdits",
 	"bypassPermissions",
 	"plan",
 	"dontAsk",
 	"auto",
-);
+]);
 export type ClaudeSDKPermissionMode = typeof ClaudeSDKPermissionModeSchema.Type;
 
-export const ClaudeSDKAssistantMessageErrorSchema = Schema.Literal(
+export const ClaudeSDKAssistantMessageErrorSchema = Schema.Literals([
 	"authentication_failed",
 	"oauth_org_not_allowed",
 	"account_on_hold",
@@ -244,23 +244,21 @@ export const ClaudeSDKAssistantMessageErrorSchema = Schema.Literal(
 	"unknown",
 	"max_output_tokens",
 	"cloud_credential_error",
+]);
+
+export const ClaudeSDKStatusSchema = Schema.NullOr(
+	Schema.Literals(["compacting", "requesting"]),
 );
 
-export const ClaudeSDKStatusSchema = Schema.Literal(
-	"compacting",
-	"requesting",
-	null,
-);
-
-export const ClaudeSDKResultSubtypeSchema = Schema.Literal(
+export const ClaudeSDKResultSubtypeSchema = Schema.Literals([
 	"success",
 	"error_during_execution",
 	"error_max_turns",
 	"error_max_budget_usd",
 	"error_max_structured_output_retries",
-);
+]);
 
-export const ClaudeSDKSystemSubtypeSchema = Schema.Literal(
+export const ClaudeSDKSystemSubtypeSchema = Schema.Literals([
 	"api_retry",
 	"background_tasks_changed",
 	"commands_changed",
@@ -290,7 +288,7 @@ export const ClaudeSDKSystemSubtypeSchema = Schema.Literal(
 	"task_updated",
 	"thinking_tokens",
 	"worker_shutting_down",
-);
+]);
 
 export const CLAUDE_SDK_MESSAGE_VARIANTS = [
 	"assistant",
@@ -346,16 +344,19 @@ export const ClaudeSDKMessageOriginSchema = Schema.Unknown;
 
 export const ClaudeSDKUserMessageSchema = Schema.Struct({
 	type: Schema.Literal("user"),
-	message: Schema.Struct({
-		role: Schema.Literal("user"),
-		content: Schema.Unknown,
-	}).pipe(
-		Schema.extend(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+	message: Schema.StructWithRest(
+		Schema.Struct({
+			role: Schema.Literal("user"),
+			content: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
+		}),
+		[Schema.Record(Schema.String, Schema.Unknown)],
 	),
 	parent_tool_use_id: Schema.NullOr(Schema.String),
 	isSynthetic: Schema.optional(Schema.Boolean),
 	tool_use_result: Schema.optional(ClaudeOpaqueToolResultSchema),
-	priority: Schema.optional(Schema.Literal("now", "next", "later")),
+	priority: Schema.optional(Schema.Literals(["now", "next", "later"])),
 	origin: Schema.optional(ClaudeSDKMessageOriginSchema),
 	shouldQuery: Schema.optional(Schema.Boolean),
 	timestamp: Schema.optional(Schema.String),
@@ -371,7 +372,9 @@ export type ClaudeSDKUserMessage = Schema.Schema.Type<
 
 const ClaudeSDKInboundUserMessageSchema = Schema.Struct({
 	...ClaudeSDKUserMessageSchema.fields,
-	message: ClaudeOpaqueBetaMessageSchema,
+	message: ClaudeOpaqueBetaMessageSchema.pipe(
+		Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+	),
 });
 
 type ClaudeSDKInboundUserMessage = Schema.Schema.Type<
@@ -399,7 +402,9 @@ const ClaudeSystemFields = {
 
 export const ClaudeSDKAssistantMessageSchema = Schema.Struct({
 	type: Schema.Literal("assistant"),
-	message: ClaudeOpaqueBetaMessageSchema,
+	message: ClaudeOpaqueBetaMessageSchema.pipe(
+		Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+	),
 	parent_tool_use_id: Schema.NullOr(Schema.String),
 	error: Schema.optional(ClaudeSDKAssistantMessageErrorSchema),
 	...ClaudeUuidSessionFields,
@@ -414,22 +419,20 @@ type _ClaudeSdkAssistantMessageFitsSchema = AssertExtends<
 	ClaudeSDKAssistantMessage
 >;
 
-const ClaudeSDKUsageSchema = Schema.Struct({
-	input_tokens: Schema.Number,
-	output_tokens: Schema.Number,
-	cache_creation_input_tokens: Schema.Number,
-	cache_read_input_tokens: Schema.Number,
-}).pipe(
-	Schema.extend(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+const ClaudeSDKUsageSchema = Schema.StructWithRest(
+	Schema.Struct({
+		input_tokens: Schema.Number,
+		output_tokens: Schema.Number,
+		cache_creation_input_tokens: Schema.Number,
+		cache_read_input_tokens: Schema.Number,
+	}),
+	[Schema.Record(Schema.String, Schema.Unknown)],
 );
 
 const ClaudeSDKPermissionDenialSchema = Schema.Struct({
 	tool_name: Schema.String,
 	tool_use_id: Schema.String,
-	tool_input: Schema.Record({
-		key: Schema.String,
-		value: ClaudeOpaqueDynamicToolInputSchema,
-	}),
+	tool_input: Schema.Record(Schema.String, ClaudeOpaqueDynamicToolInputSchema),
 });
 
 const ClaudeSDKResultBaseFields = {
@@ -441,10 +444,10 @@ const ClaudeSDKResultBaseFields = {
 	stop_reason: Schema.NullOr(Schema.String),
 	total_cost_usd: Schema.Number,
 	usage: ClaudeSDKUsageSchema,
-	modelUsage: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+	modelUsage: Schema.Record(Schema.String, Schema.Unknown),
 	permission_denials: Schema.Array(ClaudeSDKPermissionDenialSchema),
 	terminal_reason: Schema.optional(Schema.String),
-	fast_mode_state: Schema.optional(Schema.Literal("off", "cooldown", "on")),
+	fast_mode_state: Schema.optional(Schema.Literals(["off", "cooldown", "on"])),
 	origin: Schema.optional(ClaudeSDKMessageOriginSchema),
 	// The input ids (sent as each user message's `uuid`) this result answers.
 	user_message_uuid: Schema.optional(Schema.String),
@@ -462,29 +465,26 @@ export const ClaudeSDKResultSuccessSchema = Schema.Struct({
 		Schema.Struct({
 			id: Schema.String,
 			name: Schema.String,
-			input: Schema.Record({
-				key: Schema.String,
-				value: ClaudeOpaqueDynamicToolInputSchema,
-			}),
+			input: Schema.Record(Schema.String, ClaudeOpaqueDynamicToolInputSchema),
 		}),
 	),
 });
 
 export const ClaudeSDKResultErrorSchema = Schema.Struct({
 	...ClaudeSDKResultBaseFields,
-	subtype: Schema.Literal(
+	subtype: Schema.Literals([
 		"error_during_execution",
 		"error_max_turns",
 		"error_max_budget_usd",
 		"error_max_structured_output_retries",
-	),
+	]),
 	errors: Schema.Array(Schema.String),
 });
 
-export const ClaudeSDKResultMessageSchema = Schema.Union(
+export const ClaudeSDKResultMessageSchema = Schema.Union([
 	ClaudeSDKResultSuccessSchema,
 	ClaudeSDKResultErrorSchema,
-);
+]);
 
 export type ClaudeSDKResultMessage = Schema.Schema.Type<
 	typeof ClaudeSDKResultMessageSchema
@@ -529,14 +529,16 @@ export const ClaudeSDKAPIRetryMessageSchema = Schema.Struct({
 export const ClaudeSDKCompactBoundaryMessageSchema = Schema.Struct({
 	...ClaudeSystemFields,
 	subtype: Schema.Literal("compact_boundary"),
-	compact_metadata: Schema.Unknown,
+	compact_metadata: Schema.Unknown.pipe(
+		Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+	),
 });
 
 export const ClaudeSDKControlRequestProgressMessageSchema = Schema.Struct({
 	...ClaudeSystemFields,
 	subtype: Schema.Literal("control_request_progress"),
 	request_id: Schema.String,
-	status: Schema.Literal("started", "api_retry"),
+	status: Schema.Literals(["started", "api_retry"]),
 	attempt: Schema.optional(Schema.Number),
 	max_retries: Schema.optional(Schema.Number),
 	retry_delay_ms: Schema.optional(Schema.Number),
@@ -547,7 +549,7 @@ export const ClaudeSDKModelRefusalFallbackMessageSchema = Schema.Struct({
 	...ClaudeSystemFields,
 	subtype: Schema.Literal("model_refusal_fallback"),
 	trigger: Schema.Literal("refusal"),
-	direction: Schema.Literal("retry", "revert", "sticky"),
+	direction: Schema.Literals(["retry", "revert", "sticky"]),
 	original_model: Schema.String,
 	fallback_model: Schema.String,
 	request_id: Schema.NullOr(Schema.String),
@@ -605,7 +607,7 @@ export const ClaudeSDKHookResponseMessageSchema = Schema.Struct({
 	stdout: Schema.String,
 	stderr: Schema.String,
 	exit_code: Schema.optional(Schema.Number),
-	outcome: Schema.Literal("success", "error", "cancelled"),
+	outcome: Schema.Literals(["success", "error", "cancelled"]),
 });
 
 export const ClaudeSDKHookStartedMessageSchema = Schema.Struct({
@@ -625,7 +627,7 @@ export const ClaudeSDKLocalCommandOutputMessageSchema = Schema.Struct({
 export const ClaudeSDKMemoryRecallMessageSchema = Schema.Struct({
 	...ClaudeSystemFields,
 	subtype: Schema.Literal("memory_recall"),
-	mode: Schema.Literal("select", "synthesize"),
+	mode: Schema.Literals(["select", "synthesize"]),
 	memories: Schema.Array(Schema.Unknown),
 });
 
@@ -645,7 +647,7 @@ export const ClaudeSDKNotificationMessageSchema = Schema.Struct({
 	subtype: Schema.Literal("notification"),
 	key: Schema.String,
 	text: Schema.String,
-	priority: Schema.Literal("low", "medium", "high", "immediate"),
+	priority: Schema.Literals(["low", "medium", "high", "immediate"]),
 	color: Schema.optional(Schema.String),
 	timeout_ms: Schema.optional(Schema.Number),
 });
@@ -653,7 +655,7 @@ export const ClaudeSDKNotificationMessageSchema = Schema.Struct({
 export const ClaudeSDKPluginInstallMessageSchema = Schema.Struct({
 	...ClaudeSystemFields,
 	subtype: Schema.Literal("plugin_install"),
-	status: Schema.Literal("started", "installed", "failed", "completed"),
+	status: Schema.Literals(["started", "installed", "failed", "completed"]),
 	name: Schema.optional(Schema.String),
 	error: Schema.optional(Schema.String),
 });
@@ -661,7 +663,7 @@ export const ClaudeSDKPluginInstallMessageSchema = Schema.Struct({
 export const ClaudeSDKSessionStateChangedMessageSchema = Schema.Struct({
 	...ClaudeSystemFields,
 	subtype: Schema.Literal("session_state_changed"),
-	state: Schema.Literal("idle", "running", "requires_action"),
+	state: Schema.Literals(["idle", "running", "requires_action"]),
 });
 
 // The CLI emits this for a session with a custom title (such as a fork named at
@@ -713,7 +715,7 @@ export const ClaudeSDKInformationalMessageSchema = Schema.Struct({
 	...ClaudeSystemFields,
 	subtype: Schema.Literal("informational"),
 	content: Schema.String,
-	level: Schema.Literal("info", "notice", "suggestion", "warning"),
+	level: Schema.Literals(["info", "notice", "suggestion", "warning"]),
 	tool_use_id: Schema.optional(Schema.String),
 	prevent_continuation: Schema.optional(Schema.Boolean),
 });
@@ -723,7 +725,7 @@ export const ClaudeSDKStatusMessageSchema = Schema.Struct({
 	subtype: Schema.Literal("status"),
 	status: ClaudeSDKStatusSchema,
 	permissionMode: Schema.optional(ClaudeSDKPermissionModeSchema),
-	compact_result: Schema.optional(Schema.Literal("success", "failed")),
+	compact_result: Schema.optional(Schema.Literals(["success", "failed"])),
 	compact_error: Schema.optional(Schema.String),
 });
 
@@ -743,7 +745,7 @@ export const ClaudeSDKSystemMessageSchema = Schema.Struct({
 	output_style: Schema.String,
 	skills: Schema.Array(Schema.String),
 	plugins: Schema.Array(Schema.Unknown),
-	fast_mode_state: Schema.optional(Schema.Literal("off", "cooldown", "on")),
+	fast_mode_state: Schema.optional(Schema.Literals(["off", "cooldown", "on"])),
 });
 
 export const ClaudeSDKTaskNotificationMessageSchema = Schema.Struct({
@@ -751,18 +753,17 @@ export const ClaudeSDKTaskNotificationMessageSchema = Schema.Struct({
 	subtype: Schema.Literal("task_notification"),
 	task_id: Schema.String,
 	tool_use_id: Schema.optional(Schema.String),
-	status: Schema.Literal("completed", "failed", "stopped"),
+	status: Schema.Literals(["completed", "failed", "stopped"]),
 	output_file: Schema.String,
 	summary: Schema.String,
 	usage: Schema.optional(
-		Schema.Struct({
-			total_tokens: Schema.Number,
-			tool_uses: Schema.Number,
-			duration_ms: Schema.Number,
-		}).pipe(
-			Schema.extend(
-				Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-			),
+		Schema.StructWithRest(
+			Schema.Struct({
+				total_tokens: Schema.Number,
+				tool_uses: Schema.Number,
+				duration_ms: Schema.Number,
+			}),
+			[Schema.Record(Schema.String, Schema.Unknown)],
 		),
 	),
 	skip_transcript: Schema.optional(Schema.Boolean),
@@ -775,12 +776,13 @@ export const ClaudeSDKTaskProgressMessageSchema = Schema.Struct({
 	tool_use_id: Schema.optional(Schema.String),
 	description: Schema.String,
 	subagent_type: Schema.optional(Schema.String),
-	usage: Schema.Struct({
-		total_tokens: Schema.Number,
-		tool_uses: Schema.Number,
-		duration_ms: Schema.Number,
-	}).pipe(
-		Schema.extend(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+	usage: Schema.StructWithRest(
+		Schema.Struct({
+			total_tokens: Schema.Number,
+			tool_uses: Schema.Number,
+			duration_ms: Schema.Number,
+		}),
+		[Schema.Record(Schema.String, Schema.Unknown)],
 	),
 	last_tool_name: Schema.optional(Schema.String),
 	summary: Schema.optional(Schema.String),
@@ -805,14 +807,14 @@ export const ClaudeSDKTaskUpdatedMessageSchema = Schema.Struct({
 	task_id: Schema.String,
 	patch: Schema.Struct({
 		status: Schema.optional(
-			Schema.Literal(
+			Schema.Literals([
 				"pending",
 				"running",
 				"completed",
 				"failed",
 				"killed",
 				"paused",
-			),
+			]),
 		),
 		description: Schema.optional(Schema.String),
 		end_time: Schema.optional(Schema.Number),
@@ -822,7 +824,7 @@ export const ClaudeSDKTaskUpdatedMessageSchema = Schema.Struct({
 	}),
 });
 
-export const ClaudeSDKSystemLikeMessageSchema = Schema.Union(
+export const ClaudeSDKSystemLikeMessageSchema = Schema.Union([
 	ClaudeSDKAPIRetryMessageSchema,
 	ClaudeSDKBackgroundTasksChangedMessageSchema,
 	ClaudeSDKCommandsChangedMessageSchema,
@@ -852,7 +854,7 @@ export const ClaudeSDKSystemLikeMessageSchema = Schema.Union(
 	ClaudeSDKTaskUpdatedMessageSchema,
 	ClaudeSDKThinkingTokensMessageSchema,
 	ClaudeSDKWorkerShuttingDownMessageSchema,
-);
+]);
 
 export const ClaudeSDKToolProgressMessageSchema = Schema.Struct({
 	type: Schema.Literal("tool_progress"),
@@ -881,7 +883,9 @@ export const ClaudeSDKToolUseSummaryMessageSchema = Schema.Struct({
 
 export const ClaudeSDKRateLimitEventSchema = Schema.Struct({
 	type: Schema.Literal("rate_limit_event"),
-	rate_limit_info: Schema.Unknown,
+	rate_limit_info: Schema.Unknown.pipe(
+		Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+	),
 	...ClaudeUuidSessionFields,
 });
 
@@ -918,7 +922,7 @@ export const ClaudeSDKActiveGoalMessageSchema = Schema.Struct({
 export const ClaudeSDKCommandLifecycleMessageSchema = Schema.Struct({
 	type: Schema.Literal("command_lifecycle"),
 	command_uuid: Schema.String,
-	state: Schema.Literal("queued", "started", "cancelled", "completed"),
+	state: Schema.Literals(["queued", "started", "cancelled", "completed"]),
 	...ClaudeUuidSessionFields,
 });
 
@@ -926,7 +930,7 @@ export type ClaudeSDKCommandLifecycleMessage = Schema.Schema.Type<
 	typeof ClaudeSDKCommandLifecycleMessageSchema
 >;
 
-export const ClaudeSDKMessageSchema = Schema.Union(
+export const ClaudeSDKMessageSchema = Schema.Union([
 	ClaudeSDKActiveGoalMessageSchema,
 	ClaudeSDKCommandLifecycleMessageSchema,
 	ClaudeSDKAssistantMessageSchema,
@@ -940,7 +944,7 @@ export const ClaudeSDKMessageSchema = Schema.Union(
 	ClaudeSDKRateLimitEventSchema,
 	ClaudeSDKPromptSuggestionMessageSchema,
 	ClaudeSDKConversationResetMessageSchema,
-);
+]);
 
 export type ClaudeSDKMessage = Schema.Schema.Type<
 	typeof ClaudeSDKMessageSchema
@@ -1102,32 +1106,31 @@ export const ClaudeSDKOptionsJsonShapeSchema = Schema.Struct({
 	includePartialMessages: Schema.optional(Schema.Boolean),
 	forwardSubagentText: Schema.optional(Schema.Boolean),
 	settings: Schema.optional(
-		Schema.Union(
+		Schema.Union([
 			Schema.String,
-			Schema.Struct({
-				showThinkingSummaries: Schema.optional(Schema.Boolean),
-			}).pipe(
-				Schema.extend(
-					Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-				),
+			Schema.StructWithRest(
+				Schema.Struct({
+					showThinkingSummaries: Schema.optional(Schema.Boolean),
+				}),
+				[Schema.Record(Schema.String, Schema.Unknown)],
 			),
-		),
+		]),
 	),
 	settingSources: Schema.optional(
-		Schema.Array(Schema.Literal("user", "project", "local")),
+		Schema.Array(Schema.Literals(["user", "project", "local"])),
 	),
 	permissionMode: Schema.optional(ClaudeSDKPermissionModeSchema),
 	allowedTools: Schema.optional(Schema.Array(Schema.String)),
 	disallowedTools: Schema.optional(Schema.Array(Schema.String)),
 	allowDangerouslySkipPermissions: Schema.optional(Schema.Boolean),
 	env: Schema.optional(
-		Schema.Record({
-			key: Schema.String,
-			value: Schema.Union(Schema.String, Schema.Undefined),
-		}),
+		Schema.Record(
+			Schema.String,
+			Schema.Union([Schema.String, Schema.Undefined]),
+		),
 	),
 	effort: Schema.optional(
-		Schema.Literal("low", "medium", "high", "xhigh", "max"),
+		Schema.Literals(["low", "medium", "high", "xhigh", "max"]),
 	),
 });
 

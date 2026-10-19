@@ -24,10 +24,10 @@ describe("PTY Stream Effect", () => {
 		const exit = await Effect.runPromiseExit(
 			Stream.runDrain(
 				neverStream.pipe(
-					Stream.timeoutFail(
-						() => new PtyConnectionTimeout({}),
-						Duration.millis(50),
-					),
+					Stream.timeoutOrElse({
+						duration: Duration.millis(50),
+						orElse: () => Stream.fail(new PtyConnectionTimeout({})),
+					}),
 				),
 			),
 		);

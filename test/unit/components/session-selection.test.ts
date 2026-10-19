@@ -285,9 +285,11 @@ describe("session selection at the browser RPC wire", () => {
 		});
 		expect(routerState.path).toBe("/s/setup-session");
 		await settle();
-		expect(
-			calls("ViewSession").map((request) => request.payload),
-		).toMatchObject([{ sessionId: "setup-session" }]);
+		await vi.waitFor(() =>
+			expect(
+				calls("ViewSession").map((request) => request.payload),
+			).toMatchObject([{ sessionId: "setup-session" }]),
+		);
 		openSessionForSetup(null);
 		expect(module.selection.shown).toEqual({ kind: "none" });
 		expect(routerState.path).toBe("/");

@@ -3,15 +3,7 @@
 // SSE -> persisted projections -> SubscribeSessionDetail and SubscribeShell.
 
 import Database from "better-sqlite3";
-import {
-	afterAll,
-	beforeAll,
-	beforeEach,
-	describe,
-	expect,
-	it,
-	vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TurnErrorPayload } from "../../../src/lib/contracts/stored-event.js";
 import {
 	createRelayHarness,
@@ -21,20 +13,17 @@ import {
 describe("Integration: SSE to RPC Pipeline", () => {
 	let harness: RelayHarness;
 
-	beforeAll(async () => {
-		harness = await createRelayHarness();
-	}, 30_000);
-
-	afterAll(async () => {
-		if (harness) await harness.stop();
-	});
-
 	beforeEach(async () => {
+		harness = await createRelayHarness();
 		harness.mock.resetQueues();
 		await harness.stack.client.app.path();
 		await vi.waitFor(() => {
 			expect(harness.stack.sseStream.getHealth().connected).toBe(true);
 		});
+	}, 30_000);
+
+	afterEach(async () => {
+		if (harness) await harness.stop();
 	});
 
 	it("SSE stream is running after relay startup", async () => {

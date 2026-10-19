@@ -1,6 +1,6 @@
-import { RpcTest } from "@effect/rpc";
 import { it } from "@effect/vitest";
 import { type Context, Effect, Layer, Stream } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
@@ -25,7 +25,7 @@ import {
 
 // Failure modes: payload/default project overrides ownership; missing ids touch
 // a relay; subscriptions route differently from unary session operations.
-it.scoped(
+it.effect(
 	"unary and streaming session RPCs route by the directory and unknown ids fail before relay startup",
 	() =>
 		Effect.gen(function* () {
@@ -40,9 +40,8 @@ it.scoped(
 							]),
 							bus,
 							makePersistenceEffectLayer(":memory:", "b", undefined, bus),
-							Layer.succeed(ConfigTag, makeMockConfig({ slug: "b" })),
-							Layer.succeed(
-								SessionManagerServiceTag,
+							Layer.succeed(ConfigTag)(makeMockConfig({ slug: "b" })),
+							Layer.succeed(SessionManagerServiceTag)(
 								makeMockSessionManagerService({
 									sessionExists: () => Effect.succeed(true),
 								}),
@@ -71,8 +70,9 @@ it.scoped(
 			const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
 				Effect.provide(
 					makeRoutedWsRpcServerLayer(resolve, undefined, "a").pipe(
-						Layer.provide(Layer.succeed(SessionDirectory, directory)),
+						Layer.provide(Layer.succeed(SessionDirectory)(directory)),
 					),
+					{ local: true },
 				),
 			);
 			expect(yield* client.ResolveSession({ sessionId: "owned" })).toEqual({
@@ -88,21 +88,21 @@ it.scoped(
 			expect(resolve.mock.calls.every(([slug]) => slug === "b")).toBe(true);
 			resolve.mockClear();
 			expect(
-				yield* Effect.either(client.MarkSessionRead({ sessionId: "missing" })),
+				yield* Effect.result(client.MarkSessionRead({ sessionId: "missing" })),
 			).toMatchObject({
-				_tag: "Left",
-				left: {
+				_tag: "Failure",
+				failure: {
 					_tag: "WsRpcError",
 					message: expect.stringContaining("missing"),
 				},
 			});
 			expect(
-				yield* Effect.either(
+				yield* Effect.result(
 					client
 						.SubscribeSessionTodos({ sessionId: "missing" })
 						.pipe(Stream.runDrain),
 				),
-			).toMatchObject({ _tag: "Left", left: { _tag: "WsRpcError" } });
+			).toMatchObject({ _tag: "Failure", failure: { _tag: "WsRpcError" } });
 			expect(resolve).not.toHaveBeenCalled();
 		}),
 );

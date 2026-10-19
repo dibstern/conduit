@@ -27,21 +27,23 @@ describe("file reads with Effect-native file service", () => {
 
 			return getFileListResponse().pipe(
 				Effect.provideService(OpenCodeFileServiceTag, fileService),
-				Effect.tap((reply) => {
-					expect(fileService.list).toHaveBeenCalledWith(".", undefined);
-					expect(fileService.read).toHaveBeenCalledWith(
-						".gitignore",
-						undefined,
-						{ startIfStopped: true },
-					);
-					expect(reply).toEqual({
-						path: ".",
-						entries: [
-							{ name: "src", type: "directory" },
-							{ name: "README.md", type: "file" },
-						],
-					});
-				}),
+				Effect.tap((reply) =>
+					Effect.sync(() => {
+						expect(fileService.list).toHaveBeenCalledWith(".", undefined);
+						expect(fileService.read).toHaveBeenCalledWith(
+							".gitignore",
+							undefined,
+							{ startIfStopped: true },
+						);
+						expect(reply).toEqual({
+							path: ".",
+							entries: [
+								{ name: "src", type: "directory" },
+								{ name: "README.md", type: "file" },
+							],
+						});
+					}),
+				),
 			);
 		},
 	);

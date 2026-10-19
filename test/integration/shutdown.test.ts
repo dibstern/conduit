@@ -11,7 +11,7 @@ describe("Shutdown Path", () => {
 			const log: string[] = [];
 
 			// Layer A: adds finalizer that logs "A"
-			const LayerA = Layer.scopedDiscard(
+			const LayerA = Layer.effectDiscard(
 				Effect.gen(function* () {
 					yield* Effect.addFinalizer(() =>
 						Effect.sync(() => {
@@ -22,7 +22,7 @@ describe("Shutdown Path", () => {
 			);
 
 			// Layer B: depends on A, adds finalizer that logs "B"
-			const LayerB = Layer.scopedDiscard(
+			const LayerB = Layer.effectDiscard(
 				Effect.gen(function* () {
 					yield* Effect.addFinalizer(() =>
 						Effect.sync(() => {
@@ -80,7 +80,7 @@ describe("Shutdown Path", () => {
 				}).pipe(Effect.scoped, Effect.forkIn(scope));
 
 				// Allow the fiber to start
-				yield* Effect.yieldNow();
+				yield* Effect.yieldNow;
 
 				// Close scope — should release fiber, then run earlier finalizer
 				yield* Scope.close(scope, Exit.void);

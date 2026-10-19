@@ -165,7 +165,7 @@ describe("Integration: Terminal (PTY)", () => {
 				});
 				if (!unattached || attaching.mock.calls.length > 0) return acquire(id);
 				attaching();
-				return Effect.promise(() => held).pipe(Effect.zipRight(acquire(id)));
+				return Effect.promise(() => held).pipe(Effect.andThen(acquire(id)));
 			}),
 		);
 		const pty = await createExternalPty(isolated);
@@ -410,7 +410,7 @@ describe("Integration: Terminal (PTY)", () => {
 					if (session?.source !== "opencode" || session.upstream)
 						return acquire(id);
 					acquiring();
-					return Effect.promise(() => held).pipe(Effect.zipRight(acquire(id)));
+					return Effect.promise(() => held).pipe(Effect.andThen(acquire(id)));
 				}),
 			);
 		const delivered = signalDelivered(isolated, pty.id);

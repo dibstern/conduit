@@ -213,11 +213,11 @@ export class CursorToolResults {
 				return undefined;
 			if ((await stat(file)).size > MAX_MEDIA_BYTES) return undefined;
 			return await readFile(file);
-		}).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+		}).pipe(Effect.catch(() => Effect.succeed(undefined)));
 	}
 
 	complete(call: CursorToolCall, truncated = false) {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const args = { ...call.args };
 			const envelope = toRecord(call.result);
 			const success = envelope["status"] === "success";

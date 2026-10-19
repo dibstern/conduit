@@ -2,11 +2,11 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { RpcTest } from "@effect/rpc";
-import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { it } from "@effect/vitest";
 import { Effect, Fiber, Layer, Option } from "effect";
+import { RpcTest } from "effect/rpc";
+import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
@@ -182,7 +182,7 @@ describe("listDaemonSessions", () => {
 							),
 						),
 					).pipe(
-						Effect.zipRight(
+						Effect.andThen(
 							Effect.gen(function* () {
 								const sql = yield* SqlClient.SqlClient;
 								yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
@@ -264,11 +264,19 @@ describe("listDaemonSessions", () => {
 					);
 					expect(empty.sessions).toEqual([]);
 					expect(unusedGit).not.toHaveBeenCalled();
-					const listing = yield* Effect.fork(listDaemonSessions({}, cache));
+					const listing = yield* Effect.forkChild(
+						listDaemonSessions({}, cache),
+					);
 					yield* Effect.tryPromise(() =>
 						vi.waitFor(() => expect(read).toHaveBeenCalledTimes(4)),
 					);
-					expect(Option.isNone(yield* Fiber.poll(listing))).toBe(true);
+					expect(
+						Option.isNone(
+							yield* Effect.sync(() =>
+								Option.fromUndefinedOr(listing.pollUnsafe()),
+							),
+						),
+					).toBe(true);
 					expect(cache.peek(project)?.branch).toBe("cached");
 					release();
 					const result = yield* Fiber.join(listing);
@@ -1227,7 +1235,7 @@ describe("listDaemonSessions", () => {
 });
 
 describe("ResolveSession", () => {
-	it.scoped("finds indexed sessions and rejects unknown IDs", () => {
+	it.effect("finds indexed sessions and rejects unknown IDs", () => {
 		const root = makeTemporaryRoot();
 		const projects = ["project-a", "project-b"].map((slug) => ({
 			slug,
@@ -1262,10 +1270,10 @@ describe("ResolveSession", () => {
 				}),
 			).toEqual({ projectSlug: "project-b" });
 			expect(
-				yield* Effect.either(client.ResolveSession({ sessionId: "unknown" })),
+				yield* Effect.result(client.ResolveSession({ sessionId: "unknown" })),
 			).toMatchObject({
-				_tag: "Left",
-				left: { _tag: "WsRpcError", message: "Unknown session: unknown" },
+				_tag: "Failure",
+				failure: { _tag: "WsRpcError", message: "Unknown session: unknown" },
 			});
 		}).pipe(
 			Effect.provide(

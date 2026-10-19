@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { Either } from "effect";
+import { Result } from "effect";
 import {
 	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
@@ -17,9 +17,9 @@ export async function handleDoctor(options: {
 	stdout: { write(value: string): void };
 }): Promise<void> {
 	const loaded = loadDaemonConfigResult(options.configDir);
-	if (Either.isLeft(loaded) && loaded.left._tag !== "NotFound")
-		throw loaded.left;
-	const config = Either.getOrNull(loaded);
+	if (Result.isFailure(loaded) && loaded.failure._tag !== "NotFound")
+		throw loaded.failure;
+	const config = Result.getOrNull(loaded);
 	const resolver = new ProjectShellEnvResolver();
 	const { stdout } = options;
 	stdout.write(

@@ -53,8 +53,7 @@ describe("orchestration scoped layer", () => {
 			makeOrchestrationRuntimeLayer().pipe(
 				Layer.provide(
 					Layer.mergeAll(
-						Layer.succeed(
-							AccountDirectory,
+						Layer.succeed(AccountDirectory)(
 							makeAccountDirectory(
 								Effect.succeed(
 									accountsStateFromInstances(
@@ -67,10 +66,9 @@ describe("orchestration scoped layer", () => {
 								),
 							),
 						),
-						Layer.succeed(OpenCodeAPITag, openCodeApi),
+						Layer.succeed(OpenCodeAPITag)(openCodeApi),
 						persistence,
-						Layer.succeed(
-							OpenCodeInstancesTag,
+						Layer.succeed(OpenCodeInstancesTag)(
 							makeOpenCodeInstancesStub({ opencode: openCodeApi }),
 						),
 						makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),

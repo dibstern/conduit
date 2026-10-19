@@ -43,7 +43,7 @@ export class RunnerSpool {
 	}
 
 	drainEffect(): Effect.Effect<void> {
-		return Effect.async<void>((resume) => {
+		return Effect.callback<void>((resume) => {
 			if (this.retained.size === 0) {
 				resume(Effect.void);
 				return;
@@ -68,7 +68,7 @@ export class RunnerSpool {
 		this.writeSpool();
 		for (const [sequence] of this.retained) {
 			const waiter = this.waiters.get(sequence);
-			if (waiter) Deferred.unsafeDone(waiter, Effect.succeed({}));
+			if (waiter) Deferred.doneUnsafe(waiter, Effect.succeed({}));
 			this.waiters.delete(sequence);
 		}
 	}
@@ -77,7 +77,7 @@ export class RunnerSpool {
 		if (message.sequence === undefined) return;
 		const waiter = this.waiters.get(message.sequence);
 		if (waiter)
-			Deferred.unsafeDone(
+			Deferred.doneUnsafe(
 				waiter,
 				message.failure
 					? Effect.fail(message.failure)
@@ -90,7 +90,7 @@ export class RunnerSpool {
 	emit(
 		output: SessionOutput,
 	): Effect.Effect<SessionOutputReply, SessionFailure> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			// Cleanup and the idle tail must not hold the next SDK enqueue.
 			// Both notices remain retained until their durable acknowledgement.
 			const notification =

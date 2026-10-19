@@ -15,7 +15,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "@effect/vitest";
-import { Effect, Either, Stream } from "effect";
+import { Effect, Result as Either, Semaphore, Stream } from "effect";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
@@ -135,10 +135,10 @@ for (const scenario of [
 		outcome: "StaleSwitch",
 	},
 ] as const) {
-	it.scoped(scenario.name, () => {
+	it.effect(scenario.name, () => {
 		const targetAccount = "at" in scenario ? "personal" : "work";
 		const admittedSessions: string[] = [];
-		const admission = Effect.unsafeMakeSemaphore(1);
+		const admission = Semaphore.makeUnsafe(1);
 		const sends: Array<{
 			accountId: string;
 			folder: string;
@@ -225,10 +225,10 @@ for (const scenario of [
 							}).pipe(Effect.orDie),
 						pickFailover: () => Effect.succeed(undefined),
 					}),
-					Effect.either,
+					Effect.result,
 				);
 			const binding = (yield* read.getSession("s1"))?.provider;
-			const outcome = Either.isRight(result) ? "Right" : result.left._tag;
+			const outcome = Either.isSuccess(result) ? "Right" : result.failure._tag;
 			evidence.observations.push({
 				name: scenario.name,
 				expectedAccount: scenario.expectedAccount,
@@ -254,7 +254,7 @@ for (const scenario of [
 						(event) => event.type === "session.resume_scheduled",
 					),
 				).toHaveLength(1);
-			} else if (Either.isRight(result)) {
+			} else if (Either.isSuccess(result)) {
 				expect(admittedSessions).toEqual(["s1"]);
 				expect(binding).toBe("work");
 				expect(yield* engine.getProviderForSessionEffect("s1")).toBe("work");
@@ -311,7 +311,7 @@ for (const scenario of [
 				withSession: (sessionId, effect) =>
 					admission.withPermits(1)(
 						Effect.sync(() => admittedSessions.push(sessionId)).pipe(
-							Effect.zipRight(effect),
+							Effect.andThen(effect),
 						),
 					),
 				start: Effect.void,

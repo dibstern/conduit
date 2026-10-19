@@ -651,7 +651,10 @@ export const usageSettingsHandlers: StepHandler[] = [
 			const handler = rpc.stubs.QuotaForAccounts;
 			if (!handler) throw new Error("Missing seeded quota check");
 			const readings = await handler(
-				new QuotaForAccounts({ projectSlug: "myapp" }),
+				QuotaForAccounts.payloadSchema.make({
+					_tag: "QuotaForAccounts",
+					projectSlug: "myapp",
+				}),
 			);
 			rpc.setUsageReadings(readings);
 		},

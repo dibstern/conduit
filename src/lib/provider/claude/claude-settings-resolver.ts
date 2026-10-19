@@ -149,7 +149,7 @@ export const resolveClaudeSettingsFromDisk = (
 					message: "Claude settings resolver returned invalid JSON",
 				}),
 		});
-		return yield* Schema.decodeUnknown(ResolvedClaudeSettingsSchema)(
+		return yield* Schema.decodeUnknownEffect(ResolvedClaudeSettingsSchema)(
 			parsed,
 		).pipe(
 			Effect.mapError(

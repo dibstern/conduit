@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { RpcTest } from "@effect/rpc";
 import Database from "better-sqlite3";
-import { Effect, Either, HashMap, Ref, Stream } from "effect";
+import { Effect, Result as Either, HashMap, Ref, Stream } from "effect";
+import { RpcTest } from "effect/rpc";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import {
@@ -287,7 +287,7 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 		const inputId = randomUUID();
 		evidence["newInputId"] = inputId;
 		const admitted = await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId,
 				originId: browser.originId,
 				inputId,
@@ -414,7 +414,7 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 		expect(primary?.pid).not.toBe(secondary?.pid);
 		await browser.followSessions();
 		await Effect.runPromise(
-			unrelated.rpc.input.submit({
+			unrelated.rpc["input.submit"]({
 				sessionId: claudeId,
 				originId: unrelated.originId,
 				inputId: randomUUID(),

@@ -1,14 +1,14 @@
-import { SqlClient } from "@effect/sql";
 import {
 	Deferred,
 	Effect,
-	Either,
 	Exit,
 	Fiber,
 	FiberMap,
 	Option,
+	Result,
 	type Scope,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	type AccountsState,
 	resolve as resolveAccount,
@@ -163,11 +163,11 @@ export class RunnerProviderInstance implements ProviderInstance {
 		Deferred.Deferred<void>
 	>();
 
-	readonly recoverRunnerEffect = Effect.gen(this, function* () {
+	readonly recoverRunnerEffect = Effect.gen({ self: this }, function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const ingestion = yield* ProviderRuntimeIngestionTag;
 		const pending = yield* PendingInteractionServiceTag;
-		const timeoutRuntime = yield* Effect.runtime<OverridesStateTag>();
+		const timeoutRuntime = yield* Effect.context<OverridesStateTag>();
 		// An in-process runner's turns ended with the relay that ran them, so
 		// every running command is unclaimed. Runner processes may outlive it.
 		let claimed = new Set<string>();
@@ -189,7 +189,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 			const registrations = yield* Effect.try(() =>
 				discoverRunners(this.deps.workspaceRoot, this.deps.daemonConfigDir),
 			).pipe(
-				Effect.catchAll((error) =>
+				Effect.catch((error) =>
 					Effect.logError("Could not verify runner ownership", error).pipe(
 						Effect.as(undefined),
 					),
@@ -209,10 +209,10 @@ export class RunnerProviderInstance implements ProviderInstance {
 			claimed,
 			this.providerId,
 			(id) =>
-				Either.getOrUndefined(resolveAccount(accounts, { _tag: "Id", id }))
+				Result.getOrUndefined(resolveAccount(accounts, { _tag: "Id", id }))
 					?.driver,
 			(sinkId, turn, failure) =>
-				Effect.gen(this, function* () {
+				Effect.gen({ self: this }, function* () {
 					let persistenceError: ProviderRuntimeIngestionError | undefined;
 					yield* failRunnerTurn(
 						(output) =>
@@ -315,7 +315,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 	sendTurnEffect(
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const { eventSink, abortSignal, ...payload } = input;
 			const prepared = yield* this.driver.prepareTurnEffect(payload);
 			const { sessionId } = input;
@@ -326,7 +326,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 					return inFlight;
 				}),
 				(inFlight) =>
-					Effect.gen(this, function* () {
+					Effect.gen({ self: this }, function* () {
 						// An idle send is placed before the runner hop, as fast as a
 						// local write; the runner places a held send when the SDK
 						// starts it (command_lifecycle: started). A continuation places
@@ -374,7 +374,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 							inputId: input.inputId,
 						});
 						this.reportSinkForTesting("allocated", sinkId, sessionId);
-						const aborted = Effect.async<void>((resume) => {
+						const aborted = Effect.callback<void>((resume) => {
 							const onAbort = () => resume(Effect.void);
 							if (abortSignal.aborted) onAbort();
 							else
@@ -416,7 +416,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		readonly inputId: string;
 		readonly text: string;
 	}): Effect.Effect<void, ClaudeEventPersistFailure> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const persist = yield* Effect.serviceOption(ClaudeEventPersistEffectTag);
 			const persistUserMessage =
 				this.deps.persistUserMessage ??
@@ -447,15 +447,15 @@ export class RunnerProviderInstance implements ProviderInstance {
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		const prepare = this.driver.preparePreWarmEffect;
 		if (!prepare) return Effect.void;
-		const preWarm = Effect.gen(this, function* () {
+		const preWarm = Effect.gen({ self: this }, function* () {
 			const command = yield* prepare(input, this.providerScope);
 			if (command) yield* this.commandEffect(command);
 		});
 		return Effect.uninterruptibleMask((restore) =>
-			Effect.gen(this, function* () {
+			Effect.gen({ self: this }, function* () {
 				const runPreWarm = yield* FiberMap.runtime(this.preWarmFibers)();
 				const fiber = yield* Effect.sync(() => {
-					const existing = FiberMap.unsafeGet(
+					const existing = FiberMap.getUnsafe(
 						this.preWarmFibers,
 						input.sessionId,
 					);
@@ -558,7 +558,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 
 	/** Shared by explicit shutdown and scope disposal through one cached Effect. */
 	disposeEffect(): Effect.Effect<void, ProviderInstanceFailure> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			this.detachingInteractions = true;
 			for (const sink of this.sinks.values()) {
 				yield* sink.detachInteractions?.() ?? Effect.void;
@@ -567,7 +567,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 			yield* this.commandEffect({ type: "shutdown" });
 		}).pipe(
 			Effect.ensuring(
-				Effect.gen(this, function* () {
+				Effect.gen({ self: this }, function* () {
 					this.sinks.clear();
 					yield* FiberMap.clear(this.abortFibers);
 					yield* FiberMap.clear(this.interactionFibers);
@@ -600,7 +600,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		output: SessionOutput,
 		recoveredSessionId?: string,
 	): Effect.Effect<SessionOutputReply, SessionFailure> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			observeTurnTimelineFrame(output);
 			if (output.type === "background-task") {
 				this.deps.onBackgroundTask?.(output.transition);
@@ -660,7 +660,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 						`${output.sinkId}:${output.request.requestId}`,
 						request.pipe(
 							Effect.onExit((exit) =>
-								Effect.gen(this, function* () {
+								Effect.gen({ self: this }, function* () {
 									if (
 										Exit.isFailure(exit) &&
 										!Failure.isInterruptedOnly(exit.cause)
@@ -683,7 +683,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 									}
 								}),
 							),
-							Effect.catchAllCause(() => Effect.void),
+							Effect.catchCause(() => Effect.void),
 						),
 					);
 					if (registered) {
@@ -714,7 +714,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 							sink.cancelSessionInteractions?.(output.reason, {
 								recoverQuestions: output.recoverQuestions,
 							}) ?? Effect.void,
-					).pipe(Effect.catchAllCause(() => Effect.void));
+					).pipe(Effect.catchCause(() => Effect.void));
 				case "cancel-interaction":
 					return yield* FiberMap.remove(
 						this.interactionFibers,
@@ -758,7 +758,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 			}
 		}).pipe(
 			Effect.as({}),
-			Effect.catchAllDefect((cause) =>
+			Effect.catchDefect((cause) =>
 				Effect.fail(sessionFailure(output.type, cause)),
 			),
 		);

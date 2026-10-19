@@ -3,18 +3,9 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { Either, Schema } from "effect";
+import { Result as Either, Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	AnswerQuestion,
-	ForkSessionForSession,
-	ListDaemonSessions,
-	MoveSessionWorkspace,
-	OpenCodeUseWorktree,
-	SaveProject,
-	StartSideThread,
-	SubmitInput,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { SessionWorkspaceChangedPayloadSchema } from "../../../src/lib/persistence/events.js";
@@ -175,14 +166,12 @@ describe("Forked session workspaces through the built daemon", () => {
 			provider,
 		);
 		const list = () =>
-			sendRpcRequest(
-				socket,
-				new ListDaemonSessions({
-					projectSlug: "process-test",
-					scope: "process-test",
-					roots: false,
-				}),
-			);
+			sendRpcRequest(socket, {
+				_tag: "ListDaemonSessions",
+				projectSlug: "process-test",
+				scope: "process-test",
+				roots: false,
+			});
 		evidence["createdParent"] = (await list()).sessions.find(
 			({ id }) => id === parentId,
 		);
@@ -190,15 +179,13 @@ describe("Forked session workspaces through the built daemon", () => {
 		await sendRpcRequest(
 			socket,
 			provider === "claude"
-				? new MoveSessionWorkspace({
-						sessionId: parentId,
-						path: worktree,
-					})
-				: new OpenCodeUseWorktree({
+				? { _tag: "MoveSessionWorkspace", sessionId: parentId, path: worktree }
+				: {
+						_tag: "OpenCodeUseWorktree",
 						instanceId: "managed-test",
 						providerSessionId: parentId,
 						path: worktree,
-					}),
+					},
 		);
 		if (provider === "claude") {
 			expect(
@@ -215,16 +202,18 @@ describe("Forked session workspaces through the built daemon", () => {
 		const fork = await sendRpcRequest(
 			socket,
 			sideThread
-				? new StartSideThread({
+				? {
+						_tag: "StartSideThread",
 						sessionId: parentId,
 						title: "Explain this code",
 						inputId: sideInputId,
 						text: "Reply with pong.",
-					})
-				: new ForkSessionForSession({
+					}
+				: {
+						_tag: "ForkSession",
 						originId: browser.originId,
 						sessionId: parentId,
-					}),
+					},
 		);
 		forkId = fork.sessionId;
 		const child = (await list()).sessions.find(({ id }) => id === forkId);
@@ -291,15 +280,13 @@ describe("Forked session workspaces through the built daemon", () => {
 			expect(queries[0]?.options["cwd"]).toBe(worktree);
 		} else {
 			if (!sideThread)
-				await sendRpcRequest(
-					socket,
-					new SubmitInput({
-						sessionId: forkId,
-						inputId: randomUUID(),
-						text: "Reply with pong.",
-						delivery: "queue",
-					}),
-				);
+				await sendRpcRequest(socket, {
+					_tag: "input.submit",
+					sessionId: forkId,
+					inputId: randomUUID(),
+					text: "Reply with pong.",
+					delivery: "queue",
+				});
 			await vi.waitFor(() => {
 				const request = fixture
 					.opencodeRequests()
@@ -407,16 +394,14 @@ describe("Forked session workspaces through the built daemon", () => {
 						message["toolId"] === questionId,
 				);
 				expect(
-					await sendRpcRequest(
-						socket,
-						new AnswerQuestion({
-							projectSlug: "process-test",
-							originId: browser.originId,
-							commandId: randomUUID(),
-							toolId: questionId,
-							answers: { "0": "Yes" },
-						}),
-					),
+					await sendRpcRequest(socket, {
+						_tag: "AnswerQuestion",
+						projectSlug: "process-test",
+						originId: browser.originId,
+						commandId: randomUUID(),
+						toolId: questionId,
+						answers: { "0": "Yes" },
+					}),
 				).toEqual({ ok: true });
 				expect(
 					await readNative(
@@ -682,12 +667,13 @@ describe("Forked session workspaces through the built daemon", () => {
 		// Startup recovery projects the seeded history into the read model, which
 		// decides the messages a Claude fork keeps.
 		await fixture.restart({ startupTimeoutMs: 60_000 });
-		const request = new StartSideThread({
+		const request = {
+			_tag: "StartSideThread" as const,
 			sessionId: parentId,
 			title: "What does this do?",
 			inputId: randomUUID(),
 			text: "What does this do?",
-		});
+		};
 		const started = performance.now();
 		// Two identical starts in flight at once, as from two tabs.
 		const [first, duplicate] = await Promise.all([
@@ -703,10 +689,10 @@ describe("Forked session workspaces through the built daemon", () => {
 
 		// The daemon dies the moment the second Side Thread exists, so its
 		// prompt may not be admitted yet; the retry must resume that thread.
-		const crashed = new StartSideThread({
+		const crashed = {
 			...request,
 			inputId: randomUUID(),
-		});
+		};
 		void sendRpcRequest(socket, crashed).catch(() => undefined);
 		const readStarted = new Database(fixture.daemonStorePath(), {
 			readonly: true,
@@ -732,14 +718,12 @@ describe("Forked session workspaces through the built daemon", () => {
 		expect((await sendRpcRequest(socket, crashed)).sessionId).toBe(crashedId);
 
 		const sideThreads = (
-			await sendRpcRequest(
-				socket,
-				new ListDaemonSessions({
-					projectSlug: "process-test",
-					scope: "process-test",
-					roots: false,
-				}),
-			)
+			await sendRpcRequest(socket, {
+				_tag: "ListDaemonSessions",
+				projectSlug: "process-test",
+				scope: "process-test",
+				roots: false,
+			})
 		).sessions.filter(({ parentID }) => parentID === parentId);
 		expect(sideThreads.map(({ id }) => id).sort()).toEqual(
 			[forkId, crashedId].sort(),
@@ -792,24 +776,20 @@ describe("Forked session workspaces through the built daemon", () => {
 		const linked = join(fixture.root, "extra-worktree");
 		git(extra, "worktree", "add", "-b", "feature/extra-fork", linked);
 		const extraWorktree = realpathSync(linked);
-		await sendRpcRequest(
-			socket,
-			new SaveProject({
-				slug: "process-test",
-				folders: [fixture.projectDir, extra],
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [fixture.projectDir, extra],
+		});
 		const browser = await fixture.connect();
 		const parentId = await browser.createSession(
 			"Parent launched in an extra worktree",
 		);
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId: parentId,
-				path: extraWorktree,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId: parentId,
+			path: extraWorktree,
+		});
 		expect(
 			(await browser.send(parentId, "Reply with pong.")).chunks.join(""),
 		).toBe(responseChunks("Reply with pong.").join(""));
@@ -818,22 +798,18 @@ describe("Forked session workspaces through the built daemon", () => {
 			.find(({ prompt }) => prompt !== undefined);
 		expect(parentQuery?.options["cwd"]).toBe(extraWorktree);
 		evidence["parentQuery"] = parentQuery;
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId: parentId,
-				path: worktree,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId: parentId,
+			path: worktree,
+		});
 		if (removed)
 			git(fixture.projectDir, "worktree", "remove", "--force", worktree);
-		const fork = await sendRpcRequest(
-			socket,
-			new ForkSessionForSession({
-				originId: browser.originId,
-				sessionId: parentId,
-			}),
-		);
+		const fork = await sendRpcRequest(socket, {
+			_tag: "ForkSession",
+			originId: browser.originId,
+			sessionId: parentId,
+		});
 		forkId = fork.sessionId;
 		const inherited = forkEvents(fixture, forkId).find(
 			({ type }) => type === "session.workspace_changed",

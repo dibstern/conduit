@@ -1,6 +1,6 @@
-import { RpcSchema } from "@effect/rpc";
 import { expect, type Page, type WebSocketRoute } from "@playwright/test";
-import { Effect, Exit, Schema, Scope, Stream } from "effect";
+import { Cause, Effect, Exit, Schema, Scope, Stream } from "effect";
+import { RpcSchema } from "effect/rpc";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
 import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import {
@@ -25,7 +25,8 @@ import {
 
 interface EffectRpcRequest {
 	readonly _tag: "Request";
-	readonly id: string;
+	// Effect 4 clients number their requests; other clients may send strings.
+	readonly id: string | number;
 	readonly tag: string;
 	readonly payload?: Record<string, unknown>;
 }
@@ -594,7 +595,7 @@ const isEffectRpcRequest = (value: unknown): value is EffectRpcRequest =>
 	isRecord(value) &&
 	value["_tag"] === "Request" &&
 	typeof value["tag"] === "string" &&
-	typeof value["id"] === "string";
+	(typeof value["id"] === "string" || typeof value["id"] === "number");
 
 const controls = new WeakMap<Page, RpcMockControl>();
 const pendingDaemonLists = new WeakMap<
@@ -783,13 +784,17 @@ function socketTable(
 	>;
 	const table: Record<string, (payload: never) => unknown> = {};
 	for (const rpc of WsRpcGroup.requests.values()) {
-		const streamSchema = RpcSchema.getStreamSchemas(rpc.successSchema.ast);
+		const streamSchema = RpcSchema.isStreamSchema(rpc.successSchema)
+			? rpc.successSchema
+			: undefined;
 		table[rpc._tag] = (payload: Record<string, unknown>) => {
 			const request = requests.get(rpc._tag)?.shift();
 			if (!request) throw new Error(`Missing request for ${rpc._tag}`);
 			const stub = stubs[rpc._tag];
-			if (streamSchema._tag === "Some") {
-				const schema = Schema.make(streamSchema.value.success.ast);
+			if (streamSchema) {
+				const schema = Schema.make<Schema.Codec<unknown>>(
+					streamSchema.success.ast,
+				);
 				// The group's stream schema establishes this result's shape.
 				const source = stub
 					? (stub(payload) as Stream.Stream<unknown, unknown>)
@@ -803,7 +808,7 @@ function socketTable(
 						control.registerStream(
 							rpc._tag,
 							ws,
-							request.id,
+							String(request.id),
 							(values) => Effect.runSync(queue.emit(...values)),
 							(message) =>
 								Effect.runSync(queue.fail(new WsRpcError({ message }))),
@@ -822,8 +827,8 @@ function socketTable(
 									catch: (error) => new WsRpcError({ message: String(error) }),
 								});
 								if (!isRecord(response))
-									return yield* Effect.dieMessage(
-										"Mock GetModels must return an object",
+									return yield* Effect.die(
+										new Error("Mock GetModels must return an object"),
 									);
 								yield* queue.emit({
 									defaultOpenCodeInstanceId: "opencode",
@@ -858,14 +863,14 @@ function socketTable(
 						stub
 							? checkedReply(rpc._tag, () => {
 									Schema.encodeUnknownSync(
-										Schema.make(streamSchema.value.failure.ast),
+										Schema.make<Schema.Codec<unknown>>(streamSchema.error.ast),
 									)(error);
 									return error;
 								})
 							: error,
 					),
 					Stream.ensuring(
-						Effect.sync(() => control.interruptStream(request.id, ws)),
+						Effect.sync(() => control.interruptStream(String(request.id), ws)),
 					),
 				);
 			}
@@ -873,9 +878,9 @@ function socketTable(
 			return (async () => {
 				const response = await stub(payload);
 				const value = checkedReply(rpc._tag, () => {
-					Schema.encodeUnknownSync(Schema.make(rpc.successSchema.ast))(
-						response,
-					);
+					Schema.encodeUnknownSync(
+						Schema.make<Schema.Codec<unknown>>(rpc.successSchema.ast),
+					)(response);
 					return response;
 				});
 				if (!rpc._tag.startsWith("Get") && isRecord(value)) {
@@ -964,7 +969,11 @@ export async function mockWsRpc(
 	await page.routeWebSocket(/\/rpc/, (ws: WebSocketRoute) => {
 		const scope = Effect.runSync(Scope.make());
 		const onClose = () => control.unregisterSocket(ws);
+		// Closing the scope makes the Effect 4 server reply to every pending call
+		// with an interrupt. A dropped connection delivers nothing, so mute it.
+		let closed = false;
 		const cleanup = () => {
+			closed = true;
 			page.off("close", onClose);
 			void Effect.runPromise(Scope.close(scope, Exit.void));
 		};
@@ -976,6 +985,7 @@ export async function mockWsRpc(
 		const ready = Effect.runPromise(
 			serveRpc(socketTable(ws, options, control, requests), (json) =>
 				Effect.sync(() => {
+					if (closed) return;
 					ws.send(json);
 					if (submissions.size === 0) return;
 					const frame: unknown = JSON.parse(json);
@@ -991,7 +1001,7 @@ export async function mockWsRpc(
 					)
 						control.onSendMessage?.(payload);
 				}),
-			).pipe(Scope.extend(scope)),
+			).pipe(Scope.provide(scope)),
 		);
 		control.onConnect?.();
 		ws.onMessage(async (data) => {
@@ -1001,19 +1011,23 @@ export async function mockWsRpc(
 				if (isEffectRpcRequest(frame)) {
 					control.record(frame.tag, frame.payload ?? {});
 					if (frame.tag === "input.submit")
-						submissions.set(frame.id, frame.payload ?? {});
+						submissions.set(String(frame.id), frame.payload ?? {});
 					const pending = requests.get(frame.tag) ?? [];
 					pending.push(frame);
 					requests.set(frame.tag, pending);
 				} else if (
 					isRecord(frame) &&
 					frame["_tag"] === "Interrupt" &&
-					typeof frame["requestId"] === "string"
+					(typeof frame["requestId"] === "string" ||
+						typeof frame["requestId"] === "number")
 				)
-					control.interruptStream(frame["requestId"], ws);
+					control.interruptStream(String(frame["requestId"]), ws);
 			}
 			const receive = await ready;
-			await Effect.runPromise(receive(data));
+			const exit = await Effect.runPromiseExit(receive(data));
+			// A frame that races the page closing its socket meets an interrupted server.
+			if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause))
+				throw Cause.squash(exit.cause);
 		});
 	});
 	return control;
