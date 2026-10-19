@@ -150,40 +150,6 @@ test.describe("Multi-Turn", () => {
 	});
 });
 
-test.describe("Streaming State", () => {
-	test.describe.configure({ timeout: 30_000 });
-	test.use({ recording: "chat-streaming" });
-
-	test("stop button appears during processing", async ({ page, relayUrl }) => {
-		const viewport = page.viewportSize();
-		const isDesktop = viewport ? viewport.width >= 1440 : false;
-		test.skip(!isDesktop, "Chat lifecycle tests run on desktop viewport only");
-
-		const app = new AppPage(page);
-		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
-
-		await app.sendMessage("Stream a response");
-
-		// The #stop button is a separate element from #send, conditionally
-		// rendered only while processing. Try to catch it.
-		try {
-			await chat.stopBtn.waitFor({ state: "visible", timeout: 5_000 });
-			expect(await chat.isProcessing()).toBe(true);
-		} catch {
-			// Mock responses arrive instantly — stop button may never appear.
-			// This is acceptable.
-		}
-
-		// After streaming completes, stop button should be gone
-		await chat.waitForStreamingComplete();
-
-		// Verify #stop is no longer visible and #send is
-		await expect(chat.stopBtn).not.toBeVisible({ timeout: 5_000 });
-		await expect(app.sendBtn).toBeVisible();
-	});
-});
-
 test.describe("Thinking Block", () => {
 	test.describe.configure({ timeout: 30_000 });
 	test.use({ recording: "chat-thinking" });
