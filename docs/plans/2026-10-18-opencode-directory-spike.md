@@ -97,7 +97,7 @@ returned 2xx. Each figure is a single observation.
 | S7, boot and 1/5/10-directory RSS, cold/warm latency | Boot 456,256 KiB. After 1/5/10 extra plain directories: 467,056 / 474,432 / 476,960 KiB (+20.7 MiB total, about 1 MiB per directory after the first). First-ever contact 120 ms, later cold contacts 6–27 ms, warm 1–11 ms. |
 | S7, three-server summed RSS and comparison limits | Separate servers in A, B and C, each contacted once: 688,944 + 693,376 + 414,112 = 1,796,432 KiB (1.71 GiB). One server holding 11 directories used 476,960 KiB. The cost directories were plain, and git-repo servers ran about 270 MiB heavier, so **per-repo cost on a shared server is unmeasured**. It is bounded above by a separate server's. RSS excludes child processes. |
 | Model-dominated first-reply latency | First text 1.9–6.2 s; idle 3.6–12.6 s. S6 took 47.3 s to first text and 59.1 s to idle, including the permission round trip. |
-| Surprises or disagreement with code assumptions | (1) A session's directory is fixed at creation; prompt and fork accept any scope without error. (2) Non-git directories share project `global`, with a root-relative `path`. (3) Session lookup works from any directory scope. (4) Streamed text deltas can split a path, so a few temp-path fragments survive normalization in the recordings. |
+| Surprises or disagreement with code assumptions | (1) Only creation and an explicit move set a session's directory; prompt and fork accept any scope without error. (2) Non-git directories share project `global`, with a root-relative `path`. (3) Session lookup works from any directory scope. (4) Streamed text deltas can split a path, so a few temp-path fragments survive normalization in the recordings. |
 
 ## Policy for 82tn.7 and 82tn.11
 
@@ -112,9 +112,11 @@ directory.** No per-project or per-directory servers.
    cwd, but OpenCode loads config, project and permission rules per directory, and
    it never rejects a mismatch. So conduit must keep its stored directory equal to
    OpenCode's `session.directory` and treat any disagreement as a bug.
-3. **Resume and fork never change directory.** Forks inherit the parent's
-   workspace, which matches `session-workspace.ts`. Moving a conversation to
-   another workspace needs a new session.
+3. **Request scope never changes a session's directory.** Moving a session
+   between workspaces uses the explicit `experimental.controlPlane.moveSession`
+   call (`OpenCodeAPI.move`, already used for worktree moves). This spike did not
+   exercise it. Forks inherit the parent's workspace, which matches
+   `session-workspace.ts`.
 4. **Events** come from one `/global/event` subscription per server, routed by
    `sessionID`, with the envelope directory as a cross-check. Per-directory
    streams scale linearly and miss directories created later.
