@@ -400,6 +400,17 @@ const server = createServer(async (request, response) => {
 		// The turn finishes at once: busy, then idle.
 		const sessionID = path.split("/")[2];
 		response.writeHead(204).end();
+		// Crash tests control the remaining stream and idle through /test routes.
+		if (existsSync(join(configDir, "fake-opencode-hold-turn"))) {
+			updateState((state) => {
+				(state.statuses[directory] ??= {})[sessionID] = { type: "busy" };
+			});
+			emitTyped(directory, "session.status", {
+				sessionID,
+				status: { type: "busy" },
+			});
+			return;
+		}
 		for (const type of ["busy", "idle"])
 			emitTyped(directory, "session.status", { sessionID, status: { type } });
 	} else if (
@@ -446,6 +457,10 @@ const server = createServer(async (request, response) => {
 		const failures = existsSync(failureFile)
 			? JSON.parse(readFileSync(failureFile, "utf8"))
 			: {};
+		if (failures[sessionID] === "not-found") {
+			response.writeHead(404).end('{"message":"Session not found"}');
+			return;
+		}
 		// true keeps failures active until the test removes the entry.
 		if (failures[sessionID] === true || failures[sessionID] > 0) {
 			if (failures[sessionID] !== true) {
@@ -458,7 +473,21 @@ const server = createServer(async (request, response) => {
 			);
 			response.writeHead(503).end('{"message":"Injected history failure"}');
 		} else {
-			response.end("[]");
+			const historyFile = join(configDir, "fake-opencode-history.json");
+			const history = existsSync(historyFile)
+				? JSON.parse(readFileSync(historyFile, "utf8"))
+				: {};
+			const snapshot = JSON.stringify(history[sessionID] ?? []);
+			const hold = join(configDir, "fake-opencode-hold-history");
+			if (existsSync(hold)) {
+				appendFileSync(
+					join(configDir, "fake-opencode-held-history.jsonl"),
+					`${JSON.stringify({ sessionID })}\n`,
+				);
+				while (existsSync(hold))
+					await new Promise((done) => setTimeout(done, 10));
+			}
+			response.end(snapshot);
 		}
 	} else if (["/agent", "/command"].includes(path)) {
 		const discoveryFile = join(configDir, "fake-opencode-discovery.json");

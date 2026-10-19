@@ -301,6 +301,68 @@ describe("Claude turn status before the model streams", () => {
 		]);
 	}, 60_000);
 
+	it("keeps consecutive inputs on their own turns after a bare result", async () => {
+		harness = await ProcessHarness.start({
+			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
+			restartProof: true,
+			capabilityModels,
+		});
+		const fixture = harness;
+		const browser = await fixture.connect();
+		const sessionId = await browser.createSession("Bare result admission");
+		await browser.send(sessionId, "before-local-work");
+		writeFileSync(join(fixture.root, "release-local-work"), "release");
+		const inputIds: string[] = [];
+		const observations: Array<{
+			prompt: string;
+			turns: Array<{ input: number; state: string }>;
+			endedInput: number;
+		}> = [];
+		try {
+			// Send again as soon as the public idle row arrives, while the prior
+			// result's publication and runner acknowledgement may still be finishing.
+			for (let cycle = 0; cycle < 8; cycle++) {
+				for (const prompt of ["local-work-turn", `after-local-work-${cycle}`]) {
+					const inputId = randomUUID();
+					inputIds.push(inputId);
+					const cursor = browser.frames.length;
+					await Effect.runPromise(
+						browser.rpc["input.submit"]({
+							sessionId,
+							originId: browser.originId,
+							inputId,
+							delivery: "queue",
+							text: prompt,
+						}),
+					);
+					await browser.waitForTurnEnd(sessionId, cursor);
+					const state = persisted(fixture, sessionId);
+					observations.push({
+						prompt,
+						turns: state.turnRows.map((turn) => ({
+							input: inputIds.indexOf(turn.input_id ?? "") + 1,
+							state: turn.state,
+						})),
+						endedInput:
+							inputIds.indexOf(state.session.last_turn_end_input_id ?? "") + 1,
+					});
+					expect(state.session.last_turn_end_input_id).toBe(inputId);
+					expect(state.turnRows).toHaveLength(inputIds.length + 1);
+					expect(state.turnRows.at(-1)).toMatchObject({
+						id: inputId,
+						state: "completed",
+					});
+				}
+			}
+		} finally {
+			mkdirSync("test-results", { recursive: true });
+			writeFileSync(
+				"test-results/82tn23-claude-bare-result-admission.json",
+				`${JSON.stringify(observations, null, 2)}\n`,
+			);
+		}
+	}, 60_000);
+
 	it("keeps a turn busy and its queue held across a mid-turn permission-mode change", async () => {
 		harness = await ProcessHarness.start({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",

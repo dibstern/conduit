@@ -552,6 +552,7 @@ export function makeOpenCodeInstancesStub(
 		use,
 		borrow: use,
 		ifRunning: (instanceId) => Effect.option(use(instanceId)),
+		isManagedStopped: () => Effect.succeed(false),
 		useIfRunning: (instanceId) => Effect.option(use(instanceId)),
 		stop: () => Effect.void,
 	};

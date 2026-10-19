@@ -989,13 +989,6 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					}),
 				);
 			}
-			const expectedApiModelId = yield* expectedApiModelIdEffect(
-				this.deps.capabilitiesService,
-				input.model?.modelId,
-				input.contextWindow,
-				input.workspaceRoot,
-				input.agent,
-			);
 			yield* markStreamLive(this.stateRef, sessionId);
 
 			const deferred = yield* Deferred.make<TurnResult, Error>();
@@ -1011,12 +1004,27 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			let promptQueue: PromptQueueController | undefined;
 			let activeQuery: Query | undefined;
 			const setup = Effect.gen({ self: this }, function* () {
+				const expectedApiModelId = yield* expectedApiModelIdEffect(
+					this.deps.capabilitiesService,
+					input.model?.modelId,
+					input.contextWindow,
+					input.workspaceRoot,
+					input.agent,
+				);
 				const userMessage = yield* Effect.try({
 					try: () => validateUserMessage(this.buildUserMessage(input)),
 					catch: (cause) =>
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
 				yield* this.placeUserMessageEffect(input);
+				yield* input.eventSink
+					.push(
+						claudeRuntimeEvent("session.status", sessionId, {
+							sessionId,
+							status: "busy",
+						}),
+					)
+					.pipe(Effect.ignore);
 				let resumeSessionAt = input.resumeSessionAt;
 				const rewindPoint = input.rewind?.resumeSessionAt;
 				if (
@@ -1471,9 +1479,6 @@ class ClaudeRunnerPayload implements RunnerPayload {
 							(prior) => Deferred.await(prior.deferred).pipe(Effect.ignore),
 							{ discard: true },
 						);
-					const joinsRunningTurn =
-						(yield* pendingTurnWaiters(this.stateRef, ctx.sessionId)).size > 0;
-
 					// A Stop that landed while this turn waited dropped it with the
 					// rest of the queue and already sent done. Failing it instead
 					// would send a second done that ends the user's next prompt.
@@ -1518,6 +1523,23 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						Semaphore.makeUnsafe(1)).withPermits(1)(
 						Effect.uninterruptible(
 							Effect.gen({ self: this }, function* () {
+								// A result can finish while admission waits for this permit.
+								const joinsRunningTurn =
+									(yield* pendingTurnWaiters(this.stateRef, ctx.sessionId))
+										.size > 0;
+								// The server can still count the prior send while it publishes
+								// its result. Establish this input's own turn and busy status here.
+								if (!joinsRunningTurn) {
+									yield* this.placeUserMessageEffect(input);
+									yield* input.eventSink
+										.push(
+											claudeRuntimeEvent("session.status", ctx.sessionId, {
+												sessionId: ctx.sessionId,
+												status: "busy",
+											}),
+										)
+										.pipe(Effect.ignore);
+								}
 								// A held send is placed when the SDK starts it.
 								yield* addTurnWaiter(
 									this.stateRef,

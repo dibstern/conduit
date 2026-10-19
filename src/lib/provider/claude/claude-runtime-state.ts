@@ -1,4 +1,12 @@
-import { type Deferred, Effect, HashMap, HashSet, Option, Ref } from "effect";
+import {
+	type Deferred,
+	Effect,
+	Equal,
+	HashMap,
+	HashSet,
+	Option,
+	Ref,
+} from "effect";
 import type { ClaudeProviderRuntimeState } from "./claude-provider-runtime.js";
 import type { ClaudeSessionContext } from "./types.js";
 
@@ -37,7 +45,12 @@ export function setSession(
 ): Effect.Effect<void> {
 	return Ref.update(stateRef, (state) => ({
 		...state,
-		sessions: HashMap.set(state.sessions, sessionId, ctx),
+		// Live SDK contexts are mutable resources, not structural values.
+		sessions: HashMap.set(
+			state.sessions,
+			sessionId,
+			Equal.byReferenceUnsafe(ctx),
+		),
 	}));
 }
 
