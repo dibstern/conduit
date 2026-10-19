@@ -466,7 +466,9 @@ test.describe("Claude ended stream task liveness", () => {
 			endAfterTrace: true,
 			holdSubagentReadAfter: {
 				turn: 1,
-				message: 114,
+				// task_updated completes A before the following task_notification.
+				// Its completion schedules the sole final transcript read.
+				message: 113,
 				agentId: "ab898d312e2e126b5",
 			},
 		},
@@ -518,7 +520,9 @@ test.describe("Claude ended stream task liveness", () => {
 					return Number(
 						db
 							.prepare(
-								"SELECT COUNT(*) AS n FROM events WHERE session_id = ? AND instr(data, ?) > 0",
+								// The launch prompt also contains "A done."; only the final
+								// assistant text is exactly this captured response.
+								"SELECT COUNT(*) AS n FROM events WHERE session_id = ? AND type = 'text.delta' AND json_extract(data, '$.text') = ?",
 							)
 							.get(childId, "A done.")?.["n"],
 					);

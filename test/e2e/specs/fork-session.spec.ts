@@ -9,10 +9,8 @@
 // 2. Whole-session fork (no messageId)
 // 3. Prompt in the forked session ("What words did I remember?")
 //
-// The fork response selects the new session. The third prompt triggers
-// provider events that populate the chat with at
-// least a user message. Combined with the session's forkMessageId metadata,
-// the fork UI (context block + divider) renders.
+// The fork response selects the new session. Its inherited transcript renders
+// the fork UI (context block + divider) before the third prompt.
 //
 // The recording's delta events for the third prompt's assistant response
 // are attached to a later REST queue entry. We don't wait for the full
@@ -24,6 +22,7 @@ import { RpcClient, type RpcClientError, RpcSerialization } from "effect/rpc";
 import { Socket } from "effect/socket";
 import NodeWebSocket from "ws";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import { isRecord } from "../../../src/lib/utils.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
@@ -72,7 +71,59 @@ async function setupForkSession(
 	chat: ChatPage,
 	relayUrl: string,
 ): Promise<{ sourceId: string; forkId: string }> {
+	const viewedSessions = new Set<string>();
+	page.on("websocket", (socket) => {
+		if (new URL(socket.url()).pathname !== "/rpc") return;
+		const requests = new Map<string, string>();
+		socket.on("framesent", ({ payload }) => {
+			const frame: unknown = JSON.parse(String(payload));
+			const messages: readonly unknown[] = Array.isArray(frame)
+				? frame
+				: [frame];
+			for (const request of messages) {
+				if (
+					isRecord(request) &&
+					request["_tag"] === "Request" &&
+					request["tag"] === "ViewSession" &&
+					isRecord(request["payload"]) &&
+					typeof request["payload"]["sessionId"] === "string"
+				) {
+					requests.set(String(request["id"]), request["payload"]["sessionId"]);
+				}
+			}
+		});
+		socket.on("framereceived", ({ payload }) => {
+			const frame: unknown = JSON.parse(String(payload));
+			const messages: readonly unknown[] = Array.isArray(frame)
+				? frame
+				: [frame];
+			for (const response of messages) {
+				if (!isRecord(response) || response["_tag"] !== "Exit") continue;
+				const sessionId = requests.get(String(response["requestId"]));
+				requests.delete(String(response["requestId"]));
+				if (
+					sessionId &&
+					isRecord(response["exit"]) &&
+					response["exit"]["_tag"] === "Success"
+				) {
+					viewedSessions.add(sessionId);
+				}
+			}
+		});
+	});
+	async function waitForView(sessionId: string) {
+		await expect.poll(() => viewedSessions.has(sessionId)).toBe(true);
+		await page.evaluate(
+			() =>
+				new Promise<void>((resolve) => {
+					requestAnimationFrame(() => resolve());
+				}),
+		);
+	}
 	await app.goto(relayUrl);
+	const sessionId = new URL(page.url()).pathname.split("/").at(-1);
+	if (!sessionId) throw new Error("Missing source session route");
+	await waitForView(sessionId);
 
 	await app.sendMessage(
 		"Remember the word 'alpha'. Reply with only: ok, remembered.",
@@ -85,11 +136,6 @@ async function setupForkSession(
 	);
 	await chat.waitForAssistantMessage();
 	await chat.waitForStreamingComplete();
-
-	// Keep the original route so the fork response can select a different session.
-	const currentPath = new URL(page.url()).pathname;
-	const sessionId = currentPath.split("/").at(-1);
-	if (!sessionId) throw new Error("Missing source session route");
 
 	// Fork: whole-session fork (no messageId)
 	const forkedSessionId = await callRpc(relayUrl, (client) =>
@@ -104,26 +150,18 @@ async function setupForkSession(
 		window.dispatchEvent(new PopStateEvent("popstate"));
 	}, forkedSessionId);
 
-	await page.waitForFunction(
-		({ prevPath, sessionId }) => {
-			const p = window.location.pathname;
-			return p !== prevPath && p === `/s/${encodeURIComponent(sessionId)}`;
-		},
-		{ prevPath: currentPath, sessionId: forkedSessionId },
-		{ timeout: 15_000 },
-	);
+	// ViewSession restores the fork's draft asynchronously. Wait for that reply
+	// and a render frame so it cannot clear a prompt typed before it arrived.
+	await waitForView(forkedSessionId);
+	const forkDivider = page.locator(".fork-divider");
+	await forkDivider.waitFor({ state: "visible", timeout: 30_000 });
 
-	// This triggers SSE events that add at least a user transcript row to the chat.
-	// Combined with forkMessageId on the session, the fork UI renders.
 	await app.sendMessage(
 		"What words did I ask you to remember? Reply with just the words.",
 	);
-
-	// Wait for fork UI instead of waiting for the full assistant response.
-	// The fork divider appears once chatState.messages has content and
-	// the session's forkMessageId is set.
-	const forkDivider = page.locator(".fork-divider");
-	await forkDivider.waitFor({ state: "visible", timeout: 30_000 });
+	await expect(chat.userMessages.last()).toContainText(
+		"What words did I ask you to remember? Reply with just the words.",
+	);
 	return { sourceId: sessionId, forkId: forkedSessionId };
 }
 
