@@ -45,7 +45,6 @@ export default defineConfig({
 		"todo-overlay-feed.spec.ts",
 		"composer-agent-list-race.spec.ts",
 		// playwright-visual.config.ts: visual snapshot suite.
-		"visual-mockup.spec.ts",
 		"composer-layout.spec.ts",
 	],
 	fullyParallel: true,

@@ -6,7 +6,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
 	testDir: "./specs",
-	testMatch: ["visual-mockup.spec.ts", "composer-layout.spec.ts"],
+	testMatch: ["composer-layout.spec.ts"],
 	fullyParallel: true,
 	forbidOnly: !!process.env["CI"],
 	retries: 1,
