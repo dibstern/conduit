@@ -985,32 +985,30 @@ describe("back navigation", () => {
 
 describe("re-render after action", () => {
 	it("re-renders settings menu after PIN change", async () => {
-		const setPin = vi.fn().mockResolvedValue({ ok: true });
 		const io = createMockIO();
-		let renderCount = 0;
-
-		void showSettingsMenu(
+		let pinEnabled = false;
+		const onBack = vi.fn();
+		const menuPromise = showSettingsMenu(
 			io.opts({
-				setPin,
-				getSettingsInfo: () => {
-					renderCount++;
-					if (renderCount > 1) {
-						// On re-render, exit
-						setTimeout(() => io.stdin.emit("data", "\x03"), 30);
-					}
-					return defaultSettingsInfo({ pinEnabled: false });
-				},
+				setPin: vi.fn(async () => {
+					pinEnabled = true;
+					return { ok: true };
+				}),
+				getSettingsInfo: () => defaultSettingsInfo({ pinEnabled }),
+				onBack,
 			}),
 		);
 		await tick();
-
-		// Navigate to "Set PIN" and enter a PIN
 		await sendKeys(io.stdin, ["\x1b[B", "\r"]);
-		await tick();
+		const beforePin = io.output.length;
 		await sendKeys(io.stdin, ["5", "6", "7", "8", "\r"]);
-		await tick();
-
-		// getSettingsInfo should have been called at least twice (initial + re-render)
-		expect(renderCount).toBeGreaterThanOrEqual(2);
+		const transcript = stripAnsi(io.output.slice(beforePin).join(""));
+		expect(transcript).toContain("PIN updated");
+		expect(transcript).toContain("Settings");
+		expect(transcript).toContain("Change PIN");
+		expect(transcript).toContain("Remove PIN");
+		await sendKeys(io.stdin, ["\x1b"]);
+		await menuPromise;
+		expect(onBack).toHaveBeenCalledOnce();
 	});
 });
