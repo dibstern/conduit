@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SDKTaskStartedMessage } from "@anthropic-ai/claude-agent-sdk";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { Effect, Fiber, Layer } from "effect";
+import { Deferred, Effect, Fiber, Layer } from "effect";
 import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
 import { describe, expect, it, vi } from "vitest";
@@ -40,6 +40,7 @@ import type {
 	MessageWithParts,
 } from "../../../src/lib/persistence/read-model-types.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
+import { makeClaudeSessionRunner } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
 import {
 	type ClaudeSubagentSdk,
 	claudeSubagentSessionId,
@@ -310,11 +311,30 @@ describe("Claude subagent materialization pipeline", () => {
 						}),
 					] satisfies SDKMessage[];
 
+					const subagentsFinalized = yield* Deferred.make<void>();
 					const instance = makeTestClaudeProviderInstance({
 						workspaceRoot: dir,
 						queryFactory: () => createMockQuery(queryMessages),
 						subagentSdk: sdk,
 						ensureClaudeSubagentSession: persist.ensureClaudeSubagentSession,
+						runnerFactory: (deps, emit) =>
+							Effect.gen(function* () {
+								const runner = yield* makeClaudeSessionRunner(
+									{
+										...deps,
+										onSubagentFinalizationComplete: () => {
+											if (
+												runner.hasPendingSubagentFinalizers?.(
+													parentSessionId,
+												) === false
+											)
+												Deferred.doneUnsafe(subagentsFinalized, Effect.void);
+										},
+									},
+									emit,
+								);
+								return runner;
+							}),
 					});
 					yield* instance.sendTurnEffect(
 						makeBaseSendTurnInput({
@@ -332,18 +352,8 @@ describe("Claude subagent materialization pipeline", () => {
 							eventSink: relaySink,
 						}),
 					);
-					const waitForFinalCatchUp = () =>
-						Effect.promise(() =>
-							vi.waitFor(
-								async () => {
-									const rows = await Effect.runPromise(sql<MessageRow>`
-								SELECT * FROM messages WHERE session_id = ${childSessionId}`);
-									expect(rows.length).toBeGreaterThanOrEqual(2);
-								},
-								{ timeout: 2_000 },
-							),
-						);
-					yield* waitForFinalCatchUp();
+					// Message rows can exist before the final read projects their text parts.
+					yield* Deferred.await(subagentsFinalized);
 
 					const parentMessages = yield* sql<MessageRow>`
 						SELECT * FROM messages WHERE session_id = ${parentSessionId} ORDER BY created_at ASC, id ASC`;
