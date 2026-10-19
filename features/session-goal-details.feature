@@ -1,5 +1,30 @@
 Feature: Goal details reveal check history and goal actions
 
+Scenario Outline: The phone goal sheet contains keyboard focus and restores it after keyboard and touch dismissal
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And the composer status clock is frozen
+  And a session already exists on the Claude harness
+  And goal details are available for a <phase> goal
+  When I open the session goal subtitle with the keyboard
+  Then the phone goal sheet is a labelled modal with focus inside and an inert background
+  When I tab forwards and backwards through the goal sheet actions
+  And I press Escape in goal details
+  Then goal details are closed
+  And the session goal subtitle has focus
+  And the goal sheet background is interactive again
+  When I tap the session goal subtitle
+  Then the phone goal sheet is a labelled modal with focus inside and an inert background
+  When I tap the goal details scrim
+  Then goal details are closed
+  And the session goal subtitle has focus
+  And the goal sheet background is interactive again
+
+Examples:
+  | phase   |
+  | working |
+  | met     |
+
 Scenario Outline: The goal subtitle opens details and both dismissal paths work
   Given the conduit app is served with the connected mockup
   And the viewport is a <viewport>
@@ -31,10 +56,10 @@ Scenario: A running goal check appends a spinner to the returned history
   And the composer status clock is frozen
   And a session already exists on the Claude harness
   And goal details are available for a checking goal
+  And the phone header controls own separate touch areas of at least 24 pixels, using 44 where space permits
   When I click the session goal subtitle
   Then the goal details history shows Checking now followed by three checks
   And goal details offer Pause, Edit and Clear
-  And the phone header controls own separate touch areas of at least 24 pixels, using 44 where space permits
 
 Scenario: Pause interrupts the current session through the stop RPC
   Given the conduit app is served with the connected mockup

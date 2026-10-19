@@ -35,6 +35,112 @@ function checkText(page: Page) {
 
 export const sessionGoalDetailsHandlers: StepHandler[] = [
 	{
+		name: "open goal details with keyboard",
+		match: /^I open the session goal subtitle with the keyboard$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("session-goal-subtitle").focus();
+			await world.page.keyboard.press("Enter");
+		},
+	},
+	{
+		name: "assert phone goal sheet modality",
+		match:
+			/^the phone goal sheet is a labelled modal with focus inside and an inert background$/,
+		run: async ({ world }) => {
+			const sheet = world.page.getByTestId("goal-details");
+			await expect(sheet).toHaveRole("dialog");
+			await expect(sheet).toHaveAttribute("aria-modal", "true");
+			await expect(sheet).toHaveAccessibleName(CONDITION);
+			const titleId = await sheet
+				.getByTestId("goal-details-condition")
+				.getAttribute("id");
+			if (!titleId) throw new Error("Goal sheet title has no id");
+			await expect(sheet).toHaveAttribute("aria-labelledby", titleId);
+			await expect
+				.poll(() => sheet.evaluate((el) => el.contains(document.activeElement)))
+				.toBe(true);
+			for (const target of [
+				world.page.getByTestId("session-goal-subtitle"),
+				world.page.locator("#input"),
+			]) {
+				await expect
+					.poll(() => target.evaluate((el) => el.closest("[inert]") !== null))
+					.toBe(true);
+				await target.focus();
+				await expect(target).not.toBeFocused();
+			}
+		},
+	},
+	{
+		name: "cycle phone goal sheet actions in both directions",
+		match: /^I tab forwards and backwards through the goal sheet actions$/,
+		run: async ({ world }) => {
+			const sheet = world.page.getByTestId("goal-details");
+			const active = await sheet.getByTestId("goal-details-pause").count();
+			const actions = active ? ["pause", "edit", "clear"] : ["new", "dismiss"];
+			await sheet.getByTestId(`goal-details-${actions[0]}`).focus();
+			for (const action of [...actions.slice(1), actions[0]]) {
+				await world.page.keyboard.press("Tab");
+				await expect(sheet.getByTestId(`goal-details-${action}`)).toBeFocused();
+			}
+			for (const action of [...actions.slice(1).reverse(), actions[0]]) {
+				await world.page.keyboard.press("Shift+Tab");
+				await expect(sheet.getByTestId(`goal-details-${action}`)).toBeFocused();
+			}
+		},
+	},
+	{
+		name: "tap goal subtitle or scrim with touch input",
+		match: /^I tap the (session goal subtitle|goal details scrim)$/,
+		run: async ({ world, match }) => {
+			const scrim = match[1] === "goal details scrim";
+			const target = world.page.getByTestId(
+				scrim ? "goal-details-scrim" : "session-goal-subtitle",
+			);
+			await expect(target).toHaveCSS("pointer-events", "auto");
+			await expect
+				.poll(() => target.evaluate((el) => el.closest("[inert]") !== null))
+				.toBe(false);
+			const box = await target.boundingBox();
+			if (!box) throw new Error("Goal touch target has no layout box");
+			const sheet = scrim
+				? await world.page.getByTestId("goal-details").boundingBox()
+				: null;
+			const touch = await world.page.context().newCDPSession(world.page);
+			try {
+				await touch.send("Input.dispatchTouchEvent", {
+					type: "touchStart",
+					touchPoints: [
+						{
+							x: scrim ? box.x + 10 : box.x + box.width / 2,
+							y: sheet ? (box.y + sheet.y) / 2 : box.y + box.height / 2,
+						},
+					],
+				});
+				await touch.send("Input.dispatchTouchEvent", {
+					type: "touchEnd",
+					touchPoints: [],
+				});
+			} finally {
+				await touch.detach();
+			}
+		},
+	},
+	{
+		name: "assert goal sheet releases background inertness",
+		match: /^the goal sheet background is interactive again$/,
+		run: async ({ world }) => {
+			for (const target of [
+				world.page.getByTestId("session-goal-subtitle"),
+				world.page.locator("#input"),
+			]) {
+				await expect
+					.poll(() => target.evaluate((el) => el.closest("[inert]") !== null))
+					.toBe(false);
+			}
+		},
+	},
+	{
 		name: "provide goal details through mocked RPC",
 		match:
 			/^goal details are available for a (working|checking|paused|met) goal$/,

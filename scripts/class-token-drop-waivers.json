@@ -1,4 +1,11 @@
 {
+	"src/lib/frontend/components/layout/SessionBar.svelte :: bottom-0,inset-x-0,pointer-events-auto": {
+		"movedTo": "src/lib/frontend/components/ui/Popover.svelte",
+		"requires": "presentation=\"sheet\" modal",
+		"reason": "conduit-test-aoqb.35: Popover owns the bottom sheet positioning and interactive scrim."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: contents": "conduit-test-aoqb.35: Popover portals its own scrim; the caller's inert-exemption wrapper is removed.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: focus-visible:outline-hidden": "conduit-test-aoqb.35: Popover's sheet uses outline-hidden, which also suppresses the focused container outline without changing its pixels.",
 	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: gap-1.5,px-[10px],py-[6px],rounded-[9px],text-[11.5px],text-status-red": {
 		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
 		"requires": "variant=\"task-stop-all\"",

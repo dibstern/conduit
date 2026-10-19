@@ -1258,12 +1258,18 @@ export const PhoneGoalSheet: Story = {
 			expectTouchTarget(canvas.getByTestId(id));
 		}
 		await userEvent.keyboard("{Escape}");
-		await expect(canvas.queryByTestId("goal-details")).toBeNull();
-		await expect(goal).toHaveFocus();
+		await waitFor(() => {
+			expect(canvas.queryByTestId("goal-details")).toBeNull();
+			expect(goal).toHaveFocus();
+			expect(getComputedStyle(goal).pointerEvents).toBe("auto");
+		});
 		await userEvent.click(goal);
 		await userEvent.click(canvas.getByTestId("goal-details-scrim"));
-		await expect(canvas.queryByTestId("goal-details")).toBeNull();
-		await expect(goal).toHaveFocus();
+		await waitFor(() => {
+			expect(canvas.queryByTestId("goal-details")).toBeNull();
+			expect(goal).toHaveFocus();
+			expect(getComputedStyle(goal).pointerEvents).toBe("auto");
+		});
 		await userEvent.click(goal);
 	},
 };
