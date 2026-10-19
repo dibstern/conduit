@@ -1,12 +1,27 @@
 import { resolve } from "node:path";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 const guardTests = ["test/unit/**/*.guard.test.ts"];
 
 export default defineConfig({
 	plugins: [svelte()],
 	test: {
+		// `related` cannot trace filesystem reads or spawned build artifacts.
+		// It resolves inputs to absolute paths, so keep the **/ prefixes.
+		forceRerunTriggers: [
+			...configDefaults.forceRerunTriggers,
+			"**/test/fixtures/**", // Includes captured SDK traces.
+			"**/test/e2e/fixtures/**",
+			"**/*-snapshots/**",
+			"**/acceptance/visual/baselines/**",
+			"**/test/e2e/baselines/**",
+			"**/pnpm-lock.yaml",
+			"**/tsconfig*.json",
+			"**/test/setup.ts",
+			"**/src/lib/frontend/style.css",
+			"**/scripts/build.mjs",
+		],
 		// Suppress pino log noise in projects that use the runtime setup.
 		setupFiles: ["test/setup.ts"],
 		// Component tests need jsdom + browser resolve condition so
