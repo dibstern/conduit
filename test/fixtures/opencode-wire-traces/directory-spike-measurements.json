@@ -1,0 +1,2453 @@
+{
+	"version": "1.18.34",
+	"platform": {
+		"os": "darwin",
+		"arch": "arm64",
+		"release": "25.6.0"
+	},
+	"model": {
+		"providerID": "opencode",
+		"modelID": "mimo-v2.6-flash-free"
+	},
+	"serverCwd": "<A>",
+	"scenarios": {
+		"s7-cost": {
+			"result": {
+				"bootRss": {
+					"rssKiB": 456256,
+					"error": null
+				},
+				"contactMethod": "GET /project/current",
+				"latencyLabel": "local REST round trip through RecordingProxy; no model",
+				"contacts": [
+					{
+						"directory": "<ROOT>/cost-1",
+						"cold": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 120.46170799999982
+						},
+						"warm": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 5.418957999999748
+						},
+						"afterCold": {
+							"rssKiB": 467056,
+							"error": null
+						}
+					},
+					{
+						"directory": "<ROOT>/cost-2",
+						"cold": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 27.026958999999806
+						},
+						"warm": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 1.9751249999999345
+						},
+						"afterCold": {
+							"rssKiB": 471536,
+							"error": null
+						}
+					},
+					{
+						"directory": "<ROOT>/cost-3",
+						"cold": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 11.442833000000064
+						},
+						"warm": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 10.881332999999813
+						},
+						"afterCold": {
+							"rssKiB": 473344,
+							"error": null
+						}
+					},
+					{
+						"directory": "<ROOT>/cost-4",
+						"cold": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 14.988542000000052
+						},
+						"warm": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 5.32870899999989
+						},
+						"afterCold": {
+							"rssKiB": 474032,
+							"error": null
+						}
+					},
+					{
+						"directory": "<ROOT>/cost-5",
+						"cold": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 6.522208000000319
+						},
+						"warm": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 1.7629590000001372
+						},
+						"afterCold": {
+							"rssKiB": 474432,
+							"error": null
+						}
+					},
+					{
+						"directory": "<ROOT>/cost-6",
+						"cold": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 10.892208999999639
+						},
+						"warm": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 1.528791000000183
+						},
+						"afterCold": {
+							"rssKiB": 474848,
+							"error": null
+						}
+					},
+					{
+						"directory": "<ROOT>/cost-7",
+						"cold": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 10.230708999999933
+						},
+						"warm": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 1.3582910000000084
+						},
+						"afterCold": {
+							"rssKiB": 475040,
+							"error": null
+						}
+					},
+					{
+						"directory": "<ROOT>/cost-8",
+						"cold": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 5.756540999999743
+						},
+						"warm": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 3.736833000000388
+						},
+						"afterCold": {
+							"rssKiB": 476112,
+							"error": null
+						}
+					},
+					{
+						"directory": "<ROOT>/cost-9",
+						"cold": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 6.033458000000337
+						},
+						"warm": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 1.421041999999943
+						},
+						"afterCold": {
+							"rssKiB": 476704,
+							"error": null
+						}
+					},
+					{
+						"directory": "<ROOT>/cost-10",
+						"cold": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 10.402958000000126
+						},
+						"warm": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 1.6552080000001297
+						},
+						"afterCold": {
+							"rssKiB": 476960,
+							"error": null
+						}
+					}
+				],
+				"checkpoints": [
+					{
+						"newDirectoryCount": 1,
+						"rssKiB": 467056,
+						"error": null
+					},
+					{
+						"newDirectoryCount": 5,
+						"rssKiB": 474432,
+						"error": null
+					},
+					{
+						"newDirectoryCount": 10,
+						"rssKiB": 476960,
+						"error": null
+					}
+				],
+				"comparison": [
+					{
+						"directory": "<A>",
+						"contact": {
+							"status": 200,
+							"body": {
+								"id": "project_1",
+								"worktree": "<A>",
+								"vcs": "git",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 131.27091699999983
+						},
+						"rssKiB": 688944,
+						"error": null
+					},
+					{
+						"directory": "<B>",
+						"contact": {
+							"status": 200,
+							"body": {
+								"id": "project_2",
+								"worktree": "<B>",
+								"vcs": "git",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 120.70695800000067
+						},
+						"rssKiB": 693376,
+						"error": null
+					},
+					{
+						"directory": "<C>",
+						"contact": {
+							"status": 200,
+							"body": {
+								"id": "global",
+								"worktree": "/",
+								"time": {
+									"created": 0,
+									"updated": 0
+								},
+								"sandboxes": []
+							},
+							"elapsedMs": 117.96558300000015
+						},
+						"rssKiB": 414112,
+						"error": null
+					}
+				],
+				"separateServersSummedRssKiB": 1796432
+			},
+			"requests": [
+				{
+					"method": "GET",
+					"path": "/project/current",
+					"directory": "<ROOT>/cost-1",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/project/current",
+					"directory": "<ROOT>/cost-1",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/project/current",
+					"directory": "<ROOT>/cost-2",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/project/current",
+					"directory": "<ROOT>/cost-2",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/project/current",
+					"directory": "<ROOT>/cost-3",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/project/current",
+					"directory": "<ROOT>/cost-3",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/project/current",
+					"directory": "<ROOT>/cost-4",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/project/current",
+					"directory": "<ROOT>/cost-4",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/project/current",
+					"directory": "<ROOT>/cost-5",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/project/current",
+					"directory": "<ROOT>/cost-5",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/project/current",
+					"directory": "<ROOT>/cost-6",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/project/current",
+					"directory": "<ROOT>/cost-6",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/project/current",
+					"directory": "<ROOT>/cost-7",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/project/current",
+					"directory": "<ROOT>/cost-7",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/project/current",
+					"directory": "<ROOT>/cost-8",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/project/current",
+					"directory": "<ROOT>/cost-8",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/project/current",
+					"directory": "<ROOT>/cost-9",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/project/current",
+					"directory": "<ROOT>/cost-9",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/project/current",
+					"directory": "<ROOT>/cost-10",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/project/current",
+					"directory": "<ROOT>/cost-10",
+					"status": 200
+				}
+			],
+			"streamErrors": []
+		},
+		"s1-multi-directory": {
+			"result": {
+				"setup": "POST /session before per-directory stream subscriptions; no registration/config call",
+				"results": [
+					{
+						"name": "A",
+						"directory": "<A>",
+						"id": "ses_1",
+						"response": {
+							"status": 200,
+							"body": {
+								"id": "ses_1",
+								"slug": "swift-cabin",
+								"projectID": "project_1",
+								"directory": "<A>",
+								"path": "",
+								"cost": 0,
+								"tokens": {
+									"input": 0,
+									"output": 0,
+									"reasoning": 0,
+									"cache": {
+										"read": 0,
+										"write": 0
+									}
+								},
+								"title": "directory-A",
+								"version": "1.18.34",
+								"time": {
+									"created": 0,
+									"updated": 0
+								}
+							},
+							"elapsedMs": 75.94016699999975
+						},
+						"target": "<A>",
+						"turn": {
+							"response": {
+								"status": 204,
+								"body": null,
+								"elapsedMs": 96.87533299999996
+							},
+							"permissions": [],
+							"latencyLabel": "model-dominated",
+							"firstAssistantTextMs": 6223.133041,
+							"idleMs": 10907.545375000002,
+							"elapsedMs": 10912.239207999999,
+							"timedOut": false,
+							"timeoutCleanup": null,
+							"errors": [],
+							"tools": [
+								{
+									"type": "tool",
+									"tool": "bash",
+									"callID": "call_1",
+									"state": {
+										"status": "completed",
+										"input": {
+											"command": "pwd"
+										},
+										"output": "<A>\n",
+										"metadata": {
+											"output": "<A>\n",
+											"exit": 0,
+											"truncated": false
+										},
+										"title": "pwd",
+										"time": {
+											"start": 0,
+											"end": 0
+										}
+									},
+									"id": "prt_4",
+									"sessionID": "ses_1",
+									"messageID": "msg_2"
+								}
+							],
+							"assistantText": "<A>"
+						},
+						"lookupAtTarget": {
+							"status": 200,
+							"body": {
+								"id": "ses_1",
+								"slug": "swift-cabin",
+								"projectID": "project_1",
+								"directory": "<A>",
+								"path": "",
+								"summary": {
+									"additions": 0,
+									"deletions": 0,
+									"files": 0
+								},
+								"cost": 0,
+								"tokens": {
+									"input": 2148,
+									"output": 61,
+									"reasoning": 32,
+									"cache": {
+										"read": 14336,
+										"write": 0
+									}
+								},
+								"title": "directory-A",
+								"agent": "build",
+								"model": {
+									"id": "mimo-v2.6-flash-free",
+									"providerID": "opencode",
+									"variant": "default"
+								},
+								"version": "1.18.34",
+								"time": {
+									"created": 0,
+									"updated": 0
+								}
+							},
+							"elapsedMs": 3.8854580000006536
+						},
+						"lookupAtOrigin": {
+							"status": 200,
+							"body": {
+								"id": "ses_1",
+								"slug": "swift-cabin",
+								"projectID": "project_1",
+								"directory": "<A>",
+								"path": "",
+								"summary": {
+									"additions": 0,
+									"deletions": 0,
+									"files": 0
+								},
+								"cost": 0,
+								"tokens": {
+									"input": 2148,
+									"output": 61,
+									"reasoning": 32,
+									"cache": {
+										"read": 14336,
+										"write": 0
+									}
+								},
+								"title": "directory-A",
+								"agent": "build",
+								"model": {
+									"id": "mimo-v2.6-flash-free",
+									"providerID": "opencode",
+									"variant": "default"
+								},
+								"version": "1.18.34",
+								"time": {
+									"created": 0,
+									"updated": 0
+								}
+							},
+							"elapsedMs": 2.4034169999977166
+						},
+						"streams": [
+							{
+								"stream": "/global/event",
+								"count": 58,
+								"types": [
+									"session.created",
+									"session.updated",
+									"message.updated",
+									"message.part.updated",
+									"session.status",
+									"session.diff",
+									"message.part.delta",
+									"session.idle"
+								],
+								"envelopeDirectories": ["<A>"]
+							},
+							{
+								"stream": "/event?directory=<A>",
+								"count": 57,
+								"types": [
+									"session.updated",
+									"message.updated",
+									"message.part.updated",
+									"session.status",
+									"session.diff",
+									"message.part.delta",
+									"session.idle"
+								],
+								"envelopeDirectories": [null]
+							},
+							{
+								"stream": "/event?directory=<B>",
+								"count": 0,
+								"types": [],
+								"envelopeDirectories": []
+							},
+							{
+								"stream": "/event?directory=<C>",
+								"count": 0,
+								"types": [],
+								"envelopeDirectories": []
+							}
+						]
+					},
+					{
+						"name": "B",
+						"directory": "<B>",
+						"id": "ses_2",
+						"response": {
+							"status": 200,
+							"body": {
+								"id": "ses_2",
+								"slug": "happy-planet",
+								"projectID": "project_2",
+								"directory": "<B>",
+								"path": "",
+								"cost": 0,
+								"tokens": {
+									"input": 0,
+									"output": 0,
+									"reasoning": 0,
+									"cache": {
+										"read": 0,
+										"write": 0
+									}
+								},
+								"title": "directory-B",
+								"version": "1.18.34",
+								"time": {
+									"created": 0,
+									"updated": 0
+								}
+							},
+							"elapsedMs": 148.5508749999999
+						},
+						"target": "<B>",
+						"turn": {
+							"response": {
+								"status": 204,
+								"body": null,
+								"elapsedMs": 7.837625000000116
+							},
+							"permissions": [],
+							"latencyLabel": "model-dominated",
+							"firstAssistantTextMs": 3473.7806670000027,
+							"idleMs": 7258.666875000003,
+							"elapsedMs": 7293.560542000003,
+							"timedOut": false,
+							"timeoutCleanup": null,
+							"errors": [],
+							"tools": [
+								{
+									"type": "tool",
+									"tool": "bash",
+									"callID": "call_2",
+									"state": {
+										"status": "completed",
+										"input": {
+											"command": "pwd"
+										},
+										"output": "<B>\n",
+										"metadata": {
+											"output": "<B>\n",
+											"exit": 0,
+											"truncated": false
+										},
+										"title": "pwd",
+										"time": {
+											"start": 0,
+											"end": 0
+										}
+									},
+									"id": "prt_13",
+									"sessionID": "ses_2",
+									"messageID": "msg_5"
+								}
+							],
+							"assistantText": "<B>"
+						},
+						"lookupAtTarget": {
+							"status": 200,
+							"body": {
+								"id": "ses_2",
+								"slug": "happy-planet",
+								"projectID": "project_2",
+								"directory": "<B>",
+								"path": "",
+								"summary": {
+									"additions": 0,
+									"deletions": 0,
+									"files": 0
+								},
+								"cost": 0,
+								"tokens": {
+									"input": 2144,
+									"output": 61,
+									"reasoning": 27,
+									"cache": {
+										"read": 14336,
+										"write": 0
+									}
+								},
+								"title": "directory-B",
+								"agent": "build",
+								"model": {
+									"id": "mimo-v2.6-flash-free",
+									"providerID": "opencode",
+									"variant": "default"
+								},
+								"version": "1.18.34",
+								"time": {
+									"created": 0,
+									"updated": 0
+								}
+							},
+							"elapsedMs": 4.52179199999955
+						},
+						"lookupAtOrigin": {
+							"status": 200,
+							"body": {
+								"id": "ses_2",
+								"slug": "happy-planet",
+								"projectID": "project_2",
+								"directory": "<B>",
+								"path": "",
+								"summary": {
+									"additions": 0,
+									"deletions": 0,
+									"files": 0
+								},
+								"cost": 0,
+								"tokens": {
+									"input": 2144,
+									"output": 61,
+									"reasoning": 27,
+									"cache": {
+										"read": 14336,
+										"write": 0
+									}
+								},
+								"title": "directory-B",
+								"agent": "build",
+								"model": {
+									"id": "mimo-v2.6-flash-free",
+									"providerID": "opencode",
+									"variant": "default"
+								},
+								"version": "1.18.34",
+								"time": {
+									"created": 0,
+									"updated": 0
+								}
+							},
+							"elapsedMs": 2.9465420000015
+						},
+						"streams": [
+							{
+								"stream": "/global/event",
+								"count": 56,
+								"types": [
+									"session.created",
+									"session.updated",
+									"message.updated",
+									"message.part.updated",
+									"session.status",
+									"session.diff",
+									"message.part.delta",
+									"session.idle"
+								],
+								"envelopeDirectories": ["<B>"]
+							},
+							{
+								"stream": "/event?directory=<A>",
+								"count": 0,
+								"types": [],
+								"envelopeDirectories": []
+							},
+							{
+								"stream": "/event?directory=<B>",
+								"count": 55,
+								"types": [
+									"session.updated",
+									"message.updated",
+									"message.part.updated",
+									"session.status",
+									"session.diff",
+									"message.part.delta",
+									"session.idle"
+								],
+								"envelopeDirectories": [null]
+							},
+							{
+								"stream": "/event?directory=<C>",
+								"count": 0,
+								"types": [],
+								"envelopeDirectories": []
+							}
+						]
+					},
+					{
+						"name": "C",
+						"directory": "<C>",
+						"id": "ses_3",
+						"response": {
+							"status": 200,
+							"body": {
+								"id": "ses_3",
+								"slug": "eager-meadow",
+								"projectID": "global",
+								"directory": "<C>",
+								"path": "<C>",
+								"cost": 0,
+								"tokens": {
+									"input": 0,
+									"output": 0,
+									"reasoning": 0,
+									"cache": {
+										"read": 0,
+										"write": 0
+									}
+								},
+								"title": "directory-C",
+								"version": "1.18.34",
+								"time": {
+									"created": 0,
+									"updated": 0
+								}
+							},
+							"elapsedMs": 138.24275000000034
+						},
+						"target": "<C>",
+						"turn": {
+							"response": {
+								"status": 204,
+								"body": null,
+								"elapsedMs": 3.3943749999998545
+							},
+							"permissions": [],
+							"latencyLabel": "model-dominated",
+							"firstAssistantTextMs": 2947.074792000003,
+							"idleMs": 8994.980333,
+							"elapsedMs": 9001.593166999999,
+							"timedOut": false,
+							"timeoutCleanup": null,
+							"errors": [],
+							"tools": [
+								{
+									"type": "tool",
+									"tool": "bash",
+									"callID": "call_3",
+									"state": {
+										"status": "completed",
+										"input": {
+											"command": "pwd"
+										},
+										"output": "<C>\n",
+										"metadata": {
+											"output": "<C>\n",
+											"exit": 0,
+											"truncated": false
+										},
+										"title": "pwd",
+										"time": {
+											"start": 0,
+											"end": 0
+										}
+									},
+									"id": "prt_22",
+									"sessionID": "ses_3",
+									"messageID": "msg_8"
+								}
+							],
+							"assistantText": "<C>"
+						},
+						"lookupAtTarget": {
+							"status": 200,
+							"body": {
+								"id": "ses_3",
+								"slug": "eager-meadow",
+								"projectID": "global",
+								"directory": "<C>",
+								"path": "<C>",
+								"summary": {
+									"additions": 0,
+									"deletions": 0,
+									"files": 0
+								},
+								"cost": 0,
+								"tokens": {
+									"input": 2190,
+									"output": 61,
+									"reasoning": 36,
+									"cache": {
+										"read": 14208,
+										"write": 0
+									}
+								},
+								"title": "directory-C",
+								"agent": "build",
+								"model": {
+									"id": "mimo-v2.6-flash-free",
+									"providerID": "opencode",
+									"variant": "default"
+								},
+								"version": "1.18.34",
+								"time": {
+									"created": 0,
+									"updated": 0
+								}
+							},
+							"elapsedMs": 10.732624999996915
+						},
+						"lookupAtOrigin": {
+							"status": 200,
+							"body": {
+								"id": "ses_3",
+								"slug": "eager-meadow",
+								"projectID": "global",
+								"directory": "<C>",
+								"path": "<C>",
+								"summary": {
+									"additions": 0,
+									"deletions": 0,
+									"files": 0
+								},
+								"cost": 0,
+								"tokens": {
+									"input": 2190,
+									"output": 61,
+									"reasoning": 36,
+									"cache": {
+										"read": 14208,
+										"write": 0
+									}
+								},
+								"title": "directory-C",
+								"agent": "build",
+								"model": {
+									"id": "mimo-v2.6-flash-free",
+									"providerID": "opencode",
+									"variant": "default"
+								},
+								"version": "1.18.34",
+								"time": {
+									"created": 0,
+									"updated": 0
+								}
+							},
+							"elapsedMs": 3.356791999998677
+						},
+						"streams": [
+							{
+								"stream": "/global/event",
+								"count": 58,
+								"types": [
+									"session.created",
+									"session.updated",
+									"message.updated",
+									"message.part.updated",
+									"session.status",
+									"session.diff",
+									"message.part.delta",
+									"session.idle"
+								],
+								"envelopeDirectories": ["<C>"]
+							},
+							{
+								"stream": "/event?directory=<A>",
+								"count": 0,
+								"types": [],
+								"envelopeDirectories": []
+							},
+							{
+								"stream": "/event?directory=<B>",
+								"count": 0,
+								"types": [],
+								"envelopeDirectories": []
+							},
+							{
+								"stream": "/event?directory=<C>",
+								"count": 57,
+								"types": [
+									"session.updated",
+									"message.updated",
+									"message.part.updated",
+									"session.status",
+									"session.diff",
+									"message.part.delta",
+									"session.idle"
+								],
+								"envelopeDirectories": [null]
+							}
+						]
+					}
+				]
+			},
+			"requests": [
+				{
+					"method": "POST",
+					"path": "/session",
+					"directory": "<A>",
+					"status": 200
+				},
+				{
+					"method": "POST",
+					"path": "/session",
+					"directory": "<B>",
+					"status": 200
+				},
+				{
+					"method": "POST",
+					"path": "/session",
+					"directory": "<C>",
+					"status": 200
+				},
+				{
+					"method": "POST",
+					"path": "/session/ses_1/prompt_async",
+					"directory": "<A>",
+					"status": 204
+				},
+				{
+					"method": "GET",
+					"path": "/session/ses_1",
+					"directory": "<A>",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/session/ses_1",
+					"directory": "<A>",
+					"status": 200
+				},
+				{
+					"method": "POST",
+					"path": "/session/ses_2/prompt_async",
+					"directory": "<B>",
+					"status": 204
+				},
+				{
+					"method": "GET",
+					"path": "/session/ses_2",
+					"directory": "<B>",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/session/ses_2",
+					"directory": "<B>",
+					"status": 200
+				},
+				{
+					"method": "POST",
+					"path": "/session/ses_3/prompt_async",
+					"directory": "<C>",
+					"status": 204
+				},
+				{
+					"method": "GET",
+					"path": "/session/ses_3",
+					"directory": "<C>",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/session/ses_3",
+					"directory": "<C>",
+					"status": 200
+				}
+			],
+			"streamErrors": []
+		},
+		"s2-new-directory": {
+			"result": {
+				"createdAfterBoot": true,
+				"setup": "mkdir only, then POST /session; no project registration/config call",
+				"session": {
+					"id": "ses_4",
+					"response": {
+						"status": 200,
+						"body": {
+							"id": "ses_4",
+							"slug": "glowing-eagle",
+							"projectID": "global",
+							"directory": "<N>",
+							"path": "<N>",
+							"cost": 0,
+							"tokens": {
+								"input": 0,
+								"output": 0,
+								"reasoning": 0,
+								"cache": {
+									"read": 0,
+									"write": 0
+								}
+							},
+							"title": "directory-N-created-after-boot",
+							"version": "1.18.34",
+							"time": {
+								"created": 0,
+								"updated": 0
+							}
+						},
+						"elapsedMs": 43.73475000000326
+					}
+				},
+				"target": "<N>",
+				"turn": {
+					"response": {
+						"status": 204,
+						"body": null,
+						"elapsedMs": 16.486833999995724
+					},
+					"permissions": [],
+					"latencyLabel": "model-dominated",
+					"firstAssistantTextMs": 2495.483416999996,
+					"idleMs": 7049.033334,
+					"elapsedMs": 7093.537749999996,
+					"timedOut": false,
+					"timeoutCleanup": null,
+					"errors": [],
+					"tools": [
+						{
+							"type": "tool",
+							"tool": "bash",
+							"callID": "call_4",
+							"state": {
+								"status": "completed",
+								"input": {
+									"command": "pwd"
+								},
+								"output": "<N>\n",
+								"metadata": {
+									"output": "<N>\n",
+									"exit": 0,
+									"truncated": false
+								},
+								"title": "pwd",
+								"time": {
+									"start": 0,
+									"end": 0
+								}
+							},
+							"id": "prt_31",
+							"sessionID": "ses_4",
+							"messageID": "msg_11"
+						}
+					],
+					"assistantText": "<N>"
+				},
+				"lookupAtTarget": {
+					"status": 200,
+					"body": {
+						"id": "ses_4",
+						"slug": "glowing-eagle",
+						"projectID": "global",
+						"directory": "<N>",
+						"path": "<N>",
+						"summary": {
+							"additions": 0,
+							"deletions": 0,
+							"files": 0
+						},
+						"cost": 0,
+						"tokens": {
+							"input": 2190,
+							"output": 61,
+							"reasoning": 29,
+							"cache": {
+								"read": 14208,
+								"write": 0
+							}
+						},
+						"title": "directory-N-created-after-boot",
+						"agent": "build",
+						"model": {
+							"id": "mimo-v2.6-flash-free",
+							"providerID": "opencode",
+							"variant": "default"
+						},
+						"version": "1.18.34",
+						"time": {
+							"created": 0,
+							"updated": 0
+						}
+					},
+					"elapsedMs": 5.511791999997513
+				},
+				"lookupAtOrigin": {
+					"status": 200,
+					"body": {
+						"id": "ses_4",
+						"slug": "glowing-eagle",
+						"projectID": "global",
+						"directory": "<N>",
+						"path": "<N>",
+						"summary": {
+							"additions": 0,
+							"deletions": 0,
+							"files": 0
+						},
+						"cost": 0,
+						"tokens": {
+							"input": 2190,
+							"output": 61,
+							"reasoning": 29,
+							"cache": {
+								"read": 14208,
+								"write": 0
+							}
+						},
+						"title": "directory-N-created-after-boot",
+						"agent": "build",
+						"model": {
+							"id": "mimo-v2.6-flash-free",
+							"providerID": "opencode",
+							"variant": "default"
+						},
+						"version": "1.18.34",
+						"time": {
+							"created": 0,
+							"updated": 0
+						}
+					},
+					"elapsedMs": 3.4552919999987353
+				},
+				"streams": [
+					{
+						"stream": "/global/event",
+						"count": 58,
+						"types": [
+							"session.created",
+							"session.updated",
+							"message.updated",
+							"message.part.updated",
+							"session.status",
+							"session.diff",
+							"message.part.delta",
+							"session.idle"
+						],
+						"envelopeDirectories": ["<N>"]
+					},
+					{
+						"stream": "/event?directory=<A>",
+						"count": 0,
+						"types": [],
+						"envelopeDirectories": []
+					},
+					{
+						"stream": "/event?directory=<B>",
+						"count": 0,
+						"types": [],
+						"envelopeDirectories": []
+					},
+					{
+						"stream": "/event?directory=<C>",
+						"count": 0,
+						"types": [],
+						"envelopeDirectories": []
+					},
+					{
+						"stream": "/event?directory=<N>",
+						"count": 57,
+						"types": [
+							"session.updated",
+							"message.updated",
+							"message.part.updated",
+							"session.status",
+							"session.diff",
+							"message.part.delta",
+							"session.idle"
+						],
+						"envelopeDirectories": [null]
+					}
+				]
+			},
+			"requests": [
+				{
+					"method": "POST",
+					"path": "/session",
+					"directory": "<N>",
+					"status": 200
+				},
+				{
+					"method": "POST",
+					"path": "/session/ses_4/prompt_async",
+					"directory": "<N>",
+					"status": 204
+				},
+				{
+					"method": "GET",
+					"path": "/session/ses_4",
+					"directory": "<N>",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/session/ses_4",
+					"directory": "<N>",
+					"status": 200
+				}
+			],
+			"streamErrors": []
+		},
+		"s3-resume-other-directory": {
+			"result": {
+				"bTargetingC": {
+					"target": "<C>",
+					"turn": {
+						"response": {
+							"status": 204,
+							"body": null,
+							"elapsedMs": 10.35175000000163
+						},
+						"permissions": [],
+						"latencyLabel": "model-dominated",
+						"firstAssistantTextMs": 2913.975790999997,
+						"idleMs": 5635.770958000001,
+						"elapsedMs": 5672.505665999997,
+						"timedOut": false,
+						"timeoutCleanup": null,
+						"errors": [],
+						"tools": [
+							{
+								"type": "tool",
+								"tool": "bash",
+								"callID": "call_5",
+								"state": {
+									"status": "completed",
+									"input": {
+										"command": "pwd"
+									},
+									"output": "<B>\n",
+									"metadata": {
+										"output": "<B>\n",
+										"exit": 0,
+										"truncated": false
+									},
+									"title": "pwd",
+									"time": {
+										"start": 0,
+										"end": 0
+									}
+								},
+								"id": "prt_40",
+								"sessionID": "ses_2",
+								"messageID": "msg_14"
+							}
+						],
+						"assistantText": "<B>"
+					},
+					"lookupAtTarget": {
+						"status": 200,
+						"body": {
+							"id": "ses_2",
+							"slug": "happy-planet",
+							"projectID": "project_2",
+							"directory": "<B>",
+							"path": "",
+							"summary": {
+								"additions": 0,
+								"deletions": 0,
+								"files": 0
+							},
+							"cost": 0,
+							"tokens": {
+								"input": 2457,
+								"output": 122,
+								"reasoning": 51,
+								"cache": {
+									"read": 30848,
+									"write": 0
+								}
+							},
+							"title": "directory-B",
+							"agent": "build",
+							"model": {
+								"id": "mimo-v2.6-flash-free",
+								"providerID": "opencode",
+								"variant": "default"
+							},
+							"version": "1.18.34",
+							"time": {
+								"created": 0,
+								"updated": 0
+							}
+						},
+						"elapsedMs": 4.3989999999976135
+					},
+					"lookupAtOrigin": {
+						"status": 200,
+						"body": {
+							"id": "ses_2",
+							"slug": "happy-planet",
+							"projectID": "project_2",
+							"directory": "<B>",
+							"path": "",
+							"summary": {
+								"additions": 0,
+								"deletions": 0,
+								"files": 0
+							},
+							"cost": 0,
+							"tokens": {
+								"input": 2457,
+								"output": 122,
+								"reasoning": 51,
+								"cache": {
+									"read": 30848,
+									"write": 0
+								}
+							},
+							"title": "directory-B",
+							"agent": "build",
+							"model": {
+								"id": "mimo-v2.6-flash-free",
+								"providerID": "opencode",
+								"variant": "default"
+							},
+							"version": "1.18.34",
+							"time": {
+								"created": 0,
+								"updated": 0
+							}
+						},
+						"elapsedMs": 2.805000000000291
+					},
+					"streams": [
+						{
+							"stream": "/global/event",
+							"count": 53,
+							"types": [
+								"message.updated",
+								"message.part.updated",
+								"session.updated",
+								"session.status",
+								"session.diff",
+								"message.part.delta",
+								"session.idle"
+							],
+							"envelopeDirectories": ["<B>"]
+						},
+						{
+							"stream": "/event?directory=<A>",
+							"count": 0,
+							"types": [],
+							"envelopeDirectories": []
+						},
+						{
+							"stream": "/event?directory=<B>",
+							"count": 53,
+							"types": [
+								"message.updated",
+								"message.part.updated",
+								"session.updated",
+								"session.status",
+								"session.diff",
+								"message.part.delta",
+								"session.idle"
+							],
+							"envelopeDirectories": [null]
+						},
+						{
+							"stream": "/event?directory=<C>",
+							"count": 0,
+							"types": [],
+							"envelopeDirectories": []
+						}
+					]
+				},
+				"cTargetingA": {
+					"target": "<A>",
+					"turn": {
+						"response": {
+							"status": 204,
+							"body": null,
+							"elapsedMs": 20.589082999998936
+						},
+						"permissions": [],
+						"latencyLabel": "model-dominated",
+						"firstAssistantTextMs": 2719.5296249999956,
+						"idleMs": 8754.574708,
+						"elapsedMs": 8806.526707999998,
+						"timedOut": false,
+						"timeoutCleanup": null,
+						"errors": [],
+						"tools": [
+							{
+								"type": "tool",
+								"tool": "bash",
+								"callID": "call_6",
+								"state": {
+									"status": "completed",
+									"input": {
+										"command": "pwd"
+									},
+									"output": "<C>\n",
+									"metadata": {
+										"output": "<C>\n",
+										"exit": 0,
+										"truncated": false
+									},
+									"title": "pwd",
+									"time": {
+										"start": 0,
+										"end": 0
+									}
+								},
+								"id": "prt_49",
+								"sessionID": "ses_3",
+								"messageID": "msg_17"
+							}
+						],
+						"assistantText": "<C>"
+					},
+					"lookupAtTarget": {
+						"status": 200,
+						"body": {
+							"id": "ses_3",
+							"slug": "eager-meadow",
+							"projectID": "global",
+							"directory": "<C>",
+							"path": "<C>",
+							"summary": {
+								"additions": 0,
+								"deletions": 0,
+								"files": 0
+							},
+							"cost": 0,
+							"tokens": {
+								"input": 2440,
+								"output": 122,
+								"reasoning": 58,
+								"cache": {
+									"read": 30720,
+									"write": 0
+								}
+							},
+							"title": "directory-C",
+							"agent": "build",
+							"model": {
+								"id": "mimo-v2.6-flash-free",
+								"providerID": "opencode",
+								"variant": "default"
+							},
+							"version": "1.18.34",
+							"time": {
+								"created": 0,
+								"updated": 0
+							}
+						},
+						"elapsedMs": 11.767333000003418
+					},
+					"lookupAtOrigin": {
+						"status": 200,
+						"body": {
+							"id": "ses_3",
+							"slug": "eager-meadow",
+							"projectID": "global",
+							"directory": "<C>",
+							"path": "<C>",
+							"summary": {
+								"additions": 0,
+								"deletions": 0,
+								"files": 0
+							},
+							"cost": 0,
+							"tokens": {
+								"input": 2440,
+								"output": 122,
+								"reasoning": 58,
+								"cache": {
+									"read": 30720,
+									"write": 0
+								}
+							},
+							"title": "directory-C",
+							"agent": "build",
+							"model": {
+								"id": "mimo-v2.6-flash-free",
+								"providerID": "opencode",
+								"variant": "default"
+							},
+							"version": "1.18.34",
+							"time": {
+								"created": 0,
+								"updated": 0
+							}
+						},
+						"elapsedMs": 3.7495840000046883
+					},
+					"streams": [
+						{
+							"stream": "/global/event",
+							"count": 53,
+							"types": [
+								"message.updated",
+								"message.part.updated",
+								"session.updated",
+								"session.status",
+								"session.diff",
+								"message.part.delta",
+								"session.idle"
+							],
+							"envelopeDirectories": ["<C>"]
+						},
+						{
+							"stream": "/event?directory=<A>",
+							"count": 0,
+							"types": [],
+							"envelopeDirectories": []
+						},
+						{
+							"stream": "/event?directory=<B>",
+							"count": 0,
+							"types": [],
+							"envelopeDirectories": []
+						},
+						{
+							"stream": "/event?directory=<C>",
+							"count": 53,
+							"types": [
+								"message.updated",
+								"message.part.updated",
+								"session.updated",
+								"session.status",
+								"session.diff",
+								"message.part.delta",
+								"session.idle"
+							],
+							"envelopeDirectories": [null]
+						}
+					]
+				}
+			},
+			"requests": [
+				{
+					"method": "POST",
+					"path": "/session/ses_2/prompt_async",
+					"directory": "<C>",
+					"status": 204
+				},
+				{
+					"method": "GET",
+					"path": "/session/ses_2",
+					"directory": "<C>",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/session/ses_2",
+					"directory": "<B>",
+					"status": 200
+				},
+				{
+					"method": "POST",
+					"path": "/session/ses_3/prompt_async",
+					"directory": "<A>",
+					"status": 204
+				},
+				{
+					"method": "GET",
+					"path": "/session/ses_3",
+					"directory": "<A>",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/session/ses_3",
+					"directory": "<C>",
+					"status": 200
+				}
+			],
+			"streamErrors": []
+		},
+		"s4-fork-other-directory": {
+			"result": {
+				"fork": {
+					"status": 200,
+					"body": {
+						"id": "ses_5",
+						"slug": "misty-mountain",
+						"projectID": "project_2",
+						"directory": "<B>",
+						"path": "",
+						"cost": 0,
+						"tokens": {
+							"input": 0,
+							"output": 0,
+							"reasoning": 0,
+							"cache": {
+								"read": 0,
+								"write": 0
+							}
+						},
+						"title": "directory-B (fork #1)",
+						"version": "1.18.34",
+						"time": {
+							"created": 0,
+							"updated": 0
+						}
+					},
+					"elapsedMs": 43.67145800000435
+				},
+				"probe": {
+					"target": "<C>",
+					"turn": {
+						"response": {
+							"status": 204,
+							"body": null,
+							"elapsedMs": 18.03125
+						},
+						"permissions": [],
+						"latencyLabel": "model-dominated",
+						"firstAssistantTextMs": 1878.8132079999996,
+						"idleMs": 7463.169541999996,
+						"elapsedMs": 7514.447249999997,
+						"timedOut": false,
+						"timeoutCleanup": null,
+						"errors": [],
+						"tools": [
+							{
+								"type": "tool",
+								"tool": "bash",
+								"callID": "call_7",
+								"state": {
+									"status": "completed",
+									"input": {
+										"command": "pwd"
+									},
+									"output": "<B>\n",
+									"metadata": {
+										"output": "<B>\n",
+										"exit": 0,
+										"truncated": false
+									},
+									"title": "pwd",
+									"time": {
+										"start": 0,
+										"end": 0
+									}
+								},
+								"id": "prt_76",
+								"sessionID": "ses_5",
+								"messageID": "msg_26"
+							}
+						],
+						"assistantText": "<B>"
+					},
+					"lookupAtTarget": {
+						"status": 200,
+						"body": {
+							"id": "ses_5",
+							"slug": "misty-mountain",
+							"projectID": "project_2",
+							"directory": "<B>",
+							"path": "",
+							"summary": {
+								"additions": 0,
+								"deletions": 0,
+								"files": 0
+							},
+							"cost": 0,
+							"tokens": {
+								"input": 2730,
+								"output": 183,
+								"reasoning": 70,
+								"cache": {
+									"read": 47744,
+									"write": 0
+								}
+							},
+							"title": "directory-B (fork #1)",
+							"agent": "build",
+							"model": {
+								"id": "mimo-v2.6-flash-free",
+								"providerID": "opencode",
+								"variant": "default"
+							},
+							"version": "1.18.34",
+							"time": {
+								"created": 0,
+								"updated": 0
+							}
+						},
+						"elapsedMs": 5.49616600000445
+					},
+					"lookupAtOrigin": {
+						"status": 200,
+						"body": {
+							"id": "ses_5",
+							"slug": "misty-mountain",
+							"projectID": "project_2",
+							"directory": "<B>",
+							"path": "",
+							"summary": {
+								"additions": 0,
+								"deletions": 0,
+								"files": 0
+							},
+							"cost": 0,
+							"tokens": {
+								"input": 2730,
+								"output": 183,
+								"reasoning": 70,
+								"cache": {
+									"read": 47744,
+									"write": 0
+								}
+							},
+							"title": "directory-B (fork #1)",
+							"agent": "build",
+							"model": {
+								"id": "mimo-v2.6-flash-free",
+								"providerID": "opencode",
+								"variant": "default"
+							},
+							"version": "1.18.34",
+							"time": {
+								"created": 0,
+								"updated": 0
+							}
+						},
+						"elapsedMs": 10.62658399999782
+					},
+					"streams": [
+						{
+							"stream": "/global/event",
+							"count": 77,
+							"types": [
+								"session.created",
+								"message.updated",
+								"message.part.updated",
+								"session.updated",
+								"session.status",
+								"session.diff",
+								"message.part.delta",
+								"session.idle"
+							],
+							"envelopeDirectories": ["<B>"]
+						},
+						{
+							"stream": "/event?directory=<A>",
+							"count": 0,
+							"types": [],
+							"envelopeDirectories": []
+						},
+						{
+							"stream": "/event?directory=<B>",
+							"count": 77,
+							"types": [
+								"session.created",
+								"message.updated",
+								"message.part.updated",
+								"session.updated",
+								"session.status",
+								"session.diff",
+								"message.part.delta",
+								"session.idle"
+							],
+							"envelopeDirectories": [null]
+						},
+						{
+							"stream": "/event?directory=<C>",
+							"count": 0,
+							"types": [],
+							"envelopeDirectories": []
+						}
+					]
+				}
+			},
+			"requests": [
+				{
+					"method": "POST",
+					"path": "/session/ses_2/fork",
+					"directory": "<C>",
+					"status": 200
+				},
+				{
+					"method": "POST",
+					"path": "/session/ses_5/prompt_async",
+					"directory": "<C>",
+					"status": 204
+				},
+				{
+					"method": "GET",
+					"path": "/session/ses_5",
+					"directory": "<C>",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/session/ses_5",
+					"directory": "<B>",
+					"status": 200
+				}
+			],
+			"streamErrors": []
+		},
+		"s5-hung-session-isolation": {
+			"result": {
+				"toolStarted": {
+					"sessionID": "ses_1",
+					"part": {
+						"type": "tool",
+						"tool": "bash",
+						"callID": "call_8",
+						"state": {
+							"metadata": {
+								"output": ""
+							},
+							"status": "running",
+							"input": {
+								"command": "sleep 60 && echo hung-done",
+								"timeout": 120000
+							},
+							"time": {
+								"start": 0
+							}
+						},
+						"id": "prt_85",
+						"sessionID": "ses_1",
+						"messageID": "msg_29"
+					},
+					"time": 0
+				},
+				"overlapEstablished": true,
+				"aIdleBeforeAbort": false,
+				"abortAfterToolStartedMs": 4832.927416000006,
+				"abort": {
+					"status": 200,
+					"body": true,
+					"elapsedMs": 191.09404100000393
+				},
+				"aResult": {
+					"response": {
+						"status": 204,
+						"body": null,
+						"elapsedMs": 14.057000000000698
+					},
+					"permissions": [],
+					"latencyLabel": "model-dominated",
+					"firstAssistantTextMs": 4924.957125000008,
+					"idleMs": 10436.706542000007,
+					"elapsedMs": 10474.445333999996,
+					"timedOut": false,
+					"timeoutCleanup": null,
+					"errors": [
+						{
+							"sessionID": "ses_1",
+							"error": {
+								"name": "MessageAbortedError",
+								"data": {
+									"message": "Aborted"
+								}
+							}
+						}
+					],
+					"tools": [
+						{
+							"type": "tool",
+							"tool": "bash",
+							"callID": "call_8",
+							"state": {
+								"status": "completed",
+								"input": {
+									"command": "sleep 60 && echo hung-done",
+									"timeout": 120000
+								},
+								"output": "(no output)\n\n<shell_metadata>\nUser aborted the command\n</shell_metadata>",
+								"metadata": {
+									"output": "(no output)\n\n<shell_metadata>\nUser aborted the command\n</shell_metadata>",
+									"exit": null,
+									"truncated": false
+								},
+								"title": "sleep 60 && echo hung-done",
+								"time": {
+									"start": 0,
+									"end": 0
+								}
+							},
+							"id": "prt_85",
+							"sessionID": "ses_1",
+							"messageID": "msg_29"
+						}
+					],
+					"assistantText": ""
+				},
+				"aIdleAfterAbort": true,
+				"peers": [
+					{
+						"response": {
+							"status": 204,
+							"body": null,
+							"elapsedMs": 13.296458999990136
+						},
+						"permissions": [],
+						"latencyLabel": "model-dominated",
+						"firstAssistantTextMs": 2971.472375000012,
+						"idleMs": 3620.657167000012,
+						"elapsedMs": 3654.943583,
+						"timedOut": false,
+						"timeoutCleanup": null,
+						"errors": [],
+						"tools": [],
+						"assistantText": "ISOLATION-B"
+					},
+					{
+						"response": {
+							"status": 204,
+							"body": null,
+							"elapsedMs": 16.075832999995328
+						},
+						"permissions": [],
+						"latencyLabel": "model-dominated",
+						"firstAssistantTextMs": 4657.7301670000015,
+						"idleMs": 4795.256250000006,
+						"elapsedMs": 4800.083250000011,
+						"timedOut": false,
+						"timeoutCleanup": null,
+						"errors": [],
+						"tools": [],
+						"assistantText": "ISOLATION-C"
+					}
+				],
+				"peerIdleBeforeAbort": [true, true],
+				"postAbortFollowups": [
+					{
+						"response": {
+							"status": 204,
+							"body": null,
+							"elapsedMs": 26.446790999994846
+						},
+						"permissions": [],
+						"latencyLabel": "model-dominated",
+						"firstAssistantTextMs": 4230.00112500001,
+						"idleMs": 4662.614375000005,
+						"elapsedMs": 4703.107209000009,
+						"timedOut": false,
+						"timeoutCleanup": null,
+						"errors": [],
+						"tools": [],
+						"assistantText": "AFTER-ABORT-B"
+					},
+					{
+						"response": {
+							"status": 204,
+							"body": null,
+							"elapsedMs": 42.41337499998917
+						},
+						"permissions": [],
+						"latencyLabel": "model-dominated",
+						"firstAssistantTextMs": 12370.948416,
+						"idleMs": 12613.455833,
+						"elapsedMs": 12659.820916000011,
+						"timedOut": false,
+						"timeoutCleanup": null,
+						"errors": [],
+						"tools": [],
+						"assistantText": "AFTER-ABORT-C"
+					}
+				],
+				"peerErrors": [],
+				"statuses": [
+					{
+						"status": 200,
+						"body": {},
+						"elapsedMs": 3.7559170000022277
+					},
+					{
+						"status": 200,
+						"body": {},
+						"elapsedMs": 4.886250000010477
+					},
+					{
+						"status": 200,
+						"body": {},
+						"elapsedMs": 4.742542000007234
+					}
+				]
+			},
+			"requests": [
+				{
+					"method": "POST",
+					"path": "/session/ses_1/prompt_async",
+					"directory": "<A>",
+					"status": 204
+				},
+				{
+					"method": "POST",
+					"path": "/session/ses_2/prompt_async",
+					"directory": "<B>",
+					"status": 204
+				},
+				{
+					"method": "POST",
+					"path": "/session/ses_3/prompt_async",
+					"directory": "<C>",
+					"status": 204
+				},
+				{
+					"method": "POST",
+					"path": "/session/ses_1/abort",
+					"directory": "<A>",
+					"status": 200
+				},
+				{
+					"method": "POST",
+					"path": "/session/ses_2/prompt_async",
+					"directory": "<B>",
+					"status": 204
+				},
+				{
+					"method": "POST",
+					"path": "/session/ses_3/prompt_async",
+					"directory": "<C>",
+					"status": 204
+				},
+				{
+					"method": "GET",
+					"path": "/session/status",
+					"directory": "<A>",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/session/status",
+					"directory": "<C>",
+					"status": 200
+				},
+				{
+					"method": "GET",
+					"path": "/session/status",
+					"directory": "<B>",
+					"status": 200
+				}
+			],
+			"streamErrors": []
+		},
+		"s6-external-folder-access": {
+			"result": {
+				"permissionConfig": "OpenCode defaults; no session permission overrides",
+				"config": {
+					"status": 200,
+					"body": {
+						"command": {},
+						"plugin": [],
+						"username": "dstern",
+						"mode": {},
+						"agent": {}
+					},
+					"elapsedMs": 2.219167000002926
+				},
+				"tokenFile": "<E>/token.txt",
+				"turn": {
+					"response": {
+						"status": 204,
+						"body": null,
+						"elapsedMs": 5.163667000000714
+					},
+					"permissions": [
+						{
+							"request": {
+								"id": "per_1",
+								"sessionID": "ses_2",
+								"permission": "external_directory",
+								"patterns": ["<E>/*"],
+								"metadata": {
+									"filepath": "<E>/token.txt",
+									"parentDir": "<E>"
+								},
+								"always": ["<E>/*"],
+								"tool": {
+									"messageID": "msg_39",
+									"callID": "call_9"
+								}
+							},
+							"directory": "<B>",
+							"response": {
+								"status": 200,
+								"body": true,
+								"elapsedMs": 5.415250000020023
+							}
+						}
+					],
+					"latencyLabel": "model-dominated",
+					"firstAssistantTextMs": 47308.474084,
+					"idleMs": 59050.05662500001,
+					"elapsedMs": 59089.01299999999,
+					"timedOut": false,
+					"timeoutCleanup": null,
+					"errors": [],
+					"tools": [
+						{
+							"type": "tool",
+							"tool": "read",
+							"callID": "call_9",
+							"state": {
+								"status": "completed",
+								"input": {
+									"filePath": "<E>/token.txt"
+								},
+								"output": "<path><E>/token.txt</path>\n<type>file</type>\n<content>\n1: <TOKEN>\n\n(End of file - total 1 lines)\n</content>",
+								"metadata": {
+									"preview": "<TOKEN>",
+									"truncated": false,
+									"loaded": [],
+									"display": {
+										"type": "file",
+										"path": "<E>/token.txt",
+										"text": "<TOKEN>",
+										"lineStart": 1,
+										"lineEnd": 1,
+										"totalLines": 1,
+										"truncated": false
+									}
+								},
+								"title": "../E/token.txt",
+								"time": {
+									"start": 0,
+									"end": 0
+								}
+							},
+							"id": "prt_109",
+							"sessionID": "ses_2",
+							"messageID": "msg_39"
+						}
+					],
+					"assistantText": "<TOKEN>"
+				},
+				"permissionTypes": ["external_directory"],
+				"tokenReturned": true,
+				"tokenInReadOutput": true,
+				"streams": [
+					{
+						"stream": "/global/event",
+						"count": 174,
+						"types": [
+							"message.updated",
+							"message.part.updated",
+							"session.updated",
+							"session.status",
+							"session.diff",
+							"message.part.delta",
+							"permission.asked",
+							"permission.replied",
+							"session.idle"
+						],
+						"envelopeDirectories": ["<B>"]
+					},
+					{
+						"stream": "/event?directory=<A>",
+						"count": 0,
+						"types": [],
+						"envelopeDirectories": []
+					},
+					{
+						"stream": "/event?directory=<B>",
+						"count": 174,
+						"types": [
+							"message.updated",
+							"message.part.updated",
+							"session.updated",
+							"session.status",
+							"session.diff",
+							"message.part.delta",
+							"permission.asked",
+							"permission.replied",
+							"session.idle"
+						],
+						"envelopeDirectories": [null]
+					},
+					{
+						"stream": "/event?directory=<C>",
+						"count": 0,
+						"types": [],
+						"envelopeDirectories": []
+					}
+				]
+			},
+			"requests": [
+				{
+					"method": "GET",
+					"path": "/config",
+					"directory": "<B>",
+					"status": 200
+				},
+				{
+					"method": "POST",
+					"path": "/session/ses_2/prompt_async",
+					"directory": "<B>",
+					"status": 204
+				},
+				{
+					"method": "POST",
+					"path": "/session/ses_2/permissions/per_1",
+					"directory": "<B>",
+					"status": 200
+				}
+			],
+			"streamErrors": []
+		}
+	}
+}

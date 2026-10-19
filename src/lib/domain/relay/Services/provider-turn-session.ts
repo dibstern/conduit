@@ -74,7 +74,16 @@ export const completeRecoveredQuestion = (
 			...completedEvent,
 			eventId: createEventId(),
 			type: "question.resolved" as const,
-			data: { id: question.requestId, answers },
+			providerRefs: {
+				...completedEvent.providerRefs,
+				...(question.providerProcessId
+					? { providerProcessId: question.providerProcessId }
+					: {}),
+				...(question.providerRequestId
+					? { providerRequestId: question.providerRequestId }
+					: {}),
+			},
+			data: { id: question.providerRequestId ?? question.requestId, answers },
 		};
 		if (question.messageId) {
 			// A fresh mapper has not seen the stored tool start. Seed its identity

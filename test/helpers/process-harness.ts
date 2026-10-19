@@ -20,6 +20,7 @@ import { createServer } from "node:net";
 import { userInfo } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import Database from "better-sqlite3";
 import {
 	Cause,
 	Context,
@@ -211,6 +212,7 @@ export class ProcessHarness {
 		private readonly holdRunnerAck = false,
 		private readonly holdRunnerOutput?:
 			| "permission-request"
+			| "question-request"
 			| "answer-permission"
 			| "send-turn",
 		private buildId?: string,
@@ -471,6 +473,34 @@ Object.assign(ClaudeDriver, { create: deps => {
 		return join(this.configDir, "events.db");
 	}
 
+	promptIdForProviderRequest(providerRequestId: string): string | undefined {
+		const db = new Database(this.daemonStorePath(), { readonly: true });
+		try {
+			return db
+				.prepare<[string], { id: string }>(
+					"SELECT id FROM pending_approvals WHERE provider_request_id = ? ORDER BY created_at DESC LIMIT 1",
+				)
+				.get(providerRequestId)?.id;
+		} finally {
+			db.close();
+		}
+	}
+
+	providerRequestIdForPrompt(promptId: string): string | undefined {
+		const db = new Database(this.daemonStorePath(), { readonly: true });
+		try {
+			return (
+				db
+					.prepare<[string], { provider_request_id: string | null }>(
+						"SELECT provider_request_id FROM pending_approvals WHERE id = ?",
+					)
+					.get(promptId)?.provider_request_id ?? undefined
+			);
+		} finally {
+			db.close();
+		}
+	}
+
 	/** Offline source for startup-import fixtures, never a daemon runtime store. */
 	legacyProjectStorePath(slug = "process-test"): string {
 		return join(projectStorageDir(this.configDir, slug), "events.db");
@@ -509,6 +539,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			holdRunnerAck?: boolean;
 			holdRunnerOutput?:
 				| "permission-request"
+				| "question-request"
 				| "answer-permission"
 				| "send-turn";
 			buildId?: string;

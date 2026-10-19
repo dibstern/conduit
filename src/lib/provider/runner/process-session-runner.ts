@@ -17,6 +17,7 @@ import { PersistenceProjectTag } from "../../domain/persistence/Services/persist
 import * as Failure from "../../effect/failure-classification.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { createLogger } from "../../logger.js";
+import { makeRetireReplacedProcessPrompts } from "../../persistence/effect/retire-pending-prompts.js";
 import { isRecord } from "../../utils.js";
 import type { ProviderNativeSession, TurnResult } from "../types.js";
 import { connectRunner } from "./runner-connection.js";
@@ -26,7 +27,10 @@ import {
 	runnerFailure,
 	runnerSinkId,
 } from "./runner-protocol.js";
-import { makeRunnerReceiptStore } from "./runner-receipts.js";
+import {
+	currentRunnerOutput,
+	makeRunnerReceiptStore,
+} from "./runner-receipts.js";
 import type { recoverRunnerCommands } from "./runner-recovery.js";
 import {
 	discoverRunners,
@@ -348,6 +352,18 @@ export const makeProcessSessionRunner = (
 		const receipts = sql
 			? yield* makeRunnerReceiptStore(sql).pipe(Effect.orDie)
 			: undefined;
+		const retireReplacedPrompts = yield* makeRetireReplacedProcessPrompts;
+		const observedProcesses = new Map<string, string>();
+		const observeProcess = (sessionId: string, entry: RunnerChild) =>
+			Effect.gen(function* () {
+				if (observedProcesses.get(sessionId) === entry.runnerId) return;
+				yield* retireReplacedPrompts(entry.runnerId, { sessionId }).pipe(
+					Effect.mapError((cause) =>
+						runnerFailure("retire replaced runner prompts", cause),
+					),
+				);
+				observedProcesses.set(sessionId, entry.runnerId);
+			});
 		const children = new Map<string, RunnerChild>();
 		const candidates = new Set<RunnerChild>();
 		const sinks = new Map<
@@ -657,6 +673,15 @@ export const makeProcessSessionRunner = (
 									),
 								);
 							});
+						// Warming candidates have not replaced the active process yet.
+						if (!entry.candidate)
+							yield* lock.withPermits(1)(
+								Effect.gen(function* () {
+									yield* ensureAttached();
+									yield* observeProcess(sessionId, entry);
+									yield* ensureAttached();
+								}),
+							);
 						yield* ensureAttached();
 						entry.pendingSendCommands = hello.sendCommands
 							? new Map(
@@ -1025,7 +1050,7 @@ export const makeProcessSessionRunner = (
 					);
 					if (!retired) return false;
 					return yield* lock.withPermits(1)(
-						Effect.sync(() => {
+						Effect.gen(function* () {
 							if (
 								activity !== old.upgrade.activity ||
 								!eligible(sessionId, old) ||
@@ -1035,6 +1060,7 @@ export const makeProcessSessionRunner = (
 								connection.write({ type: "upgrade-cancel" });
 								return false;
 							}
+							yield* observeProcess(sessionId, replacement);
 							replacement.candidate = false;
 							replacement.connection?.write({ type: "upgrade-activate" });
 							children.set(sessionId, replacement);
@@ -1455,6 +1481,7 @@ export const makeProcessSessionRunner = (
 				let admittedSessionId = "";
 				let ending: RunnerChild | undefined;
 				return Effect.gen(function* () {
+					const outputOwner = yield* currentRunnerOutput;
 					if (turn) turn.completed = yield* Deferred.make<void>();
 					if (command.type === "shutdown") {
 						yield* shutdown;
@@ -1482,6 +1509,14 @@ export const makeProcessSessionRunner = (
 										runnerFailure(command.type, "Runners are shutting down"),
 									);
 								const existing = children.get(sessionId);
+								if (
+									outputOwner &&
+									(command.type === "answer-permission" ||
+										command.type === "answer-question" ||
+										command.type === "interaction-failed") &&
+									existing?.runnerId !== outputOwner.runnerId
+								)
+									return { entry: undefined, draining: false };
 								if (
 									existing &&
 									(command.type === "send-turn" || command.type === "pre-warm")

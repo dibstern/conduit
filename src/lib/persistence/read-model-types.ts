@@ -81,6 +81,9 @@ export interface PendingApprovalRow {
 
 export interface PendingClaudeQuestionToolRow {
 	id: string;
+	prompt_id?: string | null;
+	provider_process_id?: string | null;
+	provider_request_id?: string | null;
 	call_id: string | null;
 	message_id: string;
 	input: string | null;
