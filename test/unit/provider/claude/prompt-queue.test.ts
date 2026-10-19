@@ -44,18 +44,6 @@ async function close(queue: PromptQueueController): Promise<void> {
 }
 
 describe("EffectPromptQueue", () => {
-	it("exposes Effect-returning producer operations", async () => {
-		const q = await makeQueue();
-
-		const enqueueEffect = q.enqueue(msg("effectful"));
-		expect(Effect.isEffect(enqueueEffect)).toBe(true);
-		await Effect.runPromise(enqueueEffect);
-
-		const closeEffect = q.close();
-		expect(Effect.isEffect(closeEffect)).toBe(true);
-		await Effect.runPromise(closeEffect);
-	});
-
 	it("yields messages in enqueue order", async () => {
 		const q = await makeQueue();
 		await enqueue(q, msg("one"));

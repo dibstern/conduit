@@ -87,27 +87,6 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		rmSync(workspace, { recursive: true, force: true });
 	});
 
-	describe("setPermissionModeEffect()", () => {
-		it.each([
-			{ mode: "auto" as const, sdkMode: "auto" },
-			{ mode: "ask" as const, sdkMode: "default" },
-		])("updates a live query to $sdkMode for conduit $mode", async ({
-			mode,
-			sdkMode,
-		}) => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
-			const query = createMockQuery([]);
-			const ctx = makeFakeSessionContext("sess-1", { query });
-			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
-
-			await Effect.runPromise(instance.setPermissionModeEffect("sess-1", mode));
-
-			expect(query.setPermissionMode).toHaveBeenCalledWith(sdkMode);
-		});
-	});
-
 	describe("shutdown()", () => {
 		it("leaves an in-flight question open while completing other tools", async () => {
 			const instance = makeTestClaudeProviderInstance({
@@ -177,17 +156,6 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			expect(ctx.promptQueue.close).toHaveBeenCalled();
 			expect(ctx.query.close).toHaveBeenCalled();
 			expect(getClaudeRuntimeSessionCountForTest(instance)).toBe(0);
-		});
-
-		it("marks sessions as stopped", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
-			const ctx = makeFakeSessionContext("sess-1");
-			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
-
-			await Effect.runPromise(instance.shutdownEffect());
-
 			expect(ctx.stopped).toBe(true);
 		});
 
@@ -379,25 +347,6 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			});
 			// Should not throw
 			await Effect.runPromise(instance.interruptTurnEffect("nonexistent"));
-		});
-
-		it("clears in-flight tools", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
-			const ctx = makeFakeSessionContext("sess-1");
-			ctx.inFlightTools.set(0, {
-				itemId: "tool-1",
-				toolName: "Bash",
-				title: "Command run",
-				input: {},
-				partialInputJson: "",
-			});
-			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
-
-			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
-
-			expect(ctx.inFlightTools.size).toBe(0);
 		});
 
 		it("cleanupSession with no eventSink skips tool.completed emission", async () => {

@@ -21,6 +21,7 @@ import {
 	EventStoreEffectTag,
 	type EventStoreError,
 } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
 	type ProjectionRunnerEffect,
 	ProjectionRunnerEffectTag,
@@ -485,9 +486,7 @@ describe("ProviderRuntimeIngestion", () => {
 		]);
 	});
 
-	it("does not pre-seed session projection rows for session.created", async () => {
-		const harness = makeHarness();
-
+	it("persists an explicitly created session with its original timestamp", async () => {
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const ingestion = yield* ProviderRuntimeIngestionTag;
@@ -502,22 +501,26 @@ describe("ProviderRuntimeIngestion", () => {
 						},
 					}),
 				);
-			}).pipe(Effect.provide(harness.layer)),
-		);
-
-		expect(harness.appendBatch).toHaveBeenCalledTimes(1);
-		expect(harness.appended).toEqual([
-			expect.objectContaining({ type: "session.created" }),
-		]);
-		const queries = harness.executeSql.mock.calls as unknown as [
-			TemplateStringsArray,
-			...unknown[],
-		][];
-		expect(
-			queries.filter(([fragment]) =>
-				fragment.join("?").includes("INSERT OR IGNORE INTO sessions"),
+				const sql = yield* SqlClient.SqlClient;
+				expect(
+					yield* sql`SELECT id, provider, title, created_at FROM sessions`,
+				).toEqual([
+					{
+						id: "session-123",
+						provider: "claude",
+						title: "Untitled",
+						created_at: Date.parse(BASE_EVENT.createdAt),
+					},
+				]);
+				const store = yield* EventStoreEffectTag;
+				expect(yield* store.readAllBySession("session-123")).toEqual([
+					expect.objectContaining({ type: "session.created" }),
+				]);
+			}).pipe(
+				Effect.provide(ProviderRuntimeIngestionLive),
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
 			),
-		).toEqual([]);
+		);
 	});
 
 	it("seeds a session row for a session it never saw created", async () => {

@@ -2320,28 +2320,18 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(pushCalls.map((call) => call[0].type)).not.toContain("turn.error");
 	});
 
-	it("fails an invalid constructed SDK user message before calling query", async () => {
+	it("rejects a malformed caller input id before calling query", async () => {
 		queryFactorySpy = vi.fn(() => createMockQuery([makeSuccessResult()]));
 		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
-		(
-			instance as unknown as {
-				runtime: { buildUserMessage(input: unknown): SDKUserMessage };
-			}
-		).runtime.buildUserMessage = () =>
-			({
-				type: "user",
-				message: { role: "assistant", content: [] },
-				parent_tool_use_id: null,
-			}) as unknown as SDKUserMessage;
-
 		const result = await Effect.runPromise(
 			instance
 				.sendTurnEffect(
 					makeBaseSendTurnInput({
 						sessionId: "session-invalid-user-message",
+						inputId: 42 as unknown as string,
 					}),
 				)
 				.pipe(Effect.result),
