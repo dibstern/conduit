@@ -72,13 +72,25 @@ test.describe("New session draft", () => {
 		const { app, sidebar, countBefore } = await openDraft(page, relayUrl);
 
 		await expect(app.input).toBeFocused();
+		await expect(app.input).toHaveValue("");
 		await expect(page.getByTestId("draft-project-chip")).toBeVisible();
 		await expect(page.getByTestId("draft-project-chip")).not.toBeEmpty();
 		await expect(page.getByTestId("draft-start-chip")).toBeVisible();
 		await capture(page, testInfo, "desktop-draft");
 
-		// Give a would-be eager create time to land, then prove it did not.
-		await page.waitForTimeout(1_000);
+		// Persisting and clearing a draft proves its delayed work ran without creating a session.
+		await app.input.fill("Keep this as a draft");
+		await expect
+			.poll(() =>
+				page.evaluate(() => localStorage.getItem("conduit:new-session-draft")),
+			)
+			.toBe("Keep this as a draft");
+		await app.input.clear();
+		await expect
+			.poll(() =>
+				page.evaluate(() => localStorage.getItem("conduit:new-session-draft")),
+			)
+			.toBeNull();
 		expect(await sidebar.getSessionCount()).toBe(countBefore);
 	});
 
@@ -156,7 +168,11 @@ test.describe("New session draft", () => {
 	test("a reload keeps the half-typed prompt", async ({ page, relayUrl }) => {
 		const { app } = await openDraft(page, relayUrl);
 		await app.input.fill("Survive a reload");
-		await page.waitForTimeout(500);
+		await expect
+			.poll(() =>
+				page.evaluate(() => localStorage.getItem("conduit:new-session-draft")),
+			)
+			.toBe("Survive a reload");
 
 		await page.reload();
 

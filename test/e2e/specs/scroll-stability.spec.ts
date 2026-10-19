@@ -320,8 +320,7 @@ test.describe("Scroll Stability — Mobile", () => {
 		await expect(page.locator("#messages")).toContainText(
 			"A message from another browser tab",
 		);
-		// The scroll position must not jump during this observation window.
-		await page.waitForTimeout(1000);
+		await waitForStableScroll(page);
 
 		// Assert: scroll should NOT have snapped to exact bottom.
 		// A new message was appended, but on an inactive session the
@@ -368,8 +367,7 @@ test.describe("Scroll Stability — Mobile", () => {
 		await expect(page.locator("#messages")).toContainText(
 			"Burst message from another tab",
 		);
-		// The burst must not move the reading position during this window.
-		await page.waitForTimeout(1000);
+		await waitForStableScroll(page);
 
 		const scrollAfter = await getScrollTop(page);
 		const drift = Math.abs(scrollAfter - scrollBefore);
@@ -618,8 +616,7 @@ test.describe("Scroll Controller — Streaming", () => {
 				`More streaming content ${i}.`,
 			);
 		}
-		// Streaming must not snap the detached viewport to bottom during this window.
-		await page.waitForTimeout(150);
+		await waitForStableScroll(page);
 
 		// Scroll position should NOT have been forced to bottom
 		const scrollAfterMoreStreaming = await getScrollTop(page);
@@ -698,8 +695,7 @@ test.describe("Scroll Stability — Desktop", () => {
 		await expect(page.locator("#messages")).toContainText(
 			"Desktop burst message",
 		);
-		// The desktop reading position must not jump during this window.
-		await page.waitForTimeout(1000);
+		await waitForStableScroll(page);
 
 		const scrollAfter = await getScrollTop(page);
 		const drift = Math.abs(scrollAfter - scrollBefore);

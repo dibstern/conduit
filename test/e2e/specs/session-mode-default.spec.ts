@@ -253,6 +253,7 @@ for (const viewport of [
 				page,
 				harness,
 			}) => {
+				if (mode === "worktree") await page.clock.install();
 				const rpc = await openDraft(page, harness.relayBaseUrl, {
 					resolve: () => ({ mode, source: "file" }),
 				});
@@ -264,12 +265,7 @@ for (const viewport of [
 					mode === "local"
 						? await rpc.waitForRequest(({ tag }) => tag === "PreWarmDraft")
 						: undefined;
-				if (mode === "worktree") {
-					await page.waitForTimeout(175);
-					expect(
-						rpc.getRequests().filter(({ tag }) => tag === "PreWarmDraft"),
-					).toHaveLength(0);
-				}
+				if (mode === "worktree") await page.clock.fastForward(175);
 				await page.locator("#input").fill("Use the default workspace");
 				await press(page.locator("#send"));
 				const request = await rpc.waitForRequest(
@@ -279,9 +275,12 @@ for (const viewport of [
 					_tag: "CreateSession",
 					projectSlug: slug,
 				});
-				if (mode === "worktree")
+				if (mode === "worktree") {
+					expect(
+						rpc.getRequests().filter(({ tag }) => tag === "PreWarmDraft"),
+					).toHaveLength(0);
 					expect(request.payload).toHaveProperty("newWorktree", true);
-				else expect(request.payload).not.toHaveProperty("newWorktree");
+				} else expect(request.payload).not.toHaveProperty("newWorktree");
 				if (warm)
 					expect(request.payload).toEqual({
 						...warm.payload,

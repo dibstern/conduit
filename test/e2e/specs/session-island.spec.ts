@@ -116,8 +116,10 @@ test.describe("phone session island", () => {
 			.click();
 		await page.getByTestId("session-bar-island-overflow").tap();
 		await expect(page.getByTestId("session-bar-island-menu")).toBeVisible();
-		// The views sheet must stay open through this observation window.
-		await page.waitForTimeout(100);
+		await expect(page.getByTestId("menu-sheet-scrim")).toHaveCSS(
+			"pointer-events",
+			"auto",
+		);
 		await expect(page.getByTestId("session-bar-island-menu")).toBeVisible();
 		await page.keyboard.press("Escape");
 		await addProbeMessages(page);
@@ -125,8 +127,10 @@ test.describe("phone session island", () => {
 		await page.getByTestId("session-bar-island-overflow").tap();
 		const sheet = page.getByTestId("session-bar-island-menu");
 		await expect(sheet).toBeVisible();
-		// The overflow sheet must stay open through this observation window.
-		await page.waitForTimeout(100);
+		await expect(page.getByTestId("menu-sheet-scrim")).toHaveCSS(
+			"pointer-events",
+			"auto",
+		);
 		await expect(sheet).toBeVisible();
 		for (const view of ["chat", "terminal", "diff", "files"]) {
 			await expect(sheet.getByTestId(`overflow-view-${view}`)).toBeVisible();

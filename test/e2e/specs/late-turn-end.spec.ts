@@ -118,7 +118,17 @@ test.describe("Late turn end", () => {
 				),
 			)
 			.toBe(true);
-		await page.waitForTimeout(500);
+		// A later shell row reconciles the stored late-end version before its title renders.
+		mockServer.injectSSEEvents([
+			{
+				type: "session.updated",
+				properties: { info: { id, title: "Late end reconciled" } },
+			},
+		]);
+		await expect(
+			page.locator(`#session-list [data-session-id="${id}"]`),
+		).toContainText("Late end reconciled");
+		await expect(chat.stopBtn).toBeVisible();
 		const workingAfterLateEnd = await chat.stopBtn.isVisible();
 		await page.screenshot({ path: testInfo.outputPath("after-late-end.png") });
 

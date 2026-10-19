@@ -115,7 +115,7 @@ test.describe("PWA background/resume", () => {
 		page,
 		relayUrl,
 	}) => {
-		await mockRelayWebSocket(page, {
+		const ws = await mockRelayWebSocket(page, {
 			initMessages,
 			responses: new Map(),
 		});
@@ -134,8 +134,9 @@ test.describe("PWA background/resume", () => {
 			text: "the newest thi",
 			from: "other",
 		});
-		// The typed draft must remain unchanged through the stale sync window.
-		await page.waitForTimeout(500);
+		// A later message on the same socket proves the stale draft reached the app.
+		ws.sendMessage({ type: "client_count", count: 7 });
+		await expect(page.locator("#client-count-badge")).toHaveText("7");
 
 		await expect(composer).toHaveValue("the newest thing I typed");
 	});

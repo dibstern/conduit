@@ -756,7 +756,14 @@ test("overflow catches up every sidebar through create and delete bursts", async
 			const ticks = () => Number(tickQuery.get(...streams)?.["n"] ?? 0);
 			await expect.poll(ticks).toBeGreaterThan(parameters.streams * 10);
 			// Keep setup snapshots outside the measured burst, as in the latency test.
-			await new Promise((resolve) => setTimeout(resolve, 500));
+			const setupRenderedAt = now();
+			await expect
+				.poll(
+					() =>
+						(JSON.parse(readFileSync(metricsFile, "utf8")) as Metrics)
+							.flushedAt,
+				)
+				.toBeGreaterThan(setupRenderedAt);
 			const beforeTicks = ticks();
 			phaseStart = now();
 			await Promise.all(

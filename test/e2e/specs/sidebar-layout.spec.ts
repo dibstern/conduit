@@ -204,6 +204,8 @@ test("a promptly resynchronized shell feed does not show the stale line", async 
 	page,
 	relayUrl,
 }) => {
+	await page.clock.install();
+	let subscriptions = 0;
 	const rpc = await mockWsRpc(page, {
 		stubs: {
 			ListDaemonSessions: () => ({
@@ -215,7 +217,23 @@ test("a promptly resynchronized shell feed does not show the stale line", async 
 		},
 		streams: {
 			SubscribeShell: () => [
-				{ _tag: "snapshot", sequence: 1, rows: [] },
+				{
+					_tag: "snapshot",
+					sequence: ++subscriptions,
+					rows:
+						subscriptions === 1
+							? []
+							: [
+									{
+										accountId: null,
+										projectSlug: "e2e-replay",
+										id: "resynchronized-root",
+										title: "Resynchronized shell",
+										status: "idle",
+										updatedAt: new Date().toISOString(),
+									},
+								],
+				},
 				{ _tag: "synchronized" },
 			],
 		},
@@ -247,9 +265,11 @@ test("a promptly resynchronized shell feed does not show the stale line", async 
 			{ timeout: 5_000 },
 		)
 		.toBeGreaterThan(1);
-	// Negative observation window: the stale line only appears 3s after the
-	// feed drops, so wait past that before asserting it never showed.
-	await page.waitForTimeout(3_300);
+	await expect(
+		page.locator('#session-list [data-session-id="resynchronized-root"]'),
+	).toBeVisible();
+	// Cross the stale deadline after the reconnect's fresh snapshot has rendered.
+	await page.clock.fastForward(3_300);
 	await expect(page.getByTestId("session-list-stale")).toBeHidden();
 });
 

@@ -172,6 +172,7 @@ test.describe("Claude turn working time", () => {
 			await replayer.held();
 			await expect.poll(() => stamps().segments.length).toBe(1);
 			const heldAt = performance.now();
+			// This real server-stamped gap is the idle interval the duration must exclude.
 			await delay(HOLD_MS);
 			const heldMs = performance.now() - heldAt;
 			report["heldMs"] = heldMs;
