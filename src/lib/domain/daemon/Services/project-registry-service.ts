@@ -36,6 +36,7 @@ import {
 	Semaphore,
 	Stream,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import {
 	ProjectSaveRejected,
@@ -50,6 +51,10 @@ import {
 	withCachedProjectGit,
 } from "../../../git/session-git.js";
 import { normalizeProjectTitle } from "../../../handlers/settings.js";
+import { PersistenceStore } from "../../../persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
+import { SessionRollupProjects } from "../../../persistence/effect/session-rollup-projects.js";
+import { refreshSidebar } from "../../../persistence/effect/sidebar-projection.js";
 import { chooseProjectSlug } from "../../../persistence/project-storage.js";
 import {
 	checkFolders,
@@ -59,6 +64,7 @@ import {
 import { stopRegisteredRunners } from "../../../provider/runner/process-session-runner.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { StoredProject } from "../../../types.js";
+import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { isConduitWorktreePath } from "../Layers/worktree-layer.js";
 import {
 	ConfigPersistenceTag,
@@ -71,6 +77,61 @@ import { DaemonStoreAvailability } from "./daemon-store-availability.js";
 import { RelayCacheTag } from "./relay-cache.js";
 
 const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
+
+/** Registration changes affect roots owned by other projects too. */
+const refreshProjectRollups = (changedSlugs: readonly string[]) =>
+	Effect.gen(function* () {
+		const store = yield* Effect.serviceOption(PersistenceStore);
+		if (Option.isNone(store)) return;
+		const projects = Context.get(store.value, SessionRollupProjects);
+		if (projects === undefined) return;
+		const sql = Context.get(store.value, SqlClient.SqlClient);
+		const runner = Context.get(store.value, ProjectionRunnerEffectTag);
+		const unavailable = yield* DaemonStoreAvailability;
+		const ref = yield* ProjectRegistryTag;
+		const { advance } = yield* sql
+			.withTransaction(
+				Effect.gen(function* () {
+					const registered = [...HashMap.keys(yield* Ref.get(ref))].filter(
+						(slug) => !unavailable.has(slug),
+					);
+					const roots = yield* sql<{ id: string; project_id: string }>`
+				SELECT DISTINCT root.id, root.project_id FROM sessions member
+				JOIN sessions root ON root.id = member.root_id
+				WHERE member.project_id IN ${sql.in(changedSlugs)}`;
+					if (roots.length === 0) return { registered, advance: undefined };
+					const version = yield* runner.nextVersion.pipe(
+						Effect.provideService(SqlClient.SqlClient, sql),
+					);
+					const sessionIds = roots.map(({ id }) => id);
+					yield* refreshSidebar(sessionIds, version, registered).pipe(
+						Effect.provideService(SqlClient.SqlClient, sql),
+					);
+					return {
+						registered,
+						advance: {
+							version,
+							sessionIds,
+							projectIds: [
+								...new Set(roots.map(({ project_id }) => project_id)),
+							],
+						},
+					};
+				}),
+			)
+			.pipe(
+				Effect.tap(({ registered }) => Ref.set(projects, registered)),
+				Effect.orDie,
+				Effect.uninterruptible,
+			);
+		const bus = yield* Effect.serviceOption(SessionEventBusTag);
+		if (advance && Option.isSome(bus))
+			yield* bus.value.publishAdvance({
+				...advance,
+				removedSessionIds: [],
+				collections: ["sidebar"],
+			});
+	});
 
 const formatRelayFailure = (cause: unknown): string =>
 	cause instanceof Error ? cause.message : String(cause);
@@ -401,6 +462,7 @@ export const addWithoutRelay = (
 		if (alreadyExists) {
 			return yield* new ProjectAlreadyExists({ slug: project.slug });
 		}
+		yield* refreshProjectRollups([project.slug]);
 
 		if (!options?.silent) {
 			yield* PubSub.publish(
@@ -544,6 +606,7 @@ export const remove = (slug: string) =>
 						).pipe(Effect.andThen(requestConfigSave)),
 					),
 				);
+				yield* refreshProjectRollups([slug]);
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.InstanceRemoved({ instanceId: slug }),
@@ -699,6 +762,7 @@ export const removeAll = Effect.gen(function* () {
 
 	// Clear all entries atomically
 	yield* Ref.set(ref, HashMap.empty());
+	yield* refreshProjectRollups(allSlugs);
 
 	// Invalidate all relays and publish removal events
 	yield* Effect.forEach(

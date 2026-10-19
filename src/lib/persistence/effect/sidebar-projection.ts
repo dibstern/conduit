@@ -46,6 +46,7 @@ export type FamilyMember = Pick<
 export const refreshSidebar = (
 	sessionIds: readonly string[],
 	version: number,
+	projectIds?: readonly string[],
 ): Effect.Effect<void, SqlError, SqlClient.SqlClient> =>
 	Effect.gen(function* () {
 		if (sessionIds.length === 0) return;
@@ -71,12 +72,14 @@ export const refreshSidebar = (
 				AND parent_id IS NULL`,
 			sql<FamilyMember>`
 				SELECT id, parent_id, side_thread, unread, status FROM sessions
-				WHERE root_id IN (SELECT value FROM json_each(${roots}))`,
+				WHERE root_id IN (SELECT value FROM json_each(${roots}))
+				${projectIds === undefined ? sql.literal("") : sql`AND project_id IN ${sql.in(projectIds)}`}`,
 			sql<PendingApprovalCountRow>`
 				SELECT a.session_id, a.type, COUNT(*) AS pending_count
 				FROM pending_approvals a JOIN sessions s ON s.id = a.session_id
 				WHERE a.status = 'pending'
 				AND s.root_id IN (SELECT value FROM json_each(${roots}))
+				${projectIds === undefined ? sql.literal("") : sql`AND s.project_id IN ${sql.in(projectIds)}`}
 				GROUP BY a.session_id, a.type`,
 			sql<{ session_id: string; row: string }>`
 				SELECT session_id, row FROM session_sidebar

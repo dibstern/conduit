@@ -137,6 +137,8 @@ export const DaemonHandleLive: Layer.Layer<
 					Effect.provideService(ProjectRegistryTag, projectRef),
 				);
 				yield* removeProjectFromEffectRegistry(slug).pipe(
+					Effect.provideService(PersistenceStore, store),
+					Effect.provideService(DaemonStoreAvailability, unavailable),
 					Effect.provideService(ProjectRegistryTag, projectRef),
 					Effect.provideService(ProjectSaveLockTag, projectSaveLock),
 					Effect.provideService(DaemonEventBusTag, bus),

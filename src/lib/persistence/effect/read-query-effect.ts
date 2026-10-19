@@ -1,8 +1,9 @@
-import { Context, Data, Effect, Option, Schema } from "effect";
+import { Context, Data, Effect, Option, Ref, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { Fragment } from "effect/sql/Statement";
 import type { SessionScope } from "../../contracts/session-scope.js";
+import { SessionRollupProjects } from "./session-rollup-projects.js";
 
 export type { SessionScope } from "../../contracts/session-scope.js";
 
@@ -929,6 +930,7 @@ function groupMessagesWithPartsAndTurnModels(
 
 export const makeReadQueryEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+	const projects = yield* SessionRollupProjects;
 	// The provider may reconcile streamed timestamps while a rewind is pending.
 	// Visibility follows the transcript's current (created_at, id) ordering.
 	const pendingRewindHides = (table: "messages" | "m" = "messages") => sql`
@@ -1305,6 +1307,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 
 	const countPendingApprovalsBySession = (
 		scope: SessionScope,
+		projectIds: readonly string[] = scope.projectIds,
 	): Effect.Effect<
 		readonly PendingApprovalCountRow[],
 		ReadQueryEffectError | SqlError
@@ -1314,7 +1317,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				SELECT session_id, type, COUNT(*) AS pending_count
 				FROM pending_approvals
 				WHERE status = 'pending'
-					AND session_id IN (SELECT id FROM sessions WHERE project_id IN ${sql.in(scope.projectIds)})
+					AND session_id IN (SELECT id FROM sessions WHERE project_id IN ${sql.in(projectIds)})
 				GROUP BY session_id, type`;
 		}).pipe(
 			Effect.mapError((e) =>
@@ -1330,6 +1333,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	const listSessionInfos: ReadQueryEffect["listSessionInfos"] = (scope, opts) =>
 		Effect.gen(function* () {
 			const rows = yield* listSessions(scope, opts);
+			const projectIds = projects ? yield* Ref.get(projects) : scope.projectIds;
 			// Roll-ups (busy, unread, pending counts) only need the listed rows and
 			// their descendants. Reading lineage and status for every session made
 			// each page cost a full scan of the store, twice.
@@ -1345,10 +1349,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						SELECT value FROM json_each(${JSON.stringify(rows.map((row) => row.id))})
 						UNION
 						SELECT child.id FROM sessions child JOIN family ON child.parent_id = family.id
-						WHERE child.project_id IN ${sql.in(scope.projectIds)}
+						WHERE child.project_id IN ${sql.in(projectIds)}
 					)
 					SELECT id, parent_id, status, unread, side_thread FROM sessions JOIN family USING (id)`,
-				countPendingApprovalsBySession(scope),
+				countPendingApprovalsBySession(scope, projectIds),
 			]).pipe(
 				Effect.mapError((cause) =>
 					cause instanceof ReadQueryEffectError

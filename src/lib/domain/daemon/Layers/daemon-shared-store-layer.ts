@@ -1,6 +1,6 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { Effect, Layer } from "effect";
+import { Context, Effect, Layer, Ref } from "effect";
 import { SqlClient } from "effect/sql";
 import type { DaemonConfig } from "../../../daemon/config-persistence.js";
 import {
@@ -9,6 +9,8 @@ import {
 	type PersistenceStoreContext,
 } from "../../../persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
+import { SessionRollupProjects } from "../../../persistence/effect/session-rollup-projects.js";
+import { refreshSidebar } from "../../../persistence/effect/sidebar-projection.js";
 import { importRegisteredProjectStores } from "../../../persistence/migrations/daemon-store-import.js";
 import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
 import { migrateProjectStorage } from "../../../persistence/migrations/project-storage-migration.js";
@@ -83,12 +85,29 @@ export const makeDaemonSharedStoreLayer = (
 			return unavailable;
 		}),
 	);
+	const projects = Layer.effect(
+		SessionRollupProjects,
+		Effect.gen(function* () {
+			const unavailable = yield* DaemonStoreAvailability;
+			return yield* Ref.make<readonly string[]>(
+				config.projects
+					.map(({ slug }) => slug)
+					.filter((slug) => !unavailable.has(slug)),
+			);
+		}),
+	).pipe(Layer.provideMerge(offline));
 	const store = makePersistenceStoreLayer(filename).pipe(
-		Layer.provideMerge(offline),
+		Layer.provideMerge(projects),
 	);
 	const published = Layer.effect(
 		PersistenceStore,
-		Effect.context<PersistenceStoreContext>(),
+		Effect.gen(function* () {
+			return Context.add(
+				yield* Effect.context<PersistenceStoreContext>(),
+				SessionRollupProjects,
+				yield* SessionRollupProjects,
+			);
+		}),
 	).pipe(Layer.provideMerge(store));
 	// This dependency also keeps the store alive until every downstream relay
 	// and background consumer has released its own scope.
@@ -96,6 +115,33 @@ export const makeDaemonSharedStoreLayer = (
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const unavailable = yield* DaemonStoreAvailability;
+			// Imported or previously cached families may include retained owners.
+			// Rebuild after offline preparation, before any daemon reader starts.
+			const projects = yield* SessionRollupProjects;
+			const refresh = sql.withTransaction(
+				Effect.gen(function* () {
+					const projectIds = projects ? yield* Ref.get(projects) : [];
+					const roots = yield* sql<{
+						id: string;
+					}>`SELECT DISTINCT root.id FROM sessions root
+						JOIN sessions member ON member.root_id = root.id
+						WHERE root.parent_id IS NULL AND root.project_id IN ${sql.in(projectIds)}
+						AND member.project_id IS NOT root.project_id`;
+					if (roots.length === 0) return;
+					const [counter] = yield* sql<{
+						value: number;
+					}>`SELECT value FROM read_model_counter WHERE id = 1`;
+					const version = (counter?.value ?? 0) + 1;
+					yield* refreshSidebar(
+						roots.map(({ id }) => id),
+						version,
+						projectIds,
+					);
+					// An unchanged restart must not move the durable read frontier.
+					yield* sql`UPDATE read_model_counter SET value = ${version} WHERE id = 1
+						AND EXISTS (SELECT 1 FROM session_sidebar WHERE version = ${version})`;
+				}),
+			);
 			if (unavailable.size > 0) {
 				const blocked = yield* sql`SELECT 1 FROM sessions
 					WHERE project_id IN ${sql.in([...unavailable.keys()])} LIMIT 1`;
@@ -105,10 +151,12 @@ export const makeDaemonSharedStoreLayer = (
 					yield* Effect.logWarning(
 						"Deferring fork lineage import while stored projects are unavailable",
 					);
+					yield* refresh;
 					return;
 				}
 			}
 			yield* migrateForkLineage(configDir, config, sql);
+			yield* refresh;
 		}),
 	).pipe(Layer.provideMerge(published));
 };
