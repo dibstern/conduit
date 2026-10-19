@@ -1,13 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-	AuthenticationError,
-	ConfigurationError,
 	fromCaught,
 	OpenCodeApiError,
 	OpenCodeConnectionError,
 	RelayError,
-	SSEConnectionError,
-	WebSocketError,
 	wrapError,
 } from "../../../src/lib/errors.js";
 import { PersistenceError } from "../../../src/lib/persistence/errors.js";
@@ -85,26 +81,6 @@ describe("Schema.TaggedError errors", () => {
 		const cause = new Error("root cause");
 		const wrapped = wrapError(cause, OpenCodeConnectionError);
 		expect(wrapped.message).toBe("root cause");
-	});
-
-	it("SSEConnectionError has correct _tag", () => {
-		const err = new SSEConnectionError({ message: "disconnected" });
-		expect(err._tag).toBe("SSEConnectionError");
-	});
-
-	it("WebSocketError has correct _tag", () => {
-		const err = new WebSocketError({ message: "ws failure" });
-		expect(err._tag).toBe("WebSocketError");
-	});
-
-	it("AuthenticationError has correct _tag", () => {
-		const err = new AuthenticationError({ message: "auth failed" });
-		expect(err._tag).toBe("AuthenticationError");
-	});
-
-	it("ConfigurationError has correct _tag", () => {
-		const err = new ConfigurationError({ message: "bad config" });
-		expect(err._tag).toBe("ConfigurationError");
 	});
 
 	it("PersistenceError._tag is PersistenceError", () => {
