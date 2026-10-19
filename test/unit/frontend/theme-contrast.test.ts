@@ -149,6 +149,13 @@ describe.each(["dark", "light"] as const)("%s theme contrast", (variant) => {
 		return value;
 	}
 
+	it("primary capsule ink on accent-bg over chip clears 4.5:1", () => {
+		const capsule = composite(colour("chip"), colour("bg"));
+		expect(
+			contrastRatio(colour("accent"), composite(colour("accent-bg"), capsule)),
+		).toBeGreaterThanOrEqual(4.5);
+	});
+
 	// Rendered text/fill/opacity/base combinations, rather than an all-token
 	// cross product: quiet ink is not used on every tinted action or banner.
 	it.each([
@@ -174,6 +181,12 @@ describe.each(["dark", "light"] as const)("%s theme contrast", (variant) => {
 		["error", "error", 0.1, "bg"],
 		["error", "error", 0.15, "bg-surface"],
 		["status-snoozed", "status-snoozed", 0.15, "bg-surface"],
+		// Desktop header state chips and the goal card's tag and Clear goal.
+		["status-snoozed", "status-snoozed", 0.15, "bg"],
+		["status-pinned", "status-pinned", 0.12, "bg"],
+		["status-goal", "status-goal", 0.12, "popover-bg"],
+		["error", "error", 0.12, "popover-bg"],
+		["error", "error", 0.12, "input-bg"],
 		["warning", "warning-bg", 1, "bg"],
 		["warning", "warning-bg", 1, "user-bubble"],
 		["warning", "warning", 0.14, "input-bg"],

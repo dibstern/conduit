@@ -615,13 +615,14 @@
 		style={vvHeight ? `height: ${vvHeight}px;` : ""}
 	>
 		<div id="session-chrome" bind:offsetHeight={chromeHeight}>
+			{#if !phoneListScreen && !sessionViewState.compact}<Banners presentation="session-header" />{/if}
 			<!-- The list screen has its own bar in Sidebar; keep one session bar
 			     mounted across breakpoint changes so its state follows the viewport. -->
 			{#if !phoneListScreen}<SessionBar />{/if}
 
 			<!-- Banners (update available, skip permissions, etc.). The phone list
 			     screen hides #app, so Sidebar shows them there instead. -->
-			{#if !phoneListScreen}<Banners />{/if}
+			{#if !phoneListScreen && sessionViewState.compact}<Banners />{/if}
 
 			<!-- Todo Sticky Overlay -->
 			{#if todoEverOpened}

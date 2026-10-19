@@ -38,7 +38,13 @@ export type ButtonVariant =
 	| "picker-row"
 	| "composer-summary"
 	| "ask"
-	| "goal";
+	| "goal"
+	| "capsule-primary"
+	| "chip"
+	| "menu-trigger"
+	| "scrim"
+	| "scrim-clear"
+	| "task-row";
 
 /**
  * Resting text colour paired with its hover step, as ONE decision. "Dim,
@@ -77,6 +83,9 @@ export const TONE_CLASSES = {
 	accent: "text-accent",
 	error: "text-error",
 	success: "text-success",
+	goal: "text-status-goal",
+	"goal-paused": "text-status-amber",
+	"goal-met": "text-status-green",
 } as const;
 
 /**
@@ -198,6 +207,36 @@ type VariantRecipe = {
 };
 
 export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
+	"capsule-primary": {
+		chrome: "bg-accent-bg",
+		tone: "text-accent",
+		hoverFill: "hover:bg-accent-bg",
+	},
+	chip: {
+		chrome: "bg-chip",
+		tone: TONE_CLASSES.secondary,
+		hoverFill: HOVER_FILL_CLASSES.text,
+	},
+	"menu-trigger": {
+		chrome: "data-[state=open]:bg-accent-bg data-[state=open]:text-accent",
+		tone: TONE_CLASSES.secondary,
+		hoverFill: HOVER_FILL_CLASSES.text,
+	},
+	scrim: {
+		chrome: "bg-[rgba(var(--overlay-rgb),0.35)]",
+		tone: TONE_CLASSES.default,
+		hoverFill: "",
+	},
+	"scrim-clear": {
+		chrome: "",
+		tone: TONE_CLASSES.default,
+		hoverFill: "",
+	},
+	"task-row": {
+		chrome: "gap-1 text-[11px] leading-[1.5]",
+		tone: "text-tool",
+		hoverFill: "",
+	},
 	"composer-summary": {
 		// Keyboard focus rings the summary words, not the full-width tap target.
 		chrome:
@@ -299,9 +338,11 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 		hoverFill: "hover:bg-error/90",
 	},
 	"danger-soft": {
-		chrome: "bg-error/22",
+		// /12, not /22: the lightest tint that keeps the error label at 4.5:1 on a
+		// dark popover and in the light theme (theme-contrast.test.ts).
+		chrome: "bg-error/12",
 		tone: "text-error",
-		hoverFill: "hover:bg-error/30",
+		hoverFill: "hover:bg-error/20",
 	},
 	// The three below are the approve / deny / tool-action language already
 	// duplicated across QuestionCard, PermissionCard, ToolGenericCard and
@@ -419,6 +460,15 @@ export type ButtonSize =
 	| "sm"
 	| "md"
 	| "segment"
+	| "capsule-segment"
+	| "touch-icon"
+	| "touch-pill"
+	| "navigation"
+	| "navigation-pill"
+	| "subtitle"
+	| "card-action"
+	| "command-chip"
+	| "text-action"
 	| "row-action"
 	| "transcript"
 	| "content"
@@ -463,6 +513,36 @@ const BASE_CLASSES =
 	"focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text";
 
 const SHARED_SIZE_CLASSES = "rounded-lg font-medium";
+
+const SIZE_CLASSES: Record<
+	Exclude<ButtonSize, "sm" | "md" | "composer-action">,
+	string
+> = {
+	"text-action": "font-medium",
+	"touch-icon": "min-h-[44px] min-w-[44px] rounded-lg",
+	"touch-pill": "min-h-[44px] min-w-[44px] rounded-full",
+	navigation:
+		"min-h-[44px] gap-1.5 pl-1 pr-2 rounded-lg text-base font-semibold",
+	"navigation-pill":
+		"min-h-[44px] gap-1.5 pl-1 pr-2 rounded-full text-[13px] font-medium",
+	subtitle: "gap-1.5 text-[11px] leading-[1.35]",
+	"card-action": "gap-[6px] rounded-[9px] px-[10px] py-[6px] text-[11.5px]",
+	"command-chip": "h-[24px] rounded-full px-[8px] font-mono text-[11.5px]",
+	"capsule-segment":
+		"h-[24px] gap-[5px] rounded-full px-[10px] text-[12.5px] font-medium tabular-nums",
+	"composer-icon": "size-[30px] shrink-0 rounded-full",
+	"composer-chip": "h-[30px] gap-[5px] rounded-full px-[9px]",
+	// Literally no classes, by design — see the ButtonSize doc comment. Not
+	// even `h-auto`: that is a button's default height anyway, so emitting it
+	// buys nothing and costs a `!` at every call site that wants an explicit
+	// height (RewindBanner's `w-6 h-6` exit control, for one), which is the
+	// exact tax this size exists to avoid.
+	content: "",
+	"row-action": "size-[21px] rounded-[6px]",
+	transcript: TRANSCRIPT_ROW_CLASSES,
+	segment:
+		"h-[22px] gap-[5px] rounded-none px-[8px] text-[10px] font-medium tabular-nums",
+};
 
 /**
  * Main-axis alignment, as a prop rather than a base class, because the base
@@ -512,6 +592,7 @@ const SHARED_SIZE_CLASSES = "rounded-lg font-medium";
  */
 const LAYOUT_CLASSES = {
 	center: "inline-flex items-center whitespace-nowrap select-none",
+	block: "flex items-center whitespace-nowrap select-none",
 	baseline: "inline-flex items-baseline whitespace-nowrap select-none",
 	flow: "",
 } as const;
@@ -553,33 +634,18 @@ export function buttonClasses({
 	inert: boolean;
 	className?: string | undefined;
 }>): string {
-	// Literally no classes, by design — see the ButtonSize doc comment. Not
-	// even `h-auto`: that is a button's default height anyway, so emitting it
-	// buys nothing and costs a `!` at every call site that wants an explicit
-	// height (RewindBanner's `w-6 h-6` exit control, for one), which is the
-	// exact tax this size exists to avoid.
 	const sizeClasses =
-		size === "composer-icon"
-			? "size-[30px] shrink-0 rounded-full"
-			: size === "composer-action"
-				? `h-[34px] shrink-0 rounded-full gap-[6px] text-[13px] font-semibold ${iconOnly ? "w-[34px]" : "px-[12px]"}`
-				: size === "composer-chip"
-					? "h-[30px] gap-[5px] rounded-full px-[9px]"
-					: size === "content"
-						? ""
-						: size === "row-action"
-							? "size-[21px] rounded-[6px]"
-							: size === "transcript"
-								? TRANSCRIPT_ROW_CLASSES
-								: size === "segment"
-									? "h-[22px] gap-[5px] rounded-none px-[8px] text-[10px] font-medium"
-									: iconOnly
-										? `${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${SHARED_SIZE_CLASSES}`
-										: size === "sm"
-											? // Literal px from the mockup's `.btn`. `min-h`, not `h`, so a
-												// taller touch target composes without a collision.
-												"min-h-[25px] px-[10px] py-[4px] text-[11.5px] gap-[5px] rounded-[7px] font-normal"
-											: `h-9 px-4 text-sm gap-2 ${SHARED_SIZE_CLASSES}`;
+		size === "composer-action"
+			? `h-[34px] shrink-0 rounded-full gap-[6px] text-[13px] font-semibold ${iconOnly ? "w-[34px]" : "px-[12px]"}`
+			: size !== "sm" && size !== "md"
+				? SIZE_CLASSES[size]
+				: iconOnly
+					? `${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${SHARED_SIZE_CLASSES}`
+					: size === "sm"
+						? // Literal px from the mockup's `.btn`. `min-h`, not `h`, so a
+							// taller touch target composes without a collision.
+							"min-h-[25px] px-[10px] py-[4px] text-[11.5px] gap-[5px] rounded-[7px] font-normal"
+						: `h-9 px-4 text-sm gap-2 ${SHARED_SIZE_CLASSES}`;
 
 	/**
 	 * Nearly every variant declares a `hover:bg-*`, and `:hover` keeps matching while a

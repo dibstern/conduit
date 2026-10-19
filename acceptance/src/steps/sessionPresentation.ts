@@ -256,7 +256,7 @@ export const sessionPresentationHandlers: StepHandler[] = [
 			if (
 				layout.compact !== "false" ||
 				layout.collapsed !== "false" ||
-				layout.height > 50
+				layout.height > 60
 			) {
 				throw new Error(
 					`desktop bar is not one row: ${JSON.stringify(layout)}`,
@@ -361,7 +361,14 @@ export const sessionPresentationHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const menu = world.page.getByTestId("session-bar-overflow-menu");
 			await menu.waitFor({ state: "visible" });
-			const actions = await menu.getByRole("menuitem").allTextContents();
+			const actions = await menu
+				.locator('[data-testid^="overflow-"]')
+				.evaluateAll((items) =>
+					items.map(
+						(item) =>
+							item.getAttribute("aria-label") ?? item.textContent?.trim() ?? "",
+					),
+				);
 			const expected = ["Share", "Settings", "Debug panel"];
 			if (
 				JSON.stringify(actions.map((action) => action.trim())) !==

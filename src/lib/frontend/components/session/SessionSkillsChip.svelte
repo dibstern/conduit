@@ -176,6 +176,7 @@
 {#if rows.length > 0}
 	<Menu
 		{presentation}
+		appearance="final"
 		bind:open
 		onopenchange={(nextOpen) => {
 			if (!nextOpen) resetMenu();
@@ -192,8 +193,8 @@
 				{...props}
 				id="session-skills-chip"
 				variant="ghost"
-				size="segment"
-				icon="sparkles"
+				size={presentation === "popover" ? "capsule-segment" : "segment"}
+				icon={presentation === "popover" ? "book-open" : "sparkles"}
 				touchTarget
 				class="shrink-0 tabular-nums"
 				ariaLabel={label}
@@ -201,6 +202,7 @@
 				data-testid="session-skills-chip"
 			>
 				{rows.length}
+				{#if presentation === "popover"}<span class="segment-word">{rows.length === 1 ? "skill" : "skills"}</span>{/if}
 				{#if loading}
 					<!-- Decorative: the open list says "loading now" in words. -->
 					<span

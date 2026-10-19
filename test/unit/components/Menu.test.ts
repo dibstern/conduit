@@ -31,6 +31,7 @@ describe("Menu", () => {
 		).toEqual({
 			default: ["text-text"],
 			danger: ["text-error"],
+			selected: ["text-accent"],
 		});
 		expect(textColorClasses(MENU_RADIO_ITEM_COLOR_CLASSES)).toEqual([
 			"data-[state=unchecked]:text-text",

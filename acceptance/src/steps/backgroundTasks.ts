@@ -237,13 +237,13 @@ export const backgroundTasksHandlers: StepHandler[] = [
 	},
 	{
 		name: "seed live background tasks",
-		match: /^the session has ([1-4]) live background tasks?$/,
+		match:
+			/^the session has ([1-4]) live background tasks?( with their commands)?$/,
 		run: async ({ world, match }) => {
+			const tasks = TASKS.slice(0, Number(match[1]));
 			await setLiveTasks(
 				world.page,
-				TASKS.slice(0, Number(match[1])).map(
-					({ detail: _detail, ...task }) => task,
-				),
+				match[2] ? tasks : tasks.map(({ detail: _detail, ...task }) => task),
 			);
 			await expect(
 				world.page.getByTestId("background-tasks-row"),
@@ -309,15 +309,31 @@ export const backgroundTasksHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert row chips and more pill",
-		match: /^the background tasks row shows (.+) and (no more pill|\+[0-9]+)$/,
+		match:
+			/^the background tasks row shows (.+) and (no more pill|\+[0-9]+|responsive overflow)$/,
 		run: async ({ world, match }) => {
 			const row = world.page.getByTestId("background-tasks-row");
-			await expect(row.getByTestId("background-task-chip")).toHaveText(
-				(match[1] ?? "")
-					.split(", ")
-					.map((description) => new RegExp(`^\\s*${description}`)),
-			);
+			const chips = row.getByTestId("background-task-chip");
+			const expected = (match[1] ?? "")
+				.split(", ")
+				.map((label) => new RegExp(`^\\s*${label}`));
 			const more = row.getByTestId("background-tasks-more");
+			if (match[2] === "responsive overflow") {
+				await expect(async () => {
+					const visible = await chips.count();
+					expect(visible).toBeGreaterThan(0);
+					expect(visible).toBeLessThanOrEqual(expected.length);
+					await expect(chips).toHaveText(expected.slice(0, visible), {
+						timeout: 1_000,
+					});
+					const hidden = expected.length - visible;
+					if (hidden > 0)
+						await expect(more).toHaveText(`+${hidden}`, { timeout: 1_000 });
+					else await expect(more).toHaveCount(0, { timeout: 1_000 });
+				}).toPass({ timeout: 10_000 });
+				return;
+			}
+			await expect(chips).toHaveText(expected);
 			if (match[2] === "no more pill") await expect(more).toHaveCount(0);
 			else await expect(more).toHaveText(match[2] ?? "");
 		},
@@ -366,9 +382,12 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		match: /^I click the background tasks row$/,
 		run: async ({ world }) => {
 			const row = world.page.getByTestId("background-tasks-row");
-			await expect(row).toHaveRole("button");
-			await row.click();
-			await expect(row).toHaveAttribute("aria-expanded", "true");
+			const toggle = (await row.getByTestId("background-tasks-toggle").count())
+				? row.getByTestId("background-tasks-toggle")
+				: row;
+			await expect(toggle).toHaveRole("button");
+			await toggle.click();
+			await expect(toggle).toHaveAttribute("aria-expanded", "true");
 		},
 	},
 	{
@@ -457,9 +476,10 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		match:
 			/^the background tasks pull-down offers a named stop control for each task$/,
 		run: async ({ world }) => {
+			const panel = world.page.getByTestId("background-tasks-panel");
 			for (const task of TASKS)
 				await expect(
-					world.page.getByRole("button", {
+					panel.getByRole("button", {
 						name: `Stop ${task.description}`,
 						exact: true,
 					}),

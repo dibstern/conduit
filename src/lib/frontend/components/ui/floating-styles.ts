@@ -42,23 +42,27 @@ export const DETACHED_LISTBOX_SURFACE_CLASSES = `${FLOATING_SURFACE_BASE_CLASSES
 
 export const FLOATING_MENU_CONTENT_CLASSES = `${FLOATING_SURFACE_CLASSES} max-h-[var(--bits-dropdown-menu-content-available-height)] overflow-y-auto`;
 
+export const FINAL_MENU_CONTENT_CLASSES =
+	"z-[var(--z-popover)] max-h-[var(--bits-dropdown-menu-content-available-height)] overflow-y-auto rounded-[16px] bg-popover-bg p-[6px] text-text shadow-popover ring-1 ring-border-chip focus-visible:outline-hidden";
+
 export const FLOATING_TOOLTIP_CLASSES = `${FLOATING_SURFACE_CLASSES} max-w-xs px-2 text-xs text-text`;
 
 export const FLOATING_ITEM_PADDING_CLASSES = "px-3 py-1.5";
 
 export const MENU_ITEM_VARIANT_CLASSES = {
-	default: "text-text",
-	danger: "text-error",
+	default: "text-text hover:bg-bg focus:bg-bg",
+	danger: "text-error hover:bg-bg focus:bg-bg",
+	selected: "bg-accent-bg text-accent hover:bg-accent-bg focus:bg-accent-bg",
 } as const;
 
 export const MENU_RADIO_ITEM_COLOR_CLASSES =
-	"data-[state=unchecked]:text-text data-[state=checked]:text-accent";
+	"data-[state=unchecked]:text-text data-[state=checked]:text-accent hover:bg-bg focus:bg-bg";
 
 // Everything a menu row is regardless of how tightly it is packed. Emits no
 // `gap-*` and no padding, so the density recipe below owns that group outright.
 export const FLOATING_ITEM_BASE_CLASSES =
 	"flex cursor-default select-none items-center " +
-	"hover:bg-bg focus:bg-bg focus:outline-hidden " +
+	"focus:outline-hidden " +
 	"data-[disabled]:pointer-events-none data-[disabled]:opacity-50";
 
 // A closed union that REPLACES a row's gap and padding rather than appending
@@ -78,6 +82,10 @@ export const FLOATING_ITEM_BASE_CLASSES =
 // "these are two things".
 export const MENU_ITEM_DENSITY_CLASSES = {
 	default: `gap-2 ${FLOATING_ITEM_PADDING_CLASSES} text-sm`,
+	final:
+		"min-h-[44px] gap-[10px] rounded-[10px] px-[10px] py-[7px] text-[13.5px]",
+	option:
+		"min-h-[44px] gap-[10px] rounded-[10px] px-[10px] py-[7px] text-[13px]",
 	touch: "gap-2.5 px-4 py-3 text-sm",
 	sheet: "min-h-[44px] gap-[13px] px-4 py-0 font-[system-ui] text-[14.5px]",
 	// Rows that carry a status read-out beside the label (the account picker's
@@ -90,7 +98,7 @@ export type MenuItemDensity = keyof typeof MENU_ITEM_DENSITY_CLASSES;
 export const MENU_SHEET_LEADING_ICON_CLASSES =
 	"grid w-[20px] shrink-0 place-items-center";
 
-export const FLOATING_ITEM_CLASSES = `${FLOATING_ITEM_BASE_CLASSES} ${MENU_ITEM_DENSITY_CLASSES.default}`;
+export const FLOATING_ITEM_CLASSES = `${FLOATING_ITEM_BASE_CLASSES} ${MENU_ITEM_DENSITY_CLASSES.default} hover:bg-bg focus:bg-bg`;
 
 export const FLOATING_POSITIONING_DEFAULTS = {
 	align: "start",

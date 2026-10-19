@@ -52,8 +52,12 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 			const rpc = requireRpcControl(world.page);
 			rpc.setStubs({
 				GetGoalDetails: () => ({
+					judgeModel: "Sonnet 5",
+					setAt,
+					turnCount: 4,
 					checks: [8, 19, 31].map((minutes, index) => ({
 						iteration: index + 1,
+						turnIndex: index + 1,
 						at: setAt + minutes * 60_000,
 						reason: CHECK_REASONS[index] ?? null,
 					})),
@@ -116,6 +120,9 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 			expect(request.payload["sessionId"]).toBe(
 				new URL(world.page.url()).pathname.split("/")[2],
 			);
+			const desktop = await world.page
+				.locator('#session-bar[data-compact="false"]')
+				.count();
 			await expect
 				.poll(async () => {
 					const header = await world.page
@@ -127,9 +134,13 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 					return (
 						header !== null &&
 						panel !== null &&
-						Math.abs(panel.x - header.x) < 2 &&
-						Math.abs(panel.width - header.width) < 2 &&
-						Math.abs(panel.y - (header.y + header.height)) < 2
+						(desktop
+							? panel.width <= 380 &&
+								panel.x >= header.x &&
+								panel.y >= header.y + header.height
+							: Math.abs(panel.x - header.x) < 2 &&
+								Math.abs(panel.width - header.width) < 2 &&
+								Math.abs(panel.y - (header.y + header.height)) < 2)
 					);
 				})
 				.toBe(true);
@@ -145,24 +156,48 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert goal details age and tokens",
-		match: /^the goal details metadata includes 41m and 1\.24M tokens$/,
+		name: "assert goal details metadata and tokens",
+		match: /^the goal details metadata describes its start, checks and tokens$/,
 		run: async ({ world }) => {
 			const metadata = world.page.getByTestId("goal-details-meta");
-			await expect(metadata).toContainText("41m");
-			await expect(metadata).toContainText("1.24M");
+			if (
+				await world.page.locator('#session-bar[data-compact="false"]').count()
+			) {
+				await expect(metadata).toContainText("Sonnet 5 judges");
+				await expect(metadata).toContainText("3 checks");
+				await expect(metadata).toHaveText(/^Set \d/);
+				await expect(world.page.getByTestId("goal-details")).toContainText(
+					"1.24M tokens",
+				);
+			} else {
+				await expect(metadata).toContainText("41m");
+				await expect(metadata).toContainText("1.24M");
+			}
 		},
 	},
 	{
-		name: "assert complete goal details history in iteration order",
-		match:
-			/^the goal details history shows all three checks in iteration order$/,
+		name: "assert complete goal details history in layout order",
+		match: /^the goal details history shows all three checks in layout order$/,
 		run: async ({ world }) => {
+			const desktop = await world.page
+				.locator('#session-bar[data-compact="false"]')
+				.count();
 			await expect(
 				world.page
 					.getByTestId("goal-details-history")
 					.getByTestId("goal-details-check"),
-			).toHaveText(CHECK_TEXT);
+			).toHaveText(
+				desktop
+					? [...CHECK_REASONS]
+							.reverse()
+							.map(
+								(reason) =>
+									new RegExp(
+										`Not yet.*${reason.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+									),
+							)
+					: CHECK_TEXT,
+			);
 		},
 	},
 	{

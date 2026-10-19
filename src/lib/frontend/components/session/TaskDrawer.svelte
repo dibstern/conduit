@@ -43,7 +43,7 @@
 
 	function close() {
 		taskDrawer.task = null;
-		const target = opener?.isConnected ? opener : document.querySelector<HTMLElement>("[data-testid='background-tasks-row']") ?? document.getElementById("messages");
+		const target = opener?.isConnected ? opener : document.querySelector<HTMLElement>("[data-testid='background-tasks-toggle'], button[data-testid='background-tasks-row']") ?? document.getElementById("messages");
 		target?.focus({ preventScroll: true });
 	}
 

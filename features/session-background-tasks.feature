@@ -1,4 +1,4 @@
-Feature: Live background tasks show in the session header and on the composer
+Feature: Live background tasks show in the session header
 
 Scenario: Stop uses the Claude session routing while the model selection names OpenCode
   Given the conduit app is served with the connected mockup
@@ -8,7 +8,7 @@ Scenario: Stop uses the Claude session routing while the model selection names O
   And the composer picker has the OpenCode catalog
   When I stop the composer turn
   Then the turn-stopped toast says Turn stopped. 1 task still running
-  And the composer shows 1 task dots
+  And the composer shows no task dots
 
 Scenario: A Claude model selection does not change OpenCode cancellation
   Given the conduit app is served with the connected mockup
@@ -27,7 +27,7 @@ Scenario Outline: Composer Stop offers to stop the tasks it kept alive
   And the session has <count> live background tasks
   When I stop the composer turn
   Then the turn-stopped toast says Turn stopped. <text> still running
-  And the composer shows <count> task dots
+  And the composer shows no task dots
   And the layout region visually matches <baseline> at <threshold> percent
 
 Examples:
@@ -48,7 +48,7 @@ Scenario: The toast count and stop action follow the live tasks
   Then the turn-stopped toast says Turn stopped. 1 task still running
   When I press Stop them in the turn-stopped toast
   Then the toast asks to stop b1 without another session cancellation
-  And the composer shows 1 task dots
+  And the composer shows no task dots
   When the session's last background task ends
   Then the composer shows no task dots
   And the turn-stopped toast is gone
@@ -83,40 +83,40 @@ Scenario: OpenCode Stop shows no Claude task offer with live tasks
   When I stop the composer turn
   Then the turn-stopped toast is gone
 
-Scenario Outline: Tasks hang off a goal with an elbow, newest task first
+Scenario Outline: Tasks sit under the header, newest task first
   Given the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the composer status clock is frozen
   And a session already exists on the Claude harness
   And goal details are available for a working goal
-  And the session has <count> live background tasks
+  And the session has <count> live background tasks with their commands
   Then the background tasks row shows <chips> and <more>
-  And the background tasks row hangs off the goal with an elbow
-  And the composer shows <count> task dots
+  And the background tasks row <elbow>
+  And the composer shows no task dots
   And the old background work banner is gone
   And the layout region visually matches <baseline> at <threshold> percent
 
 Examples:
-  | viewport | count | chips                                           | more         | baseline                        | threshold |
-  | phone    | 1     | Start the Vite dev server                       | no more pill | session-background-tasks-1-phone   | 98        |
-  | phone    | 4     | Review the router refactor                      | +3           | session-background-tasks-4-phone   | 98        |
-  | desktop  | 4     | Review the router refactor, Explore route guard usage, Run vitest in watch mode, Start the Vite dev server | no more pill | session-background-tasks-4-desktop | 98        |
+  | viewport | count | chips                                           | more         | baseline                        | threshold | elbow |
+  | phone    | 1     | Start the Vite dev server                       | no more pill | session-background-tasks-1-phone   | 98        | hangs off the goal with an elbow |
+  | phone    | 4     | Review the router refactor                      | +3           | session-background-tasks-4-phone   | 98        | hangs off the goal with an elbow |
+  | desktop  | 4     | review workflow, Explore, pnpm vitest --watch, pnpm dev | responsive overflow | session-background-tasks-4-desktop | 98        | has no elbow |
 
 Scenario Outline: Without a goal the row sits under the title with no elbow
   Given the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the composer status clock is frozen
   And a session already exists on the Claude harness
-  And the session has 2 live background tasks
+  And the session has 2 live background tasks with their commands
   Then the background tasks row shows <chips> and <more>
   And the background tasks row has no elbow
-  And the composer shows 2 task dots
+  And the composer shows no task dots
   And the layout region visually matches <baseline> at <threshold> percent
 
 Examples:
   | viewport | chips                                             | more         | baseline                               | threshold |
   | phone    | Run vitest in watch mode                          | +1           | session-background-tasks-nogoal-phone   | 98        |
-  | desktop  | Run vitest in watch mode, Start the Vite dev server | no more pill | session-background-tasks-nogoal-desktop | 98        |
+  | desktop  | pnpm vitest --watch, pnpm dev                       | responsive overflow | session-background-tasks-nogoal-desktop | 98        |
 
 Scenario Outline: The pull-down lists every task with its kind, command or agent, and age
   Given the conduit app is served with the connected mockup
@@ -148,7 +148,7 @@ Scenario: Stop all requests each task and waits for the SDK without cancelling t
   When I click the background tasks row
   And I press Stop all in the background tasks pull-down
   Then the background tasks pull-down asks to stop b2, b1 without cancelling the session
-  And the composer shows 2 task dots
+  And the composer shows no task dots
   When the session's last background task ends
   Then the background tasks pull-down is closed
   And the composer shows no task dots
@@ -162,9 +162,9 @@ Scenario: Stopping one task leaves every other task until the SDK reports the ch
   When I click the background tasks row
   And I stop the background task Run vitest in watch mode
   Then the background tasks pull-down asks to stop b2 without cancelling the session
-  And the composer shows 2 task dots
+  And the composer shows no task dots
   When the SDK reports the vitest task stopped
-  Then the composer shows 1 task dots
+  Then the composer shows no task dots
   And the background tasks row shows Start the Vite dev server and no more pill
 
 Scenario: Stopping an agent requests its nested tasks before the agent
@@ -176,7 +176,7 @@ Scenario: Stopping an agent requests its nested tasks before the agent
   When I click the background tasks row
   And I stop the background task Fix the flaky router test
   Then the background tasks pull-down asks to stop n2, n1, a1 without cancelling the session
-  And the composer shows 4 task dots
+  And the composer shows no task dots
 
 Scenario: Unsupported providers show live tasks without stop controls
   Given the conduit app is served with the connected mockup
@@ -187,7 +187,7 @@ Scenario: Unsupported providers show live tasks without stop controls
   Then the background tasks pull-down has no stop controls
   And the background tasks pull-down shows only kinds for unjoinable tasks
 
-Scenario: The row and dots disappear when the last task ends
+Scenario: The row disappears when the last task ends
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And the composer status clock is frozen
@@ -205,7 +205,7 @@ Scenario Outline: The pull-down nests an agent's tasks under it
   And the composer status clock is frozen
   And a session already exists on the Claude harness
   And the session's live background tasks are an agent with 2 nested shells and a shell
-  Then the composer shows 4 task dots
+  Then the composer shows no task dots
   When I click the background tasks row
   Then the background tasks pull-down lists the agent's 2 shells indented under it
   And the layout region visually matches <baseline> at <threshold> percent

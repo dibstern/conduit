@@ -58,6 +58,7 @@ export type SessionCommand = {
 			detail?: string;
 			icon?: string;
 			separated?: boolean;
+			selected?: boolean;
 			run(returnFocus?: () => HTMLElement | null): void;
 		}[];
 	};
@@ -71,9 +72,13 @@ export type SessionCommandEntry = Omit<SessionCommand, "section"> & {
  * Each command's keys, defined once. `key` acts on the focused list row, or on the
  * open session from the transcript; `global` works anywhere with ⌘⇧ (Ctrl+Shift).
  */
-export type SessionCommandKeys = { key: string; global?: string };
+export type SessionCommandKeys = {
+	key: string;
+	global?: string;
+	globalAliases?: readonly string[];
+};
 export const sessionCommandKeys = {
-	settle: { key: "s", global: "e" },
+	settle: { key: "s", global: "s", globalAliases: ["e"] },
 	snooze: { key: "z" },
 	pin: { key: "p" },
 	read: { key: "u", global: "u" },
@@ -106,8 +111,10 @@ export function findSessionCommandForKey(
 	const global = command && event.shiftKey;
 	if (!global && (command || event.shiftKey)) return undefined;
 	const key = event.key.toLowerCase();
-	return entries.find(
-		(entry) => (global ? entry.keys?.global : entry.keys?.key) === key,
+	return entries.find((entry) =>
+		global
+			? entry.keys?.global === key || entry.keys?.globalAliases?.includes(key)
+			: entry.keys?.key === key,
 	);
 }
 
@@ -404,6 +411,16 @@ export function getSessionCommands(
 ): SessionCommand[] {
 	const actions = getSessionActionState(session, now);
 	const items: SessionCommand[] = [];
+	// The server records snoozedAt after the client chooses the preset's time.
+	const snoozePreset = actions.snoozed
+		? getSnoozePresets(session.snoozedAt ?? now).find(
+				(preset) =>
+					preset.until === (session.snoozedUntil ?? null) ||
+					(preset.until != null &&
+						session.snoozedUntil != null &&
+						Math.abs(preset.until - session.snoozedUntil) < 60_000),
+			)?.id
+		: undefined;
 	items.push(getSettleCommand(session, now), {
 		testId: "session-ctx-auto-settle",
 		label: "Auto-settle when idle",
@@ -442,6 +459,7 @@ export function getSessionCommands(
 						.map((preset) => ({
 							id: preset.id,
 							label: preset.label,
+							selected: preset.id === snoozePreset,
 							detail: formatSnoozeTime(preset.until, now),
 							run: () => {
 								void snooze(session, preset.until, now);
@@ -449,6 +467,7 @@ export function getSessionCommands(
 						})),
 					{
 						id: "pick",
+						selected: actions.snoozed && snoozePreset === undefined,
 						label: "Pick a date & time…",
 						icon: "pencil",
 						detail: "›",
@@ -458,6 +477,7 @@ export function getSessionCommands(
 					},
 					{
 						id: "indefinite",
+						selected: actions.snoozed && session.snoozedUntil == null,
 						label: "Until something happens",
 						run: () => {
 							void snooze(session, null, now);

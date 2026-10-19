@@ -70,6 +70,7 @@
 	<Menu
 		bind:open
 		presentation={presentation === "sheet" ? "sheet" : "popover"}
+		appearance="final"
 		onopenchange={(nextOpen) => {
 			if (!nextOpen) {
 				onclose();

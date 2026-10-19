@@ -129,8 +129,6 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 
 	// Verified legitimate (conduit-test-dc8k.1). The A1 header is the same for
 	// every harness and has no checkout, so these stories now meet in one frame.
-	"layout-sessionbar--desktop-claude-header | layout-sessionbar--desktop-no-checkout | layout-sessionbar--desktop-open-code-header":
-		"the A1 header shows no checkout, account pill or instance badge for either harness; each story asserts those absences in play()",
 	"layout-sessionbar--desktop-claude-header | layout-sessionbar--desktop-open-code-header":
 		"the A1 header is the same for Claude and OpenCode; each story asserts no account pill or instance badge in play()",
 

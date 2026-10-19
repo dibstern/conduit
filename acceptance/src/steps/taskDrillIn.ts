@@ -283,7 +283,9 @@ export const taskDrillInHandlers: StepHandler[] = [
 			expect(sessionIdOf(world.page)).toBe(parentOf(world.page));
 			await expect(
 				match[1] === "the background tasks row"
-					? world.page.getByTestId("background-tasks-row")
+					? world.page.locator(
+							'[data-testid="background-tasks-toggle"], button[data-testid="background-tasks-row"]',
+						)
 					: rowOf(world.page, "Fix the flaky test").locator(".subagent-link"),
 			).toBeFocused();
 		},

@@ -28,6 +28,9 @@
 	type SurfaceVariant =
 		| "card"
 		| "popover"
+		| "floating"
+		| "capsule"
+		| "segments"
 		| "quiet"
 		| "plain"
 		| "bare"
@@ -60,6 +63,9 @@
 	const VARIANT_CLASSES: Record<SurfaceVariant, string> = {
 		card: "bg-bg-surface border border-border", // 8
 		popover: "bg-popover-bg border border-border",
+		floating: "bg-popover-bg ring-1 ring-border-chip",
+		capsule: "inline-flex h-[30px] items-center rounded-full bg-chip px-[3px]",
+		segments: "inline-flex h-[24px] items-stretch rounded-lg border border-border",
 		quiet: "bg-bg-surface border border-border-subtle", // 2
 		plain: "bg-bg-surface", // 8
 		bare: "", // 5
