@@ -575,10 +575,156 @@ body:has(dialog:modal) {
 	grid-template-columns: auto minmax(0, 1fr) auto;
 	grid-template-areas:
 		"back  meta  more"
-		"title title title";
+		"title title title"
+		"goal goal goal"
+		"tasks tasks tasks";
 	align-items: center;
 	column-gap: 6px;
-	padding: 3px 12px 6px;
+	padding: 2px 10px 8px;
+}
+
+#session-bar[data-compact="true"] {
+	background: var(--color-bg);
+	grid-template-rows: 40px auto auto auto;
+	/* Let the gutters yield before a full pill crowds Back at 320px. */
+	column-gap: clamp(2px, calc(10% - 30px), 6px);
+}
+#session-bar[data-compact="true"] #session-bar-meta {
+	container: session-controls / inline-size;
+}
+#session-bar[data-compact="true"] #session-bar-meta .session-bar-segments {
+	height: 32px;
+}
+#session-bar[data-compact="true"] #session-bar-title-row {
+	padding: 4px 4px 0;
+}
+#session-bar[data-compact="true"] #session-bar-title {
+	font-size: 17px;
+	line-height: 1.5;
+	letter-spacing: -0.01em;
+}
+/* Split the 44px targets at their overlap midpoints: pill/title 40.375px,
+   title/goal 70.375px, goal/tasks 98.75px from the header top. Clip the
+   control and its pseudo-element together so both own the same rectangle.
+   Back and overflow retain 44px with explicit priority at the outer edges. */
+#session-bar[data-compact="true"][data-collapsed="false"] {
+	--phone-title-hit-height: 44px;
+	--phone-goal-hit-height: 44px;
+	--phone-task-hit-top: -2.875px;
+}
+#session-bar[data-compact="true"][data-collapsed="false"]:has(
+		[data-testid="background-tasks-row"]
+	) {
+	--phone-title-hit-height: 36.25px;
+	--phone-goal-hit-height: 28.375px;
+}
+#session-bar[data-compact="true"][data-collapsed="false"]:has(
+		[data-testid="session-goal-subtitle"]
+	) {
+	--phone-title-hit-height: 30px;
+	--phone-task-hit-top: -1.75px;
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	:is(
+		#session-skills-chip,
+		#side-threads-control,
+		#session-bar-settle,
+		[data-testid="session-bar-title-menu"],
+		button[data-testid="session-bar-unread-chip"],
+		button[data-testid="session-bar-state-chip"],
+		[data-testid="session-goal-subtitle"],
+		[data-testid="background-tasks-toggle"],
+		[data-testid="background-tasks-row-stop-all"]
+	)::before {
+	min-height: 0;
+	translate: -50% 0;
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	.session-bar-segments
+	button {
+	clip-path: inset(-10px 0 -6.375px);
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	.session-bar-segments
+	button::before {
+	top: -10px;
+	height: 40.375px;
+	/* Adjacent segments meet at their shared edge instead of growing into it. */
+	width: 100%;
+	min-width: 0;
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	#session-bar-title-row
+	button {
+	clip-path: inset(
+		calc(50% - 18.375px) 0 calc(50% + 18.375px - var(--phone-title-hit-height))
+	);
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	#session-bar-title-row
+	[data-testid="session-bar-title-menu"] {
+	clip-path: inset(
+		calc(50% - 18.375px) -2px
+			calc(50% + 18.375px - var(--phone-title-hit-height)) -22px
+	);
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	#session-bar-title-row
+	button::before {
+	top: calc(50% - 18.375px);
+	height: var(--phone-title-hit-height);
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	[data-testid="session-goal-subtitle"] {
+	clip-path: inset(-1.125px 0 calc(22.125px - var(--phone-goal-hit-height)));
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	[data-testid="session-goal-subtitle"]::before {
+	top: -1.125px;
+	height: var(--phone-goal-hit-height);
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	[data-testid="background-tasks-row"]
+	button {
+	clip-path: inset(
+		var(--phone-task-hit-top) 0 calc(-14px - var(--phone-task-hit-top))
+	);
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	[data-testid="background-tasks-row"]
+	button::before {
+	top: var(--phone-task-hit-top);
+	height: 44px;
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	:is(#session-bar-back, #session-bar-more) {
+	z-index: 2;
+}
+#session-bar[data-compact="true"][data-collapsed="false"] #session-bar-meta {
+	z-index: 1;
+}
+/* Expand towards the noninteractive title, leaving the adjacent badge its own target. */
+#session-bar[data-compact="true"]
+	[data-testid="session-bar-title-menu"]::before {
+	left: calc(50% - 10px);
+}
+/* At 320px, share the spare space between the pill and the viewport edge. */
+#session-bar[data-compact="true"][data-collapsed="false"]
+	#session-bar-more::before {
+	left: calc(50% + 2px);
+}
+#session-bar[data-compact="true"] [data-testid="session-goal-subtitle"] {
+	grid-area: goal;
+	padding-inline: 4px;
+}
+#session-bar[data-compact="true"] [data-testid="background-tasks-row"] {
+	grid-area: tasks;
+	margin-top: 8px;
+}
+@container session-controls (max-width: 175px) {
+	#session-bar-settle-label {
+		display: none;
+	}
 }
 
 /* Phone chrome overlays every view so the transcript keeps its geometry. */
@@ -613,16 +759,70 @@ body:has(dialog:modal) {
 }
 
 #app.phone-session #session-bar[data-collapsed="true"] {
+	grid-template-rows: auto;
 	grid-template-columns: auto minmax(0, 1fr) auto auto;
 	grid-template-areas: "back title chev more";
 	min-height: 46px;
-	padding: 0 4px;
-	margin: 8px 9px 0;
-	border: 1px solid var(--color-border);
-	border-radius: 12px;
-	background: var(--color-glass);
-	backdrop-filter: blur(16px);
-	box-shadow: var(--shadow-panel);
+	column-gap: 0;
+	padding: 0 2px;
+	margin: 6px 12px 0;
+	border: 0;
+	border-radius: 23px;
+	background: color-mix(in srgb, var(--color-popover-bg) 90%, transparent);
+	backdrop-filter: blur(14px);
+	box-shadow:
+		0 0 0 1px var(--color-border-chip),
+		var(--shadow-popover);
+}
+
+#app.phone-session #session-bar[data-collapsed="true"] #session-bar-title-row {
+	position: relative;
+	min-height: 44px;
+	padding: 0 2px;
+}
+/* The banner summary opens the bar; its target can include the title above it. */
+#app.phone-session
+	#session-bar[data-collapsed="true"]
+	[data-testid="session-bar-banners-row"]::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+}
+#app.phone-session #session-bar[data-collapsed="true"] #session-bar-title {
+	font-size: 15px;
+}
+#app.phone-session #session-bar[data-collapsed="true"] #session-bar-back {
+	min-width: 44px;
+}
+#session-bar[data-compact="true"] #goal-details .desktop-goal-check {
+	padding: 2px 0;
+}
+#session-bar[data-compact="true"] #goal-details h2 {
+	line-height: 1.5;
+}
+#session-bar[data-compact="true"] [data-testid="goal-details-meta"] {
+	font-size: 10.58px;
+	line-height: 1.365;
+}
+#session-bar[data-compact="true"] [data-goal-checks-heading] {
+	padding: 4px 4px 8px;
+	font-size: 17px;
+	font-weight: 600;
+	color: var(--color-text);
+}
+#session-bar[data-compact="true"] [data-testid="goal-details-history"] {
+	gap: 0;
+}
+/* The badge has its own width beside the chevron, including multi-digit counts. */
+#app.phone-session
+	#session-bar[data-collapsed="true"]
+	#session-bar-back
+	> span:not([data-testid="session-bar-attention"]) {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
 }
 
 /* The meta area does not exist in the island template, and a grid item

@@ -11,18 +11,20 @@
 
 	let {
 		width = 393,
+		height,
 		island = false,
 		getGoalDetails,
 		banners,
 	}: {
 		width?: number;
+		height?: number;
 		island?: boolean;
 		getGoalDetails?: (input: Parameters<typeof rpc<"GetGoalDetails">>[1]) => ReturnType<typeof rpc<"GetGoalDetails">>;
 		banners?: BannerConfig[];
 	} = $props();
 </script>
 
-<div id={island ? "app" : undefined} class="max-w-full {island ? 'phone-session relative min-h-[180px] bg-bg' : ''}" style="width: {width}px">
+<div id={island ? "app" : undefined} class="max-w-full {island ? 'phone-session relative min-h-[180px] bg-bg' : ''}" style:width={`${width}px`} style:height={height ? `${height}px` : undefined} style:contain={height ? "layout" : undefined}>
 	{#if island}
 		<!-- Mirrors ChatLayout: the phone chrome stack overlays the chat area. -->
 		<div id="session-chrome"><SessionBar {getGoalDetails} /><Banners /></div>

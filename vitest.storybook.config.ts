@@ -22,7 +22,9 @@ export default defineConfig({
 					browser: {
 						enabled: true,
 						headless: true,
-						provider: playwright(),
+						provider: playwright({
+							contextOptions: { timezoneId: "UTC", locale: "en-US" },
+						}),
 						instances: [{ browser: "chromium" }],
 					},
 					setupFiles: [resolve(__dirname, ".storybook/vitest.setup.ts")],

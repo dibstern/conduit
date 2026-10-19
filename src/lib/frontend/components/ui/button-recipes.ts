@@ -31,7 +31,6 @@ export type ButtonVariant =
 	| "pill"
 	| "filter"
 	| "field"
-	| "pill-warning"
 	| "composer-model"
 	| "composer-checkout"
 	| "composer-word"
@@ -44,8 +43,8 @@ export type ButtonVariant =
 	| "chip"
 	| "menu-trigger"
 	| "scrim"
-	| "scrim-clear"
-	| "task-row";
+	| "sheet-scrim"
+	| "scrim-clear";
 
 /**
  * Resting text colour paired with its hover step, as ONE decision. "Dim,
@@ -228,14 +227,14 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 		tone: TONE_CLASSES.default,
 		hoverFill: "",
 	},
-	"scrim-clear": {
-		chrome: "",
+	"sheet-scrim": {
+		chrome: "bg-backdrop",
 		tone: TONE_CLASSES.default,
 		hoverFill: "",
 	},
-	"task-row": {
-		chrome: "gap-1 text-[11px] leading-[1.5]",
-		tone: "text-tool",
+	"scrim-clear": {
+		chrome: "",
+		tone: TONE_CLASSES.default,
 		hoverFill: "",
 	},
 	"composer-summary": {
@@ -396,27 +395,6 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 		hoverFill: HOVER_FILL_CLASSES.base,
 	},
 	/**
-	 * `pill`'s elevated state. PermissionModeSelector wears it when the
-	 * session is on a permissive approval mode, where the warning colour is
-	 * the whole message.
-	 *
-	 * Deliberately carries no hover step, matching the recipe as found: the
-	 * neutral pill's hover says "this opens something", and a warning
-	 * surface that lightens under the cursor reads as a warning being
-	 * dismissed.
-	 *
-	 * A second variant string rather than a `warning` boolean on `pill`:
-	 * every other colour choice here is a variant, and one boolean modifier
-	 * invites the next one.
-	 */
-	"pill-warning": {
-		chrome:
-			"gap-1 h-6 px-2 rounded-full text-xs font-medium font-sans " +
-			"border border-warning/30 bg-warning-bg duration-100",
-		tone: "text-warning",
-		hoverFill: HOVER_FILL_CLASSES.none,
-	},
-	/**
 	 * Dim icon affordances in a dense toolbar. The 4% overlay fill is the
 	 * distinctive part and appears in no other variant.
 	 *
@@ -466,14 +444,20 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 export type ButtonSize =
 	| "sm"
 	| "md"
-	| "segment"
 	| "capsule-segment"
+	| "phone-capsule-segment"
 	| "touch-icon"
 	| "touch-pill"
-	| "navigation"
 	| "navigation-pill"
+	| "phone-navigation"
+	| "phone-header-icon"
+	| "phone-title-menu"
+	| "phone-status"
+	| "phone-task"
 	| "subtitle"
+	| "phone-subtitle"
 	| "card-action"
+	| "phone-card-action"
 	| "command-chip"
 	| "text-action"
 	| "row-action"
@@ -508,7 +492,7 @@ export type ButtonAlign = keyof typeof ALIGN_CLASSES;
 // them could win against a BASE utility. It is now `disabledStyle` — see
 // DISABLED_CLASSES in button-recipes.ts.
 const TOUCH_TARGET_CLASSES =
-	"relative before:absolute before:content-[''] before:left-1/2 before:top-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:size-full before:min-h-[44px] before:min-w-[44px] md:before:hidden";
+	"relative before:absolute before:content-[''] before:left-1/2 before:top-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:size-full before:min-h-[44px] before:min-w-[44px]";
 
 const BASE_CLASSES =
 	"no-underline cursor-pointer transition-colors " +
@@ -528,15 +512,26 @@ const SIZE_CLASSES: Record<
 	"text-action": "font-medium",
 	"touch-icon": "min-h-[44px] min-w-[44px] rounded-lg",
 	"touch-pill": "min-h-[44px] min-w-[44px] rounded-full",
-	navigation:
-		"min-h-[44px] gap-1.5 pl-1 pr-2 rounded-lg text-base font-semibold",
 	"navigation-pill":
 		"min-h-[44px] gap-1.5 pl-1 pr-2 rounded-full text-[13px] font-medium",
+	"phone-navigation":
+		"h-[28px] min-w-[44px] gap-[4px] pl-[4px] pr-[9px] rounded-full text-[13px] font-medium",
+	"phone-header-icon": "size-[30px] rounded-full",
+	"phone-title-menu": "h-[24px] w-[20px] rounded-lg focus-visible:ring-inset",
+	"phone-status": "h-[22px] min-w-[44px] rounded-full focus-visible:ring-inset",
+	"phone-task":
+		"h-[30px] min-w-[44px] gap-[8px] rounded-full focus-visible:ring-inset",
 	subtitle: "gap-1.5 text-[11px] leading-[1.35]",
+	"phone-subtitle":
+		"h-[21px] min-w-[44px] gap-[5px] text-[12.5px] leading-[1.5] focus-visible:ring-inset",
 	"card-action": "gap-[6px] rounded-[9px] px-[10px] py-[6px] text-[11.5px]",
+	"phone-card-action":
+		"h-[28px] min-w-[44px] gap-[6px] rounded-full px-[12px] text-[13px]",
 	"command-chip": "h-[24px] rounded-full px-[8px] font-mono text-[11.5px]",
 	"capsule-segment":
 		"h-[24px] gap-[5px] rounded-full px-[10px] text-[12.5px] font-medium tabular-nums",
+	"phone-capsule-segment":
+		"h-[24px] min-w-[44px] gap-[5px] rounded-full px-[10px] text-[13px] font-medium tabular-nums focus-visible:ring-inset",
 	"composer-icon": "size-[30px] shrink-0 rounded-full",
 	"composer-chip": "h-[30px] gap-[5px] rounded-full px-[9px]",
 	// Literally no classes, by design — see the ButtonSize doc comment. Not
@@ -547,8 +542,6 @@ const SIZE_CLASSES: Record<
 	content: "",
 	"row-action": "size-[21px] rounded-[6px]",
 	transcript: TRANSCRIPT_ROW_CLASSES,
-	segment:
-		"h-[22px] gap-[5px] rounded-none px-[8px] text-[10px] font-medium tabular-nums",
 };
 
 /**
@@ -637,7 +630,7 @@ export function buttonClasses({
 	align: ButtonAlign;
 	size: ButtonSize;
 	iconOnly: boolean;
-	touchTarget: boolean;
+	touchTarget: boolean | "always";
 	inert: boolean;
 	className?: string | undefined;
 }>): string {
@@ -702,6 +695,7 @@ export function buttonClasses({
 		variantClass,
 		sizeClasses,
 		touchTarget ? TOUCH_TARGET_CLASSES : "",
+		touchTarget === true ? "md:before:hidden" : "",
 		className,
 	]
 		.filter(Boolean)

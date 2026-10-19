@@ -1,7 +1,6 @@
 <!--
-  The header's row of live background tasks, newest first. On phones it is the
-  tool-blue line under the title (an elbow off the goal subtitle when one shows)
-  with one chip. Desktop gives it a full-width header row of command chips, each
+  The header's row of live background tasks. Phones show the count and Stop all.
+  Desktop gives it a full-width header row of command chips, each
   with a stop ×, as many as fit (up to four), then "+N" and Stop all. Either opens
   BackgroundTasksPanel.
 -->
@@ -11,13 +10,12 @@
 	import Button from "../ui/Button.svelte";
 	import Badge from "../ui/Badge.svelte";
 	import Icon from "../ui/Icon.svelte";
-	import TaskGlyph from "./TaskGlyph.svelte";
-	import { taskAge, taskClock, taskKind, tasksPanel } from "./background-tasks.svelte.js";
+	import Surface from "../ui/Surface.svelte";
+	import { tasksPanel } from "./background-tasks.svelte.js";
 	import { sideThreadsPanel } from "./side-threads.svelte.js";
 
-	let { tasks, underGoal, compact, onstop, onstopall }: { tasks: readonly BackgroundTask[]; underGoal: boolean; compact: boolean; onstop?: ((taskId: string) => void) | undefined; onstopall?: (() => void) | undefined } = $props();
+	let { tasks, compact, onstop, onstopall }: { tasks: readonly BackgroundTask[]; compact: boolean; onstop?: ((taskId: string) => void) | undefined; onstopall?: (() => void) | undefined } = $props();
 
-	const clock = taskClock(() => tasks);
 	let width = $state(0);
 	const shown = $derived([...tasks].reverse().slice(0, compact ? 1 : Math.max(0, Math.min(4, Math.floor((width - 230) / 170)))));
 	const more = $derived(tasks.length - shown.length);
@@ -42,22 +40,11 @@
 		{#if onstopall}<Button variant="ghost" size="text-action" tone="error" touchTarget class="ml-auto shrink-0" data-testid="background-tasks-row-stop-all" onclick={onstopall}>Stop all</Button>{/if}
 	</div>
 {:else}
-<Button variant="task-row" size="content" layout="block" align="start" data-testid="background-tasks-row" aria-expanded={tasksPanel.open} aria-controls="background-tasks-panel" ariaLabel={tasks.length === 1 ? "1 background task" : `${tasks.length} background tasks`} class="w-full {underGoal ? '' : 'mt-[6px]'}" onclick={() => { goalDetails.open = false; sideThreadsPanel.open = false; tasksPanel.open = !tasksPanel.open; }}>
-	<!-- On phones the one chip may widen the title column. Desktop's four must
-	     not set the title row's minimum width, so there the row takes no
-	     intrinsic width and the chips truncate in whatever space it is given. -->
-	<span class="flex w-full min-w-0 items-center gap-1">
-	{#if underGoal}<span aria-hidden="true" data-testid="background-tasks-elbow" class="ml-1 mr-px text-status-goal opacity-65">└</span>{/if}
-	<TaskGlyph />
-	{#each shown as task (task.id)}
-		<Badge variant="task" size="task" wrap data-testid="background-task-chip" class="min-w-0 shrink {tasks.length === 1 ? 'max-w-[210px]' : 'max-w-[168px]'}">
-			<Icon name={taskKind(task).icon} size={11} class="shrink-0" />
-			<span class="min-w-0 truncate text-text opacity-85">{task.description}</span>
-			{#if !compact}<span data-testid="background-task-chip-age" class="shrink-0 text-text-muted">{taskAge(task, clock.now)}</span>{/if}
-		</Badge>
-	{/each}
-	{#if more > 0}<span data-testid="background-tasks-more" class="shrink-0 px-0.5 text-[10.5px] font-semibold">+{more}</span>{/if}
-	<Icon name="chevron-down" size={11} class="shrink-0 opacity-75 transition-transform {tasksPanel.open ? 'rotate-180' : ''}" />
-	</span>
-</Button>
+	<Surface variant="task-strip" radius="none" data-testid="background-tasks-row" class="min-w-0">
+		<Button variant="ghost" size="phone-task" touchTarget="always" tone="secondary" align="start" class="flex-1" data-testid="background-tasks-toggle" aria-expanded={tasksPanel.open} aria-controls="background-tasks-panel" onclick={togglePanel}>
+			<Icon name="loader-circle" size={12} class="shrink-0 motion-safe:animate-spin" />
+			<span class="truncate">{tasks.length} background {tasks.length === 1 ? "task" : "tasks"}</span>
+		</Button>
+		{#if onstopall}<Button variant="ghost" size="phone-task" touchTarget="always" tone="error" class="shrink-0 px-[8px]" data-testid="background-tasks-row-stop-all" onclick={onstopall}>Stop all</Button>{/if}
+	</Surface>
 {/if}

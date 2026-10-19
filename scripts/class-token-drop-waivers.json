@@ -38,26 +38,14 @@
 		"requires": "size=\"touch-icon\"",
 		"reason": "conduit-test-aoqb.4 fix: Button's touch sizes retain 44px targets."
 	},
-	"src/lib/frontend/components/layout/SessionBar.svelte :: pl-1,pr-2,rounded-lg,text-base": {
-		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
-		"requires": "\"navigation\" : \"navigation-pill\"",
-		"reason": "conduit-test-aoqb.4 fix: Button owns the phone and desktop navigation sizes."
-	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: pl-1,pr-2,rounded-lg,text-base": "conduit-test-aoqb.5: the compact phone Back pill replaces the unused navigation size; desktop retains navigation-pill.",
 	"src/lib/frontend/components/layout/SessionBar.svelte :: py-[6px],rounded-[9px]": {
 		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
 		"requires": "size=\"card-action\"",
 		"reason": "conduit-test-aoqb.4 fix: goal-card actions use Button's public card-action size."
 	},
-	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: bg-tool/13,inline-flex,pl-[5px],pr-1.5,py-0,rounded-[6px]": {
-		"movedTo": "src/lib/frontend/components/ui/Badge.svelte",
-		"requires": "variant=\"task\" size=\"task\"",
-		"reason": "conduit-test-aoqb.4 fix: Badge owns the existing phone task-chip recipe."
-	},
-	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: justify-start,leading-[1.5],select-none,text-[11px],text-tool,whitespace-nowrap": {
-		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
-		"requires": "variant=\"task-row\"",
-		"reason": "conduit-test-aoqb.4 fix: Button owns the phone task row's typography and interaction."
-	},
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: bg-tool/13,inline-flex,pl-[5px],pr-1.5,py-0,rounded-[6px]": "conduit-test-aoqb.5: the Final phone count and Stop all strip replaces individual task chips; the unused task recipes are removed.",
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: justify-start,leading-[1.5],select-none,text-[11px],text-tool,whitespace-nowrap": "conduit-test-aoqb.5: the Final phone count and Stop all strip replaces individual task chips; the unused task recipes are removed.",
 	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: compact,min-w-full,w-0": "conduit-test-aoqb.4 fix: the phone-only branch always has compact=true, so its row uses w-full directly. Desktop command chips use the separate desktop branch.",
 	"src/lib/frontend/components/input/InputArea.svelte :: composer-task-dot,gap-1.5,justify-center,pt-[7px]": "conduit-test-aoqb.4: the approved 2026-10-16 audit removes composer task dots and their layout. Live tasks remain visible in the header row and its task panel.",
 	"src/lib/frontend/components/layout/SessionBar.svelte :: items-stretch,py-2,text-xs": "conduit-test-aoqb.4: the Final desktop capsule centers its segments; the state menu uses literal pixel padding and text sizes.",
@@ -437,22 +425,10 @@
 	"src/lib/frontend/components/input/InputArea.svelte :: h-8,min-h-6,w-8": "conduit-test-3oqa: send and stop become literal 32px squares (root font is 12px, so h-8/w-8 rendered 24px) and the field floor is 32px to centre the placeholder on the controls row.",
 	"src/lib/frontend/components/model/AgentSelector.svelte :: agent-dropdown-panel,flex-1,font-bold,font-brand,font-medium,font-semibold,gap-[2px],h-9,max-w-[160px],max-w-[calc(100vw-16px)],min-w-0,ml-auto,opacity-50,pb-1.5,pt-1,px-2,px-3.5,py-1.5,py-4,rounded-panel,text-accent,text-center,text-ellipsis,text-sm,text-text-dimmer,text-xs,tracking-[0.5px],uppercase,w-[12px],whitespace-nowrap": "conduit-test-3oqa: the final composer design moves agent choice into the model picker's Agent row, so the standalone AgentSelector component is deleted.",
 	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: duration-150,font-medium,h-9,hidden,hover:bg-bg-alt,md:inline,px-2": "conduit-test-3oqa: the trigger follows the final design, a 32px tag (logo plus short model tag) on phones and a name chip with context and chevron on desktop, replacing the old 36px pill with a desktop-only label.",
-	"src/lib/frontend/components/layout/SessionBar.svelte :: font-medium,h-[22px],px-[8px],rounded-none": {
-		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
-		"reason": "conduit-test-fnrs cleanup: the session header's segmented cells (skills | checkout | Settle) share one Button size=\"segment\" recipe instead of three copies of the same 22px, square-cornered, 10px geometry.",
-		"requires": "size=\"segment\""
-	},
-	"src/lib/frontend/components/session/GitIdentity.svelte :: font-medium,gap-[5px],h-[22px],rounded-none": {
-		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
-		"reason": "conduit-test-fnrs cleanup: the session header's segmented cells (skills | checkout | Settle) share one Button size=\"segment\" recipe instead of three copies of the same 22px, square-cornered, 10px geometry.",
-		"requires": "size=\"segment\""
-	},
-	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: gap-[5px],h-[22px],px-[8px],rounded-none,text-[10px]": {
-		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
-		"reason": "conduit-test-fnrs cleanup: the session header's segmented cells (skills | checkout | Settle) share one Button size=\"segment\" recipe instead of three copies of the same 22px, square-cornered, 10px geometry.",
-		"requires": "size=\"segment\""
-	},
-	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: segmented": "Not a class: the dead `segmented` prop, which every call site passed as true. Its square-cornered geometry now comes from Button size=\"segment\".",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: font-medium,h-[22px],px-[8px],rounded-none": "conduit-test-aoqb.5 review: the Final capsule replaces the old 22px, square-cornered session-header cells; their unused shared recipe is removed.",
+	"src/lib/frontend/components/session/GitIdentity.svelte :: font-medium,gap-[5px],h-[22px],rounded-none": "conduit-test-aoqb.5 review: the Final capsule replaces the old 22px, square-cornered session-header cells; their unused shared recipe is removed.",
+	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: gap-[5px],h-[22px],px-[8px],rounded-none,text-[10px]": "conduit-test-aoqb.5 review: the Final capsule replaces the old 22px, square-cornered session-header cells; their unused shared recipe is removed.",
+	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: segmented": "Not a class: the removed segmented prop. The Final header now supplies capsule presentation; the old square-cornered recipe has no consumers and is removed in conduit-test-aoqb.5.",
 	"src/lib/frontend/components/chat/UserMessage.svelte :: items-center,mt-2,queued-shimmer,text-text-muted": "conduit-test-jyr9.5 deletes the queued-send shimmer label under a user message. Queued sends now wait in the pending-input tray above the composer (PendingInputTray.svelte), so the transcript never shows an unplaced message and the label, its layout and its animation go.",
 	"src/lib/frontend/components/layout/Sidebar.svelte :: left-1,min-w-[240px],mt-0.5,right-1,top-full,z-[var(--z-dropdown)]": "conduit-test-usg5.11 retires the old projects panel: the scope pill menu plus ProjectDialog is the only way to manage projects. These positioned the Projects\u2026 panel surface under the sidebar header; the surface and its route are deleted.",
 	"src/lib/frontend/components/project/DirectoryAutocomplete.stories.ts :: bg-bg-alt,rounded-lg,z-[var(--z-dropdown)],z-[var(--z-popover)]": "conduit-test-usg5.11 retires the old projects panel: the scope pill menu plus ProjectDialog is the only way to manage projects. The stories probed the deleted directory autocomplete; ProjectDialog's folder picker has its own stories.",
@@ -971,5 +947,10 @@
 	"src/lib/frontend/components/chat/UserMessage.svelte :: bg-linear-to-br,from-accent,md:size-[28px],md:text-[13px],place-items-center,size-[20px],text-[11px],text-white,to-status-snoozed": "conduit-test-aoqb.3: the You avatar is drawn by UserAvatar, which sizes itself from a px size prop (letter at size x .44) and paints the chosen face; the placeholder accent-to-snoozed gradient is replaced by the initial on a name-picked preset orb gradient.",
 	"src/lib/frontend/components/ui/Tile.svelte :: text-[13px]": "Still 13px by default. The label size now reads --tile-font, so a 5-column grid (LabelledGridGroup columns=5) can set 12px labels as the spec's .sm-five does.",
 	"src/lib/frontend/components/input/InputArea.svelte :: leading-[1.35],mb-2,px-[10px],py-[7px],rounded-2xl,text-[11.5px]": "conduit-test-aoqb.17: the refused-steer notice is a ComposerStrip fused to the composer, so the strip primitive owns its padding, top corners, type size and line height, and it sits flush on #input-row with no gap.",
-	"src/lib/frontend/components/input/UsageLimitStrip.svelte :: sessionViewState.compact": "conduit-test-aoqb.17: the Switch account trigger takes the shared stretch geometry, which already centres it on phone strips; the tray keeps natural-width trailing actions."
+	"src/lib/frontend/components/input/UsageLimitStrip.svelte :: sessionViewState.compact": "conduit-test-aoqb.17: the Switch account trigger takes the shared stretch geometry, which already centres it on phone strips; the tray keeps natural-width trailing actions.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: bg-text-dimmer/30,border,border-current/40,font-sans,goalTone,h-[3px],mb-[4px],mb-[5px],min-w-full,mt-[10px],mt-[6px],mx-auto,normal-case,pb-[8px],pt-[12px],px-[14px],px-[6px],rotate-180,rounded-[6px],rounded-b-[22px],text-status-amber,text-status-green,tracking-[0.08em],tracking-normal,transition-transform,uppercase,w-0,w-[34px]": "conduit-test-aoqb.5: replace the old phone goal header, ascending elapsed-time history, and bottom handle with the Final shared goal content and ui/SheetChrome bottom sheet. The goal line spans a dedicated grid row, its indicator is the goal icon, and phone geometry uses px sizes in style.css. Desktop content retains its existing classes.",
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: font-semibold,gap-1,max-w-[168px],max-w-[210px],ml-1,mr-px,mt-[6px],opacity-65,opacity-75,opacity-85,px-0.5,rotate-180,shrink,tasks.length,tasksPanel.open,text-[10.5px],text-status-goal,text-text,text-text-muted,transition-transform,underGoal": "conduit-test-aoqb.5: the Final phone task strip replaces its elbow, task preview, overflow count, and chevron with a task count and Stop all. The complete descriptions, kinds, ages, and individual controls remain in the task panel. Surface task-strip owns the new appearance.",
+	"src/lib/frontend/components/ui/Badge.svelte :: bg-tool/13,pl-[5px],pr-1.5,py-0,rounded-[6px],text-[10.5px],text-tool": "conduit-test-aoqb.5: remove the task variant and size after the Final phone task strip replaces their last consumer.",
+	"src/lib/frontend/components/ui/Surface.svelte :: h-[24px],items-stretch,rounded-lg": "conduit-test-aoqb.5: remove the segments variant after its last consumer moved to the Final capsule.",
+	"src/lib/frontend/components/ui/button-recipes.ts :: bg-warning-bg,border-warning/30,rounded-none,text-[10px],text-base,text-tool,text-warning": "conduit-test-aoqb.5 review: remove task-row, navigation, segment and pill-warning after confirming zero production consumers; remove the warning-pill story and its baselines as well."
 }

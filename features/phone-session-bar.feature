@@ -5,6 +5,7 @@ Scenario: The session owns the top bar on a phone
   And the conduit app is served with the long-transcript mockup
   Then the session bar title is above the transcript
   And only the session bar is rendered above the transcript
+  And the phone header controls own separate touch areas of at least 24 pixels, using 44 where space permits
 
 Scenario Outline: The island floats at the bottom of the transcript
   Given the viewport is a phone
@@ -13,6 +14,7 @@ Scenario Outline: The island floats at the bottom of the transcript
   Then the jump-to-latest control is visible
   When I scroll the transcript back to the bottom
   Then the session bar is collapsed
+  And the phone header controls own separate touch areas of at least 24 pixels, using 44 where space permits
   And the session-bar region visually matches <baseline> at <threshold> percent
   And the session header has no checkout
   And the session header has no account or instance control

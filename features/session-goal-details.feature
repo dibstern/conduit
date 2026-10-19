@@ -7,7 +7,7 @@ Scenario Outline: The goal subtitle opens details and both dismissal paths work
   And a session already exists on the Claude harness
   And goal details are available for a working goal
   When I click the session goal subtitle
-  Then goal details are open below the full session header
+  Then goal details open in the session header popover or phone sheet
   And the goal details condition reads All 38 scenarios pass
   And the goal details metadata describes its start, checks and tokens
   And the goal details history shows all three checks in layout order
@@ -32,8 +32,9 @@ Scenario: A running goal check appends a spinner to the returned history
   And a session already exists on the Claude harness
   And goal details are available for a checking goal
   When I click the session goal subtitle
-  Then the goal details history shows three checks followed by Checking now
+  Then the goal details history shows Checking now followed by three checks
   And goal details offer Pause, Edit and Clear
+  And the phone header controls own separate touch areas of at least 24 pixels, using 44 where space permits
 
 Scenario: Pause interrupts the current session through the stop RPC
   Given the conduit app is served with the connected mockup
@@ -84,7 +85,7 @@ Scenario Outline: A met goal offers a new goal and dismissal
   And a session already exists on the Claude harness
   And goal details are available for a met goal
   When I click the session goal subtitle
-  Then goal details are open below the full session header
+  Then goal details open in the session header popover or phone sheet
   And the goal details condition reads All 38 scenarios pass
   And goal details offer Set a new goal and Dismiss
   And the layout region visually matches <baseline> at <threshold> percent
@@ -114,6 +115,6 @@ Scenario: Details in the met composer bar opens the same goal panel
   And a session already exists on the Claude harness
   And goal details are available for a met goal
   When I click Details in the met goal bar
-  Then goal details are open below the full session header
+  Then goal details open in the session header popover or phone sheet
   And the goal details condition reads All 38 scenarios pass
   And goal details offer Set a new goal and Dismiss
