@@ -217,9 +217,10 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			instance
 				.sendTurnEffect(makeSendTurnInput({ inputId: "t1", prompt: "first" }))
 				.pipe(
-					Effect.timeoutFail({
+					Effect.timeoutOrElse({
 						duration: "500 millis",
-						onTimeout: () => new Error("first prompt did not complete"),
+						orElse: () =>
+							Effect.fail((() => new Error("first prompt did not complete"))()),
 					}),
 				),
 		);
@@ -227,9 +228,12 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			instance
 				.sendTurnEffect(makeSendTurnInput({ inputId: "t2", prompt: "second" }))
 				.pipe(
-					Effect.timeoutFail({
+					Effect.timeoutOrElse({
 						duration: "500 millis",
-						onTimeout: () => new Error("second prompt did not complete"),
+						orElse: () =>
+							Effect.fail(
+								(() => new Error("second prompt did not complete"))(),
+							),
 					}),
 				),
 		);
@@ -318,10 +322,13 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			instance
 				.sendTurnEffect(makeSendTurnInput({ inputId: "t2", prompt: "second" }))
 				.pipe(
-					Effect.timeoutFail({
+					Effect.timeoutOrElse({
 						duration: "500 millis",
-						onTimeout: () =>
-							new Error("joined prompt was evicted by stale cleanup"),
+						orElse: () =>
+							Effect.fail(
+								(() =>
+									new Error("joined prompt was evicted by stale cleanup"))(),
+							),
 					}),
 				),
 		);

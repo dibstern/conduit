@@ -13,9 +13,9 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Fiber, Layer, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
@@ -97,28 +97,26 @@ describe("SessionManagerService settle signal", () => {
 				"feature",
 			);
 			const mergedHead = git(worktree, "rev-parse", "HEAD");
-			const configLayer = Layer.succeed(
-				ConfigTag,
+			const configLayer = Layer.succeed(ConfigTag)(
 				makeMockConfig({ configDir: dir, projectDir }),
 			);
-			const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
+			const loggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
 			const openCodeApi = makeMockOpenCodeAPI();
 			// Same wiring as project-relay-layers: one shared bus for the
 			// persistence stack and the relay services.
 			const layer = Layer.provideMerge(
 				SessionManagerServiceLive,
 				Layer.mergeAll(
-					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					makeSessionManagerStateLive(),
-					Layer.succeed(OpenCodeAPITag, openCodeApi),
+					Layer.succeed(OpenCodeAPITag)(openCodeApi),
 					loggerLayer,
 					configLayer,
-					Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+					Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 					Layer.effect(SessionActivityTag, makeSessionActivity),
 					RelayStatusSnapshotLive,
 					makeOverridesStateLive(),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: openCodeApi }),
 					),
 					DaemonEventBusLive,
@@ -129,8 +127,7 @@ describe("SessionManagerService settle signal", () => {
 						undefined,
 						SessionEventBusLive,
 					),
-					Layer.succeed(
-						OrchestrationEngineTag,
+					Layer.succeed(OrchestrationEngineTag)(
 						new OrchestrationEngine({ registry: new ProviderRegistry() }),
 					),
 				),
@@ -167,7 +164,7 @@ describe("SessionManagerService settle signal", () => {
 
 				const seen: SessionInfo[] = [];
 				let synchronized = false;
-				const shell = yield* Effect.fork(
+				const shell = yield* Effect.forkChild(
 					Stream.runForEach(subscribeShell(), (envelope) =>
 						Effect.sync(() => {
 							if (envelope._tag === "synchronized") synchronized = true;

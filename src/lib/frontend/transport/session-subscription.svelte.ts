@@ -44,7 +44,7 @@ import type { FeedStatus } from "./supervise.js";
  * One thing `subscriptions.shell()` delivers, typed off the subscription
  * itself rather than restated.
  */
-export type ShellEnvelope = Stream.Stream.Success<
+export type ShellEnvelope = Stream.Success<
 	ReturnType<WsRpcSubscriptions["shell"]>
 >;
 

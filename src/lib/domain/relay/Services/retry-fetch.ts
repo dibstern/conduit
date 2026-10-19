@@ -45,8 +45,10 @@ export const fetchWithRetry = (
 				: Effect.succeed(res),
 		),
 		Effect.retry({
-			schedule: Schedule.linear(Duration.millis(retryDelay)).pipe(
-				Schedule.compose(Schedule.recurs(retries)),
+			schedule: Schedule.recurs(retries).pipe(
+				Schedule.modifyDelay(({ attempt }) =>
+					Effect.succeed(Duration.millis(retryDelay * attempt)),
+				),
 			),
 			while: (err) => !err.message.startsWith("Request timed out"),
 		}),

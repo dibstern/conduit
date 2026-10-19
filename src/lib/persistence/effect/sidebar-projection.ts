@@ -5,9 +5,9 @@
 // stored `root_id`, so a refresh reads the touched families and nothing else,
 // once: its cost is the family's size, not that times the commit's events.
 
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Effect, Schema } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import type {
 	PendingApprovalCountRow,
 	SessionRow,
@@ -22,8 +22,10 @@ import {
 	sessionRowsToSessionInfoList,
 } from "./read-query-effect.js";
 
-const decodeRow = Schema.decodeUnknownSync(Schema.parseJson(SidebarRowSchema));
-const encodeRow = Schema.encodeSync(Schema.parseJson(SidebarRowSchema));
+const decodeRow = Schema.decodeUnknownSync(
+	Schema.fromJsonString(SidebarRowSchema),
+);
+const encodeRow = Schema.encodeSync(Schema.fromJsonString(SidebarRowSchema));
 
 /** What a family member contributes to its root's row. */
 export type FamilyMember = Pick<

@@ -55,14 +55,13 @@ async function buildLayerHarness(options?: {
 		session: partialFake<OpenCodeAPI["session"]>({ messages }),
 	});
 	const dependencyLayer = Layer.mergeAll(
-		Layer.succeed(OpenCodeAPITag, api),
-		Layer.succeed(
-			ConfigTag,
+		Layer.succeed(OpenCodeAPITag)(api),
+		Layer.succeed(ConfigTag)(
 			makeMockConfig({
 				messagePollerInterval: options?.interval ?? 1_000,
 			}),
 		),
-		Layer.succeed(LoggerTag, makeMockLogger()),
+		Layer.succeed(LoggerTag)(makeMockLogger()),
 	);
 	const layer = makeMessagePollerManagerLive({
 		...(options?.hasViewers != null && { hasViewers: options.hasViewers }),
@@ -152,10 +151,9 @@ describe("MessagePollerManagerLive", () => {
 			backgroundOpenCodeAPI.pipe(
 				Effect.provide(
 					Layer.mergeAll(
-						Layer.succeed(ConfigTag, makeMockConfig()),
-						Layer.succeed(
-							OpenCodeInstancesTag,
-							partialFake<OpenCodeInstancesTag["Type"]>({
+						Layer.succeed(ConfigTag)(makeMockConfig()),
+						Layer.succeed(OpenCodeInstancesTag)(
+							partialFake<OpenCodeInstancesTag["Service"]>({
 								ifRunning: () =>
 									Effect.sync(() =>
 										running ? Option.some(runningApi) : Option.none(),

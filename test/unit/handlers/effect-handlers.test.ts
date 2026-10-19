@@ -1,4 +1,4 @@
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/sql";
 import { MessageVersion } from "../../../src/lib/contracts/tool-wire.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
@@ -28,18 +28,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, layer } from "@effect/vitest";
-import {
-	Deferred,
-	Effect,
-	Exit,
-	Fiber,
-	Layer,
-	Option,
-	Stream,
-	TestClock,
-} from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Option, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
-import { GetAgents, GetProjects } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	PendingInteractionServiceLive,
@@ -260,19 +252,18 @@ function makeMessage(overrides: Partial<Message> = {}): Message {
 }
 
 function openCodeModelLayer(client: OpenCodeAPI) {
-	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
+	const apiLayer = Layer.succeed(OpenCodeAPITag)(client);
 	return Layer.merge(
 		apiLayer,
 		OpenCodeModelServiceLive.pipe(
 			Layer.provide(
 				Layer.mergeAll(
 					apiLayer,
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: client }),
 					),
-					Layer.succeed(ConfigTag, mockConfig()),
-					Layer.succeed(LoggerTag, mockLogger()),
+					Layer.succeed(ConfigTag)(mockConfig()),
+					Layer.succeed(LoggerTag)(mockLogger()),
 				),
 			),
 		),
@@ -281,9 +272,8 @@ function openCodeModelLayer(client: OpenCodeAPI) {
 
 function openCodeSettingsLayer(client: OpenCodeAPI) {
 	const apiLayer = Layer.mergeAll(
-		Layer.succeed(OpenCodeAPITag, client),
-		Layer.succeed(
-			OpenCodeInstancesTag,
+		Layer.succeed(OpenCodeAPITag)(client),
+		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: client }),
 		),
 	);
@@ -298,7 +288,7 @@ function projectManagementLayer(
 	config: ProjectRelayConfig,
 ) {
 	const settingsLayer = openCodeSettingsLayer(client);
-	const configLayer = Layer.succeed(ConfigTag, config);
+	const configLayer = Layer.succeed(ConfigTag)(config);
 	return Layer.mergeAll(
 		settingsLayer,
 		configLayer,
@@ -310,9 +300,8 @@ function projectManagementLayer(
 
 function openCodeModelAndSettingsLayer(client: OpenCodeAPI) {
 	const apiLayer = Layer.mergeAll(
-		Layer.succeed(OpenCodeAPITag, client),
-		Layer.succeed(
-			OpenCodeInstancesTag,
+		Layer.succeed(OpenCodeAPITag)(client),
+		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: client }),
 		),
 	);
@@ -322,12 +311,11 @@ function openCodeModelAndSettingsLayer(client: OpenCodeAPI) {
 			Layer.provide(
 				Layer.mergeAll(
 					apiLayer,
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: client }),
 					),
-					Layer.succeed(ConfigTag, mockConfig()),
-					Layer.succeed(LoggerTag, mockLogger()),
+					Layer.succeed(ConfigTag)(mockConfig()),
+					Layer.succeed(LoggerTag)(mockLogger()),
 				),
 			),
 		),
@@ -350,7 +338,7 @@ function mockConfig(
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
 const persistentHandlerPersistence = Layer.merge(
 	makePersistenceEffectLayer(":memory:", "test-project"),
-	Layer.succeed(ClaudeEventPersistEffectTag, {
+	Layer.succeed(ClaudeEventPersistEffectTag)({
 		persistHandoffDelivered: () => Effect.void,
 		persistEvent: () => Effect.void,
 		persistEvents: () => Effect.void,
@@ -359,7 +347,7 @@ const persistentHandlerPersistence = Layer.merge(
 	} satisfies ClaudeEventPersistEffect),
 );
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-layer(Layer.mergeAll(Layer.succeed(AccountDirectory, makeMockAccountDirectory()), AlertsLive, persistentHandlerPersistence, makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistentHandlerPersistence)), Layer.succeed(AgentServiceTag, makeMockAgentService()), Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()), PendingInteractionServiceLive, Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, mockConfig()), Layer.succeed(LoggerTag, mockLogger()), ProjectSettingsLive, RpcSubscriptionScopeLive))("persistent handler runtime", (it) => {
+layer(Layer.mergeAll(Layer.succeed(AccountDirectory)(makeMockAccountDirectory()), AlertsLive, persistentHandlerPersistence, makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistentHandlerPersistence)), Layer.succeed(AgentServiceTag)(makeMockAgentService()), Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()), PendingInteractionServiceLive, Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()), Layer.succeed(ConfigTag)(mockConfig()), Layer.succeed(LoggerTag)(mockLogger()), ProjectSettingsLive, RpcSubscriptionScopeLive))("persistent handler runtime", (it) => {
 describe("GetAgents", () => {
 	it.effect(
 		"fetches agents via OpenCodeAPI and returns the filtered list",
@@ -375,16 +363,16 @@ describe("GetAgents", () => {
 			});
 
 			return modelsHandlers
-				.GetAgents(new GetAgents({ projectSlug: "test-project" }))
+				.GetAgents({ _tag: "GetAgents", projectSlug: "test-project" })
 				.pipe(
-					Effect.provide(makeTestHandlerLayer({ api: client, wsHandler: ws })),
-					Effect.tap((reply) => {
+					Effect.provide(makeTestHandlerLayer({ api: client, wsHandler: ws }), { local: true }),
+					Effect.tap((reply) => Effect.sync(() => {
 						expect(client.app.agents).toHaveBeenCalledOnce();
 						expect(reply).toMatchObject({
 							providerScope: { id: "opencode", name: "OpenCode" },
 							agents: filterAgents(mockAgents),
 						});
-					}),
+					})),
 				);
 		},
 	);
@@ -401,24 +389,24 @@ describe("GetProjects", () => {
 
 		const layer = Layer.mergeAll(
 			projectManagementLayer(client, config),
-			Layer.succeed(ProjectManagementServiceTag, {
+			Layer.succeed(ProjectManagementServiceTag)({
 				currentSlug: () => Effect.succeed(config.slug),
 				list: () => Effect.succeed(projects),
 				save: () => Effect.die("Unexpected save"),
 				remove: () => Effect.die("Unexpected remove"),
 			}),
-			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(WebSocketHandlerTag)(ws),
 		);
 
-		return projectsHandlers.GetProjects(new GetProjects({ projectSlug: "test-project" })).pipe(
-			Effect.provide(layer),
-			Effect.tap((reply) => {
+		return projectsHandlers.GetProjects({ _tag: "GetProjects", projectSlug: "test-project" }).pipe(
+			Effect.provide(layer, { local: true }),
+			Effect.tap((reply) => Effect.sync(() => {
 				expect(reply).toEqual({
 					projectSlug: "test-project",
 					projects,
 					current: "test-project",
 				});
-			}),
+			})),
 		);
 	});
 
@@ -437,19 +425,19 @@ describe("GetProjects", () => {
 
 			const layer = Layer.mergeAll(
 				projectManagementLayer(client, config),
-				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(WebSocketHandlerTag)(ws),
 			);
 
-			return projectsHandlers.GetProjects(new GetProjects({ projectSlug: "test-project" })).pipe(
-				Effect.provide(layer),
-				Effect.tap((reply) => {
+			return projectsHandlers.GetProjects({ _tag: "GetProjects", projectSlug: "test-project" }).pipe(
+				Effect.provide(layer, { local: true }),
+				Effect.tap((reply) => Effect.sync(() => {
 					expect(client.app.projects).not.toHaveBeenCalled();
 					expect(reply).toEqual({
 						projectSlug: "test-project",
 						projects: [],
 						current: "test-project",
 					});
-				}),
+				})),
 			);
 		},
 	);
@@ -477,12 +465,12 @@ describe("reloadProviderSessionForClient", () => {
 		const config = mockConfig();
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+			Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 			Layer.mock(SessionWorkspaceTag, {}),
-			Layer.succeed(LoggerTag, log),
-			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+			Layer.succeed(LoggerTag)(log),
+			Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 			openCodeModelAndSettingsLayer(client),
-			Layer.succeed(ConfigTag, config),
+			Layer.succeed(ConfigTag)(config),
 			makeOverridesStateLive(),
 		);
 
@@ -491,8 +479,8 @@ describe("reloadProviderSessionForClient", () => {
 			sessionId: "session-42",
 			commandId: "cmd-reload-session",
 		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
+			Effect.provide(layer, { local: true }),
+			Effect.tap(() => Effect.sync(() => {
 				// Should have dispatched end_session
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(
 					expect.objectContaining({
@@ -502,7 +490,7 @@ describe("reloadProviderSessionForClient", () => {
 					}),
 				);
 				expect(engine.dispatchEffect).toHaveBeenCalledTimes(1);
-			}),
+			})),
 		);
 	});
 
@@ -531,15 +519,15 @@ describe("reloadProviderSessionForClient", () => {
 			);
 			const engine = withDispatchEffect({ dispatchEffect, getProviderForSessionEffect: () => Effect.succeed(account.id) });
 			const getWorkspace = vi.fn(() => Effect.succeed("/tmp/session-worktree"));
-			const reload = yield* Effect.fork(reloadProviderSessionForClient({
+			const reload = yield* Effect.forkChild(reloadProviderSessionForClient({
 				clientId: "client-1", sessionId: "session-42", commandId: "cmd-reload-session",
 			}).pipe(Effect.provide(Layer.mergeAll(
-				Layer.succeed(LoggerTag, mockLogger()),
-				Layer.succeed(OrchestrationEngineTag, engine),
-				Layer.succeed(AccountDirectory, directory),
-				Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
+				Layer.succeed(LoggerTag)(mockLogger()),
+				Layer.succeed(OrchestrationEngineTag)(engine),
+				Layer.succeed(AccountDirectory)(directory),
+				Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
 				Layer.mock(SessionWorkspaceTag, { get: getWorkspace }),
-			))));
+			), { local: true })));
 			yield* TestClock.adjust(1);
 			expect(dispatchEffect).toHaveBeenCalledTimes(1);
 			expect(dispatchEffect).toHaveBeenCalledWith({ type: "end_session", commandId: "cmd-reload-session", sessionId: "session-42", targetProviderId: account.id, account });
@@ -550,10 +538,10 @@ describe("reloadProviderSessionForClient", () => {
 			expect(getWorkspace).toHaveBeenCalledWith("session-42");
 			expect(dispatchEffect).toHaveBeenCalledWith({ type: "discover", providerId: account.id, account, workspaceRoot: "/tmp/session-worktree", refresh: true });
 			expect(dispatchEffect).toHaveBeenCalledWith({ type: "discover", providerId: account.id, account, refresh: true });
-			expect(Option.isNone(yield* Fiber.poll(reload))).toBe(true);
+			expect(Option.isNone(yield* Effect.sync(() => Option.fromUndefinedOr(reload.pollUnsafe())))).toBe(true);
 			yield* Deferred.succeed(workspaceRelease, undefined);
 			yield* TestClock.adjust(1);
-			expect(Option.isNone(yield* Fiber.poll(reload))).toBe(true);
+			expect(Option.isNone(yield* Effect.sync(() => Option.fromUndefinedOr(reload.pollUnsafe())))).toBe(true);
 			yield* Deferred.succeed(projectRelease, undefined);
 			expect(yield* Fiber.join(reload)).toEqual({ sessionId: "session-42" });
 			expect(dispatchEffect).toHaveBeenCalledTimes(3);
@@ -571,18 +559,18 @@ describe("reloadProviderSessionForClient", () => {
 					return Deferred.await(release).pipe(Effect.as({ models: [], commands: [] }));
 				});
 				const engine = withDispatchEffect({ dispatchEffect, getProviderForSessionEffect: () => Effect.succeed("claude") });
-				const reload = yield* Effect.fork(reloadProviderSessionForClient({ clientId: "client-1", sessionId: "session-42", commandId: "reload" }).pipe(
+				const reload = yield* Effect.forkChild(reloadProviderSessionForClient({ clientId: "client-1", sessionId: "session-42", commandId: "reload" }).pipe(
 					Effect.provide(Layer.mergeAll(
-						Layer.succeed(LoggerTag, log),
-						Layer.succeed(OrchestrationEngineTag, engine),
-						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-						Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
+						Layer.succeed(LoggerTag)(log),
+						Layer.succeed(OrchestrationEngineTag)(engine),
+						Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+						Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
 						Layer.mock(SessionWorkspaceTag, { get: () => Effect.succeed("/tmp/session-worktree") }),
-					)),
+					), { local: true }),
 				));
 				yield* TestClock.adjust(1);
 				expect(dispatchEffect).toHaveBeenCalledTimes(3);
-				expect(Option.isNone(yield* Fiber.poll(reload))).toBe(true);
+				expect(Option.isNone(yield* Effect.sync(() => Option.fromUndefinedOr(reload.pollUnsafe())))).toBe(true);
 				yield* Deferred.succeed(release, undefined);
 				expect(yield* Fiber.join(reload)).toEqual({ sessionId: "session-42" });
 				expect(log.warn).toHaveBeenCalledWith(expect.stringMatching(/refresh.*probe failed/i));
@@ -594,7 +582,7 @@ describe("reloadProviderSessionForClient", () => {
 
 describe("sendModelsStateToClient", () => {
 	const readClaudeCatalog = subscribeProjectSettings().pipe(
-		Stream.mapConcat((envelope) => envelope._tag === "snapshot" ? envelope.rows : envelope._tag === "upsert" ? [envelope.item] : []),
+		Stream.map((envelope) => envelope._tag === "snapshot" ? envelope.rows : envelope._tag === "upsert" ? [envelope.item] : []), Stream.flattenIterable,
 		Stream.filter((setting) => setting._tag === "providerModels"),
 		Stream.map((setting) => setting.providers),
 		Stream.runHead,
@@ -624,20 +612,20 @@ describe("sendModelsStateToClient", () => {
 
 		const layer = Layer.mergeAll(
 			openCodeModelLayer(client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, log),
-			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+			Layer.succeed(WebSocketHandlerTag)(ws),
+			Layer.succeed(LoggerTag)(log),
+			Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 			makeOverridesStateLive(),
 		);
 
 		return getModelsResponse({ clientId: "client-1" }).pipe(
-			Effect.provide(layer),
-			Effect.tap((response) => {
+			Effect.provide(layer, { local: true }),
+			Effect.tap((response) => Effect.sync(() => {
 				expect(client.provider.list).toHaveBeenCalledOnce();
 				expect(response.providers).toEqual(expect.arrayContaining([
 							expect.objectContaining({ id: "openai" }),
 						]));
-			}),
+			})),
 		);
 	});
 
@@ -674,9 +662,9 @@ describe("sendModelsStateToClient", () => {
 
 			const layer = Layer.mergeAll(
 				openCodeModelLayer(client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(log),
+				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
 
@@ -702,7 +690,7 @@ describe("sendModelsStateToClient", () => {
 									],
 								},
 							]);
-			}).pipe(Effect.provide(Layer.merge(layer, ProjectSettingsLive)));
+			}).pipe(Effect.provide(Layer.merge(layer, ProjectSettingsLive), { local: true }));
 		},
 	);
 	it.effect(
@@ -732,9 +720,9 @@ describe("sendModelsStateToClient", () => {
 
 			const layer = Layer.mergeAll(
 				openCodeModelLayer(client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(log),
+				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
 
@@ -755,7 +743,7 @@ describe("sendModelsStateToClient", () => {
 								],
 							},
 						]);
-			}).pipe(Effect.provide(Layer.merge(layer, ProjectSettingsLive)));
+			}).pipe(Effect.provide(Layer.merge(layer, ProjectSettingsLive), { local: true }));
 		},
 	);
 	it.effect(
@@ -798,9 +786,9 @@ describe("sendModelsStateToClient", () => {
 
 			const layer = Layer.mergeAll(
 				openCodeModelLayer(client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(log),
+				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
 
@@ -849,7 +837,7 @@ describe("sendModelsStateToClient", () => {
 					model: "claude-opus-4-7",
 					provider: "claude",
 				});
-			}).pipe(Effect.provide(Layer.merge(layer, ProjectSettingsLive)));
+			}).pipe(Effect.provide(Layer.merge(layer, ProjectSettingsLive), { local: true }));
 		},
 	);
 });
@@ -876,10 +864,10 @@ describe("switchModelForSession", () => {
 		const layer = Layer.mergeAll(
 			makeSessionSettingsLayer(),
 			openCodeModelLayer(client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, log),
-			Layer.succeed(ConfigTag, config),
-			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+			Layer.succeed(WebSocketHandlerTag)(ws),
+			Layer.succeed(LoggerTag)(log),
+			Layer.succeed(ConfigTag)(config),
+			Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 			makeOverridesStateLive(),
 		);
 
@@ -895,7 +883,7 @@ describe("switchModelForSession", () => {
 				modelID: "gpt-4",
 			});
 			expect(log.info).toHaveBeenCalled();
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(layer, { local: true }));
 	});
 
 	it.effect(
@@ -995,11 +983,11 @@ describe("switchModelForSession", () => {
 			const layer = Layer.mergeAll(
 				makeSessionSettingsLayer(),
 				openCodeModelLayer(client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(ConfigTag, config),
-				Layer.succeed(ReadQueryEffectTag, readQuery),
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(log),
+				Layer.succeed(ConfigTag)(config),
+				Layer.succeed(ReadQueryEffectTag)(readQuery),
+				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
 
@@ -1028,7 +1016,7 @@ describe("switchModelForSession", () => {
 					variant: "",
 					variants: ["standard"],
 				});
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -1065,10 +1053,10 @@ describe("switchModelForSession", () => {
 		const layer = Layer.mergeAll(
 			makeSessionSettingsLayer(),
 			openCodeModelLayer(client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, log),
-			Layer.succeed(ConfigTag, config),
-			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+			Layer.succeed(WebSocketHandlerTag)(ws),
+			Layer.succeed(LoggerTag)(log),
+			Layer.succeed(ConfigTag)(config),
+			Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 			makeOverridesStateLive(),
 		);
 
@@ -1088,7 +1076,7 @@ describe("switchModelForSession", () => {
 				variant: "",
 				variants: ["low", "medium", "high", "max"],
 			});
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(layer, { local: true }));
 	});
 });
 
@@ -1125,10 +1113,10 @@ describe("switchVariantForSession", () => {
 		const layer = Layer.mergeAll(
 			makeSessionSettingsLayer(),
 			openCodeModelLayer(client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, log),
-			Layer.succeed(ConfigTag, config),
-			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+			Layer.succeed(WebSocketHandlerTag)(ws),
+			Layer.succeed(LoggerTag)(log),
+			Layer.succeed(ConfigTag)(config),
+			Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 			makeOverridesStateLive(),
 			ProjectSettingsLive,
 		);
@@ -1150,7 +1138,7 @@ describe("switchVariantForSession", () => {
 				variant: "high",
 				variants: ["low", "medium", "high", "max"],
 			});
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(layer, { local: true }));
 	});
 
 	it.effect(
@@ -1183,9 +1171,9 @@ describe("switchVariantForSession", () => {
 			const layer = Layer.mergeAll(
 				makeSessionSettingsLayer(),
 				openCodeModelLayer(client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(ConfigTag, config),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(log),
+				Layer.succeed(ConfigTag)(config),
 				makeOverridesStateLive(),
 				ProjectSettingsLive,
 			);
@@ -1206,7 +1194,7 @@ describe("switchVariantForSession", () => {
 					variant: "v2",
 					variants: ["v2", "v3"],
 				});
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 });
@@ -1238,9 +1226,9 @@ describe("switchContextWindowForSession", () => {
 
 			const layer = Layer.mergeAll(
 				makeSessionSettingsLayer(),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(log),
+				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
 
@@ -1260,7 +1248,7 @@ describe("switchContextWindowForSession", () => {
 					contextWindow: "1m",
 					options: contextWindowOptions,
 				});
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -1285,9 +1273,9 @@ describe("switchContextWindowForSession", () => {
 
 			const layer = Layer.mergeAll(
 				makeSessionSettingsLayer(),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(log),
+				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
 
@@ -1298,22 +1286,22 @@ describe("switchContextWindowForSession", () => {
 					modelID: "claude-haiku-4-7",
 				});
 				yield* setContextWindow("session-42", "200k");
-				const result = yield* Effect.either(switchContextWindowForSession({
+				const result = yield* Effect.result(switchContextWindowForSession({
 					clientId: "client-1",
 					sessionId: "session-42",
 					contextWindow: "1m",
 				}));
 				expect(yield* getContextWindow("session-42")).toBe("200k");
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: {
+					_tag: "Failure",
+					failure: {
 						_tag: "ContextWindowNotOffered",
 						modelId: "claude-haiku-4-7",
 						contextWindow: "1m",
 						offered: [],
 					},
 				});
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 });
@@ -1402,21 +1390,18 @@ function makeForkSessionLayer(options?: {
 			providers: [{ id: "openai", name: "OpenAI", models: [{ id: "gpt-4", name: "GPT-4" }] }],
 		}));
 	return Layer.mergeAll(
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		openCodeModelLayer(client),
-		Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub({ opencode: client })),
-		Layer.succeed(WebSocketHandlerTag, ws),
-		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+		Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
+		Layer.succeed(WebSocketHandlerTag)(ws),
+		Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
 		PendingInteractionServiceLive,
-		Layer.succeed(LoggerTag, log),
-		Layer.succeed(
-			StatusPollerTag,
-			makeMockStatusPoller({
+		Layer.succeed(LoggerTag)(log),
+		Layer.succeed(StatusPollerTag)(makeMockStatusPoller({
 				isProcessing: vi.fn(() => Effect.succeed(false)),
 				clearMessageActivity: vi.fn(() => Effect.void),
-			}),
-		),
-		Layer.succeed(PollerManagerTag, {
+			})),
+		Layer.succeed(PollerManagerTag)({
 			on: vi.fn(),
 			isPolling: vi.fn(() => true),
 			startPolling: vi.fn(),
@@ -1454,22 +1439,19 @@ function makeSessionLifecycleLayer(options?: {
 			providers: [{ id: "openai", name: "OpenAI", models: [{ id: "gpt-4", name: "GPT-4" }] }],
 		}));
 	return Layer.mergeAll(
-		Layer.succeed(AgentLivenessTag, () => Effect.succeed(false)),
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+		Layer.succeed(AgentLivenessTag)(() => Effect.succeed(false)),
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		openCodeModelLayer(client),
-		Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [{ id: "sonnet", name: "Sonnet", providerId: "claude" }] })) })),
-		Layer.succeed(WebSocketHandlerTag, ws),
-		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+		Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [{ id: "sonnet", name: "Sonnet", providerId: "claude" }] })) })),
+		Layer.succeed(WebSocketHandlerTag)(ws),
+		Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
 		PendingInteractionServiceLive,
-		Layer.succeed(LoggerTag, log),
-		Layer.succeed(
-			StatusPollerTag,
-			makeMockStatusPoller({
+		Layer.succeed(LoggerTag)(log),
+		Layer.succeed(StatusPollerTag)(makeMockStatusPoller({
 				isProcessing: vi.fn(() => Effect.succeed(false)),
 				clearMessageActivity: vi.fn(() => Effect.void),
-			}),
-		),
-		Layer.succeed(PollerManagerTag, {
+			})),
+		Layer.succeed(PollerManagerTag)({
 			on: vi.fn(),
 			isPolling: vi.fn(() => true),
 			startPolling: vi.fn(),
@@ -1517,7 +1499,7 @@ describe("handleForkSession", () => {
 				yield* handleForkSession("client-1", {
 					sessionId: "ses-parent",
 					messageId: "msg-1",
-				}).pipe(Effect.provide(layer));
+				}).pipe(Effect.provide(layer, { local: true }));
 
 				// OpenCode cuts before messageID, so the fork keeps msg-1.
 				expect(client.session.fork).toHaveBeenCalledWith("ses-parent", {
@@ -1561,12 +1543,12 @@ describe("handleForkSession", () => {
 				handleForkSession("client-1", {
 					sessionId: "ses-parent",
 					messageId: "msg-1",
-				}).pipe(Effect.provide(layer)),
+				}).pipe(Effect.provide(layer, { local: true })),
 			).pipe(
-				Effect.tap((exit) => {
+				Effect.tap((exit) => Effect.sync(() => {
 					expect(Exit.isFailure(exit)).toBe(true);
 					expect(setForkEntry).not.toHaveBeenCalled();
-				}),
+				})),
 			);
 		},
 	);
@@ -1594,7 +1576,7 @@ describe("handleForkSession", () => {
 				expect(yield* getAgent("ses-parent")).toBeUndefined();
 				expect(yield* getVariant("ses-parent")).toBe("");
 				expect(yield* getContextWindow("ses-parent")).toBe("");
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -1653,8 +1635,8 @@ describe("handleForkSession", () => {
 				sessionId: "ses-parent",
 				messageId: "msg-1",
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap((fork) => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap((fork) => Effect.sync(() => {
 					expect(serviceSetForkEntry).not.toHaveBeenCalled();
 					expect(legacySetForkEntry).not.toHaveBeenCalled();
 					expect(serviceListSessions).toHaveBeenCalledWith();
@@ -1666,7 +1648,7 @@ describe("handleForkSession", () => {
 						forkPointTimestamp: 456,
 					});
 					expect(ws.setClientSession).not.toHaveBeenCalled();
-				}),
+				})),
 			);
 		},
 	);
@@ -1706,12 +1688,12 @@ describe("handleForkSession", () => {
 		return handleForkSession("client-1", {
 			sessionId: "ses-parent",
 		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
+			Effect.provide(layer, { local: true }),
+			Effect.tap(() => Effect.sync(() => {
 				expect(messagesPage).toHaveBeenCalledWith("ses-child", { limit: 1 });
 				expect(serviceSetForkEntry).not.toHaveBeenCalled();
 				expect(legacySetForkEntry).not.toHaveBeenCalled();
-			}),
+			})),
 		);
 	});
 
@@ -1733,11 +1715,11 @@ describe("handleForkSession", () => {
 			const layer = makeForkSessionLayer({ client, ws, sessionMgr });
 
 			return handleForkSession("client-1", {}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(fork).not.toHaveBeenCalled();
 					expect(setForkEntry).not.toHaveBeenCalled();
-				}),
+				})),
 			);
 		},
 	);
@@ -1753,9 +1735,9 @@ describe("setDefaultPermissionModeForRelay", () => {
 			const ws = mockWsHandler();
 			const log = mockLogger();
 			const layer = Layer.mergeAll(
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(ConfigTag, mockConfig({ configDir })),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(log),
+				Layer.succeed(ConfigTag)(mockConfig({ configDir })),
 				makeOverridesStateLive(),
 				ProjectSettingsLive,
 			);
@@ -1776,7 +1758,7 @@ describe("setDefaultPermissionModeForRelay", () => {
 					"client=client-1 Set default permission mode to: auto",
 				);
 			}).pipe(
-				Effect.provide(layer),
+				Effect.provide(layer, { local: true }),
 				Effect.ensuring(
 					Effect.sync(() =>
 						rmSync(configDir, { recursive: true, force: true }),
@@ -1813,11 +1795,11 @@ describe("handlePermissionResponse", () => {
 			const { registry, resolvePermissionEffect } = openCodeRegistry();
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(ConfigTag, config),
-				Layer.succeed(ProviderRegistryTag, registry),
+				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(log),
+				Layer.succeed(ConfigTag)(config),
+				Layer.succeed(ProviderRegistryTag)(registry),
 				PendingInteractionServiceLive,
 			);
 
@@ -1836,14 +1818,14 @@ describe("handlePermissionResponse", () => {
 					decision: "allow",
 				});
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(resolvePermissionEffect).toHaveBeenCalledWith(
 						"session-1",
 						"perm-1",
 						"once",
 					);
-				}),
+				})),
 			);
 		},
 	);
@@ -1863,11 +1845,11 @@ describe("handlePermissionResponse", () => {
 			const { registry, resolvePermissionEffect } = openCodeRegistry();
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(ConfigTag, config),
-				Layer.succeed(ProviderRegistryTag, registry),
+				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(log),
+				Layer.succeed(ConfigTag)(config),
+				Layer.succeed(ProviderRegistryTag)(registry),
 				PendingInteractionServiceLive,
 			);
 
@@ -1886,14 +1868,14 @@ describe("handlePermissionResponse", () => {
 					decision: "allow",
 				});
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(resolvePermissionEffect).toHaveBeenCalledWith(
 						"permission-session",
 						"perm-cross-session",
 						"once",
 					);
-				}),
+				})),
 			);
 		},
 	);
@@ -1918,11 +1900,11 @@ describe("handlePermissionResponse", () => {
 			};
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(ConfigTag, config),
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(log),
+				Layer.succeed(ConfigTag)(config),
+				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 				PendingInteractionServiceLive,
 			);
 
@@ -1942,12 +1924,12 @@ describe("handlePermissionResponse", () => {
 					persistScope: "tool",
 				});
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(client.permission.reply).not.toHaveBeenCalled();
 					expect(client.config.get).not.toHaveBeenCalled();
 					expect(client.config.update).not.toHaveBeenCalled();
-				}),
+				})),
 			);
 		},
 	);
@@ -2009,16 +1991,16 @@ describe("handlePermissionResponse", () => {
 				const engine = new OrchestrationEngine({ registry });
 
 				const layer = Layer.mergeAll(
-					Layer.succeed(OpenCodeAPITag, client),
-					Layer.succeed(WebSocketHandlerTag, ws),
-					Layer.succeed(LoggerTag, log),
-					Layer.succeed(ConfigTag, config),
-					Layer.succeed(OrchestrationEngineTag, engine),
+					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(WebSocketHandlerTag)(ws),
+					Layer.succeed(LoggerTag)(log),
+					Layer.succeed(ConfigTag)(config),
+					Layer.succeed(OrchestrationEngineTag)(engine),
 					PendingInteractionServiceLive,
 				);
 
 				yield* Effect.gen(function* () {
-					const fiber = yield* Effect.fork(
+					const fiber = yield* Effect.forkChild(
 						engine.dispatchEffect({
 							type: "send_turn",
 							commandId: "cmd-claude-in-flight",
@@ -2050,7 +2032,7 @@ describe("handlePermissionResponse", () => {
 
 					yield* Deferred.succeed(releaseSend, undefined);
 					yield* Fiber.join(fiber);
-				}).pipe(Effect.provide(layer));
+				}).pipe(Effect.provide(layer, { local: true }));
 			}),
 	);
 
@@ -2066,10 +2048,10 @@ describe("handlePermissionResponse", () => {
 		const config = mockConfig();
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, log),
-			Layer.succeed(ConfigTag, config),
+			Layer.succeed(OpenCodeAPITag)(client),
+			Layer.succeed(WebSocketHandlerTag)(ws),
+			Layer.succeed(LoggerTag)(log),
+			Layer.succeed(ConfigTag)(config),
 			PendingInteractionServiceLive,
 		);
 
@@ -2087,9 +2069,9 @@ describe("handlePermissionResponse", () => {
 				decision: "allow",
 			});
 		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-			}),
+			Effect.provide(layer, { local: true }),
+			Effect.tap(() => Effect.sync(() => {
+			})),
 		);
 	});
 
@@ -2107,18 +2089,18 @@ describe("handleQuestionReject", () => {
 		});
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+			Layer.succeed(OpenCodeAPITag)(client),
+			Layer.succeed(WebSocketHandlerTag)(ws),
+			Layer.succeed(LoggerTag)(log),
+			Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
 			makeOverridesStateLive(),
 		);
 
 		return handleQuestionReject("client-1", { toolId: "que-1" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
+			Effect.provide(layer, { local: true }),
+			Effect.tap(() => Effect.sync(() => {
 				expect(client.question.reject).toHaveBeenCalledWith("que-1", undefined);
-			}),
+			})),
 		);
 	});
 
@@ -2145,12 +2127,12 @@ describe("handleQuestionReject", () => {
 			});
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(log),
+				Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
 				PendingInteractionServiceLive,
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
 
@@ -2167,8 +2149,8 @@ describe("handleQuestionReject", () => {
 				const pending = yield* pendingInteractions.listPendingQuestions();
 				return { refusal, pending };
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(({ refusal, pending }) => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(({ refusal, pending }) => Effect.sync(() => {
 					expect(client.question.reject).not.toHaveBeenCalled();
 					expect(engine.getProviderForSessionEffect).toHaveBeenCalledWith(
 						"question-session",
@@ -2180,7 +2162,7 @@ describe("handleQuestionReject", () => {
 					);
 					expect(pending).toHaveLength(1);
 					expect(pending[0]?.requestId).toBe("que-claude");
-				}),
+				})),
 			);
 		},
 	);
@@ -2204,15 +2186,12 @@ describe("handleAskUserResponse", () => {
 				interruptTurn: () => Effect.void,
 			};
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(ConfigTag, mockConfig()),
-				Layer.succeed(LoggerTag, mockLogger()),
-				Layer.succeed(
-					SessionManagerServiceTag,
-					makeMockSessionManagerService(),
-				),
-				Layer.succeed(ProviderTurnServiceTag, turns),
+				Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(ConfigTag)(mockConfig()),
+				Layer.succeed(LoggerTag)(mockLogger()),
+				Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()),
+				Layer.succeed(ProviderTurnServiceTag)(turns),
 				PendingInteractionServiceLive,
 				makeOverridesStateLive(),
 			);
@@ -2244,7 +2223,7 @@ describe("handleAskUserResponse", () => {
 					}),
 				);
 				expect(yield* pending.listPendingQuestions()).toHaveLength(0);
-			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 		},
 	);
 	it.effect("answers question via REST API", () => {
@@ -2260,12 +2239,12 @@ describe("handleAskUserResponse", () => {
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
-					Layer.succeed(OpenCodeAPITag, client),
-					Layer.succeed(WebSocketHandlerTag, ws),
-					Layer.succeed(ConfigTag, mockConfig()),
+					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(WebSocketHandlerTag)(ws),
+					Layer.succeed(ConfigTag)(mockConfig()),
 					PendingInteractionServiceLive,
-					Layer.succeed(LoggerTag, log),
-					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+					Layer.succeed(LoggerTag)(log),
+					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
 					makeOverridesStateLive(),
 				),
 			);
@@ -2274,14 +2253,14 @@ describe("handleAskUserResponse", () => {
 			toolId: "que-1",
 			answers: { "1": "Approve", "0": "Yes" },
 		}).pipe(
-			Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
-			Effect.tap(() => {
+			Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }),
+			Effect.tap(() => Effect.sync(() => {
 				expect(client.question.reply).toHaveBeenCalledWith(
 					"que-1",
 					[["Yes"], ["Approve"]],
 					undefined,
 				);
-			}),
+			})),
 		);
 	});
 
@@ -2310,13 +2289,13 @@ describe("handleAskUserResponse", () => {
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
-					Layer.succeed(OpenCodeAPITag, client),
-					Layer.succeed(WebSocketHandlerTag, ws),
-					Layer.succeed(ConfigTag, mockConfig()),
-					Layer.succeed(LoggerTag, log),
-					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(WebSocketHandlerTag)(ws),
+					Layer.succeed(ConfigTag)(mockConfig()),
+					Layer.succeed(LoggerTag)(log),
+					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
 					PendingInteractionServiceLive,
-					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+					Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 					makeOverridesStateLive(),
 				),
 			);
@@ -2333,13 +2312,13 @@ describe("handleAskUserResponse", () => {
 					answers: { "0": "Yes" },
 				});
 			}).pipe(
-				Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(client.question.reply).not.toHaveBeenCalled();
 					expect(engine.getProviderForSessionEffect).toHaveBeenCalledWith(
 						"question-session",
 					);
-				}),
+				})),
 			);
 		},
 	);
@@ -2382,8 +2361,8 @@ describe("handleNewSession", () => {
 				permissionMode: "ask",
 				model: { modelId: "sonnet", providerId: "claude" },
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(serviceCreateSession).toHaveBeenCalledWith("New Session", {
 						account: expect.objectContaining({ id: "claude", driver: "claude" }),
 						permissionMode: "ask",
@@ -2402,7 +2381,7 @@ describe("handleNewSession", () => {
 					expect(log.info).toHaveBeenCalledWith(
 						"client=client-1 Created: new-session-1",
 					);
-				}),
+				})),
 			);
 		},
 	);
@@ -2435,8 +2414,8 @@ describe("handleNewSession", () => {
 			providerId: "opencode",
 			model: { modelId: "gpt-4", providerId: "openai" },
 		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
+			Effect.provide(layer, { local: true }),
+			Effect.tap(() => Effect.sync(() => {
 				expect(serviceCreateSession).toHaveBeenCalledWith("OpenCode Session", {
 					account: expect.objectContaining({ id: "opencode", driver: "opencode" }),
 					permissionMode: "ask",
@@ -2446,7 +2425,7 @@ describe("handleNewSession", () => {
 					"client-1",
 					"opencode-session",
 				);
-			}),
+			})),
 		);
 	});
 
@@ -2522,18 +2501,15 @@ describe("handleNewSession", () => {
 			} satisfies ReadQueryEffect;
 			const layer = Layer.mergeAll(
 				openCodeModelLayer(client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				Layer.succeed(ReadQueryEffectTag, readQuery),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(log),
+				Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+				Layer.succeed(ReadQueryEffectTag)(readQuery),
 				PendingInteractionServiceLive,
-				Layer.succeed(
-					StatusPollerTag,
-					makeMockStatusPoller({
+				Layer.succeed(StatusPollerTag)(makeMockStatusPoller({
 						isProcessing: vi.fn(() => Effect.succeed(false)),
-					}),
-				),
-				Layer.succeed(PollerManagerTag, {
+					})),
+				Layer.succeed(PollerManagerTag)({
 					on: vi.fn(),
 					isPolling: vi.fn(() => false),
 					startPolling,
@@ -2547,10 +2523,10 @@ describe("handleNewSession", () => {
 				clientId: "client-1",
 				sessionId: "ses-local-placeholder",
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(startPolling).not.toHaveBeenCalled();
-				}),
+				})),
 			);
 		},
 	);
@@ -2635,20 +2611,17 @@ describe("handleNewSession", () => {
 			});
 			const layer = Layer.mergeAll(
 				openCodeModelLayer(client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				Layer.succeed(ReadQueryEffectTag, readQuery),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(log),
+				Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+				Layer.succeed(ReadQueryEffectTag)(readQuery),
 				PendingInteractionServiceLive,
-				Layer.succeed(
-					OrchestrationEngineTag,
-					withDispatchEffect({
+				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({
 						dispatch: vi.fn(async () => undefined),
 						dispatchEffect,
-					}),
-				),
-				Layer.succeed(StatusPollerTag, makeMockStatusPoller()),
-				Layer.succeed(PollerManagerTag, {
+					})),
+				Layer.succeed(StatusPollerTag)(makeMockStatusPoller()),
+				Layer.succeed(PollerManagerTag)({
 					on: vi.fn(),
 					isPolling: vi.fn(() => false),
 					startPolling,
@@ -2662,10 +2635,10 @@ describe("handleNewSession", () => {
 				clientId: "client-1",
 				sessionId: "session-in-flight",
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(dispatchEffect).not.toHaveBeenCalled();
-				}),
+				})),
 			);
 		},
 	);
@@ -2707,13 +2680,13 @@ describe("handleDeleteSession", () => {
 			return handleDeleteSession("client-1", {
 				sessionId: "deleted-session",
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(deleteSession).toHaveBeenCalledWith("deleted-session");
 					expect(listSessions).not.toHaveBeenCalled();
 					expect(ws.setClientSession).not.toHaveBeenCalled();
 					expect(log.info).not.toHaveBeenCalled();
-				}),
+				})),
 			);
 		},
 	);
@@ -2751,8 +2724,8 @@ describe("handleDeleteSession", () => {
 			return handleDeleteSession("client-1", {
 				sessionId: "deleted-session",
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(ws.getClientsForSession).not.toHaveBeenCalled();
 					expect(serviceDeleteSession).toHaveBeenCalledWith("deleted-session");
 					expect(legacyDeleteSession).not.toHaveBeenCalled();
@@ -2761,7 +2734,7 @@ describe("handleDeleteSession", () => {
 					expect(log.info).toHaveBeenCalledWith(
 						"client=client-1 Deleted: deleted-session",
 					);
-				}),
+				})),
 			);
 		},
 	);
@@ -2777,11 +2750,11 @@ describe("handleDeleteSession", () => {
 		return handleDeleteSession("client-1", {
 			sessionId: "deleted-session",
 		}).pipe(
-			Effect.provide(makeSessionLifecycleLayer({ ws, sessionManagerService })),
-			Effect.tap(() => {
+			Effect.provide(makeSessionLifecycleLayer({ ws, sessionManagerService }), { local: true }),
+			Effect.tap(() => Effect.sync(() => {
 				expect(ws.setClientSession).not.toHaveBeenCalled();
 				expect(sessionManagerService.listSessions).not.toHaveBeenCalled();
-			}),
+			})),
 		);
 	});
 });
@@ -2809,9 +2782,9 @@ describe("renameSessionForClient", () => {
 			});
 
 			const layer = Layer.mergeAll(
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag)(log),
+				Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+				Layer.succeed(WebSocketHandlerTag)(ws),
 			);
 
 			return renameSessionForClient({
@@ -2819,13 +2792,13 @@ describe("renameSessionForClient", () => {
 				sessionId: "session-1",
 				title: "New Title",
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() => Effect.sync(() => {
 					expect(renameSession).toHaveBeenCalledWith("session-1", "New Title");
 					expect(legacyRenameSession).not.toHaveBeenCalled();
 					expect(calls).toEqual(["rename"]);
 					expect(log.info).toHaveBeenCalled();
-				}),
+				})),
 			);
 		},
 	);
@@ -2840,9 +2813,9 @@ describe("renameSessionForClient", () => {
 		});
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(LoggerTag)(log),
+			Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+			Layer.succeed(WebSocketHandlerTag)(ws),
 		);
 
 		return renameSessionForClient({
@@ -2850,10 +2823,10 @@ describe("renameSessionForClient", () => {
 			sessionId: "",
 			title: "New Title",
 		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
+			Effect.provide(layer, { local: true }),
+			Effect.tap(() => Effect.sync(() => {
 				expect(renameSession).not.toHaveBeenCalled();
-			}),
+			})),
 		);
 	});
 });
@@ -2981,15 +2954,15 @@ describe("loadMoreHistoryForSession", () => {
 			),
 		} satisfies ReadQueryEffect;
 		const layer = Layer.merge(
-			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-			Layer.succeed(ReadQueryEffectTag, readQuery),
+			Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+			Layer.succeed(ReadQueryEffectTag)(readQuery),
 		);
 
 		return loadMoreHistoryForSession({
 			sessionId: "session-1",
 		}).pipe(
-			Effect.provide(layer),
-			Effect.tap((result) => {
+			Effect.provide(layer, { local: true }),
+			Effect.tap((result) => Effect.sync(() => {
 				expect(result.messages[0]?.modelExecution).toEqual({
 					requestedModel: "sonnet",
 					expectedModel: "claude-sonnet-5",
@@ -2999,7 +2972,7 @@ describe("loadMoreHistoryForSession", () => {
 				expect(result).toMatchObject({ hasMore: false });
 				expect(result).not.toHaveProperty("total");
 				expect(loadPreRenderedHistory).not.toHaveBeenCalled();
-			}),
+			})),
 		);
 	});
 	}
@@ -3019,31 +2992,25 @@ describe("sendMessageToSession", () => {
 					`conduit-prompt-triage-${crypto.randomUUID()}.sqlite`,
 				);
 				const ws = mockWsHandler();
-				const configLayer = Layer.succeed(ConfigTag, mockConfig());
-				const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
+				const configLayer = Layer.succeed(ConfigTag)(mockConfig());
+				const loggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
 				const openCodeApi = makeMockOpenCodeAPI();
 				const serviceLayer = Layer.provideMerge(
 					SessionManagerServiceLive,
 					Layer.mergeAll(
-						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-						Layer.succeed(OpenCodeAPITag, openCodeApi),
+						Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+						Layer.succeed(OpenCodeAPITag)(openCodeApi),
 						loggerLayer,
 						configLayer,
-						Layer.succeed(WebSocketHandlerTag, ws),
+						Layer.succeed(WebSocketHandlerTag)(ws),
 Layer.effect(SessionActivityTag, makeSessionActivity),
 						RelayStatusSnapshotLive,
 						makeOverridesStateLive(),
-						Layer.succeed(
-	OpenCodeInstancesTag,
-	makeOpenCodeInstancesStub({ opencode: openCodeApi }),
-),
+						Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: openCodeApi })),
 						makeSessionManagerStateLive(),
 						DaemonEventBusLive,
 						makePersistenceEffectLayer(dbFile, "test-project"),
-						Layer.succeed(
-							OrchestrationEngineTag,
-							new OrchestrationEngine({ registry: new ProviderRegistry() }),
-						),
+						Layer.succeed(OrchestrationEngineTag)(new OrchestrationEngine({ registry: new ProviderRegistry() })),
 					),
 				);
 				return Effect.gen(function* () {
@@ -3097,18 +3064,18 @@ Layer.effect(SessionActivityTag, makeSessionActivity),
 						text: "Continue",
 						commandId: "cmd1",
 					}).pipe(
-						Effect.provide(PassThroughSessionInbox),
+						Effect.provide(PassThroughSessionInbox, { local: true }),
 						Effect.provideService(ProviderTurnServiceTag, provider),
 					);
 				}).pipe(
 					Effect.provide(
 						Layer.mergeAll(
 							serviceLayer,
-							Layer.succeed(WebSocketHandlerTag, ws),
-							Layer.succeed(ConfigTag, mockConfig()),
+							Layer.succeed(WebSocketHandlerTag)(ws),
+							Layer.succeed(ConfigTag)(mockConfig()),
 							PendingInteractionServiceLive,
 							makeOverridesStateLive(),
-						),
+						), { local: true },
 					),
 					Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 				);
@@ -3134,12 +3101,12 @@ Layer.effect(SessionActivityTag, makeSessionActivity),
 				),
 		});
 		const layer = Layer.mergeAll(
-			Layer.succeed(ProviderTurnServiceTag, provider),
-			Layer.succeed(OpenCodeAPITag, {} as OpenCodeAPI),
-			Layer.succeed(WebSocketHandlerTag, mockWsHandler()),
-			Layer.succeed(LoggerTag, mockLogger()),
-			Layer.succeed(ConfigTag, mockConfig()),
-			Layer.succeed(SessionManagerServiceTag, service),
+			Layer.succeed(ProviderTurnServiceTag)(provider),
+			Layer.succeed(OpenCodeAPITag)({} as OpenCodeAPI),
+			Layer.succeed(WebSocketHandlerTag)(mockWsHandler()),
+			Layer.succeed(LoggerTag)(mockLogger()),
+			Layer.succeed(ConfigTag)(mockConfig()),
+			Layer.succeed(SessionManagerServiceTag)(service),
 			PendingInteractionServiceLive,
 			makeOverridesStateLive(),
 		);
@@ -3149,8 +3116,8 @@ Layer.effect(SessionActivityTag, makeSessionActivity),
 			text: "Continue",
 			commandId: "cmd1",
 		}).pipe(
-			Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
-			Effect.tap(() => expect(sendTurn).toHaveBeenCalledOnce()),
+			Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }),
+			Effect.tap(() => Effect.sync(() => expect(sendTurn).toHaveBeenCalledOnce())),
 		);
 	});
 });
@@ -3165,7 +3132,7 @@ describe("cancelSessionById", () => {
 		};
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(ProviderTurnServiceTag, providerTurnService),
+			Layer.succeed(ProviderTurnServiceTag)(providerTurnService),
 			makeOverridesStateLive(),
 		);
 
@@ -3177,7 +3144,7 @@ describe("cancelSessionById", () => {
 				commandId: "cmd-cancel-test",
 				sessionId: "session-1",
 			});
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(layer, { local: true }));
 	});
 });
 
@@ -3208,13 +3175,13 @@ describe("rewindSessionToMessage", () => {
 			sessionId: "session-1",
 			messageId: "msg-1",
 		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
+			Effect.provide(layer, { local: true }),
+			Effect.tap(() => Effect.sync(() => {
 				expect(client.session.revert).toHaveBeenCalledWith("session-1", {
 					messageID: "msg-1",
 				});
 				expect(log.info).toHaveBeenCalled();
-			}),
+			})),
 		);
 	});
 });
@@ -3230,11 +3197,11 @@ describe("handleMessage", () => {
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				Layer.succeed(ConfigTag, config),
+				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(log),
+				Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+				Layer.succeed(ConfigTag)(config),
 				PendingInteractionServiceLive,
 				makeOverridesStateLive(),
 			),
@@ -3244,12 +3211,12 @@ describe("handleMessage", () => {
 			text: "hello",
 			commandId: "cmd-no-session",
 		}).pipe(
-			Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
-			Effect.tap(() => {
+			Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }),
+			Effect.tap(() => Effect.sync(() => {
 				expect(log.warn).toHaveBeenCalledWith(
 					expect.stringContaining("no active session"),
 				);
-			}),
+			})),
 		);
 	});
 
@@ -3276,13 +3243,13 @@ describe("handleMessage", () => {
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				Layer.succeed(ConfigTag, config),
+				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(log),
+				Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+				Layer.succeed(ConfigTag)(config),
 				PendingInteractionServiceLive,
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			),
 		);
@@ -3324,7 +3291,7 @@ describe("handleMessage", () => {
 					}),
 				}),
 			);
-		}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+		}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 	});
 
 	it.effect(
@@ -3376,22 +3343,22 @@ describe("handleMessage", () => {
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
-					Layer.succeed(OpenCodeAPITag, client),
-					Layer.succeed(WebSocketHandlerTag, ws),
-					Layer.succeed(LoggerTag, log),
-					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-					Layer.succeed(ConfigTag, config),
+					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(WebSocketHandlerTag)(ws),
+					Layer.succeed(LoggerTag)(log),
+					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+					Layer.succeed(ConfigTag)(config),
 					PendingInteractionServiceLive,
 					// Production always supplies ProviderRuntimeIngestion for Claude output
 					// (relay-stack builds it from the daemon's always-present persistence
 					// DB). cev.3 makes the seam mandatory, so the Claude event sink needs
 					// it present to avoid the failing guard sink.
-					Layer.succeed(ProviderRuntimeIngestionTag, {
+					Layer.succeed(ProviderRuntimeIngestionTag)({
 						ingest: () => Effect.succeed(0),
 						ingestBatch: () => Effect.succeed(0),
 						drain: () => Effect.void,
 					}),
-					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+					Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 					makeOverridesStateLive(),
 				),
 			);
@@ -3430,7 +3397,7 @@ describe("handleMessage", () => {
 					"0": "Yes",
 				});
 				yield* Effect.tryPromise(() => questionPromise ?? Promise.resolve({}));
-			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -3502,14 +3469,14 @@ describe("handleMessage", () => {
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
-					Layer.succeed(OpenCodeAPITag, client),
-					Layer.succeed(WebSocketHandlerTag, ws),
-					Layer.succeed(LoggerTag, log),
-					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-					Layer.succeed(ConfigTag, config),
+					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(WebSocketHandlerTag)(ws),
+					Layer.succeed(LoggerTag)(log),
+					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+					Layer.succeed(ConfigTag)(config),
 					PendingInteractionServiceLive,
-					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-					Layer.succeed(ReadQueryEffectTag, readQuery),
+					Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
+					Layer.succeed(ReadQueryEffectTag)(readQuery),
 					makeOverridesStateLive(),
 				),
 			);
@@ -3548,7 +3515,7 @@ describe("handleMessage", () => {
 						}),
 					}),
 				);
-			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -3604,13 +3571,13 @@ describe("handleMessage", () => {
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
-					Layer.succeed(OpenCodeAPITag, client),
-					Layer.succeed(WebSocketHandlerTag, ws),
-					Layer.succeed(LoggerTag, log),
-					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-					Layer.succeed(ConfigTag, config),
+					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(WebSocketHandlerTag)(ws),
+					Layer.succeed(LoggerTag)(log),
+					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+					Layer.succeed(ConfigTag)(config),
 					PendingInteractionServiceLive,
-					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+					Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 					makeOverridesStateLive(),
 				),
 			);
@@ -3626,7 +3593,7 @@ describe("handleMessage", () => {
 				expect(renameSession).not.toHaveBeenCalled();
 				expect(legacyListSessions).not.toHaveBeenCalled();
 				expect(legacyRenameSession).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -3671,13 +3638,13 @@ describe("handleMessage", () => {
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				Layer.succeed(ConfigTag, config),
+				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(log),
+				Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+				Layer.succeed(ConfigTag)(config),
 				PendingInteractionServiceLive,
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			),
 		);
@@ -3691,7 +3658,7 @@ describe("handleMessage", () => {
 
 			expect(listSessions).not.toHaveBeenCalled();
 			expect(renameSession).not.toHaveBeenCalled();
-		}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+		}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 	});
 
 	it.effect(
@@ -3791,15 +3758,15 @@ describe("handleMessage", () => {
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
-					Layer.succeed(OpenCodeAPITag, client),
-					Layer.succeed(WebSocketHandlerTag, ws),
-					Layer.succeed(LoggerTag, log),
-					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-					Layer.succeed(ConfigTag, config),
+					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(WebSocketHandlerTag)(ws),
+					Layer.succeed(LoggerTag)(log),
+					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+					Layer.succeed(ConfigTag)(config),
 					PendingInteractionServiceLive,
-					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-					Layer.succeed(ReadQueryEffectTag, readQuery),
-					Layer.succeed(ProviderRuntimeIngestionTag, {
+					Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
+					Layer.succeed(ReadQueryEffectTag)(readQuery),
+					Layer.succeed(ProviderRuntimeIngestionTag)({
 						ingest: () => Effect.succeed(0),
 						ingestBatch,
 						drain: () => Effect.void,
@@ -3833,7 +3800,7 @@ describe("handleMessage", () => {
 						data: expect.objectContaining({ code: "PICK_REQUIRED" }),
 					}),
 				]));
-			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -3865,13 +3832,13 @@ describe("handleMessage", () => {
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
-					Layer.succeed(OpenCodeAPITag, client),
-					Layer.succeed(WebSocketHandlerTag, ws),
-					Layer.succeed(LoggerTag, log),
-					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-					Layer.succeed(ConfigTag, config),
+					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(WebSocketHandlerTag)(ws),
+					Layer.succeed(LoggerTag)(log),
+					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+					Layer.succeed(ConfigTag)(config),
 					PendingInteractionServiceLive,
-					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+					Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 					makeOverridesStateLive(),
 				),
 			);
@@ -3901,7 +3868,7 @@ describe("handleMessage", () => {
 				expect(failures).toEqual([
 					{ code: "SEND_FAILED", error: expect.any(String) },
 				]);
-			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -3933,21 +3900,26 @@ describe("markSessionSeenForClient", () => {
 			}).pipe(
 				Effect.provide(
 					Layer.mergeAll(
-						Layer.succeed(WebSocketHandlerTag, ws),
-						Layer.succeed(LoggerTag, log),
-						Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+						Layer.succeed(WebSocketHandlerTag)(ws),
+						Layer.succeed(LoggerTag)(log),
+						Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
 					),
+					{ local: true },
 				),
 				Effect.flip,
-				Effect.tap((error) => {
-					expect(error).toBe(failure);
-					expect(sessionManagerService.markSessionSeen).toHaveBeenCalledOnce();
-					expect(log.warn).toHaveBeenCalledOnce();
-					expect(log.warn).toHaveBeenCalledWith(
-						expect.stringContaining("session-1"),
-						failure,
-					);
-				}),
+				Effect.tap((error) =>
+					Effect.sync(() => {
+						expect(error).toBe(failure);
+						expect(
+							sessionManagerService.markSessionSeen,
+						).toHaveBeenCalledOnce();
+						expect(log.warn).toHaveBeenCalledOnce();
+						expect(log.warn).toHaveBeenCalledWith(
+							expect.stringContaining("session-1"),
+							failure,
+						);
+					}),
+				),
 			);
 		},
 	);

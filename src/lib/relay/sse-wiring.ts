@@ -2,8 +2,8 @@
 // OpenCode, persists them, maintains timeouts, and publishes alerts and push
 // notifications using RPC viewer presence.
 
-import type { SqlError } from "@effect/sql/SqlError";
-import { Data, Effect, Either, Option, Runtime, Schema } from "effect";
+import { Data, Effect, Option, Result, Schema } from "effect";
+import type { SqlError } from "effect/sql/SqlError";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
 import { OpenCodeEventSchema } from "../contracts/providers/opencode-sdk.js";
 import type { OpenCodeConnectionStatus } from "../contracts/ws-rpc.js";
@@ -64,8 +64,8 @@ import {
 import type { SSEStreamEvents } from "./sse-stream.js";
 
 // Built once: envelope decoder for the fail-closed ingestion gate (see the
-// consumer "event" handler). Returns Either<OpenCodeEvent, ParseError>.
-const decodeOpenCodeEvent = Schema.decodeUnknownEither(OpenCodeEventSchema);
+// consumer "event" handler). Returns Result<OpenCodeEvent, SchemaError>.
+const decodeOpenCodeEvent = Schema.decodeUnknownResult(OpenCodeEventSchema);
 
 // OpenCode SSE events store sessionID in different locations by event type:
 //   - Top-level: message.part.delta, session.status, message.part.removed, etc.
@@ -377,7 +377,7 @@ export const sendPushForEventEffect = (
 				),
 			),
 			// Without a claim, delivery could repeat an alert already sent.
-			Effect.catchAll((sqlError) =>
+			Effect.catch((sqlError) =>
 				Effect.sync(() =>
 					log.error(
 						`Alert ledger unavailable (${kind}); delivery deferred: ${sqlError}`,
@@ -524,7 +524,7 @@ const refreshLineageAfterUpdateEffect = (deps: SSEWiringDeps) =>
 		yield* sessionService
 			.refreshSessionLineage()
 			.pipe(
-				Effect.catchAll((err) =>
+				Effect.catch((err) =>
 					Effect.sync(() =>
 						deps.log.warn(
 							`Failed to refresh session lineage after session.updated: ${err}`,
@@ -683,12 +683,12 @@ export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
 				reply &&
 				opencodeModeCoversAsk(mode, input.toolName)
 			) {
-				const replied = yield* Effect.either(
+				const replied = yield* Effect.result(
 					Effect.tryPromise(() =>
 						reply(input.sessionId, input.requestId, "once"),
 					),
 				);
-				if (replied._tag === "Right") {
+				if (replied._tag === "Success") {
 					autoApproved = true;
 					yield* Effect.sync(() =>
 						deps.log.info(
@@ -698,7 +698,7 @@ export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
 				} else {
 					yield* Effect.sync(() =>
 						deps.log.warn(
-							`auto-approve reply failed, falling back to card (request=${input.requestId}): ${replied.left}`,
+							`auto-approve reply failed, falling back to card (request=${input.requestId}): ${replied.failure}`,
 						),
 					);
 				}
@@ -781,7 +781,7 @@ function wireSSEConsumerWithCallbacks(
 	// silently lose live traffic (e.g. a future server event) and regress today's
 	// pass-through behavior. Field-level consumption stays guarded per translator.
 	consumer.on("event", (event: unknown) => {
-		if (Either.isLeft(decodeOpenCodeEvent(event))) {
+		if (Result.isFailure(decodeOpenCodeEvent(event))) {
 			const type =
 				typeof (event as { type?: unknown } | null)?.type === "string"
 					? (event as { type: string }).type
@@ -799,7 +799,7 @@ export const wireSSEConsumerEffect = (
 	consumer: SSEStreamEvents,
 ) =>
 	Effect.gen(function* () {
-		const runtime = yield* Effect.runtime<
+		const runtime = yield* Effect.context<
 			| PendingInteractionServiceTag
 			| OverridesStateTag
 			| SessionManagerServiceTag
@@ -807,7 +807,7 @@ export const wireSSEConsumerEffect = (
 			| AlertsTag
 		>();
 		yield* Effect.sync(() => {
-			const runFork = Runtime.runFork(runtime);
+			const runFork = Effect.runForkWith(runtime);
 			let connectionRevision = 0;
 			wireSSEConsumerWithCallbacks(deps, consumer, {
 				onConnectionStatus: (status, managedStopped) => {
@@ -842,7 +842,7 @@ export const wireSSEConsumerEffect = (
 					}
 					runFork(
 						handleSSEEventEffect(deps, event).pipe(
-							Effect.catchAllCause((cause) =>
+							Effect.catchCause((cause) =>
 								Effect.sync(() =>
 									deps.log.warn(
 										`SSE event handling failed: ${Failure.renderCause(cause)}`,
@@ -858,7 +858,7 @@ export const wireSSEConsumerEffect = (
 							deps.opencodeRuntimeIngress
 								.onReconnect(deps.providerInstanceId)
 								.pipe(
-									Effect.catchAllCause((cause) =>
+									Effect.catchCause((cause) =>
 										Effect.sync(() =>
 											deps.log.warn(
 												`OpenCode reconnect backfill scheduling failed: ${Failure.renderCause(cause)}`,

@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import {
 	type EventStoreError,
@@ -28,7 +28,7 @@ export class DurableCommandCommitRepository {
 		input: DurableCommandCommitInput,
 	): Effect.Effect<readonly StoredEvent[], SqlError | EventStoreError | Error> {
 		return this.sql.withTransaction(
-			Effect.gen(this, function* () {
+			Effect.gen({ self: this }, function* () {
 				// Acquire the writer slot before the command-ownership preflight.
 				// No session rows change; this prevents a stale snapshot upgrade.
 				yield* this.sql`UPDATE sessions SET project_id = project_id WHERE 0`;
@@ -121,7 +121,7 @@ export class DurableCommandCommitRepository {
 		// the provider concurrently, so refuse the recommit and let the whole
 		// commit transaction roll back. Terminal rows (completed/failed) are
 		// preserved as history.
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const [running] = yield* this.sql<{
 				readonly n: number;
 				readonly attempt_count: number;

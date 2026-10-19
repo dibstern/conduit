@@ -292,23 +292,23 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			...(variant ? { variant } : {}),
 		};
 
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			// Resolve the owning client first: a session bound to a NAMED
 			// OpenCode instance must be prompted on THAT instance's server. A
 			// resolution failure (unknown/unconfigured instance) becomes a clean
 			// send failure — never a hang or a silent fall-through to the
 			// default server.
-			const clientResult = yield* Effect.either(
+			const clientResult = yield* Effect.result(
 				this.resolveClientEffect(sessionId, input.account),
 			);
-			if (clientResult._tag === "Left") {
-				const message = clientResult.left.message;
+			if (clientResult._tag === "Failure") {
+				const message = clientResult.failure.message;
 				log.error(
 					`sendTurn client resolution failed for session ${sessionId}: ${message}`,
 				);
 				return sendFailedTurnResult(message);
 			}
-			const client = clientResult.right;
+			const client = clientResult.success;
 			if (
 				!isCompaction &&
 				this.hasWorktreeToolForSession &&
@@ -354,7 +354,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				}
 			});
 
-			return yield* Effect.gen(this, function* () {
+			return yield* Effect.gen({ self: this }, function* () {
 				if (abortSignal.aborted) return interruptedTurnResult();
 				if (isCompaction) {
 					yield* input.eventSink.push({
@@ -369,7 +369,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 					});
 				}
 
-				const promptResult = yield* Effect.either(
+				const promptResult = yield* Effect.result(
 					Effect.tryPromise({
 						try: async () => {
 							if (isCompaction) {
@@ -454,8 +454,8 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 						catch: (cause) => cause,
 					}),
 				);
-				if (promptResult._tag === "Left") {
-					const cause = promptResult.left;
+				if (promptResult._tag === "Failure") {
+					const cause = promptResult.failure;
 					const baseMessage =
 						cause instanceof Error ? cause.message : String(cause);
 					const boundInstanceId =
@@ -514,7 +514,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			this.pendingTurns.delete(sessionId);
 			// SSE callbacks are synchronous; complete the Effect Deferred directly
 			// instead of adding an app-internal runtime bridge.
-			Deferred.unsafeDone(pendingTurn.deferred, Effect.succeed(result));
+			Deferred.doneUnsafe(pendingTurn.deferred, Effect.succeed(result));
 		} else {
 			log.debug(
 				`notifyTurnCompleted: no pending turn for session ${sessionId} -- may have already completed`,
@@ -649,7 +649,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		const pendingTurn = this.pendingTurns.get(sessionId);
 		if (pendingTurn && this.pendingTurns.get(sessionId) === pendingTurn) {
 			this.pendingTurns.delete(sessionId);
-			Deferred.unsafeDone(
+			Deferred.doneUnsafe(
 				pendingTurn.deferred,
 				Effect.fail(new Error("Session ended (reload)")),
 			);
@@ -663,7 +663,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			for (const [sessionId, pendingTurn] of this.pendingTurns) {
 				if (this.pendingTurns.get(sessionId) !== pendingTurn) continue;
 				this.pendingTurns.delete(sessionId);
-				Deferred.unsafeDone(
+				Deferred.doneUnsafe(
 					pendingTurn.deferred,
 					Effect.fail(
 						new Error(

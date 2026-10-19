@@ -23,10 +23,10 @@ describe("session detail item contract", () => {
 		];
 		for (const sample of samples) {
 			const encoded = await Effect.runPromise(
-				Schema.encode(SessionDetailItemSchema)(sample),
+				Schema.encodeEffect(SessionDetailItemSchema)(sample),
 			);
 			const decoded = await Effect.runPromise(
-				Schema.decodeUnknown(SessionDetailItemSchema)(
+				Schema.decodeUnknownEffect(SessionDetailItemSchema)(
 					JSON.parse(JSON.stringify(encoded)),
 				),
 			);

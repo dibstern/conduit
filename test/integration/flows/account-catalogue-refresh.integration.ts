@@ -9,9 +9,9 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer, Queue, Schema, Stream } from "effect";
+import { RpcTest } from "effect/rpc";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { AccountSchema } from "../../../src/lib/contracts/account.js";
 import {
@@ -165,7 +165,7 @@ const clients = (pendingOriginal?: Deferred.Deferred<ProviderCapabilities>) =>
 	});
 
 describe("account catalogue refresh through browser RPC", () => {
-	it.scoped(
+	it.effect(
 		"validates and publishes a model default using the current default account",
 		() =>
 			Effect.gen(function* () {
@@ -185,7 +185,7 @@ describe("account catalogue refresh through browser RPC", () => {
 				});
 			}).pipe(Effect.provide(daemonLayer()), Effect.timeout("10 seconds")),
 	);
-	it.scoped(
+	it.effect(
 		"discovers a changed default while the former default is still pending",
 		() =>
 			Effect.gen(function* () {
@@ -210,7 +210,7 @@ describe("account catalogue refresh through browser RPC", () => {
 				const repeatedRead = yield* project
 					.GetModels({ projectSlug: "myapp", instanceId: "claude" })
 					.pipe(Effect.forkScoped);
-				yield* Effect.yieldNow();
+				yield* Effect.yieldNow;
 				expect(yield* Queue.size(started)).toBe(0);
 				yield* daemon.SetDefault({ instanceId: "personal" });
 				yield* project.GetModels({ projectSlug: "myapp" });
@@ -243,7 +243,7 @@ describe("account catalogue refresh through browser RPC", () => {
 			}).pipe(Effect.provide(daemonLayer()), Effect.timeout("10 seconds")),
 	);
 
-	it.scoped(
+	it.effect(
 		"tags the catalogue published when a model-only CreateSession validates an account",
 		() =>
 			Effect.gen(function* () {

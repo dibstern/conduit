@@ -1,14 +1,7 @@
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
-import {
-	Deferred,
-	Duration,
-	Effect,
-	Fiber,
-	Layer,
-	Option,
-	TestClock,
-} from "effect";
+import { Deferred, Duration, Effect, Fiber, Layer, Option } from "effect";
+import { SqlClient } from "effect/sql";
+import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
@@ -632,12 +625,24 @@ describe("ProviderSideEffectReactor", () => {
 					outcomePollTimeout: "500 millis",
 				});
 
-				const loser = yield* Effect.fork(reactor.runCommand("cmd-1"));
-				yield* Effect.yieldNow();
-				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+				const loser = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
+				yield* Effect.yieldNow;
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(loser.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 
 				yield* TestClock.adjust("100 millis");
-				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(loser.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 
 				yield* sql.unsafe(
 					"UPDATE command_receipts SET status = 'side_effect_completed' WHERE command_id = ?",
@@ -683,9 +688,15 @@ describe("ProviderSideEffectReactor", () => {
 						[requestSequence],
 					);
 
-					const loser = yield* Effect.fork(reactor.runCommand(commandId));
-					yield* Effect.yieldNow();
-					expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+					const loser = yield* Effect.forkChild(reactor.runCommand(commandId));
+					yield* Effect.yieldNow;
+					expect(
+						Option.isNone(
+							yield* Effect.sync(() =>
+								Option.fromUndefinedOr(loser.pollUnsafe()),
+							),
+						),
+					).toBe(true);
 
 					yield* sql.withTransaction(
 						Effect.all([
@@ -740,10 +751,16 @@ describe("ProviderSideEffectReactor", () => {
 					errorCode: null,
 				});
 
-				const loser = yield* Effect.fork(reactor.runCommand("cmd-1"));
-				yield* Effect.yieldNow();
+				const loser = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
+				yield* Effect.yieldNow;
 				yield* TestClock.adjust("200 millis");
-				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(loser.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 
 				yield* TestClock.adjust("100 millis");
 				const error = yield* Effect.flip(Fiber.join(loser));
@@ -776,9 +793,15 @@ describe("ProviderSideEffectReactor", () => {
 					outcomePollTimeout: "100 millis",
 				});
 
-				const loser = yield* Effect.fork(reactor.runCommand("cmd-1"));
-				yield* Effect.yieldNow();
-				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+				const loser = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
+				yield* Effect.yieldNow;
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(loser.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 
 				yield* TestClock.adjust("100 millis");
 				const error = yield* Effect.flip(Fiber.join(loser));
@@ -825,15 +848,29 @@ describe("ProviderSideEffectReactor", () => {
 					outcomePollTimeout: "500 millis",
 				});
 
-				const winner = yield* Effect.fork(winnerReactor.runCommand("cmd-1"));
+				const winner = yield* Effect.forkChild(
+					winnerReactor.runCommand("cmd-1"),
+				);
 				yield* Deferred.await(winnerStarted);
-				const loser = yield* Effect.fork(loserReactor.runCommand("cmd-1"));
-				yield* Effect.yieldNow();
+				const loser = yield* Effect.forkChild(loserReactor.runCommand("cmd-1"));
+				yield* Effect.yieldNow;
 
-				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(loser.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 				yield* Deferred.succeed(releaseWinner, undefined);
 				expect((yield* Fiber.join(winner)).status).toBe("completed");
-				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(loser.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 
 				yield* TestClock.adjust("100 millis");
 				expect((yield* Fiber.join(loser)).status).toBe("completed");

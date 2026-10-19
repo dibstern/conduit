@@ -25,23 +25,6 @@ import type {
 	ProjectWorktreeCleanup,
 	WorktreeCleanup,
 } from "../../../src/lib/contracts/worktree.js";
-import {
-	CleanUpWorktreesNow,
-	ClosePty,
-	CreatePty,
-	CreatePtyForSession,
-	CreateSession,
-	DeleteSession,
-	GetWorktreeCleanupSetting,
-	InspectSessionWorktrees,
-	ListDaemonSessions,
-	ListPtys,
-	MoveSessionWorkspace,
-	SaveProject,
-	SetProjectWorktreeCleanupSetting,
-	SetSessionSettled,
-	SetWorktreeCleanupSetting,
-} from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { PtyHostClient } from "../../../src/lib/terminal/pty-host-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -159,30 +142,26 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		await fixture.restart({ startupTimeoutMs: 120_000 });
 		const socket = join(fixture.configDir, "relay.sock");
 		const sessions = (projectSlug = "process-test") =>
-			sendRpcRequest(
-				socket,
-				new ListDaemonSessions({
-					projectSlug,
-					scope: projectSlug,
-				}),
-			);
+			sendRpcRequest(socket, {
+				_tag: "ListDaemonSessions",
+				projectSlug,
+				scope: projectSlug,
+			});
 		const create = async (
 			title: string,
 			newWorktree = true,
 			project = { slug: "process-test", directory: fixture.projectDir },
 		) => {
-			const result = await sendRpcRequest(
-				socket,
-				new CreateSession({
-					projectSlug: project.slug,
-					originId: "cleanup-test",
-					providerId: "claude",
-					permissionMode: "ask",
-					model: { providerId: "claude", modelId: "sonnet" },
-					title,
-					...(newWorktree ? { newWorktree: true } : {}),
-				}),
-			);
+			const result = await sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				projectSlug: project.slug,
+				originId: "cleanup-test",
+				providerId: "claude",
+				permissionMode: "ask",
+				model: { providerId: "claude", modelId: "sonnet" },
+				title,
+				...(newWorktree ? { newWorktree: true } : {}),
+			});
 			const session = (await sessions(project.slug)).sessions.find(
 				({ id }) => id === result.sessionId,
 			);
@@ -200,19 +179,18 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			return { id: result.sessionId, path: path ?? project.directory, branch };
 		};
 		const settle = (sessionId: string) =>
-			sendRpcRequest(
-				socket,
-				new SetSessionSettled({
-					sessionId,
-					settled: true,
-				}),
-			);
+			sendRpcRequest(socket, {
+				_tag: "SetSessionSettled",
+				sessionId,
+				settled: true,
+			});
 		const sweep = async (label: string, projectSlug?: string) => {
 			const result = await sendRpcRequest(
 				socket,
-				new CleanUpWorktreesNow(
-					projectSlug === undefined ? {} : { projectSlug },
-				),
+				{
+					_tag: "CleanUpWorktreesNow",
+					...(projectSlug === undefined ? {} : { projectSlug }),
+				},
 				{ requestTimeoutMs: 30_000 },
 			);
 			(evidence["sweeps"] as unknown[]).push({ label, ...result });
@@ -229,22 +207,18 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			return result;
 		};
 		const setting = (projectSlug?: string) =>
-			sendRpcRequest(
-				socket,
-				new GetWorktreeCleanupSetting(
-					projectSlug === undefined ? {} : { projectSlug },
-				),
-			);
+			sendRpcRequest(socket, {
+				_tag: "GetWorktreeCleanupSetting",
+				...(projectSlug === undefined ? {} : { projectSlug }),
+			});
 		const set = async (value: Partial<CleanupSetting>) => {
 			const worktreeCleanup = { ...defaults, ...value };
 			expect(
-				await sendRpcRequest(
-					socket,
-					new SetWorktreeCleanupSetting({
-						scope: "global",
-						rules: worktreeCleanup,
-					}),
-				),
+				await sendRpcRequest(socket, {
+					_tag: "SetWorktreeCleanupSetting",
+					scope: "global",
+					rules: worktreeCleanup,
+				}),
 			).toEqual({ global: worktreeCleanup });
 			return worktreeCleanup;
 		};
@@ -252,14 +226,12 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			override: ProjectWorktreeCleanup | null,
 			projectSlug = "process-test",
 		) => {
-			const result = await sendRpcRequest(
-				socket,
-				new SetProjectWorktreeCleanupSetting({
-					scope: "project",
-					projectSlug,
-					override,
-				}),
-			);
+			const result = await sendRpcRequest(socket, {
+				_tag: "SetWorktreeCleanupSetting",
+				scope: "project",
+				projectSlug,
+				override,
+			});
 			expect(result.project).toEqual(override);
 			return result;
 		};
@@ -351,13 +323,11 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		expect(
 			git(fixture.projectDir, "rev-parse", `refs/heads/${session.branch}`),
 		).toBe(head);
-		const rows = await sendRpcRequest(
-			socket,
-			new ListDaemonSessions({
-				projectSlug: "process-test",
-				scope: "process-test",
-			}),
-		);
+		const rows = await sendRpcRequest(socket, {
+			_tag: "ListDaemonSessions",
+			projectSlug: "process-test",
+			scope: "process-test",
+		});
 		expect(
 			rows.sessions.find(({ id }) => id === session.id)?.workspace?.worktrees[
 				fixture.projectDir
@@ -664,17 +634,16 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 	it("keeps a checkout with a hosted terminal after daemon restart until it closes", async () => {
 		const { fixture, socket, create, settle, enable, sweep } = await start();
 		const session = await create("terminal ownership");
-		await sendRpcRequest(
-			socket,
-			new CreatePtyForSession({
-				sessionId: session.id,
-				originId: "cleanup-test",
-			}),
-		);
-		const { ptys } = await sendRpcRequest(
-			socket,
-			new ListPtys({ projectSlug: "process-test", originId: "cleanup-test" }),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "CreatePty",
+			sessionId: session.id,
+			originId: "cleanup-test",
+		});
+		const { ptys } = await sendRpcRequest(socket, {
+			_tag: "ListPtys",
+			projectSlug: "process-test",
+			originId: "cleanup-test",
+		});
 		const pty = ptys.find(({ cwd }) => cwd === session.path);
 		expect(pty?.status).toBe("running");
 		if (!pty) throw new Error("Worktree terminal was not created");
@@ -694,10 +663,11 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		});
 		expect(existsSync(session.path)).toBe(true);
 		evidence["terminal"] = { id: pty.id, cwd: pty.cwd, pid: pty.pid };
-		await sendRpcRequest(
-			socket,
-			new ClosePty({ projectSlug: "process-test", ptyId: pty.id }),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "ClosePty",
+			projectSlug: "process-test",
+			ptyId: pty.id,
+		});
 		const removed = await sweep("terminal closed");
 		expect(
 			removed.removed.some(({ sessionId }) => sessionId === session.id),
@@ -757,10 +727,11 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const session = await create("cross-project terminal");
 		// Start the fixture host, then retain a terminal whose owning project
 		// differs from its cwd through the host's public protocol.
-		await sendRpcRequest(
-			socket,
-			new CreatePty({ projectSlug: "process-test", originId: "cleanup-test" }),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "CreatePty",
+			projectSlug: "process-test",
+			originId: "cleanup-test",
+		});
 		const host = await PtyHostClient.connect({
 			configDir: fixture.configDir,
 			start: false,
@@ -804,13 +775,11 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const { socket, create, settle, enable, sweep } = await start();
 		const owner = await create("shared owner");
 		const other = await create("shared user", false);
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId: other.id,
-				path: owner.path,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId: other.id,
+			path: owner.path,
+		});
 		await settle(owner.id);
 		await enable(owner, { onSettle: "keep", settledAfterDays: 0 });
 		const result = await sweep("shared checkout");
@@ -851,24 +820,20 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			}),
 		);
 		await fixture.restart({ startupTimeoutMs: 120_000 });
-		const other = await sendRpcRequest(
-			socket,
-			new CreateSession({
-				projectSlug,
-				originId: "cleanup-test",
-				providerId: "claude",
-				permissionMode: "ask",
-				model: { providerId: "claude", modelId: "sonnet" },
-				title: "Registered project session",
-			}),
-		);
-		const rows = await sendRpcRequest(
-			socket,
-			new ListDaemonSessions({
-				projectSlug,
-				scope: projectSlug,
-			}),
-		);
+		const other = await sendRpcRequest(socket, {
+			_tag: "CreateSession",
+			projectSlug,
+			originId: "cleanup-test",
+			providerId: "claude",
+			permissionMode: "ask",
+			model: { providerId: "claude", modelId: "sonnet" },
+			title: "Registered project session",
+		});
+		const rows = await sendRpcRequest(socket, {
+			_tag: "ListDaemonSessions",
+			projectSlug,
+			scope: projectSlug,
+		});
 		const row = rows.sessions.find(({ id }) => id === other.sessionId);
 		expect(row).toBeDefined();
 		expect(row?.workspace ?? null).toBeNull();
@@ -945,12 +910,10 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const head = git(session.path, "rev-parse", "HEAD");
 		await settle(session.id);
 		writeFileSync(join(session.path, "base.txt"), "cleanup guard\n");
-		await sendRpcRequest(
-			socket,
-			new DeleteSession({
-				sessionId: session.id,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "DeleteSession",
+			sessionId: session.id,
+		});
 		expect(existsSync(session.path)).toBe(true);
 		await enable(session, { onSettle: "nothing-missing", settledAfterDays: 0 });
 		const kept = await sweep("deleted without onDelete");
@@ -983,14 +946,14 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		writeFileSync(join(directory, "base.txt"), "Off project base\n");
 		git(directory, "add", "base.txt");
 		commit(directory, "Off project base");
-		const { savedSlug: slug } = await sendRpcRequest(
-			socket,
-			new SaveProject({ folders: [directory] }),
-		);
+		const { savedSlug: slug } = await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			folders: [directory],
+		});
 		const remove = await create("Custom delete rule");
 		const ask = await create("Off delete rule", true, { slug, directory });
 		const inspect = (sessionId: string) =>
-			sendRpcRequest(socket, new InspectSessionWorktrees({ sessionId }));
+			sendRpcRequest(socket, { _tag: "InspectSessionWorktrees", sessionId });
 		// Both relays are already loaded. Changes must be read at inspection time.
 		for (const session of [remove, ask]) {
 			expect((await inspect(session.id)).onDelete).toBe("ask");
@@ -1018,7 +981,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		}));
 		const deletions = await Promise.all(
 			payloads.map((payload) =>
-				sendRpcRequest(socket, new DeleteSession(payload)),
+				sendRpcRequest(socket, { _tag: "DeleteSession", ...payload }),
 			),
 		);
 		for (const deletion of deletions) {
@@ -1070,7 +1033,10 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			checkoutExists: existsSync(session.path),
 		};
 		expect(existsSync(session.path)).toBe(true);
-		const deletion = await sendRpcRequest(socket, new DeleteSession(payload));
+		const deletion = await sendRpcRequest(socket, {
+			_tag: "DeleteSession",
+			...payload,
+		});
 		evidence["deletionResponse"] = deletion;
 		expect(deletion.ok).toBe(true);
 		expect(deletion.worktreeWarnings ?? []).toEqual([]);
@@ -1094,13 +1060,11 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const session = await create("deferred removal");
 		const head = git(session.path, "rev-parse", "HEAD");
 		writeFileSync(join(session.path, "base.txt"), "unfinished work\n");
-		const deletion = await sendRpcRequest(
-			socket,
-			new DeleteSession({
-				sessionId: session.id,
-				removeWorktrees: true,
-			}),
-		);
+		const deletion = await sendRpcRequest(socket, {
+			_tag: "DeleteSession",
+			sessionId: session.id,
+			removeWorktrees: true,
+		});
 		evidence["deletion"] = deletion;
 		expect(deletion.worktreeWarnings?.join(" ")).toMatch(/uncommitted/i);
 		expect(existsSync(session.path)).toBe(true);
@@ -1135,10 +1099,11 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const { fixture, socket, create, enable, sweep } = await start();
 		const session = await create("delete keep level");
 		const head = git(session.path, "rev-parse", "HEAD");
-		await sendRpcRequest(
-			socket,
-			new DeleteSession({ sessionId: session.id, removeWorktrees: false }),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "DeleteSession",
+			sessionId: session.id,
+			removeWorktrees: false,
+		});
 		await enable(session, { onSettle: "keep", onDelete: true, keepWhen });
 		writeFileSync(join(session.path, file), "local work\n");
 		const keep =
@@ -1467,10 +1432,10 @@ syncBuiltinESMExports();
 		writeFileSync(join(directory, "base.txt"), "other project\n");
 		git(directory, "add", "base.txt");
 		commit(directory, "Other project base");
-		const { savedSlug: slug } = await sendRpcRequest(
-			socket,
-			new SaveProject({ folders: [directory] }),
-		);
+		const { savedSlug: slug } = await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			folders: [directory],
+		});
 		const first = await create("project request");
 		const second = await create("global request", true, { slug, directory });
 		for (const session of [first, second]) {
@@ -1518,14 +1483,12 @@ syncBuiltinESMExports();
 		};
 		await setProject(custom);
 		// Ordinary project edits must preserve an override supplied through Settings.
-		await sendRpcRequest(
-			socket,
-			new SaveProject({
-				slug: "process-test",
-				folders: [fixture.projectDir],
-				title: "Renamed project",
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [fixture.projectDir],
+			title: "Renamed project",
+		});
 		expect((await setting("process-test")).project).toEqual(custom);
 		for (const override of [custom, "off"] as const) {
 			await setProject(override);

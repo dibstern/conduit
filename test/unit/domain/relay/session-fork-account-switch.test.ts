@@ -373,10 +373,10 @@ it.each([
 					(row) => row.id,
 				),
 			).toEqual(["first", "before"]);
-			const rejected = yield* Effect.either(
+			const rejected = yield* Effect.result(
 				forkSession("parent", { messageId: "uncovered" }),
 			);
-			expect(rejected._tag).toBe("Left");
+			expect(rejected._tag).toBe("Failure");
 			const child = yield* forkSession("parent");
 			const history = yield* read.getSessionMessagesWithParts(child.id);
 			expect

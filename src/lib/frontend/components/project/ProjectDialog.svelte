@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Rpc } from "effect/rpc";
 	import { onMount, tick } from "svelte";
 	import type { SessionMode } from "../../../contracts/project-file.js";
 	import {
@@ -56,8 +57,8 @@
 		onclose: () => void;
 		onsaved?: (response: SaveProjectResponse) => void;
 		returnFocus?: () => HTMLElement | null;
-		findFolders?: (input: ConstructorParameters<typeof FindFolders>[0]) => Promise<FindFoldersResponse>;
-		saveProject?: (input: ConstructorParameters<typeof SaveProject>[0]) => Promise<SaveProjectResponse>;
+		findFolders?: (input: Rpc.PayloadConstructor<typeof FindFolders>) => Promise<FindFoldersResponse>;
+		saveProject?: (input: Rpc.PayloadConstructor<typeof SaveProject>) => Promise<SaveProjectResponse>;
 	} = $props();
 
 	const uid = $props.id();

@@ -1,5 +1,6 @@
-import { Socket, SocketServer } from "@effect/platform";
 import { Effect } from "effect";
+import { NetAddress } from "effect/net";
+import { Socket, SocketServer } from "effect/socket";
 
 /** One connection, matching ws-rpc-handler.ts, with bytes instead of OS sockets. */
 export const makeFakeSocketServer = Effect.gen(function* () {
@@ -30,9 +31,9 @@ export const makeFakeSocketServer = Effect.gen(function* () {
 		}),
 	);
 	const socketServer = SocketServer.SocketServer.of({
-		address: { _tag: "TcpAddress", hostname: "websocket", port: 0 },
+		address: NetAddress.inetAddressUnsafe(NetAddress.ipv4Unspecified, 0),
 		run: (handler) =>
-			handler(socket).pipe(Effect.orDie, Effect.zipRight(Effect.never)),
+			handler(socket).pipe(Effect.orDie, Effect.andThen(Effect.never)),
 	});
 	return { socketServer, clientSocket, clientFrames, serverFrames };
 });

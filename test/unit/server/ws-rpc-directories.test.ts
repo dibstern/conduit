@@ -1,9 +1,9 @@
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
@@ -65,7 +65,7 @@ describe("WsRpcServerLayer FindFolders", () => {
 					},
 				],
 			});
-		}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
+		}).pipe(Effect.scoped, Effect.provide(rpcLayer, { local: true })),
 	);
 
 	it.effect("normalizes and deduplicates the exact existing folder", () =>
@@ -87,7 +87,7 @@ describe("WsRpcServerLayer FindFolders", () => {
 					},
 				],
 			});
-		}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
+		}).pipe(Effect.scoped, Effect.provide(rpcLayer, { local: true })),
 	);
 
 	it.effect(
@@ -118,7 +118,7 @@ describe("WsRpcServerLayer FindFolders", () => {
 				expect(entries.some((entry) => entry.path.endsWith(".hidden"))).toBe(
 					false,
 				);
-			}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
+			}).pipe(Effect.scoped, Effect.provide(rpcLayer, { local: true })),
 	);
 
 	it.effect("expands the current user's home directory", () =>
@@ -131,7 +131,7 @@ describe("WsRpcServerLayer FindFolders", () => {
 			expect(entries.every((entry) => entry.path === resolve(entry.path))).toBe(
 				true,
 			);
-		}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
+		}).pipe(Effect.scoped, Effect.provide(rpcLayer, { local: true })),
 	);
 
 	it.effect("identifies git directories and worktree git files", () =>
@@ -161,7 +161,7 @@ describe("WsRpcServerLayer FindFolders", () => {
 				{ path: `${root}/project-c`, isGitRepo: false },
 				{ path: `${root}/project`, isGitRepo: false },
 			]);
-		}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
+		}).pipe(Effect.scoped, Effect.provide(rpcLayer, { local: true })),
 	);
 
 	it.effect("returns no suggestions for non-path queries", () =>
@@ -176,7 +176,7 @@ describe("WsRpcServerLayer FindFolders", () => {
 				home: homedir(),
 				entries: [],
 			});
-		}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
+		}).pipe(Effect.scoped, Effect.provide(rpcLayer, { local: true })),
 	);
 
 	it.effect("returns the typed new folder when its parent is missing", () =>
@@ -189,7 +189,7 @@ describe("WsRpcServerLayer FindFolders", () => {
 				home: homedir(),
 				entries: [{ path, isGitRepo: false, reason: "match", exists: false }],
 			});
-		}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
+		}).pipe(Effect.scoped, Effect.provide(rpcLayer, { local: true })),
 	);
 
 	it.effect(
@@ -202,12 +202,12 @@ describe("WsRpcServerLayer FindFolders", () => {
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
 
 				for (const query of [path, `${path}/child`]) {
-					const result = yield* Effect.either(client.FindFolders({ query }));
-					expect(result._tag).toBe("Left");
-					if (result._tag === "Left")
-						expect(result.left.message).toMatch(/not a directory|ENOTDIR/i);
+					const result = yield* Effect.result(client.FindFolders({ query }));
+					expect(result._tag).toBe("Failure");
+					if (result._tag === "Failure")
+						expect(result.failure.message).toMatch(/not a directory|ENOTDIR/i);
 				}
-			}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
+			}).pipe(Effect.scoped, Effect.provide(rpcLayer, { local: true })),
 	);
 
 	it.effect(
@@ -222,16 +222,16 @@ describe("WsRpcServerLayer FindFolders", () => {
 					() => tryFs(() => chmod(blocked, 0o700)).pipe(Effect.orDie),
 				);
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					client.FindFolders({ query: `${blocked}/missing` }),
 				);
 
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left")
-					expect(result.left).toMatchObject({
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure")
+					expect(result.failure).toMatchObject({
 						_tag: "ProjectSaveRejected",
 						issues: [{ kind: "permission-denied", path: `${blocked}/missing` }],
 					});
-			}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
+			}).pipe(Effect.scoped, Effect.provide(rpcLayer, { local: true })),
 	);
 });

@@ -357,7 +357,7 @@ describe("Claude turn status before the model streams", () => {
 		}, 15_000);
 		const inputId = randomUUID();
 		await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				...payload,
 				inputId,
 				delivery: "queue",

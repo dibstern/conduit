@@ -1,6 +1,6 @@
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Struct } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import * as Contracts from "../../../src/lib/contracts/ws-rpc.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
@@ -20,10 +20,10 @@ describe("RPC registration", () => {
 
 	it("requires a handler for every group member", () => {
 		// @ts-expect-error Omitting a group member must fail registration.
-		WsRpcGroup.of(Struct.omit(Server.wsRpcHandlers, "GetStatus"));
+		WsRpcGroup.of(Struct.omit(Server.wsRpcHandlers, ["GetStatus"]));
 	});
 
-	it.scoped("ignores daemon hooks outside the RPC group", () =>
+	it.effect("ignores daemon hooks outside the RPC group", () =>
 		Effect.gen(function* () {
 			const handlers = yield* DaemonWsRpcHandlersTag;
 			const nonRpcHook = vi.fn(() => Effect.void);
@@ -34,11 +34,12 @@ describe("RPC registration", () => {
 						...handlers,
 						nonRpcHook,
 					}),
+					{ local: true },
 				),
 			);
 			expect((yield* client.GetProjects({})).projects).toEqual([]);
 			expect(nonRpcHook).not.toHaveBeenCalled();
 			expect(resolve).not.toHaveBeenCalled();
-		}).pipe(Effect.provide(makeDaemonRpcTestLayer())),
+		}).pipe(Effect.provide(makeDaemonRpcTestLayer(), { local: true })),
 	);
 });

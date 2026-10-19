@@ -39,9 +39,9 @@ const bedrockModel = (id: string, name: string) => ({
 
 layer(
 	Layer.mergeAll(
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		makePersistenceEffectLayer(":memory:", "test-project"),
-		Layer.succeed(ConfigTag, makeMockConfig()),
+		Layer.succeed(ConfigTag)(makeMockConfig()),
 		ProjectSettingsLive,
 		RpcSubscriptionScopeLive,
 	),
@@ -112,26 +112,27 @@ layer(
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeModelServiceTag, modelService),
-				Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-				Layer.succeed(LoggerTag, makeMockLogger()),
-				Layer.succeed(
-					OrchestrationEngineTag,
+				Layer.succeed(OpenCodeModelServiceTag)(modelService),
+				Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+				Layer.succeed(LoggerTag)(makeMockLogger()),
+				Layer.succeed(OrchestrationEngineTag)(
 					withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [] })) }),
 				),
 				makeOverridesStateLive(),
 			);
 
 			return getModelsResponse().pipe(
-				Effect.provide(layer),
-				Effect.tap((response) => {
-					const openai = response.providers.find((p) => p.id === "openai");
-					expect(openai?.models.map((m) => m.name)).toEqual([
-						"gpt-4.1",
-						"GPT-5.6 Sol",
-						"o3",
-					]);
-				}),
+				Effect.provide(layer, { local: true }),
+				Effect.tap((response) =>
+					Effect.sync(() => {
+						const openai = response.providers.find((p) => p.id === "openai");
+						expect(openai?.models.map((m) => m.name)).toEqual([
+							"gpt-4.1",
+							"GPT-5.6 Sol",
+							"o3",
+						]);
+					}),
+				),
 			);
 		},
 	);
@@ -171,33 +172,34 @@ layer(
 			persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 		};
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeModelServiceTag, modelService),
-			Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-			Layer.succeed(LoggerTag, makeMockLogger()),
-			Layer.succeed(
-				OrchestrationEngineTag,
+			Layer.succeed(OpenCodeModelServiceTag)(modelService),
+			Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+			Layer.succeed(LoggerTag)(makeMockLogger()),
+			Layer.succeed(OrchestrationEngineTag)(
 				withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [] })) }),
 			),
 			makeOverridesStateLive(),
 		);
 
 		return getModelsResponse().pipe(
-			Effect.provide(layer),
-			Effect.tap((response) => {
-				const bedrock = response.providers.find(
-					(p) => p.id === "amazon-bedrock",
-				);
-				expect(bedrock?.models).toHaveLength(1);
-				expect(bedrock?.models[0]).toMatchObject({
-					id: "global.anthropic.claude-fable-5",
-					name: "Claude Fable 5",
-				});
-				expect(bedrock?.models[0]?.routingOptions).toHaveLength(2);
+			Effect.provide(layer, { local: true }),
+			Effect.tap((response) =>
+				Effect.sync(() => {
+					const bedrock = response.providers.find(
+						(p) => p.id === "amazon-bedrock",
+					);
+					expect(bedrock?.models).toHaveLength(1);
+					expect(bedrock?.models[0]).toMatchObject({
+						id: "global.anthropic.claude-fable-5",
+						name: "Claude Fable 5",
+					});
+					expect(bedrock?.models[0]?.routingOptions).toHaveLength(2);
 
-				const openai = response.providers.find((p) => p.id === "openai");
-				expect(openai?.models[0]).toMatchObject({ id: "us.gpt-5.6-sol" });
-				expect(openai?.models[0]).not.toHaveProperty("routingOptions");
-			}),
+					const openai = response.providers.find((p) => p.id === "openai");
+					expect(openai?.models[0]).toMatchObject({ id: "us.gpt-5.6-sol" });
+					expect(openai?.models[0]).not.toHaveProperty("routingOptions");
+				}),
+			),
 		);
 	});
 });

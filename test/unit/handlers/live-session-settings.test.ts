@@ -3,9 +3,9 @@
 // already has, so sending only the field that changed reads as "cleared" and
 // silently resets the other two.
 
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { applyLiveSessionSettings } from "../../../src/lib/handlers/model.js";
@@ -42,7 +42,7 @@ const layerFor = (instance: ProviderInstance) =>
 	Layer.mergeAll(
 		makePersistenceEffectLayer(":memory:", "test-project"),
 		ProviderRegistryLive([instance]),
-		Layer.succeed(LoggerTag, makeMockLogger()),
+		Layer.succeed(LoggerTag)(makeMockLogger()),
 	);
 
 const seedSessionPick = (pick: {
@@ -85,7 +85,7 @@ describe("applyLiveSessionSettings", () => {
 					contextWindow: "1m",
 					variant: "high",
 				});
-			}).pipe(Effect.provide(layerFor(instance)));
+			}).pipe(Effect.provide(layerFor(instance), { local: true }));
 		},
 	);
 
@@ -126,7 +126,7 @@ describe("applyLiveSessionSettings", () => {
 					variant: "high",
 					context_window: "1m",
 				});
-			}).pipe(Effect.provide(layerFor(instance)));
+			}).pipe(Effect.provide(layerFor(instance), { local: true }));
 		},
 	);
 
@@ -143,6 +143,6 @@ describe("applyLiveSessionSettings", () => {
 			});
 			yield* applyLiveSessionSettings("s1");
 			expect(applySpy).not.toHaveBeenCalled();
-		}).pipe(Effect.provide(layerFor(instance)));
+		}).pipe(Effect.provide(layerFor(instance), { local: true }));
 	});
 });

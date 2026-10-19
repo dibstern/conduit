@@ -14,8 +14,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Effect, Layer, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, it } from "vitest";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
 import {
@@ -42,7 +42,7 @@ const withPersistence = async (
 ) => {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-session-attention-"));
 	const advances: ReadModelAdvance[] = [];
-	const bus = Layer.succeed(SessionEventBusTag, {
+	const bus = Layer.succeed(SessionEventBusTag)({
 		publish: () => Effect.void,
 		publishAdvance: (advance) => Effect.sync(() => void advances.push(advance)),
 		subscribe: () => Effect.succeed(Stream.empty),

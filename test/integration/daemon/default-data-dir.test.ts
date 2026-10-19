@@ -13,7 +13,7 @@ import { createServer } from "node:net";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { GetProjects, GetStatus } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 
 // Failure cases: first startup chooses the wrong directory, explicit XDG loses,
@@ -185,10 +185,12 @@ Object.assign(ClaudeDriver, { create: deps => create({ ...deps,
 			result.resolvedDir = `~/${relative(home, configDir).split("\\").join("/")}`;
 			expect(result.resolvedDir).toBe(`~/${expected}`);
 			const socket = join(configDir, "relay.sock");
-			const status = await sendRpcRequest(socket, new GetStatus({}));
+			const status = await sendRpcRequest(socket, { _tag: "GetStatus" });
 			expect(status.port).toBe(port);
 			if (name === "legacy-project") {
-				const { projects } = await sendRpcRequest(socket, new GetProjects({}));
+				const { projects } = await sendRpcRequest(socket, {
+					_tag: "GetProjects",
+				});
 				result.seededProjectReachable = projects.some(
 					(entry) =>
 						entry.slug === "seeded-project" && entry.folders.includes(project),

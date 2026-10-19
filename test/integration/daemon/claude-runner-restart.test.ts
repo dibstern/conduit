@@ -578,7 +578,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 					.pipe(Effect.timeout("15 seconds")),
 			);
 			cachedFailure = await Effect.runPromise(
-				Effect.either(
+				Effect.result(
 					direct.commandEffect(
 						command.command_id,
 						{
@@ -594,7 +594,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 					),
 				).pipe(Effect.timeout("15 seconds")),
 			);
-			expect(cachedFailure).toMatchObject({ _tag: "Left" });
+			expect(cachedFailure).toMatchObject({ _tag: "Failure" });
 			await new Promise<void>((resolve) => {
 				socket.once("close", resolve);
 				direct?.destroy();
@@ -885,7 +885,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 			);
 			const steer = "recovery-steer";
 			const submitted = await Effect.runPromise(
-				after.rpc.input.submit({
+				after.rpc["input.submit"]({
 					sessionId,
 					inputId: randomUUID(),
 					originId: after.originId,

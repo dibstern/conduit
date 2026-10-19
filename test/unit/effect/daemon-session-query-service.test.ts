@@ -12,9 +12,9 @@ describe("standalone DaemonSessionQueryServiceLive", () => {
 		() =>
 			Effect.gen(function* () {
 				const service = yield* DaemonSessionQueryServiceTag;
-				expect(yield* Effect.either(service.list({ limit: 5 }))).toMatchObject({
-					_tag: "Left",
-					left: {
+				expect(yield* Effect.result(service.list({ limit: 5 }))).toMatchObject({
+					_tag: "Failure",
+					failure: {
 						_tag: "DaemonSessionQueryNotSupported",
 						message:
 							"Cross-project session listing is not supported in this mode",

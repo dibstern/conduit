@@ -1,6 +1,6 @@
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
@@ -19,15 +19,15 @@ describe("WsRpcServerLayer RewindSession", () => {
 		const api = makeMockOpenCodeAPI();
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				client.RewindSession({
 					sessionId: "session-1",
 					messageId: "client-only-uuid",
 				}),
 			);
 			expect(result).toMatchObject({
-				_tag: "Left",
-				left: {
+				_tag: "Failure",
+				failure: {
 					_tag: "WsRpcError",
 					message: expect.stringContaining("not found"),
 				},
@@ -55,6 +55,7 @@ describe("WsRpcServerLayer RewindSession", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -108,6 +109,7 @@ describe("WsRpcServerLayer RewindSession", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});

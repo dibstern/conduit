@@ -89,11 +89,11 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 			for (const line of payload.toString().split("\n").filter(Boolean)) {
 				const request = JSON.parse(line) as {
 					_tag: string;
-					id: string;
+					id: string | number;
 					tag: string;
 				};
 				if (request._tag === "Request" && startupLoads.includes(request.tag)) {
-					requests.set(request.id, request.tag);
+					requests.set(String(request.id), request.tag);
 					if (restarting) restartSent.add(request.tag);
 				}
 				if (restarting && restartSent.size === startupLoads.length)
@@ -104,14 +104,14 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 			for (const line of payload.toString().split("\n").filter(Boolean)) {
 				const response = JSON.parse(line) as {
 					_tag: string;
-					requestId: string;
+					requestId: string | number;
 					exit: { _tag: string };
 				};
 				// Any server Exit counts: the bug fails the call client-side before a
 				// frame is sent. This harness has no daemon, so ListDaemonSessions
 				// is answered with a typed "not supported" Failure.
 				if (response._tag !== "Exit") continue;
-				const tag = requests.get(response.requestId);
+				const tag = requests.get(String(response.requestId));
 				if (tag) answered.add(tag);
 				if (restarting && restartAnswered.size === startupLoads.length)
 					allAnsweredAt ??= Date.now();

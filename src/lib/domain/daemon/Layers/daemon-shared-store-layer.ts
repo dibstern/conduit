@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import type { DaemonConfig } from "../../../daemon/config-persistence.js";
 import {
 	makePersistenceStoreLayer,

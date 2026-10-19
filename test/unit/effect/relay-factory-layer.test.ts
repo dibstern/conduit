@@ -3,9 +3,9 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
-import { Context, Effect, Layer, Option, PubSub, Queue, Ref } from "effect";
+import { Context, Effect, Layer, Option, PubSub, Ref } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { PortScannerTag } from "../../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
 import {
@@ -105,7 +105,7 @@ describe("HttpServerRefTag", () => {
 describe("RelayFactoryTag", () => {
 	const configLayer = Layer.mergeAll(
 		makeDaemonStoreTestLayer(),
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		InstanceHealthCheckLive,
 		DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 		ConfigPersistenceNoopLive,
@@ -115,15 +115,15 @@ describe("RelayFactoryTag", () => {
 		makeInstanceManagerStateLive(undefined, [], {
 			launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
 		}),
-		Layer.succeed(PortScannerTag, {
+		Layer.succeed(PortScannerTag)({
 			getKnownPorts: () => Effect.succeed(new Set<number>()),
 			scanNow: () => Effect.succeed({ discovered: [], lost: [], active: [] }),
 		}),
-		Layer.succeed(VersionCheckerTag, {
+		Layer.succeed(VersionCheckerTag)({
 			getLatestKnown: () => Effect.succeed(null),
 			getCurrentVersion: () => Effect.succeed("unknown"),
 		}),
-		Layer.succeed(PushManagerTag, {
+		Layer.succeed(PushManagerTag)({
 			subscribe: () => Effect.void,
 			unsubscribe: () => Effect.void,
 			broadcast: () => Effect.void,
@@ -140,7 +140,7 @@ describe("RelayFactoryTag", () => {
 	const factoryLayer = RelayFactoryLive("/tmp/test-conduit").pipe(
 		Layer.provideMerge(configLayer),
 		Layer.provide(
-			Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
+			Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
 		),
 	);
 
@@ -172,11 +172,11 @@ describe("RelayFactoryTag", () => {
 
 			const result = yield* factory
 				.create(project)
-				.pipe(Effect.scoped, Effect.either);
+				.pipe(Effect.scoped, Effect.result);
 
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				const error = result.left;
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
+				const error = result.failure;
 				expect(error).toBeInstanceOf(RelayFactoryError);
 				expect(error._tag).toBe("RelayFactoryError");
 				expect(error.reason).toBe("HTTP server not started");
@@ -201,10 +201,10 @@ describe("RelayFactoryTag", () => {
 						title: "Missing",
 						folders: [missingDirectory],
 					})
-					.pipe(Effect.either);
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left")
-					expect(result.left.reason).toContain("directory does not exist");
+					.pipe(Effect.result);
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure")
+					expect(result.failure.reason).toContain("directory does not exist");
 				expect(existsSync(missingDirectory)).toBe(false);
 				expect(createProjectRelayMock).not.toHaveBeenCalled();
 			}).pipe(
@@ -255,7 +255,7 @@ describe("RelayFactoryTag", () => {
 						Layer.mergeAll(
 							configLayer,
 							makeSharedSessionDirectoryLive.pipe(Layer.provide(configLayer)),
-							Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
+							Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
 						),
 					),
 				),
@@ -311,13 +311,17 @@ describe("RelayFactoryTag", () => {
 					Effect.provideService(DaemonEventBusTag, bus),
 				);
 				yield* PubSub.publish(bus, DaemonEvent.DaemonSessionsChanged());
-				const first = yield* Queue.take(subscription);
+				const first = yield* PubSub.take(subscription);
 				expect(first).toMatchObject({ _tag: "ProjectsChanged" });
 				expect(yield* projectInfos).toMatchObject([
 					{ slug: "git-project", git: { branch: "main", dirty: false } },
 				]);
-				yield* Queue.take(subscription); // DaemonSessionsChanged
-				expect(Array.from(yield* Queue.takeAll(subscription))).toHaveLength(0);
+				yield* PubSub.take(subscription); // DaemonSessionsChanged
+				expect(
+					Array.from(
+						yield* PubSub.takeUpTo(subscription, Number.POSITIVE_INFINITY),
+					),
+				).toHaveLength(0);
 
 				writeFileSync(join(directory, "untracked"), "changed");
 				yield* Effect.promise(() => daemonSessionGitCache.refresh(directory));
@@ -326,12 +330,12 @@ describe("RelayFactoryTag", () => {
 					Effect.provideService(DaemonEventBusTag, bus),
 				);
 				yield* PubSub.publish(bus, DaemonEvent.DaemonSessionsChanged());
-				const changed = yield* Queue.take(subscription);
+				const changed = yield* PubSub.take(subscription);
 				expect(changed).toMatchObject({ _tag: "ProjectsChanged" });
 				expect(yield* projectInfos).toMatchObject([
 					{ slug: "git-project", git: { dirty: true } },
 				]);
-				yield* Queue.take(subscription);
+				yield* PubSub.take(subscription);
 			}).pipe(
 				Effect.scoped,
 				Effect.provide(Layer.fresh(factoryLayer)),

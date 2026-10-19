@@ -42,19 +42,19 @@ export interface DaemonRuntimeConfig {
 	readonly persistedSessionCounts: ReadonlyMap<string, number>;
 }
 
-export class DaemonConfigRefTag extends Context.Tag("DaemonConfigRef")<
+export class DaemonConfigRefTag extends Context.Service<
 	DaemonConfigRefTag,
 	Ref.Ref<DaemonRuntimeConfig>
->() {}
+>()("DaemonConfigRef") {}
 
 export interface DaemonConfigMirror {
 	readonly set: (config: DaemonRuntimeConfig) => Effect.Effect<void>;
 }
 
-export class DaemonConfigMirrorTag extends Context.Tag("DaemonConfigMirror")<
+export class DaemonConfigMirrorTag extends Context.Service<
 	DaemonConfigMirrorTag,
 	DaemonConfigMirror
->() {}
+>()("DaemonConfigMirror") {}
 
 export const DaemonConfigMirrorLive = (mirror: DaemonConfigMirror) =>
 	Layer.succeed(DaemonConfigMirrorTag, mirror);

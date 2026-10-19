@@ -385,13 +385,13 @@ test.describe("Notification → session navigation (replay)", () => {
 							(msg["payload"] as { sessionId?: unknown } | undefined)
 								?.sessionId === watchedId,
 					)
-					.map((msg) => msg["id"]);
+					.map((msg) => String(msg["id"]));
 				return receivedFrames
 					.map(parse)
 					.some(
 						(msg) =>
 							msg["_tag"] === "Exit" &&
-							requestIds.includes(msg["requestId"]) &&
+							requestIds.includes(String(msg["requestId"])) &&
 							(msg["exit"] as { _tag?: unknown } | undefined)?._tag ===
 								"Success",
 					);

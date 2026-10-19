@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import {
 	AgentLivenessTag,
@@ -46,7 +46,7 @@ export const stopQuiescentSettledAgents = (now: number) =>
 					}),
 				);
 			}).pipe(
-				Effect.catchAllCause((cause) =>
+				Effect.catchCause((cause) =>
 					Failure.isInterruptedOnly(cause)
 						? Effect.failCause(cause)
 						: Effect.logWarning("Could not stop settled session agent", {

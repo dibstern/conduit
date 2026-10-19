@@ -27,7 +27,6 @@ import {
 	Context,
 	Deferred,
 	Effect,
-	Either,
 	Exit,
 	Fiber,
 	FiberMap,
@@ -35,7 +34,9 @@ import {
 	HashSet,
 	Layer,
 	Ref,
+	Result,
 	type Scope,
+	Semaphore,
 } from "effect";
 import { accountsStateFromConfig } from "../../account-directory.js";
 import type { Account } from "../../contracts/account.js";
@@ -279,9 +280,10 @@ const emptyClaudeProviderRuntimeState = (): ClaudeProviderRuntimeState => ({
 	shutdownAfterTurn: HashSet.empty(),
 });
 
-export class ClaudeProviderRuntimeTag extends Context.Tag(
-	"ClaudeProviderRuntime",
-)<ClaudeProviderRuntimeTag, RunnerProviderInstance>() {}
+export class ClaudeProviderRuntimeTag extends Context.Service<
+	ClaudeProviderRuntimeTag,
+	RunnerProviderInstance
+>()("ClaudeProviderRuntime") {}
 
 export const makeClaudeProviderRuntime = (
 	deps: ClaudeProviderInstanceDeps,
@@ -301,7 +303,7 @@ export const makeClaudeProviderRuntime = (
 					: {}),
 				launchConfig: () =>
 					resolveClaudeLaunchConfig(
-						Either.getOrElse(
+						Result.getOrElse(
 							loadDaemonConfigResult(deps.daemonConfigDir),
 							(error) => {
 								if (error._tag === "NotFound") return null;
@@ -312,7 +314,7 @@ export const makeClaudeProviderRuntime = (
 			}));
 		const driver = makeClaudeRunnerDriver({ ...deps, capabilitiesService });
 		const accounts = Effect.suspend(() =>
-			loadDaemonConfigResult(deps.daemonConfigDir),
+			Effect.fromResult(loadDaemonConfigResult(deps.daemonConfigDir)),
 		).pipe(
 			Effect.catchTag("NotFound", () => Effect.succeed(defaultDaemonConfig())),
 			Effect.map((config) =>
@@ -372,7 +374,7 @@ export const makeClaudeSessionRunner = (
 								: {}),
 							launchConfig: () =>
 								resolveClaudeLaunchConfig(
-									Either.getOrElse(
+									Result.getOrElse(
 										loadDaemonConfigResult(deps.daemonConfigDir),
 										(error) => {
 											if (error._tag === "NotFound") return null;
@@ -416,7 +418,7 @@ export const makeClaudeSessionRunner = (
 export const ClaudeProviderRuntimeLive = (
 	deps: ClaudeProviderInstanceDeps,
 ): Layer.Layer<ClaudeProviderRuntimeTag, never, Scope.Scope> =>
-	Layer.scoped(ClaudeProviderRuntimeTag, makeClaudeProviderRuntime(deps));
+	Layer.effect(ClaudeProviderRuntimeTag, makeClaudeProviderRuntime(deps));
 
 function sessionFailure(operation: string, cause: unknown): SessionFailure {
 	const failure =
@@ -595,7 +597,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	preWarm(
 		command: Extract<SessionCommand, { type: "pre-warm" }>,
 	): Effect.Effect<void, SessionFailure> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			if (
 				(yield* getSession(this.stateRef, command.sessionId)) ||
 				(yield* getSetupLock(this.stateRef, command.sessionId))
@@ -614,7 +616,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		sessionId: string,
 		taskId: string,
 	): Effect.Effect<void, SessionFailure> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const ctx = yield* getSession(this.stateRef, sessionId);
 			if (!ctx || ctx.stopped)
 				return yield* Effect.fail(
@@ -644,7 +646,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		);
 	}
 	shutdownAfterTurn(sessionId: string): Effect.Effect<void, SessionFailure> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const ctx = yield* getSession(this.stateRef, sessionId);
 			if (!ctx && !this.sinks.hasSessionSinks(sessionId)) {
 				yield* this.warmedQueries.discardEffect(sessionId);
@@ -666,7 +668,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		return FiberMap.run(
 			this.shutdownFibers,
 			sessionId,
-			Effect.gen(this, function* () {
+			Effect.gen({ self: this }, function* () {
 				while (
 					HashSet.has(
 						(yield* getState(this.stateRef)).shutdownAfterTurn,
@@ -716,7 +718,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	private recordBackgroundTaskEffect(
 		transition: BackgroundTaskTransition,
 	): Effect.Effect<void> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const ctx = yield* getSession(this.stateRef, transition.sessionId);
 			if (ctx)
 				ctx.liveBackgroundTaskCount =
@@ -777,7 +779,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	}
 
 	private removeSessionEffect(sessionId: string): Effect.Effect<void> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			yield* this.warmedQueries.discardEffect(sessionId);
 			const ctx = yield* getSession(this.stateRef, sessionId);
 			yield* removeSession(this.stateRef, sessionId);
@@ -816,13 +818,15 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
 		return this.mapProviderFailure(
 			"discover",
-			Effect.gen(this, function* () {
+			Effect.gen({ self: this }, function* () {
 				const configDir =
 					account?.driver === "claude"
 						? account.folder
 						: resolveClaudeLaunchConfig(
 								yield* Effect.suspend(() =>
-									loadDaemonConfigResult(this.deps.daemonConfigDir),
+									Effect.fromResult(
+										loadDaemonConfigResult(this.deps.daemonConfigDir),
+									),
 								).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null))),
 							).configDir;
 				return yield* discoverCapabilitiesEffect(
@@ -852,8 +856,8 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		return this.mapProviderFailure(
 			"sendTurn",
 			this.sendTurnLocalEffect(input).pipe(
-				Effect.catchAll((err) =>
-					Effect.gen(this, function* () {
+				Effect.catch((err) =>
+					Effect.gen({ self: this }, function* () {
 						const ctx = yield* getSession(this.stateRef, input.sessionId);
 						const tracker = ctx
 							? (ctx.goalTracker ??= new ClaudeGoalTracker(
@@ -886,7 +890,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	private sendTurnLocalEffect(
 		input: ClaudeSendTurnInput,
 	): Effect.Effect<TurnResult, ClaudeAdapterError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const { sessionId } = input;
 
 			// Per-session mutex: prevent duplicate session creation.
@@ -971,7 +975,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	private createSessionAndSendTurnEffect(
 		input: ClaudeSendTurnInput,
 	): Effect.Effect<TurnResult, ClaudeAdapterError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const { sessionId } = input;
 			const apiModelId = claudeApiModelId(
 				input.model?.modelId,
@@ -1006,7 +1010,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 
 			let promptQueue: PromptQueueController | undefined;
 			let activeQuery: Query | undefined;
-			const setup = Effect.gen(this, function* () {
+			const setup = Effect.gen({ self: this }, function* () {
 				const userMessage = yield* Effect.try({
 					try: () => validateUserMessage(this.buildUserMessage(input)),
 					catch: (cause) =>
@@ -1113,7 +1117,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				activeQuery = warmed?.query;
 				const queue = warmed?.promptQueue ?? (yield* makeEffectPromptQueue());
 				promptQueue = queue;
-				const turnAdmissionSemaphore = yield* Effect.makeSemaphore(1);
+				const turnAdmissionSemaphore = yield* Semaphore.make(1);
 				abortController = warmed?.abortController ?? abortController;
 				if (input.abortSignal) {
 					if (input.abortSignal.aborted) {
@@ -1243,7 +1247,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				),
 				Effect.onExit((exit) =>
 					Exit.isFailure(exit)
-						? Effect.gen(this, function* () {
+						? Effect.gen({ self: this }, function* () {
 								const failure = asError(Failure.squashCause(exit.cause));
 								yield* settleQueuedTurnDeferredsEffect(
 									this.stateRef,
@@ -1263,7 +1267,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						: Effect.void,
 				),
 				Effect.ensuring(
-					Effect.gen(this, function* () {
+					Effect.gen({ self: this }, function* () {
 						// Clear the lock (but keep the deferred -- it resolves via the stream).
 						yield* removeSetupLock(this.stateRef, sessionId);
 					}),
@@ -1296,7 +1300,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			readonly variant?: string | undefined;
 		},
 	): Effect.Effect<void, ClaudeAdapterError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const baseModelId = settings.modelId ?? ctx.currentModel;
 			const apiModelId = claudeApiModelId(baseModelId, settings.contextWindow);
 			const forceSettingsSync = ctx.settingsOutOfSync;
@@ -1354,7 +1358,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.mapProviderFailure(
 			"apply live settings",
-			Effect.gen(this, function* () {
+			Effect.gen({ self: this }, function* () {
 				const pending = yield* getSetupLock(this.stateRef, sessionId);
 				if (pending) {
 					yield* Deferred.await(pending).pipe(
@@ -1395,7 +1399,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.mapProviderFailure(
 			"set permission mode",
-			Effect.gen(this, function* () {
+			Effect.gen({ self: this }, function* () {
 				const pending = yield* getSetupLock(this.stateRef, sessionId);
 				if (pending) {
 					yield* Deferred.await(pending).pipe(
@@ -1420,7 +1424,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		ctx: ClaudeSessionContext,
 		input: ClaudeSendTurnInput,
 	): Effect.Effect<TurnResult, ClaudeAdapterError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			if (this.hasAgentChanged(ctx, input)) {
 				if (yield* hasPendingTurn(this.stateRef, ctx.sessionId)) {
 					return this.agentSwitchDuringActiveTurnResult(ctx, input);
@@ -1441,7 +1445,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				);
 			}
 			const deferred = yield* turnAdmissionSemaphore.withPermits(1)(
-				Effect.gen(this, function* () {
+				Effect.gen({ self: this }, function* () {
 					// A send that needs no settings change joins the live query at
 					// once: mid-turn it is a steer, which the SDK reads at its next
 					// tool boundary. One that changes the model or effort waits for
@@ -1511,9 +1515,9 @@ class ClaudeRunnerPayload implements RunnerPayload {
 
 					const turnDeferred = yield* Deferred.make<TurnResult, Error>();
 					yield* (ctx.messageOwnershipPermit ??=
-						Effect.unsafeMakeSemaphore(1)).withPermits(1)(
+						Semaphore.makeUnsafe(1)).withPermits(1)(
 						Effect.uninterruptible(
-							Effect.gen(this, function* () {
+							Effect.gen({ self: this }, function* () {
 								// A held send is placed when the SDK starts it.
 								yield* addTurnWaiter(
 									this.stateRef,
@@ -1550,7 +1554,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 								// read the prompt, so end the turn here rather than wait.
 								yield* ctx.promptQueue.enqueue(userMessage).pipe(
 									Effect.catchTag("EffectPromptQueueClosed", () =>
-										Effect.gen(this, function* () {
+										Effect.gen({ self: this }, function* () {
 											yield* removeTurnWaiter(
 												this.stateRef,
 												ctx.sessionId,
@@ -1617,7 +1621,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		input: ClaudeSendTurnInput,
 		reason: string,
 	): Effect.Effect<TurnResult, ClaudeAdapterError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			yield* FiberMap.remove(this.shutdownFibers, ctx.sessionId);
 			yield* this.disposeSessionEffect(ctx, reason);
 			return yield* this.createSessionAndSendTurnEffect(input);
@@ -1643,9 +1647,9 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		ctx: ClaudeSessionContext,
 		translator: ClaudeTranslationService,
 	): Effect.Effect<void, ClaudeAdapterError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			yield* this.consumeStreamLoopEffect(ctx, translator).pipe(
-				Effect.catchAll((err) =>
+				Effect.catch((err) =>
 					ctx.resumeFallbackAllowed &&
 					!ctx.queryInitialized &&
 					isClaudeResumeFailure(err)
@@ -1670,7 +1674,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		ctx: ClaudeSessionContext,
 		translator: ClaudeTranslationService,
 	): Effect.Effect<void, ClaudeAdapterError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const iterator = (ctx.query as AsyncIterable<unknown>)[
 				Symbol.asyncIterator
 			]();
@@ -1701,7 +1705,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 									cause,
 								}),
 				}).pipe(
-					Effect.catchAll((cause) =>
+					Effect.catch((cause) =>
 						cause instanceof ClaudeSDKDecodeError
 							? Effect.succeed(undefined)
 							: Effect.fail(cause),
@@ -1774,7 +1778,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		decisions: readonly ClaudeOwnershipDecision[],
 		parentClaudeSessionId = ctx.resumeSessionId,
 	): Effect.Effect<void, ClaudeAdapterError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			let parentChildLink: Effect.Effect<void> | undefined;
 			for (const decision of decisions) {
 				if (decision.kind === "start-feed") {
@@ -1926,7 +1930,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		ctx: ClaudeSessionContext,
 		message: ClaudeSDKCommandLifecycleMessage,
 	): Effect.Effect<void> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			if (message.state === "cancelled") {
 				yield* cancelTurnWaiterEffect(
 					this.stateRef,
@@ -1956,7 +1960,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			}
 			// The stream outlives one input: a failed placement must not end it.
 			yield* this.placeUserMessageEffect(unplaced).pipe(
-				Effect.catchAll((error) =>
+				Effect.catch((error) =>
 					Effect.sync(() =>
 						log.warn(
 							`Session ${ctx.sessionId}: placing input ${message.command_uuid} failed: ${formatErrorDetail(error)}`,
@@ -1966,8 +1970,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			);
 		}).pipe(
 			Effect.uninterruptible,
-			(ctx.messageOwnershipPermit ??=
-				Effect.unsafeMakeSemaphore(1)).withPermits(1),
+			(ctx.messageOwnershipPermit ??= Semaphore.makeUnsafe(1)).withPermits(1),
 		);
 	}
 
@@ -1987,7 +1990,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			key,
 			finalization.pipe(
 				Effect.interruptible,
-				Effect.catchAll((err) =>
+				Effect.catch((err) =>
 					Effect.sync(() =>
 						log.warn(
 							`Claude subagent finalization failed for ${ctx.sessionId}: ${err instanceof Error ? err.message : err}`,
@@ -2028,7 +2031,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		translator: ClaudeTranslationService,
 		err: unknown,
 	): Effect.Effect<void, ClaudeAdapterError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			if (ctx.stopped || !(yield* isCurrentSession(this.stateRef, ctx))) return;
 			// Clear stale resume cursor so next turn starts a fresh SDK session
 			const errMsg = err instanceof Error ? err.message : String(err);
@@ -2049,7 +2052,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			}
 
 			yield* translator.translateError(ctx, err).pipe(
-				Effect.catchAll((translateErr) =>
+				Effect.catch((translateErr) =>
 					Effect.sync(() => {
 						log.warn(
 							`translateError failed for session ${ctx.sessionId}: ${translateErr instanceof Error ? translateErr.message : translateErr}`,
@@ -2064,7 +2067,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	private finalizeStreamConsumerEffect(
 		ctx: ClaudeSessionContext,
 	): Effect.Effect<void, ClaudeAdapterError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			if (!ctx.stopped && (yield* isCurrentSession(this.stateRef, ctx))) {
 				const current = yield* getSession(this.stateRef, ctx.sessionId);
 				if (current === ctx) {
@@ -2082,7 +2085,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			// query. A newer query that already replaced this one went through
 			// removeSession, which cleared it; don't wipe the newer query's tasks.
 			Effect.ensuring(
-				Effect.gen(this, function* () {
+				Effect.gen({ self: this }, function* () {
 					const current = yield* getSession(this.stateRef, ctx.sessionId);
 					if (current === undefined || current === ctx) {
 						this.deps.onTurnStateChanged?.(ctx.sessionId, false);
@@ -2113,7 +2116,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	private interruptSessionEffect(
 		sessionId: string,
 	): Effect.Effect<void, ClaudeAdapterError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			yield* FiberMap.remove(this.shutdownFibers, sessionId);
 			yield* this.warmedQueries.discardEffect(sessionId);
 			const ctx = yield* getSession(this.stateRef, sessionId);
@@ -2154,8 +2157,8 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				// Only an accepted interrupt may reject interactions. Keep this on
 				// the stream's ownership permit so a pending steer cannot lose its approvals.
 				yield* (ctx.messageOwnershipPermit ??=
-					Effect.unsafeMakeSemaphore(1)).withPermits(1)(
-					Effect.gen(this, function* () {
+					Semaphore.makeUnsafe(1)).withPermits(1)(
+					Effect.gen({ self: this }, function* () {
 						if (ctx.currentTurnId === inputId && ctx.turnInFlight)
 							yield* this.cancelInteractionsEffect(
 								ctx,
@@ -2256,7 +2259,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		reason: string,
 		recoverQuestions: boolean,
 	): Effect.Effect<void, ClaudeAdapterError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			if (ctx.stopped) return;
 			ctx.stopped = true;
 			const turnInFlight = ctx.turnInFlight === true;
@@ -2322,7 +2325,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.mapProviderFailure(
 			"resolvePermission",
-			Effect.gen(this, function* () {
+			Effect.gen({ self: this }, function* () {
 				const ctx = yield* getSession(this.stateRef, sessionId);
 				if (!ctx) return;
 
@@ -2342,7 +2345,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.mapProviderFailure(
 			"resolveQuestion",
-			Effect.gen(this, function* () {
+			Effect.gen({ self: this }, function* () {
 				const ctx = yield* getSession(this.stateRef, sessionId);
 				if (!ctx) return;
 
@@ -2365,7 +2368,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		ctx: ClaudeSessionContext,
 		reason: string,
 	): Effect.Effect<void, ClaudeAdapterError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			yield* this.cleanupSessionEffect(ctx, reason, true);
 
 			yield* settleQueuedTurnDeferredsEffect(
@@ -2398,7 +2401,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	private endSessionLocalEffect(
 		sessionId: string,
 	): Effect.Effect<void, ClaudeAdapterError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			yield* FiberMap.remove(this.shutdownFibers, sessionId);
 			yield* this.warmedQueries.discardEffect(sessionId);
 			const ctx = yield* getSession(this.stateRef, sessionId);
@@ -2420,7 +2423,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	}
 
 	shutdownLocalEffect(): Effect.Effect<void, ClaudeAdapterError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			yield* this.warmedQueries.clearEffect();
 			yield* FiberMap.clear(this.shutdownFibers);
 			log.info("ClaudeProviderRuntime shutting down");

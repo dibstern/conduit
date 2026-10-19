@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import Database from "better-sqlite3";
 import { Effect, Layer, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import {

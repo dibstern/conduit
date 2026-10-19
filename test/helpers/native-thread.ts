@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { PersistenceProjectTag } from "../../src/lib/domain/persistence/Services/persistence-service.js";
 import { makeProviderStateEffect } from "../../src/lib/persistence/effect/provider-state-effect.js";
 

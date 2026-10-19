@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
 import type {
 	WorktreeCleanup,
@@ -108,7 +108,7 @@ export const cleanUpProjectWorktrees = (
 				};
 			});
 		const blockedReason = (
-			state: Effect.Effect.Success<ReturnType<typeof stateOf>>,
+			state: Effect.Success<ReturnType<typeof stateOf>>,
 		) => {
 			return (
 				sessionQuiescenceBlockReason(state) ??
@@ -290,7 +290,7 @@ export const cleanUpProjectWorktrees = (
 						report.removed.push({ ...entry, reason: decision.reason });
 						if (sessionGit._tag === "Some")
 							yield* sessionGit.value.refresh({ sessionId }).pipe(
-								Effect.catchAllCause((cause) => {
+								Effect.catchCause((cause) => {
 									if (Failure.isInterruptedOnly(cause))
 										return Effect.failCause(cause);
 									report.failed.push({
@@ -305,7 +305,7 @@ export const cleanUpProjectWorktrees = (
 								}),
 							);
 					}).pipe(
-						Effect.catchAllCause((cause) => {
+						Effect.catchCause((cause) => {
 							if (Failure.isInterruptedOnly(cause))
 								return Effect.failCause(cause);
 							report.failed.push({
@@ -320,7 +320,7 @@ export const cleanUpProjectWorktrees = (
 					);
 				}
 			}).pipe(
-				Effect.catchAllCause((cause) => {
+				Effect.catchCause((cause) => {
 					if (Failure.isInterruptedOnly(cause)) return Effect.failCause(cause);
 					for (const item of paths.filter(
 						({ session_id }) => session_id === sessionId,

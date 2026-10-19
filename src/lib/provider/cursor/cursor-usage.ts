@@ -1,4 +1,4 @@
-import { Clock, Deferred, Effect, Option, Schema } from "effect";
+import { Clock, Deferred, Effect, Option, Schema, Semaphore } from "effect";
 import type { CursorUsageBinding } from "../../contracts/account.js";
 import type { UsageAccount, UsageRead, UsageReader } from "../usage-reader.js";
 import {
@@ -39,7 +39,9 @@ export const cursorUsageSource = (
 				: "unsupported";
 
 const DashboardResponseSchema = Schema.Struct({
-	billingCycleEnd: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
+	billingCycleEnd: Schema.optional(
+		Schema.Union([Schema.String, Schema.Number]),
+	),
 	planUsage: Schema.optional(
 		Schema.Struct({ totalPercentUsed: Schema.optional(Schema.Number) }),
 	),
@@ -75,7 +77,7 @@ export const makeCursorUsage = (options: {
 	let memory = Option.none<CursorUsageToken>();
 	let pending = Option.none<Deferred.Deferred<CursorKeychainRead>>();
 	let requestedAccount: string | undefined;
-	const bindingLock = Effect.unsafeMakeSemaphore(1);
+	const bindingLock = Semaphore.makeUnsafe(1);
 	const cached = new Map<
 		string,
 		{ credential: CursorUsageToken; until: number; reading: UsageRead }
@@ -91,12 +93,12 @@ export const makeCursorUsage = (options: {
 			const done = yield* Deferred.make<CursorKeychainRead>();
 			pending = Option.some(done);
 			yield* keychain.read.pipe(
-				Effect.timeoutTo({
+				Effect.timeoutOrElse({
 					duration: "60 seconds",
-					onTimeout: (): CursorKeychainRead => ({
-						reason: cursorKeychainTimeout,
-					}),
-					onSuccess: (result) => result,
+					orElse: () =>
+						Effect.succeed<CursorKeychainRead>({
+							reason: cursorKeychainTimeout,
+						}),
 				}),
 				Effect.tap((result) =>
 					Effect.sync(() => {
@@ -107,10 +109,10 @@ export const makeCursorUsage = (options: {
 				Effect.onExit((exit) =>
 					Effect.sync(() => {
 						pending = Option.none();
-					}).pipe(Effect.zipRight(Deferred.done(done, exit))),
+					}).pipe(Effect.andThen(Deferred.done(done, exit))),
 				),
 				Effect.interruptible,
-				Effect.forkDaemon,
+				Effect.forkDetach,
 			);
 			return done;
 		}),
@@ -172,7 +174,7 @@ export const makeCursorUsage = (options: {
 					try: () => response.json(),
 					catch: () => "Cursor usage returned an invalid response.",
 				}).pipe(
-					Effect.flatMap(Schema.decodeUnknown(DashboardResponseSchema)),
+					Effect.flatMap(Schema.decodeUnknownEffect(DashboardResponseSchema)),
 					Effect.map((body) => {
 						const percent = body.planUsage?.totalPercentUsed;
 						if (percent === undefined || !Number.isFinite(percent))
@@ -207,7 +209,7 @@ export const makeCursorUsage = (options: {
 					}),
 				);
 			}),
-			Effect.catchAll(() =>
+			Effect.catch(() =>
 				Effect.succeed({
 					authFailed: false,
 					reading: unavailable("Cursor usage could not be read. Try again."),
@@ -309,7 +311,7 @@ export const makeCursorUsage = (options: {
 					),
 				);
 			}).pipe(
-				Effect.catchAll(() =>
+				Effect.catch(() =>
 					Effect.succeed({
 						enabled: false,
 						reason: "Cursor usage settings could not be saved.",

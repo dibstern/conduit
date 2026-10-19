@@ -6,7 +6,7 @@ import {
 	InMemorySpanExporter,
 	SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { Context, Effect, Exit, FiberId, Option, Tracer } from "effect";
+import { Context, Effect, Exit, Option, Tracer } from "effect";
 import { expect, vi } from "vitest";
 
 import {
@@ -52,9 +52,9 @@ const makeRecordingTracer = (
 	onContext?: (span: Tracer.AnySpan | undefined) => void,
 ): Tracer.Tracer =>
 	Tracer.make({
-		span(name, parent, context, links, startTime, kind) {
+		span({ name, parent, annotations, links, startTime, kind }) {
 			const attributes = new Map<string, unknown>();
-			let spanLinks = links;
+			let spanLinks: ReadonlyArray<Tracer.SpanLink> = links;
 			let status: Tracer.SpanStatus = { _tag: "Started", startTime };
 			const span = {
 				_tag: "Span" as const,
@@ -62,7 +62,7 @@ const makeRecordingTracer = (
 				spanId: `${idPrefix}-span`,
 				traceId: `${idPrefix}-trace`,
 				parent,
-				context,
+				annotations,
 				get status() {
 					return status;
 				},
@@ -85,14 +85,14 @@ const makeRecordingTracer = (
 			} satisfies Tracer.Span;
 			return span;
 		},
-		context(f, fiber) {
-			onContext?.(fiber.currentSpan);
-			return f();
+		context(primitive, fiber) {
+			onContext?.(fiber.cache.span);
+			return primitive["~effect/Effect/evaluate"](fiber);
 		},
 	});
 
 describe("Tracing Layer", () => {
-	it.scoped("provides NodeSdk and captures spans via InMemoryExporter", () => {
+	it.effect("provides NodeSdk and captures spans via InMemoryExporter", () => {
 		const exporter = new InMemorySpanExporter();
 		const processor = new SimpleSpanProcessor(exporter);
 
@@ -111,11 +111,12 @@ describe("Tracing Layer", () => {
 					enabled: true,
 					spanProcessors: [processor],
 				}),
+				{ local: true },
 			),
 		);
 	});
 
-	it.scoped("captures spans with a shared exporter reference", () => {
+	it.effect("captures spans with a shared exporter reference", () => {
 		const exporter = new InMemorySpanExporter();
 		const processor = new SimpleSpanProcessor(exporter);
 
@@ -136,19 +137,22 @@ describe("Tracing Layer", () => {
 					enabled: true,
 					spanProcessors: [processor],
 				}),
+				{ local: true },
 			),
 		);
 	});
 
-	it.scoped("is a no-op when disabled", () =>
+	it.effect("is a no-op when disabled", () =>
 		Effect.gen(function* () {
 			// When disabled, Effect.withSpan should still work (it's always
 			// safe) — it just won't export to any backend.
 			yield* Effect.withSpan("should.not.crash")(Effect.void);
-		}).pipe(Effect.provide(makeTracingLive({ enabled: false }))),
+		}).pipe(
+			Effect.provide(makeTracingLive({ enabled: false }), { local: true }),
+		),
 	);
 
-	it.scoped("is a no-op when enabled but no exporters configured", () =>
+	it.effect("is a no-op when enabled but no exporters configured", () =>
 		Effect.gen(function* () {
 			yield* Effect.withSpan("no.exporters")(Effect.void);
 		}).pipe(
@@ -157,11 +161,12 @@ describe("Tracing Layer", () => {
 					enabled: true,
 					// No consoleExporter, no otlpEndpoint, no spanProcessors
 				}),
+				{ local: true },
 			),
 		),
 	);
 
-	it.scoped(
+	it.effect(
 		"makeDaemonTracingLive writes local spans with the floor disabled",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-daemon-tracing-"));
@@ -190,12 +195,13 @@ describe("Tracing Layer", () => {
 						batchWindowMs: 10,
 						minMs: 0,
 					}),
+					{ local: true },
 				),
 			);
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"makeDaemonTracingLive fans out spans to local file tracing and OTel processors",
 		() => {
 			const exporter = new InMemorySpanExporter();
@@ -237,6 +243,7 @@ describe("Tracing Layer", () => {
 						sessionId: "debug-session",
 						spanProcessors: [processor],
 					}),
+					{ local: true },
 				),
 			);
 		},
@@ -272,7 +279,16 @@ describe("Tracing Layer", () => {
 		for (const name of ["sql.execute", "instance.getAll", "other"]) {
 			for (const durationNs of [0n, 4_999_999n, 5_000_000n, 8_000_000n]) {
 				tracer
-					.span(name, Option.none(), Context.empty(), [], 0n, "client")
+					.span({
+						name,
+						parent: Option.none(),
+						annotations: Context.empty(),
+						links: [],
+						startTime: 0n,
+						kind: "client",
+						root: false,
+						sampled: true,
+					})
 					.end(durationNs, Exit.void);
 			}
 			expect(
@@ -284,11 +300,20 @@ describe("Tracing Layer", () => {
 		for (const exit of [
 			Exit.fail("failed"),
 			Exit.die("defect"),
-			Exit.interrupt(FiberId.none),
+			Exit.interrupt(),
 		]) {
 			for (const name of ["sql.execute", "other"]) {
 				tracer
-					.span(name, Option.none(), Context.empty(), [], 0n, "internal")
+					.span({
+						name,
+						parent: Option.none(),
+						annotations: Context.empty(),
+						links: [],
+						startTime: 0n,
+						kind: "internal",
+						root: false,
+						sampled: true,
+					})
 					.end(0n, exit);
 				expect(records.at(-1)).toMatchObject({ name, durationMs: 0 });
 				expect(records.at(-1)?.exit._tag).not.toBe("Success");
@@ -303,32 +328,38 @@ describe("Tracing Layer", () => {
 			spanId: "external",
 			traceId: "trace",
 		});
-		const parent = tracer.span(
-			"debug.parent",
-			Option.some(external),
-			Context.empty(),
-			[],
-			0n,
-			"internal",
-		);
+		const parent = tracer.span({
+			name: "debug.parent",
+			parent: Option.some(external),
+			annotations: Context.empty(),
+			links: [],
+			startTime: 0n,
+			kind: "internal",
+			root: false,
+			sampled: true,
+		});
 		// Pass a composite parent directly to the local tracer, and annotate it
 		// after creating the grandchild so lookup must use live attributes.
-		const child = local.span(
-			"debug.child",
-			Option.some(parent),
-			Context.empty(),
-			[],
-			0n,
-			"internal",
-		);
-		const grandchild = local.span(
-			"debug.grandchild",
-			Option.some(child),
-			Context.empty(),
-			[],
-			0n,
-			"internal",
-		);
+		const child = local.span({
+			name: "debug.child",
+			parent: Option.some(parent),
+			annotations: Context.empty(),
+			links: [],
+			startTime: 0n,
+			kind: "internal",
+			root: false,
+			sampled: true,
+		});
+		const grandchild = local.span({
+			name: "debug.grandchild",
+			parent: Option.some(child),
+			annotations: Context.empty(),
+			links: [],
+			startTime: 0n,
+			kind: "internal",
+			root: false,
+			sampled: true,
+		});
 		parent.attribute("sessionId", "debug-session");
 		grandchild.end(0n, Exit.void);
 		child.end(0n, Exit.void);
@@ -340,44 +371,62 @@ describe("Tracing Layer", () => {
 		]);
 		const beforeExternal = records.length;
 		local
-			.span(
-				"external.child",
-				Option.some(external),
-				Context.empty(),
-				[],
-				0n,
-				"internal",
-			)
+			.span({
+				name: "external.child",
+				parent: Option.some(external),
+				annotations: Context.empty(),
+				links: [],
+				startTime: 0n,
+				kind: "internal",
+				root: false,
+				sampled: true,
+			})
 			.end(0n, Exit.void);
 		expect(records).toHaveLength(beforeExternal + (minMs === 0 ? 1 : 0));
 	});
 
-	it("passes the upstream span to composite tracer context", () => {
-		let upstreamContextSpan: Tracer.AnySpan | undefined;
-		const tracer = makeCompositeTracer(
-			makeRecordingTracer("local"),
-			makeRecordingTracer("upstream", (span) => {
-				upstreamContextSpan = span;
-			}),
-		);
+	it.effect("passes the upstream span to composite tracer context", () =>
+		Effect.gen(function* () {
+			let upstreamContextSpan: Tracer.AnySpan | undefined;
+			const tracer = makeCompositeTracer(
+				makeRecordingTracer("local"),
+				makeRecordingTracer("upstream", (span) => {
+					upstreamContextSpan = span;
+				}),
+			);
 
-		const compositeSpan = tracer.span(
-			"composite",
-			Option.none(),
-			Context.empty(),
-			[],
-			0n,
-			"internal",
-		);
-		tracer.context(() => undefined, {
-			currentSpan: compositeSpan,
-		} as Parameters<Tracer.Tracer["context"]>[1]);
+			const compositeSpan = tracer.span({
+				name: "composite",
+				parent: Option.none(),
+				annotations: Context.empty(),
+				links: [],
+				startTime: 0n,
+				kind: "internal",
+				root: false,
+				sampled: true,
+			});
+			yield* Effect.withFiber((fiber) =>
+				Effect.sync(() => {
+					if (tracer.context === undefined)
+						throw new Error("Expected tracer context");
+					tracer.context(
+						{
+							"~effect/Effect/evaluate": () => undefined,
+						},
+						{
+							...fiber,
+							cache: { ...fiber.cache, span: compositeSpan },
+						},
+					);
+				}),
+			);
 
-		expect(upstreamContextSpan?.spanId).toBe("upstream-span");
-		expect(upstreamContextSpan?.traceId).toBe("upstream-trace");
-	});
+			expect(upstreamContextSpan?.spanId).toBe("upstream-span");
+			expect(upstreamContextSpan?.traceId).toBe("upstream-trace");
+		}),
+	);
 
-	it.scoped(
+	it.effect(
 		"makeDaemonTracingLive does not create a local file when disabled",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-daemon-tracing-"));
@@ -398,6 +447,7 @@ describe("Tracing Layer", () => {
 						maxFiles: 2,
 						batchWindowMs: 10,
 					}),
+					{ local: true },
 				),
 			);
 		},

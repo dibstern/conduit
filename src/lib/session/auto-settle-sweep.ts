@@ -1,6 +1,6 @@
-import type { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Effect } from "effect";
+import type { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import {
 	type AutoSettleFacts,

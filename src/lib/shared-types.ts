@@ -46,13 +46,13 @@ export type RequestId = typeof RequestId.Type;
 export const PermissionId = Schema.String.pipe(Schema.brand("PermissionId"));
 export type PermissionId = typeof PermissionId.Type;
 
-export const ProviderPermissionUpdateDestinationSchema = Schema.Literal(
+export const ProviderPermissionUpdateDestinationSchema = Schema.Literals([
 	"userSettings",
 	"projectSettings",
 	"localSettings",
 	"session",
 	"cliArg",
-);
+]);
 export type ProviderPermissionUpdateDestination =
 	typeof ProviderPermissionUpdateDestinationSchema.Type;
 
@@ -61,15 +61,19 @@ const ProviderPermissionRuleValueSchema = Schema.Struct({
 	ruleContent: Schema.optional(Schema.String),
 });
 
-const ProviderPermissionBehaviorSchema = Schema.Literal("allow", "deny", "ask");
-const ProviderPermissionModeSchema = Schema.Literal(
+const ProviderPermissionBehaviorSchema = Schema.Literals([
+	"allow",
+	"deny",
+	"ask",
+]);
+const ProviderPermissionModeSchema = Schema.Literals([
 	"default",
 	"acceptEdits",
 	"bypassPermissions",
 	"plan",
 	"dontAsk",
 	"auto",
-);
+]);
 
 /**
  * Conduit-level per-session approval mode. Corresponds 1:1 to the Claude Agent
@@ -77,17 +81,17 @@ const ProviderPermissionModeSchema = Schema.Literal(
  * "ask" and "full" keep conduit's original spellings (SDK "default" and
  * "bypassPermissions") so persisted rows stay valid without a migration.
  */
-export const SessionPermissionModeSchema = Schema.Literal(
+export const SessionPermissionModeSchema = Schema.Literals([
 	"ask",
 	"acceptEdits",
 	"auto",
 	"full",
 	"plan",
 	"dontAsk",
-);
+]);
 export type SessionPermissionMode = typeof SessionPermissionModeSchema.Type;
 
-export const ProviderPermissionUpdateSchema = Schema.Union(
+export const ProviderPermissionUpdateSchema = Schema.Union([
 	Schema.Struct({
 		type: Schema.Literal("addRules"),
 		rules: Schema.Array(ProviderPermissionRuleValueSchema),
@@ -121,7 +125,7 @@ export const ProviderPermissionUpdateSchema = Schema.Union(
 		directories: Schema.Array(Schema.String),
 		destination: ProviderPermissionUpdateDestinationSchema,
 	}),
-);
+]);
 export type ProviderPermissionUpdate =
 	typeof ProviderPermissionUpdateSchema.Type;
 
@@ -206,12 +210,12 @@ export interface FileEntry {
 }
 
 /** The `sessions` projection's lifecycle status, as the row stores it. */
-export const SessionStatusSchema = Schema.Literal(
+export const SessionStatusSchema = Schema.Literals([
 	"idle",
 	"busy",
 	"retry",
 	"error",
-);
+]);
 
 export const SESSION_ATTENTION_TIERS = [
 	"needs-approval",
@@ -224,12 +228,12 @@ export const SESSION_ATTENTION_TIERS = [
 	"idle",
 ] as const;
 export type SessionAttention = (typeof SESSION_ATTENTION_TIERS)[number];
-export const SessionAttentionSchema = Schema.Literal(
+export const SessionAttentionSchema = Schema.Literals([
 	...SESSION_ATTENTION_TIERS,
-);
+]);
 
 /** Live Claude background tasks that outlive their turn, by what they are doing. */
-export const BackgroundWorkSchema = Schema.Literal("working", "monitoring");
+export const BackgroundWorkSchema = Schema.Literals(["working", "monitoring"]);
 export type BackgroundWork = typeof BackgroundWorkSchema.Type;
 
 /** A live, non-ambient Claude background task (shell, agent, monitor, ...). */
@@ -267,17 +271,16 @@ export interface SessionGit {
 }
 
 const GitStatusSchema = Schema.Struct({
-	branch: Schema.optionalWith(Schema.String, { exact: true }),
-	head: Schema.optionalWith(Schema.String, { exact: true }),
-	worktree: Schema.optionalWith(Schema.String, { exact: true }),
-	dirty: Schema.optionalWith(Schema.Boolean, { exact: true }),
-	ahead: Schema.optionalWith(Schema.Number, { exact: true }),
-	behind: Schema.optionalWith(Schema.Number, { exact: true }),
-	merged: Schema.optionalWith(Schema.Boolean, { exact: true }),
-	mergedHead: Schema.optionalWith(Schema.String, { exact: true }),
-	operation: Schema.optionalWith(
-		Schema.Literal("rebase", "merge", "cherry-pick", "revert", "bisect"),
-		{ exact: true },
+	branch: Schema.optionalKey(Schema.String),
+	head: Schema.optionalKey(Schema.String),
+	worktree: Schema.optionalKey(Schema.String),
+	dirty: Schema.optionalKey(Schema.Boolean),
+	ahead: Schema.optionalKey(Schema.Number),
+	behind: Schema.optionalKey(Schema.Number),
+	merged: Schema.optionalKey(Schema.Boolean),
+	mergedHead: Schema.optionalKey(Schema.String),
+	operation: Schema.optionalKey(
+		Schema.Literals(["rebase", "merge", "cherry-pick", "revert", "bisect"]),
 	),
 });
 
@@ -285,18 +288,16 @@ export const SessionFolderGitSchema = Schema.Struct({
 	root: Schema.String,
 	label: Schema.String,
 	/** Derived from conduit workspace origin and an absent worktree mapping. */
-	shared: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	shared: Schema.optionalKey(Schema.Boolean),
 	/** An unavailable recorded checkout has no healthy Git status fields. */
-	missing: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	missing: Schema.optionalKey(Schema.Boolean),
 	...GitStatusSchema.fields,
 });
 export type SessionFolderGit = typeof SessionFolderGitSchema.Type;
 
 export const SessionGitSchema = Schema.Struct({
 	...GitStatusSchema.fields,
-	folders: Schema.optionalWith(Schema.Array(SessionFolderGitSchema), {
-		exact: true,
-	}),
+	folders: Schema.optionalKey(Schema.Array(SessionFolderGitSchema)),
 });
 
 /** One wire shape for projected sessions and daemon-wide lists. */
@@ -307,8 +308,8 @@ export const SessionInfoSchema = Schema.Struct({
 	title: Schema.String,
 	status: SessionStatusSchema,
 	projectSlug: Schema.String,
-	createdAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
-	updatedAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
+	createdAt: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
+	updatedAt: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
 	messageCount: Schema.optional(Schema.Number),
 	processing: Schema.optional(Schema.Boolean),
 	goalState: Schema.optional(SessionGoalChangedPayloadSchema),
@@ -367,7 +368,7 @@ export const SessionInfoSchema = Schema.Struct({
 	snoozedUntil: Schema.optional(Schema.Number),
 	wokenAt: Schema.optional(Schema.Number),
 	wokeBecause: Schema.optional(
-		Schema.Literal("time", "approval", "question", "error", "turn"),
+		Schema.Literals(["time", "approval", "question", "error", "turn"]),
 	),
 });
 
@@ -655,7 +656,7 @@ export const PermissionApprovalSchema = Schema.TaggedStruct("permission", {
 	sessionId: Schema.String,
 	requestId: PermissionId,
 	toolName: Schema.String,
-	toolInput: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+	toolInput: Schema.Record(Schema.String, Schema.Unknown),
 	toolUseId: Schema.optional(Schema.String),
 	always: Schema.optional(Schema.Array(Schema.String)),
 	permissionSuggestions: Schema.optional(
@@ -675,16 +676,16 @@ export const QuestionApprovalSchema = Schema.TaggedStruct("question", {
 	providerId: Schema.optional(Schema.String),
 });
 
-export const ApprovalSchema = Schema.Union(
+export const ApprovalSchema = Schema.Union([
 	PermissionApprovalSchema,
 	QuestionApprovalSchema,
-);
+]);
 export type Approval = typeof ApprovalSchema.Type;
 
 const ResultSchema = Schema.Struct({
 	type: Schema.Literal("result"),
 	usage: UsageInfoSchema,
-	contextTokens: Schema.optionalWith(Schema.Number, { exact: true }),
+	contextTokens: Schema.optionalKey(Schema.Number),
 	cost: Schema.Number,
 	duration: Schema.Number,
 	sessionId: Schema.String,
@@ -728,28 +729,23 @@ export const WS_PROTOCOL_VERSION = 7;
 
 // -- Combined RelayMessage schema union --
 
-export const RelayMessageSchema = Schema.Union(
-	// Streaming
+export const RelayMessageSchema = Schema.Union([
 	DeltaSchema,
 	ThinkingStartSchema,
 	ThinkingDeltaSchema,
-	// Tools
 	ToolStartSchema,
 	ToolResultSchema,
-	// Session lifecycle
 	ResultSchema,
 	DoneSchema,
-	// Part lifecycle
 	PartRemovedSchema,
 	MessageRemovedSchema,
-	// Cache / Replay
 	UserMessageSchema,
-);
+]);
 
 export type RelayMessage = typeof RelayMessageSchema.Type;
 
 export const RELAY_MESSAGE_TYPES: ReadonlyArray<RelayMessage["type"]> =
-	RelayMessageSchema.members.map((member) => member.fields.type.literals[0]);
+	RelayMessageSchema.members.map((member) => member.fields.type.literal);
 
 export const KNOWN_RELAY_MESSAGE_TYPES: ReadonlySet<string> = new Set(
 	RELAY_MESSAGE_TYPES,

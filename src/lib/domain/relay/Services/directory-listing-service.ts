@@ -40,9 +40,10 @@ export interface DirectoryListingService {
 	>;
 }
 
-export class DirectoryListingServiceTag extends Context.Tag(
-	"DirectoryListingService",
-)<DirectoryListingServiceTag, DirectoryListingService>() {}
+export class DirectoryListingServiceTag extends Context.Service<
+	DirectoryListingServiceTag,
+	DirectoryListingService
+>()("DirectoryListingService") {}
 
 const expandHome = (path: string): string =>
 	path.startsWith("~/") || path === "~" ? homedir() + path.slice(1) : path;

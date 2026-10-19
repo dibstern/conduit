@@ -1,13 +1,14 @@
 import { getProviderDriver } from "../contracts/provider-instance.js";
 import type { ClaudeLaunchConfig } from "./claude/claude-sdk-env.js";
+
 // src/lib/provider/orchestration-engine.ts
 // Central command processor for the provider instance layer (CQRS core loop).
 // Routes commands to the correct provider instance via ProviderRegistry.
 // Manages session-to-provider mapping.
 
-import type { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Deferred, Effect } from "effect";
+import type { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 
 import type { Account } from "../contracts/account.js";
 import type { SessionScope } from "../contracts/session-scope.js";
@@ -185,7 +186,7 @@ export interface OrchestrationEngineOptions {
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 	readonly durableCommands?: DurableCommandStoreOptions;
 	readonly accountDirectory?: Pick<
-		AccountDirectory["Type"],
+		AccountDirectory["Service"],
 		"resolve" | "defaultFor"
 	>;
 }
@@ -319,7 +320,7 @@ export class OrchestrationEngine {
 	dispatchEffect(
 		command: OrchestrationCommand,
 	): Effect.Effect<OrchestrationResult, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			yield* this.ensureMutatingCommandHasId(command);
 			if (!command.commandId) {
 				return yield* this.runCommandEffect(command);
@@ -361,7 +362,7 @@ export class OrchestrationEngine {
 	private runCommandEffect(
 		command: OrchestrationCommand,
 	): Effect.Effect<OrchestrationResult, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			switch (command.type) {
 				case "send_turn":
 					return yield* this.handleSendTurnEffect(command);
@@ -406,7 +407,7 @@ export class OrchestrationEngine {
 		command: SendTurnCommand,
 		durable: DurableCommandRuntime,
 	): Effect.Effect<TurnResult, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const hash = fingerprintHash(effectiveDispatchFingerprint(command));
 
 			const existing = yield* durable.receipts
@@ -607,7 +608,7 @@ export class OrchestrationEngine {
 	private handleInlineSendTurnEffect(
 		command: SendTurnCommand,
 	): Effect.Effect<TurnResult, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const instance = yield* this.getProviderInstanceEffect(
 				command.providerId,
 				command.input.account,
@@ -622,7 +623,7 @@ export class OrchestrationEngine {
 		command: SendTurnCommand,
 		instance: ProviderInstance,
 	): Effect.Effect<TurnResult, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			yield* Effect.sync(() =>
 				log.info(
 					`Dispatching sendTurn: session=${command.input.sessionId} provider=${command.providerId}`,
@@ -668,7 +669,7 @@ export class OrchestrationEngine {
 	private handleInterruptTurnEffect(
 		command: InterruptTurnCommand,
 	): Effect.Effect<void, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const providerId = yield* this.requireProviderForSessionEffect(
 				command.sessionId,
 			);
@@ -695,7 +696,7 @@ export class OrchestrationEngine {
 	private handleResolvePermissionEffect(
 		command: ResolvePermissionCommand,
 	): Effect.Effect<void, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const providerId = yield* this.requireProviderForSessionEffect(
 				command.sessionId,
 			);
@@ -722,7 +723,7 @@ export class OrchestrationEngine {
 	private handleResolveQuestionEffect(
 		command: ResolveQuestionCommand,
 	): Effect.Effect<void, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const providerId = yield* this.requireProviderForSessionEffect(
 				command.sessionId,
 			);
@@ -749,7 +750,7 @@ export class OrchestrationEngine {
 	private handleDiscoverEffect(
 		command: DiscoverCommand,
 	): Effect.Effect<ProviderCapabilities, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const instance = yield* this.getProviderInstanceEffect(
 				command.providerId,
 				command.account,
@@ -774,7 +775,7 @@ export class OrchestrationEngine {
 	private handleEndSessionEffect(
 		command: EndSessionCommand,
 	): Effect.Effect<void, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const targetBindingRevision =
 				yield* this.sessionBindingReadModel.getBindingRevision(
 					command.sessionId,
@@ -792,7 +793,7 @@ export class OrchestrationEngine {
 				);
 				return;
 			}
-			const endSession = Effect.gen(this, function* () {
+			const endSession = Effect.gen({ self: this }, function* () {
 				const instance = yield* this.getProviderInstanceEffect(
 					providerId,
 					command.account,
@@ -865,7 +866,7 @@ export class OrchestrationEngine {
 
 	/** Shutdown the engine and all provider instances. */
 	shutdownEffect(): Effect.Effect<void> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			yield* Effect.sync(() => log.info("OrchestrationEngine shutting down"));
 			yield* this.registry.shutdownAllEffect();
 			yield* Effect.sync(() => {

@@ -5,7 +5,7 @@ import type {
 	SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
-import { Either, Schema } from "effect";
+import { Result, Schema } from "effect";
 import {
 	ClaudeSDKInitializationResultSubsetSchema,
 	decodeClaudeSDKOptionsJsonShape,
@@ -28,7 +28,7 @@ const defaultLog = createLogger("claude-capabilities-probe");
 // Best-effort observability decode: the probe survives an empty catalog, so we
 // never fail-close here — but a renamed/absent commands/agents/models/account
 // field would silently yield empty catalogs, so log the drift instead.
-const decodeInitializationResult = Schema.decodeUnknownEither(
+const decodeInitializationResult = Schema.decodeUnknownResult(
 	ClaudeSDKInitializationResultSubsetSchema,
 );
 
@@ -267,9 +267,9 @@ export async function probeClaudeCapabilities(
 			);
 		}
 		const decoded = decodeInitializationResult(init);
-		if (Either.isLeft(decoded)) {
+		if (Result.isFailure(decoded)) {
 			(deps.logger ?? defaultLog).warn(
-				`Claude initializationResult failed subset decode (using raw with fallbacks): ${decoded.left.message.slice(
+				`Claude initializationResult failed subset decode (using raw with fallbacks): ${decoded.failure.message.slice(
 					0,
 					400,
 				)}`,

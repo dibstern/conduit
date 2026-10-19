@@ -5,7 +5,7 @@
 // defaults dangle after removal or ignore usage order; SetDefault accepts a
 // missing/wrong-driver account; deleted ids are reused or route across drivers;
 // an account's driver changes without deleting and adding it.
-import { Either, Option } from "effect";
+import { Result as Either, Option } from "effect";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
@@ -147,10 +147,10 @@ describe("account directory mutations", () => {
 			{ _tag: "Add", name: "Overflow", driver: "claude" },
 			[],
 		);
-		expect(Either.isLeft(rejected)).toBe(true);
-		if (Either.isLeft(rejected)) {
-			expect(rejected.left._tag).toBe("AccountChangeRejected");
-			expect(rejected.left.reason).toMatch(/limit|max|capacity/i);
+		expect(Either.isFailure(rejected)).toBe(true);
+		if (Either.isFailure(rejected)) {
+			expect(rejected.failure._tag).toBe("AccountChangeRejected");
+			expect(rejected.failure.reason).toMatch(/limit|max|capacity/i);
 		}
 		expect(list(state)).toEqual(before);
 		const removedId = before[0]?.id;
@@ -270,11 +270,11 @@ describe("account directory mutations", () => {
 		const state = accountsStateFromInstances([], launchLogin);
 		const before = structuredClone(state);
 		const rejected = apply(state, change, []);
-		expect(Either.isLeft(rejected)).toBe(true);
-		if (Either.isLeft(rejected)) {
-			expect(rejected.left._tag).toBe("AccountChangeRejected");
-			expect(rejected.left.reason).toMatch(reason);
-			expect(rejected.left.message).toContain(rejected.left.reason);
+		expect(Either.isFailure(rejected)).toBe(true);
+		if (Either.isFailure(rejected)) {
+			expect(rejected.failure._tag).toBe("AccountChangeRejected");
+			expect(rejected.failure.reason).toMatch(reason);
+			expect(rejected.failure.message).toContain(rejected.failure.reason);
 		}
 		expect(state).toEqual(before);
 	});
@@ -309,7 +309,7 @@ describe("account directory mutations", () => {
 			);
 			expect(state.deleted).toContainEqual({ id: removed, driver: "claude" });
 			const routed = resolve(state, { _tag: "Id", id: removed });
-			if (promoted === undefined) expect(Either.isLeft(routed)).toBe(true);
+			if (promoted === undefined) expect(Either.isFailure(routed)).toBe(true);
 			else expect(Either.getOrThrow(routed).id).toBe(promoted);
 		}
 		const added = Either.getOrThrow(
@@ -319,7 +319,7 @@ describe("account directory mutations", () => {
 			"personal-2",
 		);
 		expect(
-			Either.isLeft(
+			Either.isFailure(
 				apply(
 					added,
 					{ _tag: "Add", id: "personal", name: "Reuse", driver: "claude" },
@@ -338,9 +338,9 @@ describe("account directory mutations", () => {
 			launchLogin,
 		);
 		for (const id of ["missing", "opencode"])
-			expect(Either.isLeft(apply(state, { _tag: "SetDefault", id }, []))).toBe(
-				true,
-			);
+			expect(
+				Either.isFailure(apply(state, { _tag: "SetDefault", id }, [])),
+			).toBe(true);
 		expect(Option.getOrThrow(defaultFor(state, "claude")).id).toBe("claude");
 	});
 
@@ -353,11 +353,11 @@ describe("account directory mutations", () => {
 			{ _tag: "Update", id: "claude", updates: { driver: "opencode" } },
 		] satisfies ReadonlyArray<AccountChange>) {
 			const result = apply(state, change, []);
-			expect(Either.isLeft(result)).toBe(true);
-			if (Either.isLeft(result)) {
-				expect(result.left._tag).toBe("AccountChangeRejected");
-				expect(result.left.id).toBe("claude");
-				expect(result.left.reason).toMatch(/type.*delete.*add/i);
+			expect(Either.isFailure(result)).toBe(true);
+			if (Either.isFailure(result)) {
+				expect(result.failure._tag).toBe("AccountChangeRejected");
+				expect(result.failure.id).toBe("claude");
+				expect(result.failure.reason).toMatch(/type.*delete.*add/i);
 			}
 		}
 		expect(list(state)).toHaveLength(1);
@@ -449,12 +449,12 @@ describe("account directory mutations", () => {
 							previous.map((account) => account.id).reverse(),
 						);
 						expect(state).toEqual(snapshot);
-						if (Either.isLeft(result)) {
-							expect(result.left._tag).toBe("AccountChangeRejected");
-							expect(result.left.reason.length).toBeGreaterThan(0);
+						if (Either.isFailure(result)) {
+							expect(result.failure._tag).toBe("AccountChangeRejected");
+							expect(result.failure.reason.length).toBeGreaterThan(0);
 							continue;
 						}
-						state = result.right;
+						state = result.success;
 						const current = list(state);
 						const claudeAccounts = current.filter(
 							(account) => account.driver === "claude",
@@ -480,8 +480,8 @@ describe("account directory mutations", () => {
 							const routed = resolve(state, { _tag: "Id", id: deleted.id });
 							const fallback = defaultFor(state, deleted.driver);
 							if (Option.isSome(fallback))
-								expect(routed).toEqual(Either.right(fallback.value));
-							else expect(Either.isLeft(routed)).toBe(true);
+								expect(routed).toEqual(Either.succeed(fallback.value));
+							else expect(Either.isFailure(routed)).toBe(true);
 						}
 						if (change._tag === "Remove") {
 							const removed = previous.find((account) => account.id === id);
@@ -496,8 +496,8 @@ describe("account directory mutations", () => {
 								state.deleted.find((account) => account.id === legacyId)
 									?.driver ?? (legacyId === "opencode" ? "opencode" : "claude");
 							const routed = resolve(state, { _tag: "Id", id: legacyId });
-							if (Either.isRight(routed))
-								expect(routed.right.driver).toBe(expectedDriver);
+							if (Either.isSuccess(routed))
+								expect(routed.success.driver).toBe(expectedDriver);
 						}
 						expect(new Set(current.map((account) => account.id)).size).toBe(
 							current.length,
@@ -516,7 +516,7 @@ describe("account directory mutations", () => {
 						}
 						for (const { isDefault: _isDefault, ...account } of current) {
 							expect(resolve(state, { _tag: "Id", id: account.id })).toEqual(
-								Either.right(account),
+								Either.succeed(account),
 							);
 							if (account.driver === "claude") {
 								expect(account.folder.path.trim().length).toBeGreaterThan(0);

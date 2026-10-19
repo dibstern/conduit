@@ -1,6 +1,6 @@
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Effect, Either, Layer } from "effect";
+import { Effect, Result as Either, Layer } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonSessionQueryServiceTag } from "../../../src/lib/domain/relay/Services/daemon-session-query-service.js";
@@ -84,7 +84,7 @@ describe("WsRpcServerLayer daemon sessions", () => {
 					Layer.provideMerge(
 						Layer.merge(
 							makeTestHandlerLayer(),
-							Layer.succeed(DaemonSessionQueryServiceTag, {
+							Layer.succeed(DaemonSessionQueryServiceTag)({
 								listArchived: () =>
 									Effect.succeed({
 										sessions: [],
@@ -97,6 +97,7 @@ describe("WsRpcServerLayer daemon sessions", () => {
 						),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -106,13 +107,13 @@ describe("WsRpcServerLayer daemon sessions", () => {
 		() =>
 			Effect.gen(function* () {
 				const client = yield* rpcClient;
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					client.ListDaemonSessions({ projectSlug: "project-a" }),
 				);
 
-				expect(Either.isLeft(result)).toBe(true);
-				if (Either.isLeft(result)) {
-					expect(result.left.message).toContain(
+				expect(Either.isFailure(result)).toBe(true);
+				if (Either.isFailure(result)) {
+					expect(result.failure.message).toContain(
 						"Cross-project session listing is not supported in this mode",
 					);
 				}
@@ -120,6 +121,7 @@ describe("WsRpcServerLayer daemon sessions", () => {
 				Effect.scoped,
 				Effect.provide(
 					WsRpcServerLayer.pipe(Layer.provideMerge(makeTestHandlerLayer())),
+					{ local: true },
 				),
 			),
 	);

@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Clock, Data, Duration, Effect, Option, Schema } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { AccountSchema } from "../contracts/account.js";
 import { getProviderDriver } from "../contracts/provider-instance.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
@@ -143,23 +143,22 @@ export interface ProviderSideEffectReactorOptions {
 	readonly defaultClaudeLaunchConfig?: () => ClaudeLaunchConfig;
 	/** Optional deterministic override; defaults to the Effect Clock service. */
 	readonly nowMs?: () => number;
-	readonly retryBackoff?: (failureCount: number) => Duration.DurationInput;
-	readonly outcomePollInterval?: Duration.DurationInput;
-	readonly outcomePollTimeout?: Duration.DurationInput;
+	readonly retryBackoff?: (failureCount: number) => Duration.Input;
+	readonly outcomePollInterval?: Duration.Input;
+	readonly outcomePollTimeout?: Duration.Input;
 	readonly accountDirectory?: Pick<
-		AccountDirectory["Type"],
+		AccountDirectory["Service"],
 		"resolve" | "defaultFor"
 	>;
 }
 
-const defaultRetryBackoff = (failureCount: number): Duration.DurationInput =>
+const defaultRetryBackoff = (failureCount: number): Duration.Input =>
 	Duration.millis(Math.min(1000 * 2 ** Math.max(0, failureCount - 1), 30_000));
-const defaultOutcomePollInterval: Duration.DurationInput = Duration.millis(500);
-const defaultOutcomePollTimeout: Duration.DurationInput =
-	Duration.millis(900_000);
+const defaultOutcomePollInterval: Duration.Input = Duration.millis(500);
+const defaultOutcomePollTimeout: Duration.Input = Duration.millis(900_000);
 
 function clampPollDuration(
-	duration: Duration.DurationInput,
+	duration: Duration.Input,
 	minimumMillis: number,
 ): Duration.Duration {
 	const millis = Duration.toMillis(duration);
@@ -183,7 +182,7 @@ export class ProviderSideEffectReactor {
 	constructor(private readonly options: ProviderSideEffectReactorOptions) {}
 
 	drain(): Effect.Effect<void, ProviderCommandStoreFailure> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			while (true) {
 				const processed = yield* this.runOnce();
 				if (processed === 0) return;
@@ -192,14 +191,17 @@ export class ProviderSideEffectReactor {
 	}
 
 	runOnce(): Effect.Effect<number, ProviderCommandStoreFailure> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const now = yield* this.currentTimeMillis();
 			const row = yield* this.nextPendingRequest(now);
 			if (!row) return 0;
 			// Recovery / background path: no waiter, so the row outcome is recorded
 			// durably and swallowed here.
-			const result = yield* Effect.either(this.executeRow(row));
-			if (result._tag === "Right" && result.right.status === "steer-declined") {
+			const result = yield* Effect.result(this.executeRow(row));
+			if (
+				result._tag === "Success" &&
+				result.success.status === "steer-declined"
+			) {
 				const persist = yield* Effect.serviceOption(
 					ClaudeEventPersistEffectTag,
 				);
@@ -233,7 +235,7 @@ export class ProviderSideEffectReactor {
 		commandId: string,
 		interactions?: EventSink,
 	): Effect.Effect<TurnResult, ProviderCommandExecutionError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const row = yield* this.pendingRequestForCommand(commandId);
 			if (row) return yield* this.executeRow(row, interactions);
 			return yield* this.durableOutcome(commandId);
@@ -250,7 +252,7 @@ export class ProviderSideEffectReactor {
 		row: ProviderCommandOutboxRow,
 		interactions?: EventSink,
 	): Effect.Effect<TurnResult, ProviderCommandExecutionError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const startedAt = yield* this.currentTimeMillis();
 			// The `pending -> running` update is the exclusive execution claim.
 			// If it changes no rows another executor already claimed this row, so
@@ -259,15 +261,15 @@ export class ProviderSideEffectReactor {
 			if (claimed === undefined) {
 				return yield* this.durableOutcome(row.command_id);
 			}
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				this.runProviderEffect(row, claimed, interactions),
 			);
-			if (result._tag === "Left") {
+			if (result._tag === "Failure") {
 				const failedAt = yield* this.currentTimeMillis();
-				yield* this.markFailed(row, result.left, failedAt);
-				return yield* Effect.fail(result.left);
+				yield* this.markFailed(row, result.failure, failedAt);
+				return yield* Effect.fail(result.failure);
 			}
-			const turn = result.right;
+			const turn = result.success;
 			if (turn.status === "steer-declined") {
 				// The inbox owns rescheduling. This delivery must never retry.
 				yield* this.writeFailure(
@@ -306,7 +308,7 @@ export class ProviderSideEffectReactor {
 		TurnResult,
 		ProviderCommandStoreFailure | ProviderCommandNotExecutable
 	> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const pollInterval = clampPollDuration(
 				this.options.outcomePollInterval ?? defaultOutcomePollInterval,
 				1,
@@ -416,7 +418,7 @@ export class ProviderSideEffectReactor {
 		| ProviderInstanceFailure
 		| ProviderCommandStoreFailure
 	> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			if (row.effect_type === "send_turn") {
 				const payload = yield* this.parseSendTurnPayload(row);
 				const account =
@@ -472,7 +474,7 @@ export class ProviderSideEffectReactor {
 						});
 					});
 				const result = getProviderDriver(driver)?.supportsNativeResume
-					? yield* Effect.gen(this, function* () {
+					? yield* Effect.gen({ self: this }, function* () {
 							const state = yield* makeProviderStateEffect.pipe(
 								Effect.provideService(PersistenceProjectTag, {
 									projectId: row.project_key,

@@ -6,7 +6,7 @@ import {
 	resolveSettings as sdkResolveSettings,
 	tool,
 } from "@anthropic-ai/claude-agent-sdk";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { z } from "zod";
 import {
 	loadDaemonConfigResult,
@@ -311,7 +311,7 @@ export const makeClaudeRunnerLaunch = (
 		};
 		const defaultLaunchConfig = () =>
 			resolveClaudeLaunchConfig(
-				Either.getOrElse(loadDaemonConfigResult(daemonConfigDir), (error) => {
+				Result.getOrElse(loadDaemonConfigResult(daemonConfigDir), (error) => {
 					if (error._tag === "NotFound") return null;
 					throw error;
 				}),

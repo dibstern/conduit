@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { Rpc, RpcSchema, RpcSerialization } from "@effect/rpc";
-import { Either, Option, ParseResult, Schema } from "effect";
+import { Result, Schema, SchemaIssue } from "effect";
+import { Rpc, RpcSchema, RpcSerialization } from "effect/rpc";
 import { WsRpcGroup } from "../../src/lib/contracts/ws-rpc.js";
 import { isRecord } from "../../src/lib/utils.js";
 
@@ -56,6 +56,46 @@ function redactPayload(raw: string): string {
 	}
 }
 
+function focusUnionFailures(issue: SchemaIssue.Issue): SchemaIssue.Issue {
+	if (
+		issue._tag === "Pointer" ||
+		issue._tag === "Encoding" ||
+		issue._tag === "Filter"
+	)
+		return { ...issue, issue: focusUnionFailures(issue.issue) };
+	if (issue._tag === "Composite")
+		return {
+			...issue,
+			issues: [
+				focusUnionFailures(issue.issues[0]),
+				...issue.issues.slice(1).map(focusUnionFailures),
+			],
+		};
+	if (issue._tag !== "AnyOf") return issue;
+	const tag = isRecord(issue.input) ? issue.input["_tag"] : undefined;
+	const branchTags = issue.issues.map((branch) => {
+		if (!("ast" in branch) || branch.ast._tag !== "Objects") return undefined;
+		const field = branch.ast.propertySignatures.find(
+			(property) => property.name === "_tag",
+		);
+		return field?.type._tag === "Literal" ? field.type.literal : undefined;
+	});
+	// Opaque union fallbacks can fail their tag even when another branch's tag
+	// matches. Keep real tag failures when no branch matches, and untagged errors.
+	const hasMatchingTag = typeof tag === "string" && branchTags.includes(tag);
+	return {
+		...issue,
+		issues: issue.issues
+			.filter(
+				(_, index) =>
+					!hasMatchingTag ||
+					branchTags[index] === undefined ||
+					branchTags[index] === tag,
+			)
+			.map(focusUnionFailures),
+	};
+}
+
 /** Observe the source schemas at the wire boundary without replacing RPC errors. */
 export class RpcDecodeDiagnostics {
 	readonly wireFrames: {
@@ -86,11 +126,15 @@ export class RpcDecodeDiagnostics {
 		prefix: (string | number)[] = [],
 		requestId: string | null = null,
 	): void {
-		const schemaPaths = ParseResult.isParseError(error)
-			? ParseResult.ArrayFormatter.formatErrorSync(error).map(({ path }) => [
+		const schemaPaths = Schema.isSchemaError(error)
+			? SchemaIssue.makeFormatterStandardSchemaV1()(
+					focusUnionFailures(error.issue),
+				).issues.map(({ path }) => [
 					...prefix,
-					...path.map((part) =>
-						typeof part === "symbol" ? String(part) : part,
+					...(path ?? []).map((part) =>
+						typeof part === "string" || typeof part === "number"
+							? part
+							: String(typeof part === "symbol" ? part : part.key),
 					),
 				])
 			: [[]];
@@ -124,11 +168,13 @@ export class RpcDecodeDiagnostics {
 		}
 	}
 
-	serialization(endpoint: string): RpcSerialization.RpcSerialization["Type"] {
+	serialization(
+		endpoint: string,
+	): RpcSerialization.RpcSerialization["Service"] {
 		return RpcSerialization.RpcSerialization.of({
 			...RpcSerialization.json,
-			unsafeMake: () => {
-				const parser = RpcSerialization.json.unsafeMake();
+			makeUnsafe: () => {
+				const parser = RpcSerialization.json.makeUnsafe();
 				const requests = new Map<string, string>();
 				return {
 					encode: (message) => {
@@ -210,33 +256,35 @@ export class RpcDecodeDiagnostics {
 							const tag = requests.get(requestId);
 							const rpc = tag ? WsRpcGroup.requests.get(tag) : undefined;
 							if (!rpc) continue;
-							let schema: Schema.Schema<unknown, unknown>;
+							let schema: Schema.Codec<unknown>;
 							let payload: unknown;
 							let prefix: string;
 							if (frame["_tag"] === "Exit") {
 								// Same exit schema used by RpcClient.make, with no schema context.
-								schema = Schema.make(Rpc.exitSchema(rpc).ast);
+								schema = Schema.make<Schema.Codec<unknown>>(
+									Rpc.exitSchema(rpc).ast,
+								);
 								payload = frame["exit"];
 								prefix = "exit";
 								requests.delete(requestId);
 							} else if (frame["_tag"] === "Chunk") {
-								const stream = RpcSchema.getStreamSchemas(
-									rpc.successSchema.ast,
-								);
-								if (Option.isNone(stream)) continue;
+								if (!RpcSchema.isStreamSchema(rpc.successSchema)) continue;
 								schema = Schema.make(
-									Schema.NonEmptyArray(stream.value.success).ast,
+									Schema.NonEmptyArray(rpc.successSchema.success).ast,
 								);
 								payload = frame["values"];
 								prefix = "values";
 							} else continue;
-							const decoded = Schema.decodeUnknownEither(schema)(payload);
-							if (Either.isLeft(decoded))
+							const decoded = Schema.decodeUnknownResult(
+								RpcSerialization.json.codecFor(schema),
+								{ reportInput: true },
+							)(payload);
+							if (Result.isFailure(decoded))
 								this.capture(
 									endpoint,
 									rpc._tag,
 									raw,
-									decoded.left,
+									decoded.failure,
 									[prefix],
 									requestId,
 								);

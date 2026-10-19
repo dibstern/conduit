@@ -1,6 +1,9 @@
 // Tests for Effect-native layer replacements of daemon leaf services.
 
-import { NodeCommandExecutor, NodeFileSystem } from "@effect/platform-node";
+import {
+	NodeChildProcessSpawner as NodeCommandExecutor,
+	NodeFileSystem,
+} from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
 import {
 	Context,
@@ -8,10 +11,11 @@ import {
 	Effect,
 	Exit,
 	Layer,
+	Path,
 	Ref,
 	Scope,
-	TestClock,
 } from "effect";
+import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { resolveKeepAwakeCommand } from "../../../src/lib/daemon/keep-awake.js";
 import {
@@ -40,11 +44,11 @@ const withMonitor = (
 	config: {
 		getStorageUsage: () => Effect.Effect<number>;
 		persistence: { evictOldEvents: () => Effect.Effect<void> };
-		checkInterval: Duration.DurationInput;
+		checkInterval: Duration.Input;
 		highWaterMark: number;
 	},
 	body: (
-		svc: Context.Tag.Service<typeof StorageMonitorTag>,
+		svc: Context.Service.Shape<typeof StorageMonitorTag>,
 	) => Effect.Effect<void>,
 ) =>
 	Effect.gen(function* () {
@@ -62,7 +66,7 @@ const withMonitor = (
 
 describe("Leaf service Layers", () => {
 	describe("StorageMonitor", () => {
-		it.scoped("Layer constructs and provides tag", () =>
+		it.effect("Layer constructs and provides tag", () =>
 			Effect.gen(function* () {
 				const layer = StorageMonitorLive({
 					getStorageUsage: vi.fn().mockReturnValue(Effect.succeed(0.5)),
@@ -82,7 +86,7 @@ describe("Leaf service Layers", () => {
 			}),
 		);
 
-		it.scoped("background check records usage from getStorageUsage", () =>
+		it.effect("background check records usage from getStorageUsage", () =>
 			withMonitor(
 				{
 					getStorageUsage: vi.fn().mockReturnValue(Effect.succeed(0.42)),
@@ -102,7 +106,7 @@ describe("Leaf service Layers", () => {
 			),
 		);
 
-		it.scoped("evicts when usage exceeds high-water mark", () => {
+		it.effect("evicts when usage exceeds high-water mark", () => {
 			const evictOldEvents = vi.fn().mockReturnValue(Effect.succeed(undefined));
 			return withMonitor(
 				{
@@ -118,7 +122,7 @@ describe("Leaf service Layers", () => {
 			);
 		});
 
-		it.scoped("does not evict when usage is below high-water mark", () => {
+		it.effect("does not evict when usage is below high-water mark", () => {
 			const evictOldEvents = vi.fn().mockReturnValue(Effect.succeed(undefined));
 			return withMonitor(
 				{
@@ -134,7 +138,7 @@ describe("Leaf service Layers", () => {
 			);
 		});
 
-		it.scoped("scope close interrupts background fiber cleanly", () =>
+		it.effect("scope close interrupts background fiber cleanly", () =>
 			Effect.gen(function* () {
 				const layer = StorageMonitorLive({
 					getStorageUsage: vi.fn().mockReturnValue(Effect.succeed(0.5)),
@@ -159,10 +163,10 @@ describe("Leaf service Layers", () => {
 			config: {
 				getCurrentVersion: () => string;
 				fetchLatestVersion: () => Effect.Effect<string | null>;
-				checkInterval: Duration.DurationInput;
+				checkInterval: Duration.Input;
 			},
 			body: (
-				svc: Context.Tag.Service<typeof VersionCheckerTag>,
+				svc: Context.Service.Shape<typeof VersionCheckerTag>,
 			) => Effect.Effect<void>,
 		) =>
 			Effect.gen(function* () {
@@ -178,7 +182,7 @@ describe("Leaf service Layers", () => {
 				yield* Scope.close(scope, Exit.void);
 			});
 
-		it.scoped("detects newer version", () => {
+		it.effect("detects newer version", () => {
 			return withVersionChecker(
 				{
 					getCurrentVersion: () => "1.0.0",
@@ -193,7 +197,7 @@ describe("Leaf service Layers", () => {
 			);
 		});
 
-		it.scoped("ignores the same version", () => {
+		it.effect("ignores the same version", () => {
 			return withVersionChecker(
 				{
 					getCurrentVersion: () => "1.0.0",
@@ -207,7 +211,7 @@ describe("Leaf service Layers", () => {
 			);
 		});
 
-		it.scoped("ignores an older version", () => {
+		it.effect("ignores an older version", () => {
 			return withVersionChecker(
 				{
 					getCurrentVersion: () => "2.0.0",
@@ -221,7 +225,7 @@ describe("Leaf service Layers", () => {
 			);
 		});
 
-		it.scoped("ignores an unavailable version", () => {
+		it.effect("ignores an unavailable version", () => {
 			return withVersionChecker(
 				{
 					getCurrentVersion: () => "1.0.0",
@@ -235,7 +239,7 @@ describe("Leaf service Layers", () => {
 			);
 		});
 
-		it.scoped("getCurrentVersion returns configured version", () =>
+		it.effect("getCurrentVersion returns configured version", () =>
 			withVersionChecker(
 				{
 					getCurrentVersion: () => "3.5.1",
@@ -250,7 +254,7 @@ describe("Leaf service Layers", () => {
 			),
 		);
 
-		it.scoped("scope close interrupts background fiber cleanly", () =>
+		it.effect("scope close interrupts background fiber cleanly", () =>
 			Effect.gen(function* () {
 				const layer = VersionCheckerLive({
 					getCurrentVersion: () => "1.0.0",
@@ -272,7 +276,7 @@ describe("Leaf service Layers", () => {
 			config: {
 				probeFn: (port: number) => Effect.Effect<boolean>;
 				portRange: [number, number];
-				scanInterval: Duration.DurationInput;
+				scanInterval: Duration.Input;
 				removalThreshold: number;
 				onDiscovered: (port: number) => Effect.Effect<void>;
 				onLost: (port: number) => Effect.Effect<void>;
@@ -285,7 +289,7 @@ describe("Leaf service Layers", () => {
 				getExcludedPorts?: () => Effect.Effect<ReadonlySet<number>>;
 			},
 			body: (
-				svc: Context.Tag.Service<typeof PortScannerTag>,
+				svc: Context.Service.Shape<typeof PortScannerTag>,
 			) => Effect.Effect<void>,
 		) =>
 			Effect.gen(function* () {
@@ -301,7 +305,7 @@ describe("Leaf service Layers", () => {
 				yield* Scope.close(scope, Exit.void);
 			});
 
-		it.scoped("discovers alive ports and calls onDiscovered", () => {
+		it.effect("discovers alive ports and calls onDiscovered", () => {
 			const onDiscovered = vi.fn().mockReturnValue(Effect.succeed(undefined));
 			const onLost = vi.fn().mockReturnValue(Effect.succeed(undefined));
 			return withPortScanner(
@@ -324,14 +328,14 @@ describe("Leaf service Layers", () => {
 			);
 		});
 
-		it.scoped(
+		it.effect(
 			"hysteresis: port not removed until removalThreshold consecutive failures",
 			() => {
 				const onDiscovered = vi.fn().mockReturnValue(Effect.succeed(undefined));
 				const onLost = vi.fn().mockReturnValue(Effect.succeed(undefined));
 
 				// scanCount tracks which scan we are on so probeFn can vary behavior
-				const scanCountRef = Ref.unsafeMake(0);
+				const scanCountRef = Ref.makeUnsafe(0);
 
 				// Scan 0: port 3000 alive (discovered)
 				// Scan 1: port 3000 dead (failure count = 1)
@@ -387,7 +391,7 @@ describe("Leaf service Layers", () => {
 			},
 		);
 
-		it.scoped("excludedPorts are not scanned", () => {
+		it.effect("excludedPorts are not scanned", () => {
 			const onDiscovered = vi.fn().mockReturnValue(Effect.succeed(undefined));
 			return withPortScanner(
 				{
@@ -410,7 +414,7 @@ describe("Leaf service Layers", () => {
 			);
 		});
 
-		it.scoped("scope close interrupts background fiber cleanly", () =>
+		it.effect("scope close interrupts background fiber cleanly", () =>
 			Effect.gen(function* () {
 				const layer = PortScannerLive({
 					probeFn: () => Effect.succeed(true),
@@ -428,11 +432,11 @@ describe("Leaf service Layers", () => {
 			}),
 		);
 
-		it.scoped("scanNow returns discovered, lost, and active ports", () => {
+		it.effect("scanNow returns discovered, lost, and active ports", () => {
 			const onDiscovered = vi.fn().mockReturnValue(Effect.succeed(undefined));
 			const onLost = vi.fn().mockReturnValue(Effect.succeed(undefined));
 			const onScan = vi.fn().mockReturnValue(Effect.succeed(undefined));
-			const aliveRef = Ref.unsafeMake(true);
+			const aliveRef = Ref.makeUnsafe(true);
 
 			return withPortScanner(
 				{
@@ -470,8 +474,8 @@ describe("Leaf service Layers", () => {
 			);
 		});
 
-		it.scoped("reads excluded ports for each scan", () => {
-			const excludedRef = Ref.unsafeMake<ReadonlySet<number>>(new Set([3001]));
+		it.effect("reads excluded ports for each scan", () => {
+			const excludedRef = Ref.makeUnsafe<ReadonlySet<number>>(new Set([3001]));
 			const probed: number[] = [];
 
 			return withPortScanner(
@@ -506,11 +510,12 @@ describe("Leaf service Layers", () => {
 	});
 
 	describe("KeepAwake", () => {
-		it.scoped("isSupported follows platform command resolution", () =>
+		it.effect("isSupported follows platform command resolution", () =>
 			Effect.gen(function* () {
 				const layer = KeepAwakeLive().pipe(
 					Layer.provide(NodeCommandExecutor.layer),
 					Layer.provide(NodeFileSystem.layer),
+					Layer.provide(Path.layer),
 				);
 				const scope = yield* Scope.make();
 				const ctx = yield* Layer.buildWithScope(layer, scope);
@@ -524,12 +529,13 @@ describe("Leaf service Layers", () => {
 			}),
 		);
 
-		it.scoped("activate/deactivate is idempotent", () =>
+		it.effect("activate/deactivate is idempotent", () =>
 			Effect.gen(function* () {
 				// Use a custom command to ensure isSupported = true regardless of platform
 				const layer = KeepAwakeLive({ command: "sleep", args: ["86400"] }).pipe(
 					Layer.provide(NodeCommandExecutor.layer),
 					Layer.provide(NodeFileSystem.layer),
+					Layer.provide(Path.layer),
 				);
 				const scope = yield* Scope.make();
 				const ctx = yield* Layer.buildWithScope(layer, scope);
@@ -551,11 +557,12 @@ describe("Leaf service Layers", () => {
 			}),
 		);
 
-		it.scoped("scope close runs finalizer (deactivate)", () =>
+		it.effect("scope close runs finalizer (deactivate)", () =>
 			Effect.gen(function* () {
 				const layer = KeepAwakeLive({ command: "sleep", args: ["86400"] }).pipe(
 					Layer.provide(NodeCommandExecutor.layer),
 					Layer.provide(NodeFileSystem.layer),
+					Layer.provide(Path.layer),
 				);
 				const scope = yield* Scope.make();
 				const ctx = yield* Layer.buildWithScope(layer, scope);
@@ -576,7 +583,7 @@ describe("Leaf service Layers", () => {
 	});
 
 	describe("RateLimiter", () => {
-		it.scoped("allows requests under limit", () =>
+		it.effect("allows requests under limit", () =>
 			Effect.gen(function* () {
 				const limiter = yield* RateLimiterTag;
 				const r1 = yield* limiter.checkLimit("127.0.0.1");
@@ -588,7 +595,7 @@ describe("Leaf service Layers", () => {
 			),
 		);
 
-		it.scoped("blocks requests over limit", () =>
+		it.effect("blocks requests over limit", () =>
 			Effect.gen(function* () {
 				const limiter = yield* RateLimiterTag;
 				for (let i = 0; i < 5; i++) {

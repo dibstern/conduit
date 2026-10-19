@@ -13,7 +13,7 @@ import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AddInstance } from "../../../src/lib/contracts/ws-rpc.js";
+
 import {
 	type ProcessBrowser,
 	ProcessHarness,
@@ -174,9 +174,11 @@ describe("Cursor usage, errors and cancellation through daemon and runner", () =
 					: {}),
 			},
 		});
-		const added = await harness.requestRpc(
-			new AddInstance({ name: "Cursor usage replay", driver: "cursor" }),
-		);
+		const added = await harness.requestRpc({
+			_tag: "AddInstance",
+			name: "Cursor usage replay",
+			driver: "cursor",
+		});
 		if (!added.addedInstanceId) throw new Error("Missing Cursor account");
 		const browser = await harness.connect();
 		sessionId = await browser.createSession(
@@ -190,7 +192,7 @@ describe("Cursor usage, errors and cancellation through daemon and runner", () =
 
 	async function submit(browser: ProcessBrowser, id: string, text: string) {
 		await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId: id,
 				originId: browser.originId,
 				inputId: randomUUID(),

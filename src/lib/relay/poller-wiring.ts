@@ -3,7 +3,7 @@
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
-import { Effect, Runtime } from "effect";
+import { Effect } from "effect";
 import {
 	type AlertsTag,
 	publishAlert,
@@ -239,11 +239,11 @@ export function wirePollers(deps: PollerWiringDeps): void {
 
 export const wirePollersEffect = (deps: EffectPollerWiringDeps) =>
 	Effect.gen(function* () {
-		const runtime = yield* Effect.runtime<
+		const runtime = yield* Effect.context<
 			SessionManagerServiceTag | StatusPollerTag | OverridesStateTag | AlertsTag
 		>();
 		yield* Effect.sync(() => {
-			const runFork = Runtime.runFork(runtime);
+			const runFork = Effect.runForkWith(runtime);
 			deps.pollerManager.on(
 				"events",
 				(events, polledSessionId, hasActivity) => {
@@ -254,7 +254,7 @@ export const wirePollersEffect = (deps: EffectPollerWiringDeps) =>
 							polledSessionId,
 							hasActivity,
 						).pipe(
-							Effect.catchAllCause((cause) =>
+							Effect.catchCause((cause) =>
 								Effect.sync(() =>
 									deps.pollerLog.warn(
 										`Message poller event handling failed: ${Failure.renderCause(cause)}`,

@@ -348,7 +348,7 @@ describe("in-process Claude session runner", () => {
 								return {};
 							}),
 					);
-					const first = yield* Effect.fork(
+					const first = yield* Effect.forkChild(
 						runner.executeEffect(roundTrip(send("turn-1"))),
 					);
 					const request = yield* Deferred.await(approval);
@@ -380,7 +380,7 @@ describe("in-process Claude session runner", () => {
 						updatedInput: { answers: { "Continue?": "Yes" } },
 					});
 
-					const second = yield* Effect.fork(
+					const second = yield* Effect.forkChild(
 						runner.executeEffect(roundTrip(send("turn-2"))),
 					);
 					yield* Deferred.await(secondTurn);
@@ -444,7 +444,9 @@ describe("in-process Claude session runner", () => {
 								? Deferred.succeed(shutdown, undefined).pipe(Effect.as({}))
 								: Effect.succeed({}),
 					);
-					const turn = yield* Effect.fork(runner.executeEffect(send("turn-1")));
+					const turn = yield* Effect.forkChild(
+						runner.executeEffect(send("turn-1")),
+					);
 					yield* Deferred.await(started);
 					yield* runner.executeEffect({
 						type: "shutdown-after-turn",

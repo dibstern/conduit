@@ -1,7 +1,7 @@
-import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
 import Database from "better-sqlite3";
 import { Effect, Stream } from "effect";
+import { RpcClient, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import { describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";

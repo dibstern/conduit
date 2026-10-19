@@ -109,7 +109,7 @@ it("leaves socket write missing when the browser leaves before assistant output"
 	const inputId = randomUUID();
 	expect(
 		await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId,
 				originId: "timeline-disconnect",
 				inputId,

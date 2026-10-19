@@ -9,11 +9,11 @@ import {
 } from "node:fs";
 import { arch, cpus, platform, release, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { parseArgs } from "node:util";
-import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import Database from "better-sqlite3";
 import { Effect, Exit, Schema, Tracer } from "effect";
+import { SqlClient } from "effect/sql";
 import { PersistenceProjectTag } from "../../src/lib/domain/persistence/Services/persistence-service.js";
 import { makeEffectSqlMigrator } from "../../src/lib/persistence/effect/migrations.js";
 import { makeProjectionRunnerEffect } from "../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -84,7 +84,7 @@ async function main(): Promise<void> {
 		);
 		const migrationMs = performance.now() - migrationStart;
 		const seedStart = performance.now();
-		const db = new Database(filename);
+		const db = new DatabaseSync(filename, { timeout: 5000 });
 		try {
 			db.exec(`CREATE TABLE benchmark_applications (
 				sequence INTEGER PRIMARY KEY,
@@ -97,7 +97,8 @@ async function main(): Promise<void> {
 				"INSERT INTO benchmark_applications (sequence) VALUES (?)",
 			);
 			const decodeEventId = Schema.decodeSync(EventId);
-			db.transaction(() => {
+			db.exec("BEGIN");
+			try {
 				for (let sequence = 1; sequence <= eventCount; sequence++) {
 					const event = canonicalEvent(
 						"session.renamed",
@@ -122,7 +123,11 @@ async function main(): Promise<void> {
 					);
 					insertCounter.run(sequence);
 				}
-			})();
+				db.exec("COMMIT");
+			} catch (cause) {
+				db.exec("ROLLBACK");
+				throw cause;
+			}
 		} finally {
 			db.close();
 		}
@@ -130,7 +135,15 @@ async function main(): Promise<void> {
 
 		let transactionCommits = 0;
 		const tracer = Tracer.make({
-			span: (name, parent, context, links, startTime, kind) => {
+			span: ({
+				name,
+				parent,
+				annotations,
+				links,
+				startTime,
+				kind,
+				sampled,
+			}) => {
 				let committed = false;
 				return {
 					_tag: "Span",
@@ -138,18 +151,18 @@ async function main(): Promise<void> {
 					spanId: "benchmark",
 					traceId: "benchmark",
 					parent,
-					context,
+					annotations,
 					status: { _tag: "Started", startTime },
 					attributes: new Map(),
 					links,
-					sampled: true,
+					sampled,
 					kind,
 					attribute: () => {},
 					addLinks: () => {},
 					event: (eventName) => {
 						if (
 							name === "sql.transaction" &&
-							eventName === "db.transaction.commit"
+							eventName === "effect.sql.transaction.commit"
 						)
 							committed = true;
 					},
@@ -158,7 +171,6 @@ async function main(): Promise<void> {
 					},
 				};
 			},
-			context: (f) => f(),
 		});
 		const sqliteLayer = SqliteNode.layer({ filename });
 		const recover = Effect.gen(function* () {

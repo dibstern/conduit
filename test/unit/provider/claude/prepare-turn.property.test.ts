@@ -320,7 +320,7 @@ it("retries only startup-rejected native conversations once, preserving other re
 							durationMs: 0,
 							providerStateUpdates: [],
 						};
-						const result = yield* Effect.either(
+						const result = yield* Effect.result(
 							sendPreparedClaudeTurn({
 								sessionId: "s1",
 								instanceId: "personal",
@@ -357,8 +357,8 @@ it("retries only startup-rejected native conversations once, preserving other re
 							}),
 						);
 						expect(result).toMatchObject({
-							_tag: "Right",
-							right: {
+							_tag: "Success",
+							success: {
 								status:
 									!startupRejected || fallbackFails ? "error" : "completed",
 							},
@@ -714,12 +714,12 @@ it("prepares intact, ordered, budgeted context only for a fresh native thread", 
 								configDir: configuredClaudeConfigDir("/accounts/work"),
 								modelContextWindow: 16000,
 							});
-							const tooLarge = yield* Effect.either(
+							const tooLarge = yield* Effect.result(
 								tiny("s1", "work", current),
 							);
-							expect(tooLarge._tag).toBe("Left");
-							if (tooLarge._tag === "Left")
-								expect(tooLarge.left._tag).toBe("HandoffTooLarge");
+							expect(tooLarge._tag).toBe("Failure");
+							if (tooLarge._tag === "Failure")
+								expect(tooLarge.failure._tag).toBe("HandoffTooLarge");
 						}
 						const liveSession = {
 							instanceId: "personal",

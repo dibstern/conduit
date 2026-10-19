@@ -1,25 +1,46 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 export const WorktreeCleanupSchema = Schema.Struct({
-	onSettle: Schema.optionalWith(Schema.Literal("keep", "nothing-missing"), {
-		default: () => "nothing-missing" as const,
-	}),
-	onDelete: Schema.optionalWith(Schema.Boolean, { default: () => false }),
-	settledAfterDays: Schema.optionalWith(
-		Schema.NullOr(Schema.Number.pipe(Schema.int(), Schema.between(0, 3650))),
-		{ default: () => null },
+	onSettle: Schema.Literals(["keep", "nothing-missing"]).pipe(
+		Schema.withDecodingDefaultType(
+			Effect.sync(() => "nothing-missing" as const),
+		),
+		Schema.withConstructorDefault(
+			Effect.sync(() => "nothing-missing" as const),
+		),
 	),
-	keepWhen: Schema.optionalWith(
-		Schema.Literal("any-local-files", "uncommitted-changes", "tracked-changes"),
-		{ default: () => "uncommitted-changes" as const },
+	onDelete: Schema.Boolean.pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => false)),
+		Schema.withConstructorDefault(Effect.sync(() => false)),
+	),
+	settledAfterDays: Schema.NullOr(
+		Schema.Number.pipe(
+			Schema.check(Schema.isInt()),
+			Schema.check(Schema.isBetween({ minimum: 0, maximum: 3650 })),
+		),
+	).pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => null)),
+		Schema.withConstructorDefault(Effect.sync(() => null)),
+	),
+	keepWhen: Schema.Literals([
+		"any-local-files",
+		"uncommitted-changes",
+		"tracked-changes",
+	]).pipe(
+		Schema.withDecodingDefaultType(
+			Effect.sync(() => "uncommitted-changes" as const),
+		),
+		Schema.withConstructorDefault(
+			Effect.sync(() => "uncommitted-changes" as const),
+		),
 	),
 });
 export type WorktreeCleanup = typeof WorktreeCleanupSchema.Type;
 
-export const ProjectWorktreeCleanupSchema = Schema.Union(
+export const ProjectWorktreeCleanupSchema = Schema.Union([
 	Schema.Literal("off"),
 	WorktreeCleanupSchema,
-);
+]);
 export type ProjectWorktreeCleanup = typeof ProjectWorktreeCleanupSchema.Type;
 
 export const resolveWorktreeCleanup = (
@@ -53,14 +74,14 @@ export class WorktreeBranchRenameError extends Schema.TaggedError<WorktreeBranch
 	"WorktreeBranchRenameError",
 	{
 		folder: Schema.String,
-		reason: Schema.Literal(
+		reason: Schema.Literals([
 			"not-owned",
 			"invalid-name",
 			"already-exists",
 			"worktree-missing",
 			"head-mismatch",
 			"git-failed",
-		),
+		]),
 		message: Schema.String,
 	},
 ) {}
@@ -68,14 +89,14 @@ export class WorktreeBranchRenameError extends Schema.TaggedError<WorktreeBranch
 export class WorktreeCreationError extends Schema.TaggedError<WorktreeCreationError>()(
 	"WorktreeCreationError",
 	{
-		reason: Schema.Literal(
+		reason: Schema.Literals([
 			"branch-exists",
 			"invalid-branch",
 			"detached-head",
 			"target-exists",
 			"git-failed",
 			"unsupported-project",
-		),
+		]),
 		path: Schema.String,
 		message: Schema.String,
 	},
@@ -87,13 +108,13 @@ const WorktreeMissingFields = {
 	branch: Schema.optional(Schema.String),
 	canRecreate: Schema.Boolean,
 	reason: Schema.optional(
-		Schema.Literal(
+		Schema.Literals([
 			"branch-missing",
 			"branch-unknown",
 			"branch-in-use",
 			"git-failed",
 			"not-owned",
-		),
+		]),
 	),
 };
 export const WorkspaceMissingSchema = Schema.Struct({
@@ -112,20 +133,23 @@ export type WorkspaceMissing = typeof WorkspaceMissingSchema.Type;
 
 export class MissingWorktreeError extends Schema.TaggedError<MissingWorktreeError>()(
 	"MissingWorktreeError",
-	{ path: Schema.String, message: Schema.String },
+	{
+		path: Schema.String,
+		message: Schema.String,
+	},
 ) {}
 
 export class WorktreeRecoveryError extends Schema.TaggedError<WorktreeRecoveryError>()(
 	"WorktreeRecoveryError",
 	{
-		reason: Schema.Literal(
+		reason: Schema.Literals([
 			"branch-missing",
 			"branch-unknown",
 			"branch-in-use",
 			"target-exists",
 			"git-failed",
 			"not-owned",
-		),
+		]),
 		path: Schema.String,
 		message: Schema.String,
 	},

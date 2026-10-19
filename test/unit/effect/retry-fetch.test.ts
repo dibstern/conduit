@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Effect, Exit } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import { expect } from "vitest";
 
 import { fetchWithRetry } from "../../../src/lib/domain/relay/Services/retry-fetch.js";
@@ -22,15 +22,9 @@ describe("Effect-based retry fetch", () => {
 			);
 			expect(Exit.isFailure(result)).toBe(true);
 			if (Exit.isFailure(result)) {
-				const cause = result.cause;
-				// Extract the error from the Cause
-				const errors: OpenCodeConnectionError[] = [];
-				const collectErrors = (c: typeof cause): void => {
-					if (c._tag === "Fail") {
-						errors.push(c.error as OpenCodeConnectionError);
-					}
-				};
-				collectErrors(cause);
+				const errors = result.cause.reasons
+					.filter(Cause.isFailReason)
+					.map((reason) => reason.error);
 				expect(errors.length).toBe(1);
 				expect(errors[0]).toBeInstanceOf(OpenCodeConnectionError);
 			}

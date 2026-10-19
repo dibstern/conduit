@@ -12,9 +12,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { SqlClient, Statement } from "@effect/sql";
 import Database from "better-sqlite3";
 import { Effect, Layer, ManagedRuntime } from "effect";
+import { SqlClient, Statement } from "effect/sql";
 import { expect, it } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
@@ -190,24 +190,21 @@ it.skipIf(!snapshot || !baselineRef)(
 						mkdirSync(configDir, { recursive: true });
 						const runtime = ManagedRuntime.make(
 							Layer.mergeAll(
-								Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-								Layer.succeed(
-									OpenCodeInstancesTag,
+								Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+								Layer.succeed(OpenCodeInstancesTag)(
 									makeOpenCodeInstancesStub(),
 								),
 								makePersistenceEffectLayer(filename, projectId),
 								makeOverridesStateLive(),
-								Layer.succeed(
-									ConfigTag,
+								Layer.succeed(ConfigTag)(
 									makeMockConfig({
 										projectDir: directory,
 										configDir,
 										claudeSdk,
 									}),
 								),
-								Layer.succeed(LoggerTag, makeMockLogger()),
-								Layer.succeed(
-									OrchestrationEngineTag,
+								Layer.succeed(LoggerTag)(makeMockLogger()),
+								Layer.succeed(OrchestrationEngineTag)(
 									withDispatchEffect({
 										dispatchEffect: () =>
 											Effect.succeed({
@@ -260,15 +257,18 @@ it.skipIf(!snapshot || !baselineRef)(
 											}
 										: undefined,
 								).pipe(
-									Statement.withTransformer((statement) => {
-										const [sql] = statement.compile();
-										if (
-											/^\s*(SELECT|WITH)/i.test(sql) &&
-											/\bFROM events\b/i.test(sql)
-										)
-											reads.push(sql);
-										return Effect.succeed(statement);
-									}),
+									Effect.provideService(
+										Statement.CurrentTransformer,
+										(statement) => {
+											const [sql] = statement.compile();
+											if (
+												/^\s*(SELECT|WITH)/i.test(sql) &&
+												/\bFROM events\b/i.test(sql)
+											)
+												reads.push(sql);
+											return Effect.succeed(statement);
+										},
+									),
 								),
 							);
 							const elapsed = performance.now() - started;

@@ -5,13 +5,9 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	GetProjects,
-	type ProjectInfo,
-	SaveProject,
-} from "../../../src/lib/contracts/ws-rpc.js";
+import type { ProjectInfo } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	type DaemonConfig,
 	loadDaemonConfigResult,
@@ -25,10 +21,9 @@ describe("repository identities through the daemon", () => {
 
 	const projects = async (fixture: ProcessHarness) =>
 		(
-			await sendRpcRequest(
-				join(fixture.configDir, "relay.sock"),
-				new GetProjects({}),
-			)
+			await sendRpcRequest(join(fixture.configDir, "relay.sock"), {
+				_tag: "GetProjects",
+			})
 		).projects;
 	const state = (
 		entries: readonly Pick<
@@ -167,7 +162,7 @@ describe("repository identities through the daemon", () => {
 		await fixture.restart();
 		const socket = join(fixture.configDir, "relay.sock");
 		const save = (folders: string[], title: string) =>
-			sendRpcRequest(socket, new SaveProject({ folders, title }));
+			sendRpcRequest(socket, { _tag: "SaveProject", folders, title });
 		const sshProject = await save([ssh, scratch], "SSH clone");
 		const httpsProject = await save([https], "HTTPS clone");
 		const localProject = await save([local], "Local");
@@ -227,13 +222,11 @@ describe("repository identities through the daemon", () => {
 		});
 
 		// Changing the folder list must derive newly attached folders and drop detached keys.
-		await sendRpcRequest(
-			socket,
-			new SaveProject({
-				slug: sshProject.savedSlug,
-				folders: [ssh, linked, scratch],
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: sshProject.savedSlug,
+			folders: [ssh, linked, scratch],
+		});
 		expect(
 			bySlug(await projects(fixture), sshProject.savedSlug)
 				.repositoryIdentities,
@@ -241,10 +234,11 @@ describe("repository identities through the daemon", () => {
 			[ssh]: { key: "github.com/owner/shared", name: "Shared", root: ssh },
 			[linked]: { ...localIdentity, root: linked },
 		});
-		await sendRpcRequest(
-			socket,
-			new SaveProject({ slug: sshProject.savedSlug, folders: [ssh, scratch] }),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: sshProject.savedSlug,
+			folders: [ssh, scratch],
+		});
 		expect(
 			bySlug(await projects(fixture), sshProject.savedSlug)
 				.repositoryIdentities,

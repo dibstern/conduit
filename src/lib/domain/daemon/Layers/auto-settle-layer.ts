@@ -21,7 +21,7 @@ import { RelayCacheTag } from "../Services/relay-cache.js";
 const MILLISECONDS_PER_DAY = 86_400_000;
 
 export const AutoSettleLive = () =>
-	Layer.scopedDiscard(
+	Layer.effectDiscard(
 		Effect.gen(function* () {
 			const configRef = yield* DaemonConfigRefTag;
 			const registry = yield* ProjectRegistryTag;
@@ -93,7 +93,7 @@ export const AutoSettleLive = () =>
 						if (count > 0)
 							yield* PubSub.publish(bus, DaemonEvent.DaemonSessionsChanged());
 					}).pipe(
-						Effect.catchAllCause((cause) =>
+						Effect.catchCause((cause) =>
 							Failure.isInterruptedOnly(cause)
 								? Effect.failCause(cause)
 								: Effect.logWarning("automatic settlement failed for project", {
@@ -104,7 +104,7 @@ export const AutoSettleLive = () =>
 					);
 				}
 			}).pipe(
-				Effect.catchAllCause((cause) =>
+				Effect.catchCause((cause) =>
 					Failure.isInterruptedOnly(cause)
 						? Effect.failCause(cause)
 						: Effect.logWarning(

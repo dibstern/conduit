@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Cause, Context, Deferred, Effect, Layer, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import type { SessionSetupFinishedPayloadSchema } from "../../../contracts/project-setup.js";
 import { loadDaemonConfigResult } from "../../../daemon/config-persistence.js";
 import { readProjectFile } from "../../../daemon/project-file.js";
@@ -12,11 +12,9 @@ import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
 import { ConfigTag } from "./services.js";
 import { applySessionCommand, SessionCommandError } from "./session-command.js";
 
-type SetupCommandError = Effect.Effect.Error<
-	ReturnType<typeof applySessionCommand>
->;
+type SetupCommandError = Effect.Error<ReturnType<typeof applySessionCommand>>;
 
-export class SessionSetupTag extends Context.Tag("SessionSetup")<
+export class SessionSetupTag extends Context.Service<
 	SessionSetupTag,
 	{
 		/** Register the gate during workspace initialization; setup runs in the relay scope. */
@@ -27,9 +25,9 @@ export class SessionSetupTag extends Context.Tag("SessionSetup")<
 		readonly wait: (sessionId: string) => Effect.Effect<void>;
 		readonly recover: Effect.Effect<void, SetupCommandError>;
 	}
->() {}
+>()("SessionSetup") {}
 
-export const SessionSetupLive = Layer.scoped(
+export const SessionSetupLive = Layer.effect(
 	SessionSetupTag,
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
@@ -39,7 +37,7 @@ export const SessionSetupLive = Layer.scoped(
 		const scope = yield* Effect.scope;
 		const context =
 			yield* Effect.context<
-				Effect.Effect.Context<ReturnType<typeof applySessionCommand>>
+				Effect.Services<ReturnType<typeof applySessionCommand>>
 			>();
 		const commit = (command: Parameters<typeof applySessionCommand>[0]) =>
 			applySessionCommand(command).pipe(Effect.provide(context));
@@ -76,7 +74,7 @@ export const SessionSetupLive = Layer.scoped(
 										Effect.provideService(ProjectRegistryTag, registry.value),
 									)
 								: yield* Effect.suspend(() =>
-										loadDaemonConfigResult(config.configDir),
+										Effect.fromResult(loadDaemonConfigResult(config.configDir)),
 									).pipe(
 										Effect.map((loaded) => loaded.projects),
 										Effect.catchTag("NotFound", () =>
@@ -146,13 +144,13 @@ export const SessionSetupLive = Layer.scoped(
 											? "Setup interrupted by daemon shutdown."
 											: `Setup could not finish: ${exit._tag === "Failure" ? Failure.renderCause(exit.cause) : "runner ended without an outcome"}`,
 									}).pipe(
-										Effect.catchAllCause((cause) =>
+										Effect.catchCause((cause) =>
 											Effect.logError("Failed to record setup outcome", cause),
 										),
 									)
 								: Effect.void,
 						),
-						Effect.catchAllCause((cause) =>
+						Effect.catchCause((cause) =>
 							Failure.isInterruptedOnly(cause)
 								? Effect.void
 								: Effect.logError("Project setup failed", cause),
@@ -164,7 +162,9 @@ export const SessionSetupLive = Layer.scoped(
 							}),
 						),
 					);
-					yield* Effect.forkIn(Effect.interruptible(run), scope);
+					yield* Effect.forkIn(Effect.interruptible(run), scope, {
+						uninterruptible: "inherit",
+					});
 				}),
 			wait: (sessionId: string) =>
 				Effect.suspend(() => {

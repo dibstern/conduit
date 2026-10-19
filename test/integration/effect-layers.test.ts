@@ -3,7 +3,7 @@ import { sdkDefaultClaudeConfigDir } from "../../src/lib/provider/claude/claude-
 // and key services work end-to-end.
 
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Queue, Schema } from "effect";
+import { Effect, Layer, PubSub, Schema } from "effect";
 import { expect } from "vitest";
 import { WsRpcRequest } from "../../src/lib/contracts/ws-rpc.js";
 import { DaemonWsRpcHandlersTag } from "../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
@@ -77,7 +77,7 @@ const composedLayer = Layer.mergeAll(
 );
 
 describe("Integration: Full Layer Composition", () => {
-	it.scoped("all Tags resolve from composed Layer", () =>
+	it.effect("all Tags resolve from composed Layer", () =>
 		Effect.gen(function* () {
 			const daemonState = yield* DaemonStateTag;
 			const sessionState = yield* SessionManagerStateTag;
@@ -101,9 +101,9 @@ describe("Integration: Full Layer Composition", () => {
 		}).pipe(Effect.provide(Layer.fresh(composedLayer))),
 	);
 
-	it.scoped("decodes and handles a browser RPC GetStatus request", () =>
+	it.effect("decodes and handles a browser RPC GetStatus request", () =>
 		Effect.gen(function* () {
-			const request = yield* Schema.decodeUnknown(WsRpcRequest)(
+			const request = yield* Schema.decodeUnknownEffect(WsRpcRequest)(
 				JSON.parse('{"_tag":"GetStatus"}'),
 			);
 			if (request._tag !== "GetStatus") throw new Error("Expected GetStatus");
@@ -113,11 +113,11 @@ describe("Integration: Full Layer Composition", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeDaemonRpcTestLayer()))),
 	);
 
-	it.scoped("PubSub events flow between publisher and subscriber", () =>
+	it.effect("PubSub events flow between publisher and subscriber", () =>
 		Effect.gen(function* () {
 			const sub = yield* subscribeToDaemonEvents;
 			yield* publishStatusChanged({ s1: "busy", s2: "idle" });
-			const event = yield* Queue.take(sub);
+			const event = yield* PubSub.take(sub);
 
 			expect(event._tag).toBe("StatusChanged");
 			if (event._tag === "StatusChanged") {
@@ -126,7 +126,7 @@ describe("Integration: Full Layer Composition", () => {
 		}).pipe(Effect.provide(Layer.fresh(DaemonEventBusLive))),
 	);
 
-	it.scoped("RateLimiter enforces limits", () =>
+	it.effect("RateLimiter enforces limits", () =>
 		Effect.gen(function* () {
 			const limiter = yield* RateLimiterTag;
 

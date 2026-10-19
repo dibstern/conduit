@@ -2,7 +2,7 @@ import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SaveProject } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
 	type ProcessBrowser,
@@ -33,10 +33,10 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 
 	async function addProject(fixture: ProcessHarness, directory: string) {
 		mkdirSync(directory, { recursive: true });
-		const result = await sendRpcRequest(
-			join(fixture.configDir, "relay.sock"),
-			new SaveProject({ folders: [directory] }),
-		);
+		const result = await sendRpcRequest(join(fixture.configDir, "relay.sock"), {
+			_tag: "SaveProject",
+			folders: [directory],
+		});
 		return result.savedSlug;
 	}
 

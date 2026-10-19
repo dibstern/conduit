@@ -3,7 +3,7 @@
 // writer, the sidebar read and the differential test share this schema, and
 // `changeSidebarRow` alone decides whether a row's version moves.
 
-import { Schema } from "effect";
+import { Schema, Struct } from "effect";
 import { SessionInfoSchema } from "../shared-types.js";
 
 export const SidebarRowSchema = Schema.Struct({
@@ -22,7 +22,7 @@ export const SidebarRowSchema = Schema.Struct({
 		snoozed_until: Schema.NullOr(Schema.Number),
 		woken_at: Schema.NullOr(Schema.Number),
 		woken_reason: Schema.NullOr(
-			Schema.Literal("approval", "question", "error", "turn"),
+			Schema.Literals(["approval", "question", "error", "turn"]),
 		),
 	}),
 	/**
@@ -30,25 +30,27 @@ export const SidebarRowSchema = Schema.Struct({
 	 * read time: background work and snooze state. Its attention and
 	 * processing are what the stored state alone gives.
 	 */
-	session: SessionInfoSchema.omit(
-		"accountId",
-		"projectSlug",
-		"updatedAt",
-		"backgroundWork",
-		"backgroundTasks",
-		"compacting",
-		"retrying",
-		"snoozedAt",
-		"snoozedUntil",
-		"wokenAt",
-		"wokeBecause",
+	session: SessionInfoSchema.mapFields(
+		Struct.omit([
+			"accountId",
+			"projectSlug",
+			"updatedAt",
+			"backgroundWork",
+			"backgroundTasks",
+			"compacting",
+			"retrying",
+			"snoozedAt",
+			"snoozedUntil",
+			"wokenAt",
+			"wokeBecause",
+		]),
 	),
 });
 
 export type SidebarRow = typeof SidebarRowSchema.Type;
 
 const encodeShown = Schema.encodeSync(
-	SidebarRowSchema.omit("version", "lastActivity"),
+	SidebarRowSchema.mapFields(Struct.omit(["version", "lastActivity"])),
 );
 // Encoding puts keys in schema order, so equal content compares equal however
 // each side was built.

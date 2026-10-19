@@ -1,8 +1,9 @@
 // Failure modes: deleting the cut point exposes its hidden tail; deleting a
 // later member leaves an undoable half-removed range; deleting a kept message
 // commits an unrelated rewind; partial projection commits only part of a cut.
-import { SqlClient } from "@effect/sql";
+
 import { Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, it } from "vitest";
 import {
 	ProviderRuntimeIngestionLive,
@@ -162,10 +163,10 @@ it("rolls back the entire upstream rewind commit when a hidden removal cannot pr
 			const sql = yield* SqlClient.SqlClient;
 			const events = yield* EventStoreEffectTag;
 			const before = yield* events.readAllBySession(SESSION_ID);
-			const outcome = yield* Effect.either(
+			const outcome = yield* Effect.result(
 				ingestion.ingest(upstreamRemoval("cut-user")),
 			);
-			expect.soft(outcome._tag).toBe("Left");
+			expect.soft(outcome._tag).toBe("Failure");
 			expect
 				.soft((yield* read.getSession(SESSION_ID))?.pending_rewind_message_id)
 				.toBe("cut-user");

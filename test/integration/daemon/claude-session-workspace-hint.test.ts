@@ -459,7 +459,7 @@ exec '${realGit}' "$@"
 		);
 		await browser.followFamily(sessionId);
 		await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId,
 				originId: browser.originId,
 				inputId: randomUUID(),

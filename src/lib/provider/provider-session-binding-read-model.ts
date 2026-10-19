@@ -1,5 +1,5 @@
-import type { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import type { SqlClient } from "effect/sql";
 import type { SessionScope } from "../contracts/session-scope.js";
 
 export interface ProviderSessionBinding {
@@ -148,7 +148,7 @@ export class SqliteProviderSessionBindingReadModel
 		providerId: string,
 		bindingRevision: ProviderSessionBindingRevision,
 	): Effect.Effect<void> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const currentProvider = yield* this.getProviderForSession(sessionId);
 			const currentRevision = yield* this.getBindingRevision(sessionId);
 			if (

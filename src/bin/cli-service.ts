@@ -336,8 +336,8 @@ export async function runServiceCommand(
 			if (!state.installed) {
 				// With no unit to locate its config, require the invocation to match.
 				const config = runner.loadConfig(paths.configDir);
-				if (config._tag === "Left") throw config.left;
-				if (config.right.pid !== state.pid) {
+				if (config._tag === "Failure") throw config.failure;
+				if (config.success.pid !== state.pid) {
 					throw new Error(
 						`Conduit server ${state.pid} does not match ${paths.configDir}. Set CONDUIT_CONFIG_DIR to the installed service's config directory before uninstalling.`,
 					);
@@ -382,9 +382,9 @@ export async function runServiceCommand(
 	}
 	// Read after stopping the old service so its shutdown flush is included.
 	const loaded = runner.loadConfig(paths.configDir);
-	if (loaded._tag === "Left" && loaded.left._tag !== "NotFound")
-		throw loaded.left;
-	const persisted = loaded._tag === "Right" ? loaded.right : null;
+	if (loaded._tag === "Failure" && loaded.failure._tag !== "NotFound")
+		throw loaded.failure;
+	const persisted = loaded._tag === "Success" ? loaded.success : null;
 	const config: DaemonConfig = {
 		...(persisted ?? {
 			...defaultDaemonConfig(),
@@ -525,7 +525,10 @@ export function createServiceRunner(
 		stopDaemon: async (configDir, pid) => {
 			const socketPath = join(configDir, "relay.sock");
 			if (!(await isDaemonRunning(socketPath))) return;
-			await sendRpcRequest(socketPath, new Shutdown({}));
+			await sendRpcRequest(
+				socketPath,
+				Shutdown.payloadSchema.make({ _tag: "Shutdown" }),
+			);
 			// Shutdown acknowledges intent before disposing the runtime owners.
 			// The socket closes during disposal, so wait for the original process.
 			const deadline = Date.now() + 60_000;

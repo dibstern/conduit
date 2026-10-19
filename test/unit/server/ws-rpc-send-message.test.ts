@@ -1,7 +1,7 @@
 import { tmpdir } from "node:os";
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { RateLimiterLive } from "../../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
@@ -37,13 +37,15 @@ describe("WsRpcServerLayer input.submit", () => {
 					commandId: "cmd-no-handoff",
 				}).pipe(
 					Effect.tap((result) =>
-						expect(result).toEqual({
-							sessionId: input.sessionId,
-							handedOff: false,
+						Effect.sync(() => {
+							expect(result).toEqual({
+								sessionId: input.sessionId,
+								handedOff: false,
+							});
 						}),
 					),
 					Effect.scoped,
-					Effect.provide(makeTestHandlerLayer()),
+					Effect.provide(makeTestHandlerLayer(), { local: true }),
 				),
 		);
 	}
@@ -70,7 +72,7 @@ describe("WsRpcServerLayer input.submit", () => {
 				modelID: "sonnet",
 			});
 
-			yield* client.input.submit({
+			yield* client["input.submit"]({
 				sessionId: "session-1",
 				text: "hello",
 				originId: "browser-tab-a",
@@ -111,6 +113,7 @@ describe("WsRpcServerLayer input.submit", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -119,7 +122,7 @@ describe("WsRpcServerLayer input.submit", () => {
 		const dispatchEffect = vi.fn(
 			(command: { onAccepted?: Effect.Effect<void> }) =>
 				// The engine commits the handoff, then the turn runs on.
-				Effect.zipRight(command.onAccepted ?? Effect.void, Effect.never),
+				Effect.andThen(command.onAccepted ?? Effect.void, Effect.never),
 		);
 		const engine = withDispatchEffect({ dispatchEffect });
 		engine.bindSession("session-1", "opencode");
@@ -128,7 +131,7 @@ describe("WsRpcServerLayer input.submit", () => {
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
 
-			const result = yield* client.input.submit({
+			const result = yield* client["input.submit"]({
 				sessionId: "session-1",
 				text: "hello",
 				images: ["data:image/png;base64,abc"],
@@ -179,6 +182,7 @@ describe("WsRpcServerLayer input.submit", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -187,14 +191,14 @@ describe("WsRpcServerLayer input.submit", () => {
 		const dispatchEffect = vi.fn(
 			(command: { onAccepted?: Effect.Effect<void> }) =>
 				// The engine commits the handoff, then the turn runs on.
-				Effect.zipRight(command.onAccepted ?? Effect.void, Effect.never),
+				Effect.andThen(command.onAccepted ?? Effect.void, Effect.never),
 		);
 		const engine = withDispatchEffect({ dispatchEffect });
 		engine.bindSession("session-1", "opencode");
 
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
-			yield* client.input.submit({
+			yield* client["input.submit"]({
 				sessionId: "session-1",
 				text: "first",
 				originId: "browser-tab-a",
@@ -202,8 +206,8 @@ describe("WsRpcServerLayer input.submit", () => {
 				delivery: "queue",
 			});
 
-			const second = yield* Effect.either(
-				client.input.submit({
+			const second = yield* Effect.result(
+				client["input.submit"]({
 					sessionId: "session-1",
 					text: "second",
 					originId: "browser-tab-a",
@@ -212,7 +216,7 @@ describe("WsRpcServerLayer input.submit", () => {
 				}),
 			);
 
-			expect(second._tag).toBe("Left");
+			expect(second._tag).toBe("Failure");
 			expect(dispatchEffect).toHaveBeenCalledTimes(1);
 		}).pipe(
 			Effect.scoped,
@@ -240,6 +244,7 @@ describe("WsRpcServerLayer input.submit", () => {
 						),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});

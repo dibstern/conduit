@@ -159,30 +159,26 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 			title: string,
 			provider: "claude" | "opencode" = "claude",
 		) => {
-			const { sessionId } = await sendRpcRequest(
-				socket,
-				new CreateSession({
-					projectSlug: "process-test",
-					originId: "cleanup-agent-test",
-					providerId: provider,
-					permissionMode: "ask",
-					...(provider === "claude"
-						? { model: { providerId: "claude", modelId: "sonnet" } }
-						: {
-								instanceId: AccountIdSchema.make("managed-test"),
-								model: { providerId: "fake", modelId: "fake-model" },
-							}),
-					title,
-					newWorktree: true,
-				}),
-			);
-			const { sessions } = await sendRpcRequest(
-				socket,
-				new ListDaemonSessions({
-					projectSlug: "process-test",
-					scope: "process-test",
-				}),
-			);
+			const { sessionId } = await sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				projectSlug: "process-test",
+				originId: "cleanup-agent-test",
+				providerId: provider,
+				permissionMode: "ask",
+				...(provider === "claude"
+					? { model: { providerId: "claude", modelId: "sonnet" } }
+					: {
+							instanceId: AccountIdSchema.make("managed-test"),
+							model: { providerId: "fake", modelId: "fake-model" },
+						}),
+				title,
+				newWorktree: true,
+			});
+			const { sessions } = await sendRpcRequest(socket, {
+				_tag: "ListDaemonSessions",
+				projectSlug: "process-test",
+				scope: "process-test",
+			});
 			const path = sessions.find(({ id }) => id === sessionId)?.workspace
 				?.worktrees[fixture.projectDir];
 			if (!path) throw new Error("Missing owned session worktree");
@@ -197,7 +193,7 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 		const sweep = async (label: string) => {
 			const result = await sendRpcRequest(
 				socket,
-				new CleanUpWorktreesNow({ projectSlug: "process-test" }),
+				{ _tag: "CleanUpWorktreesNow", projectSlug: "process-test" },
 				{ requestTimeoutMs: 30_000 },
 			);
 			(evidence["sweeps"] as unknown[]).push({ label, ...result });
@@ -205,15 +201,13 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 			return result;
 		};
 		const settle = (sessionId: string, settled = true) =>
-			sendRpcRequest(socket, new SetSessionSettled({ sessionId, settled }));
+			sendRpcRequest(socket, { _tag: "SetSessionSettled", sessionId, settled });
 		const set = (worktreeCleanup: WorktreeCleanup) =>
-			sendRpcRequest(
-				socket,
-				new SetWorktreeCleanupSetting({
-					scope: "global",
-					rules: worktreeCleanup,
-				}),
-			);
+			sendRpcRequest(socket, {
+				_tag: "SetWorktreeCleanupSetting",
+				scope: "global",
+				rules: worktreeCleanup,
+			});
 		const enable = async (session: { path: string }) => {
 			// Keep automatic requests harmless until the manual run observes removal.
 			writeFileSync(join(session.path, "base.txt"), "cleanup guard\n");
@@ -486,13 +480,11 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 			await browser.answerApproval(approval, "allow");
 			await turn;
 		} else {
-			await sendRpcRequest(
-				socket,
-				new CancelSession({
-					sessionId: session.sessionId,
-					commandId: randomUUID(),
-				}),
-			);
+			await sendRpcRequest(socket, {
+				_tag: "CancelSession",
+				sessionId: session.sessionId,
+				commandId: randomUUID(),
+			});
 		}
 		await vi.waitFor(() => expect(alive(runner.pid)).toBe(false), {
 			timeout: 15_000,
@@ -521,14 +513,12 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 	it("stops with project cleanup Off, resumes the same conversation on the next message, and starts nothing on unsettle", async () => {
 		const { fixture, socket, create, send, settle, sweep, set } = await start();
 		await set(cleanup);
-		await sendRpcRequest(
-			socket,
-			new SetProjectWorktreeCleanupSetting({
-				scope: "project",
-				projectSlug: "process-test",
-				override: "off",
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SetWorktreeCleanupSetting",
+			scope: "project",
+			projectSlug: "process-test",
+			override: "off",
+		});
 		const session = await create("settle while cleanup Off");
 		const first = await send(session.sessionId);
 		const before = await vi.waitFor(
@@ -810,13 +800,11 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 			join(fixture.root, `fail-end-session-${session.sessionId}`),
 			"fail\n",
 		);
-		const response = await sendRpcRequest(
-			socket,
-			new DeleteSession({
-				sessionId: session.sessionId,
-				removeWorktrees: true,
-			}),
-		);
+		const response = await sendRpcRequest(socket, {
+			_tag: "DeleteSession",
+			sessionId: session.sessionId,
+			removeWorktrees: true,
+		});
 		evidence["delete"] = response;
 		expect(response.ok).toBe(true);
 		expect(response.worktreeWarnings?.length).toBeGreaterThan(0);

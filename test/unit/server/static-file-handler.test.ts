@@ -1,7 +1,7 @@
-import { FileSystem, HttpServerRequest } from "@effect/platform";
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, FileSystem, Layer } from "effect";
+import { HttpServerRequest } from "effect/http";
 import { expect } from "vitest";
 import {
 	getCacheControl,

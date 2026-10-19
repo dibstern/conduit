@@ -8,12 +8,6 @@ overrides:
 publicHoistPattern:
   - '@cursor/sdk-*'
 
-peerDependencyRules:
-  allowedVersions:
-    # @effect/vitest 0.30 (the last Effect 3 release) works with Vitest 5
-    # despite declaring a Vitest 3 peer.
-    '@effect/vitest>vitest': '5'
-
 allowBuilds:
   '@evilmartians/lefthook': false
   '@parcel/watcher': false

@@ -17,7 +17,6 @@ import {
 } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import {
 	Context,
 	Deferred,
@@ -27,6 +26,7 @@ import {
 	ManagedRuntime,
 	Option,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { describe, expect, it, vi } from "vitest";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
@@ -405,7 +405,7 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 			);
 			const directory = Option.getOrThrow(
 				Context.getOption(
-					(await relay.effectRuntime.runtime.runtime()).context,
+					await relay.effectRuntime.runtime.context(),
 					SessionDirectory,
 				),
 			);
@@ -495,7 +495,7 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 							committed,
 							consumed: false,
 						};
-						const append = yield* Effect.fork(
+						const append = yield* Effect.forkChild(
 							ingestion
 								.ingestBatch([
 									providerRuntimeEvent("workspace.changed", sessionId, {
@@ -507,7 +507,7 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 										status: "busy",
 									}),
 								])
-								.pipe(Effect.locally(currentRunnerOutput, receipt)),
+								.pipe(Effect.provideService(currentRunnerOutput, receipt)),
 						);
 						yield* Deferred.await(resolved);
 						yield* applySessionCommand(
@@ -536,8 +536,10 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 				}),
 			);
 			// fullBaseLayers supplies these services; the public runtime exposes a narrower facade.
-			const context = (await relay.effectRuntime.runtime.runtime())
-				.context as Context.Context<Effect.Effect.Context<typeof program>>;
+			const context =
+				(await relay.effectRuntime.runtime.context()) as Context.Context<
+					Effect.Services<typeof program>
+				>;
 			const result = await relay.effectRuntime.runtime.runPromise(
 				Effect.provide(program, context),
 			);

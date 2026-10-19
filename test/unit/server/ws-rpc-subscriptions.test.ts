@@ -1,16 +1,16 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describe, it } from "@effect/vitest";
+import { Effect, Layer, Queue, Schema, type Scope, Stream } from "effect";
 import {
 	RpcClient,
 	type RpcGroup,
 	type RpcMessage,
 	RpcServer,
 	RpcTest,
-} from "@effect/rpc";
-import { SqlClient } from "@effect/sql";
-import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Queue, Schema, type Scope, Stream } from "effect";
+} from "effect/rpc";
+import { SqlClient } from "effect/sql";
 import { expect, expectTypeOf } from "vitest";
 import {
 	type SessionDetailEnvelope,
@@ -53,7 +53,7 @@ const makeLayer = () => {
 	const persistence = Layer.mergeAll(
 		persistenceLayer,
 		SessionEventBusLive,
-		Layer.scopedDiscard(
+		Layer.effectDiscard(
 			Effect.addFinalizer(() =>
 				Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 			),
@@ -96,7 +96,7 @@ const commit = (event: CanonicalEvent) =>
 	});
 
 describe("subscription RPC handlers", () => {
-	it.scoped(
+	it.effect(
 		"sends suffixes by default and keeps snapshots and headers whole",
 		() =>
 			Effect.gen(function* () {
@@ -165,15 +165,15 @@ describe("subscription RPC handlers", () => {
 					expect(yield* Queue.take(decoded)).toMatchObject(header);
 					expect(yield* Queue.take(wire)).toMatchObject(header);
 				}
-			}).pipe(Effect.provide(makeLayer())),
+			}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 	it("do not require a caller-owned Scope", () => {
 		expectTypeOf<
-			Extract<Layer.Layer.Context<typeof WsRpcServerLayer>, Scope.Scope>
+			Extract<Layer.Services<typeof WsRpcServerLayer>, Scope.Scope>
 		>().toEqualTypeOf<never>();
 	});
 
-	it.scoped(
+	it.effect(
 		"shell snapshots Forks as roots and republishes their own rows",
 		() =>
 			Effect.gen(function* () {
@@ -271,11 +271,11 @@ describe("subscription RPC handlers", () => {
 					},
 					{ _tag: "synchronized" },
 				]);
-			}).pipe(Effect.provide(makeLayer())),
+			}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 
 	for (const member of ["SubscribeShell", "SubscribeSessionDetail"] as const) {
-		it.scoped(
+		it.effect(
 			`${member} delivers real snapshots, live updates and resume with 33 subscriptions`,
 			() =>
 				Effect.gen(function* () {
@@ -481,7 +481,7 @@ describe("subscription RPC handlers", () => {
 									},
 								],
 					);
-				}).pipe(Effect.provide(makeLayer())),
+				}).pipe(Effect.provide(makeLayer(), { local: true })),
 			{ timeout: 10000 },
 		);
 	}

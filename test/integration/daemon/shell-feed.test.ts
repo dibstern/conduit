@@ -6,8 +6,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcTest } from "@effect/rpc";
-import { SqlClient } from "@effect/sql";
 import {
 	Effect,
 	Fiber,
@@ -18,6 +16,8 @@ import {
 	Ref,
 	Stream,
 } from "effect";
+import { RpcTest } from "effect/rpc";
+import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type ShellEnvelope,
@@ -80,7 +80,7 @@ async function fixture(initial = ["alpha", "beta"]) {
 			projects.filter(({ slug }) => initial.includes(slug)),
 			factory,
 			{ configDir: root },
-		).pipe(Layer.provide(Layer.succeed(DaemonStoreAvailability, blocked))),
+		).pipe(Layer.provide(Layer.succeed(DaemonStoreAvailability)(blocked))),
 	);
 	cleanup.push(async () => {
 		await runtime.dispose();
@@ -94,10 +94,10 @@ async function fixture(initial = ["alpha", "beta"]) {
 	const bus = await runtime.runPromise(SessionEventBusTag);
 	const projectLayer = (slug: string) =>
 		makePersistenceProjectLayer(slug, {
-			sessionEventBusLayer: Layer.succeed(SessionEventBusTag, bus),
+			sessionEventBusLayer: Layer.succeed(SessionEventBusTag)(bus),
 		}).pipe(
 			Layer.provideMerge(Layer.succeedContext(store)),
-			Layer.provideMerge(Layer.succeed(SessionEventBusTag, bus)),
+			Layer.provideMerge(Layer.succeed(SessionEventBusTag)(bus)),
 		);
 	const write = (slug: string, events: readonly CanonicalEvent[]) =>
 		Effect.runPromise(

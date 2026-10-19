@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Data, Effect, Schema } from "effect";
+import { Context, Data, Effect, Schema, SchemaTransformation } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import {
 	type ClaudeConfigDir,
@@ -28,21 +28,31 @@ export interface NativeThread {
 	readonly deliveredThrough: number;
 }
 
-const NativeThreadSchema = Schema.parseJson(
+const NativeThreadSchema = Schema.fromJsonString(
 	Schema.Struct({
-		configDir: Schema.optional(
-			Schema.Union(
+		configDir: Schema.optionalKey(
+			Schema.Union([
 				ClaudeConfigDirSchema,
-				Schema.transform(Schema.String, ClaudeConfigDirSchema, {
-					strict: true,
-					decode: configuredClaudeConfigDir,
-					encode: (value) => value.path,
-				}),
-			),
+				Schema.String.pipe(
+					Schema.decodeTo(
+						ClaudeConfigDirSchema,
+						SchemaTransformation.transform({
+							decode: configuredClaudeConfigDir,
+							encode: (value) => value.path,
+						}),
+					),
+				),
+			]),
 		),
 		resumeSessionId: Schema.String,
-		firstSequence: Schema.NonNegativeInt,
-		deliveredThrough: Schema.NonNegativeInt,
+		firstSequence: Schema.Number.check(
+			Schema.isInt(),
+			Schema.isGreaterThanOrEqualTo(0),
+		),
+		deliveredThrough: Schema.Number.check(
+			Schema.isInt(),
+			Schema.isGreaterThanOrEqualTo(0),
+		),
 	}),
 );
 
@@ -78,10 +88,10 @@ export interface ProviderStateEffect {
 	) => Effect.Effect<void, ProviderStateEffectError | SqlError>;
 }
 
-export class ProviderStateEffectTag extends Context.Tag("ProviderStateEffect")<
+export class ProviderStateEffectTag extends Context.Service<
 	ProviderStateEffectTag,
 	ProviderStateEffect
->() {}
+>()("ProviderStateEffect") {}
 
 export const makeProviderStateEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -92,7 +102,8 @@ export const makeProviderStateEffect = Effect.gen(function* () {
 			const state = yield* getState(sessionId);
 			const stored = state[nativeThreadKey(instanceId)];
 			if (stored !== undefined) {
-				const thread = yield* Schema.decodeUnknown(NativeThreadSchema)(stored);
+				const thread =
+					yield* Schema.decodeUnknownEffect(NativeThreadSchema)(stored);
 				return { ...thread, projectId };
 			}
 			// Once per-account receipts exist, legacy keys cannot prove delivery to
@@ -120,7 +131,7 @@ export const makeProviderStateEffect = Effect.gen(function* () {
 			const configDir =
 				legacyFolder === undefined
 					? undefined
-					: yield* Schema.decodeUnknown(ClaudeConfigDirSchema)(
+					: yield* Schema.decodeUnknownEffect(ClaudeConfigDirSchema)(
 							configuredClaudeConfigDir(legacyFolder),
 						);
 			const [bounds] = yield* sql<{
@@ -181,7 +192,7 @@ export const makeProviderStateEffect = Effect.gen(function* () {
 						let value = update.value;
 						if (update.key.startsWith(NATIVE_THREAD_PREFIX)) {
 							const thread =
-								yield* Schema.decodeUnknown(NativeThreadSchema)(value);
+								yield* Schema.decodeUnknownEffect(NativeThreadSchema)(value);
 							const instanceId = update.key.slice(NATIVE_THREAD_PREFIX.length);
 							const [bounds] = yield* sql<{
 								firstSequence: number;

@@ -9,7 +9,7 @@
 
 import * as childProcess from "node:child_process";
 import { dirname } from "node:path";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseArgs, run } from "../../../src/bin/cli-core.js";
 import * as service from "../../../src/bin/cli-service.js";
@@ -73,7 +73,7 @@ function options(platform: NodeJS.Platform): ServiceOptions {
 function fakeRunner(platform: NodeJS.Platform) {
 	const files = new Map<string, string>([[cliEntry, "installed CLI"]]);
 	const events: string[] = [];
-	let storedConfig: ReturnType<ServiceRunner["loadConfig"]> = Either.left(
+	let storedConfig: ReturnType<ServiceRunner["loadConfig"]> = Either.fail(
 		new DaemonConfigNotFound({
 			path: `${configDir}/daemon.json`,
 			cause: "ENOENT",
@@ -105,7 +105,7 @@ function fakeRunner(platform: NodeJS.Platform) {
 		}),
 		loadConfig: vi.fn<ServiceRunner["loadConfig"]>(() => storedConfig),
 		saveConfig: vi.fn<ServiceRunner["saveConfig"]>(async (config, dir) => {
-			storedConfig = Either.right(config);
+			storedConfig = Either.succeed(config);
 			events.push(`save config ${dir}`);
 			files.set(`${dir}/daemon.json`, JSON.stringify(config));
 		}),
@@ -349,7 +349,7 @@ describe.each([
 		const content = "{ damaged config";
 		files.set(path, content);
 		const error = new ErrorType({ path, cause: "fixture config failure" });
-		runner.loadConfig.mockReturnValue(Either.left(error));
+		runner.loadConfig.mockReturnValue(Either.fail(error));
 		await expect(runServiceCommand("install", config, runner)).rejects.toBe(
 			error,
 		);
@@ -619,7 +619,7 @@ describe.each([
 		const { runner, config } = fakeRunner(platform);
 		loaded(runner, platform);
 		runner.loadConfig.mockReturnValue(
-			Either.right({ ...defaultDaemonConfig(), pid: 42 }),
+			Either.succeed({ ...defaultDaemonConfig(), pid: 42 }),
 		);
 		if (platform === "linux") {
 			// Reload can leave a running process with LoadState=not-found.

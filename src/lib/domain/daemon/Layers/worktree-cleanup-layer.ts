@@ -32,7 +32,7 @@ import { readColdWorktreeCleanupCandidates } from "../Services/worktree-cleanup-
 import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js";
 
 export const WorktreeCleanupLive = () =>
-	Layer.scopedDiscard(
+	Layer.effectDiscard(
 		Effect.gen(function* () {
 			const configRef = yield* DaemonConfigRefTag;
 			const registry = yield* ProjectRegistryTag;
@@ -90,7 +90,7 @@ export const WorktreeCleanupLive = () =>
 									);
 								yield* stopQuiescentSettledAgents(now).pipe(
 									Effect.provide(yield* context),
-									Effect.catchAllCause((cause) =>
+									Effect.catchCause((cause) =>
 										Failure.isInterruptedOnly(cause)
 											? Effect.failCause(cause)
 											: Effect.logWarning(
@@ -142,7 +142,7 @@ export const WorktreeCleanupLive = () =>
 							if (projectReport.removed.length > 0)
 								yield* PubSub.publish(bus, DaemonEvent.DaemonSessionsChanged());
 						}).pipe(
-							Effect.catchAllCause((cause) => {
+							Effect.catchCause((cause) => {
 								if (Failure.isInterruptedOnly(cause))
 									return Effect.failCause(cause);
 								report.failed.push({
@@ -176,7 +176,7 @@ export const WorktreeCleanupLive = () =>
 			// One worker owns all removals; requests arriving during a run form the next batch.
 			yield* Effect.gen(function* () {
 				const first = yield* Queue.take(requests);
-				const batch = [first, ...(yield* Queue.takeAll(requests))];
+				const batch = [first, ...(yield* Queue.clear(requests))];
 				const slugs = batch.some(({ projectSlug }) => projectSlug === undefined)
 					? undefined
 					: new Set(
@@ -185,7 +185,7 @@ export const WorktreeCleanupLive = () =>
 							),
 						);
 				const report = yield* sweep(slugs).pipe(
-					Effect.catchAllCause((cause) =>
+					Effect.catchCause((cause) =>
 						Failure.isInterruptedOnly(cause)
 							? Effect.failCause(cause)
 							: Effect.logWarning(

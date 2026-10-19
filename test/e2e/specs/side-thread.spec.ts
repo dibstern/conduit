@@ -4,9 +4,9 @@
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
-import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
+import { RpcClient, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import NodeWebSocket from "ws";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { readNativeThread } from "../../helpers/native-thread.js";
@@ -332,7 +332,7 @@ test.describe("OpenCode Side Threads", () => {
 			}
 			const eventsBeforeNested = sessionEvents(harness.eventsDbPath);
 			const nested = await rpc(relayUrl, (client) =>
-				Effect.either(
+				Effect.result(
 					client.StartSideThread({
 						sessionId: sideId,
 						title: "Nested question",
@@ -341,14 +341,14 @@ test.describe("OpenCode Side Threads", () => {
 					}),
 				),
 			);
-			expect(nested._tag).toBe("Left");
-			if (nested._tag !== "Left")
+			expect(nested._tag).toBe("Failure");
+			if (nested._tag !== "Failure")
 				throw new Error("Nested Side Thread was created");
-			expect(nested.left).toBeInstanceOf(WsRpcError);
-			if (!(nested.left instanceof WsRpcError))
+			expect(nested.failure).toBeInstanceOf(WsRpcError);
+			if (!(nested.failure instanceof WsRpcError))
 				throw new Error("Nested start failed outside the typed RPC contract");
-			expect(nested.left._tag).toBe("WsRpcError");
-			expect(nested.left.message).toBe(
+			expect(nested.failure._tag).toBe("WsRpcError");
+			expect(nested.failure.message).toBe(
 				"Cannot start a Side Thread from a Side Thread",
 			);
 			expect(sessionEvents(harness.eventsDbPath)).toEqual(eventsBeforeNested);
@@ -469,7 +469,7 @@ test.describe("OpenCode Side Threads", () => {
 		await new AppPage(page).goto(relayUrl);
 		const before = sessionEvents(harness.eventsDbPath);
 		const result = await rpc(relayUrl, (client) =>
-			Effect.either(
+			Effect.result(
 				client.StartSideThread({
 					sessionId: "missing-side-thread-parent",
 					title: question,
@@ -478,14 +478,14 @@ test.describe("OpenCode Side Threads", () => {
 				}),
 			),
 		);
-		expect(result._tag).toBe("Left");
-		if (result._tag !== "Left")
+		expect(result._tag).toBe("Failure");
+		if (result._tag !== "Failure")
 			throw new Error("Missing parent started a Side Thread");
-		expect(result.left).toBeInstanceOf(WsRpcError);
-		if (!(result.left instanceof WsRpcError))
+		expect(result.failure).toBeInstanceOf(WsRpcError);
+		if (!(result.failure instanceof WsRpcError))
 			throw new Error("Missing parent failed outside the typed RPC contract");
-		expect(result.left._tag).toBe("WsRpcError");
-		expect(result.left.message).toBe(
+		expect(result.failure._tag).toBe("WsRpcError");
+		expect(result.failure.message).toBe(
 			"Parent session missing-side-thread-parent was not found",
 		);
 		expect(sessionEvents(harness.eventsDbPath)).toEqual(before);

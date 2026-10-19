@@ -12,13 +12,14 @@
 import {
 	Context,
 	Effect,
-	Either,
 	FiberMap,
 	Layer,
 	Option,
 	PubSub,
 	Record,
 	Ref,
+	Result,
+	Semaphore,
 	Stream,
 } from "effect";
 import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
@@ -93,7 +94,7 @@ const isLiveFact = (setting: ProjectSetting): setting is LiveProjectFact =>
 export interface ProjectSettings {
 	readonly changes: PubSub.PubSub<ProjectSettingChange>;
 	/** Keep an older read from publishing after a newer one on this relay. */
-	readonly globalSync: Effect.Semaphore;
+	readonly globalSync: Semaphore.Semaphore;
 	/** Share a pending Claude catalogue refresh for each account. */
 	readonly modelDiscovery: FiberMap.FiberMap<string, void, never>;
 	/**
@@ -110,17 +111,17 @@ export interface ProjectSettings {
 	readonly live: Ref.Ref<LiveProjectFacts>;
 }
 
-export class ProjectSettingsTag extends Context.Tag("ProjectSettings")<
+export class ProjectSettingsTag extends Context.Service<
 	ProjectSettingsTag,
 	ProjectSettings
->() {}
+>()("ProjectSettings") {}
 
 export const ProjectSettingsLive: Layer.Layer<ProjectSettingsTag> =
-	Layer.scoped(
+	Layer.effect(
 		ProjectSettingsTag,
 		Effect.all({
 			changes: PubSub.unbounded<ProjectSettingChange>(),
-			globalSync: Effect.makeSemaphore(1),
+			globalSync: Semaphore.make(1),
 			modelDiscovery: FiberMap.make<string, void, never>(),
 			browsers: Effect.sync(() => {
 				let count = 0;
@@ -211,13 +212,13 @@ const readHarnessDefaults = Effect.gen(function* () {
 		)
 			return { pick, status: "unverified" };
 		const resolved = resolveTurnSettings(candidate, catalog ?? []);
-		return Either.isLeft(resolved)
-			? { pick, status: "invalid", problem: resolved.left.message }
+		return Result.isFailure(resolved)
+			? { pick, status: "invalid", problem: resolved.failure.message }
 			: {
 					pick: {
-						...resolved.right.model,
-						effort: resolved.right.effort,
-						contextWindow: resolved.right.contextWindow,
+						...resolved.success.model,
+						effort: resolved.success.effort,
+						contextWindow: resolved.success.contextWindow,
 					},
 					status: "ok",
 				};
@@ -337,7 +338,7 @@ export const subscribeProjectSettings = (): Stream.Stream<
 	never,
 	ProjectSettingsTag | OverridesStateTag | ConfigTag
 > =>
-	Stream.unwrapScoped(
+	Stream.unwrap(
 		Effect.gen(function* () {
 			const { changes, revision, globalSync, browsers } =
 				yield* ProjectSettingsTag;
@@ -358,7 +359,7 @@ export const subscribeProjectSettings = (): Stream.Stream<
 			];
 			return Stream.concat(
 				Stream.fromIterable(head),
-				Stream.fromQueue(dequeue),
+				Stream.fromSubscription(dequeue),
 			);
 		}),
 	);

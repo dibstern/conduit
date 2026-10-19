@@ -89,7 +89,7 @@ describe("daemon startup effects", () => {
 					Effect.provide(
 						Layer.mergeAll(
 							makeDaemonStateLive({ instances }),
-							Layer.succeed(InstanceMgmtTag, mockMgmt),
+							Layer.succeed(InstanceMgmtTag)(mockMgmt),
 						),
 					),
 				);
@@ -157,7 +157,7 @@ describe("daemon startup effects", () => {
 					Effect.provide(
 						Layer.mergeAll(
 							makeDaemonStateLive({ instances }),
-							Layer.succeed(InstanceMgmtTag, mockMgmt),
+							Layer.succeed(InstanceMgmtTag)(mockMgmt),
 						),
 					),
 				);
@@ -211,7 +211,7 @@ describe("daemon startup effects", () => {
 						Effect.provide(
 							Layer.mergeAll(
 								makeDaemonStateLive({ instances }),
-								Layer.succeed(InstanceMgmtTag, mockMgmt),
+								Layer.succeed(InstanceMgmtTag)(mockMgmt),
 							),
 						),
 					),

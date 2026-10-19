@@ -2,7 +2,7 @@
 // Verifies the complete message flow:
 //   send → busy shell row → transcript text → completed idle shell row
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -11,16 +11,13 @@ import {
 describe("Integration: Message Lifecycle", () => {
 	let harness: RelayHarness;
 
-	beforeAll(async () => {
+	beforeEach(async () => {
 		harness = await createRelayHarness();
+		harness.mock.resetQueues();
 	}, 30_000);
 
-	afterAll(async () => {
+	afterEach(async () => {
 		if (harness) await harness.stop();
-	});
-
-	beforeEach(() => {
-		harness.mock.resetQueues();
 	});
 
 	it("complete lifecycle: send → processing → transcript text → idle", async () => {

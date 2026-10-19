@@ -12,8 +12,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Effect, Layer, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, it } from "vitest";
 import { AlertLedgerLive } from "../../../src/lib/domain/relay/Services/alert-ledger.js";
 import {
@@ -53,7 +53,7 @@ const delivered: PushDeliveryReport = {
 	failed: [],
 };
 
-const silentBus = Layer.succeed(SessionEventBusTag, {
+const silentBus = Layer.succeed(SessionEventBusTag)({
 	publish: () => Effect.void,
 	publishAdvance: () => Effect.void,
 	subscribe: () => Effect.succeed(Stream.empty),
@@ -106,7 +106,7 @@ const run = async (
 		AlertsLive,
 		PendingInteractionServiceLive,
 		makeOverridesStateLive(),
-		Layer.succeed(SessionManagerServiceTag, {
+		Layer.succeed(SessionManagerServiceTag)({
 			getSessionParentMap: () => Effect.succeed(new Map()),
 		} as never),
 	).pipe(Layer.provideMerge(persistence));
@@ -127,7 +127,9 @@ const run = async (
 					VALUES ('turn-1', ${SESSION}, 'completed', 1000, 1001)`;
 				yield* body(pushed);
 			}).pipe(
-				Effect.provide(Layer.provideMerge(AlertLedgerLive, layer)),
+				Effect.provide(Layer.provideMerge(AlertLedgerLive, layer), {
+					local: true,
+				}),
 				Effect.orDie,
 			),
 		);

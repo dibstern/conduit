@@ -1,7 +1,6 @@
 // Manages the list of registered projects and the current project slug.
 
 import { Effect, Fiber, Stream } from "effect";
-import type { RuntimeFiber } from "effect/Fiber";
 import type { ShellEnvelope } from "../../contracts/ws-rpc.js";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
@@ -114,7 +113,7 @@ const toProjectInfoList = (
 
 let following = false;
 let generation = 0;
-let fiber: RuntimeFiber<void, never> | null = null;
+let fiber: Fiber.Fiber<void, never> | null = null;
 
 /**
  * Follow the daemon-global instance, usage and status lists over the
@@ -167,7 +166,7 @@ export function followDaemonLists(on: boolean): void {
 															applyUsageLimitsSetting(usageLimits);
 													}),
 												),
-												Effect.catchAll(() => Effect.void),
+												Effect.catch(() => Effect.void),
 											);
 										}),
 								),

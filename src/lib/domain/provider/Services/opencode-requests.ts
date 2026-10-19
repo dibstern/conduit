@@ -22,8 +22,7 @@ import { OpenCodeAPITag } from "./opencode-api-service.js";
 //   - src/lib/contracts/providers/opencode-sdk.ts (provider boundary schemas)
 //   - src/lib/instance/sdk-types.ts (type definitions)
 
-import { Data, Effect, Request, RequestResolver } from "effect";
-import type { NonEmptyArray } from "effect/Array";
+import { Context, Data, Effect, Request, RequestResolver } from "effect";
 
 import type {
 	SessionDetail as SchemaSessionDetail,
@@ -51,28 +50,36 @@ interface FlatMessage {
 
 /** Fetch the session list. Returns Array<SessionDetail>. */
 export class GetSessions extends Request.TaggedClass("GetSessions")<
+	Record<string, never>,
 	ReadonlyArray<SchemaSessionDetail>,
 	OpenCodeRequestError,
-	Record<string, never>
+	OpenCodeAPITag
 > {}
 
 /** Fetch messages for a specific session. Returns Array<FlatMessage>. */
 export class GetMessages extends Request.TaggedClass("GetMessages")<
+	{ readonly sessionId: string },
 	ReadonlyArray<FlatMessage>,
 	OpenCodeRequestError,
-	{ readonly sessionId: string }
+	OpenCodeAPITag
 > {}
 
 /** Fetch all session statuses. Returns Record<string, SessionStatus>. */
 export class GetSessionStatuses extends Request.TaggedClass(
 	"GetSessionStatuses",
-)<Record<string, SessionStatus>, OpenCodeRequestError, Record<string, never>> {}
+)<
+	Record<string, never>,
+	Record<string, SessionStatus>,
+	OpenCodeRequestError,
+	OpenCodeAPITag
+> {}
 
 /** Fetch a single session detail by ID. Batchable via session.list(). */
 export class GetSession extends Request.TaggedClass("GetSession")<
+	{ readonly sessionId: string },
 	SchemaSessionDetail,
 	OpenCodeRequestError,
-	{ readonly sessionId: string }
+	OpenCodeAPITag
 > {}
 
 export type OpenCodeRequest =
@@ -82,8 +89,8 @@ export type OpenCodeRequest =
 	| GetSession;
 
 /** Resolver for GetSessions — calls session.list() */
-export const GetSessionsResolver = RequestResolver.fromEffect(
-	(_req: GetSessions) =>
+export const GetSessionsResolver = RequestResolver.fromEffect<GetSessions>(
+	(entry) =>
 		Effect.gen(function* () {
 			const api = yield* OpenCodeAPITag;
 			return yield* Effect.tryPromise({
@@ -91,25 +98,31 @@ export const GetSessionsResolver = RequestResolver.fromEffect(
 				catch: (cause) =>
 					new OpenCodeRequestError({ method: "session.list", cause }),
 			});
-		}).pipe(Effect.withSpan("opencode.request.GetSessions")),
+		}).pipe(
+			Effect.provideContext(entry.context),
+			Effect.withSpan("opencode.request.GetSessions"),
+		),
 );
 
 /** Resolver for GetMessages — calls session.messages(sessionId) */
-export const GetMessagesResolver = RequestResolver.fromEffect(
-	(req: GetMessages) =>
+export const GetMessagesResolver = RequestResolver.fromEffect<GetMessages>(
+	(entry) =>
 		Effect.gen(function* () {
 			const api = yield* OpenCodeAPITag;
 			return yield* Effect.tryPromise({
-				try: () => api.session.messages(req.sessionId),
+				try: () => api.session.messages(entry.request.sessionId),
 				catch: (cause) =>
 					new OpenCodeRequestError({ method: "session.messages", cause }),
 			});
-		}).pipe(Effect.withSpan("opencode.request.GetMessages")),
+		}).pipe(
+			Effect.provideContext(entry.context),
+			Effect.withSpan("opencode.request.GetMessages"),
+		),
 );
 
 /** Resolver for GetSessionStatuses — calls session.statuses() (returns all at once) */
-export const GetSessionStatusesResolver = RequestResolver.fromEffect(
-	(_req: GetSessionStatuses) =>
+export const GetSessionStatusesResolver =
+	RequestResolver.fromEffect<GetSessionStatuses>((entry) =>
 		Effect.gen(function* () {
 			const api = yield* OpenCodeAPITag;
 			return yield* Effect.tryPromise({
@@ -117,8 +130,11 @@ export const GetSessionStatusesResolver = RequestResolver.fromEffect(
 				catch: (cause) =>
 					new OpenCodeRequestError({ method: "session.statuses", cause }),
 			});
-		}).pipe(Effect.withSpan("opencode.request.GetSessionStatuses")),
-);
+		}).pipe(
+			Effect.provideContext(entry.context),
+			Effect.withSpan("opencode.request.GetSessionStatuses"),
+		),
+	);
 
 /**
  * Batched resolver for GetSession — when multiple fibers concurrently request
@@ -127,11 +143,13 @@ export const GetSessionStatusesResolver = RequestResolver.fromEffect(
  *
  * Sessions not found in the list are failed with OpenCodeRequestError.
  */
-export const GetSessionBatchedResolver = RequestResolver.makeBatched(
-	(requests: NonEmptyArray<GetSession>) =>
+export const GetSessionBatchedResolver = RequestResolver.makeGrouped<
+	GetSession,
+	OpenCodeAPITag["Service"]
+>({
+	key: (entry) => Context.get(entry.context, OpenCodeAPITag),
+	resolver: (requests, api) =>
 		Effect.gen(function* () {
-			const api = yield* OpenCodeAPITag;
-
 			// Fetch all sessions in a single API call
 			const sessions = yield* Effect.tryPromise({
 				try: () => api.session.list(),
@@ -152,7 +170,7 @@ export const GetSessionBatchedResolver = RequestResolver.makeBatched(
 			yield* Effect.forEach(
 				requests,
 				(req) => {
-					const session = sessionMap.get(req.sessionId);
+					const session = sessionMap.get(req.request.sessionId);
 					if (session) {
 						return Request.succeed(req, session);
 					}
@@ -160,7 +178,7 @@ export const GetSessionBatchedResolver = RequestResolver.makeBatched(
 						req,
 						new OpenCodeRequestError({
 							method: "session.get (batched)",
-							cause: new Error(`Session not found: ${req.sessionId}`),
+							cause: new Error(`Session not found: ${req.request.sessionId}`),
 						}),
 					);
 				},
@@ -168,7 +186,7 @@ export const GetSessionBatchedResolver = RequestResolver.makeBatched(
 			);
 		}).pipe(
 			// If the batch fetch itself fails, fail all requests
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.forEach(requests, (req) => Request.fail(req, error), {
 					discard: true,
 				}),
@@ -177,33 +195,24 @@ export const GetSessionBatchedResolver = RequestResolver.makeBatched(
 				attributes: { batchSize: requests.length },
 			}),
 		),
-);
-
-// These use RequestResolver.contextFromEffect to lift the context-dependent
-// resolvers into Effect values that Effect.request accepts.
+});
 
 /** Fetch the session list via the request system. */
-export const getSessions = Effect.flatMap(
-	RequestResolver.contextFromEffect(GetSessionsResolver),
-	(resolver) => Effect.request(new GetSessions({}), resolver),
+export const getSessions = Effect.request(
+	new GetSessions({}),
+	GetSessionsResolver,
 );
 
 /** Fetch messages for a session via the request system. */
 export const getMessages = (sessionId: string) =>
-	Effect.flatMap(
-		RequestResolver.contextFromEffect(GetMessagesResolver),
-		(resolver) => Effect.request(new GetMessages({ sessionId }), resolver),
-	);
+	Effect.request(new GetMessages({ sessionId }), GetMessagesResolver);
 
 /** Fetch all session statuses via the request system. */
-export const getSessionStatuses = Effect.flatMap(
-	RequestResolver.contextFromEffect(GetSessionStatusesResolver),
-	(resolver) => Effect.request(new GetSessionStatuses({}), resolver),
+export const getSessionStatuses = Effect.request(
+	new GetSessionStatuses({}),
+	GetSessionStatusesResolver,
 );
 
 /** Fetch a single session detail via the batched request system. */
 export const getSession = (sessionId: string) =>
-	Effect.flatMap(
-		RequestResolver.contextFromEffect(GetSessionBatchedResolver),
-		(resolver) => Effect.request(new GetSession({ sessionId }), resolver),
-	);
+	Effect.request(new GetSession({ sessionId }), GetSessionBatchedResolver);

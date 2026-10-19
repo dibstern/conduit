@@ -12,25 +12,11 @@ import {
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
-import { Socket } from "@effect/platform";
 import { NodeSocket } from "@effect/platform-node";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect, Option, Schedule, Stream } from "effect";
-import {
-	AddInstance,
-	CreatePty,
-	CreateSession,
-	GetInstances,
-	GetStatus,
-	ListDaemonSessions,
-	ListPtys,
-	LoadMoreHistory,
-	PtyInput,
-	SaveProject,
-	StartInstance,
-	SubmitInput,
-	WsRpcGroup,
-} from "../../../src/lib/contracts/ws-rpc.js";
+import { RpcClient, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
+import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { runnerDirectory } from "../../../src/lib/provider/runner/runner-registry.js";
 
@@ -170,10 +156,14 @@ async function server(): Promise<ProcessInfo> {
 		info.argv.includes("serve"),
 		`MainPID is not conduit serve: ${info.argv.join(" ")}`,
 	);
-	await sendRpcRequest(socket, new GetStatus({}), {
-		startupRetries: 0,
-		requestTimeoutMs: 2000,
-	});
+	await sendRpcRequest(
+		socket,
+		{ _tag: "GetStatus" },
+		{
+			startupRetries: 0,
+			requestTimeoutMs: 2000,
+		},
+	);
 	return info;
 }
 
@@ -213,7 +203,7 @@ async function ptySnapshot() {
 					return Option.getOrThrow(snapshot);
 				}).pipe(
 					Effect.provide(
-						RpcClient.layerProtocolSocket({ retrySchedule: Schedule.stop }),
+						RpcClient.layerProtocolSocket({ retryPolicy: Schedule.recurs(0) }),
 					),
 					Effect.provideService(Socket.Socket, connection),
 					Effect.provide(RpcSerialization.layerNdjson),
@@ -278,57 +268,60 @@ async function startScenario(label: "A" | "B" | "C" | "CONTROL") {
 	const marker = `CONDUIT_M37913_${label}`;
 	const { sessionId } = await sendRpcRequest(
 		socket,
-		new CreateSession({
+		{
+			_tag: "CreateSession",
 			projectSlug,
 			originId: randomUUID(),
 			providerId: "claude",
 			permissionMode: "ask",
 			title: `Linux service ${label}`,
 			model: { modelId: "sonnet", providerId: "claude" },
-		}),
+		},
 		{ requestTimeoutMs: 60_000 },
 	);
 	record("session-created", { sessionId, marker });
 	const result = await sendRpcRequest(
 		socket,
-		new SubmitInput({
+		{
+			_tag: "input.submit",
 			sessionId,
 			inputId: randomUUID(),
 			text: `${marker}: Reply with a plain text response. Do not use tools.`,
 			delivery: "queue",
-		}),
+		},
 		{ requestTimeoutMs: 60_000 },
 	);
 	assert(result.ok, `Prompt rejected for ${sessionId}`);
 	await streaming(marker);
 	await eventually("runner registration", async () => runner(sessionId));
-	const beforePtys = await sendRpcRequest(
-		socket,
-		new ListPtys({ projectSlug, originId: randomUUID() }),
-	);
-	await sendRpcRequest(
-		socket,
-		new CreatePty({ projectSlug, originId: randomUUID() }),
-	);
+	const beforePtys = await sendRpcRequest(socket, {
+		_tag: "ListPtys",
+		projectSlug,
+		originId: randomUUID(),
+	});
+	await sendRpcRequest(socket, {
+		_tag: "CreatePty",
+		projectSlug,
+		originId: randomUUID(),
+	});
 	const pty = await eventually("new PTY", async () => {
-		const current = await sendRpcRequest(
-			socket,
-			new ListPtys({ projectSlug, originId: randomUUID() }),
-		);
+		const current = await sendRpcRequest(socket, {
+			_tag: "ListPtys",
+			projectSlug,
+			originId: randomUUID(),
+		});
 		const created = current.ptys.find(
 			(item) => !beforePtys.ptys.some((old) => old.id === item.id),
 		);
 		assert(created, "New PTY not listed");
 		return created;
 	});
-	await sendRpcRequest(
-		socket,
-		new PtyInput({
-			projectSlug,
-			ptyId: pty.id,
-			data: `exec /bin/bash /repo/test/e2e/linux-service/counter.sh ${label}\r`,
-		}),
-	);
+	await sendRpcRequest(socket, {
+		_tag: "PtyInput",
+		projectSlug,
+		ptyId: pty.id,
+		data: `exec /bin/bash /repo/test/e2e/linux-service/counter.sh ${label}\r`,
+	});
 	const beforeText = await eventually(
 		"counter ticks before disruption",
 		async () => {
@@ -381,10 +374,10 @@ async function completedTurn(scenario: Scenario) {
 	const text = await eventually(
 		"finished turn persisted after restart",
 		async () => {
-			const history = await sendRpcRequest(
-				socket,
-				new LoadMoreHistory({ sessionId: scenario.sessionId }),
-			);
+			const history = await sendRpcRequest(socket, {
+				_tag: "LoadMoreHistory",
+				sessionId: scenario.sessionId,
+			});
 			const assistantText = history.messages
 				.filter((message) => message.role === "assistant")
 				.map(
@@ -401,10 +394,10 @@ async function completedTurn(scenario: Scenario) {
 				assistantText.includes(finalSentence),
 				"Final sentence not persisted",
 			);
-			const sessions = await sendRpcRequest(
-				socket,
-				new ListDaemonSessions({ projectSlug }),
-			);
+			const sessions = await sendRpcRequest(socket, {
+				_tag: "ListDaemonSessions",
+				projectSlug,
+			});
 			assert.equal(
 				sessions.sessions.find((session) => session.id === scenario.sessionId)
 					?.status,
@@ -544,10 +537,11 @@ async function negativeControl() {
 async function main() {
 	await eventually("installed service readiness", server);
 	assert.match(readFileSync(unit, "utf8"), /^KillMode=process$/m);
-	const saved = await sendRpcRequest(
-		socket,
-		new SaveProject({ folders: [project], title: "Linux service E2E" }),
-	);
+	const saved = await sendRpcRequest(socket, {
+		_tag: "SaveProject",
+		folders: [project],
+		title: "Linux service E2E",
+	});
 	projectSlug = saved.savedSlug;
 	record("project-registered", { projectSlug, folder: project });
 	const restart = await startScenario("A");
@@ -560,20 +554,22 @@ async function main() {
 	await negativeControl();
 
 	phase = "C";
-	const added = await sendRpcRequest(
-		socket,
-		new AddInstance({
-			name: "Linux service managed",
-			driver: "opencode",
-			managed: true,
-			port: 27332,
-		}),
-	);
+	const added = await sendRpcRequest(socket, {
+		_tag: "AddInstance",
+		name: "Linux service managed",
+		driver: "opencode",
+		managed: true,
+		port: 27332,
+	});
 	const instanceId = added.addedInstanceId;
 	assert(instanceId, "Managed OpenCode account was not created");
-	await sendRpcRequest(socket, new StartInstance({ instanceId }), {
-		requestTimeoutMs: 60_000,
-	}).catch((error: unknown) => {
+	await sendRpcRequest(
+		socket,
+		{ _tag: "StartInstance", instanceId },
+		{
+			requestTimeoutMs: 60_000,
+		},
+	).catch((error: unknown) => {
 		// Under load OpenCode can miss the server's first 4s probe while it keeps starting.
 		if (!String(error).includes("is unreachable")) throw error;
 		record("managed-opencode-slow-start", { error: String(error) });
@@ -581,7 +577,9 @@ async function main() {
 	const opencode = await eventually(
 		"real managed OpenCode starts",
 		async () => {
-			const { instances } = await sendRpcRequest(socket, new GetInstances({}));
+			const { instances } = await sendRpcRequest(socket, {
+				_tag: "GetInstances",
+			});
 			const instance = instances.find(({ id }) => id === instanceId);
 			const pid = instance?.pid;
 			assert(instance && pid, "Real managed OpenCode has no pid yet");

@@ -1,4 +1,4 @@
-import { Context, Effect, Exit, Fiber, Layer, Option } from "effect";
+import { Context, Effect, Exit, Fiber, Layer, Semaphore } from "effect";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import type { PreWarmSessionInput } from "../../../provider/types.js";
@@ -19,7 +19,7 @@ export const draftLaunchKey = (
 		extraFolders: input.extraFolders,
 	});
 
-export class DraftPreWarmTag extends Context.Tag("DraftPreWarm")<
+export class DraftPreWarmTag extends Context.Service<
 	DraftPreWarmTag,
 	{
 		readonly discardSession: (sessionId: string) => Effect.Effect<void>;
@@ -39,17 +39,17 @@ export class DraftPreWarmTag extends Context.Tag("DraftPreWarm")<
 			launchKey: string | undefined,
 		) => Effect.Effect<string | undefined>;
 	}
->() {}
+>()("DraftPreWarm") {}
 
 /** Reservations belong to this relay and must die before its provider detaches. */
-export const DraftPreWarmLive = Layer.scoped(
+export const DraftPreWarmLive = Layer.effect(
 	DraftPreWarmTag,
 	Effect.gen(function* () {
 		const registry = yield* ProviderRegistryTag;
 		const log = yield* LoggerTag;
 		const scope = yield* Effect.scope;
-		const gate = yield* Effect.makeSemaphore(1);
-		const directoryGate = yield* Effect.makeSemaphore(1);
+		const gate = yield* Semaphore.make(1);
+		const directoryGate = yield* Semaphore.make(1);
 		const configured = Number(
 			process.env["CONDUIT_TEST_DRAFT_PREWARM_TTL_MS"] ?? 600_000,
 		);
@@ -60,8 +60,8 @@ export const DraftPreWarmLive = Layer.scoped(
 			readonly sessionId: string;
 			readonly launchKey: string;
 			readonly expiresAt: number;
-			readonly warm: Fiber.RuntimeFiber<boolean>;
-			readonly timer: Fiber.RuntimeFiber<void>;
+			readonly warm: Fiber.Fiber<boolean>;
+			readonly timer: Fiber.Fiber<void>;
 		};
 		// One entry per origin also bounds live runners while switching drafts.
 		const reservations = new Map<string, Reservation>();
@@ -74,7 +74,7 @@ export const DraftPreWarmLive = Layer.scoped(
 				registry.getInstance("claude")?.endSessionEffect(sessionId) ??
 				Effect.void
 			).pipe(
-				Effect.catchAllCause((cause) =>
+				Effect.catchCause((cause) =>
 					Effect.sync(() =>
 						log.debug(`Draft pre-warm cleanup failed: ${String(cause)}`),
 					),
@@ -92,13 +92,13 @@ export const DraftPreWarmLive = Layer.scoped(
 			draftId: string,
 			sessionId: string,
 			launchKey: string,
-			warm: Fiber.RuntimeFiber<boolean>,
+			warm: Fiber.Fiber<boolean>,
 		) =>
 			Effect.gen(function* () {
 				const expiresAt = Date.now() + ttl;
 				const timer = yield* Effect.forkIn(
 					Effect.sleep(ttl).pipe(
-						Effect.zipRight(
+						Effect.andThen(
 							gate.withPermits(1)(
 								Effect.gen(function* () {
 									const current = reservations.get(originId);
@@ -116,6 +116,7 @@ export const DraftPreWarmLive = Layer.scoped(
 						Effect.interruptible,
 					),
 					scope,
+					{ uninterruptible: "inherit" },
 				);
 				reservations.set(originId, {
 					draftId,
@@ -161,10 +162,10 @@ export const DraftPreWarmLive = Layer.scoped(
 								const current = reservations.get(originId);
 								if (current) {
 									// A failed warm is retried under a fresh id, never rejoined.
-									const failed = Option.exists(
-										yield* Fiber.poll(current.warm),
-										(exit) => !Exit.isSuccess(exit) || !exit.value,
-									);
+									const warmExit = current.warm.pollUnsafe();
+									const failed =
+										warmExit !== undefined &&
+										(!Exit.isSuccess(warmExit) || !warmExit.value);
 									if (
 										current.draftId === draftId &&
 										current.launchKey === launchKey &&
@@ -199,7 +200,7 @@ export const DraftPreWarmLive = Layer.scoped(
 										}),
 									).pipe(
 										Effect.as(true),
-										Effect.catchAllCause((cause) =>
+										Effect.catchCause((cause) =>
 											Effect.sync(() => {
 												log.debug(`Draft pre-warm failed: ${String(cause)}`);
 												return false;
@@ -207,6 +208,7 @@ export const DraftPreWarmLive = Layer.scoped(
 										),
 									),
 									scope,
+									{ uninterruptible: "inherit" },
 								);
 								yield* refresh(originId, draftId, sessionId, launchKey, warm);
 								return warm;

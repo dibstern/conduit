@@ -9,11 +9,11 @@ import fs, {
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Reactivity } from "@effect/experimental";
-import { SqlClient } from "@effect/sql";
+import { DatabaseSync } from "node:sqlite";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import Database from "better-sqlite3";
-import { Effect, Either, Layer } from "effect";
+import { Effect, Result as Either, Layer } from "effect";
+import { Reactivity } from "effect/reactivity";
+import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
 import {
 	defaultDaemonConfig,
@@ -32,10 +32,10 @@ import { projectStorageDir } from "../../../src/lib/persistence/project-storage.
 const migrateWithConfig = (dir: string) =>
 	Effect.gen(function* () {
 		const loaded = loadDaemonConfigResult(dir);
-		const config = yield* Either.isLeft(loaded) &&
-		loaded.left._tag === "NotFound"
+		const config = yield* Either.isFailure(loaded) &&
+		loaded.failure._tag === "NotFound"
 			? Effect.succeed(defaultDaemonConfig())
-			: loaded;
+			: Effect.fromResult(loaded);
 		if (
 			existsSync(join(dir, "projects")) ||
 			existsSync(join(dir, "events.db"))
@@ -398,7 +398,7 @@ it("imports all known projects before deleting the sidecar, without appending hi
 				),
 			);
 		}
-		const prepared = vi.spyOn(Database.prototype, "prepare");
+		const prepared = vi.spyOn(DatabaseSync.prototype, "prepare");
 		try {
 			await Effect.runPromise(migrateWithConfig(dir));
 			expect(
@@ -437,7 +437,7 @@ it("imports all known projects before deleting the sidecar, without appending hi
 			);
 		}
 		expect(existsSync(sidecar)).toBe(false);
-		const clean = vi.spyOn(Database.prototype, "prepare");
+		const clean = vi.spyOn(DatabaseSync.prototype, "prepare");
 		try {
 			await Effect.runPromise(migrateWithConfig(dir));
 			expect(

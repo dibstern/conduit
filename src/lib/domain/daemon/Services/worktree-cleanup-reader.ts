@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import type { WorktreeCleanup } from "../../../contracts/worktree.js";
 import { worktreeCleanupCandidateFilter } from "../../../session/worktree-cleanup-rules.js";
 import type { StoredProject } from "../../../types.js";

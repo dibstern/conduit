@@ -95,7 +95,7 @@ export const makeSessionLifecycleWiringLive = (
 	| LoggerTag
 	| DaemonEventBusTag
 > =>
-	Layer.scopedDiscard(
+	Layer.effectDiscard(
 		Effect.gen(function* () {
 			const instances = yield* OpenCodeInstancesTag;
 			const pollerManager = yield* PollerManagerTag;
@@ -181,6 +181,7 @@ export const makeSessionLifecycleWiringLive = (
 						return Effect.void;
 					}),
 				),
+				{ uninterruptible: "inherit" },
 			);
 		}),
 	);

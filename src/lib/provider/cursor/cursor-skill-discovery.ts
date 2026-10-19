@@ -32,7 +32,7 @@ const decodeFrontmatter = Schema.decodeUnknownOption(
 		metadata: Schema.optional(
 			Schema.Struct({
 				surfaces: Schema.optional(
-					Schema.Union(Schema.String, Schema.Array(Schema.String)),
+					Schema.Union([Schema.String, Schema.Array(Schema.String)]),
 				),
 			}),
 		),
@@ -41,11 +41,11 @@ const decodeFrontmatter = Schema.decodeUnknownOption(
 
 const decodePluginManifest = Schema.decodeUnknownOption(
 	Schema.Struct({
-		name: Schema.String.pipe(
-			Schema.pattern(/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/),
+		name: Schema.String.check(
+			Schema.isPattern(/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/),
 		),
 		skills: Schema.optional(
-			Schema.Union(Schema.String, Schema.Array(Schema.String)),
+			Schema.Union([Schema.String, Schema.Array(Schema.String)]),
 		),
 	}),
 );

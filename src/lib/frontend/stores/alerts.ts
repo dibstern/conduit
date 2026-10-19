@@ -4,7 +4,6 @@
 // ding for every other one. Live-only, so a reconnect never re-fires an alert.
 
 import { Effect, Fiber, Stream } from "effect";
-import type { RuntimeFiber } from "effect/Fiber";
 import { notificationContent } from "../../notification-content.js";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
@@ -51,7 +50,7 @@ export const applyAlert = (alert: Alert): void => {
 
 let viewed: string | null = null;
 let generation = 0;
-let fiber: RuntimeFiber<void, never> | null = null;
+let fiber: Fiber.Fiber<void, never> | null = null;
 
 /** Follow `project`'s alerts until the attached project moves; `null` stops. */
 export function viewAlerts(project: string | null): void {

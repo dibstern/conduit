@@ -12,9 +12,9 @@ import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/c
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Reactivity } from "@effect/experimental";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Effect, Layer } from "effect";
+import { Reactivity } from "effect/reactivity";
 import { describe, expect, it, vi } from "vitest";
 import { decodeClaudeSDKMessage } from "../../../../src/lib/contracts/providers/claude-agent-sdk.js";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
@@ -106,7 +106,7 @@ function makeTestLayer() {
 	const sqlite = SqliteNode.layer({ filename: join(dir, "events.db") }).pipe(
 		Layer.provide(Reactivity.layer),
 		Layer.merge(
-			Layer.scopedDiscard(
+			Layer.effectDiscard(
 				Effect.addFinalizer(() =>
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 				),

@@ -5,8 +5,9 @@
 // For importable classes/interfaces the concrete type is used directly.
 // For inline/structural types a Shape interface is defined here.
 
-import { Cause, Context, Effect, Layer, Option } from "effect";
+import { type Cause, Context, Effect, Layer, Option } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
+import * as Failure from "../../../effect/failure-classification.js";
 
 import type {
 	HandlerDeps,
@@ -137,18 +138,18 @@ export interface OpenCodeFileService {
 		path: string,
 		directory?: string,
 		options?: { readonly startIfStopped?: boolean },
-	): Effect.Effect<OpenCodeFileEntry[], Cause.UnknownException>;
+	): Effect.Effect<OpenCodeFileEntry[], Cause.UnknownError>;
 	read(
 		path: string,
 		directory?: string,
 		options?: { readonly startIfStopped?: boolean },
-	): Effect.Effect<OpenCodeFileContent, Cause.UnknownException>;
+	): Effect.Effect<OpenCodeFileContent, Cause.UnknownError>;
 }
 
-export class OpenCodeFileServiceTag extends Context.Tag("OpenCodeFileService")<
+export class OpenCodeFileServiceTag extends Context.Service<
 	OpenCodeFileServiceTag,
 	OpenCodeFileService
->() {}
+>()("OpenCodeFileService") {}
 
 export const OpenCodeFileServiceLive: Layer.Layer<
 	OpenCodeFileServiceTag,
@@ -204,7 +205,7 @@ export interface OpenCodeModelService {
 		readonly startIfStopped?: boolean;
 		readonly instanceId?: string;
 		readonly requireFresh?: boolean;
-	}): Effect.Effect<OpenCodeProviderList, Cause.UnknownException>;
+	}): Effect.Effect<OpenCodeProviderList, Cause.UnknownError>;
 	/** The last catalog listProviders returned. Never contacts OpenCode. */
 	cachedProviders(
 		instanceId?: string,
@@ -212,12 +213,13 @@ export interface OpenCodeModelService {
 	persistDefaultModel(
 		providerID: string,
 		modelID: string,
-	): Effect.Effect<void, Cause.UnknownException>;
+	): Effect.Effect<void, Cause.UnknownError>;
 }
 
-export class OpenCodeModelServiceTag extends Context.Tag(
-	"OpenCodeModelService",
-)<OpenCodeModelServiceTag, OpenCodeModelService>() {}
+export class OpenCodeModelServiceTag extends Context.Service<
+	OpenCodeModelServiceTag,
+	OpenCodeModelService
+>()("OpenCodeModelService") {}
 
 export const OpenCodeModelServiceLive: Layer.Layer<
 	OpenCodeModelServiceTag,
@@ -242,16 +244,16 @@ export const OpenCodeModelServiceLive: Layer.Layer<
 			Effect.gen(function* () {
 				const cached = catalogs.get(instanceId);
 				const list = yield* Effect.tryPromise(() => opencode.provider.list());
-				const nativeConfig = yield* Effect.either(
+				const nativeConfig = yield* Effect.result(
 					Effect.tryPromise(() => opencode.config.get()),
 				);
 				const nativeDefaultModel =
-					nativeConfig._tag === "Right"
-						? typeof nativeConfig.right["model"] === "string"
-							? nativeConfig.right["model"]
+					nativeConfig._tag === "Success"
+						? typeof nativeConfig.success["model"] === "string"
+							? nativeConfig.success["model"]
 							: undefined
 						: cached?.nativeDefaultModel;
-				if (nativeConfig._tag === "Left")
+				if (nativeConfig._tag === "Failure")
 					log.warn("Failed to read OpenCode's native default model");
 				const catalog = {
 					...list,
@@ -260,7 +262,7 @@ export const OpenCodeModelServiceLive: Layer.Layer<
 				catalogs.set(instanceId, catalog);
 				return catalog;
 			}).pipe(
-				Effect.catchAll((error) => {
+				Effect.catch((error) => {
 					const cached = catalogs.get(instanceId);
 					return cached && !requireFresh
 						? Effect.succeed(cached)
@@ -279,18 +281,14 @@ export const OpenCodeModelServiceLive: Layer.Layer<
 						? Option.some(
 								yield* instances
 									.use(targetId, config.projectDir)
-									.pipe(
-										Effect.mapError(
-											(error) => new Cause.UnknownException(error),
-										),
-									),
+									.pipe(Failure.mapEffectFailures(Failure.unknownError)),
 							)
 						: yield* instances.ifRunning(targetId, config.projectDir);
 					if (Option.isSome(running))
 						return yield* refresh(running.value, targetId, requireFresh);
 					if (requireFresh)
 						return yield* Effect.fail(
-							new Cause.UnknownException("OpenCode is not running"),
+							Failure.unknownError("OpenCode is not running"),
 						);
 					return (
 						catalogs.get(targetId) ?? {
@@ -302,7 +300,7 @@ export const OpenCodeModelServiceLive: Layer.Layer<
 				}).pipe(Effect.scoped),
 			cachedProviders: (instanceId = defaultInstanceId) =>
 				Effect.sync(() =>
-					Option.fromNullable(catalogs.get(target(instanceId))),
+					Option.fromNullishOr(catalogs.get(target(instanceId))),
 				),
 			persistDefaultModel: (providerID: string, modelID: string) =>
 				Effect.tryPromise(async () => {
@@ -316,13 +314,14 @@ export const OpenCodeModelServiceLive: Layer.Layer<
 export interface OpenCodeSettingsService {
 	listCommands(options?: {
 		readonly startIfStopped?: boolean;
-	}): Effect.Effect<OpenCodeCommandList, Cause.UnknownException>;
-	listProjects(): Effect.Effect<OpenCodeProjectList, Cause.UnknownException>;
+	}): Effect.Effect<OpenCodeCommandList, Cause.UnknownError>;
+	listProjects(): Effect.Effect<OpenCodeProjectList, Cause.UnknownError>;
 }
 
-export class OpenCodeSettingsServiceTag extends Context.Tag(
-	"OpenCodeSettingsService",
-)<OpenCodeSettingsServiceTag, OpenCodeSettingsService>() {}
+export class OpenCodeSettingsServiceTag extends Context.Service<
+	OpenCodeSettingsServiceTag,
+	OpenCodeSettingsService
+>()("OpenCodeSettingsService") {}
 
 export const OpenCodeSettingsServiceLive: Layer.Layer<
 	OpenCodeSettingsServiceTag,
@@ -348,85 +347,81 @@ export const OpenCodeSettingsServiceLive: Layer.Layer<
 	}),
 );
 
-export class WebSocketHandlerTag extends Context.Tag("WebSocketHandler")<
+export class WebSocketHandlerTag extends Context.Service<
 	WebSocketHandlerTag,
 	WebSocketHandlerShape
->() {}
+>()("WebSocketHandler") {}
 
-export class PtyManagerTag extends Context.Tag("PtyManager")<
-	PtyManagerTag,
-	PtyManager
->() {}
+export class PtyManagerTag extends Context.Service<PtyManagerTag, PtyManager>()(
+	"PtyManager",
+) {}
 
-export class ConfigTag extends Context.Tag("Config")<
-	ConfigTag,
-	ProjectRelayConfig
->() {}
+export class ConfigTag extends Context.Service<ConfigTag, ProjectRelayConfig>()(
+	"Config",
+) {}
 
-export class LoggerTag extends Context.Tag("Logger")<LoggerTag, Logger>() {}
+export class LoggerTag extends Context.Service<LoggerTag, Logger>()("Logger") {}
 
-export class StatusPollerTag extends Context.Tag("StatusPoller")<
+export class StatusPollerTag extends Context.Service<
 	StatusPollerTag,
 	StatusPollerShape
->() {}
+>()("StatusPoller") {}
 
-export class BackgroundLivenessTag extends Context.Tag("BackgroundLiveness")<
+export class BackgroundLivenessTag extends Context.Service<
 	BackgroundLivenessTag,
 	(sessionId: string) => SessionBackground | undefined
->() {}
+>()("BackgroundLiveness") {}
 
 /** Runner process ownership, independent of turn and background activity. */
-export class AgentLivenessTag extends Context.Tag("AgentLiveness")<
+export class AgentLivenessTag extends Context.Service<
 	AgentLivenessTag,
 	(sessionId: string) => Effect.Effect<boolean>
->() {}
+>()("AgentLiveness") {}
 
 /** A Claude runtime's live task ids; see makeSessionBackgroundLiveness. */
-export class LiveTaskListTag extends Context.Tag("LiveTaskList")<
+export class LiveTaskListTag extends Context.Service<
 	LiveTaskListTag,
 	(
 		sessionId: string,
 	) =>
 		| { readonly taskIds: ReadonlySet<string>; readonly since: number }
 		| undefined
->() {}
+>()("LiveTaskList") {}
 
 /** The compaction in progress per session; see makeSessionCompactions. */
-export class SessionCompactionsTag extends Context.Tag("SessionCompactions")<
+export class SessionCompactionsTag extends Context.Service<
 	SessionCompactionsTag,
 	(sessionId: string) => string | undefined
->() {}
+>()("SessionCompactions") {}
 
 /** The provider retry a session is waiting on; see makeSessionRetries. */
-export class SessionRetriesTag extends Context.Tag("SessionRetries")<
+export class SessionRetriesTag extends Context.Service<
 	SessionRetriesTag,
 	(sessionId: string) => string | undefined
->() {}
+>()("SessionRetries") {}
 
-export class PollerManagerTag extends Context.Tag("PollerManager")<
+export class PollerManagerTag extends Context.Service<
 	PollerManagerTag,
 	PollerManagerShape
->() {}
+>()("PollerManager") {}
 
-export class ConnectPtyUpstreamTag extends Context.Tag("ConnectPtyUpstream")<
+export class ConnectPtyUpstreamTag extends Context.Service<
 	ConnectPtyUpstreamTag,
 	ConnectPtyUpstreamShape
->() {}
+>()("ConnectPtyUpstream") {}
 
-export class OrchestrationEngineTag extends Context.Tag("OrchestrationEngine")<
+export class OrchestrationEngineTag extends Context.Service<
 	OrchestrationEngineTag,
 	OrchestrationEngine
->() {}
+>()("OrchestrationEngine") {}
 
-export class TranslatorTag extends Context.Tag("Translator")<
-	TranslatorTag,
-	Translator
->() {}
+export class TranslatorTag extends Context.Service<TranslatorTag, Translator>()(
+	"Translator",
+) {}
 
-export class ClientIdTag extends Context.Tag("ClientId")<
-	ClientIdTag,
-	string
->() {}
+export class ClientIdTag extends Context.Service<ClientIdTag, string>()(
+	"ClientId",
+) {}
 
 // This type alias maps every required+optional HandlerDeps field to its
 // corresponding Tag's service type. A type error here means a field was

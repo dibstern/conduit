@@ -1,15 +1,18 @@
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
-import { SqlClient } from "@effect/sql";
 import {
 	Context,
 	Effect,
-	Either,
+	Filter,
 	Layer,
 	ManagedRuntime,
 	Option,
 	Ref,
+	Result,
+	Semaphore,
 	Stream,
+	Tracer,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { accountsStateFromConfig } from "../account-directory.js";
 import {
 	MANAGED_OPENCODE_ACCOUNT_ID,
@@ -188,29 +191,35 @@ const relayOpenCodeInstances = (
 	const used = new Set(persistedInstanceIds.map(target));
 	const use: OpenCodeInstances["use"] = (instanceId, directory = scope) =>
 		instances.use(target(instanceId), directory).pipe(
-			Effect.tap(() => {
-				used.add(target(instanceId));
-			}),
+			Effect.tap(() =>
+				Effect.sync(() => {
+					used.add(target(instanceId));
+				}),
+			),
 		);
 	return {
 		events: (directories, instanceId = defaultId) =>
 			instances
 				.events(directories, target(instanceId))
 				.pipe(
-					Stream.filterMap((message) =>
-						message.instanceId === selectedId
-							? Option.some({ ...message, instanceId: defaultId })
-							: used.has(message.instanceId)
-								? Option.some(message)
-								: Option.none(),
+					Stream.filterMap(
+						Filter.fromPredicateOption((message) =>
+							message.instanceId === selectedId
+								? Option.some({ ...message, instanceId: defaultId })
+								: used.has(message.instanceId)
+									? Option.some(message)
+									: Option.none(),
+						),
 					),
 				),
 		use,
 		borrow: (instanceId, directory = scope) =>
 			instances.borrow(target(instanceId), directory).pipe(
-				Effect.tap(() => {
-					used.add(target(instanceId));
-				}),
+				Effect.tap(() =>
+					Effect.sync(() => {
+						used.add(target(instanceId));
+					}),
+				),
 			),
 		useIfRunning: (instanceId, directory = scope) =>
 			instances.useIfRunning(target(instanceId), directory),
@@ -237,7 +246,7 @@ export type RelayRuntimeServices =
 	| OverridesStateTag
 	| DaemonConfigRefTag
 	| ConfigPersistenceTag
-	| Layer.Layer.Success<typeof PendingInteractionServiceLive>
+	| Layer.Success<typeof PendingInteractionServiceLive>
 	| PollerStateTag
 	| ReadQueryEffectTag
 	| OpenCodeInstancesTag
@@ -247,10 +256,12 @@ export type RelayRuntimeServices =
 	| ProjectManagementServiceTag
 	| InstanceManagementServiceTag
 	| SqlClient.SqlClient
-	| ReturnType<typeof createTranslator>;
+	| TranslatorTag;
 
-export const TranslatorTag =
-	Context.GenericTag<ReturnType<typeof createTranslator>>("RelayTranslator");
+export class TranslatorTag extends Context.Service<
+	TranslatorTag,
+	ReturnType<typeof createTranslator>
+>()("RelayTranslator") {}
 
 export interface RelayRuntime {
 	runtime: ManagedRuntime.ManagedRuntime<
@@ -290,7 +301,7 @@ export function createProjectRelayLayers({
 	const daemonConfigLayer: Layer.Layer<
 		DaemonConfigRefTag | ConfigPersistenceTag | AccountDirectory,
 		DaemonConfigLoadError
-	> = Layer.unwrapEffect(
+	> = Layer.unwrap(
 		Effect.gen(function* () {
 			const shared = config.daemonConfigContext ?? Context.empty();
 			const configRef = Context.getOption(shared, DaemonConfigRefTag);
@@ -311,9 +322,9 @@ export function createProjectRelayLayers({
 			}
 			const configDir = config.configDir ?? getConfigDir();
 			const loaded = loadDaemonConfigResult(configDir);
-			if (Either.isLeft(loaded) && loaded.left._tag !== "NotFound")
-				return yield* loaded.left;
-			const saved = Either.getOrElse(loaded, defaultDaemonConfig);
+			if (Result.isFailure(loaded) && loaded.failure._tag !== "NotFound")
+				return yield* loaded.failure;
+			const saved = Result.getOrElse(loaded, defaultDaemonConfig);
 			const accounts = accountsStateFromConfig(
 				saved,
 				captureClaudeLaunchLogin(process.env),
@@ -336,7 +347,7 @@ export function createProjectRelayLayers({
 						build: Effect.gen(function* () {
 							const current = yield* Ref.get(configRef);
 							const persisted = yield* Effect.suspend(() =>
-								loadDaemonConfigResult(configDir),
+								Effect.fromResult(loadDaemonConfigResult(configDir)),
 							).pipe(
 								Effect.catchTag("NotFound", () =>
 									Effect.succeed(defaultDaemonConfig()),
@@ -417,7 +428,7 @@ export function createProjectRelayLayers({
 		),
 	).pipe(Layer.provideMerge(activityLayer));
 	// Orchestration runtime layer (provider instance routing)
-	const orchestrationRuntimeLayer = Layer.unwrapEffect(
+	const orchestrationRuntimeLayer = Layer.unwrap(
 		Effect.map(SessionActivityTag, (activity) =>
 			makeOrchestrationRuntimeLayer({
 				...(config.shellEnv && { shellEnv: config.shellEnv }),
@@ -444,7 +455,7 @@ export function createProjectRelayLayers({
 	const sharedUsage = config.usage;
 	const usageLayer = sharedUsage
 		? Layer.sync(Usage, () => sharedUsage)
-		: Layer.scoped(
+		: Layer.effect(
 				Usage,
 				Effect.gen(function* () {
 					const directory = yield* AccountDirectory;
@@ -576,7 +587,7 @@ export function createProjectRelayLayers({
 			),
 		),
 	);
-	const providerRuntimeIngestionLayer = Layer.unwrapEffect(
+	const providerRuntimeIngestionLayer = Layer.unwrap(
 		Effect.gen(function* () {
 			const ledger = yield* AlertLedgerTag;
 			const alerts = yield* AlertsTag;
@@ -853,7 +864,7 @@ export function createProjectRelayLayers({
 			: makeWorktreeLive(config.configDir ?? getConfigDir()),
 		usageLayer,
 		historyReconcileLayer,
-		Layer.effect(OpenCodeSessionCreationGateTag, Effect.makeSemaphore(1)),
+		Layer.effect(OpenCodeSessionCreationGateTag, Semaphore.make(1)),
 		openCodeApiLayer,
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,
@@ -928,7 +939,7 @@ export function createProjectRelayLayers({
 	// monitoring wiring share one view, while the poller manager itself remains
 	// runtime-owned by MessagePollerManagerLive.
 	const monitoringStateAccess = createMonitoringWiringState();
-	const sessionLifecycleWiringLayer = Layer.unwrapEffect(
+	const sessionLifecycleWiringLayer = Layer.unwrap(
 		Effect.map(TranslatorTag, (translator) =>
 			makeSessionLifecycleWiringLive({
 				translator,
@@ -943,10 +954,8 @@ export function createProjectRelayLayers({
 		sessionLifecycleWiringLayer,
 	).pipe(Layer.provide(baseLayers));
 	const inboxLayer = SessionInboxLive.pipe(Layer.provide(sessionEventBusLayer));
-	// The borrowed daemon tracer goes BENEATH everything, not beside it:
-	// Layer.setTracer patches a FiberRef in its own build fiber, so a merged
-	// tracer never reaches fibers forked while building sibling layers
-	// (e.g. the status poller loop).
+	// Provide the borrowed daemon tracer to every layer, including fibers forked
+	// while building services such as the status poller.
 	const fullLayer = Layer.provideMerge(
 		Layer.provideMerge(
 			RpcSubscriptionScopeLive,
@@ -959,7 +968,9 @@ export function createProjectRelayLayers({
 				fullBaseLayers,
 			),
 		),
-		config.tracer === undefined ? Layer.empty : Layer.setTracer(config.tracer),
+		config.tracer === undefined
+			? Layer.empty
+			: Layer.succeed(Tracer.Tracer, config.tracer),
 	);
 	const relayManagedRuntime = ManagedRuntime.make(fullLayer);
 	const effectRuntime: RelayRuntime = {

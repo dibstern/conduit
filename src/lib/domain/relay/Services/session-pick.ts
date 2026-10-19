@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
+import { SqlClient } from "effect/sql";
 import type { Account } from "../../../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
@@ -66,16 +66,16 @@ export const resolveServerSessionPick = (
 	source?: TurnPick,
 	defaultPick?: TurnPick,
 	catalog?: readonly ModelInfo[],
-): Either.Either<TurnSettings, PickRejection> => {
+): Result.Result<TurnSettings, PickRejection> => {
 	const pick = source ?? defaultPick;
-	if (!pick) return Either.left(new PickRequired());
+	if (!pick) return Result.fail(new PickRequired());
 	if (
 		pick.harness !== harness ||
 		harnessForModelProvider(pick.model.providerId) !== harness
 	)
-		return Either.left(new ModelNotInCatalog({ harness, ...pick.model }));
+		return Result.fail(new ModelNotInCatalog({ harness, ...pick.model }));
 	return catalog === undefined
-		? Either.right(pick)
+		? Result.succeed(pick)
 		: resolveTurnSettings(pick, catalog);
 };
 
@@ -111,8 +111,8 @@ export const loadServerSessionPick = (
 			),
 			catalog,
 		);
-		if (Either.isLeft(resolved)) return yield* resolved.left;
-		return resolved.right;
+		if (Result.isFailure(resolved)) return yield* resolved.failure;
+		return resolved.success;
 	});
 
 /** These join session.created in the creator's transaction. */
@@ -186,15 +186,15 @@ export const backfillSessionPicks = () =>
 		const accounts = yield* AccountDirectory;
 		let filled = 0;
 		for (const { id, provider, retry_reason } of missing) {
-			const resolved = yield* Effect.either(
+			const resolved = yield* Effect.result(
 				accounts.resolve({ _tag: "Id", id: provider }),
 			);
-			if (Either.isLeft(resolved)) {
+			if (Result.isFailure(resolved)) {
 				if (retry_reason !== "driver_unresolved")
 					yield* sql`UPDATE session_pick_backfill SET retry_reason = 'driver_unresolved' WHERE session_id = ${id}`;
 				continue;
 			}
-			const driver = resolved.right.driver;
+			const driver = resolved.success.driver;
 			const row = yield* read.getSession(id);
 			if (!row) continue;
 			if (storedSessionPick(row, driver)) {

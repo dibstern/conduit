@@ -4,15 +4,7 @@
 //   - Model switch works and messages succeed
 //   - New session resets model selection
 
-import {
-	afterAll,
-	assert,
-	beforeAll,
-	beforeEach,
-	describe,
-	expect,
-	it,
-} from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -21,16 +13,13 @@ import {
 describe("Integration: Model Selection", () => {
 	let harness: RelayHarness;
 
-	beforeAll(async () => {
+	beforeEach(async () => {
 		harness = await createRelayHarness();
+		harness.mock.resetQueues();
 	}, 30_000);
 
-	afterAll(async () => {
+	afterEach(async () => {
 		if (harness) await harness.stop();
-	});
-
-	beforeEach(() => {
-		harness.mock.resetQueues();
 	});
 
 	it("GetModels only returns configured providers", async () => {
