@@ -8,6 +8,7 @@ import {
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import {
 	AgentServiceTag,
 	filterAgents,
@@ -344,10 +345,11 @@ const persistentHandlerPersistence = Layer.merge(
 		persistEvents: () => Effect.void,
 		persistUserMessage: () => Effect.void,
 		ensureClaudeSubagentSession: () => Effect.void,
+		readClaudeSubagentTranscript: () => Effect.succeed({ messages: [], parts: [] }),
 	} satisfies ClaudeEventPersistEffect),
 );
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-layer(Layer.mergeAll(Layer.succeed(AccountDirectory)(makeMockAccountDirectory()), AlertsLive, persistentHandlerPersistence, makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistentHandlerPersistence)), Layer.succeed(AgentServiceTag)(makeMockAgentService()), Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()), PendingInteractionServiceLive, Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()), Layer.succeed(ConfigTag)(mockConfig()), Layer.succeed(LoggerTag)(mockLogger()), ProjectSettingsLive, RpcSubscriptionScopeLive))("persistent handler runtime", (it) => {
+layer(Layer.provideMerge(SessionWorkspaceLive, Layer.mergeAll(Layer.succeed(OpenCodeAPITag)(makeHandlerOpenCodeAPI()), Layer.succeed(AccountDirectory)(makeMockAccountDirectory()), AlertsLive, persistentHandlerPersistence, makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistentHandlerPersistence)), Layer.succeed(AgentServiceTag)(makeMockAgentService()), Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()), PendingInteractionServiceLive, Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()), Layer.succeed(ConfigTag)(mockConfig()), Layer.succeed(LoggerTag)(mockLogger()), ProjectSettingsLive, RpcSubscriptionScopeLive)))("persistent handler runtime", (it) => {
 describe("GetAgents", () => {
 	it.effect(
 		"fetches agents via OpenCodeAPI and returns the filtered list",
@@ -1389,7 +1391,7 @@ function makeForkSessionLayer(options?: {
 	vi.spyOn(client.provider, "list").mockResolvedValue(makeProviderListResult({
 			providers: [{ id: "openai", name: "OpenAI", models: [{ id: "gpt-4", name: "GPT-4" }] }],
 		}));
-	return Layer.mergeAll(
+	const dependencies = Layer.mergeAll(
 		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		openCodeModelLayer(client),
 		Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
@@ -1411,6 +1413,7 @@ function makeForkSessionLayer(options?: {
 		makeOverridesStateLive(),
 		forkPersistence,
 	);
+	return Layer.provideMerge(SessionWorkspaceLive, dependencies);
 }
 
 function makeSessionLifecycleLayer(options?: {
@@ -2101,7 +2104,7 @@ describe("handleQuestionReject", () => {
 		return handleQuestionReject("client-1", { toolId: "que-1" }).pipe(
 			Effect.provide(layer, { local: true }),
 			Effect.tap(() => Effect.sync(() => {
-				expect(client.question.reject).toHaveBeenCalledWith("que-1", undefined);
+				expect(client.question.reject).toHaveBeenCalledWith("que-1", tmpdir());
 			})),
 		);
 	});
@@ -2242,6 +2245,7 @@ describe("handleAskUserResponse", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(ConfigTag)(mockConfig()),
 					PendingInteractionServiceLive,
@@ -2260,7 +2264,7 @@ describe("handleAskUserResponse", () => {
 				expect(client.question.reply).toHaveBeenCalledWith(
 					"que-1",
 					[["Yes"], ["Approve"]],
-					undefined,
+					tmpdir(),
 				);
 			})),
 		);
@@ -2292,6 +2296,7 @@ describe("handleAskUserResponse", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(ConfigTag)(mockConfig()),
 					Layer.succeed(LoggerTag)(log),
@@ -3200,6 +3205,7 @@ describe("handleMessage", () => {
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 				Layer.succeed(WebSocketHandlerTag)(ws),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
@@ -3246,6 +3252,7 @@ describe("handleMessage", () => {
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 				Layer.succeed(WebSocketHandlerTag)(ws),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
@@ -3346,6 +3353,7 @@ describe("handleMessage", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
@@ -3475,6 +3483,7 @@ describe("handleMessage", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
@@ -3577,6 +3586,7 @@ describe("handleMessage", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
@@ -3644,6 +3654,7 @@ describe("handleMessage", () => {
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 				Layer.succeed(WebSocketHandlerTag)(ws),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
@@ -3764,6 +3775,7 @@ describe("handleMessage", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
@@ -3838,6 +3850,7 @@ describe("handleMessage", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),

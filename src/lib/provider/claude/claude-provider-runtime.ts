@@ -124,6 +124,7 @@ import {
 } from "./claude-runtime-discovery.js";
 import { claudeRuntimeEvent } from "./claude-runtime-event.js";
 import {
+	claimSetupLock,
 	getOrUndefined,
 	getSession,
 	getSetupLock,
@@ -135,7 +136,6 @@ import {
 	removeSession,
 	removeSetupLock,
 	setSession,
-	setSetupLock,
 } from "./claude-runtime-state.js";
 import {
 	addTurnWaiter,
@@ -229,6 +229,7 @@ export interface ClaudeProviderInstanceDeps {
 	readonly subagentSdk?: ClaudeSubagentSdk;
 	readonly sessionForkSdk?: ClaudeSessionForkSdk;
 	readonly ensureClaudeSubagentSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
+	readonly readClaudeSubagentTranscript?: ClaudeEventPersistEffect["readClaudeSubagentTranscript"];
 	readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
 	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
 	readonly subagentPollTimeoutMs?: number;
@@ -327,6 +328,9 @@ export const makeClaudeProviderRuntime = (
 				accounts,
 				...(deps.ensureClaudeSubagentSession
 					? { ensureChildSession: deps.ensureClaudeSubagentSession }
+					: {}),
+				...(deps.readClaudeSubagentTranscript
+					? { readSubagentTranscript: deps.readClaudeSubagentTranscript }
 					: {}),
 			},
 			driver,
@@ -778,6 +782,43 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		);
 	}
 
+	private readSubagentTranscriptEffect(
+		ctx: ClaudeSessionContext,
+		childSessionId: string,
+	) {
+		const sinkId = this.sinks.sinkId(ctx.eventSink);
+		return Effect.gen({ self: this }, function* () {
+			if (!sinkId)
+				return yield* Effect.fail({
+					operation: "read-subagent-transcript",
+					message: "Missing Claude transcript sink",
+				});
+			const output = {
+				type: "read-subagent-transcript" as const,
+				sinkId,
+				childSessionId,
+			};
+			let reply = yield* this.emit(output);
+			// A reconnect can replay a read older than the last acknowledged output.
+			// Its reply is no longer retained, so ask again with a new sequence.
+			if (!reply.subagentTranscript) reply = yield* this.emit(output);
+			if (!reply.subagentTranscript)
+				return yield* Effect.fail({
+					operation: output.type,
+					message: "Missing persisted Claude subagent transcript reply",
+				});
+			return reply.subagentTranscript;
+		}).pipe(
+			Effect.mapError(
+				(cause) =>
+					new ClaudeBoundaryError({
+						operation: "readClaudeSubagentTranscript",
+						cause: new Error(cause.message),
+					}),
+			),
+		);
+	}
+
 	private removeSessionEffect(sessionId: string): Effect.Effect<void> {
 		return Effect.gen({ self: this }, function* () {
 			yield* this.warmedQueries.discardEffect(sessionId);
@@ -925,7 +966,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				// queue; enqueueing would throw. Evict silently and create fresh.
 				log.info(`Evicting stopped session on sendTurn: ${sessionId}`);
 				yield* this.removeSessionEffect(sessionId);
-				return yield* this.createSessionAndSendTurnEffect(input);
+				return yield* this.createSessionAndSendTurnEffect(
+					input,
+					existingCtx.workspaceStartReported,
+				);
 			} else if (
 				existingCtx &&
 				!sameClaudeLogin(
@@ -968,12 +1012,16 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				return yield* this.enqueueTurnEffect(existingCtx, input);
 			}
 
-			return yield* this.createSessionAndSendTurnEffect(input);
+			return yield* this.createSessionAndSendTurnEffect(
+				input,
+				existingCtx?.workspaceStartReported,
+			);
 		});
 	}
 
 	private createSessionAndSendTurnEffect(
 		input: ClaudeSendTurnInput,
+		workspaceStartReported = false,
 	): Effect.Effect<TurnResult, ClaudeAdapterError> {
 		return Effect.gen({ self: this }, function* () {
 			const { sessionId } = input;
@@ -989,28 +1037,38 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					}),
 				);
 			}
-			const expectedApiModelId = yield* expectedApiModelIdEffect(
-				this.deps.capabilitiesService,
-				input.model?.modelId,
-				input.contextWindow,
-				input.workspaceRoot,
-				input.agent,
-			);
-			yield* markStreamLive(this.stateRef, sessionId);
-
 			const deferred = yield* Deferred.make<TurnResult, Error>();
-			yield* addTurnWaiter(this.stateRef, sessionId, input.inputId, {
-				deferred,
-				started: false,
-			});
-
-			// Set session lock synchronously before any effectful boundary.
 			const setupLock = yield* Deferred.make<void, Error>();
-			yield* setSetupLock(this.stateRef, sessionId, setupLock);
-
+			const pending = yield* claimSetupLock(
+				this.stateRef,
+				sessionId,
+				setupLock,
+			);
+			if (pending) {
+				yield* Deferred.await(pending).pipe(
+					Effect.mapError(
+						(cause) =>
+							new ClaudeBoundaryError({ operation: "awaitSetup", cause }),
+					),
+				);
+				return yield* this.sendTurnLocalEffect(input);
+			}
 			let promptQueue: PromptQueueController | undefined;
 			let activeQuery: Query | undefined;
 			const setup = Effect.gen({ self: this }, function* () {
+				yield* markStreamLive(this.stateRef, sessionId);
+				yield* addTurnWaiter(this.stateRef, sessionId, input.inputId, {
+					deferred,
+					started: false,
+					unplaced: input,
+				});
+				const expectedApiModelId = yield* expectedApiModelIdEffect(
+					this.deps.capabilitiesService,
+					input.model?.modelId,
+					input.contextWindow,
+					input.workspaceRoot,
+					input.agent,
+				);
 				const userMessage = yield* Effect.try({
 					try: () => validateUserMessage(this.buildUserMessage(input)),
 					catch: (cause) =>
@@ -1137,6 +1195,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					instanceId: input.instanceId ?? "claude",
 					nativeThread: launchInput.nativeThread,
 					workspaceRoot: input.workspaceRoot,
+					workspaceStartReported,
 					configDir: input.configDir,
 					goalTracker: new ClaudeGoalTracker(sessionId, input.goalState),
 					cumulativeTokens: input.cumulativeTokens ?? 0,
@@ -1471,9 +1530,6 @@ class ClaudeRunnerPayload implements RunnerPayload {
 							(prior) => Deferred.await(prior.deferred).pipe(Effect.ignore),
 							{ discard: true },
 						);
-					const joinsRunningTurn =
-						(yield* pendingTurnWaiters(this.stateRef, ctx.sessionId)).size > 0;
-
 					// A Stop that landed while this turn waited dropped it with the
 					// rest of the queue and already sent done. Failing it instead
 					// would send a second done that ends the user's next prompt.
@@ -1518,6 +1574,11 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						Semaphore.makeUnsafe(1)).withPermits(1)(
 						Effect.uninterruptible(
 							Effect.gen({ self: this }, function* () {
+								// A prior result can settle during settings discovery. Read
+								// admission state under the permit that also settles it.
+								const joinsRunningTurn =
+									(yield* pendingTurnWaiters(this.stateRef, ctx.sessionId))
+										.size > 0;
 								// A held send is placed when the SDK starts it.
 								yield* addTurnWaiter(
 									this.stateRef,
@@ -1624,7 +1685,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		return Effect.gen({ self: this }, function* () {
 			yield* FiberMap.remove(this.shutdownFibers, ctx.sessionId);
 			yield* this.disposeSessionEffect(ctx, reason);
-			return yield* this.createSessionAndSendTurnEffect(input);
+			return yield* this.createSessionAndSendTurnEffect(
+				input,
+				ctx.workspaceStartReported,
+			);
 		});
 	}
 
@@ -1820,6 +1884,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						ctx,
 						decision,
 						parentClaudeSessionId,
+						{
+							readTranscript: (childSessionId) =>
+								this.readSubagentTranscriptEffect(ctx, childSessionId),
+						},
 					);
 					if (childLink) parentChildLink = childLink;
 					continue;
@@ -1929,7 +1997,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	private handleCommandLifecycleEffect(
 		ctx: ClaudeSessionContext,
 		message: ClaudeSDKCommandLifecycleMessage,
-	): Effect.Effect<void> {
+	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen({ self: this }, function* () {
 			if (message.state === "cancelled") {
 				yield* cancelTurnWaiterEffect(
@@ -1945,7 +2013,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				ctx.sessionId,
 				message.command_uuid,
 			);
-			if (!unplaced) return;
+			if (!unplaced || ctx.stopped) return;
 			// A steer becomes the current turn when it starts, on its own sink,
 			// and is in flight even when the turn before it already ended.
 			ctx.currentTurnId = message.command_uuid;
@@ -1968,6 +2036,22 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					),
 				),
 			);
+			if (ctx.stopped) return;
+			// Admission may have joined the prior turn before its result wrote idle.
+			// The SDK start places this input and makes its local work busy too.
+			yield* ctx.eventSink
+				.push(
+					claudeRuntimeEvent("session.status", ctx.sessionId, {
+						sessionId: ctx.sessionId,
+						status: "busy",
+					}),
+				)
+				.pipe(
+					Effect.mapError(
+						(cause) =>
+							new ClaudeBoundaryError({ operation: "startTurn", cause }),
+					),
+				);
 		}).pipe(
 			Effect.uninterruptible,
 			(ctx.messageOwnershipPermit ??= Semaphore.makeUnsafe(1)).withPermits(1),

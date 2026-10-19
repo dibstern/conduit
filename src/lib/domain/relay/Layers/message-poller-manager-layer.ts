@@ -1,13 +1,19 @@
-import { Effect, Layer } from "effect";
+import { Effect, FiberSet, Layer, Option, Scope } from "effect";
 import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../../errors.js";
+import type { Message } from "../../../instance/sdk-types.js";
+import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { MessagePollerManager } from "../../../relay/message-poller-impl.js";
-import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
+import type { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	PollerManagerTag,
 } from "../Services/services.js";
+import {
+	makeSessionOpenCodeClient,
+	type SessionWorkspaceTag,
+} from "../Services/session-workspace.js";
 
 export interface MessagePollerManagerLiveOptions {
 	readonly hasViewers?: (sessionId: string) => boolean;
@@ -18,17 +24,47 @@ export const makeMessagePollerManagerLive = (
 ): Layer.Layer<
 	PollerManagerTag,
 	never,
-	OpenCodeAPITag | ConfigTag | LoggerTag
+	| ConfigTag
+	| LoggerTag
+	| OpenCodeInstancesTag
+	| ReadQueryEffectTag
+	| SessionWorkspaceTag
 > =>
 	Layer.effect(
 		PollerManagerTag,
 		Effect.gen(function* () {
-			const client = yield* OpenCodeAPITag;
 			const config = yield* ConfigTag;
 			const log = yield* LoggerTag;
+			const sessionClient = yield* makeSessionOpenCodeClient;
+			const readsScope = yield* Scope.fork(yield* Effect.scope);
+			const run = yield* FiberSet.makeRuntimePromise<
+				never,
+				Message[],
+				unknown
+			>().pipe(Effect.provideService(Scope.Scope, readsScope));
 			const pollerLog = log.child("poller-mgr");
 			const manager = new MessagePollerManager({
-				client,
+				client: {
+					session: {
+						messages: (sessionId) =>
+							run(
+								Effect.gen(function* () {
+									// Preserve the asynchronous handoff before starting native work.
+									yield* Effect.yieldNow;
+									const client = yield* sessionClient(sessionId);
+									if (Option.isNone(client))
+										return yield* Effect.fail(
+											new Error(`Session ${sessionId} not found`),
+										);
+									return yield* Effect.tryPromise({
+										try: (signal) =>
+											client.value.session.messages(sessionId, { signal }),
+										catch: (cause) => cause,
+									});
+								}).pipe(Effect.scoped),
+							),
+					},
+				},
 				log: pollerLog,
 				...(options.hasViewers != null && { hasViewers: options.hasViewers }),
 				...(config.messagePollerInterval != null && {
@@ -36,10 +72,15 @@ export const makeMessagePollerManagerLive = (
 				}),
 			});
 
-			yield* Effect.addFinalizer(() =>
-				Effect.tryPromise({
-					try: () => manager.drain(),
-					catch: (cause) => cause,
+			yield* Effect.addFinalizer((exit) =>
+				Effect.gen(function* () {
+					// Stop timers, interrupt scoped reads, then wait for their callbacks to settle.
+					const draining = manager.drain();
+					yield* Scope.close(readsScope, exit);
+					yield* Effect.tryPromise({
+						try: () => draining,
+						catch: (cause) => cause,
+					});
 				}).pipe(
 					Effect.catch((cause) =>
 						Effect.sync(() =>

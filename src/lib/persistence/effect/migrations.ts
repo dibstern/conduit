@@ -975,6 +975,59 @@ const runBackfillCompactionMessagesMigration: Effect.Effect<
 	yield* executeSqlStatements(backfillCompactionMessagesMigrationSql);
 });
 
+const runPurgeBackgroundShellSessionsMigration: Effect.Effect<
+	void,
+	SqlError,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	// Pre-da246483 local_bash tasks were incorrectly given child sessions. Freeze
+	// the cohort before deleting its references. Content and descendant guards
+	// must skip unsafe matches, never Effect.fail: see the Migrator transaction
+	// warning in runPurgeLegacySkeletonSessionsMigration.
+	yield* sql`CREATE TEMP TABLE background_shell_sessions (id TEXT PRIMARY KEY)`;
+	yield* sql`INSERT INTO background_shell_sessions (id)
+		WITH refs AS (
+			SELECT json_extract(metadata, '$.childSessionId') AS id FROM message_parts
+			WHERE type = 'tool' AND json_extract(metadata, '$.subagentType') = 'local_bash'
+			UNION
+			SELECT json_extract(data, '$.metadata.childSessionId') FROM events
+			WHERE type IN ('tool.started', 'tool.running', 'tool.completed')
+				AND json_extract(data, '$.metadata.subagentType') = 'local_bash'
+		)
+		SELECT s.id FROM sessions s JOIN refs ON refs.id = s.id
+		WHERE s.parent_id IS NOT NULL AND s.provider = 'claude'
+			AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id)
+			AND NOT EXISTS (SELECT 1 FROM sessions c WHERE c.parent_id = s.id)`;
+	const [cohort] = yield* sql<{
+		count: number;
+	}>`SELECT COUNT(*) AS count FROM background_shell_sessions`;
+	if (cohort && cohort.count > 0) {
+		// Same FK-safe order as the skeleton purge. activities was dropped in 0056.
+		// messages and message_parts are INTENTIONALLY ABSENT: preserve the content
+		// backstop and leave the parents' Bash-card metadata untouched.
+		yield* sql`DELETE FROM pending_approvals WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM turns WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM session_providers WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM tool_content WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM provider_state WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM command_receipts WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM provider_command_outbox WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM provider_command_interactions WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM provider_command_turns WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM provider_command_tombstones WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM provider_command_sessions WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		// Sidebar rows no longer cascade; the remaining dependent tables do.
+		yield* sql`DELETE FROM session_sidebar WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM events WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM sessions WHERE id IN (SELECT id FROM background_shell_sessions)`;
+		yield* Effect.logWarning(
+			`Purged ${cohort.count} background shell session(s)`,
+		);
+	}
+	yield* sql`DROP TABLE background_shell_sessions`;
+});
+
 export const effectMigrationEntries = {
 	"0001_create_event_store_tables": runBaselineEventStoreMigration,
 	"0002_add_message_part_metadata": runMessagePartMetadataMigration,
@@ -1285,6 +1338,8 @@ export const effectMigrationEntries = {
 			version,
 		);
 	}),
+	"0067_purge_background_shell_sessions":
+		runPurgeBackgroundShellSessionsMigration,
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

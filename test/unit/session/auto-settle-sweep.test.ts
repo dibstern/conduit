@@ -13,6 +13,7 @@ import {
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
 	ConfigTag,
@@ -127,7 +128,7 @@ describe("relay automatic settlement sweep", () => {
 			const loggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
 			const openCodeApi = makeMockOpenCodeAPI();
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				Layer.provideMerge(SessionManagerServiceLive, SessionWorkspaceLive),
 				Layer.mergeAll(
 					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					makeSessionManagerStateLive(),

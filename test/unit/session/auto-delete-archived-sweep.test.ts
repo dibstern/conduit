@@ -33,6 +33,7 @@ import {
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
 	ConfigTag,
@@ -90,7 +91,10 @@ describe("archived tree retention", () => {
 						makePersistenceEffectLayer(join(dir, "events.db"), "test-project"),
 					),
 				);
-				const layer = SessionManagerServiceLive.pipe(
+				const layer = Layer.provideMerge(
+					SessionManagerServiceLive,
+					SessionWorkspaceLive,
+				).pipe(
 					Layer.provideMerge(
 						Layer.mergeAll(
 							persistence,

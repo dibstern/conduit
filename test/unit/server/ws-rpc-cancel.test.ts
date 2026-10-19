@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect";
 import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockOpenCodeAPI,
@@ -34,7 +35,18 @@ describe("WsRpcServerLayer CancelSession", () => {
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ api })),
+					Layer.provideMerge(
+						makeTestHandlerLayer({
+							api,
+							seedEvents: [
+								canonicalEvent("session.created", "session-1", {
+									sessionId: "session-1",
+									title: "OpenCode session",
+									provider: "opencode",
+								}),
+							],
+						}),
+					),
 				),
 				{ local: true },
 			),

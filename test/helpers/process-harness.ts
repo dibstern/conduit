@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import {
 	appendFileSync,
 	chmodSync,
@@ -17,7 +18,7 @@ import {
 import { createServer as createHttpServer, type Server } from "node:http";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
-import { userInfo } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
@@ -84,6 +85,8 @@ import {
 export { responseChunks };
 
 const TIMEOUT_MS = 15_000;
+// Loaded four-worker runs reached 22.9s. Leave 5s within the 30s hook deadline.
+const STARTUP_TIMEOUT_MS = 25_000;
 
 class BrowserRpc extends Context.Service<
 	BrowserRpc,
@@ -132,6 +135,7 @@ interface Generation {
 	signal?: NodeJS.Signals | null;
 	exitCode?: number | null;
 	fakeSdkActive?: boolean;
+	startupMs?: number;
 }
 
 export interface BrowserFrame {
@@ -788,9 +792,11 @@ Object.assign(ClaudeDriver, { create: deps => {
 				});
 			});
 		}
+		const startupAt = performance.now();
 		const child = spawn(
 			process.execPath,
 			[
+				"--disable-warning=DEP0205",
 				"--import",
 				pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href,
 				"--import",
@@ -839,6 +845,11 @@ Object.assign(ClaudeDriver, { create: deps => {
 					SHELL: "/bin/sh",
 					XDG_CONFIG_HOME: join(this.root, "config"),
 					XDG_CACHE_HOME: join(this.root, "cache"),
+					// Reuse V8 compilation across fixtures and workers, including tsx's
+					// loader thread. Per-fixture HOME/XDG directories stay isolated.
+					NODE_COMPILE_CACHE:
+						process.env["NODE_COMPILE_CACHE"] ??
+						join(tmpdir(), "conduit-process-harness-compile-cache"),
 					XDG_DATA_HOME: join(this.root, "data"),
 					CONDUIT_CONFIG_DIR: join(this.root, "config"),
 					...(this.opencodeBorrowIdleTimeoutMs === undefined
@@ -1083,7 +1094,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			const timer = setTimeout(() => {
 				finished = true;
 				fail(new Error(`Server startup timeout\n${this.logs}`));
-			}, options.startupTimeoutMs ?? TIMEOUT_MS);
+			}, options.startupTimeoutMs ?? STARTUP_TIMEOUT_MS);
 			const onExit = () => {
 				finished = true;
 				clearTimeout(timer);
@@ -1102,7 +1113,11 @@ Object.assign(ClaudeDriver, { create: deps => {
 				clearTimeout(timer);
 				child.off("exit", onExit);
 				child.off("error", onError);
-				generation = { ...value, fakeSdkActive };
+				generation = {
+					...value,
+					fakeSdkActive,
+					startupMs: Math.round(performance.now() - startupAt),
+				};
 				this.port = generation.port;
 				this.generations.push(generation);
 				done();
@@ -1456,6 +1471,25 @@ Object.assign(ClaudeDriver, { create: deps => {
 
 	async signal(signal: "SIGINT" | "SIGTERM"): Promise<void> {
 		await this.stop(signal, 10_000);
+	}
+
+	/** Fixture IPC and browser RPC travel independently; wait on the mark itself. */
+	async waitForMark(
+		predicate: (mark: ProcessMark) => boolean,
+		cursor = 0,
+	): Promise<ProcessMark> {
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+		try {
+			for (;;) {
+				const mark = this.marks.slice(cursor).find(predicate);
+				if (mark) return mark;
+				if (!this.child) throw new Error("No server to receive fixture marks");
+				await once(this.child, "message", { signal: controller.signal });
+			}
+		} finally {
+			clearTimeout(timer);
+		}
 	}
 
 	async runCli(
@@ -1813,10 +1847,12 @@ Object.assign(ClaudeDriver, { create: deps => {
 					"release",
 				);
 			}
-			for (const project of Either.getOrThrowWith(
-				loadDaemonConfigResult(this.configDir),
-				(error) => error,
-			)?.projects ?? []) {
+			const config = loadDaemonConfigResult(this.configDir);
+			const projects =
+				config._tag === "Failure" && config.failure._tag === "NotFound"
+					? [] // Startup can fail before the daemon writes its first config.
+					: (Either.getOrThrowWith(config, (error) => error)?.projects ?? []);
+			for (const project of projects) {
 				if (!project.path.startsWith(`${this.root}/`)) continue;
 				for (const name of ["recovery-gated", "recovery-fail-after-adoption"]) {
 					const gate = join(project.path, ".conduit", name);
@@ -2551,11 +2587,12 @@ export class ProcessBrowser {
 			knownMessages.set(owner, ids);
 		}
 		const cursor = this.frames.length;
+		const inputId = randomUUID();
 		const result = await this.run(
 			this.rpc["input.submit"]({
 				sessionId,
 				originId: this.originId,
-				inputId: randomUUID(),
+				inputId,
 				delivery,
 				text: prompt,
 			}),
@@ -2564,7 +2601,13 @@ export class ProcessBrowser {
 		// A queued submit is never refused; only a steer can be.
 		if (!result.ok) throw new Error(`submit refused: ${result.reason}`);
 		await this.followSession(result.sessionId);
-		const done = await this.waitForTurnEnd(result.sessionId, cursor, timeoutMs);
+		const done = await this.waitForTurnEnd(
+			result.sessionId,
+			cursor,
+			timeoutMs,
+			// A steered input shares the running turn's original input identity.
+			delivery === "queue" ? inputId : undefined,
+		);
 		// The detail source currently emits projected messages, not StoredEvents.
 		// A fresh typed history read fences the final text against shell completion.
 		const history = await this.history(result.sessionId);
@@ -2584,12 +2627,14 @@ export class ProcessBrowser {
 		return { chunks, done };
 	}
 
-	/** Wait for a completed/failed turn's shell version to advance past cursor.
+	/** Wait for a completed/failed turn's shell version to advance past cursor,
+	 * optionally matching the input that started it so a late prior end cannot win.
 	 * The current read model does not advance this field on interruption. */
 	waitForTurnEnd(
 		sessionId: string,
 		cursor = 0,
 		timeoutMs = TIMEOUT_MS,
+		inputId?: string,
 	): Promise<Record<string, unknown>> {
 		const endedBefore = Math.max(
 			-1,
@@ -2605,6 +2650,7 @@ export class ProcessBrowser {
 			(message) =>
 				message["type"] === "session_row" &&
 				message["id"] === sessionId &&
+				(inputId === undefined || message["lastTurnEndInputId"] === inputId) &&
 				(message["status"] === "idle" || message["status"] === "error") &&
 				Number(message["lastTurnEndVersion"] ?? -1) > endedBefore,
 			cursor,

@@ -7,7 +7,9 @@ import { Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
@@ -43,6 +45,7 @@ import {
 	makeMockAgentService,
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
+	makeOpenCodeInstancesStub,
 	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
@@ -141,10 +144,13 @@ describe("handleMessage with Effect provider state persistence", () => {
 			});
 			const persistence = makePersistenceEffectLayer(filename, "test-project");
 			const layer = Layer.provideMerge(
-				ProviderTurnServiceLive,
+				Layer.provideMerge(ProviderTurnServiceLive, SessionWorkspaceLive),
 				Layer.mergeAll(
 					AlertsLive,
 					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(OpenCodeInstancesTag)(
+						makeOpenCodeInstancesStub({ opencode: client }),
+					),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(
@@ -246,10 +252,13 @@ describe("handleMessage with Effect provider state persistence", () => {
 		});
 		const persistence = makePersistenceEffectLayer(filename, "test-project");
 		const layer = Layer.provideMerge(
-			ProviderTurnServiceLive,
+			Layer.provideMerge(ProviderTurnServiceLive, SessionWorkspaceLive),
 			Layer.mergeAll(
 				AlertsLive,
 				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(OpenCodeInstancesTag)(
+					makeOpenCodeInstancesStub({ opencode: client }),
+				),
 				Layer.succeed(WebSocketHandlerTag)(ws),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(SessionManagerServiceTag)(
@@ -356,10 +365,13 @@ describe("handleMessage with Effect provider state persistence", () => {
 			});
 			const persistence = makePersistenceEffectLayer(filename, "test-project");
 			const layer = Layer.provideMerge(
-				ProviderTurnServiceLive,
+				Layer.provideMerge(ProviderTurnServiceLive, SessionWorkspaceLive),
 				Layer.mergeAll(
 					AlertsLive,
 					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(OpenCodeInstancesTag)(
+						makeOpenCodeInstancesStub({ opencode: client }),
+					),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(
@@ -488,10 +500,13 @@ describe("handleMessage with Effect provider state persistence", () => {
 				}),
 			});
 			const layer = Layer.provideMerge(
-				ProviderTurnServiceLive,
+				Layer.provideMerge(ProviderTurnServiceLive, SessionWorkspaceLive),
 				Layer.mergeAll(
 					AlertsLive,
 					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(OpenCodeInstancesTag)(
+						makeOpenCodeInstancesStub({ opencode: client }),
+					),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(

@@ -468,10 +468,28 @@ export const SessionWorkspaceLive = Layer.effect(
 						),
 					),
 				),
-			get: (sessionId) =>
+			get: (sessionId, nativeDirectory) =>
 				readWorkspace(sessionId).pipe(
-					Effect.map(({ workspace }) =>
-						effectiveWorkingDirectory(config.projectDir, workspace),
+					Effect.flatMap(({ workspace }) =>
+						Effect.gen(function* () {
+							// Native ingress can seed a row before its workspace is known.
+							// Explicit moves, including resets to the project, always win.
+							if (
+								nativeDirectory !== undefined &&
+								workspace === null &&
+								(yield* latestMove(sessionId)).length === 0
+							)
+								return nativeDirectory;
+							return effectiveWorkingDirectory(config.projectDir, workspace);
+						}).pipe(
+							Effect.mapError(
+								(cause) =>
+									new SessionCommandError({
+										operation: "workspace.get",
+										cause,
+									}),
+							),
+						),
 					),
 				),
 			resolve,

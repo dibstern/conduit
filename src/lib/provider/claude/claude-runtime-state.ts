@@ -1,4 +1,12 @@
-import { type Deferred, Effect, HashMap, HashSet, Option, Ref } from "effect";
+import {
+	type Deferred,
+	Effect,
+	Equal,
+	HashMap,
+	HashSet,
+	Option,
+	Ref,
+} from "effect";
 import type { ClaudeProviderRuntimeState } from "./claude-provider-runtime.js";
 import type { ClaudeSessionContext } from "./types.js";
 
@@ -37,7 +45,12 @@ export function setSession(
 ): Effect.Effect<void> {
 	return Ref.update(stateRef, (state) => ({
 		...state,
-		sessions: HashMap.set(state.sessions, sessionId, ctx),
+		// Live contexts own mutable SDK resources and use identity for ownership.
+		sessions: HashMap.set(
+			state.sessions,
+			sessionId,
+			Equal.byReferenceUnsafe(ctx),
+		),
 	}));
 }
 
@@ -62,15 +75,23 @@ export function getSetupLock(
 	);
 }
 
-export function setSetupLock(
+export function claimSetupLock(
 	stateRef: Ref.Ref<ClaudeProviderRuntimeState>,
 	sessionId: string,
 	deferred: Deferred.Deferred<void, Error>,
-): Effect.Effect<void> {
-	return Ref.update(stateRef, (state) => ({
-		...state,
-		setupLocks: HashMap.set(state.setupLocks, sessionId, deferred),
-	}));
+): Effect.Effect<Deferred.Deferred<void, Error> | undefined> {
+	return Ref.modify(stateRef, (state) => {
+		const existing = getOrUndefined(HashMap.get(state.setupLocks, sessionId));
+		return existing
+			? [existing, state]
+			: [
+					undefined,
+					{
+						...state,
+						setupLocks: HashMap.set(state.setupLocks, sessionId, deferred),
+					},
+				];
+	});
 }
 
 export function removeSetupLock(

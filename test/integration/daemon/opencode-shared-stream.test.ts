@@ -1,10 +1,23 @@
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	realpathSync,
+	writeFileSync,
+} from "node:fs";
+import { createServer, request } from "node:http";
 import { join, resolve } from "node:path";
+import Database from "better-sqlite3";
 import { Result as Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
+import {
+	defaultDaemonConfig,
+	loadDaemonConfigResult,
+} from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
+import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
+import { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
 import {
 	type ProcessBrowser,
 	ProcessHarness,
@@ -198,6 +211,254 @@ describe("daemon shared OpenCode global stream", () => {
 		).toEqual([expect.objectContaining({ path: "/global/event" })]);
 	}, 90_000);
 
+	it("backfills an unseen native session from its first worktree idle event", async () => {
+		scenario = "first-sighting-backfill";
+		evidence = { ticket: "conduit-test-82tn.7" };
+		// Source mode exercises the current relay without relying on a prior build.
+		const fixture = ProcessHarness.create();
+		harness = fixture;
+		const worktree = join(fixture.root, "native-worktree");
+		mkdirSync(worktree);
+		const nativeSession = "ses_native_first_sighting";
+		const nativeMessage = "msg_native_first_sighting";
+		const sessionInfo = (id: string, directory: string) => ({
+			id,
+			slug: "native-history",
+			version: "1",
+			projectID: "native-project",
+			directory,
+			title: "Native history session",
+			time: { created: 1_700_000_000_000, updated: 1_700_000_000_000 },
+		});
+		const history = [
+			{
+				info: {
+					id: nativeMessage,
+					sessionID: nativeSession,
+					role: "user",
+					time: { created: 1_700_000_000_000 },
+					agent: "build",
+					model: { providerID: "openai", modelID: "gpt-4" },
+				},
+				parts: [
+					{
+						id: "prt_native_first_sighting",
+						sessionID: nativeSession,
+						messageID: nativeMessage,
+						type: "text",
+						text: "NATIVE_WORKTREE_HISTORY",
+					},
+				],
+			},
+		];
+		const server = new MockOpenCodeServer(
+			loadOpenCodeRecording("chat-simple"),
+			true,
+		);
+		const historyDirectories: string[] = [];
+		const historyResponses: number[] = [];
+		const artifact: Record<string, unknown> = {
+			ticket: "conduit-test-82tn.7",
+			scenario: "first-sighting-backfill",
+			event: { session: "session-2", directory: "<W1>", status: "idle" },
+		};
+		const readNative = () => {
+			if (!existsSync(fixture.daemonStorePath()))
+				return { session: undefined, messages: [] };
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				return {
+					session: db
+						.prepare("SELECT history_complete FROM sessions WHERE id = ?")
+						.get(nativeSession),
+					messages: db
+						.prepare(
+							"SELECT role, text FROM messages WHERE session_id = ? ORDER BY created_at, id",
+						)
+						.all(nativeSession),
+				};
+			} finally {
+				db.close();
+			}
+		};
+		const proxy = createServer((incoming, outgoing) => {
+			const url = new URL(incoming.url ?? "/", server.url);
+			if (url.pathname === `/session/${nativeSession}/message`) {
+				const header = incoming.headers["x-opencode-directory"];
+				const directory =
+					url.searchParams.get("directory") ??
+					(typeof header === "string" ? decodeURIComponent(header) : "");
+				historyDirectories.push(directory);
+				const responseStatus =
+					directory !== worktree
+						? 409
+						: historyDirectories.length === 1
+							? 503
+							: 200;
+				historyResponses.push(responseStatus);
+				outgoing.writeHead(responseStatus, {
+					"Content-Type": "application/json",
+				});
+				outgoing.end(
+					JSON.stringify(
+						responseStatus === 200
+							? history
+							: { message: "Native history unavailable for this request" },
+					),
+				);
+				return;
+			}
+			const upstream = request(
+				url,
+				{ method: incoming.method, headers: incoming.headers },
+				(response) => {
+					outgoing.writeHead(response.statusCode ?? 500, response.headers);
+					response.pipe(outgoing);
+				},
+			);
+			upstream.on("error", (error) => outgoing.destroy(error));
+			outgoing.on("close", () => upstream.destroy());
+			incoming.pipe(upstream);
+		});
+		try {
+			await server.start();
+			server.setExactResponse("GET", "/session", 200, []);
+			server.setExactResponse("GET", "/provider", 200, {
+				all: [
+					{
+						id: "fake",
+						name: "Fake",
+						models: {
+							"fake-model": {
+								id: "fake-model",
+								name: "Fake",
+								limit: { context: 128000, output: 4096 },
+							},
+						},
+					},
+				],
+				default: { fake: "fake-model" },
+				connected: ["fake"],
+			});
+			server.setExactResponse(
+				"GET",
+				`/session/${nativeSession}`,
+				200,
+				sessionInfo(nativeSession, worktree),
+			);
+			server.setExactResponse(
+				"POST",
+				"/session",
+				200,
+				sessionInfo("ses_subscribed_worktree", fixture.projectDir),
+			);
+			server.setExactResponse(
+				"GET",
+				"/session/ses_subscribed_worktree/message",
+				200,
+				[],
+			);
+			await new Promise<void>((done) => proxy.listen(0, "127.0.0.1", done));
+			const address = proxy.address();
+			if (!address || typeof address === "string")
+				throw new Error("No history proxy port");
+			writeFileSync(
+				join(fixture.configDir, "daemon.json"),
+				JSON.stringify({
+					...defaultDaemonConfig(),
+					instances: [
+						{
+							id: "opencode",
+							name: "Native history",
+							driver: "opencode",
+							managed: false,
+							url: `http://127.0.0.1:${address.port}`,
+							port: address.port,
+						},
+					],
+				}),
+			);
+			await fixture.restart({ startupTimeoutMs: 60_000 });
+			const firstBrowser = await fixture.connect();
+			const subscriber = await firstBrowser.createSession(
+				"Worktree subscriber",
+				"opencode",
+				"opencode",
+			);
+			await fixture.terminate();
+			const db = new Database(fixture.daemonStorePath());
+			try {
+				db.prepare("UPDATE sessions SET workspace = ? WHERE id = ?").run(
+					JSON.stringify({
+						cause: "user",
+						origin: "existing",
+						worktrees: { [fixture.projectDir]: worktree },
+					}),
+					subscriber,
+				);
+			} finally {
+				db.close();
+			}
+			await fixture.restart({ startupTimeoutMs: 60_000 });
+			const browser = await fixture.connect();
+			server.setExactResponse(
+				"POST",
+				"/session",
+				200,
+				sessionInfo("ses_root_peer", fixture.projectDir),
+			);
+			server.setExactResponse("GET", "/session/ses_root_peer/message", 200, []);
+			await browser.createSession("Root peer", "opencode", "opencode");
+			await vi.waitFor(() =>
+				expect(
+					server.diagnostics.filter(({ event }) => event === "sse_connect")
+						.length,
+				).toBeGreaterThan(1),
+			);
+			artifact["before"] = readNative();
+			expect(readNative().session).toBeUndefined();
+			// This direct provider read only gives the mock the native directory; it
+			// does not introduce the session to Conduit's store or event pipeline.
+			await fetch(
+				`${server.url}/session/${nativeSession}?directory=${encodeURIComponent(worktree)}`,
+			);
+			server.emitTestEvent("session.status", {
+				sessionID: nativeSession,
+				status: { type: "idle" },
+			});
+			await vi.waitFor(
+				() =>
+					expect(readNative()).toEqual({
+						session: { history_complete: 1 },
+						messages: [{ role: "user", text: "NATIVE_WORKTREE_HISTORY" }],
+					}),
+				{ timeout: 10_000 },
+			);
+			expect(historyDirectories.length).toBeGreaterThanOrEqual(2);
+			expect(historyResponses[0]).toBe(503);
+			expect(
+				historyDirectories.every((directory) => directory === worktree),
+			).toBe(true);
+		} finally {
+			artifact["historyResponses"] = historyResponses;
+			artifact["historyDirectories"] = historyDirectories.map((directory) =>
+				directory === worktree
+					? "<W1>"
+					: directory.replaceAll(fixture.root, "<ROOT>"),
+			);
+			artifact["after"] = readNative();
+			mkdirSync("test-results", { recursive: true });
+			writeFileSync(
+				"test-results/82tn7-first-sighting-backfill.json",
+				JSON.stringify(artifact, null, 2),
+			);
+			await fixture.terminate();
+			await server.stop();
+			proxy.closeAllConnections();
+			await new Promise<void>((done) => proxy.close(() => done()));
+		}
+	}, 180_000);
+
 	it("keeps a session's selected OpenCode instance separate from the daemon default", async () => {
 		const fixture = await start("project-instance", true);
 		const socket = join(fixture.configDir, "relay.sock");
@@ -206,13 +467,20 @@ describe("daemon shared OpenCode global stream", () => {
 		});
 		const opencode = instances.filter(({ driver }) => driver === "opencode");
 		expect(opencode).toHaveLength(2);
-		const [defaultInstance, namedInstance] = opencode;
-		if (!defaultInstance || !namedInstance)
-			throw new Error("Expected two OpenCode instances");
+		const defaultInstance = opencode.find(({ id }) => id === "managed-test");
+		if (!defaultInstance) throw new Error("Expected the managed test instance");
 		const defaultId = defaultInstance.id;
-		const namedId = namedInstance.id;
+		const { addedInstanceId: namedId } = await sendRpcRequest(socket, {
+			_tag: "AddInstance",
+			name: "Selected B",
+			driver: "opencode",
+			managed: true,
+			port: 0,
+		});
+		if (!namedId) throw new Error("Expected a new named OpenCode instance");
+		expect(namedId).not.toBe(defaultId);
 		const a = await fixture.connect();
-		const sessionA = await a.createSession("Default A", "opencode", "opencode");
+		const sessionA = await a.createSession("Default A", defaultId, "opencode");
 		const directoryB = join(fixture.root, "project-b");
 		const slugB = await addProject(fixture, directoryB);
 		const b = await fixture.connect(undefined, undefined, slugB);

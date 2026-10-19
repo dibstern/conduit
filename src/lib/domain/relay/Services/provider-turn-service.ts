@@ -13,6 +13,7 @@ import type { ProviderStateEffectTag } from "../../../persistence/effect/provide
 import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { CanonicalEvent } from "../../../persistence/events.js";
 import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
+import type { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import type { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type { AlertsTag } from "./alerts.js";
 import type {
@@ -42,6 +43,7 @@ import {
 	OverridesStateTag,
 } from "./session-overrides-state.js";
 import type { SessionTitleServiceTag } from "./session-title-service.js";
+import type { SessionWorkspaceTag } from "./session-workspace.js";
 
 export interface ProviderTurnServiceSendInput {
 	/** Continuation admission may already have resolved this immutable snapshot. */
@@ -130,6 +132,8 @@ export class ProviderTurnServiceTag extends Context.Service<
 const makeProviderTurnService = Effect.gen(function* () {
 	const context = yield* Effect.context<
 		| AccountDirectory
+		| OpenCodeInstancesTag
+		| SessionWorkspaceTag
 		| OpenCodeAPITag
 		| WebSocketHandlerTag
 		| LoggerTag
@@ -233,6 +237,8 @@ export const ProviderTurnServiceLive: Layer.Layer<
 	ProviderTurnServiceTag,
 	never,
 	| AccountDirectory
+	| OpenCodeInstancesTag
+	| SessionWorkspaceTag
 	| OpenCodeAPITag
 	| WebSocketHandlerTag
 	| LoggerTag

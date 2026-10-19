@@ -18,6 +18,8 @@ import { SqlClient, Statement } from "effect/sql";
 import { expect, it } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -31,6 +33,7 @@ import {
 	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
+	makeMockOpenCodeAPI,
 	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
@@ -188,52 +191,52 @@ it.skipIf(!snapshot || !baselineRef)(
 						copyFileSync(seedFile, filename);
 						const configDir = join(directory, "config");
 						mkdirSync(configDir, { recursive: true });
-						const runtime = ManagedRuntime.make(
-							Layer.mergeAll(
-								Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
-								Layer.succeed(OpenCodeInstancesTag)(
-									makeOpenCodeInstancesStub(),
-								),
-								makePersistenceEffectLayer(filename, projectId),
-								makeOverridesStateLive(),
-								Layer.succeed(ConfigTag)(
-									makeMockConfig({
-										projectDir: directory,
-										configDir,
-										claudeSdk,
-									}),
-								),
-								Layer.succeed(LoggerTag)(makeMockLogger()),
-								Layer.succeed(OrchestrationEngineTag)(
-									withDispatchEffect({
-										dispatchEffect: () =>
-											Effect.succeed({
-												models: [
-													{
-														id: model.model_id,
-														name: model.model_id,
-														providerId: "claude",
-														variants: { [model.variant]: {} },
-														contextWindowOptions: [
-															{
-																value: model.context_window,
-																label: "Inherited",
-															},
-														],
-													},
-												],
-												supportsTools: true,
-												supportsThinking: true,
-												supportsPermissions: true,
-												supportsQuestions: true,
-												supportsAttachments: true,
-												supportsFork: true,
-												supportsRevert: false,
-												commands: [],
-											}),
-									}),
-								),
+						const dependencies = Layer.mergeAll(
+							Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+							Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+							Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
+							makePersistenceEffectLayer(filename, projectId),
+							makeOverridesStateLive(),
+							Layer.succeed(ConfigTag)(
+								makeMockConfig({
+									projectDir: directory,
+									configDir,
+									claudeSdk,
+								}),
 							),
+							Layer.succeed(LoggerTag)(makeMockLogger()),
+							Layer.succeed(OrchestrationEngineTag)(
+								withDispatchEffect({
+									dispatchEffect: () =>
+										Effect.succeed({
+											models: [
+												{
+													id: model.model_id,
+													name: model.model_id,
+													providerId: "claude",
+													variants: { [model.variant]: {} },
+													contextWindowOptions: [
+														{
+															value: model.context_window,
+															label: "Inherited",
+														},
+													],
+												},
+											],
+											supportsTools: true,
+											supportsThinking: true,
+											supportsPermissions: true,
+											supportsQuestions: true,
+											supportsAttachments: true,
+											supportsFork: true,
+											supportsRevert: false,
+											commands: [],
+										}),
+								}),
+							),
+						);
+						const runtime = ManagedRuntime.make(
+							Layer.provideMerge(SessionWorkspaceLive, dependencies),
 						);
 						try {
 							// Startup/migration and OS-cache warming are outside the command timer.

@@ -14,7 +14,9 @@ import {
 	AccountDirectory,
 	AccountDirectoryFromConfigLive,
 } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
+import { OpenCodeInstancesTag } from "../../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import { AlertsLive } from "../../../../src/lib/domain/relay/Services/alerts.js";
 import {
 	PendingInteractionServiceLive,
@@ -87,6 +89,7 @@ import {
 	makeMockOpenCodeModelService,
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
+	makeOpenCodeInstancesStub,
 } from "../../../helpers/mock-factories.js";
 import { partialFake } from "../../../helpers/partial-fake.js";
 import { providerRuntimeEvent } from "../../../helpers/provider-runtime-event.js";
@@ -273,6 +276,8 @@ const makePersistService = (
 	persistEvents: vi.fn(() => Effect.void),
 	persistUserMessage,
 	ensureClaudeSubagentSession: vi.fn(() => Effect.void),
+	readClaudeSubagentTranscript: () =>
+		Effect.succeed({ messages: [], parts: [] }),
 });
 
 const makeProviderState = (
@@ -348,6 +353,7 @@ const serviceLayer = (input: {
 	const log = makeMockLogger();
 	const sessionManagerService = makeMockSessionManagerService();
 	const ingestion = input.ingestion ?? makeIngestion();
+	const api = input.api ?? makeMockOpenCodeAPI();
 	let baseLayer = Layer.mergeAll(
 		input.accountDirectory !== undefined
 			? Layer.succeed(AccountDirectory)(input.accountDirectory)
@@ -357,7 +363,10 @@ const serviceLayer = (input: {
 						input.configDir,
 						configuredClaudeConfigDir("/isolated-provider-home/.claude"),
 					),
-		Layer.succeed(OpenCodeAPITag)(input.api ?? makeMockOpenCodeAPI()),
+		Layer.succeed(OpenCodeAPITag)(api),
+		Layer.succeed(OpenCodeInstancesTag)(
+			makeOpenCodeInstancesStub({ opencode: api }),
+		),
 		Layer.succeed(OpenCodeModelServiceTag)(
 			makeMockOpenCodeModelService(openCodeCatalog),
 		),
@@ -398,7 +407,10 @@ const serviceLayer = (input: {
 		);
 	}
 	return {
-		layer: Layer.provideMerge(ProviderTurnServiceLive, baseLayer),
+		layer: Layer.provideMerge(
+			ProviderTurnServiceLive,
+			Layer.provideMerge(SessionWorkspaceLive, baseLayer),
+		),
 		wsHandler,
 		log,
 		sessionManagerService,
@@ -1258,6 +1270,9 @@ describe("ProviderTurnService", () => {
 			const { layer } = serviceLayer({ api });
 
 			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions (id, provider, title, created_at, updated_at)
+					VALUES ('session-1', 'opencode', 'Unbound session', 1, 1)`;
 				yield* startProcessingTimeout(
 					"session-1",
 					"2 minutes",

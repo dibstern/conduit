@@ -1,8 +1,11 @@
 import { AccountIdSchema } from "../../../../src/lib/contracts/provider-instance.js";
 import { AccountDirectory } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import {
 	makeMockAccountDirectory,
+	makeMockOpenCodeAPI,
 	makeOpenCodeInstancesStub,
 } from "../../../helpers/mock-factories.js";
 // Failure modes: choosing only the current account; accepting a receipt before
@@ -228,6 +231,8 @@ it.each([
 				expect(prepared.prompt).toBe("Continue the child");
 			}
 		}).pipe(
+			Effect.provide(SessionWorkspaceLive),
+			Effect.provideService(OpenCodeAPITag, makeMockOpenCodeAPI()),
 			Effect.provideService(
 				OrchestrationEngineTag,
 				withDispatchEffect({
@@ -393,6 +398,8 @@ it.each([
 			expect.soft(prepared.prompt).toContain("Kept response");
 			expect.soft(prepared.prompt).not.toContain("Discarded");
 		}).pipe(
+			Effect.provide(SessionWorkspaceLive),
+			Effect.provideService(OpenCodeAPITag, makeMockOpenCodeAPI()),
 			Effect.provideService(
 				OrchestrationEngineTag,
 				withDispatchEffect({

@@ -32,7 +32,7 @@ const SSE_SILENCE_THRESHOLD_MS = 2000;
 const IDLE_TIMEOUT_MS = 5000;
 
 export interface MessagePollerOptions {
-	client: Pick<OpenCodeAPI, "session">;
+	client: { session: Pick<OpenCodeAPI["session"], "messages"> };
 	/** Polling interval in milliseconds (default: 750) */
 	interval?: number;
 	log?: Logger;
@@ -52,7 +52,7 @@ export type MessagePollerEventsCallback = (
 ) => void;
 
 export class MessagePoller {
-	private readonly client: Pick<OpenCodeAPI, "session">;
+	private readonly client: MessagePollerOptions["client"];
 	private readonly interval: number;
 	private readonly log: Logger;
 	private readonly hasViewers: (() => boolean) | undefined;
@@ -286,7 +286,8 @@ export class MessagePoller {
 				}
 			}
 		} catch (err) {
-			if (isOpenCodeNotRunningError(err)) return;
+			if (this.activeSessionId !== sessionId || isOpenCodeNotRunningError(err))
+				return;
 			const msg = err instanceof Error ? err.message : String(err);
 			this.log.warn(`poll failed: ${msg}`);
 		} finally {
@@ -332,7 +333,7 @@ export type PollerManagerEventsCallback = (
 ) => void;
 
 export interface MessagePollerManagerOptions {
-	client: Pick<OpenCodeAPI, "session">;
+	client: MessagePollerOptions["client"];
 	log?: Logger;
 	interval?: number;
 	/** External viewer check — delegates to SessionRegistry */
@@ -341,7 +342,7 @@ export interface MessagePollerManagerOptions {
 
 export class MessagePollerManager {
 	private readonly pollers: Map<string, MessagePoller> = new Map();
-	private readonly client: Pick<OpenCodeAPI, "session">;
+	private readonly client: MessagePollerOptions["client"];
 	private readonly log: Logger;
 	private readonly interval?: number;
 
@@ -435,9 +436,11 @@ export class MessagePollerManager {
 		this.pollers.clear();
 	}
 
-	/** Drain: stop all child pollers. */
+	/** Stop child pollers and wait for reads already submitted to their client. */
 	async drain(): Promise<void> {
+		const pollers = [...this.pollers.values()];
 		this.stopAll();
+		await Promise.allSettled(pollers.map((poller) => poller.drain()));
 	}
 
 	/** Get the number of active pollers. */

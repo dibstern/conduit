@@ -20,6 +20,7 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 import { InstanceManagementServiceTag } from "../domain/relay/Services/instance-management-service.js";
 import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
+import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger } from "../logger.js";
 import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
@@ -140,6 +141,7 @@ const createOrchestrationComponentsEffect = (
 	| PersistenceProjectTag
 	| AccountDirectory
 	| OpenCodeInstancesTag
+	| SessionWorkspaceTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag
 	| EventStoreEffectTag
@@ -161,26 +163,27 @@ const createOrchestrationComponentsEffect = (
 		// resolve the historical binding through the in-memory directory.
 		const instances = yield* OpenCodeInstancesTag;
 		const accountDirectory = yield* AccountDirectory;
+		const sessionWorkspace = yield* SessionWorkspaceTag;
 		const instanceManagement = Option.getOrUndefined(
 			yield* Effect.serviceOption(InstanceManagementServiceTag),
 		);
 		const clientForSession = (sessionId: string) =>
-			sessionBindingReadModel.getProviderForSession(sessionId).pipe(
-				Effect.flatMap((boundInstanceId) =>
-					accountDirectory.resolve(
-						boundInstanceId === undefined
-							? { _tag: "DriverDefault", driver: "opencode" }
-							: { _tag: "Id", id: boundInstanceId },
-					),
-				),
-				Effect.flatMap((account) =>
-					PROVIDER_DRIVERS[account.driver].runsOpenCodeServer
-						? instances.use(account.id)
-						: Effect.fail(
-								new Error("OpenCode session requires an OpenCode account"),
-							),
-				),
-			);
+			Effect.gen(function* () {
+				const boundInstanceId =
+					yield* sessionBindingReadModel.getProviderForSession(sessionId);
+				const account = yield* accountDirectory.resolve(
+					boundInstanceId === undefined
+						? { _tag: "DriverDefault", driver: "opencode" }
+						: { _tag: "Id", id: boundInstanceId },
+				);
+				if (!PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
+					return yield* Effect.fail(
+						new Error("OpenCode session requires an OpenCode account"),
+					);
+				}
+				const directory = yield* sessionWorkspace.get(sessionId);
+				return yield* instances.use(account.id, directory);
+			});
 
 		const openCodeInstance = (yield* OpenCodeDriver.create({
 			client: options.client,
@@ -188,7 +191,8 @@ const createOrchestrationComponentsEffect = (
 				? { workspaceRoot: options.workspaceRoot }
 				: {}),
 			clientForSession,
-			clientForAccount: (account) => instances.use(account.id),
+			clientForAccount: (account, directory) =>
+				instances.use(account.id, directory),
 			instanceIdForSession: (sessionId) =>
 				sessionBindingReadModel.getProviderForSession(sessionId),
 			hasWorktreeToolForSession: (sessionId, account) =>
@@ -355,6 +359,7 @@ export const makeOrchestrationRuntimeLayer = (
 	| PersistenceProjectTag
 	| AccountDirectory
 	| OpenCodeInstancesTag
+	| SessionWorkspaceTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag
 	| EventStoreEffectTag
