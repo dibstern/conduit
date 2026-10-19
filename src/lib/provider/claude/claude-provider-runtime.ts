@@ -1075,6 +1075,14 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
 				yield* this.placeUserMessageEffect(input);
+				yield* input.eventSink
+					.push(
+						claudeRuntimeEvent("session.status", sessionId, {
+							sessionId,
+							status: "busy",
+						}),
+					)
+					.pipe(Effect.ignore);
 				let resumeSessionAt = input.resumeSessionAt;
 				const rewindPoint = input.rewind?.resumeSessionAt;
 				if (
@@ -1574,11 +1582,23 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						Semaphore.makeUnsafe(1)).withPermits(1)(
 						Effect.uninterruptible(
 							Effect.gen({ self: this }, function* () {
-								// A prior result can settle during settings discovery. Read
-								// admission state under the permit that also settles it.
+								// A result can finish while admission waits for this permit.
 								const joinsRunningTurn =
 									(yield* pendingTurnWaiters(this.stateRef, ctx.sessionId))
 										.size > 0;
+								// The server can still count the prior send while it publishes
+								// its result. Establish this input's own turn and busy status here.
+								if (!joinsRunningTurn) {
+									yield* this.placeUserMessageEffect(input);
+									yield* input.eventSink
+										.push(
+											claudeRuntimeEvent("session.status", ctx.sessionId, {
+												sessionId: ctx.sessionId,
+												status: "busy",
+											}),
+										)
+										.pipe(Effect.ignore);
+								}
 								// A held send is placed when the SDK starts it.
 								yield* addTurnWaiter(
 									this.stateRef,

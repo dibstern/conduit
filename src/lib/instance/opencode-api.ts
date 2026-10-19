@@ -398,6 +398,9 @@ class SessionNamespace {
 		await this.api.sdk("session.prompt", decodeOpenCodeUndefinedResponse, () =>
 			this.api._sdk.session.promptAsync({
 				sessionID: sessionId,
+				...(options.messageId !== undefined
+					? { messageID: options.messageId }
+					: {}),
 				...(options.directory !== undefined
 					? { directory: options.directory }
 					: {}),

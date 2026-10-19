@@ -21,6 +21,10 @@ import { createLogger } from "../logger.js";
 import { createEventId } from "../persistence/events.js";
 import type { SessionPermissionMode } from "../shared-types.js";
 import { ProviderInstanceFailure } from "./errors.js";
+import {
+	inputIdFromOpenCodeMessageId,
+	openCodeInputMessageId,
+} from "./opencode/opencode-input-message-id.js";
 import type {
 	CommandInfo,
 	ModelInfo,
@@ -118,8 +122,8 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			inFlight: number;
 		}
 	>();
-	/** Sends handed to OpenCode whose user echo is not yet seen, in handoff
-	 *  order. OpenCode picks its own message ids, so echoes match by order. */
+	/** Sends whose user echo is not yet seen, in handoff order. Compaction and
+	 *  legacy echoes can still carry an ID that OpenCode chose. */
 	private readonly unechoedInputs = new Map<string, string[]>();
 	/** Echo message id to send, so a retried translation tags the same send. */
 	private readonly echoInputIds = new Map<string, string>();
@@ -133,11 +137,14 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		this.hasWorktreeToolForSession = options.hasWorktreeToolForSession;
 	}
 
-	/** The send a new user message echo belongs to: the oldest unechoed one. */
+	/** Match reserved IDs exactly; legacy provider IDs retain their FIFO fallback. */
 	inputIdForUserEcho(sessionId: string, messageId: string): string | undefined {
 		const tagged = this.echoInputIds.get(messageId);
 		if (tagged) return tagged;
-		const inputId = this.unechoedInputs.get(sessionId)?.shift();
+		const queue = this.unechoedInputs.get(sessionId) ?? [];
+		const reserved = inputIdFromOpenCodeMessageId(messageId);
+		const index = reserved === undefined ? 0 : queue.indexOf(reserved);
+		const inputId = index < 0 ? undefined : queue.splice(index, 1)[0];
 		if (inputId) this.echoInputIds.set(messageId, inputId);
 		return inputId;
 	}
@@ -276,6 +283,9 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 		const promptOptions: PromptOptions = {
 			text: prompt,
+			...(!isCompaction
+				? { messageId: openCodeInputMessageId(input.inputId) }
+				: {}),
 			directory: input.workspaceRoot,
 			...(extraFolders.length > 0
 				? {

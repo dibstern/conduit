@@ -113,6 +113,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		const result = await resultPromise;
 		expect(client.session.prompt).toHaveBeenCalledWith("s1", {
 			directory: "/tmp/project",
+			messageId: "msg_conduit_t1",
 			text: "Write hello world",
 			model: { providerID: "anthropic", modelID: "claude-sonnet" },
 		});
@@ -374,6 +375,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 
 		expect(client.session.prompt).toHaveBeenCalledWith("s1", {
 			directory: "/tmp/project",
+			messageId: "msg_conduit_t1",
 			text: "Write hello world",
 			model: { providerID: "anthropic", modelID: "claude-sonnet" },
 			images: ["data:image/png;base64,abc"],
@@ -417,6 +419,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 
 		expect(client.session.prompt).toHaveBeenCalledExactlyOnceWith("s1", {
 			directory: "/tmp/project",
+			messageId: "msg_conduit_t1",
 			text: "Write hello world",
 			model: { providerID: "anthropic", modelID: "claude-sonnet" },
 			...expected,

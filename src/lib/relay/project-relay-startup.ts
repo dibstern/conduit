@@ -1,7 +1,7 @@
 import { Effect, Exit, Option } from "effect";
 import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
-import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
+import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
@@ -44,6 +44,7 @@ import {
 } from "../domain/relay/Services/session-workspace.js";
 import { SSEStreamTag } from "../domain/relay/Services/sse-stream-service.js";
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
+import { makeFailTurn } from "../domain/relay/Services/turn-failure.js";
 import * as Failure from "../effect/failure-classification.js";
 import { formatErrorDetail } from "../errors.js";
 import type { Logger } from "../logger.js";
@@ -51,6 +52,7 @@ import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runn
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { getOrchestrationLayer } from "../provider/orchestration-wiring.js";
 import { RunnerProviderInstance } from "../provider/runner/runner-provider-instance.js";
+import { runningRunnerCommands } from "../provider/runner/runner-recovery.js";
 import { makeWsRpcWebSocketHandler } from "../server/ws-rpc-handler.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { wireMonitoringEffect } from "./monitoring-wiring.js";
@@ -214,6 +216,8 @@ function acquireStartupServices(inputs: StartupInputs) {
 		const statusPoller = yield* StatusPollerTag;
 		const pollerManager = yield* PollerManagerTag;
 		const sessionClient = yield* makeSessionOpenCodeClient;
+		const instances = yield* OpenCodeInstancesTag;
+		const workspace = yield* SessionWorkspaceTag;
 		const readOpenCodeMessages = (
 			sessionId: string,
 			instanceId?: string,
@@ -265,6 +269,31 @@ function acquireStartupServices(inputs: StartupInputs) {
 					),
 				),
 		);
+		const accounts = yield* (yield* AccountDirectory).snapshot;
+		const recoveryCommands = yield* runningRunnerCommands(
+			sql,
+			"opencode",
+			(id) => accounts.accounts.find((account) => account.id === id)?.driver,
+		);
+		const recoverOpenCodeCommands = opencodeRuntimeIngress.recoverCommands(
+			recoveryCommands,
+			(instanceId, sessionId) =>
+				Effect.gen(function* () {
+					const directory = yield* workspace.withLaunch(
+						workspace.get(sessionId),
+					);
+					const client = yield* instances.ifRunning(instanceId, directory);
+					if (Option.isNone(client))
+						return (yield* instances.isManagedStopped(instanceId))
+							? ("stopped" as const)
+							: undefined;
+					return yield* Effect.tryPromise({
+						try: () => client.value.session.statuses(),
+						catch: (cause) => cause,
+					});
+				}).pipe(Effect.scoped),
+			yield* makeFailTurn,
+		);
 		layers.setHistoryIngress(opencodeRuntimeIngress);
 		if (config.signal?.aborted) {
 			return yield* Effect.fail(
@@ -287,6 +316,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 			sessionId,
 			orchestration,
 			statusPoller,
+			recoverOpenCodeCommands,
 			pollerManager,
 			opencodeRuntimeIngress,
 			readOpenCodeMessages,
@@ -301,6 +331,9 @@ type AcquiredStartupServices = Effect.Success<
 function wireStartupCallbacks(services: AcquiredStartupServices) {
 	const { orchestration, sseStream } = services;
 	return Effect.gen(function* () {
+		yield* services.statusPoller.on("changed", () => {
+			services.runFork(services.recoverOpenCodeCommands);
+		});
 		yield* Effect.sync(() => {
 			orchestration.wireSSEToInstance((event, handler) => {
 				sseStream.on(event, handler);
@@ -456,6 +489,7 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				const { stopMonitoring } = monitoring;
 				yield* Effect.gen(function* () {
 					yield* startSseConsumers(inputs, services, monitoring);
+					yield* services.recoverOpenCodeCommands;
 					yield* (yield* SessionSetupTag).recover;
 					// Providers are registered and recovered; queued inputs may drain.
 					yield* (yield* SessionInboxTag).start;

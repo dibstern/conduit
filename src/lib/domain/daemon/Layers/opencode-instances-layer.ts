@@ -45,6 +45,7 @@ import {
 	getInstanceUrl,
 	getManagedOpenCodeProcessEnv,
 	getManagedOpenCodeProcessIdentity,
+	isManagedOpenCodeStopped,
 	scheduleRestart,
 	startInstance,
 	stopInstance,
@@ -95,6 +96,10 @@ export type OpenCodeEndpoint = {
 
 /** Process control for the instances behind the endpoints. */
 type OpenCodeProcessControl<Start, Stop> = {
+	/** Passive process proof, serialized with managed starts and stops. */
+	readonly isStopped?: (
+		instanceId: string,
+	) => Effect.Effect<boolean, never, Start>;
 	/** Spawns a managed instance; begins health checks of an external one. */
 	readonly start: (instanceId: string) => Effect.Effect<void, unknown, Start>;
 	/** True only when termination completed; cached manager status is not proof. */
@@ -1168,6 +1173,15 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 								: Option.none(),
 						),
 					),
+				isManagedStopped: (instanceId) =>
+					Effect.flatMap(resolveId(instanceId), (id) => {
+						if (starts.has(id) || stopping.has(id))
+							return Effect.succeed(false);
+						if (states.get(id)?.managedStopped) return Effect.succeed(true);
+						return control?.isStopped
+							? control.isStopped(id).pipe(Effect.provide(context))
+							: Effect.succeed(false);
+					}),
 				stop: (instanceId) => Effect.flatMap(resolveId(instanceId), stop),
 			};
 		}),
@@ -1203,6 +1217,7 @@ export const OpenCodeInstancesLive = makeOpenCodeInstancesLive(
 		}),
 	{
 		control: {
+			isStopped: isManagedOpenCodeStopped,
 			start: startInstance,
 			removed: Stream.unwrap(
 				Effect.map(subscribeToDaemonEvents, (events) =>
