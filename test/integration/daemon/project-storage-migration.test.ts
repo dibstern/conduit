@@ -385,7 +385,9 @@ describe("project storage migration through the daemon", () => {
 			() => expect(readProjectStorageOwner(configDir, secondSlug)).toBe(second),
 			{ timeout: 15_000 },
 		);
-		expect(await other.history(sessionId)).toEqual([]);
+		await expect(other.history(sessionId)).rejects.toThrow(
+			`Unknown session: ${sessionId}`,
+		);
 		expect(existsSync(join(second, ".conduit"))).toBe(false);
 		evidence = {
 			first,

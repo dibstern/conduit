@@ -20,7 +20,7 @@ import {
 	statSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import {
 	Array as Arr,
 	Context,
@@ -36,6 +36,7 @@ import {
 	Semaphore,
 	Stream,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import {
 	ProjectSaveRejected,
@@ -50,7 +51,18 @@ import {
 	withCachedProjectGit,
 } from "../../../git/session-git.js";
 import { normalizeProjectTitle } from "../../../handlers/settings.js";
-import { chooseProjectSlug } from "../../../persistence/project-storage.js";
+import { PersistenceStore } from "../../../persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
+import {
+	DaemonStoreImportError,
+	importProjectStoreWithBackup,
+	type ProjectStoreImportResult,
+} from "../../../persistence/migrations/daemon-store-import.js";
+import { migrateProjectStorageForProject } from "../../../persistence/migrations/project-storage-migration.js";
+import {
+	chooseProjectSlug,
+	projectStorageDir,
+} from "../../../persistence/project-storage.js";
 import {
 	checkFolders,
 	type FolderIssue,
@@ -1128,6 +1140,63 @@ export const saveProject = (input: SaveProjectInput) =>
 						sessionMode,
 					});
 				} else {
+					const unavailable = yield* DaemonStoreAvailability;
+					if (!unavailable.has(slug)) {
+						const reason = yield* migrateProjectStorageForProject(configDir, {
+							slug,
+							path: mainFolder,
+						});
+						if (reason !== undefined) {
+							unavailable.set(slug, reason);
+						} else {
+							const store = yield* PersistenceStore;
+							const sql = Context.get(store, SqlClient.SqlClient);
+							// Enroll destination projectors as startup does, before reserving
+							// the connection: recovery needs the same SQL semaphore.
+							// Reserve without a SQLite transaction so the importer's own
+							// connection cannot busy-wait on a blocked daemon continuation.
+							const result = yield* Effect.scoped(
+								Context.get(store, ProjectionRunnerEffectTag)
+									.recover()
+									.pipe(
+										Effect.provideService(SqlClient.SqlClient, sql),
+										Effect.andThen(sql.reserve),
+										Effect.andThen(
+											importProjectStoreWithBackup(configDir, {
+												projectId: slug,
+												sourcePath: join(
+													projectStorageDir(configDir, slug),
+													"events.db",
+												),
+											}),
+										),
+									),
+							).pipe(
+								Effect.catch((cause) =>
+									Effect.succeed<ProjectStoreImportResult>({
+										projectId: slug,
+										outcome: "failed" as const,
+										error: new DaemonStoreImportError({
+											projectId: slug,
+											kind: "io",
+											message: formatRelayFailure(cause),
+											cause,
+										}),
+									}),
+								),
+							);
+							if (result.error)
+								unavailable.set(
+									slug,
+									`History import failed (${result.error.kind})`,
+								);
+							const log =
+								result.error || result.backupError
+									? Effect.logWarning
+									: Effect.logInfo;
+							yield* log("Daemon store project import", result);
+						}
+					}
 					yield* addWithoutRelay(project);
 				}
 				if (
