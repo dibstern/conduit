@@ -14,6 +14,41 @@ pnpm test:unit
 
 Start there unless the change crosses a boundary that unit tests cannot cover.
 
+## Release gate
+
+Release CI (`.github/workflows/npm-release.yml`) is the authoritative release
+gate. It runs every group defined in `scripts/test-all.sh`, the single source
+of truth for the `pnpm test:all` stage list. With no arguments, the script runs
+all groups in their original order, reports each stage's time and result, and
+exits non-zero if any stage fails.
+
+| Group | Stages | Release job | Runner |
+| --- | --- | --- | --- |
+| `static` | Type check, lint | `lint-and-build` | `ubuntu-latest` |
+| `vitest` | Unit, integration, contract | `vitest` | `ubuntu-latest` |
+| `build` | Build | `lint-and-build` | `ubuntu-latest` |
+| `e2e` | Replay, harness, daemon, preview Playwright configs, including all configured projects | `e2e` | `ubuntu-latest` |
+| `storybook` | Storybook build, interaction and a11y | `storybook` | `ubuntu-latest` |
+| `visual` | Strict Darwin Storybook visual | `visual` | `macos-latest` |
+
+The release job waits for every verification job. The existing release-only
+build-output tests also run in `lint-and-build`, after the `build` group.
+Normal CI (`ci.yml`) runs a narrower set of checks.
+
+Run one or more groups locally:
+
+```bash
+bash scripts/test-all.sh static
+bash scripts/test-all.sh build e2e
+bash scripts/test-all.sh storybook visual  # macOS, for Darwin baselines
+```
+
+Selection preserves stage order and runs each selected group once. Install
+Chromium with `pnpm exec playwright install --with-deps chromium` for the `e2e`,
+`storybook`, and `visual` groups. `e2e` needs `dist/` from the `build` group or
+CI's build artifact. `visual` needs `dist/storybook/` from the `storybook` group
+or `pnpm storybook:build`, which its macOS job runs as a prerequisite.
+
 ## Pre-commit
 
 Lefthook runs every check in parallel: Biome on staged files, `pnpm lint:rules`,

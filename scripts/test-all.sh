@@ -1,13 +1,24 @@
 #!/usr/bin/env bash
-# Run all test suites, continuing past failures so you see every broken suite.
+# Run all test suites, or selected groups, continuing past failures.
 # Exits non-zero if ANY step failed.
+# Usage: bash scripts/test-all.sh [static|vitest|build|e2e|storybook|visual ...]
 #
 # Ordering is optimized: vitest suites run before the build since they don't
 # need build output. The build runs just before E2E tests that need dist/.
 # Suites run in order here; integration files run in parallel within their suite.
-# GitHub Actions (npm-release.yml) also runs suites in parallel jobs.
+# Release CI (npm-release.yml) runs these same groups in parallel jobs.
 
 set -uo pipefail
+
+groups="static vitest build e2e storybook visual"
+for group in "$@"; do
+  case " $groups " in
+    *" $group "*) ;;
+    *) echo "Unknown group: $group. Available groups: $groups" >&2; exit 2 ;;
+  esac
+done
+# Padded with spaces so a group matches only as a whole word.
+selected=" ${*:-$groups} "
 
 # Increase Node heap to prevent OOM/segfault when running all suites sequentially.
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=8192}"
@@ -25,7 +36,7 @@ run() {
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   local started=$SECONDS
   local result
-  if "$@"; then
+  if "$@" </dev/null; then
     result="✓ $label passed"
   else
     local rc=$?
@@ -37,36 +48,48 @@ run() {
   stage_results+=("$result (${elapsed}s)")
 }
 
-# --- Static analysis ---
-run "Type check"       pnpm check
-run "Lint"             pnpm lint
-
 # Wait for child processes to exit and ports to settle between suites.
 wait_for_cleanup() {
   sleep 1
 }
 
-# --- Vitest suites (no build needed) ---
-run "Unit tests"               pnpm test:unit
-wait_for_cleanup
-run "Integration tests"        pnpm test:integration
-wait_for_cleanup
-run "Contract tests"           pnpm test:contract
+# Stages always run in this order, however the arguments are ordered.
+for group in $groups; do
+  [[ "$selected" == *" $group "* ]] || continue
 
-# --- Build (needed by E2E and storybook visual tests below) ---
-run "Build"            pnpm build
-
-# --- E2E tests ---
-run "E2E replay tests"         pnpm exec playwright test --config test/e2e/playwright-replay.config.ts
-run "E2E harness tests"        env CONDUIT_TEST_DIST=dist pnpm exec playwright test --config test/e2e/playwright-harness.config.ts
-run "E2E daemon tests"         pnpm exec playwright test --config test/e2e/playwright-daemon.config.ts
-run "E2E preview tests"        pnpm exec playwright test --config test/e2e/playwright-preview.config.ts
-
-# --- Storybook ---
-run "Storybook build"          pnpm storybook:build
-run "Storybook interaction and a11y tests" pnpm test:storybook
-# Strict only: the tolerant pass found almost nothing strict missed. Reuses the build above.
-run "Strict Darwin Storybook visual tests" env VISUAL_STRICT=1 pnpm exec playwright test --config test/visual/playwright.config.ts
+  case "$group" in
+    static)
+      run "Type check"       pnpm check
+      run "Lint"             pnpm lint
+      ;;
+    vitest)
+      run "Unit tests"               pnpm test:unit
+      wait_for_cleanup
+      run "Integration tests"        pnpm test:integration
+      wait_for_cleanup
+      run "Contract tests"           pnpm test:contract
+      ;;
+    build)
+      run "Build"            pnpm build
+      ;;
+    e2e)
+      # Requires dist/ from the build group or CI's downloaded build artifact.
+      run "E2E replay tests"         pnpm exec playwright test --config test/e2e/playwright-replay.config.ts
+      run "E2E harness tests"        env CONDUIT_TEST_DIST=dist pnpm exec playwright test --config test/e2e/playwright-harness.config.ts
+      run "E2E daemon tests"         pnpm exec playwright test --config test/e2e/playwright-daemon.config.ts
+      run "E2E preview tests"        pnpm exec playwright test --config test/e2e/playwright-preview.config.ts
+      ;;
+    storybook)
+      run "Storybook build"          pnpm storybook:build
+      run "Storybook interaction and a11y tests" pnpm test:storybook
+      ;;
+    visual)
+      # Requires dist/storybook/ from the storybook group or a CI setup step.
+      # Strict only: reuses that build and compares Darwin baselines on macOS.
+      run "Strict Darwin Storybook visual tests" env VISUAL_STRICT=1 pnpm exec playwright test --config test/visual/playwright.config.ts
+      ;;
+  esac
+done
 
 # --- Summary ---
 echo ""
