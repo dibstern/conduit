@@ -305,6 +305,7 @@ describe("Managed real OpenCode launch workspace execution", () => {
 			title: "Workspace probe",
 			instanceId: AccountIdSchema.make("managed-test"),
 			providerId: "opencode",
+			model: { providerId: "workspace-test", modelId: "cwd" },
 			...(createsWorktree ? { newWorktree: true } : { worktreePath: existing }),
 		});
 		evidence["projectFolder"] = fixture.projectDir;
@@ -332,6 +333,7 @@ describe("Managed real OpenCode launch workspace execution", () => {
 						title: "Cross-repository probe",
 						instanceId: AccountIdSchema.make("managed-test"),
 						providerId: "opencode",
+						model: { providerId: "workspace-test", modelId: "cwd" },
 					}),
 				);
 				// Browser instance responses redact credentials; native probes use config.

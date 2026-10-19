@@ -88,19 +88,16 @@ describe("Integration: account catalogues", () => {
 			}),
 		);
 		const before = harness.mock.diagnostics.length;
+		// A session-scoped request names no project: its owner supplies it.
 		for (const scope of [
-			{ instanceId: "missing-account" },
+			{ projectSlug: "integration-test", instanceId: "missing-account" },
 			{ sessionId: "ses-unroutable" },
 		]) {
 			await expect(
-				client.rpcCall((rpc) =>
-					rpc.GetModels({ projectSlug: "integration-test", ...scope }),
-				),
+				client.rpcCall((rpc) => rpc.GetModels(scope)),
 			).rejects.toThrow(/missing-account/);
 			await expect(
-				client.rpcCall((rpc) =>
-					rpc.GetAgents({ projectSlug: "integration-test", ...scope }),
-				),
+				client.rpcCall((rpc) => rpc.GetAgents(scope)),
 			).rejects.toThrow(/missing-account/);
 		}
 		expect(

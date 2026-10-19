@@ -501,6 +501,7 @@ describe("Session workspace through the built daemon", () => {
 			"OpenCode workspace",
 			undefined,
 			"opencode",
+			{ modelProviderId: "anthropic", modelId: "claude-opus-4-5-20251101" },
 		);
 		for (const path of [first, main, join(fixture.root, "missing")]) {
 			await expect(

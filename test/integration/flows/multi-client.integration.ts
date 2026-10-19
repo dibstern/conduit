@@ -52,7 +52,8 @@ describe("Integration: Multi-Client", () => {
 		const sessionId = client1.getActiveSessionId();
 		await client2.subscribeShell();
 
-		await client1.switchModel("multi-test-model", "multi-test-provider");
+		// A model the recorded OpenCode catalog offers: picks are validated.
+		await client1.switchModel("gpt-5-nano", "opencode");
 
 		const upsert = await client2.waitFor("shell", {
 			timeout: 5000,
@@ -66,8 +67,8 @@ describe("Integration: Multi-Client", () => {
 			},
 		});
 		expect((upsert["item"] as Record<string, unknown>)["model"]).toEqual({
-			model: "multi-test-model",
-			provider: "multi-test-provider",
+			model: "gpt-5-nano",
+			provider: "opencode",
 		});
 
 		await client1.close();

@@ -9,6 +9,7 @@
  * - An explicit base is ignored, or a tag/revision is accepted as a local branch.
  * - An invalid base creates a session, generated branch or checkout before failing.
  */
+
 import { execFileSync } from "node:child_process";
 import {
 	existsSync,
@@ -23,7 +24,9 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect, Exit } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
 import {
+	AddInstance,
 	CreateSession,
 	FindFolders,
 	ListBranches,
@@ -142,6 +145,7 @@ process.exit(result.status ?? 1);
 					projectSlug: "process-test",
 					originId: "new-worktree-test",
 					providerId: "claude",
+					model: { providerId: "claude", modelId: "sonnet" },
 					title,
 					...(newWorktree ? { newWorktree: true } : {}),
 					...(worktreeBase === undefined ? {} : { worktreeBase }),
@@ -386,6 +390,7 @@ process.exit(result.status ?? 1);
 						projectSlug: "process-test",
 						originId: "base-test",
 						providerId: "claude",
+						model: { providerId: "claude", modelId: "sonnet" },
 						newWorktree: true,
 						worktreeBase,
 					}),
@@ -559,6 +564,7 @@ process.exit(result.status ?? 1);
 				projectSlug: "process-test",
 				originId: "new-worktree-test",
 				providerId: "claude",
+				model: { providerId: "claude", modelId: "sonnet" },
 				title: "subfolder",
 				newWorktree: true,
 			}),
@@ -613,6 +619,7 @@ process.exit(result.status ?? 1);
 						projectSlug: "process-test",
 						originId: "new-worktree-test",
 						providerId: "claude",
+						model: { providerId: "claude", modelId: "sonnet" },
 						title: "failed",
 						newWorktree: true,
 					}),
@@ -656,6 +663,12 @@ process.exit(result.status ?? 1);
 	it("rejects unsupported providers and projects without Git before creating anything", async () => {
 		const { fixture, socket, sessions } = await start("unsupported-launches");
 		const before = (await sessions()).sessions.map(({ id }) => id);
+		// Cursor is the routable provider that cannot launch into a new worktree.
+		const { addedInstanceId } = await sendRpcRequest(
+			socket,
+			new AddInstance({ name: "Cursor", driver: "cursor" }),
+		);
+		if (!addedInstanceId) throw new Error("Missing registered Cursor account");
 		await expect(
 			sendRpcRequest(
 				socket,
@@ -663,7 +676,9 @@ process.exit(result.status ?? 1);
 					permissionMode: "ask",
 					projectSlug: "process-test",
 					originId: "new-worktree-test",
-					providerId: "unsupported-provider",
+					instanceId: AccountIdSchema.make(addedInstanceId),
+					providerId: "cursor",
+					model: { providerId: "cursor", modelId: "composer-2.5" },
 					newWorktree: true,
 				}),
 			),
@@ -679,6 +694,7 @@ process.exit(result.status ?? 1);
 					projectSlug: "process-test",
 					originId: "new-worktree-test",
 					providerId: "claude",
+					model: { providerId: "claude", modelId: "sonnet" },
 					newWorktree: true,
 					worktreePath: fixture.projectDir,
 				}),
@@ -706,6 +722,7 @@ process.exit(result.status ?? 1);
 					projectSlug: "process-test",
 					originId: "new-worktree-test",
 					providerId: "claude",
+					model: { providerId: "claude", modelId: "sonnet" },
 					newWorktree: true,
 				}),
 			),
