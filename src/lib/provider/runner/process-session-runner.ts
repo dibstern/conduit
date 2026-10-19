@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, closeSync, openSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -835,27 +835,34 @@ export const makeProcessSessionRunner = (
 								import.meta.url,
 							),
 						);
-						const child = spawn(
-							process.execPath,
-							[
-								...process.execArgv,
-								runnerEntry,
-								entry.socketPath,
-								sessionId,
-								entry.runnerId,
-								entry.candidate ? "upgrade" : "active",
-								driver.driverKind,
-							],
-							{
-								cwd: deps.workspaceRoot,
-								env: { ...process.env, CONDUIT_CONFIG_DIR: configDir },
-								detached: true,
-								stdio: ["ignore", "inherit", "inherit", "ipc"],
-							},
-						);
-						entry.child = child;
-						entry.pid = child.pid;
-						return child;
+						// Runners outlive the server, so inherited stdio would keep writing
+						// into whichever terminal first started them.
+						const log = openSync(join(configDir, "runners.log"), "a", 0o600);
+						try {
+							const child = spawn(
+								process.execPath,
+								[
+									...process.execArgv,
+									runnerEntry,
+									entry.socketPath,
+									sessionId,
+									entry.runnerId,
+									entry.candidate ? "upgrade" : "active",
+									driver.driverKind,
+								],
+								{
+									cwd: deps.workspaceRoot,
+									env: { ...process.env, CONDUIT_CONFIG_DIR: configDir },
+									detached: true,
+									stdio: ["ignore", log, log, "ipc"],
+								},
+							);
+							entry.child = child;
+							entry.pid = child.pid;
+							return child;
+						} finally {
+							closeSync(log);
+						}
 					},
 					catch: (cause) => runnerFailure("spawn runner", cause),
 				});
