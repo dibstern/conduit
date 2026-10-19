@@ -45,9 +45,12 @@ const capabilities = (id: string): ProbeResult => ({
 	agents: [],
 });
 
+// Bounded by wall time, not turns: background cache writes are real fs I/O,
+// which can outlast any fixed turn count on a loaded machine.
 const waitUntil = <E, R>(check: Effect.Effect<boolean, E, R>) =>
 	Effect.gen(function* () {
-		for (let attempt = 0; attempt < 1000; attempt++) {
+		const deadline = Date.now() + 5_000;
+		while (Date.now() < deadline) {
 			if (yield* check) return;
 			yield* Effect.promise(() => setImmediate());
 		}

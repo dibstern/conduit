@@ -11,6 +11,7 @@ import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instanc
 import { WorktreeServiceTag } from "../domain/daemon/Services/worktree-service.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import {
+	AgentLivenessTag,
 	BackgroundLivenessTag,
 	ConfigTag,
 	SessionRetriesTag,
@@ -26,14 +27,14 @@ import {
 } from "../domain/relay/Services/session-worktree-deletion.js";
 import { LocalPtyServiceTag } from "../domain/relay/Services/terminal-service.js";
 import * as Failure from "../effect/failure-classification.js";
-import {
-	daemonSessionGitCache,
-	hasNoCommitsBeyondDefault,
-} from "../git/session-git.js";
+import { hasNoCommitsBeyondDefault } from "../git/session-git.js";
 import { realWorkspacePath } from "../git/worktrees.js";
 import { readPersistedAutoSettleFacts } from "./auto-settle-reader.js";
-
-const DAY_MS = 86_400_000;
+import {
+	decideWorktreeCleanup,
+	sessionQuiescenceBlockReason,
+	type WorktreeCleanupGitCheck,
+} from "./worktree-cleanup-rules.js";
 
 /** Discovery only: no Git calls and no relay startup for an absent checkout. */
 export const readWorktreeCleanupPaths = Effect.gen(function* () {
@@ -48,8 +49,33 @@ export const readWorktreeCleanupPaths = Effect.gen(function* () {
 			AND json_extract(events.data, '$.origin') = 'conduit'`;
 });
 
+/** Everything quiescence reads for one session, apart from its viewers and agent. */
+export const readSessionQuiescence = (now: number, sessionId: string) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const { projectId } = yield* PersistenceProjectTag;
+		const backgroundOf = yield* BackgroundLivenessTag;
+		const retries = yield* Effect.serviceOption(SessionRetriesTag);
+		return {
+			facts: (yield* readPersistedAutoSettleFacts(
+				projectId,
+				now,
+				sessionId,
+			)).get(sessionId),
+			hasPendingTurn:
+				(yield* sql<{ found: number }>`SELECT EXISTS (
+					SELECT 1 FROM provider_command_outbox
+					WHERE project_key = ${projectId} AND session_id = ${sessionId} AND effect_type = 'send_turn'
+					AND status IN ('pending', 'running', 'retryable_failed')
+				) AS found`)[0]?.found === 1,
+			hasLiveBackgroundWork: backgroundOf(sessionId) !== undefined,
+			isRetrying:
+				retries._tag === "Some" && retries.value(sessionId) !== undefined,
+		};
+	});
+
 export const cleanUpProjectWorktrees = (
-	getSetting: Effect.Effect<WorktreeCleanup>,
+	getSetting: Effect.Effect<WorktreeCleanup | "off">,
 	getProjectFolders: Effect.Effect<readonly string[]>,
 	now: number,
 ) =>
@@ -59,13 +85,11 @@ export const cleanUpProjectWorktrees = (
 		const worktrees = yield* WorktreeServiceTag;
 		const workspace = yield* SessionWorkspaceTag;
 		const inbox = yield* SessionInboxTag;
-		const sql = yield* SqlClient.SqlClient;
 		const localPty = yield* Effect.serviceOption(LocalPtyServiceTag);
 		const instances = yield* OpenCodeInstancesTag;
 		const sessionGit = yield* Effect.serviceOption(SessionGitServiceTag);
 		const viewers = yield* WebSocketHandlerTag;
-		const backgroundOf = yield* BackgroundLivenessTag;
-		const retries = yield* Effect.serviceOption(SessionRetriesTag);
+		const agentIsLive = yield* AgentLivenessTag;
 		const report: {
 			removed: WorktreeCleanupEntry[];
 			kept: WorktreeCleanupEntry[];
@@ -77,57 +101,40 @@ export const cleanUpProjectWorktrees = (
 		const sessionIds = new Set(paths.map(({ session_id }) => session_id));
 		const stateOf = (sessionId: string) =>
 			Effect.gen(function* () {
-				const facts = (yield* readPersistedAutoSettleFacts(
-					projectId,
-					now,
-					sessionId,
-				)).get(sessionId);
 				return {
-					facts,
-					hasPendingTurn:
-						(yield* sql<{ found: number }>`SELECT EXISTS (
-							SELECT 1 FROM provider_command_outbox
-							WHERE project_key = ${projectId} AND session_id = ${sessionId} AND effect_type = 'send_turn'
-							AND status IN ('pending', 'running', 'retryable_failed')
-						) AS found`)[0]?.found === 1,
+					...(yield* readSessionQuiescence(now, sessionId)),
 					hasViewer: viewers.getClientsForSession(sessionId).length > 0,
-					hasLiveBackgroundWork: backgroundOf(sessionId) !== undefined,
-					isRetrying:
-						retries._tag === "Some" && retries.value(sessionId) !== undefined,
+					hasLiveAgent: yield* agentIsLive(sessionId),
 				};
 			});
 		const blockedReason = (
 			state: Effect.Success<ReturnType<typeof stateOf>>,
 		) => {
-			const facts = state.facts;
-			if (
-				facts?.status === "busy" ||
-				facts?.status === "pending" ||
-				facts?.status === "retry" ||
-				facts?.latestTurn?.state === "pending" ||
-				facts?.latestTurn?.state === "running" ||
-				state.isRetrying ||
-				state.hasPendingTurn
-			)
-				return "Session is running";
-			if (facts?.hasPendingApproval)
-				return "Has a pending approval or question";
-			if (state.hasLiveBackgroundWork) return "Has live background work";
-			if (state.hasViewer) return "Session has a viewer";
-			return undefined;
+			return (
+				sessionQuiescenceBlockReason(state) ??
+				(state.hasLiveAgent ? "Agent process is running" : undefined) ??
+				(state.hasViewer ? "Session has a viewer" : undefined)
+			);
 		};
 		for (const sessionId of sessionIds) {
 			const base = { projectSlug: config.slug, sessionId };
 			yield* Effect.gen(function* () {
 				const setting = yield* getSetting;
+				if (setting === "off") return;
 				const initial = yield* stateOf(sessionId);
 				const deleted = initial.facts === undefined;
+				const initialDecision = decideWorktreeCleanup(
+					setting,
+					initial.facts,
+					now,
+				);
 				const earlyReason = blockedReason(initial);
 				// Modern ownership is a pure event read. Legacy proof may inspect Git,
 				// so leave it until the cheap session guards have passed.
 				let owned = yield* readSessionWorktreeOwnership(sessionId, false);
 				if (owned.length === 0) {
-					if (earlyReason || (deleted && !setting.onDelete)) return;
+					if (earlyReason || (deleted && initialDecision._tag === "Keep"))
+						return;
 					owned = yield* readSessionWorktreeOwnership(sessionId);
 				}
 				for (const checkout of owned.filter(({ path }) => existsSync(path))) {
@@ -137,18 +144,11 @@ export const cleanUpProjectWorktrees = (
 							report.kept.push({ ...entry, reason });
 						};
 						if (earlyReason) return keep(earlyReason);
-						if (deleted && !setting.onDelete)
-							return keep("No rule matched for deleted session");
 						if (
-							!deleted &&
-							!(
-								initial.facts?.settledAt != null && setting.onSettle !== "off"
-							) &&
-							setting.afterInactiveDays === null &&
-							!setting.whenMerged &&
-							!setting.noCommitsBeyondDefault
+							initialDecision._tag === "Keep" &&
+							!initialDecision.inspectCheckout
 						)
-							return keep("No rule matched");
+							return keep(initialDecision.reason);
 						const sharedReason = Effect.gen(function* () {
 							if (
 								(yield* getProjectFolders).some((folder) =>
@@ -207,66 +207,63 @@ export const cleanUpProjectWorktrees = (
 							return false;
 						}).pipe(Effect.scoped);
 						if (yield* hasOpenTerminal) return keep("Has an open terminal");
-						const inspection = yield* worktrees.inspectCheckoutCleanup(
-							{ path: checkout.folder, projectSlug: config.slug, sessionId },
-							checkout,
-							setting.keepWhen,
-						);
-						if (inspection.keepReason) return keep(inspection.keepReason);
-						if (!inspection.head) return keep("Could not read checkout HEAD");
-						let reason: string | undefined;
-						if (deleted) reason = "Session was deleted";
-						else {
-							const facts = initial.facts;
-							if (facts?.settledAt != null && setting.onSettle === "any")
-								reason = "Session is settled";
-							if (!reason && setting.afterInactiveDays !== null && facts) {
-								const turn = facts.latestTurn;
-								const lastActivity = Math.max(
-									facts.lastMessageAt ?? -Infinity,
-									facts.latestUserMessageAt ?? -Infinity,
-									turn?.requestedAt ?? -Infinity,
-									turn?.startedAt ?? -Infinity,
-									turn?.completedAt ?? -Infinity,
+						let decision = initialDecision;
+						const gitChecks: Partial<Record<WorktreeCleanupGitCheck, boolean>> =
+							{};
+						let inspection:
+							| { readonly head?: string; readonly keepReason?: string }
+							| undefined;
+						let inspectedKeepWhen: WorktreeCleanup["keepWhen"] | undefined;
+						while (true) {
+							if (!inspection || inspectedKeepWhen !== decision.keepWhen) {
+								inspection = yield* worktrees.inspectCheckoutCleanup(
+									{
+										path: checkout.folder,
+										projectSlug: config.slug,
+										sessionId,
+									},
+									checkout,
+									decision.keepWhen,
 								);
-								if (
-									Number.isFinite(lastActivity) &&
-									lastActivity < now - setting.afterInactiveDays * DAY_MS
-								)
-									reason = `Inactive for ${Math.floor((now - lastActivity) / DAY_MS)} days`;
+								inspectedKeepWhen = decision.keepWhen;
 							}
-							if (
-								!reason &&
-								(setting.whenMerged ||
-									(facts?.settledAt != null && setting.onSettle === "merged"))
-							) {
-								const git = yield* Effect.tryPromise(() =>
-									daemonSessionGitCache.refresh(checkout.path),
-								);
-								if (git?.merged && git.mergedHead === inspection.head)
-									reason =
-										facts?.settledAt != null && setting.onSettle === "merged"
-											? "Settled and merged"
-											: "Branch is merged";
+							if (inspection.keepReason) return keep(inspection.keepReason);
+							if (!inspection.head) return keep("Could not read checkout HEAD");
+							if (decision._tag === "Keep") return keep(decision.reason);
+							for (const check of decision.gitChecks) {
+								if (gitChecks[check] !== undefined) continue;
+								switch (check) {
+									case "nothing-missing": {
+										const inspectedHead = inspection.head;
+										gitChecks[check] = yield* Effect.tryPromise(() =>
+											hasNoCommitsBeyondDefault(checkout.path, inspectedHead),
+										);
+										break;
+									}
+								}
 							}
-							if (
-								!reason &&
-								setting.noCommitsBeyondDefault &&
-								(yield* Effect.tryPromise(() =>
-									hasNoCommitsBeyondDefault(checkout.path),
-								))
-							)
-								reason = "No commits beyond the default branch";
+							if (decision.gitChecks.every((check) => gitChecks[check])) break;
+							decision = decideWorktreeCleanup(
+								setting,
+								initial.facts,
+								now,
+								gitChecks,
+							);
+							if (decision._tag === "Keep") return keep(decision.reason);
 						}
-						if (!reason) return keep("No rule matched");
 						const changed = Effect.gen(function* () {
-							const current = yield* getSetting;
-							const latest = yield* stateOf(sessionId);
-							return (
-								JSON.stringify(current) !== JSON.stringify(setting) ||
-								JSON.stringify(latest) !== JSON.stringify(initial) ||
+							if (
 								(yield* hasOpenTerminal) ||
 								(yield* sharedReason) !== undefined
+							)
+								return true;
+							// Read rules and session state last: the checks above are slow
+							// enough for a switch to Off to land during them.
+							const latest = yield* stateOf(sessionId);
+							const current = yield* getSetting;
+							return (
+								JSON.stringify(current) !== JSON.stringify(setting) ||
+								JSON.stringify(latest) !== JSON.stringify(initial)
 							);
 						});
 						// Admission holds the inbox before resolving launch folders. Keep
@@ -282,7 +279,7 @@ export const cleanUpProjectWorktrees = (
 											sessionId,
 										},
 										checkout,
-										setting.keepWhen,
+										decision.keepWhen,
 										inspection.head,
 										changed,
 									),
@@ -290,7 +287,7 @@ export const cleanUpProjectWorktrees = (
 							),
 						);
 						if (keptReason) return keep(keptReason);
-						report.removed.push({ ...entry, reason });
+						report.removed.push({ ...entry, reason: decision.reason });
 						if (sessionGit._tag === "Some")
 							yield* sessionGit.value.refresh({ sessionId }).pipe(
 								Effect.catchCause((cause) => {

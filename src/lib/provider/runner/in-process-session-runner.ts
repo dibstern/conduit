@@ -37,6 +37,9 @@ export class InProcessSessionRunner implements SessionRunner {
 		private readonly sinks: RunnerSinkBindings,
 		private readonly scope: Scope.Scope,
 	) {}
+	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
+		return Effect.sync(() => this.sessions.has(sessionId));
+	}
 	hasPendingSubagentFinalizers(sessionId: string): boolean {
 		return this.payload.hasPendingSubagentFinalizers?.(sessionId) ?? false;
 	}

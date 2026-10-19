@@ -62,6 +62,7 @@ async function openSession(
 			InspectSessionWorktrees: () => ({
 				worktrees: [],
 				removeWorktrees: false,
+				onDelete: "ask",
 			}),
 			ListDaemonSessions: () => ({
 				sessions: rows,

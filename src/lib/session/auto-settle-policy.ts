@@ -22,8 +22,8 @@ export interface AutoSettleFacts {
 	readonly unread: boolean;
 	readonly autoSettleDisabledAt: number | null;
 	readonly unsettledAt: number | null;
-	readonly mergedHead?: string | undefined;
-	readonly settledMergedHead?: string | undefined;
+	readonly createdAt: number | null;
+	readonly mergedAt?: number | undefined;
 }
 
 export function shouldSettleIdleSession(
@@ -68,8 +68,13 @@ export function shouldSettleIdleSession(
 		turn?.completedAt ?? Number.NEGATIVE_INFINITY,
 	);
 	return (
-		(facts.mergedHead !== undefined &&
-			facts.mergedHead !== facts.settledMergedHead) ||
+		(facts.mergedAt !== undefined &&
+			facts.mergedAt >
+				Math.max(
+					facts.createdAt ?? Number.NEGATIVE_INFINITY,
+					facts.latestUserMessageAt ?? Number.NEGATIVE_INFINITY,
+					facts.unsettledAt ?? Number.NEGATIVE_INFINITY,
+				)) ||
 		(Number.isFinite(lastActivityAt) &&
 			(facts.unsettledAt === null || facts.unsettledAt <= lastActivityAt) &&
 			lastActivityAt < now - idleWindowMs)
@@ -88,6 +93,7 @@ export function sessionRowToAutoSettleFacts(
 		| "unread"
 		| "autoSettleDisabledAt"
 		| "unsettledAt"
+		| "createdAt"
 	>,
 ): AutoSettleFacts {
 	return {
@@ -100,5 +106,6 @@ export function sessionRowToAutoSettleFacts(
 		unread: row?.unread === 1,
 		autoSettleDisabledAt: row?.auto_settle_disabled_at ?? null,
 		unsettledAt: row?.unsettled_at ?? null,
+		createdAt: row?.created_at ?? null,
 	};
 }

@@ -228,17 +228,17 @@ export const WorktreeCleanup: Story = {
 	play: async ({ canvasElement }) => {
 		const body = within(canvasElement.ownerDocument.body);
 		const disclosure = body.getByRole("button", {
-			name: /^Worktree cleanup.*Settled and merged$/,
+			name: /^Worktree cleanup.*When nothing is missing$/,
 		});
 		await userEvent.click(disclosure);
 		await expect(disclosure).toHaveAttribute("aria-expanded", "true");
 		disclosure.scrollIntoView({ block: "start" });
 		await expect(body.getByTestId("settings-cleanup-on-settle")).toHaveValue(
-			"merged",
+			"nothing-missing",
 		);
-		await expect(body.getByTestId("settings-cleanup-idle")).toHaveValue(
-			"never",
-		);
+		await expect(
+			body.getByTestId("settings-cleanup-settled-after"),
+		).toHaveValue("never");
 		await expect(body.getByTestId("settings-cleanup-keep-when")).toHaveValue(
 			"uncommitted-changes",
 		);

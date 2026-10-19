@@ -23,12 +23,13 @@ const eligible = (): AutoSettleFacts => ({
 	unread: false,
 	autoSettleDisabledAt: null,
 	unsettledAt: null,
+	createdAt: null,
 });
 
 describe("automatic idle settlement policy", () => {
-	// Merge facts must use the session's checkout, preserve all settlement guards,
-	// and consume each merged head once, including after a fetch or daemon restart.
-	it("settles recent work when its own branch has a new merged head", () => {
+	// A merge must follow creation, the latest user message and the latest
+	// un-settle, and must preserve every settlement guard.
+	it("settles when the merge follows the latest user message", () => {
 		expect(
 			shouldSettleIdleSession(
 				{
@@ -41,7 +42,7 @@ describe("automatic idle settlement policy", () => {
 						startedAt: NOW - 1_900,
 						completedAt: NOW - 1_000,
 					},
-					mergedHead: "new-head",
+					mergedAt: NOW - 500,
 				},
 				NOW,
 				idle,
@@ -50,9 +51,34 @@ describe("automatic idle settlement policy", () => {
 	});
 
 	it.each([
-		["a consumed merge", { settledMergedHead: "merged-head" }],
+		["missing", { exists: false }],
+		["already settled", { settledAt: NOW - 2_000 }],
 		["unread", { unread: true }],
 		["running", { status: "busy" }],
+		["retrying", { status: "retry" }],
+		[
+			"pending turn",
+			{
+				latestTurn: {
+					state: "pending",
+					requestedAt: NOW - 2_000,
+					startedAt: null,
+					completedAt: null,
+				},
+			},
+		],
+		[
+			"running turn",
+			{
+				latestTurn: {
+					state: "running",
+					requestedAt: NOW - 2_000,
+					startedAt: NOW - 1_900,
+					completedAt: null,
+				},
+			},
+		],
+		["queued user message", { latestTurn: null }],
 		["pending approval", { hasPendingApproval: true }],
 		["pinned", { pinnedAt: NOW - 2_000 }],
 		["viewed", { hasViewer: true }],
@@ -72,7 +98,7 @@ describe("automatic idle settlement policy", () => {
 						startedAt: NOW - 1_900,
 						completedAt: NOW - 100,
 					},
-					mergedHead: "merged-head",
+					mergedAt: NOW - 50,
 					...override,
 				},
 				NOW,
@@ -81,28 +107,29 @@ describe("automatic idle settlement policy", () => {
 		).toBe(false);
 	});
 
-	it("keeps resumed work active until a different branch head merges", () => {
-		const resumed = {
+	it.each([
+		["the latest user message", { latestUserMessageAt: NOW - 500 }],
+		["the latest un-settle", { unsettledAt: NOW - 500 }],
+		["creation", { createdAt: NOW - 500 }],
+	])("requires the merge to be strictly after %s", (_label, override) => {
+		const facts = {
 			...eligible(),
 			lastMessageAt: NOW - 100,
-			unsettledAt: NOW - 500,
-			latestUserMessageAt: NOW - 500,
+			latestUserMessageAt: NOW - 2_000,
 			latestTurn: {
 				state: "completed",
 				requestedAt: NOW - 500,
 				startedAt: NOW - 450,
 				completedAt: NOW - 100,
 			},
-			mergedHead: "merged-head",
-			settledMergedHead: "merged-head",
+			...override,
 		};
-		expect(shouldSettleIdleSession(resumed, NOW, idle)).toBe(false);
+		for (const mergedAt of [NOW - 501, NOW - 500])
+			expect(shouldSettleIdleSession({ ...facts, mergedAt }, NOW, idle)).toBe(
+				false,
+			);
 		expect(
-			shouldSettleIdleSession(
-				{ ...resumed, mergedHead: "next-head" },
-				NOW,
-				idle,
-			),
+			shouldSettleIdleSession({ ...facts, mergedAt: NOW - 499 }, NOW, idle),
 		).toBe(true);
 	});
 
@@ -199,6 +226,9 @@ describe("automatic idle settlement policy", () => {
 
 	it("never settles when the setting is null", () => {
 		expect(shouldSettleIdleSession(eligible(), NOW, null)).toBe(false);
+		expect(
+			shouldSettleIdleSession({ ...eligible(), mergedAt: NOW }, NOW, null),
+		).toBe(false);
 	});
 
 	it("respects the queued user message grace boundary", () => {

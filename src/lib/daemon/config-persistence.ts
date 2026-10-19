@@ -9,6 +9,7 @@ import {
 	Record,
 	Result,
 	Schema,
+	SchemaParser,
 	SchemaTransformation,
 	Struct,
 } from "effect";
@@ -37,6 +38,8 @@ import {
 } from "../contracts/provider-instance.js";
 import {
 	DEFAULT_WORKTREE_CLEANUP,
+	ProjectWorktreeCleanupSchema,
+	type WorktreeCleanup,
 	WorktreeCleanupSchema,
 } from "../contracts/worktree.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
@@ -59,7 +62,27 @@ import {
 export const DEFAULT_AUTO_SETTLE_AFTER_DAYS = 3;
 export const DEFAULT_AUTO_ARCHIVE_AFTER_DAYS = 30;
 
-export const CURRENT_CONFIG_VERSION = 1;
+export const CURRENT_CONFIG_VERSION = 2;
+
+const LegacyWorktreeCleanupSchema = Schema.Struct({
+	onSettle: Schema.Literals(["off", "merged", "any"]).pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => "merged" as const)),
+	),
+	onDelete: WorktreeCleanupSchema.fields.onDelete,
+	afterInactiveDays: Schema.NullOr(
+		Schema.Number.pipe(
+			Schema.check(Schema.isInt()),
+			Schema.check(Schema.isBetween({ minimum: 1, maximum: 3650 })),
+		),
+	).pipe(Schema.withDecodingDefaultType(Effect.sync(() => null))),
+	whenMerged: Schema.Boolean.pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => false)),
+	),
+	noCommitsBeyondDefault: Schema.Boolean.pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => false)),
+	),
+	keepWhen: WorktreeCleanupSchema.fields.keepWhen,
+});
 
 const ProjectSchema = Schema.Struct({
 	path: Schema.String,
@@ -74,6 +97,7 @@ const ProjectSchema = Schema.Struct({
 	shellEnv: Schema.optionalKey(ProjectShellEnvConfigSchema),
 	setupScript: Schema.optionalKey(Schema.String),
 	sessionMode: Schema.optionalKey(SessionModeSchema),
+	worktreeCleanup: Schema.optionalKey(ProjectWorktreeCleanupSchema),
 	sessionCount: Schema.optionalKey(Schema.Number),
 });
 
@@ -214,6 +238,7 @@ export type DaemonConfig = typeof CurrentDaemonConfigSchema.Type;
 
 export const DaemonConfigSchema = Schema.Struct({
 	...DaemonConfigFields,
+	worktreeCleanup: Schema.optionalKey(Schema.Unknown),
 	claudeConfigDir: Schema.optionalKey(Schema.String),
 })
 	.mapFields(Struct.map(Schema.mutableKey))
@@ -221,12 +246,40 @@ export const DaemonConfigSchema = Schema.Struct({
 	.pipe(
 		Schema.decodeTo(
 			Schema.toType(CurrentDaemonConfigSchema),
-			SchemaTransformation.transform({
-				decode: ({ claudeConfigDir, ...config }): DaemonConfig =>
-					normalizeDaemonConfig(
-						migrateLegacyClaudeAccount(config, claudeConfigDir),
-					),
-				encode: (config) => config,
+			SchemaTransformation.transformEffect({
+				decode: ({ claudeConfigDir, worktreeCleanup, ...config }) =>
+					Effect.gen(function* () {
+						const persistedCleanup = worktreeCleanup ?? {};
+						const cleanup: WorktreeCleanup =
+							config.configVersion === CURRENT_CONFIG_VERSION
+								? yield* SchemaParser.decodeUnknownEffect(
+										WorktreeCleanupSchema,
+									)(persistedCleanup)
+								: yield* SchemaParser.decodeUnknownEffect(
+										LegacyWorktreeCleanupSchema,
+									)(persistedCleanup).pipe(
+										Effect.map((old) => ({
+											onSettle:
+												old.onSettle === "merged" ||
+												old.onSettle === "any" ||
+												old.whenMerged ||
+												old.noCommitsBeyondDefault
+													? ("nothing-missing" as const)
+													: ("keep" as const),
+											settledAfterDays:
+												old.onSettle === "any" ? 0 : old.afterInactiveDays,
+											onDelete: old.onDelete,
+											keepWhen: old.keepWhen,
+										})),
+									);
+						return normalizeDaemonConfig(
+							migrateLegacyClaudeAccount(
+								{ ...config, worktreeCleanup: cleanup },
+								claudeConfigDir,
+							),
+						);
+					}),
+				encode: (config) => Effect.succeed(config),
 			}),
 		),
 	)

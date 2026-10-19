@@ -106,6 +106,7 @@ import {
 	ScanServiceTag,
 } from "../domain/relay/Services/scan-service.js";
 import {
+	AgentLivenessTag,
 	BackgroundLivenessTag,
 	type ConfigTag,
 	LiveTaskListTag,
@@ -152,6 +153,7 @@ import {
 } from "../persistence/effect/live.js";
 import type { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import { ClaudeProviderInstance } from "../provider/claude/claude-provider-instance.js";
 import { captureClaudeLaunchLogin } from "../provider/claude/claude-sdk-env.js";
 import { defaultClaudeSessionForkSdk } from "../provider/claude/claude-session-fork.js";
 import { makeClaudeUsageReader } from "../provider/claude/claude-usage-probe.js";
@@ -159,6 +161,7 @@ import {
 	makeOrchestrationRuntimeLayer,
 	type OrchestrationRuntimeLayerOptions,
 } from "../provider/orchestration-wiring.js";
+import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import { SqliteProviderSessionBindingReadModel } from "../provider/provider-session-binding-read-model.js";
 import { usageAccounts } from "../provider/usage-reader.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
@@ -273,7 +276,8 @@ export interface ProjectRelayLayerInputs {
 	claudeRunnerFactory?: OrchestrationRuntimeLayerOptions["claudeRunnerFactory"];
 	testSendLimit?: number;
 	onBackgroundWorkChanged: (sessionId: string) => void;
-	getWsHandler: () => WebSocketHandlerShape;
+	/** Undefined until startup finishes; runner adoption publishes before then. */
+	getWsHandler: () => WebSocketHandlerShape | undefined;
 }
 
 /** Build the shared per-project Layer graph and its managed runtime. */
@@ -666,7 +670,7 @@ export function createProjectRelayLayers({
 				relayPublisher: {
 					publish: (msg) =>
 						publishProviderRelayMessage(msg, {
-							wsHandler: getWsHandler(),
+							wsHandler: getWsHandler() ?? { getClientsForSession: () => [] },
 							log,
 							slug: config.slug,
 							...(config.pushManager
@@ -730,6 +734,19 @@ export function createProjectRelayLayers({
 	const providerOrchestrationLayer = orchestrationRuntimeLayer.pipe(
 		Layer.provide(providerOrchestrationDeps),
 	);
+	const agentLivenessLayer = Layer.effect(
+		AgentLivenessTag,
+		Effect.gen(function* () {
+			const registry = yield* ProviderRegistryTag;
+			return (sessionId: string) =>
+				Effect.suspend(() => {
+					const instance = registry.getInstance("claude");
+					return instance instanceof ClaudeProviderInstance
+						? instance.hasLiveProcessEffect(sessionId)
+						: Effect.succeed(false);
+				});
+		}),
+	).pipe(Layer.provide(providerOrchestrationLayer));
 	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
 		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
 	);
@@ -802,7 +819,8 @@ export function createProjectRelayLayers({
 	);
 	// Polling must not restart an idle-stopped OpenCode.
 	const messagePollerManagerLayer = makeMessagePollerManagerLive({
-		hasViewers: (sid) => getWsHandler().getClientsForSession(sid).length > 0,
+		hasViewers: (sid) =>
+			(getWsHandler()?.getClientsForSession(sid).length ?? 0) > 0,
 	}).pipe(
 		Layer.provide(
 			Layer.mergeAll(
@@ -868,6 +886,7 @@ export function createProjectRelayLayers({
 		webSocketHandlerLayer,
 		messagePollerManagerLayer,
 		activityReaders,
+		agentLivenessLayer,
 		ptyRuntimeLayer,
 		configLayer,
 		loggerLayer,

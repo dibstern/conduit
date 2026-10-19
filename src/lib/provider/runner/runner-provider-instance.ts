@@ -306,6 +306,10 @@ export class RunnerProviderInstance implements ProviderInstance {
 		return this.driver.discoverEffect(workspaceRoot, account, options);
 	}
 
+	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
+		return this.runner.hasLiveProcessEffect(sessionId);
+	}
+
 	getNativeSessionEffect(
 		sessionId: string,
 	): Effect.Effect<ProviderNativeSession | undefined> {

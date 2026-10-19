@@ -14,7 +14,7 @@ import { parseArgs, stripVTControlCharacters } from "node:util";
 let scratch = "/tmp/sdk-upgrade";
 const scripts = dirname(fileURLToPath(import.meta.url));
 const workspaceFile = "pnpm-workspace.yaml";
-const lockTest = "test/unit/contracts/providers/sdk-version-lock.test.ts";
+const lockTest = "test/unit/contracts/providers/sdk-version-lock.guard.test.ts";
 const packages = {
 	claude: "@anthropic-ai/claude-agent-sdk",
 	anthropic: "@anthropic-ai/sdk",

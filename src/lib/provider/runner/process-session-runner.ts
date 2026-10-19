@@ -51,6 +51,7 @@ import type {
 } from "./session-runner.js";
 
 interface RunnerChild {
+	readonly sessionId: string;
 	readonly ready: Deferred.Deferred<RunnerSocket, SessionFailure>;
 	readonly stopped: Deferred.Deferred<void>;
 	readonly drained: Deferred.Deferred<void>;
@@ -366,6 +367,9 @@ export const makeProcessSessionRunner = (
 			});
 		const children = new Map<string, RunnerChild>();
 		const candidates = new Set<RunnerChild>();
+		// Liveness only: evicted children whose OS process may not have exited
+		// yet. Pruned lazily by pid, never consulted for ownership.
+		const exiting = new Set<RunnerChild>();
 		const sinks = new Map<
 			string,
 			{
@@ -457,6 +461,8 @@ export const makeProcessSessionRunner = (
 			// A late close from an old child must not remove its replacement.
 			if (children.get(sessionId) !== entry) return;
 			children.delete(sessionId);
+			// Usability ends before the OS process does; keep it visible to liveness.
+			if ((entry.pid ?? entry.child?.pid) !== undefined) exiting.add(entry);
 			for (const [sinkId, binding] of sinks)
 				if (binding.sessionId === sessionId) sinks.delete(sinkId);
 		};
@@ -934,10 +940,11 @@ export const makeProcessSessionRunner = (
 				),
 			);
 
-		const createEntry = (): Effect.Effect<RunnerChild> =>
+		const createEntry = (sessionId: string): Effect.Effect<RunnerChild> =>
 			Effect.gen(function* () {
 				const runnerId = randomBytes(6).toString("hex");
 				return {
+					sessionId,
 					verified: false,
 					runnerId,
 					ready: yield* Deferred.make<RunnerSocket, SessionFailure>(),
@@ -972,8 +979,8 @@ export const makeProcessSessionRunner = (
 		const upgrade = makeRunnerUpgrade<RunnerChild>({
 			eligible,
 			runFork,
-			create: (_sessionId, old) =>
-				createEntry().pipe(
+			create: (sessionId, old) =>
+				createEntry(sessionId).pipe(
 					Effect.tap((entry) =>
 						Effect.sync(() => {
 							entry.candidate = true;
@@ -1422,6 +1429,23 @@ export const makeProcessSessionRunner = (
 					);
 				}
 			});
+			hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
+				return Effect.sync(() => {
+					// Before hello only the spawned child's pid is known.
+					const alive = (entry: RunnerChild) => {
+						const pid = entry.pid ?? entry.child?.pid;
+						return pid !== undefined && runnerPidAlive(pid);
+					};
+					for (const entry of exiting) if (!alive(entry)) exiting.delete(entry);
+					const owns = (entry: RunnerChild | undefined) =>
+						entry?.sessionId === sessionId && alive(entry);
+					return (
+						owns(children.get(sessionId)) ||
+						[...candidates, ...exiting].some(owns)
+					);
+				});
+			}
+
 			getNativeSessionEffect(
 				sessionId: string,
 			): Effect.Effect<ProviderNativeSession | undefined> {
@@ -1667,7 +1691,7 @@ export const makeProcessSessionRunner = (
 										admission: existing?.endingReleased,
 									};
 								}
-								const created: RunnerChild = yield* createEntry();
+								const created: RunnerChild = yield* createEntry(sessionId);
 								created.commandsInFlight++;
 								admitted = created;
 								children.set(sessionId, created);
