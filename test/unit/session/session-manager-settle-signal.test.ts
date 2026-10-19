@@ -10,7 +10,7 @@ import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 // and a later manual settle is a server-side no-op that still shows its toast.
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
@@ -194,6 +194,30 @@ describe("SessionManagerService settle signal", () => {
 				// Manual settlement must consume the same merge before a wake-up, too.
 				yield* service.setSessionSettled("ses-idle", { settled: false });
 				yield* service.setSessionSettled("ses-idle", { settled: true });
+				expect(
+					(yield* store.readAllBySession("ses-idle"))
+						.filter((event) => event.type === "session.settled")
+						.at(-1)?.data,
+				).toEqual({ sessionId: "ses-idle", automatic: false, mergedHead });
+				// A click must not wait on git: on a busy machine each command can
+				// run to its timeout. The poller keeps the cached merge current.
+				yield* service.setSessionSettled("ses-idle", { settled: false });
+				const hangingGitDir = join(dir, "bin");
+				mkdirSync(hangingGitDir);
+				writeFileSync(join(hangingGitDir, "git"), "#!/bin/sh\nsleep 5\n", {
+					mode: 0o755,
+				});
+				const path = process.env["PATH"];
+				process.env["PATH"] = `${hangingGitDir}:${path}`;
+				const started = Date.now();
+				yield* service.setSessionSettled("ses-idle", { settled: true }).pipe(
+					Effect.ensuring(
+						Effect.sync(() => {
+							process.env["PATH"] = path;
+						}),
+					),
+				);
+				expect(Date.now() - started).toBeLessThan(1_000);
 				expect(
 					(yield* store.readAllBySession("ses-idle"))
 						.filter((event) => event.type === "session.settled")

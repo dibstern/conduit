@@ -106,9 +106,13 @@ export const setSessionSettled = (
 					workspace.value,
 				);
 				if (directory !== config.projectDir) {
-					const git = yield* Effect.tryPromise(() =>
-						daemonSessionGitCache.refresh(directory),
-					).pipe(Effect.orElseSucceed(() => undefined));
+					// A click must not wait on git, which can hit its timeout on a busy
+					// machine. The poller keeps the cached merge current.
+					const git =
+						daemonSessionGitCache.peek(directory) ??
+						(yield* Effect.tryPromise(() =>
+							daemonSessionGitCache.refresh(directory),
+						).pipe(Effect.orElseSucceed(() => undefined)));
 					consumedHead = git?.mergedHead;
 				}
 			}
