@@ -36,6 +36,7 @@ describe("Schema Migration", () => {
 					[62, "legacy_forks"],
 					[63, "sessions_archived"],
 					[64, "prompt_provider_reference"],
+					[65, "tool_result_event_refs"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
