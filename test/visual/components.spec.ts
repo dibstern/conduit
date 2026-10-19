@@ -496,7 +496,6 @@ if (stories.length > 0) {
 		["layout-sessionbar--desktop-unread-and-settled", "mobile"],
 		// These stories pin the wide desktop row. The phone project applies phone
 		// media rules even when the fixture requests a wide canvas.
-		["layout-sessionbar--desktop-git-identity", "mobile"],
 		["layout-sessionbar--desktop-long-title-narrow", "mobile"],
 		["layout-sessionbar--desktop-settled", "mobile"],
 		["layout-sessionbar--desktop-no-session", "mobile"],
