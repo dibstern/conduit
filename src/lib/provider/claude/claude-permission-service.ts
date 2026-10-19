@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { Effect, Fiber } from "effect";
 import { isRecord } from "../../utils.js";
 import {
@@ -211,7 +210,7 @@ export class ClaudePermissionService {
 				const request = yield* Effect.forkDetach(
 					restore(
 						sink.requestQuestion({
-							requestId: options.toolUseID,
+							requestId: options.requestId ?? options.toolUseID,
 							toolUseId: options.toolUseID,
 							questions,
 						}),
@@ -257,7 +256,7 @@ export class ClaudePermissionService {
 		options: CanUseToolOptions,
 	): Effect.Effect<PermissionResult, ClaudeAdapterError> {
 		return Effect.gen({ self: this }, function* () {
-			const requestId = randomUUID();
+			const requestId = options.requestId ?? options.toolUseID;
 			const createdAt = new Date().toISOString();
 			const sink = ctx.eventSink ?? this.deps.sink;
 			if (!sink) {

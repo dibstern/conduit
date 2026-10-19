@@ -939,6 +939,8 @@ export const CanonicalEvents = {
 	"permission.asked": live(
 		Schema.Struct({
 			id: Schema.String,
+			providerProcessId: Schema.optionalKey(Schema.String),
+			providerRequestId: Schema.optionalKey(Schema.String),
 			sessionId: Schema.String,
 			toolName: Schema.String,
 			input: Schema.Unknown.pipe(
@@ -950,6 +952,8 @@ export const CanonicalEvents = {
 	"permission.resolved": live(
 		Schema.Struct({
 			id: Schema.String,
+			providerProcessId: Schema.optionalKey(Schema.String),
+			providerRequestId: Schema.optionalKey(Schema.String),
 			decision: PermissionDecisionSchema,
 			resolvedBy: Schema.optionalKey(Schema.Literal("auto")),
 		}),
@@ -957,6 +961,8 @@ export const CanonicalEvents = {
 	"question.asked": live(
 		Schema.Struct({
 			id: Schema.String,
+			providerProcessId: Schema.optionalKey(Schema.String),
+			providerRequestId: Schema.optionalKey(Schema.String),
 			sessionId: Schema.String,
 			questions: Schema.Unknown.pipe(
 				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
@@ -967,6 +973,8 @@ export const CanonicalEvents = {
 	"question.resolved": live(
 		Schema.Struct({
 			id: Schema.String,
+			providerProcessId: Schema.optionalKey(Schema.String),
+			providerRequestId: Schema.optionalKey(Schema.String),
 			answers: Schema.Record(Schema.String, Schema.Unknown),
 		}),
 	),

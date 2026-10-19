@@ -65,7 +65,7 @@ find it still listed. An upstream failure is logged with operation, session id,
 and cause, and the command still succeeds — Conduit's durable state is the
 source of truth, and the provider is a cache of it.
 
-`test/unit/effect/session-mutation-boundary-grep.test.ts` enforces the second
+`test/unit/effect/session-mutation-boundary-grep.guard.test.ts` enforces the second
 half of this structurally: a direct `api.session.create|update|delete` call
 anywhere in `src/` outside `session-command.ts` fails the build. There is no
 allowlist to curate — the rule is the architecture, stated once. A companion
@@ -92,7 +92,7 @@ Read state is therefore written directly to the read model, through one module,
 version and publishes the row after commit, so every client sees the change. The
 guarantee this ADR exists for still holds, by a different mechanism. The write
 goes straight into the table `listSessions` reads, so it cannot miss the read
-model. A boundary test, in the style of `session-mutation-boundary-grep.test.ts`,
+model. A boundary test, in the style of `session-mutation-boundary-grep.guard.test.ts`,
 fails the build if anything outside `SessionAttention` writes `seen_version`.
 
 Main's `session.read` and `session.unread` events predate this amendment. They

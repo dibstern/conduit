@@ -88,12 +88,12 @@ async function main(): Promise<void> {
 	buildFrontend();
 
 	// Start preview server
-	const previewProc = await startPreview();
+	const preview = await startPreview();
 
 	try {
-		await runScenes(scenes);
+		await runScenes(scenes, preview.url);
 	} finally {
-		killPreviewGroup(previewProc);
+		killPreviewGroup(preview.process);
 		// Clean video temp dir
 		rmSync(path.join(MEDIA_DIR, "_video_tmp"), {
 			recursive: true,

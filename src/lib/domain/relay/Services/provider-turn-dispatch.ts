@@ -433,10 +433,10 @@ const makeEventSink = (sessionId: string, driver: ProviderDriverKind) =>
 				),
 			persist,
 			ingestion: {
-				ingest: (event) =>
+				ingest: (event, onPrompt) =>
 					Effect.contextWith((caller: Context.Context<never>) =>
 						ingestion
-							.ingest(event)
+							.ingest(event, onPrompt)
 							.pipe(Effect.provide(Context.merge(runtime, caller))),
 					),
 			},

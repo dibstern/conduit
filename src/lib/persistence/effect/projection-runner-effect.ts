@@ -1,6 +1,6 @@
 // The only projection runner. Uses SqlClient.withTransaction for writes.
 
-import { Context, Data, Effect, Exit, Semaphore } from "effect";
+import { Context, Data, Effect, Exit, Ref, Semaphore } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
@@ -12,6 +12,7 @@ import {
 	type ProjectionContext,
 	type ProjectionTouch,
 } from "./projectors-effect.js";
+import { SessionRollupProjects } from "./session-rollup-projects.js";
 import { refreshSidebar } from "./sidebar-projection.js";
 import {
 	decodeStoredEventRow,
@@ -109,6 +110,10 @@ export const makeProjectionRunnerEffect = (
 	Effect.gen(function* () {
 		const cursorRepo = yield* ProjectorCursorEffectTag;
 		const sql = yield* SqlClient.SqlClient;
+		const projects = yield* SessionRollupProjects;
+		const rollupProjectIds = projects
+			? Ref.get(projects)
+			: Effect.succeed(undefined);
 		const recoveryLock = yield* Semaphore.make(1);
 		const batchCursorName =
 			BATCH_CURSOR_PREFIX +
@@ -240,7 +245,11 @@ export const makeProjectionRunnerEffect = (
 					}
 
 					const touched = mergeTouches(touches);
-					yield* refreshSidebar(touched.sidebar ?? [], version);
+					yield* refreshSidebar(
+						touched.sidebar ?? [],
+						version,
+						yield* rollupProjectIds,
+					);
 					return {
 						version,
 						projectIds: [event.projectId],
@@ -305,7 +314,11 @@ export const makeProjectionRunnerEffect = (
 						);
 						// Once for the batch: a refresh reads whole families.
 						const touched = mergeTouches(touches);
-						yield* refreshSidebar(touched.sidebar ?? [], version);
+						yield* refreshSidebar(
+							touched.sidebar ?? [],
+							version,
+							yield* rollupProjectIds,
+						);
 						return { version, touched };
 					}).pipe(
 						Effect.mapError(
@@ -442,7 +455,11 @@ export const makeProjectionRunnerEffect = (
 													replaying: true,
 												});
 												// This savepoint isolates one projector/event pair.
-												yield* refreshSidebar(touched.sidebar ?? [], version);
+												yield* refreshSidebar(
+													touched.sidebar ?? [],
+													version,
+													yield* rollupProjectIds,
+												);
 												yield* cursorRepo.upsert(
 													projector.name,
 													eventRow.sequence,

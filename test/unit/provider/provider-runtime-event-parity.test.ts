@@ -745,6 +745,16 @@ describe("translateProviderRuntimeEventToDomain", () => {
 		];
 
 		const result = foldRuntimeEvents(sequence);
+		const permission = result.events.find(
+			(event) => event.type === "permission.asked",
+		);
+		const question = result.events.find(
+			(event) => event.type === "question.asked",
+		);
+		expect(permission?.data.id).toBeTypeOf("string");
+		expect(permission?.data.id).not.toBe("permission-1");
+		expect(question?.data.id).toBeTypeOf("string");
+		expect(question?.data.id).not.toBe("question-1");
 
 		expect(result.events.map((event) => event.type)).toEqual([
 			"session.renamed",
@@ -759,22 +769,26 @@ describe("translateProviderRuntimeEventToDomain", () => {
 				title: "New session title",
 			},
 			{
-				id: "permission-1",
+				id: permission?.data.id,
+				providerRequestId: "permission-1",
 				sessionId: "session-123",
 				toolName: "Bash",
 				input: { command: "pnpm test" },
 			},
 			{
-				id: "permission-1",
+				id: permission?.data.id,
+				providerRequestId: "permission-1",
 				decision: "always",
 			},
 			{
-				id: "question-1",
+				id: question?.data.id,
+				providerRequestId: "question-1",
 				sessionId: "session-123",
 				questions: [{ id: "target", question: "Which target?" }],
 			},
 			{
-				id: "question-1",
+				id: question?.data.id,
+				providerRequestId: "question-1",
 				answers: { target: "unit" },
 			},
 		]);
@@ -810,6 +824,7 @@ describe("translateProviderRuntimeEventToDomain", () => {
 				type: "permission.resolved",
 				data: {
 					id: "permission-1",
+					providerRequestId: "permission-1",
 					decision: expectedDecision,
 				},
 			}),

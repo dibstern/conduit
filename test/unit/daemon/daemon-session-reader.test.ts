@@ -590,7 +590,20 @@ describe("listDaemonSessions", () => {
 			expect(rootB).not.toHaveProperty("processing");
 			expect(rootC).toMatchObject({ id: "root-c", processing: true });
 		}).pipe(
-			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
+			Effect.provide(
+				makeDaemonSharedStoreLayer(root, {
+					...defaultDaemonConfig(),
+					projects: [
+						{
+							slug: "project",
+							title: "Project",
+							path: project,
+							folders: [project],
+							addedAt: 1,
+						},
+					],
+				}),
+			),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
@@ -668,7 +681,20 @@ describe("listDaemonSessions", () => {
 			expect(result.hasMore).toBe(false);
 			expect(result.nextCursor).toBeNull();
 		}).pipe(
-			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
+			Effect.provide(
+				makeDaemonSharedStoreLayer(root, {
+					...defaultDaemonConfig(),
+					projects: [
+						{
+							slug: "project",
+							title: "Project",
+							path: project,
+							folders: [project],
+							addedAt: 1,
+						},
+					],
+				}),
+			),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
