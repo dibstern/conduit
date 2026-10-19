@@ -597,11 +597,7 @@ describe("ProviderRuntimeIngestion", () => {
 					messageId: "message-1",
 					role: "assistant",
 				}),
-				metadata: {
-					providerRuntimeEventId: "runtime-event-1",
-					rawSource: "claude.sdk.message",
-					providerRefs: BASE_EVENT.providerRefs,
-				},
+				metadata: {},
 			}),
 		]);
 		expect(harness.projectBatch).toHaveBeenCalledTimes(1);

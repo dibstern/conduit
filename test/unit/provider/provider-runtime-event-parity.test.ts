@@ -64,6 +64,33 @@ function stateEntries(state: ProviderRuntimeDomainMapperState) {
 
 describe("translateProviderRuntimeEventToDomain", () => {
 	it.each([
+		"claude.sdk.message",
+		"opencode.sse",
+		"opencode.rest",
+		"claude.subagent.transcript",
+	])("persists only metadata with readers for %s", (kind) => {
+		const { events } = translateProviderRuntimeEventToDomain(
+			runtimeEvent({
+				eventId: "compact-metadata",
+				type: "message.created",
+				providerId: kind.startsWith("opencode") ? "opencode" : "claude",
+				rawSource: { kind },
+				metadata: { source: "test-source" },
+				data: { messageId: "message-1", role: "assistant" },
+			}),
+		);
+
+		expect(events).toHaveLength(1);
+		expect(events[0]?.metadata).toEqual({
+			source: "test-source",
+			...(kind === "opencode.rest" || kind === "claude.subagent.transcript"
+				? { rawSource: kind }
+				: {}),
+		});
+		expect(events[0]?.metadata).not.toHaveProperty("providerRuntimeEventId");
+	});
+
+	it.each([
 		"text.delta",
 		"thinking.delta",
 	])("emits the first empty %s to open its part and drops later empty deltas", (type) => {
@@ -211,11 +238,7 @@ describe("translateProviderRuntimeEventToDomain", () => {
 					sessionId: "session-123",
 					turnId: "turn-1",
 				},
-				metadata: {
-					providerRuntimeEventId: "runtime-event-1",
-					rawSource: "claude.sdk.message",
-					providerRefs: BASE_EVENT.providerRefs,
-				},
+				metadata: {},
 			}),
 		]);
 		expect(state.currentAssistantMessageIds.get("session-123:turn-1")).toBe(
@@ -274,9 +297,7 @@ describe("translateProviderRuntimeEventToDomain", () => {
 					partId: "message-1:text",
 					text: "hello",
 				},
-				metadata: expect.objectContaining({
-					providerRuntimeEventId: "runtime-event-2",
-				}),
+				metadata: {},
 			}),
 		]);
 	});

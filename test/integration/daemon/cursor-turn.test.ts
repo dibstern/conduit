@@ -271,19 +271,9 @@ describe("Cursor text turns through the built daemon and detached runner", () =>
 		expect(firstState.eventCounts["text.delta"]).toBeGreaterThan(0);
 		expect(firstState.eventCounts["turn.completed"]).toBe(1);
 		expect(firstState.interactions).toBe(0);
-		const capturedTerminal = traceRows(
-			resolve("test/fixtures/cursor-sdk-traces/basic.jsonl"),
-		).find(({ kind }) => kind === "wait.result")?.data as Record<
-			string,
-			unknown
-		>;
-		expect(
-			firstState.events.some(
-				({ metadata }) =>
-					metadata.providerRefs?.["providerRequestId"] ===
-					capturedTerminal["requestId"],
-			),
-		).toBe(true);
+		expect(firstState.events).toContainEqual(
+			expect.objectContaining({ type: "turn.completed", metadata: {} }),
+		);
 		const firstHistory = await browser.history(id);
 		expect(
 			firstHistory
