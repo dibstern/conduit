@@ -12,10 +12,6 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import {
-	GetMessages,
-	GetSession,
-	GetSessionStatuses,
-	GetSessions,
 	getMessages,
 	getSession,
 	getSessionStatuses,
@@ -121,8 +117,9 @@ describe("GetSessions", () => {
 
 	it.effect("propagates API errors as OpenCodeRequestError", () =>
 		Effect.gen(function* () {
+			const cause = new Error("connection refused");
 			const layer = makeMockApiLayer({
-				listSessions: () => Promise.reject(new Error("connection refused")),
+				listSessions: () => Promise.reject(cause),
 			});
 
 			const result = yield* getSessions.pipe(
@@ -133,6 +130,7 @@ describe("GetSessions", () => {
 			expect(result).toBeInstanceOf(OpenCodeRequestError);
 			expect(result._tag).toBe("OpenCodeRequestError");
 			expect(result.method).toBe("session.list");
+			expect(result.cause).toBe(cause);
 		}),
 	);
 });
@@ -241,9 +239,7 @@ describe("GetSession (batched)", () => {
 				expect(s1.id).toBe("s1");
 				expect(s2.id).toBe("s2");
 
-				// The batched resolver should call session.list() only once
-				// (or a small number of times if the scheduler didn't batch them)
-				expect(mock.session.list.mock.calls.length).toBeLessThanOrEqual(2);
+				expect(mock.session.list).toHaveBeenCalledTimes(1);
 			}),
 	);
 
@@ -273,40 +269,4 @@ describe("GetSession (batched)", () => {
 			expect(result).toBeInstanceOf(OpenCodeRequestError);
 		}),
 	);
-});
-
-describe("Request types", () => {
-	it("GetSessions has correct _tag", () => {
-		const req = new GetSessions({});
-		expect(req._tag).toBe("GetSessions");
-	});
-
-	it("GetMessages has correct _tag and sessionId", () => {
-		const req = new GetMessages({ sessionId: "s42" });
-		expect(req._tag).toBe("GetMessages");
-		expect(req.sessionId).toBe("s42");
-	});
-
-	it("GetSessionStatuses has correct _tag", () => {
-		const req = new GetSessionStatuses({});
-		expect(req._tag).toBe("GetSessionStatuses");
-	});
-
-	it("GetSession has correct _tag and sessionId", () => {
-		const req = new GetSession({ sessionId: "s99" });
-		expect(req._tag).toBe("GetSession");
-		expect(req.sessionId).toBe("s99");
-	});
-});
-
-describe("OpenCodeRequestError", () => {
-	it("has correct tag and fields", () => {
-		const error = new OpenCodeRequestError({
-			method: "session.list",
-			cause: new Error("oops"),
-		});
-		expect(error._tag).toBe("OpenCodeRequestError");
-		expect(error.method).toBe("session.list");
-		expect(error.cause).toBeInstanceOf(Error);
-	});
 });
