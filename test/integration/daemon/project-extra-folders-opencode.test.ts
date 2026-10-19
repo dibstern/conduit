@@ -2,11 +2,18 @@
 // SCENARIO=multi-folder-project pnpm test:record-snapshots
 // Assertions use the fixed marker and replay-time paths, never recorded paths.
 
-import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SaveProject } from "../../../src/lib/contracts/ws-rpc.js";
+import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -275,6 +282,17 @@ describe("OpenCode project extra folders through the daemon", () => {
 		]);
 		await save(fixture, [fixture.projectDir]);
 		if (restart) {
+			// SaveProject queues persistence; make the removal durable before crashing.
+			await vi.waitFor(() => {
+				const config = JSON.parse(
+					readFileSync(join(fixture.configDir, "daemon.json"), "utf8"),
+				) as DaemonConfig;
+				const folders = config.projects.find(
+					({ slug }) => slug === "process-test",
+				)?.folders;
+				evidence["persistedFoldersBeforeRestart"] = folders;
+				expect(folders).toEqual([fixture.projectDir]);
+			});
 			await fixture.kill();
 			await fixture.restart();
 		}
