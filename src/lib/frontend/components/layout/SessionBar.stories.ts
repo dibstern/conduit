@@ -1342,6 +1342,10 @@ export const DesktopNoCheckout: Story = {
 		const canvas = within(canvasElement);
 		const bar = canvas.getByTestId("session-bar");
 		await expect(bar).toHaveAttribute("data-compact", "false");
+		expect(bar.getBoundingClientRect().height).toBe(52);
+		expect(
+			canvas.getByTestId("session-bar-overflow").getBoundingClientRect().height,
+		).toBeGreaterThanOrEqual(44);
 		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
 		expect(canvas.queryByTitle("Uncommitted changes")).toBeNull();
 		await expect(canvas.getByTestId("session-bar-settle")).toBeVisible();

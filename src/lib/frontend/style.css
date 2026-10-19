@@ -890,6 +890,16 @@ body:has(dialog:modal) {
 		"back title meta connection more"
 		"tasks tasks tasks tasks tasks";
 }
+/* Final's idle header is 52px: a 44px target, 7px padding and a 1px border.
+   Keep the existing room for the goal title's focus ring and the task row. */
+#session-bar[data-compact="false"]:not(
+		:has(
+				[data-testid="session-goal-subtitle"],
+				[data-testid="background-tasks-row"]
+			)
+	) {
+	padding-block: 3.5px;
+}
 #session-bar[data-compact="false"] [data-testid="background-tasks-row"] {
 	grid-area: tasks;
 }
