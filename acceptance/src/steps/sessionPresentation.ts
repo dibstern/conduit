@@ -171,6 +171,14 @@ export const sessionPresentationHandlers: StepHandler[] = [
 		match: /^the transcript is visible at the remembered scroll position$/,
 		run: async ({ world }) => {
 			await world.page.locator("#messages").waitFor({ state: "visible" });
+			// The top clearance trails a bar resize by a frame (it is measured by a
+			// ResizeObserver), so let it land before measuring.
+			await world.page.evaluate(
+				() =>
+					new Promise((resolve) =>
+						requestAnimationFrame(() => requestAnimationFrame(resolve)),
+					),
+			);
 			const before = transcriptMessageTops.get(world.page);
 			const after = await world.page
 				.locator("#messages .msg-user")
@@ -188,6 +196,18 @@ export const sessionPresentationHandlers: StepHandler[] = [
 			await world.page.locator("#messages").evaluate((el) => {
 				el.scrollTo({ top: el.scrollHeight });
 			});
+		},
+	},
+	{
+		// Sets scrollTop directly: a wheel would also toggle the bar, and the
+		// scenario needs the bar change to come only from the step after this.
+		name: "park transcript just above the bottom",
+		match: /^the transcript is parked ([0-9]+) pixels above the bottom$/,
+		run: async ({ world, match }) => {
+			const gap = Number(match[1]);
+			await world.page.locator("#messages").evaluate((el, gap) => {
+				el.scrollTop = el.scrollHeight - el.clientHeight - gap;
+			}, gap);
 		},
 	},
 	{

@@ -133,6 +133,21 @@ Scenario: Scrolling down collapses the bar mid-transcript and scrolling up resto
   When I scroll the transcript up by 200 pixels
   Then the session bar is expanded
 
+# Just above the bottom the reader still follows new output, but the bar
+# changing size is not new output and must not snap them down to it.
+Scenario: Showing the bar just above the bottom keeps the reading position
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  When I scroll the transcript up by 400 pixels
+  Then the jump-to-latest control is visible
+  When I scroll the transcript back to the bottom
+  Then the session bar is collapsed
+  When the transcript is parked 30 pixels above the bottom
+  And I remember the transcript scroll position
+  And I tap the chevron to show the bar
+  Then the session bar is expanded
+  And the transcript is visible at the remembered scroll position
+
 Scenario Outline: header has no checkout
   Given the session loaded the skills "release-notes by you in turn 1; changelog-style by agent in turn 1; verify by agent in turn 2"
   And the conduit app is served with the connected mockup

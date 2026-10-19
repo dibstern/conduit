@@ -200,26 +200,33 @@
 	});
 
 	// Container resizes can change the bottom gap without a scroll event.
+	// Border box, because the default content box also shrinks when the top
+	// clearance padding grows, and that is handled below without a snap.
 	$effect(() => {
 		const scroller = messagesEl;
 		if (!scroller) return;
 		const observer = new ResizeObserver(() => scrollCtrl.onContainerResize());
-		observer.observe(scroller);
+		observer.observe(scroller, { box: "border-box" });
 		return () => observer.disconnect();
 	});
 
 	// The transcript's top padding follows topClearance (ChatLayout sets the
 	// CSS variable). Chromium does not scroll-anchor on a scroller's own padding
-	// change, so keep a detached reading position in place by hand. Svelte runs
-	// this after the DOM update and before paint, so it lands in the same frame.
+	// change, so keep the reading position in place by hand. Only a reader at
+	// the very bottom stays pinned there (shifting would double-count, as the
+	// browser already clamps scrollTop when the padding shrinks). A reader just
+	// above the bottom still counts as following, but the bar resizing is not
+	// new content to follow, so they are shifted, not snapped. Svelte runs this
+	// after the DOM update and before paint, so it lands in the same frame.
 	let appliedClearance: number | undefined;
 	$effect(() => {
 		const scroller = messagesEl;
 		if (!scroller) return;
 		const delta = appliedClearance === undefined ? 0 : topClearance - appliedClearance;
 		appliedClearance = topClearance;
-		if (delta !== 0 && untrack(() => scrollCtrl.isDetached)) scroller.scrollTop += delta;
-		untrack(() => scrollCtrl.onContainerResize());
+		if (delta === 0) return;
+		if (untrack(() => scrollCtrl.isPinned)) scrollCtrl.onContainerResize();
+		else scroller.scrollTop += delta;
 	});
 
 	// Scroll to bottom when the transcript becomes ready.
