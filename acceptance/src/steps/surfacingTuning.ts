@@ -406,7 +406,7 @@ export const surfacingTuningHandlers: StepHandler[] = [
 			const page = world.page;
 			await expect(preview(page)).toBeVisible();
 			await expect(preview(page)).toContainText("agrees with");
-			const now = Date.now();
+			const now = await page.evaluate(() => Date.now());
 			await page.clock.install({ time: now });
 			await page.clock.pauseAt(now + 1);
 			const initial = fixture(page).scoreRequests.length;

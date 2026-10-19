@@ -1,12 +1,13 @@
 import { expect, type Page } from "@playwright/test";
 import { sendMockFamily } from "../../../test/e2e/helpers/rpc-mock.js";
 import { InputPage } from "../../../test/e2e/page-objects/input.page.js";
-import { DESKTOP_VIEWPORT } from "../playwrightDriver.js";
+import { DESKTOP_VIEWPORT, PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	openComposerMoreSheet,
 	openSessionRoute,
 	relayControls,
+	requireRelayControl,
 	requireRpcControl,
 	rpcControls,
 } from "./shared.js";
@@ -33,6 +34,67 @@ async function openApprovalsMenu(page: Page): Promise<void> {
 }
 
 export const composerHandlers: StepHandler[] = [
+	{
+		name: "assert ordered mock messages after clock changes",
+		match: /^generated messages follow the scenario clock in arrival order$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const now = await page.evaluate(() => Date.now());
+			const texts = ["Start a composer turn.", "The fixed-clock reply"];
+			for (let index = 0; index < 12; index++) {
+				const text = `Device message ${index + 1}`;
+				texts.push(text);
+				requireRelayControl(page).sendMessage({
+					type: "user_message",
+					sessionId: "sess-mockup-001",
+					text,
+				});
+			}
+			const times = page.locator("#messages time");
+			await expect(times).toHaveCount(texts.length);
+			const stamps = await times.evaluateAll((elements) =>
+				elements.map((element) =>
+					Date.parse(element.getAttribute("datetime") ?? ""),
+				),
+			);
+			expect(stamps[0]).toBe(now);
+			for (let index = 1; index < stamps.length; index++)
+				expect(stamps[index]).toBeGreaterThan(stamps[index - 1] ?? 0);
+			const transcript = page.locator("#messages");
+			const content = await transcript.innerText();
+			for (let index = 1; index < texts.length; index++)
+				expect(content.indexOf(texts[index] ?? "")).toBeGreaterThan(
+					content.indexOf(texts[index - 1] ?? ""),
+				);
+		},
+	},
+	{
+		name: "assert deterministic mock identity and time",
+		match:
+			/^the mock avatar and message clock match the fixed acceptance fixture$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			expect(
+				await page.evaluate(() => ({
+					now: Date.now(),
+					date: new Date().toISOString(),
+					zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+					locale: navigator.language,
+				})),
+			).toEqual({
+				now: PINNED_CLOCK_MS,
+				date: new Date(PINNED_CLOCK_MS).toISOString(),
+				zone: "UTC",
+				locale: "en-US",
+			});
+			const message = page.locator("#messages .msg-user").last();
+			await expect(message.getByTestId("user-avatar")).toHaveText("Y");
+			const timestamp = await message.locator("time").getAttribute("datetime");
+			const createdAt = Date.parse(timestamp ?? "");
+			expect(createdAt).toBeGreaterThanOrEqual(PINNED_CLOCK_MS);
+			expect(createdAt).toBeLessThan(PINNED_CLOCK_MS + 60_000);
+		},
+	},
 	{
 		name: "set desktop viewport",
 		match: /^the viewport is a desktop$/,

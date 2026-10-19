@@ -17,6 +17,9 @@ export interface MockMessage {
 	[key: string]: unknown;
 }
 
+/** Shared epoch for canned mock data and the acceptance browser clock. */
+export const MOCK_NOW_MS = Date.UTC(2026, 0, 1, 9, 41, 0);
+
 export const initMessages: MockMessage[] = [
 	{
 		type: "instance_list",
@@ -69,7 +72,7 @@ export const initMessages: MockMessage[] = [
 				accountId: "opencode",
 				title: "Fix model selector UI",
 				status: "idle",
-				updatedAt: Date.now(),
+				updatedAt: MOCK_NOW_MS,
 				messageCount: 4,
 			},
 			{
@@ -78,7 +81,7 @@ export const initMessages: MockMessage[] = [
 				accountId: "opencode",
 				title: "Add dark mode support",
 				status: "idle",
-				updatedAt: Date.now() - 3600_000,
+				updatedAt: MOCK_NOW_MS - 3600_000,
 				messageCount: 8,
 			},
 			{
@@ -87,7 +90,7 @@ export const initMessages: MockMessage[] = [
 				accountId: "opencode",
 				title: "Refactor WebSocket handler",
 				status: "idle",
-				updatedAt: Date.now() - 7200_000,
+				updatedAt: MOCK_NOW_MS - 7200_000,
 				messageCount: 12,
 			},
 			{
@@ -96,7 +99,7 @@ export const initMessages: MockMessage[] = [
 				accountId: "opencode",
 				title: "Implement file browser panel",
 				status: "idle",
-				updatedAt: Date.now() - 86400_000,
+				updatedAt: MOCK_NOW_MS - 86400_000,
 				messageCount: 6,
 			},
 			{
@@ -105,7 +108,7 @@ export const initMessages: MockMessage[] = [
 				accountId: "opencode",
 				title: "Add notification system",
 				status: "idle",
-				updatedAt: Date.now() - 100800_000,
+				updatedAt: MOCK_NOW_MS - 100800_000,
 				messageCount: 3,
 			},
 			{
@@ -114,7 +117,7 @@ export const initMessages: MockMessage[] = [
 				accountId: "opencode",
 				title: "Set up project structure",
 				status: "idle",
-				updatedAt: Date.now() - 345600_000,
+				updatedAt: MOCK_NOW_MS - 345600_000,
 				messageCount: 10,
 			},
 			{
@@ -123,7 +126,7 @@ export const initMessages: MockMessage[] = [
 				accountId: "opencode",
 				title: "Initial relay architecture",
 				status: "idle",
-				updatedAt: Date.now() - 432000_000,
+				updatedAt: MOCK_NOW_MS - 432000_000,
 				messageCount: 15,
 			},
 		],
@@ -553,7 +556,7 @@ export const multiInstanceList: MockMessage = {
 			managed: true,
 			status: "healthy",
 			restartCount: 0,
-			createdAt: Date.now() - 86400_000,
+			createdAt: MOCK_NOW_MS - 86400_000,
 		},
 		{
 			id: "work",
@@ -564,7 +567,7 @@ export const multiInstanceList: MockMessage = {
 			managed: true,
 			status: "unhealthy",
 			restartCount: 2,
-			createdAt: Date.now() - 43200_000,
+			createdAt: MOCK_NOW_MS - 43200_000,
 		},
 	],
 };
@@ -582,7 +585,7 @@ export const singleInstanceList: MockMessage = {
 			managed: true,
 			status: "healthy",
 			restartCount: 0,
-			createdAt: Date.now(),
+			createdAt: MOCK_NOW_MS,
 		},
 	],
 };
@@ -674,7 +677,7 @@ export const noInstanceInitMessages: MockMessage[] = [
 				accountId: null,
 				title: "Test session",
 				status: "idle",
-				updatedAt: Date.now(),
+				updatedAt: MOCK_NOW_MS,
 				messageCount: 0,
 			},
 		],
@@ -708,7 +711,7 @@ export const multiInstanceInitMessages: MockMessage[] = [
 				accountId: "personal",
 				title: "Test session",
 				status: "idle",
-				updatedAt: Date.now(),
+				updatedAt: MOCK_NOW_MS,
 				messageCount: 0,
 			},
 		],
@@ -742,7 +745,7 @@ export const singleInstanceInitMessages: MockMessage[] = [
 				accountId: "opencode",
 				title: "Test session",
 				status: "idle",
-				updatedAt: Date.now(),
+				updatedAt: MOCK_NOW_MS,
 				messageCount: 0,
 			},
 		],
@@ -814,7 +817,7 @@ export const variantInitMessages: MockMessage[] = [
 				accountId: "opencode",
 				title: "Test session",
 				status: "idle",
-				updatedAt: Date.now(),
+				updatedAt: MOCK_NOW_MS,
 				messageCount: 0,
 			},
 		],
@@ -860,7 +863,7 @@ export const noVariantInitMessages: MockMessage[] = [
 				accountId: "opencode",
 				title: "Test session",
 				status: "idle",
-				updatedAt: Date.now(),
+				updatedAt: MOCK_NOW_MS,
 				messageCount: 0,
 			},
 		],
@@ -934,7 +937,7 @@ export const contextWindowInitMessages: MockMessage[] = [
 				accountId: "opencode",
 				title: "Test session",
 				status: "idle",
-				updatedAt: Date.now(),
+				updatedAt: MOCK_NOW_MS,
 				messageCount: 0,
 			},
 		],
@@ -984,7 +987,7 @@ export const noContextWindowInitMessages: MockMessage[] = [
 				accountId: "opencode",
 				title: "Test session",
 				status: "idle",
-				updatedAt: Date.now(),
+				updatedAt: MOCK_NOW_MS,
 				messageCount: 0,
 			},
 		],

@@ -114,9 +114,7 @@ export const sessionPresentationHandlers: StepHandler[] = [
 			requireRelayControl(world.page).sendMessage({
 				type: "user_message",
 				sessionId: "sess-mockup-001",
-				messageId: `other-device-${Date.now()}`,
 				text,
-				createdAt: Date.now(),
 			});
 			await world.page.locator("#messages").getByText(text).waitFor();
 		},
