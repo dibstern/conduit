@@ -710,7 +710,7 @@ export class OpenCodeRuntimeEventTranslator {
 						: {}),
 				}),
 				// Keep receipt time for session activity; message provenance uses provider time.
-				...(msg.role === "user" && msg.time?.created !== undefined
+				...(msg.time?.created !== undefined
 					? { metadata: { providerCreatedAt: msg.time.created } }
 					: {}),
 			});
