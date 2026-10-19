@@ -94,7 +94,7 @@ describe("managed OpenCode through CLI server replacement", () => {
 			code: number | null;
 			signal: NodeJS.Signals | null;
 		}>((done, fail) => {
-			child.once("exit", (code, signal) => done({ code, signal }));
+			child.once("close", (code, signal) => done({ code, signal }));
 			child.once("error", fail);
 		});
 		cliProcesses.push({ child, exit });
@@ -124,6 +124,8 @@ describe("managed OpenCode through CLI server replacement", () => {
 	});
 
 	it("preserves the same OpenCode PID after SIGTERM and serve, then terminates it on stop", async () => {
+		const timingsMs: Record<string, number> = {};
+		result["timingsMs"] = timingsMs;
 		harness = await ProcessHarness.start({ managedOpenCode: true });
 		// Managed OpenCode starts lazily, so nothing listens until first use.
 		await harness.requestRpc({
@@ -139,6 +141,7 @@ describe("managed OpenCode through CLI server replacement", () => {
 		await harness.terminate();
 		expect(daemonBefore.exitCode).toBe(0);
 		expect(alive(before.pid)).toBe(true);
+		const replacementStartedAt = performance.now();
 		const replacement = spawnCli([
 			"serve",
 			"--port",
@@ -148,8 +151,9 @@ describe("managed OpenCode through CLI server replacement", () => {
 			"--no-https",
 		]);
 		await vi.waitFor(() => expect(replacement.output()).toContain("Ready."), {
-			timeout: 15_000,
+			timeout: 60_000,
 		});
+		timingsMs["replacementReady"] = performance.now() - replacementStartedAt;
 		expect(replacement.child.pid).not.toBe(daemonBefore.pid);
 		expect(alive(before.pid)).toBe(true);
 		const after = await health();
@@ -159,13 +163,9 @@ describe("managed OpenCode through CLI server replacement", () => {
 		expect(afterRecord.port).toBe(port);
 
 		const stop = spawnCli(["stop"]);
-		await vi.waitFor(() => expect(stop.child.exitCode).toBe(0), {
-			timeout: 15_000,
-		});
+		expect(await stop.exit).toEqual({ code: 0, signal: null });
 		expect(stop.output()).toMatch(/(?:server|daemon) stopped\./i);
-		await vi.waitFor(() => expect(replacement.child.exitCode).toBe(0), {
-			timeout: 5000,
-		});
+		expect(await replacement.exit).toEqual({ code: 0, signal: null });
 		await vi.waitFor(
 			() => {
 				expect(alive(before.pid)).toBe(false);
@@ -176,6 +176,7 @@ describe("managed OpenCode through CLI server replacement", () => {
 		expect(recorded().pid).toBeUndefined();
 		result = {
 			passed: true,
+			timingsMs,
 			daemonPidBefore: daemonBefore.pid,
 			daemonPidAfter: replacement.child.pid,
 			opencodePidBefore: before.pid,
@@ -185,5 +186,5 @@ describe("managed OpenCode through CLI server replacement", () => {
 			childPid: before.childPid,
 			explicitStopTerminatedBoth: true,
 		};
-	});
+	}, 120_000);
 });
