@@ -1394,9 +1394,11 @@ describe("Claude session pre-warm through daemon RPC", () => {
 
 	it("settles a first send interrupted while initialization is pending and allows the next send", async () => {
 		const { harness, browser } = await start({
-			queryInitializationDelayMs: 1000,
+			restartProof: true,
+			holdRunnerAck: "place-user-message",
 		});
 		const sessionId = await browser.createSession("Cancel pending pre-warm");
+		writeFileSync(join(harness.root, "hold-next-initialization"), "hold once");
 		const warm = browser.preWarmSession(sessionId).then(
 			() => "ready" as const,
 			() => "cancelled" as const,
@@ -1418,6 +1420,19 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			expect(
 				harness.marks.some(
 					(mark) => mark.kind === "runner-command" && mark.type === "send-turn",
+				),
+			).toBe(true),
+		);
+		await vi.waitFor(async () =>
+			expect(
+				(await browser.history(sessionId)).some(
+					(message) =>
+						message.role === "user" &&
+						message.parts?.some(
+							(part) =>
+								part.type === "text" &&
+								part.text === "cancel-before-initialization",
+						),
 				),
 			).toBe(true),
 		);

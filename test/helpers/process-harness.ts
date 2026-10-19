@@ -213,7 +213,7 @@ export class ProcessHarness {
 		private readonly blockCapabilitiesProbe = false,
 		capabilityModels?: readonly ModelInfo[],
 		private readonly restartProof = false,
-		private readonly holdRunnerAck = false,
+		private readonly holdRunnerAck: boolean | "place-user-message" = false,
 		private readonly holdRunnerOutput?:
 			| "permission-request"
 			| "answer-permission"
@@ -511,7 +511,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			logLevel?: "warn";
 			/** Stand in for a login service: respawn exited daemons on the same port. */
 			respawnOnExit?: boolean;
-			holdRunnerAck?: boolean;
+			holdRunnerAck?: boolean | "place-user-message";
 			holdRunnerOutput?:
 				| "permission-request"
 				| "answer-permission"
@@ -1012,7 +1012,12 @@ Object.assign(ClaudeDriver, { create: deps => {
 							}
 						: {}),
 					...(this.holdRunnerAck
-						? { CONDUIT_TEST_HOLD_RUNNER_ACK: "text.delta" }
+						? {
+								CONDUIT_TEST_HOLD_RUNNER_ACK:
+									this.holdRunnerAck === true
+										? "text.delta"
+										: this.holdRunnerAck,
+							}
 						: {}),
 					...(this.holdRunnerOutput && this.generations.length === 0
 						? { CONDUIT_TEST_HOLD_RUNNER_OUTPUT: this.holdRunnerOutput }

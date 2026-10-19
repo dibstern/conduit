@@ -1243,6 +1243,14 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			});
 
 			yield* setup.pipe(
+				Effect.raceFirst(
+					Deferred.await(setupLock).pipe(
+						Effect.mapError(
+							(cause) =>
+								new ClaudeBoundaryError({ operation: "awaitSetup", cause }),
+						),
+					),
+				),
 				Effect.tap(() =>
 					Deferred.succeed(setupLock, undefined).pipe(Effect.ignore),
 				),
@@ -2129,10 +2137,13 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				const boundTurnId = bound ? ctx?.currentTurnId : undefined;
 				if (bound) {
 					if (!ctx) {
-						// A bound send still in setup has no context yet: discarding the
-						// warm query it awaits is what stops it.
+						// Stop setup too: it may still be placing the user message and
+						// otherwise create a cold query after the warm query is discarded.
 						const waiters = yield* pendingTurnWaiters(this.stateRef, sessionId);
 						if (!turnIds.some((turnId) => waiters.has(turnId))) return;
+						const setupLock = yield* getSetupLock(this.stateRef, sessionId);
+						if (setupLock)
+							yield* Deferred.fail(setupLock, new Error("Turn interrupted"));
 					} else if (
 						!boundTurnId ||
 						!turnIds.includes(boundTurnId) ||
