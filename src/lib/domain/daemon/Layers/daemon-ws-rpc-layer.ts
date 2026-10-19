@@ -61,6 +61,7 @@ import { CategorySet } from "../Services/category-set.js";
 import {
 	type ConfigPersistenceTag,
 	requestConfigSave,
+	saveConfig,
 } from "../Services/config-persistence-service.js";
 import {
 	commitDaemonRuntimeConfig,
@@ -459,7 +460,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 									else invalidateBrowsers();
 								});
 							}
-							yield* requestConfigSave;
+							yield* saveConfig;
 							return { ok: true as const };
 						}),
 					).pipe(Effect.uninterruptible);
@@ -482,7 +483,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 							...config,
 							keepAwake: request.enabled,
 						}));
-						yield* requestConfigSave;
+						yield* saveConfig;
 						return { ok: true as const, supported, active };
 					}).pipe(Effect.uninterruptible, keepAwakeLock.withPermits(1)),
 				),
@@ -490,7 +491,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				run(
 					Effect.gen(function* () {
 						yield* applyTailscaleServe(request.enabled);
-						yield* requestConfigSave;
+						yield* saveConfig;
 						return { ok: true as const };
 					}).pipe(Effect.uninterruptible, tailscaleServeLock.withPermits(1)),
 				),
@@ -509,7 +510,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 							...config,
 							...updates,
 						}));
-						yield* requestConfigSave;
+						yield* saveConfig;
 						return { ok: true as const };
 					}).pipe(Effect.uninterruptible, keepAwakeLock.withPermits(1)),
 				),
@@ -555,7 +556,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 							...config,
 							shuttingDown: true,
 						}));
-						yield* requestConfigSave;
+						yield* saveConfig;
 						return { ok: true as const };
 					}),
 				),
@@ -640,7 +641,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 									projectOrder,
 								}));
 								yield* PubSub.publish(bus, DaemonEvent.ProjectsChanged());
-								yield* requestConfigSave;
+								yield* saveConfig;
 							}),
 						),
 					),
@@ -652,6 +653,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 							(project) => project.slug === request.slug,
 						);
 						yield* removeProjectFromEffectRegistry(request.slug);
+						yield* saveConfig;
 						// Removed folders feed the dialog's "recent" suggestions. Reversed
 						// so the main folder ends up first; a failed write must not fail
 						// the removal.
@@ -682,6 +684,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 								?.runsOpenCodeServer
 						)
 							yield* Effect.scoped(openCodeInstances.use(request.instanceId));
+						yield* saveConfig;
 						return {
 							projectSlug: request.projectSlug,
 							instances: yield* instanceList,
@@ -697,6 +700,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 								?.runsOpenCodeServer
 						)
 							yield* openCodeInstances.stop(request.instanceId);
+						yield* saveConfig;
 						return {
 							projectSlug: request.projectSlug,
 							instances: yield* instanceList,

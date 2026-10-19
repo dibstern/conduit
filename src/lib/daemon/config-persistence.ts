@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { chmod, rename, writeFile } from "node:fs/promises";
+import { chmod, open, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
@@ -622,7 +622,7 @@ export function loadAccountsState(
 	return Result.succeed(accountsStateFromConfig(loaded.success, launchLogin));
 }
 
-/** Atomic write: write to a unique tmp file then rename to daemon.json. */
+/** Flush the new contents, atomically replace daemon.json, then flush the rename. */
 export async function saveDaemonConfig(
 	config: DaemonConfig,
 	configDir?: string,
@@ -643,10 +643,17 @@ export async function saveDaemonConfig(
 		{
 			encoding: "utf-8",
 			mode: 0o600,
+			flush: true,
 		},
 	);
 	await chmod(tmpPath, 0o600);
 	await rename(tmpPath, finalPath);
+	const directory = await open(dir, "r");
+	try {
+		await directory.sync();
+	} finally {
+		await directory.close();
+	}
 }
 
 /** Persist decode migrations once, using the same snapshot that seeds startup. */

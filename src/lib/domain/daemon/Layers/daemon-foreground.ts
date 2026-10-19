@@ -552,6 +552,7 @@ export async function startForegroundDaemon(
 						),
 					);
 				}
+				yield* (yield* ConfigPersistenceTag).flush;
 			}),
 		);
 		await refreshSnapshots();
