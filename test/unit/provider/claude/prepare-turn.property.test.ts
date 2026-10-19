@@ -175,8 +175,9 @@ it("catches up whole undelivered messages and turn errors without repeating deli
 							configDir: configuredClaudeConfigDir(
 								"/accounts/changed-personal",
 							),
-							continuation,
-							...(!continuation ? { userMessageId: "current" } : {}),
+							...(continuation
+								? { continuation: { cutOffMessageId: "cut-off" } }
+								: { userMessageId: "current" }),
 						};
 						const prepare = yield* makePrepareTurn(options);
 						const prepared = yield* prepare(
@@ -482,12 +483,24 @@ it("prepends a hidden still-open note only until Dismiss or a reply, on fresh an
 							userMessageId: "current",
 						});
 						const plan = yield* prepare("s1", "personal", text);
+						const continuation = yield* makePrepareTurn({
+							folderSource: "account",
+							configDir: configuredClaudeConfigDir("/accounts/work"),
+							continuation: { cutOffMessageId: "cut-off" },
+						});
+						if (cutOff.includes("dismissed")) {
+							const refused = yield* Effect.flip(continuation("s1", "work"));
+							expect(refused._tag).toBe("ContinuationNotReady");
+							expect(refused.message).toBe(
+								"The cut-off request was dismissed.",
+							);
+						} else {
+							// A reply clears the note but must not refuse the continuation
+							// itself: a restart replays it after its own reply arrived.
+							const switched = yield* continuation("s1", "work");
+							expect(switched.prompt.endsWith("Earlier request")).toBe(true);
+						}
 						if (cutOff === "open") {
-							const continuation = yield* makePrepareTurn({
-								folderSource: "account",
-								configDir: configuredClaudeConfigDir("/accounts/work"),
-								continuation: true,
-							});
 							const switched = yield* continuation("s1", "work");
 							expect(switched.resumeSessionId).toBeUndefined();
 							expect(switched.prompt).toContain("[Conduit still-open note]");

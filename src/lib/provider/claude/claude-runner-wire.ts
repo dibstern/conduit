@@ -84,7 +84,11 @@ export function normalizeClaudeLaunchInput<
 }
 
 export function normalizeClaudeSessionTurn(
-	input: Omit<SessionTurn, "inputId" | "configDir" | "folderSource"> & {
+	input: Omit<
+		SessionTurn,
+		"inputId" | "configDir" | "folderSource" | "continuation"
+	> & {
+		readonly continuation?: SessionTurn["continuation"] | boolean;
 		readonly configDir?: ClaudeConfigDir | string | undefined;
 		readonly folderSource?: ClaudeLaunchConfig["folderSource"] | undefined;
 		readonly inputId?: string;
@@ -94,14 +98,29 @@ export function normalizeClaudeSessionTurn(
 	},
 	defaultFolder?: () => ClaudeLaunchConfig,
 ): SessionTurn & ClaudeLaunchConfig {
-	const { inputId, userMessageId, commandId, turnId, ...turn } = input;
-	const id = inputId ?? userMessageId ?? commandId ?? turnId;
+	const { inputId, userMessageId, commandId, turnId, continuation, ...turn } =
+		input;
+	// Pre-inbox continuations carried `true` and the cut-off id in
+	// userMessageId; their own identity was the command id.
+	const legacyCutOff = continuation === true ? userMessageId : undefined;
+	const id =
+		legacyCutOff !== undefined
+			? commandId
+			: (inputId ?? userMessageId ?? commandId ?? turnId);
 	if (id === undefined)
 		throw new ClaudeBoundaryError({
 			operation: "decodeRunnerTurn",
 			cause: "Claude turn input id is required",
 		});
-	return { ...normalizeClaudeLaunchInput(turn, defaultFolder), inputId: id };
+	return {
+		...normalizeClaudeLaunchInput(turn, defaultFolder),
+		inputId: id,
+		...(typeof continuation === "object"
+			? { continuation }
+			: legacyCutOff !== undefined
+				? { continuation: { cutOffMessageId: legacyCutOff } }
+				: {}),
+	};
 }
 
 function normalizeClaudeSnapshotInput(

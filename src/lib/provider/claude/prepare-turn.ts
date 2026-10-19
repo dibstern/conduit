@@ -39,7 +39,7 @@ export { HandoffTooLarge } from "../../contracts/limit-recovery.js";
 export class ContinuationNotReady extends Data.TaggedError(
 	"ContinuationNotReady",
 )<{
-	readonly reason: string;
+	readonly message: string;
 }> {}
 
 interface PrepareTurnOptions extends ClaudeLaunchConfig {
@@ -48,7 +48,8 @@ interface PrepareTurnOptions extends ClaudeLaunchConfig {
 	readonly modelContextWindow?: number | undefined;
 	readonly agent?: string | undefined;
 	readonly userMessageId?: string | undefined;
-	readonly continuation?: boolean | undefined;
+	/** The cut-off this turn continues, from the continuation command itself. */
+	readonly continuation?: { readonly cutOffMessageId: string } | undefined;
 	readonly nativeResumeFallback?: boolean | undefined;
 	readonly rewind?: SendTurnInput["rewind"];
 	readonly sessionForkSdk?: ClaudeSessionForkSdk | undefined;
@@ -72,6 +73,7 @@ function planTurn(input: {
 	readonly hasAccountSwitch: boolean;
 	readonly deliveredAgent: string | undefined;
 	readonly limitRecovery: LimitRecovery | null;
+	readonly cutOffDismissed: boolean;
 	readonly messages?: readonly MessageWithParts[];
 	readonly userText: string;
 	readonly options: PrepareTurnOptions;
@@ -81,9 +83,11 @@ function planTurn(input: {
 	| ContinuationNotReady
 	| { readonly _tag: "ReadHistory"; readonly deliveredThrough?: number } {
 	const { nativeThread, options, userText } = input;
-	if (options.continuation && !input.limitRecovery?.cutOffMessageId)
+	// Only Dismiss closes a continuation. The continuation's own reply clears
+	// limit_recovery, and a restart or retry must still be able to re-plan it.
+	if (options.continuation && input.cutOffDismissed)
 		return new ContinuationNotReady({
-			reason: "The cut-off request is no longer open.",
+			message: "The cut-off request was dismissed.",
 		});
 	// A cut-off remains an open request until Dismiss or a real assistant reply.
 	const note =
@@ -151,7 +155,7 @@ function planTurn(input: {
 		!options.nativeResumeFallback
 	)
 		return new ContinuationNotReady({
-			reason: "The cut-off request has no native session to resume.",
+			message: "The cut-off request has no native session to resume.",
 		});
 	const requiresFreshSession =
 		sameLiveAccount && (!sameLiveAgent || !live?.resumeSessionId);
@@ -413,6 +417,20 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 								OR ${nativeThread?.deliveredThrough ?? null} IS NULL
 								AND json_extract(data, '$.newProvider') = ${instanceId})
 						LIMIT 1`;
+				const cutOff = options.continuation?.cutOffMessageId ?? null;
+				// A message can be cut off again after an earlier Dismiss; only a
+				// dismissal after its latest cut-off closes it.
+				const dismissals =
+					cutOff === null
+						? []
+						: yield* sql<{ dismissed: number }>`
+						SELECT 1 AS dismissed FROM events
+						WHERE session_id = ${sessionId} AND type = 'session.cut_off_dismissed'
+							AND json_extract(data, '$.cutOffMessageId') = ${cutOff}
+							AND sequence > COALESCE((SELECT MAX(sequence) FROM events
+								WHERE session_id = ${sessionId} AND type = 'session.usage_limited'
+									AND json_extract(data, '$.cutOffMessageId') = ${cutOff}), 0)
+						LIMIT 1`;
 				const input = {
 					projectId: state.projectId,
 					sessionId,
@@ -426,6 +444,7 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 							: Schema.decodeUnknownSync(
 									Schema.fromJsonString(LimitRecoverySchema),
 								)(session.limit_recovery),
+					cutOffDismissed: dismissals.length > 0,
 					userText: userText ?? "",
 					options: turnOptions,
 				};
@@ -444,9 +463,7 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 					}
 					// The current user event is already committed by the send path. Its
 					// text belongs only at the end of the SDK prompt, outside the handoff.
-					const cutOffMessageId = options.continuation
-						? input.limitRecovery?.cutOffMessageId
-						: undefined;
+					const cutOffMessageId = options.continuation?.cutOffMessageId;
 					const cutOffMessage = cutOffMessageId
 						? messages.find(
 								(message) =>
@@ -455,7 +472,7 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 						: undefined;
 					if (options.continuation && !cutOffMessage)
 						return yield* new ContinuationNotReady({
-							reason: "The cut-off request is no longer available.",
+							message: "The cut-off request is no longer available.",
 						});
 					let history = messages;
 					if (plan.deliveredThrough !== undefined) {

@@ -99,7 +99,7 @@ export const recoverClaudeRunnerCommands = (
 							agent: input.agent,
 							userMessageId:
 								input.continuation?.cutOffMessageId ?? input.inputId,
-							continuation: input.continuation !== undefined,
+							continuation: input.continuation,
 							nativeResumeFallback: input.nativeResumeFallback,
 							rewind: input.rewind,
 							sessionForkSdk: deps.sessionForkSdk,
