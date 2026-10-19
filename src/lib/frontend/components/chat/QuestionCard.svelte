@@ -10,10 +10,9 @@
 	import TextInput from "../ui/TextInput.svelte";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import {
-		answerQuestionRpc,
-		rejectQuestionRpc,
-	} from "../../transport/ws-rpc-client.js";
+	import { getDriverTraits } from "../../stores/instance.svelte.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { failureLine } from "../../transport/rpc-errors.js";
 	import {
 		buildAnswerPayload,
 		formatQuestionHeader,
@@ -53,7 +52,9 @@
 	let singleSelected = $state(new Map<number, string>());
 
 	const canSubmit = $derived(isValidSubmission(selections, request.questions));
-	const canSkip = $derived(request.providerId !== "claude");
+	const canSkip = $derived(
+		getDriverTraits(request.providerId)?.supportsQuestionSkip ?? true,
+	);
 
 	function rebuildSelections() {
 		const next = new Map<number, string>();
@@ -139,7 +140,7 @@
 		const projectSlug = getCurrentSlug();
 		if (!projectSlug) return;
 		const answers = buildAnswerPayload(selections, request.questions);
-		void answerQuestionRpc({
+		void rpc("AnswerQuestion", {
 			projectSlug,
 			originId: getBrowserClientId(),
 			commandId: crypto.randomUUID(),
@@ -157,10 +158,7 @@
 				if (resolved === "submitting") {
 					resolved = null;
 				}
-				errorMessage =
-					error instanceof Error
-						? error.message
-						: "No response from server. You can try again, or send a follow-up message to continue.";
+				errorMessage = failureLine(error, "No response from server. You can try again, or send a follow-up message to continue.");
 				clearTimeout(submitTimeout);
 			});
 		// Show "submitting" state until the server confirms the answer; the
@@ -182,15 +180,14 @@
 		const projectSlug = getCurrentSlug();
 		if (!projectSlug) return;
 		errorMessage = null;
-		void rejectQuestionRpc({
+		void rpc("RejectQuestion", {
 			projectSlug,
 			originId: getBrowserClientId(),
 			commandId: crypto.randomUUID(),
 			toolId: request.toolId,
 		}).catch((error) => {
 			if (resolved === "skipped") resolved = null;
-			errorMessage =
-				error instanceof Error ? error.message : "Could not skip this question.";
+			errorMessage = failureLine(error, "Could not skip this question.");
 		});
 		resolved = "skipped";
 	}

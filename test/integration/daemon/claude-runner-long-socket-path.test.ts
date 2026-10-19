@@ -6,6 +6,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	readlinkSync,
+	realpathSync,
 	rmSync,
 	statSync,
 	symlinkSync,
@@ -14,9 +15,9 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
-	claudeRunnerDirectory,
-	discoverClaudeRunners,
-} from "../../../src/lib/provider/claude/claude-runner-registry.js";
+	discoverRunners,
+	runnerDirectory,
+} from "../../../src/lib/provider/runner/runner-registry.js";
 import { cleanupTestClaudeRunners } from "../../helpers/claude-runner-cleanup.js";
 import {
 	ProcessHarness,
@@ -35,12 +36,12 @@ describe.skipIf(process.platform === "win32")(
 			const root = mkdtempSync("/tmp/conduit-runner-alias-");
 			const configDir = join(root, "x".repeat(90));
 			const projectDir = join(root, "project");
-			const alias = claudeRunnerDirectory(projectDir, configDir);
+			const alias = runnerDirectory(projectDir, configDir);
 			try {
 				mkdirSync(dirname(alias), { recursive: true });
 				if (kind === "directory") mkdirSync(alias, { mode: 0o700 });
 				else symlinkSync(root, alias);
-				expect(() => discoverClaudeRunners(projectDir, configDir)).toThrow(
+				expect(() => discoverRunners(projectDir, configDir)).toThrow(
 					/Unsafe.*alias/,
 				);
 			} finally {
@@ -50,7 +51,7 @@ describe.skipIf(process.platform === "win32")(
 		});
 
 		it("completes turns, re-adopts and upgrades through the same short alias", async () => {
-			const prefix = "/tmp/conduit-runner-long-";
+			const prefix = join(realpathSync("/tmp"), "conduit-runner-long-");
 			const rootPrefix =
 				prefix +
 				"x".repeat(85 - Buffer.byteLength(prefix) - 6 - "/config".length);
@@ -121,7 +122,7 @@ describe.skipIf(process.platform === "win32")(
 					socketPath: original.socketPath,
 				});
 				expect(
-					discoverClaudeRunners(harness.projectDir, harness.configDir),
+					discoverRunners(harness.projectDir, harness.configDir),
 				).toMatchObject([
 					{ pid: original.pid, socketPath: original.socketPath },
 				]);
@@ -168,7 +169,7 @@ describe.skipIf(process.platform === "win32")(
 						expect(() => process.kill(original.pid, 0)).toThrow();
 						expect(existsSync(`${original.socketPath}.json`)).toBe(false);
 						expect(
-							discoverClaudeRunners(
+							discoverRunners(
 								activeHarness.projectDir,
 								activeHarness.configDir,
 							),

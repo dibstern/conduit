@@ -41,7 +41,7 @@ const baseConfig: DaemonRuntimeConfig = {
 	persistedSessionCounts: new Map(),
 };
 
-const NullTlsLayer = Layer.succeed(TlsCertTag, {
+const NullTlsLayer = Layer.succeed(TlsCertTag)({
 	certs: null,
 	caRootPath: null,
 	caCertDer: null,
@@ -59,7 +59,7 @@ function makeContext(): DaemonLifecycleContext {
 	};
 }
 
-const TestRequestHandlerLive = Layer.succeed(DaemonHttpRequestHandlerTag, {
+const TestRequestHandlerLive = Layer.succeed(DaemonHttpRequestHandlerTag)({
 	async handleRequest(_req, res) {
 		res.writeHead(200, { "Content-Type": "text/plain" });
 		res.end("ok");
@@ -130,7 +130,7 @@ function withStaticDir<A, E, R>(
 }
 
 function activeTlsLayer(caCertDer: Buffer | null = null) {
-	return Layer.succeed(TlsCertTag, {
+	return Layer.succeed(TlsCertTag)({
 		certs: fixtureCerts,
 		caRootPath: null,
 		caCertDer,
@@ -139,7 +139,7 @@ function activeTlsLayer(caCertDer: Buffer | null = null) {
 }
 
 describe("makeHttpServerLive", () => {
-	it.scoped("binds to the host from DaemonConfigRefTag", () => {
+	it.effect("binds to the host from DaemonConfigRefTag", () => {
 		const ctx = makeContext();
 		const configLayer = DaemonConfigRefLive({
 			...baseConfig,
@@ -160,7 +160,7 @@ describe("makeHttpServerLive", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer)));
 	});
 
-	it.scoped("writes the actual bound port back to the config Ref", () => {
+	it.effect("writes the actual bound port back to the config Ref", () => {
 		const ctx = makeContext();
 		const configLayer = DaemonConfigRefLive({
 			...baseConfig,
@@ -183,7 +183,7 @@ describe("makeHttpServerLive", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer)));
 	});
 
-	it.scoped(
+	it.effect(
 		"uses TLS material from TlsCertTag and starts the upgrade server",
 		() => {
 			const ctx = makeContext();
@@ -193,7 +193,7 @@ describe("makeHttpServerLive", () => {
 				host: "127.0.0.1",
 				tlsEnabled: true,
 			});
-			const tlsLayer = Layer.succeed(TlsCertTag, {
+			const tlsLayer = Layer.succeed(TlsCertTag)({
 				certs: fixtureCerts,
 				caRootPath: null,
 				caCertDer: null,
@@ -213,7 +213,7 @@ describe("makeHttpServerLive", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"uses real TlsCertLive handoff and binds TLS to 0.0.0.0 when host was not explicit",
 		() => {
 			const ctx = makeContext();
@@ -224,7 +224,7 @@ describe("makeHttpServerLive", () => {
 				tlsEnabled: true,
 				hostExplicit: false,
 			});
-			const ensureCertsLayer = Layer.succeed(EnsureCertsTag, {
+			const ensureCertsLayer = Layer.succeed(EnsureCertsTag)({
 				ensureCerts: () => Effect.succeed(fixtureCerts),
 			});
 			const tlsLayer = TlsCertLive("/tmp/conduit-http-server-live").pipe(
@@ -251,7 +251,7 @@ describe("makeHttpServerLive", () => {
 });
 
 describe("makeOnboardingServerLive", () => {
-	it.scoped("skips when TlsCertTag has no certs", () => {
+	it.effect("skips when TlsCertTag has no certs", () => {
 		return withStaticDir((staticDir) => {
 			const ctx = makeContext();
 			const configLayer = DaemonConfigRefLive(baseConfig);
@@ -266,7 +266,7 @@ describe("makeOnboardingServerLive", () => {
 		});
 	});
 
-	it.scoped(
+	it.effect(
 		"binds to the host from DaemonConfigRefTag when TLS is active",
 		() => {
 			return withStaticDir((staticDir) => {
@@ -293,7 +293,7 @@ describe("makeOnboardingServerLive", () => {
 		},
 	);
 
-	it.scoped("serves CA DER material from TlsCertTag", () => {
+	it.effect("serves CA DER material from TlsCertTag", () => {
 		return withStaticDir((staticDir) => {
 			const ctx = makeContext();
 			const caPayload = Buffer.from("test-ca-der");
@@ -320,7 +320,7 @@ describe("makeOnboardingServerLive", () => {
 		});
 	});
 
-	it.scoped(
+	it.effect(
 		"uses the actual main-server port in composed setup-info when HTTP started with port 0",
 		() => {
 			return withStaticDir((staticDir) => {

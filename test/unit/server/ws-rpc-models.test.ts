@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Option, Queue, Stream } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import type { ClaudeAccount } from "../../../src/lib/contracts/account.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
@@ -51,13 +51,14 @@ const readClaudeCatalog = Effect.gen(function* () {
 	return yield* client
 		.SubscribeProjectSettings({ projectSlug: "project-a" })
 		.pipe(
-			Stream.mapConcat((envelope) =>
+			Stream.map((envelope) =>
 				envelope._tag === "snapshot"
 					? envelope.rows
 					: envelope._tag === "upsert"
 						? [envelope.item]
 						: [],
 			),
+			Stream.flattenIterable,
 			Stream.filter((setting) => setting._tag === "providerModels"),
 			Stream.map((setting) => setting.providers),
 			Stream.runHead,
@@ -70,6 +71,7 @@ const makeReadQuery = (
 		ReadQueryEffect["getLatestTurnModelExecution"]
 	>,
 ): ReadQueryEffect => ({
+	listPendingClaudeQuestionTools: () => Effect.succeed([]),
 	readToolDetails: () => Effect.succeed([]),
 	getSessionStatus: () => Effect.succeed(undefined),
 	getSession: () => Effect.succeed(undefined),
@@ -157,19 +159,15 @@ describe("WsRpcServerLayer GetModels", () => {
 			return Effect.gen(function* () {
 				const client = yield* rpcClient;
 				const drift = yield* client.GetModels({
-					projectSlug: "project-a",
 					sessionId: "drift",
 				});
 				const match = yield* client.GetModels({
-					projectSlug: "project-a",
 					sessionId: "match",
 				});
 				const window = yield* client.GetModels({
-					projectSlug: "project-a",
 					sessionId: "window",
 				});
 				const unknown = yield* client.GetModels({
-					projectSlug: "project-a",
 					sessionId: "unknown",
 				});
 
@@ -204,10 +202,11 @@ describe("WsRpcServerLayer GetModels", () => {
 						Layer.provideMerge(
 							Layer.merge(
 								makeTestHandlerLayer({ api, orchestrationEngine }),
-								Layer.succeed(ReadQueryEffectTag, readQuery),
+								Layer.succeed(ReadQueryEffectTag)(readQuery),
 							),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -226,7 +225,6 @@ describe("WsRpcServerLayer GetModels", () => {
 			expect(getLatestTurnModelExecution).not.toHaveBeenCalled();
 
 			const noRow = yield* client.GetModels({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 			});
 			expect(noRow.modelExecution).toBeUndefined();
@@ -238,10 +236,11 @@ describe("WsRpcServerLayer GetModels", () => {
 					Layer.provideMerge(
 						Layer.merge(
 							makeTestHandlerLayer(),
-							Layer.succeed(ReadQueryEffectTag, readQuery),
+							Layer.succeed(ReadQueryEffectTag)(readQuery),
 						),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -261,7 +260,6 @@ describe("WsRpcServerLayer GetModels", () => {
 			return Effect.gen(function* () {
 				const client = yield* rpcClient;
 				const result = yield* client.GetModels({
-					projectSlug: "project-a",
 					sessionId: "session-1",
 				});
 				expect(result.providers).toBeDefined();
@@ -273,10 +271,11 @@ describe("WsRpcServerLayer GetModels", () => {
 						Layer.provideMerge(
 							Layer.merge(
 								makeTestHandlerLayer(),
-								Layer.succeed(ReadQueryEffectTag, readQuery),
+								Layer.succeed(ReadQueryEffectTag)(readQuery),
 							),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -420,11 +419,9 @@ describe("WsRpcServerLayer GetModels", () => {
 
 				const client = yield* rpcClient;
 				const match = yield* client.GetModels({
-					projectSlug: "project-a",
 					sessionId: "match-session",
 				});
 				const drift = yield* client.GetModels({
-					projectSlug: "project-a",
 					sessionId: "drift-session",
 				});
 				expect(match.modelExecution).toEqual({
@@ -452,6 +449,7 @@ describe("WsRpcServerLayer GetModels", () => {
 							),
 						),
 					),
+					{ local: true },
 				),
 				Effect.ensuring(
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
@@ -510,11 +508,10 @@ describe("WsRpcServerLayer GetModels", () => {
 				const client = yield* rpcClient;
 
 				const result = yield* client.GetModels({
-					projectSlug: "project-a",
 					sessionId: "session-1",
 				});
 
-				expect(result.projectSlug).toBe("project-a");
+				expect(result.projectSlug).toBe("test-project");
 				expect(result.providers).toEqual([
 					{
 						id: "anthropic",
@@ -601,6 +598,7 @@ describe("WsRpcServerLayer GetModels", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -719,6 +717,7 @@ describe("WsRpcServerLayer GetModels", () => {
 										id: AccountIdSchema.make("opencode"),
 										name: "OpenCode",
 										driver: "opencode",
+										usageEligible: false,
 									},
 									{
 										id: AccountIdSchema.make("claude"),
@@ -738,12 +737,14 @@ describe("WsRpcServerLayer GetModels", () => {
 										id: AccountIdSchema.make("opencode-work"),
 										name: "OpenCode work",
 										driver: "opencode",
+										usageEligible: false,
 									},
 								]),
 								config: makeMockConfig({ configDir }),
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -780,6 +781,7 @@ describe("WsRpcServerLayer GetModels", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -817,7 +819,6 @@ describe("WsRpcServerLayer GetModels", () => {
 			return Effect.gen(function* () {
 				const client = yield* rpcClient;
 				const result = yield* client.GetModels({
-					projectSlug: "project-a",
 					sessionId: "session-1",
 					instanceId: "opencode",
 				});
@@ -839,6 +840,7 @@ describe("WsRpcServerLayer GetModels", () => {
 										id: AccountIdSchema.make("opencode"),
 										name: "OpenCode",
 										driver: "opencode",
+										usageEligible: false,
 									},
 									{
 										id: AccountIdSchema.make("claude"),
@@ -858,12 +860,14 @@ describe("WsRpcServerLayer GetModels", () => {
 										id: AccountIdSchema.make("opencode-work"),
 										name: "OpenCode work",
 										driver: "opencode",
+										usageEligible: false,
 									},
 								]),
 								config: makeMockConfig({ configDir }),
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},

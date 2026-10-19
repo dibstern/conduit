@@ -3,11 +3,12 @@
 // The replay fixture fails the test unless exactly the planned turns are sent.
 
 import { randomUUID } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
 import type { Page, TestInfo } from "@playwright/test";
 import { Effect } from "effect";
+import { RpcClient, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { readNativeThread } from "../../helpers/native-thread.js";
 import { expect, test } from "../helpers/replay-fixture.js";
@@ -82,7 +83,7 @@ function recordSends(page: Page): Send[] {
 }
 
 const makeWsRpcClient = RpcClient.make(WsRpcGroup);
-type WsRpcClient = Effect.Effect.Success<typeof makeWsRpcClient>;
+type WsRpcClient = Effect.Success<typeof makeWsRpcClient>;
 
 test.describe("Claude replay lane", () => {
 	test.beforeEach(({ page }) => {
@@ -1130,11 +1131,11 @@ test.describe("Claude replay lane", () => {
 				submit: (text: string, delivery: "queue" | "steer") => {
 					const inputId = randomUUID();
 					return rpc((client) =>
-						client.input.submit({ ...target, inputId, text, delivery }),
+						client["input.submit"]({ ...target, inputId, text, delivery }),
 					).then((response) => ({ inputId, response }));
 				},
 				sendNow: (inputId: string) =>
-					rpc((client) => client.input.sendNow({ ...target, inputId })),
+					rpc((client) => client["input.sendNow"]({ ...target, inputId })),
 				switchModel: (modelId: string) =>
 					rpc((client) =>
 						client.SwitchModel({ ...target, providerId: "claude", modelId }),
@@ -1153,9 +1154,152 @@ test.describe("Claude replay lane", () => {
 			match: (event: ReturnType<typeof ledger>["events"][number]) => boolean,
 		) => events.find(match)?.sequence ?? Number.NaN;
 
+		test.describe("an interruption in another tab", () => {
+			test.use({
+				claudeReplay: { turns: ["pong-thinking-text-turn"], delayMs: 500 },
+			});
+			test("an interruption from another tab ends working and finalizes once in the starter tab", async ({
+				page,
+				browser,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				test.setTimeout(60_000);
+				const s = await open(page, relayUrl, harness);
+				const context = await browser.newContext({
+					viewport: page.viewportSize(),
+				});
+				try {
+					const other = await context.newPage();
+					const otherChat = new ChatPage(other);
+					await new AppPage(other).goto(relayUrl);
+					await s.app.sendMessage("Alpha");
+					await expect
+						.poll(() => countEvents(s.dbPath, "message.created"))
+						.toBeGreaterThan(1);
+					await expect(otherChat.stopBtn).toBeVisible();
+					await otherChat.stopBtn.click();
+					await expect
+						.poll(() => countEvents(s.dbPath, "turn.interrupted"))
+						.toBe(1);
+					const row = queryDb<{
+						last_turn_end_input_id: string;
+						last_turn_end_version: number;
+						last_turn_error_at: number | null;
+					}>(
+						s.dbPath,
+						"SELECT last_turn_end_input_id, last_turn_end_version, last_turn_error_at FROM sessions WHERE id = ?",
+						s.sessionId,
+					)[0];
+					const artifact = testInfo.outputPath("two-tab-interruption.json");
+					writeFileSync(
+						artifact,
+						JSON.stringify(
+							{ starter: s.sends[0], row, ...ledger(s.dbPath, s.sessionId) },
+							null,
+							2,
+						),
+					);
+					await testInfo.attach("two-tab-interruption", {
+						path: artifact,
+						contentType: "application/json",
+					});
+					for (const chat of [s.chat, otherChat]) {
+						await expect(chat.stopBtn).toBeHidden();
+						await expect(chat.userMessages).toHaveText([/\bAlpha\b/]);
+						await expect(chat.page.locator(".glow-tool-error")).toHaveCount(0);
+					}
+					expect(row?.last_turn_end_input_id).toBe(s.sends[0]?.commandId);
+					expect(row?.last_turn_end_version).toBeGreaterThan(0);
+					expect(row?.last_turn_error_at).toBeNull();
+					const rendered = await page
+						.locator(".msg-user, .msg-assistant, .turn-activity-toggle")
+						.allTextContents();
+					await page.reload();
+					await expect(s.chat.userMessages).toHaveText([/\bAlpha\b/]);
+					await expect(
+						page.locator(".msg-user, .msg-assistant, .turn-activity-toggle"),
+					).toHaveText(rendered);
+					await expect(s.chat.stopBtn).toBeHidden();
+					await page.screenshot({
+						path: testInfo.outputPath("two-tab-interruption-ended.png"),
+					});
+				} finally {
+					await context.close();
+				}
+			});
+		});
+
 		test.describe("a steer during a tool", () => {
 			test.use({
 				claudeReplay: { turns: ["steer-during-tool-folds"], delayMs: 100 },
+			});
+
+			test("Alpha starts and Bravo steers from another tab; working ends in both tabs", async ({
+				page,
+				browser,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				test.setTimeout(60_000);
+				const s = await open(page, relayUrl, harness);
+				const context = await browser.newContext({
+					viewport: page.viewportSize(),
+				});
+				try {
+					const other = await context.newPage();
+					const otherSends = recordSends(other);
+					const otherChat = new ChatPage(other);
+					await new AppPage(other).goto(relayUrl);
+					await s.app.sendMessage("Alpha");
+					await s.chat.waitForToolBlock();
+					await expect(otherChat.stopBtn).toBeVisible();
+					await other.locator("#input").fill("Bravo");
+					await other.locator("#input").press("ControlOrMeta+Enter");
+					await expect.poll(() => otherSends.length).toBe(1);
+					await expect.poll(s.turnEnds).toBe(1);
+					const row = queryDb<{
+						last_turn_end_input_id: string;
+						last_turn_end_version: number;
+					}>(
+						s.dbPath,
+						"SELECT last_turn_end_input_id, last_turn_end_version FROM sessions WHERE id = ?",
+						s.sessionId,
+					)[0];
+					const artifact = testInfo.outputPath("two-tab-steer.json");
+					writeFileSync(
+						artifact,
+						JSON.stringify(
+							{
+								starter: s.sends[0],
+								steer: otherSends[0],
+								row,
+								...ledger(s.dbPath, s.sessionId),
+							},
+							null,
+							2,
+						),
+					);
+					await testInfo.attach("two-tab-steer", {
+						path: artifact,
+						contentType: "application/json",
+					});
+					for (const chat of [s.chat, otherChat]) {
+						await expect(chat.stopBtn).toBeHidden();
+						await expect(chat.userMessages).toHaveText([
+							/\bAlpha\b/,
+							/\bBravo\b/,
+						]);
+						await expect(chat.assistantMessages.last()).toContainText("BANANA");
+						await expect(chat.page.locator(".glow-tool-error")).toHaveCount(0);
+					}
+					expect(row?.last_turn_end_input_id).toBe(s.sends[0]?.commandId);
+					await page.screenshot({
+						path: testInfo.outputPath("two-tab-steer-ended.png"),
+					});
+				} finally {
+					await context.close();
+				}
 			});
 
 			test("joins at the tool boundary: one result, two turns, one turn end", async ({
@@ -1168,10 +1312,35 @@ test.describe("Claude replay lane", () => {
 				await s.app.sendMessage("Alpha");
 				await s.chat.waitForToolBlock();
 				const { inputId: b, response } = await s.submit("Bravo", "steer");
-				expect(response).toEqual({ ok: true, sessionId: s.sessionId });
+				expect(response).toEqual({
+					ok: true,
+					sessionId: s.sessionId,
+					handedOff: true,
+				});
 				const steering = pendingState(s.dbPath, b);
 
 				await expect.poll(s.turnEnds).toBe(1);
+				const turnEndDb = new DatabaseSync(s.dbPath, { readOnly: true });
+				try {
+					await testInfo.attach("turn-end-input-evidence.json", {
+						body: JSON.stringify(
+							{
+								sends: s.sends,
+								steer: b,
+								row: turnEndDb
+									.prepare(
+										"SELECT id, status, last_turn_end_version, last_turn_end_input_id FROM sessions WHERE id = ?",
+									)
+									.get(s.sessionId),
+							},
+							null,
+							2,
+						),
+						contentType: "application/json",
+					});
+				} finally {
+					turnEndDb.close();
+				}
 				await s.chat.waitForStreamingComplete();
 				await expect(s.chat.userMessages).toHaveText([
 					/\bAlpha\b/,
@@ -1307,7 +1476,11 @@ test.describe("Claude replay lane", () => {
 				// Alpha is replying (no tool, so no boundary to read the steer at).
 				await expect(s.chat.assistantMessages).toHaveCount(1);
 				const { inputId: b, response } = await s.submit("Bravo", "steer");
-				expect(response).toEqual({ ok: true, sessionId: s.sessionId });
+				expect(response).toEqual({
+					ok: true,
+					sessionId: s.sessionId,
+					handedOff: true,
+				});
 				const steering = pendingState(s.dbPath, b);
 
 				await expect.poll(s.turnEnds, { timeout: 30_000 }).toBe(2);
@@ -1369,8 +1542,8 @@ test.describe("Claude replay lane", () => {
 				const charlie = await s.submit("Charlie", "steer");
 				const [b, c] = [bravo.inputId, charlie.inputId];
 				expect([bravo.response, charlie.response]).toEqual([
-					{ ok: true, sessionId: s.sessionId },
-					{ ok: true, sessionId: s.sessionId },
+					{ ok: true, sessionId: s.sessionId, handedOff: true },
+					{ ok: true, sessionId: s.sessionId, handedOff: true },
 				]);
 				const steering = [pendingState(s.dbPath, b), pendingState(s.dbPath, c)];
 
@@ -1446,7 +1619,11 @@ test.describe("Claude replay lane", () => {
 				await s.app.sendMessage("Alpha");
 				await s.chat.waitForToolBlock();
 				const { inputId: b, response } = await s.submit("Bravo", "steer");
-				expect(response).toEqual({ ok: true, sessionId: s.sessionId });
+				expect(response).toEqual({
+					ok: true,
+					sessionId: s.sessionId,
+					handedOff: true,
+				});
 				const steering = pendingState(s.dbPath, b);
 				const charlie = await s.submit("Charlie", "queue");
 				const c = charlie.inputId;
@@ -1530,7 +1707,11 @@ test.describe("Claude replay lane", () => {
 				await s.app.sendMessage("Alpha");
 				await s.chat.waitForToolBlock();
 				const { inputId: b, response } = await s.submit("Bravo", "queue");
-				expect(response).toEqual({ ok: true, sessionId: s.sessionId });
+				expect(response).toEqual({
+					ok: true,
+					sessionId: s.sessionId,
+					handedOff: false,
+				});
 				const queued = pendingState(s.dbPath, b);
 				expect(await s.sendNow(b)).toEqual({ ok: true });
 				const steering = pendingState(s.dbPath, b);

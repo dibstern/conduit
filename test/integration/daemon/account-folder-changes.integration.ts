@@ -25,11 +25,7 @@ import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
-import {
-	AddInstance,
-	ForkSession,
-	UpdateInstance,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import {
 	ProcessHarness,
 	responseChunks,
@@ -58,7 +54,7 @@ describe("Account folder changes without daemon restart", () => {
 	};
 	afterEach(async ({ task }) => {
 		if (!harness) return;
-		const db = new Database(harness.projectStorePath(), { readonly: true });
+		const db = new Database(harness.daemonStorePath(), { readonly: true });
 		let persisted: {
 			inputs: unknown[];
 			commands: unknown[];
@@ -69,22 +65,22 @@ describe("Account folder changes without daemon restart", () => {
 			persisted = {
 				inputs: db
 					.prepare(
-						"SELECT input_id, state FROM pending_inputs ORDER BY input_id",
+						"SELECT input_id, state FROM pending_inputs WHERE session_id IN (SELECT id FROM sessions WHERE project_id = 'process-test') ORDER BY input_id",
 					)
 					.all(),
 				commands: db
 					.prepare(
-						"SELECT command_id, status, json_extract(payload_json, '$.account.folder.path') AS folder FROM provider_command_outbox WHERE effect_type = 'send_turn' ORDER BY request_sequence",
+						"SELECT command_id, status, json_extract(payload_json, '$.account.folder.path') AS folder FROM provider_command_outbox WHERE project_key = 'process-test' AND effect_type = 'send_turn' ORDER BY request_sequence",
 					)
 					.all(),
 				events: db
 					.prepare(
-						"SELECT type, json_extract(data, '$.inputId') AS inputId, json_extract(data, '$.messageId') AS messageId, json_extract(data, '$.status') AS status FROM events WHERE type IN ('input.admitted', 'input.sent', 'input.started', 'turn.started', 'turn.end', 'turn.error', 'session.status') ORDER BY sequence",
+						"SELECT type, json_extract(data, '$.inputId') AS inputId, json_extract(data, '$.messageId') AS messageId, json_extract(data, '$.status') AS status FROM events WHERE project_id = 'process-test' AND type IN ('input.admitted', 'input.sent', 'input.started', 'turn.started', 'turn.end', 'turn.error', 'session.status') ORDER BY sequence",
 					)
 					.all(),
 				forkEvents: db
 					.prepare(
-						"SELECT session_id, type, data FROM events WHERE type IN ('session.created', 'session.forked') ORDER BY sequence",
+						"SELECT session_id, type, data FROM events WHERE project_id = 'process-test' AND type IN ('session.created', 'session.forked') ORDER BY sequence",
 					)
 					.all(),
 			};
@@ -134,9 +130,11 @@ describe("Account folder changes without daemon restart", () => {
 		const original = login(daemon, "original-fork");
 		const edited = login(daemon, "edited-fork");
 		const accountId = AccountIdSchema.make("claude");
-		await daemon.requestRpc(
-			new UpdateInstance({ instanceId: accountId, configDir: original }),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: accountId,
+			configDir: original,
+		});
 		const parentId = await browser.createSession(
 			"Fork after login edit",
 			accountId,
@@ -170,17 +168,17 @@ describe("Account folder changes without daemon restart", () => {
 				),
 			),
 		).toBe(false);
-		await daemon.requestRpc(
-			new UpdateInstance({ instanceId: accountId, configDir: edited }),
-		);
-		const fork = await daemon.requestRpc(
-			new ForkSession({
-				projectSlug: "process-test",
-				originId: browser.originId,
-				sessionId: parentId,
-				messageId: boundary.id,
-			}),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: accountId,
+			configDir: edited,
+		});
+		const fork = await daemon.requestRpc({
+			_tag: "ForkSession",
+			originId: browser.originId,
+			sessionId: parentId,
+			messageId: boundary.id,
+		});
 		expect(fork.sessionId).not.toBe(parentId);
 		expect(daemon.marks.filter((mark) => mark.kind === "native-fork")).toEqual(
 			[],
@@ -224,9 +222,11 @@ describe("Account folder changes without daemon restart", () => {
 		const edited = login(daemon, "edited");
 		const launchLogin = login(daemon, "claude");
 		const accountId = AccountIdSchema.make("claude");
-		await daemon.requestRpc(
-			new UpdateInstance({ instanceId: accountId, configDir: original }),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: accountId,
+			configDir: original,
+		});
 		const sessionId = await browser.createSession(
 			"Folder edits keep the conversation",
 			accountId,
@@ -249,9 +249,11 @@ describe("Account folder changes without daemon restart", () => {
 				),
 			).toBe(true),
 		);
-		await daemon.requestRpc(
-			new UpdateInstance({ instanceId: accountId, configDir: edited }),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: accountId,
+			configDir: edited,
+		});
 		await browser.preWarmSession(sessionId);
 		expect(daemon.marks.filter((mark) => mark.kind === "query")).toHaveLength(
 			1,
@@ -304,9 +306,11 @@ describe("Account folder changes without daemon restart", () => {
 		if (editedQuery?.kind !== "query")
 			throw new Error("Missing edited-folder query");
 		relocateOrReject(editedQuery.sessionId, edited, launchLogin);
-		await daemon.requestRpc(
-			new UpdateInstance({ instanceId: accountId, configDir: "" }),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: accountId,
+			configDir: "",
+		});
 		const cleared = "turn-after-folder-clear";
 		expect((await browser.send(sessionId, cleared)).chunks.join("")).toBe(
 			responseChunks(cleared).join(""),
@@ -350,14 +354,13 @@ describe("Account folder changes without daemon restart", () => {
 		const original = login(daemon, "original");
 		const edited = login(daemon, "edited");
 		const launchLogin = login(daemon, "claude");
-		const added = await daemon.requestRpc(
-			new AddInstance({
-				name: "Personal",
-				driver: "claude",
-				managed: false,
-				configDir: original,
-			}),
-		);
+		const added = await daemon.requestRpc({
+			_tag: "AddInstance",
+			name: "Personal",
+			driver: "claude",
+			managed: false,
+			configDir: original,
+		});
 		if (!added.addedInstanceId) throw new Error("Missing named account");
 		const accountId = AccountIdSchema.make(added.addedInstanceId);
 		for (const [configDir, resolvedFolder] of [
@@ -388,9 +391,11 @@ describe("Account folder changes without daemon restart", () => {
 				.filter((mark) => mark.kind === "query")
 				.at(-1);
 			if (warmed?.kind !== "query") throw new Error("Missing warmed query");
-			await daemon.requestRpc(
-				new UpdateInstance({ instanceId: accountId, configDir }),
-			);
+			await daemon.requestRpc({
+				_tag: "UpdateInstance",
+				instanceId: accountId,
+				configDir,
+			});
 			if (action === "pre-warm") await browser.preWarmSession(sessionId);
 			const text = `first-send-after-${configDir ? "edit" : "clear"}`;
 			expect((await browser.send(sessionId, text)).chunks.join("")).toBe(
@@ -416,12 +421,11 @@ describe("Account folder changes without daemon restart", () => {
 		const { daemon, browser } = await start();
 		const original = login(daemon, "original");
 		const edited = login(daemon, "edited");
-		await daemon.requestRpc(
-			new UpdateInstance({
-				instanceId: AccountIdSchema.make("claude"),
-				configDir: original,
-			}),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: AccountIdSchema.make("claude"),
+			configDir: original,
+		});
 		const sessionId = await browser.createSession(
 			"Folder edits preserve steering",
 			"claude",
@@ -435,18 +439,16 @@ describe("Account folder changes without daemon restart", () => {
 					).toBe(true),
 				{ timeout: 5000 },
 			);
-			await daemon.requestRpc(
-				new UpdateInstance({
-					instanceId: AccountIdSchema.make("claude"),
-					configDir: edited,
-				}),
-			);
+			await daemon.requestRpc({
+				_tag: "UpdateInstance",
+				instanceId: AccountIdSchema.make("claude"),
+				configDir: edited,
+			});
 			const inputId = randomUUID();
 			// The fixture emits the SDK's command-start boundary for corrections.
 			const steerText = "correction-after-folder-edit";
 			const submitted = await Effect.runPromise(
-				browser.rpc.input.submit({
-					projectSlug: "process-test",
+				browser.rpc["input.submit"]({
 					sessionId,
 					inputId,
 					originId: browser.originId,
@@ -497,12 +499,11 @@ describe("Account folder changes without daemon restart", () => {
 		const { daemon, browser } = await start(0, 4000);
 		const original = login(daemon, "original");
 		const edited = login(daemon, "edited");
-		await daemon.requestRpc(
-			new UpdateInstance({
-				instanceId: AccountIdSchema.make("claude"),
-				configDir: original,
-			}),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: AccountIdSchema.make("claude"),
+			configDir: original,
+		});
 		const sessionId = await browser.createSession(
 			"Steer during runner startup",
 			"claude",
@@ -517,18 +518,16 @@ describe("Account folder changes without daemon restart", () => {
 					).toBe(true),
 				{ timeout: 10_000 },
 			);
-			await daemon.requestRpc(
-				new UpdateInstance({
-					instanceId: AccountIdSchema.make("claude"),
-					configDir: edited,
-				}),
-			);
+			await daemon.requestRpc({
+				_tag: "UpdateInstance",
+				instanceId: AccountIdSchema.make("claude"),
+				configDir: edited,
+			});
 			const steerText = "correction-during-runner-startup";
 			expect(
 				(
 					await Effect.runPromise(
-						browser.rpc.input.submit({
-							projectSlug: "process-test",
+						browser.rpc["input.submit"]({
 							sessionId,
 							inputId: randomUUID(),
 							originId: browser.originId,
@@ -541,7 +540,7 @@ describe("Account folder changes without daemon restart", () => {
 			expect(daemon.marks.filter((mark) => mark.kind === "query")).toHaveLength(
 				0,
 			);
-			const db = new Database(daemon.projectStorePath(), { readonly: true });
+			const db = new Database(daemon.daemonStorePath(), { readonly: true });
 			try {
 				expect(
 					db
@@ -604,9 +603,11 @@ describe("Account folder changes without daemon restart", () => {
 		const original = login(daemon, "original");
 		const target = login(daemon, change === "edit" ? "edited" : "claude");
 		const accountId = AccountIdSchema.make("claude");
-		await daemon.requestRpc(
-			new UpdateInstance({ instanceId: accountId, configDir: original }),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: accountId,
+			configDir: original,
+		});
 		const sessionId = await browser.createSession(
 			"Legacy receipt folder change",
 			accountId,
@@ -615,7 +616,7 @@ describe("Account folder changes without daemon restart", () => {
 		await browser.send(sessionId, first);
 		const native = daemon.marks.find((mark) => mark.kind === "query");
 		if (native?.kind !== "query") throw new Error("Missing native receipt");
-		const db = new Database(daemon.projectStorePath());
+		const db = new Database(daemon.daemonStorePath());
 		try {
 			await vi.waitFor(() =>
 				expect(
@@ -638,12 +639,11 @@ describe("Account folder changes without daemon restart", () => {
 		} finally {
 			db.close();
 		}
-		await daemon.requestRpc(
-			new UpdateInstance({
-				instanceId: accountId,
-				configDir: change === "edit" ? target : "",
-			}),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: accountId,
+			configDir: change === "edit" ? target : "",
+		});
 		writeFileSync(
 			join(daemon.root, "rejected-resume-session-id"),
 			native.sessionId,
@@ -666,20 +666,18 @@ describe("Account folder changes without daemon restart", () => {
 		const original = login(daemon, "original");
 		const edited = login(daemon, "edited");
 		const spare = login(daemon, "spare");
-		await daemon.requestRpc(
-			new UpdateInstance({
-				instanceId: AccountIdSchema.make("claude"),
-				configDir: original,
-			}),
-		);
-		const added = await daemon.requestRpc(
-			new AddInstance({
-				name: "Spare",
-				driver: "claude",
-				managed: false,
-				configDir: spare,
-			}),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: AccountIdSchema.make("claude"),
+			configDir: original,
+		});
+		const added = await daemon.requestRpc({
+			_tag: "AddInstance",
+			name: "Spare",
+			driver: "claude",
+			managed: false,
+			configDir: spare,
+		});
 		if (!added.addedInstanceId) throw new Error("Missing spare account");
 		const sessionId = await browser.createSession(
 			"Receipt folder is historical",
@@ -697,7 +695,6 @@ describe("Account folder changes without daemon restart", () => {
 		const switchTo = (instanceId: string, expectedInstanceId: string) =>
 			Effect.runPromise(
 				browser.rpc.ContinueSession({
-					projectSlug: "process-test",
 					sessionId,
 					instanceId,
 					expectedInstanceId,
@@ -706,12 +703,11 @@ describe("Account folder changes without daemon restart", () => {
 			);
 		await switchTo(added.addedInstanceId, "claude");
 		await browser.send(sessionId, "spare-account-history");
-		await daemon.requestRpc(
-			new UpdateInstance({
-				instanceId: AccountIdSchema.make("claude"),
-				configDir: edited,
-			}),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: AccountIdSchema.make("claude"),
+			configDir: edited,
+		});
 		await switchTo("claude", added.addedInstanceId);
 		await browser.send(sessionId, "return-to-edited-account");
 		expect(launches().at(-1)).toMatchObject({

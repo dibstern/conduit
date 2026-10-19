@@ -1,9 +1,10 @@
+import { RpcClientError } from "effect/rpc/RpcClientError";
 import type { Attachment } from "svelte/attachments";
 import { on } from "svelte/events";
 import { getBrowserClientId } from "../stores/client-identity.js";
 import { findSession } from "../stores/session.svelte.js";
-import { showToast } from "../stores/ui.svelte.js";
-import { markSessionSeenRpc } from "../transport/ws-rpc-client.js";
+import { toastFailure } from "../transport/rpc-errors.js";
+import { rpc } from "../transport/ws-rpc-client.js";
 import type { SessionInfo } from "../types.js";
 
 // Browser half of read state (ADR-0004, Scope; conduit-test-hk9m.4). Only
@@ -92,10 +93,22 @@ const pending = new Map<
 	{ readonly projectSlug: string; readonly upTo: number }
 >();
 
+/** Keep reports that never reached the server for reconnect. */
+async function markSessionSeenRpc(
+	input: Parameters<typeof rpc<"MarkSessionSeen">>[1],
+): Promise<"saved" | "disconnected"> {
+	try {
+		await rpc("MarkSessionSeen", input);
+		return "saved";
+	} catch (error) {
+		if (error instanceof RpcClientError) return "disconnected";
+		throw error;
+	}
+}
+
 function send(sessionId: string, projectSlug: string, upTo: number): void {
 	pending.delete(sessionId);
 	markSessionSeenRpc({
-		projectSlug,
 		sessionId,
 		upTo,
 		originId: getBrowserClientId(),
@@ -105,9 +118,9 @@ function send(sessionId: string, projectSlug: string, upTo: number): void {
 			if (outcome === "disconnected")
 				pending.set(sessionId, { projectSlug, upTo });
 		},
-		() => {
+		(error) => {
 			if (reported.get(sessionId) === upTo) reported.delete(sessionId);
-			showToast("Couldn't mark read", { variant: "error" });
+			toastFailure("Couldn't mark read")(error);
 		},
 	);
 }

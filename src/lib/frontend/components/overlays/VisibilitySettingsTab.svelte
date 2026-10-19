@@ -1,18 +1,21 @@
 <script lang="ts">
 	import { untrack } from "svelte";
 	import type { HarnessDefaultState } from "../../transport/ws-rpc.js";
-	import { catalogFromProviderList, findCatalogModel, type Harness, harnessForModelProvider, offeredOptions } from "../../../provider/turn-settings.js";
+	import { catalogFromProviderList, findCatalogModel, type Harness, offeredOptions } from "../../../provider/turn-settings.js";
 	import Select from "../ui/Select.svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
-	import { applyGetAgentsResponse, followModelsRead, applyHarnessDefaultSet, applyHiddenEntriesSet, chooseHiddenEntries, discoveryState } from "../../stores/discovery.svelte.js";
+	import { isKnownDriverKind } from "../../../contracts/provider-instance.js";
+	import { getDriverTraits } from "../../stores/instance.svelte.js";
+	import { PROVIDER_PRESENTATION } from "../../utils/provider-presentation.js";
+	import { refreshCatalogs, applyHarnessDefaultSet, applyHiddenEntriesSet, chooseHiddenEntries, discoveryState, getHarnessDefaultProviders } from "../../stores/discovery.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { sessionState } from "../../stores/session.svelte.js";
-	import { getAgentsRpc, getModelsRpc, setHarnessDefaultRpc, setHiddenEntriesRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	const log = createFrontendLogger("push");
 	let modelsFetchPending = $state(false);
 	const hiddenModelSet = $derived(new Set(discoveryState.hiddenModels));
@@ -63,21 +66,19 @@
 		});
 	});
 
-	let saving = $state({ claude: false, opencode: false });
-	const defaultRows = $derived(([
-		{ harness: "claude", label: "Claude" },
-		{ harness: "opencode", label: "OpenCode" },
-	] as const).map((row) => {
+	let saving = $state<Partial<Record<Harness, boolean>>>({});
+	const defaultRows = $derived(Object.keys(PROVIDER_PRESENTATION).filter(isKnownDriverKind).map((harness) => {
+		const row = { harness, label: PROVIDER_PRESENTATION[harness].label };
 		const state = discoveryState.harnessDefaults[row.harness];
-		const providers = modelProviders.filter((provider) => harnessForModelProvider(provider.id) === row.harness);
+		const providers = getHarnessDefaultProviders(row.harness);
 		const catalog = catalogFromProviderList(providers);
 		const model = state.pick ? findCatalogModel(row.harness, state.pick, catalog) : undefined;
 		return { ...row, state, providers, model, options: model ? offeredOptions(model) : { efforts: [], contextWindows: [] } };
 	}));
 
-	function defaultProblem(state: HarnessDefaultState, label: string): string {
+	function defaultProblem(state: HarnessDefaultState, harness: Harness, label: string): string {
 		if (state.status === "missing") return `No default. New chats on ${label} start with no model.`;
-		if (state.status === "unverified") return label === "OpenCode" ? "Start OpenCode to check this default." : "Connect Claude to check this default.";
+		if (state.status === "unverified") return getDriverTraits(harness)?.runsOpenCodeServer ? `Start ${label} to check this default.` : `Connect ${label} to check this default.`;
 		if (state.problem?.startsWith("EffortNotOffered")) return `Effort "${state.pick?.effort}" is no longer available for ${state.pick?.modelId}.`;
 		if (state.problem?.startsWith("ContextWindowNotOffered")) return `Context window "${state.pick?.contextWindow}" is no longer available for ${state.pick?.modelId}.`;
 		return `${state.pick?.modelId ?? "This model"} is no longer available.`;
@@ -97,14 +98,14 @@
 		if (!pick) return;
 		saving[harness] = true;
 		try {
-			applyHarnessDefaultSet(await setHarnessDefaultRpc({ projectSlug, harness, ...pick }));
-		} catch {
+			applyHarnessDefaultSet(await rpc("SetHarnessDefault", { projectSlug, harness, ...pick }));
+		} catch (error) {
 			// Restore the server value, including when the native select changed first.
 			const current = discoveryState.harnessDefaults[harness].pick;
 			select.value = setting === "model"
 				? current ? `${current.providerId}/${current.modelId}` : ""
 				: current?.[setting] ?? "";
-			showToast("Failed to save default model", { variant: "warn" });
+			toastFailure("Failed to save default model", "warn")(error);
 		} finally {
 			saving[harness] = false;
 		}
@@ -116,23 +117,11 @@
 		if (!projectSlug) return;
 		untrack(() => {
 			modelsFetchPending = true;
-			// Scoped, so the reply describes the open session's model, not the
-			// project default.
-			const sessionId = sessionState.currentId;
-			const applyModels = followModelsRead(sessionId ?? undefined);
-			void getModelsRpc({ projectSlug, ...(sessionId ? { sessionId } : {}) })
-				.then((response) => {
-					if (sessionState.currentId === sessionId) applyModels(response);
-				})
+			void refreshCatalogs()
 				.catch((err) => log.warn("Visibility models fetch failed:", err))
 				.finally(() => {
 					modelsFetchPending = false;
 				});
-			void getAgentsRpc({ projectSlug, ...(sessionId ? { sessionId } : {}) })
-				.then((response) => {
-					if (sessionState.currentId === sessionId) applyGetAgentsResponse(response, sessionId ?? undefined);
-				})
-				.catch((err) => log.warn("Visibility agents fetch failed:", err));
 		});
 	});
 
@@ -150,10 +139,10 @@
 		}
 		const undoHidden = chooseHiddenEntries(update);
 		try {
-			applyHiddenEntriesSet(await setHiddenEntriesRpc({ projectSlug, ...update }));
-		} catch {
+			applyHiddenEntriesSet(await rpc("SetHiddenEntries", { projectSlug, ...update }));
+		} catch (error) {
 			undoHidden();
-			showToast("Failed to save visibility settings", { variant: "warn" });
+			toastFailure("Failed to save visibility settings", "warn")(error);
 		}
 	}
 
@@ -250,7 +239,7 @@
 			{/snippet}
 			<SettingsRow label={row.label} labelFor="settings-harness-default-{row.harness}-model" control={controls} class="p-0" />
 			{#if row.state.status !== "ok"}
-				<p class="mt-1 text-[11px] text-text-muted" data-testid="settings-harness-default-{row.harness}-status" data-status={row.state.status}>{defaultProblem(row.state, row.label)}</p>
+				<p class="mt-1 text-[11px] text-text-muted" data-testid="settings-harness-default-{row.harness}-status" data-status={row.state.status}>{defaultProblem(row.state, row.harness, row.label)}</p>
 			{/if}
 		</div>
 	{/each}

@@ -9,10 +9,10 @@
 	import type { SteerBlocker } from "../../../contracts/stored-event.js";
 	import type { PendingInput } from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
-	import { cancelInputRpc, sendInputNowRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { extractDisplayText } from "../../utils/format.js";
 	import { usageForecastTime } from "../../utils/continuation.js";
 	import Badge from "../ui/Badge.svelte";
@@ -43,26 +43,28 @@
 
 	/** True when the server applied the command; a row that started is refused. */
 	async function act(
-		rpc: typeof cancelInputRpc,
+		tag: "input.cancel" | "input.sendNow",
 		input: PendingInput,
 	): Promise<boolean> {
-		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
-		if (!projectSlug || !sessionId) return false;
+		if (!sessionId) return false;
 		try {
-			const response = await rpc({ projectSlug, sessionId, inputId: input.inputId });
+			const payload = { sessionId, inputId: input.inputId };
+			const response = await (tag === "input.cancel"
+				? rpc("input.cancel", payload)
+				: rpc("input.sendNow", payload));
 			if (response.ok) return true;
 			if (response.reason === "already_started")
 				showToast("That message already started", { variant: "warn" });
 			else onSteerRefused(response.reason);
-		} catch {
-			showToast("Could not update the queue", { variant: "error" });
+		} catch (error) {
+			toastFailure("Could not update the queue")(error);
 		}
 		return false;
 	}
 
 	async function edit(input: PendingInput) {
-		if (await act(cancelInputRpc, input))
+		if (await act("input.cancel", input))
 			onEdit(extractDisplayText(input.request.text), input.request.images ?? []);
 	}
 </script>
@@ -79,7 +81,7 @@
 					tone="accent"
 					data-testid="pending-input-resume"
 					class="shrink-0 font-semibold"
-					onclick={() => act(sendInputNowRpc, inputs[0]!)}
+					onclick={() => act("input.sendNow", inputs[0]!)}
 				>Resume</TextButton>
 			</div>
 		{/if}
@@ -111,13 +113,13 @@
 									data-testid="pending-input-steer"
 									class="shrink-0"
 									disabled={steer === "prompt_open"}
-									onclick={() => act(sendInputNowRpc, input)}
+									onclick={() => act("input.sendNow", input)}
 								>{command ? "Run now" : "Steer"}</TextButton>{/snippet}
 								{steer === "prompt_open" ? "Answer the open prompt before steering" : command ? "Stop the running turn and run this next" : "Send it into the running turn"}
 							</Tooltip>
 						{/if}
 						<TextButton data-testid="pending-input-edit" class="shrink-0" onclick={() => edit(input)}>Edit</TextButton>
-						<TextButton data-testid="pending-input-remove" class="shrink-0" onclick={() => act(cancelInputRpc, input)}>Remove</TextButton>
+						<TextButton data-testid="pending-input-remove" class="shrink-0" onclick={() => act("input.cancel", input)}>Remove</TextButton>
 					{/if}
 				</li>
 			{/each}

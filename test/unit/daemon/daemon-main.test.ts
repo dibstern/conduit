@@ -59,18 +59,17 @@ function makeMockInstanceMgmt(): InstanceManagementDeps {
 function makeTestLayer() {
 	return Layer.mergeAll(
 		makeDaemonStateLive(),
-		Layer.succeed(PersistencePathTag, "/tmp/test-daemon.json"),
-		Layer.succeed(InstanceMgmtTag, makeMockInstanceMgmt()),
-		Layer.succeed(ProjectMgmtTag, {
+		Layer.succeed(PersistencePathTag)("/tmp/test-daemon.json"),
+		Layer.succeed(InstanceMgmtTag)(makeMockInstanceMgmt()),
+		Layer.succeed(ProjectMgmtTag)({
 			getProjects: vi.fn().mockReturnValue([]),
 		}),
-		Layer.succeed(RelayCacheTag, {
+		Layer.succeed(RelayCacheTag)({
 			get: () => Effect.die("not implemented in test"),
 			peek: () => Effect.succeed(Option.none()),
 			invalidate: () => Effect.die("not implemented in test"),
 		}),
-		Layer.succeed(
-			ConfigTag,
+		Layer.succeed(ConfigTag)(
 			makeMockConfig({
 				httpServer: {} as import("node:http").Server,
 				opencodeUrl: "http://localhost:4096",
@@ -80,8 +79,7 @@ function makeTestLayer() {
 				publishGlobalSetting: () => Effect.void,
 			}),
 		),
-		Layer.succeed(
-			LoggerTag,
+		Layer.succeed(LoggerTag)(
 			partialFake<Logger>({
 				info: vi.fn<Logger["info"]>(),
 				warn: vi.fn<Logger["warn"]>(),

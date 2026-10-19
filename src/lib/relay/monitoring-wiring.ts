@@ -4,9 +4,10 @@
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
-import { SqlClient } from "@effect/sql";
-import { Cause, Deferred, Effect, FiberId, Option, Runtime } from "effect";
+import { Deferred, Effect, Option } from "effect";
+import { SqlClient } from "effect/sql";
 import type { Account, AccountRef } from "../contracts/account.js";
+import { getProviderDriver } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { isOpenCodeNotRunningError } from "../domain/daemon/Services/opencode-instances-service.js";
 import {
@@ -19,6 +20,7 @@ import {
 	clearProcessingTimeout,
 	type OverridesStateTag,
 } from "../domain/relay/Services/session-overrides-state.js";
+import * as Failure from "../effect/failure-classification.js";
 import type { Message } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationSender } from "../server/push.js";
@@ -168,7 +170,7 @@ export function createMonitoringWiringState(): MonitoringWiringStateAccess {
 }
 
 const providerStreamsLifecycle = (account: Account | undefined): boolean =>
-	account?.driver === "claude";
+	getProviderDriver(account?.driver)?.streamsSessionLifecycle === true;
 
 const processAndApplyDoneEffect = (
 	sessionId: string,
@@ -229,10 +231,10 @@ const processAndApplyDoneEffect = (
 				}
 				return undefined;
 			}).pipe(
-				Effect.catchAllCause((cause) =>
+				Effect.catchCause((cause) =>
 					Effect.sync(() => {
 						deps.statusLog.warn(
-							`Failed to identify poller completion: ${Cause.pretty(cause)}`,
+							`Failed to identify poller completion: ${Failure.renderCause(cause)}`,
 						);
 						return undefined;
 					}),
@@ -276,7 +278,7 @@ const processAndApplyDoneEffect = (
 		if (!originId && !isSubagent && sql._tag === "Some" && pushManager) {
 			// The provider can know the completed assistant message before its
 			// terminal event reaches this relay. Resolve that identity off the tick.
-			yield* Effect.forkDaemon(
+			yield* Effect.forkDetach(
 				Effect.tryPromise(() => deps.client.session.messages(sessionId)).pipe(
 					Effect.flatMap((messages) => {
 						const lastMessage = messages.at(-1);
@@ -291,14 +293,15 @@ const processAndApplyDoneEffect = (
 							{ slug: deps.config.slug, sessionId },
 						);
 					}),
-					Effect.catchAllCause((cause) =>
+					Effect.catchCause((cause) =>
 						Effect.sync(() =>
 							deps.statusLog.warn(
-								`Failed to identify provider completion: ${Cause.pretty(cause)}`,
+								`Failed to identify provider completion: ${Failure.renderCause(cause)}`,
 							),
 						),
 					),
 				),
+				{ uninterruptible: "inherit" },
 			);
 		}
 		if (notification.alert) yield* publishAlert(notification.alert);
@@ -324,13 +327,13 @@ const executeMonitoringEffectsEffect = (
 					const sessionId = effect.sessionId;
 					// Seed off the tick: a hung messages() call must not delay
 					// the effects that follow it (other sessions' stops and dones).
-					yield* Effect.forkDaemon(
+					yield* Effect.forkDetach(
 						Effect.gen(function* () {
 							const messages = yield* Effect.tryPromise({
 								try: () => deps.client.session.messages(sessionId),
 								catch: (error) => error,
 							}).pipe(
-								Effect.catchAll((err) =>
+								Effect.catch((err) =>
 									Effect.sync(() => {
 										if (isOpenCodeNotRunningError(err)) return;
 										deps.statusLog.warn(
@@ -348,6 +351,7 @@ const executeMonitoringEffectsEffect = (
 								}
 							});
 						}),
+						{ uninterruptible: "inherit" },
 					);
 					break;
 				}
@@ -598,7 +602,7 @@ export const wireMonitoringEffect = (
 	Effect.gen(function* () {
 		const statusPoller = yield* StatusPollerTag;
 		const directory = yield* AccountDirectory;
-		const runtime = yield* Effect.runtime<
+		const runtime = yield* Effect.context<
 			SessionManagerServiceTag | OverridesStateTag | AlertsTag
 		>();
 		const {
@@ -621,13 +625,13 @@ export const wireMonitoringEffect = (
 			log: pipelineLog,
 		};
 
-		const runFork = Runtime.runFork(runtime);
+		const runFork = Effect.runForkWith(runtime);
 		// Ticks reduce in capture order. The lineage refresh before reduction is
 		// async, so a busy tick could otherwise reach reduction after the next idle
 		// one; dropping it as stale lost the busy period and its done alert.
 		let previousReduction: Effect.Effect<void> = Effect.void;
 		yield* statusPoller.on("changed", (statuses, statusesChanged) => {
-			const reduction = Deferred.unsafeMake<void>(FiberId.none);
+			const reduction = Deferred.makeUnsafe<void>();
 			const afterPrevious = previousReduction;
 			previousReduction = Deferred.await(reduction);
 			runFork(
@@ -652,7 +656,7 @@ export const wireMonitoringEffect = (
 						yield* sessionService
 							.refreshSessionLineage()
 							.pipe(
-								Effect.catchAll((err) =>
+								Effect.catch((err) =>
 									Effect.sync(() =>
 										statusLog.warn(
 											`Failed to refresh session lineage: ${err instanceof Error ? err.message : err}`,
@@ -737,10 +741,10 @@ export const wireMonitoringEffect = (
 				}).pipe(
 					// Early returns and failures must not stall later ticks.
 					Effect.ensuring(Deferred.succeed(reduction, undefined)),
-					Effect.catchAllCause((cause) =>
+					Effect.catchCause((cause) =>
 						Effect.sync(() =>
 							statusLog.warn(
-								`Status poller changed handler failed: ${Cause.pretty(cause)}`,
+								`Status poller changed handler failed: ${Failure.renderCause(cause)}`,
 							),
 						),
 					),

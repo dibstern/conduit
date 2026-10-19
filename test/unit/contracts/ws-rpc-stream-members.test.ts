@@ -1,5 +1,5 @@
-import { RpcSchema } from "@effect/rpc";
 import { Schema } from "effect";
+import { RpcSchema } from "effect/rpc";
 import { describe, expect, it } from "vitest";
 import * as Contracts from "../../../src/lib/contracts/ws-rpc.js";
 import * as Frontend from "../../../src/lib/frontend/transport/ws-rpc.js";
@@ -14,9 +14,8 @@ describe("subscription RPC contracts", () => {
 		expect(Frontend.SubscribeSessionDetail).toBe(member);
 		const decodePayload = Schema.decodeUnknownSync(member.payloadSchema);
 		for (const payload of [
-			{ projectSlug: "project", sessionId: "session-1" },
+			{ sessionId: "session-1" },
 			{
-				projectSlug: "project",
 				sessionId: "session-1",
 				resumeFromSequence: 42,
 			},
@@ -24,10 +23,9 @@ describe("subscription RPC contracts", () => {
 			expect(decodePayload(payload)).toEqual(payload);
 		}
 		for (const payload of [
-			{ projectSlug: "project" },
-			{ projectSlug: "project", sessionId: "" },
+			{},
+			{ sessionId: "" },
 			{
-				projectSlug: "project",
 				sessionId: "session-1",
 				resumeFromSequence: "42",
 			},
@@ -35,7 +33,7 @@ describe("subscription RPC contracts", () => {
 			expect(() => decodePayload(payload)).toThrow();
 		}
 		expect(RpcSchema.isStreamSchema(member.successSchema)).toBe(true);
-		expect(member.successSchema.failure).toBe(Contracts.WsRpcError);
+		expect(member.successSchema.error).toBe(Contracts.WsRpcError);
 		const decode = Schema.decodeUnknownSync(member.successSchema.success);
 		const message = {
 			_tag: "message",
@@ -75,10 +73,10 @@ describe("subscription RPC contracts", () => {
 		);
 		expect(Frontend.SubscribeSessionTodos).toBe(member);
 		const decodePayload = Schema.decodeUnknownSync(member.payloadSchema);
-		const payload = { projectSlug: "project", sessionId: "session-1" };
+		const payload = { sessionId: "session-1" };
 		expect(decodePayload(payload)).toEqual(payload);
 		// Scope is an argument, never ambient: no session, no subscription.
-		expect(() => decodePayload({ projectSlug: "project" })).toThrow();
+		expect(() => decodePayload({})).toThrow();
 		expect(RpcSchema.isStreamSchema(member.successSchema)).toBe(true);
 		const decode = Schema.decodeUnknownSync(member.successSchema.success);
 		const item = {
@@ -125,17 +123,12 @@ describe("subscription RPC contracts", () => {
 		expect(Contracts.WsRpcGroup.requests.get("SubscribeShell")).toBe(member);
 		expect(Frontend.SubscribeShell).toBe(member);
 		const decodePayload = Schema.decodeUnknownSync(member.payloadSchema);
-		for (const payload of [
-			{ projectSlug: "project" },
-			{ projectSlug: "project", resumeFromSequence: 42 },
-		]) {
+		for (const payload of [{}, { resumeFromSequence: 42 }]) {
 			expect(decodePayload(payload)).toEqual(payload);
 		}
-		expect(() =>
-			decodePayload({ projectSlug: "project", resumeFromSequence: "42" }),
-		).toThrow();
+		expect(() => decodePayload({ resumeFromSequence: "42" })).toThrow();
 		expect(RpcSchema.isStreamSchema(member.successSchema)).toBe(true);
-		expect(member.successSchema.failure).toBe(Contracts.WsRpcError);
+		expect(member.successSchema.error).toBe(Contracts.WsRpcError);
 		const decode = Schema.decodeUnknownSync(member.successSchema.success);
 		const session = {
 			id: "session-1",
@@ -172,7 +165,7 @@ describe("subscription RPC contracts", () => {
 		expect(() => decodePayload({})).toThrow();
 		expect(() => decodePayload({ projectSlug: "" })).toThrow();
 		expect(RpcSchema.isStreamSchema(member.successSchema)).toBe(true);
-		expect(member.successSchema.failure).toBe(Contracts.WsRpcError);
+		expect(member.successSchema.error).toBe(Contracts.WsRpcError);
 		const decode = Schema.decodeUnknownSync(member.successSchema.success);
 		const visibility = {
 			_tag: "visibility",

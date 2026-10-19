@@ -12,12 +12,11 @@
 	} from "../../stores/ui.svelte.js";
 	import { chatState, currentChat } from "../../stores/chat.svelte.js";
 	import { getAvailableInstances } from "../../stores/discovery.svelte.js";
+	import { getDriverTraits } from "../../stores/instance.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import {
-		rewindSessionRpc,
-		undoRewindRpc,
-	} from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import Surface from "../ui/Surface.svelte";
 
 	let {
@@ -33,9 +32,10 @@
 	const pendingMessageId = $derived(
 		currentChat().transcript?.pendingRewindMessageId ?? null,
 	);
-	const isClaude = $derived(
-		!pendingOnly && sessionState.currentId !== null &&
-		getAvailableInstances().find((instance) => instance.id === findSession(sessionState.currentId ?? "")?.accountId)?.driver === "claude",
+	const restoresFiles = $derived(
+		!pendingOnly && sessionState.currentId !== null
+			? getDriverTraits(getAvailableInstances().find((instance) => instance.id === findSession(sessionState.currentId ?? "")?.accountId)?.driver)?.supportsFileRewind ?? true
+			: true,
 	);
 	const showBanner = $derived(!pendingOnly && uiState.rewindActive);
 	const showModal = $derived(
@@ -55,7 +55,7 @@
 		const sessionId = sessionState.currentId;
 		const projectSlug = getCurrentSlug();
 		if (!uuid || !sessionId || !projectSlug) return;
-		const mode = isClaude ? "conversation" : "both";
+		const mode = restoresFiles ? "both" : "conversation";
 		const message = chatState.messages.find((message) => message.uuid === uuid);
 		if (!message || !("messageId" in message) || !message.messageId) {
 			exitRewindMode();
@@ -66,8 +66,7 @@
 			return;
 		}
 
-		void rewindSessionRpc({
-			projectSlug,
+		void rpc("RewindSession", {
 			sessionId,
 			messageId: message.messageId,
 		})
@@ -81,9 +80,9 @@
 				}
 				onRewind?.(uuid, mode);
 			})
-			.catch(() => {
+			.catch((error) => {
 				if (sessionState.currentId === sessionId && getCurrentSlug() === projectSlug)
-					showToast("Could not rewind the conversation.", { variant: "warn" });
+					toastFailure("Could not rewind the conversation.", "warn")(error);
 			});
 
 		exitRewindMode();
@@ -95,10 +94,10 @@
 		if (!pendingMessageId || !sessionId || !projectSlug || undoing) return;
 		undoing = true;
 		try {
-			await undoRewindRpc({ projectSlug, sessionId });
-		} catch {
+			await rpc("UndoRewind", { sessionId });
+		} catch (error) {
 			if (sessionState.currentId === sessionId && getCurrentSlug() === projectSlug)
-				showToast("Could not undo the rewind.", { variant: "warn" });
+				toastFailure("Could not undo the rewind.", "warn")(error);
 		} finally {
 			undoing = false;
 		}
@@ -167,7 +166,7 @@
 				This message and everything after it will be removed. You can undo until you send your next message.
 			</p>
 			<p class="mb-5 text-sm text-text-secondary">
-				{isClaude ? "Files are not restored." : "Files are restored to this point."}
+				{restoresFiles ? "Files are restored to this point." : "Files are not restored."}
 			</p>
 
 			<!-- Action buttons -->

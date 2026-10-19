@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import type { Account } from "../contracts/account.js";
+import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import {
 	ConfigTag,
@@ -23,7 +24,8 @@ export const normalizeProjectTitle = (title: string): string =>
 
 const listSessionCommands = (
 	activeSessionId: string | undefined,
-	tolerateClaudeFailure = true,
+	tolerateDiscoveryFailure = true,
+	draftInstanceId?: string,
 ) =>
 	Effect.gen(function* () {
 		const engine = yield* OrchestrationEngineTag;
@@ -31,12 +33,14 @@ const listSessionCommands = (
 		const boundId = activeSessionId
 			? yield* engine.getProviderForSessionEffect(activeSessionId)
 			: undefined;
+		// A draft has no session yet; the account it picked owns its catalogue.
+		const accountId = boundId ?? draftInstanceId;
 		const account = yield* directory.resolve(
-			boundId === undefined
+			accountId === undefined
 				? { _tag: "DriverDefault", driver: "opencode" }
-				: { _tag: "Id", id: boundId },
+				: { _tag: "Id", id: accountId },
 		);
-		const listClaudeCommands = (claude: Account) =>
+		const listDiscoveredCommands = (selected: Account) =>
 			Effect.gen(function* () {
 				const workspaceRoot = activeSessionId
 					? yield* (yield* SessionWorkspaceTag).get(activeSessionId)
@@ -44,17 +48,17 @@ const listSessionCommands = (
 				return yield* engine
 					.dispatchEffect({
 						type: "discover",
-						providerId: "claude",
-						account: claude,
+						providerId: selected.id,
+						account: selected,
 						workspaceRoot,
 					})
 					.pipe(
 						Effect.map((capabilities) => capabilities.commands),
-						Effect.catchAll((error) =>
-							tolerateClaudeFailure
+						Effect.catch((error) =>
+							tolerateDiscoveryFailure
 								? Effect.gen(function* () {
 										(yield* LoggerTag).warn(
-											`Failed to discover Claude commands: ${error instanceof Error ? error.message : error}`,
+											`Failed to discover ${selected.name} commands: ${error instanceof Error ? error.message : error}`,
 										);
 										return [];
 									})
@@ -62,24 +66,28 @@ const listSessionCommands = (
 						),
 					);
 			});
-		if (account.driver === "claude") return yield* listClaudeCommands(account);
-		const result = yield* Effect.either(
+		if (PROVIDER_DRIVERS[account.driver].catalogSource === "discovery")
+			return yield* listDiscoveredCommands(account);
+		const result = yield* Effect.result(
 			(yield* OpenCodeSettingsServiceTag).listCommands({
-				startIfStopped: !tolerateClaudeFailure,
+				startIfStopped: !tolerateDiscoveryFailure,
 			}),
 		);
-		if (result._tag === "Right") return result.right;
-		if (boundId !== undefined) return yield* Effect.fail(result.left);
+		if (result._tag === "Success") return result.success;
+		if (boundId !== undefined) return yield* Effect.fail(result.failure);
 		(yield* LoggerTag).warn(
-			`Failed to discover OpenCode commands; falling back to Claude commands: ${result.left instanceof Error ? result.left.message : result.left}`,
+			`Failed to discover OpenCode commands; falling back to Claude commands: ${result.failure instanceof Error ? result.failure.message : result.failure}`,
 		);
-		return yield* listClaudeCommands(
+		return yield* listDiscoveredCommands(
 			yield* directory.resolve({ _tag: "DriverDefault", driver: "claude" }),
 		);
 	});
 
-export const getCommandsForSession = (activeSessionId: string | undefined) =>
-	listSessionCommands(activeSessionId).pipe(
+export const getCommandsForSession = (
+	activeSessionId: string | undefined,
+	draftInstanceId?: string,
+) =>
+	listSessionCommands(activeSessionId, true, draftInstanceId).pipe(
 		Effect.map((commands) =>
 			commands.map((command) => ({
 				name: command.name,

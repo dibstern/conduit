@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
-import { Chunk, Deferred, Effect, Fiber, Layer, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Stream } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { describe, expect, it, vi } from "vitest";
 import {
 	decodeProviderRuntimeEvent,
@@ -56,6 +56,7 @@ function runtimeEvent(event: Record<string, unknown>): ProviderRuntimeEvent {
 }
 
 function makeHarness(options?: {
+	readonly existingSession?: boolean;
 	readonly appendEffect?: (
 		event: CanonicalEvent,
 		stored: StoredEvent,
@@ -97,6 +98,7 @@ function makeHarness(options?: {
 			).pipe(
 				Effect.as({
 					version: event.sequence,
+					projectIds: [event.projectId],
 					sessionIds: [event.sessionId],
 					removedSessionIds: [],
 					collections: ["messages"] as const,
@@ -114,6 +116,7 @@ function makeHarness(options?: {
 		).pipe(
 			Effect.as({
 				version: events[events.length - 1]?.sequence ?? 0,
+				projectIds: [...new Set(events.map((event) => event.projectId))],
 				sessionIds: [...new Set(events.map((event) => event.sessionId))],
 				removedSessionIds: [],
 				collections: ["messages"] as const,
@@ -148,8 +151,17 @@ function makeHarness(options?: {
 		nextVersion: Effect.succeed(0),
 	} satisfies ProjectionRunnerEffect;
 
-	const executeSql = vi.fn(() => Effect.succeed([]));
-	const sql = executeSql as unknown as SqlClient.SqlClient & {
+	const executeSql = vi.fn((strings: TemplateStringsArray) =>
+		Effect.succeed(
+			options?.existingSession &&
+				strings.join("").includes("SELECT id FROM sessions")
+				? [{ id: "session-123" }]
+				: [],
+		),
+	);
+	const sql = Object.assign(executeSql, {
+		transactionService: SqlClient.TransactionConnection(0),
+	}) as unknown as SqlClient.SqlClient & {
 		withTransaction: <A, E, R>(
 			effect: Effect.Effect<A, E, R>,
 		) => Effect.Effect<A, E, R>;
@@ -157,9 +169,9 @@ function makeHarness(options?: {
 	sql.withTransaction = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect;
 
 	const depsLayer = Layer.mergeAll(
-		Layer.succeed(EventStoreEffectTag, eventStore),
-		Layer.succeed(ProjectionRunnerEffectTag, projectionRunner),
-		Layer.succeed(SqlClient.SqlClient, sql),
+		Layer.succeed(EventStoreEffectTag)(eventStore),
+		Layer.succeed(ProjectionRunnerEffectTag)(projectionRunner),
+		Layer.succeed(SqlClient.SqlClient)(sql),
 	);
 	const layer = ProviderRuntimeIngestionLive.pipe(Layer.provide(depsLayer));
 
@@ -178,8 +190,8 @@ function makeHarness(options?: {
 }
 
 describe("ProviderRuntimeIngestion", () => {
-	it("publishes ingested provider output to relay clients through the ingestion owner", async () => {
-		const harness = makeHarness();
+	it("publishes only turn-ended alerts through the ingestion owner", async () => {
+		const harness = makeHarness({ existingSession: true });
 		const published: unknown[] = [];
 		const layer = makeProviderRuntimeIngestionLive({
 			relayPublisher: {
@@ -205,17 +217,24 @@ describe("ProviderRuntimeIngestion", () => {
 						},
 					}),
 				);
+				yield* ingestion.ingest(
+					runtimeEvent({
+						eventId: "runtime-turn-completed",
+						type: "turn.completed",
+						turnId: "turn-1",
+						data: { messageId: "message-1" },
+					}),
+				);
 				yield* ingestion.drain();
 			}).pipe(Effect.provide(layer)),
 		);
 
 		expect(published).toEqual([
 			{
-				type: "delta",
+				type: "done",
 				sessionId: "session-123",
-				text: "hello",
-				messageId: "message-1",
-				partId: "text-1",
+				code: 0,
+				alertId: '["session-123","message-1","done"]',
 			},
 		]);
 	});
@@ -247,7 +266,7 @@ describe("ProviderRuntimeIngestion", () => {
 			),
 		);
 
-		expect(Chunk.toReadonlyArray(received)).toEqual([
+		expect([...received]).toEqual([
 			expect.objectContaining({ eventId: "committed-1", sequence: 1 }),
 		]);
 	});
@@ -272,10 +291,10 @@ describe("ProviderRuntimeIngestion", () => {
 			expectedRelayCalls: 1,
 		},
 	])("$name", async ({ options, expectedBusCalls, expectedRelayCalls }) => {
-		const harness = makeHarness();
+		const harness = makeHarness({ existingSession: true });
 		const busPublish = vi.fn(() => Effect.void);
 		const relayPublish = vi.fn(() => Effect.void);
-		const busLayer = Layer.succeed(SessionEventBusTag, {
+		const busLayer = Layer.succeed(SessionEventBusTag)({
 			publish: busPublish,
 			publishAdvance: () => Effect.void,
 			subscribe: () => Effect.succeed(Stream.empty),
@@ -291,13 +310,11 @@ describe("ProviderRuntimeIngestion", () => {
 				yield* ingestion.ingestBatch(
 					[
 						runtimeEvent({
-							eventId: "publication-matrix-delta",
-							type: "text.delta",
+							eventId: "publication-matrix-completed",
+							type: "turn.completed",
 							turnId: "turn-1",
 							data: {
 								messageId: "message-1",
-								partId: "text-1",
-								text: "hello",
 							},
 						}),
 					],
@@ -322,7 +339,7 @@ describe("ProviderRuntimeIngestion", () => {
 		});
 		const busPublish = vi.fn(() => Effect.void);
 		const relayPublish = vi.fn(() => Effect.void);
-		const busLayer = Layer.succeed(SessionEventBusTag, {
+		const busLayer = Layer.succeed(SessionEventBusTag)({
 			publish: busPublish,
 			publishAdvance: () => Effect.void,
 			subscribe: () => Effect.succeed(Stream.empty),
@@ -347,11 +364,11 @@ describe("ProviderRuntimeIngestion", () => {
 							},
 						}),
 					)
-					.pipe(Effect.either);
+					.pipe(Effect.result);
 			}).pipe(Effect.provide(layer)),
 		);
 
-		expect(result._tag).toBe("Left");
+		expect(result._tag).toBe("Failure");
 		expect(harness.projectBatch).toHaveBeenCalledTimes(1);
 		expect(harness.projectBatch).toHaveBeenCalledWith([
 			expect.objectContaining({
@@ -370,7 +387,7 @@ describe("ProviderRuntimeIngestion", () => {
 		const published: StoredEvent[] = [];
 		let projectedCountAtPublish = 0;
 		const harness = makeHarness();
-		const busLayer = Layer.succeed(SessionEventBusTag, {
+		const busLayer = Layer.succeed(SessionEventBusTag)({
 			publish: (events) =>
 				Effect.gen(function* () {
 					yield* Deferred.succeed(publishStarted, undefined);
@@ -389,7 +406,7 @@ describe("ProviderRuntimeIngestion", () => {
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const ingestion = yield* ProviderRuntimeIngestionTag;
-				const fiber = yield* Effect.fork(
+				const fiber = yield* Effect.forkChild(
 					ingestion.ingest(
 						runtimeEvent({
 							eventId: "interrupt-during-bus-publish",
@@ -405,8 +422,8 @@ describe("ProviderRuntimeIngestion", () => {
 
 				yield* Deferred.await(publishStarted);
 				projectedCountAtPublish = harness.projected.length;
-				yield* Fiber.interruptFork(fiber);
-				yield* Effect.yieldNow();
+				fiber.interruptUnsafe();
+				yield* Effect.yieldNow;
 				yield* Deferred.succeed(publishGate, undefined);
 				yield* Fiber.await(fiber);
 			}).pipe(Effect.provide(layer)),
@@ -580,11 +597,7 @@ describe("ProviderRuntimeIngestion", () => {
 					messageId: "message-1",
 					role: "assistant",
 				}),
-				metadata: {
-					providerRuntimeEventId: "runtime-event-1",
-					rawSource: "claude.sdk.message",
-					providerRefs: BASE_EVENT.providerRefs,
-				},
+				metadata: {},
 			}),
 		]);
 		expect(harness.projectBatch).toHaveBeenCalledTimes(1);
@@ -758,7 +771,7 @@ describe("ProviderRuntimeIngestion", () => {
 							},
 						}),
 					)
-					.pipe(Effect.fork);
+					.pipe(Effect.forkChild);
 				yield* Deferred.await(firstAppendStarted);
 				const second = yield* ingestion
 					.ingest(
@@ -771,7 +784,7 @@ describe("ProviderRuntimeIngestion", () => {
 							},
 						}),
 					)
-					.pipe(Effect.fork);
+					.pipe(Effect.forkChild);
 
 				expect(harness.append).toHaveBeenCalledTimes(1);
 				yield* Deferred.succeed(releaseFirstAppend, undefined);
@@ -825,7 +838,7 @@ describe("ProviderRuntimeIngestion", () => {
 							},
 						}),
 					)
-					.pipe(Effect.either);
+					.pipe(Effect.result);
 				yield* ingestion.ingest(
 					runtimeEvent({
 						eventId: "thinking-start",

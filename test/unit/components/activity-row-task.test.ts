@@ -3,20 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ToolMessage } from "../../../src/lib/frontend/types.js";
 
 const openTask = vi.hoisted(() => vi.fn());
-const switchToSession = vi.hoisted(() => vi.fn());
+const openSession = vi.hoisted(() => vi.fn());
 vi.mock(
 	"../../../src/lib/frontend/components/session/background-tasks.svelte.js",
 	() => ({ openTask }),
 );
-vi.mock(
-	"../../../src/lib/frontend/stores/session.svelte.js",
-	async (importOriginal) => ({
-		...(await importOriginal<
-			typeof import("../../../src/lib/frontend/stores/session.svelte.js")
-		>()),
-		switchToSession,
-	}),
-);
+vi.mock("../../../src/lib/frontend/stores/selection.svelte.js", () => ({
+	selection: { open: openSession },
+}));
 
 import ActivityRow from "../../../src/lib/frontend/components/chat/ActivityRow.svelte";
 
@@ -80,7 +74,7 @@ describe("ActivityRow task actions", () => {
 			container.querySelector("button") as HTMLButtonElement,
 		);
 		expect(openTask).not.toHaveBeenCalled();
-		expect(switchToSession).not.toHaveBeenCalled();
+		expect(openSession).not.toHaveBeenCalled();
 		expect(container.querySelector(".tool-result")).toBeNull();
 		expect(container.querySelector(".subagent-link")).toBeNull();
 	});
@@ -129,7 +123,7 @@ describe("ActivityRow task actions", () => {
 		await fireEvent.click(
 			container.querySelector(".subagent-link") as HTMLButtonElement,
 		);
-		expect(switchToSession).toHaveBeenCalledWith("child");
+		expect(openSession).toHaveBeenCalledWith("child");
 		expect(openTask).not.toHaveBeenCalled();
 	});
 });

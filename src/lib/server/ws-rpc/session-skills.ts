@@ -13,5 +13,5 @@ export const sessionSkillsHandlers = {
 			);
 			const names = yield* getSkillNamesForSession(request.sessionId);
 			return { loads: collectSessionSkillLoads(messages, names) };
-		}).pipe(Effect.catchAll(mapRpcFailure("GetSessionSkills"))),
+		}).pipe(Effect.catch(mapRpcFailure("GetSessionSkills"))),
 } satisfies Pick<WsRpcHandlerMap, "GetSessionSkills">;

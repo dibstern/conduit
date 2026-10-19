@@ -1,6 +1,6 @@
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
@@ -24,7 +24,6 @@ describe("WsRpcServerLayer CancelSession", () => {
 			const client = yield* rpcClient;
 
 			const result = yield* client.CancelSession({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				commandId: "cmd-stop-opencode",
 			});
@@ -37,6 +36,7 @@ describe("WsRpcServerLayer CancelSession", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ api })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -61,7 +61,6 @@ describe("WsRpcServerLayer CancelSession", () => {
 			const client = yield* rpcClient;
 
 			const result = yield* client.CancelSession({
-				projectSlug: "project-a",
 				sessionId: "session-claude",
 				commandId: "cmd-stop-1",
 			});
@@ -84,6 +83,7 @@ describe("WsRpcServerLayer CancelSession", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});

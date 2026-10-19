@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
 import { seedSessions } from "./session-fixtures.js";
 
@@ -7,25 +8,25 @@ vi.mock("../../../src/lib/frontend/stores/ws-notifications.js", () => ({
 }));
 
 import * as chat from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	applyTranscriptEnvelope,
 	deriveTranscriptMessages,
 	type TranscriptEntry,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { triggerNotifications } from "../../../src/lib/frontend/stores/ws-notifications.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { detailUpserts } from "../../helpers/detail-rows.js";
 
 afterEach(() => {
 	vi.clearAllMocks();
 	chat.sessionActivity.clear();
 	chat.sessionMessages.clear();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 });
 
 function projectedTurn() {
 	seedSessions([{ id: "s", title: "test", status: "idle" }]);
-	sessionState.currentId = "s";
+	openSessionForSetup("s", "project-a");
 	const slot = chat.getOrCreateSessionSlot("s");
 	chat.phaseToProcessing(slot.activity);
 	const empty: TranscriptEntry = {

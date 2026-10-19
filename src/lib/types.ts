@@ -1,19 +1,14 @@
-import type { AddAccountInput } from "./contracts/account.js";
 // Canonical type definitions for conduit, derived from ticket specs.
 
 import type { Tracer } from "effect/Tracer";
 import type { Logger } from "./logger.js";
 import type { PushNotificationSender } from "./server/push.js";
 import type {
-	DaemonSessionQueryOptions,
-	DaemonSessionQueryResult,
 	PartType,
 	PermissionId,
 	ProviderPermissionUpdate,
 	ToolStatus,
 } from "./shared-types.js";
-
-type MaybePromise<T> = T | PromiseLike<T>;
 
 // Re-export all shared types (shared between server and frontend)
 export type {
@@ -120,12 +115,15 @@ export interface StoredProject {
 	>;
 	readonly title: string;
 	readonly lastUsed?: number;
+	readonly addedAt?: number;
 	readonly shellEnv?: import("./contracts/project-shell-env.js").ProjectShellEnvConfig;
 	readonly setupScript?: string | undefined;
 	readonly sessionMode?:
 		| import("./contracts/project-file.js").SessionMode
 		| undefined;
-	readonly groupingMode?: import("./shared-types.js").GroupingMode | undefined;
+	readonly worktreeCleanup?:
+		| import("./contracts/worktree.js").ProjectWorktreeCleanup
+		| undefined;
 }
 
 export interface RecentProject {
@@ -166,12 +164,8 @@ export interface ProjectRelayConfig {
 	worktreeContext?: import("effect").Context.Context<
 		import("./domain/daemon/Services/worktree-service.js").WorktreeServiceTag
 	>;
-	/** Shared daemon config state and persistence for settings and continuation. */
-	daemonConfigContext?: import("effect").Context.Context<
-		| import("./domain/daemon/Services/daemon-config-ref.js").DaemonConfigRefTag
-		| import("./domain/daemon/Services/config-persistence-service.js").ConfigPersistenceTag
-		| import("./domain/daemon/Services/account-directory.js").AccountDirectory
-	>;
+	/** Daemon services shared with relay runtimes; omitted services use standalone adapters. */
+	daemonConfigContext?: import("effect").Context.Context<never>;
 	/** Id of the OpenCode instance selected for this relay (default instance when omitted). */
 	openCodeInstanceId?: string;
 	/** Project working directory */
@@ -192,77 +186,16 @@ export interface ProjectRelayConfig {
 	 * to the relay.
 	 */
 	noServer?: boolean;
-	/** Return the relay's registered project list (for the project switcher). */
-	getProjects?: () => MaybePromise<
-		ReadonlyArray<{
-			slug: string;
-			title: string;
-			folders: readonly [string, ...string[]];
-			setupScript?: string | undefined;
-			sessionMode?:
-				| import("./contracts/project-file.js").SessionMode
-				| undefined;
-		}>
-	>;
-	/** List sessions across every registered project without starting relays. */
-	listDaemonSessions?: (
-		options: DaemonSessionQueryOptions,
-	) => MaybePromise<DaemonSessionQueryResult>;
-	/** Existing canonical owner, without starting a relay or warming git. */
-	resolveSessionProject?: (sessionId: string) => Promise<string | null>;
-	/** Notify browsers on other project relays that the daemon list changed. */
-	broadcastSessionListChanged?: () => Promise<void>;
 	/** Request the daemon's serialized worktree sweep after a session settles. */
 	requestWorktreeCleanup?: () => import("effect").Effect.Effect<void>;
+	/** Read this project's current effective cleanup rules from the daemon. */
+	getWorktreeCleanup?: () => import("effect").Effect.Effect<
+		import("./contracts/worktree.js").WorktreeCleanup | "off"
+	>;
 	/** Notify the daemon's other live relays; standalone relays use a no-op. */
 	publishGlobalSetting: (
 		tag: import("./contracts/ws-rpc.js").GlobalSettingTag,
 	) => import("effect").Effect.Effect<void>;
-	/** Refresh the daemon's cached git context before publishing a turn-end list. */
-	refreshSessionGit?: () => Promise<void>;
-	/** Remove a project from the registry. */
-	removeProject?: (slug: string) => void | Promise<void>;
-	/** Create or update a project's folders and display title. */
-	saveProject?: (
-		input: import("./contracts/ws-rpc.js").SaveProjectInput,
-	) => Promise<{
-		kind?: "existing" | undefined;
-		project: import("./shared-types.js").ProjectInfo;
-		warnings: readonly import("./project-folders.js").FolderIssue[];
-	}>;
-	/** Return the current list of OpenCode instances (for the instance switcher). */
-	getInstances?: () => MaybePromise<
-		ReadonlyArray<Readonly<import("./shared-types.js").OpenCodeInstance>>
-	>;
-	/** Add a new instance. Returns the created instance. */
-	addInstance?: (
-		input: AddAccountInput,
-	) => MaybePromise<import("./shared-types.js").OpenCodeInstance>;
-	/** Remove an instance by ID. */
-	removeInstance?: (id: string) => MaybePromise<void>;
-	/** Start a managed instance. */
-	startInstance?: (id: string) => Promise<void>;
-	/** Stop an instance. */
-	stopInstance?: (id: string) => MaybePromise<void>;
-	/** Update an instance's name, env, or port. */
-	updateInstance?: (
-		id: string,
-		updates: {
-			name?: string;
-			env?: Record<string, string>;
-			port?: number;
-			driver?: import("./contracts/provider-instance.js").ProviderDriverKind;
-			configDir?: string;
-		},
-	) => MaybePromise<import("./shared-types.js").OpenCodeInstance>;
-	/** Persist daemon config to disk after instance mutations. */
-	persistConfig?: () => MaybePromise<void>;
-	/** Trigger an immediate port scan (optional — daemon mode only). */
-	triggerScan?: () => Promise<{
-		discovered: number[];
-		lost: number[];
-		active: number[];
-	}>;
 	/** Optional push notification manager for server-side push delivery */
 	pushManager?: PushNotificationSender;
 	/** Config directory for cache storage (default: projectDir/.conduit) */

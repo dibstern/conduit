@@ -1,10 +1,12 @@
 <script lang="ts">
+	import type { Rpc } from "effect/rpc";
 	import { onMount, tick } from "svelte";
 	import type { SessionMode } from "../../../contracts/project-file.js";
-	import type { GroupingMode } from "../../../shared-types.js";
 	import {
+		type FindFolders,
 		ProjectSaveRejected,
 		type FindFoldersResponse,
+		type SaveProject,
 		type SaveProjectResponse,
 	} from "../../transport/ws-rpc.js";
 	import { type FolderIssue, labelProjectFolders } from "../../../project-folders.js";
@@ -22,12 +24,8 @@
 	import type { OpenCodeInstance, ProjectInfo } from "../../types.js";
 	import { getAvailableInstances } from "../../stores/discovery.svelte.js";
 	import { getInstanceById } from "../../stores/instance.svelte.js";
-	import {
-		findFoldersRpc,
-		saveProjectRpc,
-		type FindFoldersRpcInput,
-		type SaveProjectRpcInput,
-	} from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { failureLine } from "../../transport/rpc-errors.js";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
 	import Checkbox from "../ui/Checkbox.svelte";
@@ -48,8 +46,8 @@
 		onclose,
 		onsaved,
 		returnFocus,
-		findFolders = findFoldersRpc,
-		saveProject = saveProjectRpc,
+		findFolders = (input) => rpc("FindFolders", input),
+		saveProject = (input) => rpc("SaveProject", input),
 	}: {
 		open: boolean;
 		/** Opens the dialog in Edit mode for this project. */
@@ -59,8 +57,8 @@
 		onclose: () => void;
 		onsaved?: (response: SaveProjectResponse) => void;
 		returnFocus?: () => HTMLElement | null;
-		findFolders?: (input: FindFoldersRpcInput) => Promise<FindFoldersResponse>;
-		saveProject?: (input: SaveProjectRpcInput) => Promise<SaveProjectResponse>;
+		findFolders?: (input: Rpc.PayloadConstructor<typeof FindFolders>) => Promise<FindFoldersResponse>;
+		saveProject?: (input: Rpc.PayloadConstructor<typeof SaveProject>) => Promise<SaveProjectResponse>;
 	} = $props();
 
 	const uid = $props.id();
@@ -71,7 +69,6 @@
 	let draft = $state<ProjectDraft>(createDraft());
 	let setupScript = $state("");
 	let sessionMode = $state<SessionMode | "">("");
-	let groupingMode = $state<GroupingMode | "">("");
 	let query = $state("");
 	let entries = $state<FindFoldersResponse["entries"]>([]);
 	let home = $state("");
@@ -113,7 +110,7 @@
 		...saveIssues.filter((issue) => issue.kind !== "permission-denied"),
 	]);
 	const canSave = $derived(
-		!saving && issues.errors.length === 0 && !issues.nameError && (!project || isDirty(draft, original) || setupValue !== (project.setupScript ?? "") || sessionMode !== (project.sessionMode ?? "") || groupingMode !== (project.groupingMode ?? "")),
+		!saving && issues.errors.length === 0 && !issues.nameError && (!project || isDirty(draft, original) || setupValue !== (project.setupScript ?? "") || sessionMode !== (project.sessionMode ?? "")),
 	);
 
 	onMount(() => {
@@ -146,7 +143,6 @@
 		draft = original;
 		setupScript = project?.setupScript ?? "";
 		sessionMode = project?.sessionMode ?? "";
-		groupingMode = project?.groupingMode ?? "";
 		query = "";
 		entries = [];
 		addIssues = [];
@@ -185,7 +181,7 @@
 					// Suggestions are a convenience; only a failed path lookup is worth an error.
 					if (pathQuery) {
 						if (error instanceof ProjectSaveRejected) lookupIssues = error.issues;
-						else lookupError = error instanceof Error ? error.message : "Couldn't find folders. Try again.";
+						else lookupError = failureLine(error, "Couldn't find folders. Try again.");
 					}
 					searching = false;
 				},
@@ -247,7 +243,6 @@
 				folders: draft.folders,
 				...(setupValue ? { setupScript: setupValue } : project?.setupScript ? { setupScript: "" } : {}),
 				...(sessionMode ? { sessionMode } : project?.sessionMode ? { sessionMode: null } : {}),
-				...(groupingMode ? { groupingMode } : project?.groupingMode ? { groupingMode: null } : {}),
 			});
 			if (!open || version !== saveVersion) return;
 			onsaved?.(response);
@@ -255,7 +250,7 @@
 		} catch (error) {
 			if (!open || version !== saveVersion) return;
 			if (error instanceof ProjectSaveRejected) saveIssues = error.issues;
-			else saveError = error instanceof Error ? error.message : "Couldn't save the project. Try again.";
+			else saveError = failureLine(error, "Couldn't save the project. Try again.");
 		} finally {
 			if (version === saveVersion) saving = false;
 		}
@@ -419,14 +414,6 @@
 				</Field>
 				<Field label="Setup script" hint="It runs in each new worktree before the agent starts.">
 					<Textarea bind:value={setupScript} rows={3} disabled={saving} spellcheck={false} autocapitalize="none" class="font-mono text-xs max-md:text-[16px]" />
-				</Field>
-				<Field label="Repository grouping" hint="How this project's sessions are labelled in the session list.">
-					<Select bind:value={groupingMode} disabled={saving} touchTarget>
-						<option value="">Use global default</option>
-						<option value="repository">By repository</option>
-						<option value="repository+subfolder">By repository and subfolder</option>
-						<option value="off">Off</option>
-					</Select>
 				</Field>
 				{#if errors.length || saveError || issues.nameError}
 					<div role="alert" class="flex flex-col gap-[5px] break-words text-[11px] text-error">

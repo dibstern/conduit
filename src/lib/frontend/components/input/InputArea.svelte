@@ -4,14 +4,13 @@
 <script module lang="ts">
 	// A composer remount must not repeat the same turn's diagnostic.
 	const reportedMissingPrompts = new Set<string>();
+	let draftId = crypto.randomUUID();
 </script>
 
 <script lang="ts">
-	import { Schema } from "effect";
-	import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
-	import { WorktreeCreationError } from "../../../contracts/worktree.js";
-	import { onDestroy, tick, untrack, type Snippet } from "svelte";
-	import { formatErrorDetail } from "../../../errors-utils.js";
+	import { AccountIdSchema, getProviderDriver } from "../../../contracts/provider-instance.js";
+	import { tick, untrack, type Snippet } from "svelte";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import AccountDot from "../ui/AccountDot.svelte";
@@ -40,9 +39,10 @@
 	import PastePreview from "../chat/PastePreview.svelte";
 	import PendingInputTray from "./PendingInputTray.svelte";
 	import { openSideThreads } from "../session/side-threads.svelte.js";
-	import { stopBackgroundTasks } from "../session/background-tasks.svelte.js";
-	import { currentChat, draftSend, followSessionBusy, getOrCreateSessionSlot, inputSyncState, isProcessing, phaseToProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
+	import { currentChat, draftSend, inputSyncState, isProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
+	import { send, stop, turn as readTurn } from "../../stores/turn.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
+	import { approvals } from "../../stores/composer-settings.svelte.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import {
@@ -63,32 +63,32 @@
 		filterFiles,
 	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
-	import { findSession, isSessionBusy, isSessionSnoozed, sessionAttention, sessionState, switchToSession } from "../../stores/session.svelte.js";
-	import { placedSessionId } from "../../stores/transcript.svelte.js";
+	import { findSession, isSessionSnoozed, sessionState } from "../../stores/session.svelte.js";
+	import { selection } from "../../stores/selection.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { getCurrentRoute, getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { fade } from "svelte/transition";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
-	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
+	import { getDriverTraits, instanceState } from "../../stores/instance.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
-	import { dismissToast, showToast, uiState } from "../../stores/ui.svelte.js";
+	import { showToast, uiState } from "../../stores/ui.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
-	import { rateLimitChatSend } from "../../stores/ws-send.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
 	import { composerPickerState } from "../../stores/composer-picker.svelte.js";
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
-	import { cancelSessionRpc, continueSessionInMainFolderRpc, createSessionRpc, dismissWorkspaceHintRpc, listWorktreesRpc, moveSessionWorkspaceRpc, recreateSessionWorktreeRpc, renameSessionBranchRpc, resolveSessionModeRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
-	import { requestSessionPreWarm } from "../../utils/session-prewarm.js";
+	import { requestDraftPreWarm, requestSessionPreWarm } from "../../utils/session-prewarm.js";
 	import { planUsageWindows, usageForecastTime } from "../../utils/continuation.js";
 	import { switchSessionAccount } from "../../utils/account-switch.js";
+	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
-	import type { PendingImage } from "../../types.js";
+	import type { PendingImage, SessionPermissionMode } from "../../types.js";
 	import type { InputDelivery, SteerBlocker } from "../../../contracts/stored-event.js";
 	import type { WorktreeInfo } from "../../../shared-types.js";
 
@@ -118,7 +118,7 @@
 	let draftNewWorktree = $state(false);
 	let draftWorktreeBase = $state<string | null>(null);
 	let draftModeChosen = $state(false);
-	let draftSessionMode = $state<Awaited<ReturnType<typeof resolveSessionModeRpc>> | undefined>();
+	let draftSessionMode = $state<Awaited<ReturnType<typeof rpc<"ResolveSessionMode">>> | undefined>();
 	let pendingDraftSessionMode: Promise<void> | undefined;
 	const draftRoute = $derived(getCurrentRoute());
 	const draftContext = $derived(`${getDraftProject() ?? ""}:${sessionState.currentId ?? ""}:${draftRoute.page === "chat" && draftRoute.draft ? "draft" : "session"}`);
@@ -138,13 +138,14 @@
 		pendingDraftSessionMode = undefined;
 		if (route.page !== "chat" || !route.draft || !projectSlug || untrack(() => sessionState.currentId)) return;
 		let current = true;
-		pendingDraftSessionMode = resolveSessionModeRpc(projectSlug)
+		pendingDraftSessionMode = rpc("ResolveSessionMode", { projectSlug })
 			.then((resolution) => { if (current) draftSessionMode = resolution; })
-			.catch(() => { if (current) showToast("Couldn't load default session mode", { variant: "error" }); });
+			.catch((error) => { if (current) toastFailure("Couldn't load default session mode")(error); });
 		return () => { current = false; };
 	});
-	const isGoalCommand = $derived(discoveryState.currentProviderId === "claude" && inputText.startsWith("/goal"));
+	const isGoalCommand = $derived(discoveryState.currentTraits?.supportsGoalState && inputText.startsWith("/goal"));
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
+	let composerFocused = $state(false);
 	let pendingImages = $state<PendingImage[]>([]);
 	let commandMenuRef: CommandMenu | undefined = $state();
 	let fileMenuRef: FileMenu | undefined = $state();
@@ -154,7 +155,7 @@
 	let cursorPos = $state(0);
 	let composing = $state(false);
 	const currentSession = $derived(findSession(sessionState.currentId ?? ""));
-	const goalFacts = $derived(discoveryState.currentProviderId === "claude" ? sessionGoals.get(sessionState.currentId ?? "") : undefined);
+	const goalFacts = $derived(discoveryState.currentTraits?.supportsGoalState ? sessionGoals.get(sessionState.currentId ?? "") : undefined);
 	const goal = $derived(goalView(
 		goalFacts,
 		isProcessing() ? "busy" : currentSession?.status ?? "idle",
@@ -174,7 +175,8 @@
 	// A queued prompt waits in the tray, so the transcript's last turn is the started one.
 	const turn = $derived(segmentTurns(currentChat().messages, isProcessing()).at(-1));
 	const paused = $derived(turn !== undefined && isPaused(turn));
-	const working = $derived(isProcessing() || paused || Boolean(currentSession && sessionAttention(currentSession) === "working"));
+	const turnControl = $derived(readTurn());
+	const working = $derived(turnControl.working);
 	const elapsed = $derived.by(() => {
 		if (!turn) return undefined;
 		if (paused) return workingTime(turn, Date.now());
@@ -210,6 +212,8 @@
 			// Projected rows report every ordinary tool as completed, so the
 			// missing result is what marks the tool still in flight.
 			if (part.type === "tool" && part.result === undefined && part.status !== "error") {
+				const progress = part.metadata?.["progress"];
+				if (typeof part.metadata?.["cursorToolType"] === "string" && typeof progress === "string" && progress) return progress;
 				const summary = lookupSummarizer(part.name).summarize(ensureCanonical(part.name, part.input), {});
 				return summary.subtitle ? `${part.name} · ${summary.subtitle}` : part.name;
 			}
@@ -217,8 +221,29 @@
 		return "";
 	});
 	$effect(() => {
-		requestSessionPreWarm(currentSession ? currentSession.projectSlug : getCurrentSlug(), sessionState.currentId);
-		return () => requestSessionPreWarm(null, null);
+		requestSessionPreWarm(readOnlySubagent ? null : sessionState.currentId);
+		return () => requestSessionPreWarm(null);
+	});
+	function draftSessionPayload(projectSlug: string | null) {
+		const displayed = getDraftPick();
+		if (!projectSlug || !displayed) return undefined;
+		return {
+			projectSlug,
+			originId: getBrowserClientId(),
+			draftId,
+			...displayed,
+			instanceId: AccountIdSchema.make(displayed.instanceId),
+			...(draftWorktree ? { worktreePath: draftWorktree.path } : {}),
+			...(draftNewWorktree && draftWorktreeBase ? { worktreeBase: draftWorktreeBase } : {}),
+		};
+	}
+	$effect(() => {
+		requestDraftPreWarm(
+			composerFocused && draftRoute.page === "chat" && draftRoute.draft &&
+			!sessionState.currentId && !draftNewWorktree && (draftModeChosen || draftSessionMode !== undefined)
+				? draftSessionPayload(getDraftProject()) : undefined,
+		);
+		return () => requestDraftPreWarm();
 	});
 	const composerProjectSlug = $derived(currentSession ? currentSession.projectSlug : getDraftProject() ?? "");
 	const composerProject = $derived(projectState.projects.find((project) => project.slug === composerProjectSlug));
@@ -227,16 +252,22 @@
 	const claudeAccounts = $derived(getClaudeAccounts(composerProjectSlug));
 	const accountId = $derived(composerAccountId(currentSession));
 	const composerInstance = $derived(getAvailableInstances().find((instance) => instance.id === accountId));
-	// The settings row appears in one go. Until the daemon answers, models load
-	// and a session link resolves, each control would fill in on its own and
-	// guess (an empty store reads as OpenCode). "" is the undialled state, which
-	// only Storybook stays in.
+	// Wait for accounts and session placement before showing settings. Catalog
+	// loading belongs to the picker, which must stay available to switch accounts.
 	const offline = $derived(["connecting", "disconnected", "error"].includes(connectionState.status));
 	const routeSessionId = $derived(getCurrentSessionId());
 	const settingsPending = $derived(
-		offline || !discoveryState.modelsLoaded || (routeSessionId !== null && sessionState.currentId !== routeSessionId),
+		offline || (!sessionState.currentId && !instanceState.loaded) || (routeSessionId !== null && sessionState.currentId !== routeSessionId),
 	);
 	const composerDriver = $derived(composerInstance?.driver);
+	const composerTraits = $derived(getDriverTraits(composerDriver));
+	const composerPresentation = $derived(getProviderPresentation(composerDriver));
+	const readOnlySubagent = $derived(
+		getProviderDriver(composerDriver)?.readOnlySubagents === true && !!sessionState.currentParentId &&
+		!currentSession?.sideThread,
+	);
+	const composerNotices: Partial<Record<SessionPermissionMode, string>> | undefined = $derived(composerPresentation?.composerNotice);
+	const composerNotice = $derived(composerNotices?.[approvals.current?.mode ?? "ask"]);
 	const supportsWorktree = $derived(composerInstance?.capabilities?.supportsWorktree ?? instanceState.providerCapabilities[composerDriver ?? ""]?.supportsWorktree);
 	const usageReading = $derived(claudeAccounts.readingOf(accountId));
 	let sendMenuOpen = $state(false);
@@ -277,10 +308,10 @@
 	});
 	const placeholder = $derived(
 		sendsAt !== undefined
-			? sessionViewState.compact ? `Sends at ${sendAtTime}` : `Message Claude… sends at ${sendAtTime}`
+			? sessionViewState.compact ? `Sends at ${sendAtTime}` : `Message${composerPresentation ? ` ${composerPresentation.label}` : ""}… sends at ${sendAtTime}`
 			: currentSession?.settledAt != null ? "Message to un-settle…" :
 			currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
-			composerDriver === "opencode" ? "Ask OpenCode…" : composerDriver === "claude" ? "Ask Claude…" : "Message…",
+			composerPresentation ? `Ask ${composerPresentation.label}…` : "Message…",
 	);
 
 	// Each session keeps its own unsent input text. Switching sessions saves the
@@ -389,7 +420,9 @@
 		do {
 			savedText = inputText;
 			savedSessionId = sessionState.currentId;
-			await syncInputDraft(savedText);
+			// Offline (e.g. a redial found another build): the reload draft below
+			// carries the text, and no RPC reaches a daemon that may not decode it.
+			if (connectionState.status === "connected") await syncInputDraft(savedText);
 		} while (inputText !== savedText || sessionState.currentId !== savedSessionId);
 		// Cancelling the debounce above dropped any pending new-session draft write.
 		if (!sessionState.currentId) storeNewSessionDraft(inputText);
@@ -496,14 +529,7 @@
 	const HIGHLIGHT_MAX_CHARS = 20_000;
 	const plainText = $derived(inputText.length > HIGHLIGHT_MAX_CHARS);
 
-	const draftProject = $derived(projectState.projects.find((project) => project.slug === getDraftProject()));
-	const unsupportedDraftFolders = $derived(
-		!sessionState.currentId && (draftProject?.folders.length ?? 0) > 1 &&
-		getAvailableInstances().find((instance) => instance.id === getEffectiveInstanceId())?.capabilities?.supportsMultiFolder === false,
-	);
-	// A session drawn from its saved page takes sends once the server places it.
-	const unplaced = $derived(placedSessionId() !== sessionState.currentId);
-	const canSend = $derived(!unsupportedDraftFolders && !unplaced && (sessionState.currentId !== null || getDraftPick() !== undefined || (instanceState.loaded && !getEffectiveInstanceId())) && (inputText.trim().length > 0 || pendingImages.length > 0));
+	const canSend = $derived(!readOnlySubagent && turnControl.ready && (inputText.trim().length > 0 || pendingImages.length > 0));
 	const sendButtonLabel = $derived(
 		sendMode === "at-reset"
 			? `Send at ${sendAtTime}`
@@ -511,7 +537,7 @@
 				? `Send on ${switchTarget.name}`
 			: permissionsState.pendingQuestions.some((question) => question.sessionId === sessionState.currentId)
 				? "Reply"
-				: isProcessing()
+				: working
 					? "Queue message"
 					: "Send",
 	);
@@ -532,6 +558,11 @@
 	const steerPending = $derived(currentChat().transcript?.pending.some((input) => input.state === "steering") ?? false);
 	/** The last steer the server refused, shown beside the input box until the draft changes. */
 	let steerRefusal = $state<{ sessionId: string; reason: SteerBlocker } | null>(null);
+	let dismissedRefusal = $state.raw<typeof turnControl.refusal>(null);
+	const visibleRefusal = $derived(
+		steerRefusal?.sessionId === sessionState.currentId ? steerRefusal
+			: turnControl.refusal !== dismissedRefusal ? turnControl.refusal : null,
+	);
 	const STEER_REFUSALS: Record<SteerBlocker, string> = {
 		no_steering: "This provider can't steer.",
 		prompt_open: "Answer the open prompt first.",
@@ -573,12 +604,10 @@
 		);
 	}
 
-	function syncInputDraft(text: string): Promise<void> {
+	async function syncInputDraft(text: string): Promise<void> {
 		const sessionId = sessionState.currentId;
-		const projectSlug = currentSession ? currentSession.projectSlug : getCurrentSlug();
-		if (!sessionId || !projectSlug) return Promise.resolve();
-		return syncInputDraftRpc({
-			projectSlug,
+		if (!sessionId) return;
+		await rpc("SyncInputDraft", {
 			sessionId,
 			text,
 			originId: getBrowserClientId(),
@@ -591,6 +620,7 @@
 		}
 		lastLocalEditAt = Date.now();
 		steerRefusal = null;
+		dismissedRefusal = turnControl.refusal;
 
 		// Debounced outgoing input sync to other tabs
 		if (inputSyncTimer) clearTimeout(inputSyncTimer);
@@ -664,7 +694,7 @@
 		const images = pendingImages;
 		switchingAccount = true;
 		try {
-			if (!(await switchSessionAccount({ projectSlug, sessionId, instanceId, expectedInstanceId }))) return false;
+			if (!(await switchSessionAccount({ sessionId, instanceId, expectedInstanceId }))) return false;
 			await tick();
 			// Navigation or edits during the handoff leave the draft for its owner.
 			if (sessionState.currentId !== sessionId || composerProjectSlug !== projectSlug || inputText !== draft || pendingImages !== images) return false;
@@ -687,9 +717,10 @@
 
 	async function startSideThread(question: string | undefined): Promise<boolean> {
 		if (startingSideThread) return false;
+		const from = selection.scope;
 		const parentSessionId = sessionState.currentId;
 		const projectSlug = parentSessionId ? findSession(parentSessionId)?.projectSlug ?? getCurrentSlug() : null;
-		if (!parentSessionId || !projectSlug) {
+		if (!parentSessionId) {
 			showToast("Open a session to start a Side Thread", { variant: "error" });
 			return false;
 		}
@@ -707,24 +738,33 @@
 		startingSideThread = true;
 		try {
 			const images = draftImages.map((image) => image.dataUrl);
-			const { sessionId } = await startSideThreadRpc({
-				projectSlug,
-				parentSessionId,
-				title: question,
+			const outcome = await send({
+				from,
+				sideThread: { sessionId: parentSessionId, title: question },
+				delivery: "queue",
 				inputId,
 				text: await withReferences(toProviderCommands(question, providerBuiltinNameSet), projectSlug),
 				...(images.length > 0 ? { images } : {}),
-				originId: getBrowserClientId(),
 			});
-			sideThreadAttempt = undefined;
-			if (sessionState.currentId === parentSessionId && inputText === draftText && pendingImages === draftImages) {
-				clearComposer();
-				switchToSession(sessionId, projectSlug);
+			if (outcome.kind === "started") {
+				sideThreadAttempt = undefined;
+				// Following may already have saved the parent's draft and restored the new session's.
+				const parentText = previousSessionId === parentSessionId ? inputText : inputDrafts.get(parentSessionId);
+				if (parentText === draftText && pendingImages === draftImages) {
+					inputDrafts.delete(parentSessionId);
+					if (previousSessionId === parentSessionId) {
+						inputText = "";
+						cursorPos = 0;
+						if (inputSyncTimer) {
+							clearTimeout(inputSyncTimer);
+							inputSyncTimer = null;
+						}
+					}
+					pendingImages = [];
+					void rpc("SyncInputDraft", { sessionId: parentSessionId, text: "", originId: getBrowserClientId() }).catch(() => undefined);
+				}
 			}
-			return true;
-		} catch (error) {
-			showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
-			return false;
+			return outcome.kind === "started" || outcome.kind === "waiting";
 		} finally {
 			startingSideThread = false;
 		}
@@ -752,8 +792,7 @@
 	}
 
 	async function sendMessage(textOverride?: string, delivery: InputDelivery = "queue"): Promise<boolean> {
-		if (unsupportedDraftFolders || unplaced) return false;
-		if (!sessionState.currentId && getEffectiveInstanceId() && !getDraftPick()) return false;
+		if (readOnlySubagent || !turnControl.ready) return false;
 		let text = textOverride ?? inputText.trim();
 		if (!text) return false;
 		if (textOverride === undefined) {
@@ -772,26 +811,17 @@
 			? pendingImages.map((img) => img.dataUrl)
 			: undefined;
 
-		// Always send immediately: conduit queues a busy send in the session's
-		// tray, and the transcript shows the message once the adapter places it.
-		let sid = sessionState.currentId;
-		// A draft is created in the project its chip names, which can differ
-		// from the attached one until the attach round trip lands.
-		const projectSlug = sid ? findSession(sid)?.projectSlug ?? getCurrentSlug() : getDraftProject();
-		if (!projectSlug) {
-			showToast("No active project", { variant: "error" });
-			return false;
-		}
-		if (!sid) {
-			// First send with no active session: create one bound to the selected
-			// harness instance (the picker's pre-creation draft), then send into it.
-			// A second Enter before the create lands would make a second session.
-			if (creatingSession) return false;
-			creatingSession = true;
-			let unsent: { text: string; images: typeof pendingImages } | undefined;
-			try {
-				// Sending before the default arrives must use the same workspace as
-				// the chip. An explicit choice already supplies that workspace.
+		const sentFromSessionId = sessionState.currentId;
+		const projectSlug = sentFromSessionId ? findSession(sentFromSessionId)?.projectSlug ?? getCurrentSlug() : getDraftProject();
+		if (!sentFromSessionId && creatingSession) return false;
+		if (!sentFromSessionId) creatingSession = true;
+		try {
+			let draft: Parameters<typeof rpc<"CreateSession">>[1] | undefined;
+			if (!sentFromSessionId) {
+				if (!projectSlug) {
+					showToast("No active project", { variant: "error" });
+					return false;
+				}
 				const context = sessionModeContext;
 				const resolution = pendingDraftSessionMode;
 				if (!draftModeChosen) {
@@ -800,116 +830,63 @@
 				}
 				if (context !== sessionModeContext || resolution !== pendingDraftSessionMode || sessionState.currentId) return false;
 				if (!getEffectiveInstanceId()) {
+					const presentation = getProviderPresentation(discoveryState.defaultProviderId);
 					showToast({
 						title: "No account available",
 						variant: "error",
-						body: discoveryState.defaultProviderId === "claude"
-							? "Add a Claude account in Settings before sending."
+						body: getDriverTraits(discoveryState.defaultProviderId)?.accountKind === "config-directory" && presentation
+							? `Add a ${presentation.label} account in Settings before sending.`
 							: "Add an account in Settings before sending.",
 					});
 					return false;
 				}
-				const displayed = getDraftPick();
-				if (!displayed) {
+				const payload = draftSessionPayload(projectSlug);
+				if (!payload) {
 					showToast("Select model", { variant: "error" });
 					return false;
 				}
-				// The message leaves the composer now and shows in the pane until
-				// the new session places it; a failed create puts it back.
-				if (textOverride === undefined) {
-					unsent = { text: inputText, images: pendingImages };
-					clearComposer();
-				}
+				draft = { ...payload, ...(draftNewWorktree ? { newWorktree: true } : {}) };
+				requestDraftPreWarm();
 				draftSend.message = { type: "user", uuid: crypto.randomUUID(), text: messageText, createdAt: Date.now() };
 				draftSend.sessionId = null;
-				const created = await createSessionRpc({
-					projectSlug,
-					originId: getBrowserClientId(),
-					...displayed,
-					...(draftWorktree ? { worktreePath: draftWorktree.path } : {}),
-					...(draftNewWorktree ? { newWorktree: true } : {}),
-					...(draftNewWorktree && draftWorktreeBase ? { worktreeBase: draftWorktreeBase } : {}),
-				});
-				sid = created.sessionId;
-				draftSend.sessionId = sid;
-				storeNewSessionDraft("");
-				// Don't yank someone who opened another session while this one was created.
-				if (!sessionState.currentId) switchToSession(sid, projectSlug);
-			} catch (error) {
-				if (Schema.is(WorktreeCreationError)(error)) {
-					showToast({ title: "Could not start session", variant: "error", body: error.message });
-				} else if (Schema.is(WorkspaceMoveError)(error)) {
-					const body = {
-						missing: "That worktree no longer exists.",
-						"not-a-worktree": "That folder is not a git worktree.",
-						"other-repository": "That worktree belongs to another repository.",
-						"unsupported-provider": "This provider does not support worktrees.",
-					}[error.reason];
-					showToast({ title: "Could not start session", variant: "error", body });
-				} else {
-					showToast({ title: "Failed to create session", variant: "error", body: formatErrorDetail(error) });
-				}
-				draftSend.message = null;
-				if (unsent && !sessionState.currentId && !inputText) {
+			}
+			const unsent = { text: inputText, images: pendingImages };
+			if (!isProcessing()) requestScrollOnNextContent();
+			steerRefusal = null;
+			dismissedRefusal = null;
+			if (textOverride === undefined && delivery !== "steer") clearComposer();
+			const outcome = await send({
+				text: messageText,
+				delivery,
+				...(imageUrls ? { images: imageUrls } : {}),
+				...(draft ? {
+					draft,
+					onCreated: () => {
+						draftId = crypto.randomUUID();
+						storeNewSessionDraft("");
+					},
+				} : { sessionId: sentFromSessionId! }),
+			});
+			const sentToSessionId = sentFromSessionId ?? draftSend.sessionId;
+			if (outcome.kind === "failed" || outcome.kind === "refused") {
+				const sameScope = sentToSessionId ? sessionState.currentId === sentToSessionId
+					: !sessionState.currentId && getDraftProject() === projectSlug;
+				if (textOverride === undefined && sameScope && !inputText && pendingImages.length === 0) {
 					inputText = unsent.text;
 					cursorPos = unsent.text.length;
 					pendingImages = unsent.images;
 				}
 				return false;
-			} finally {
-				creatingSession = false;
 			}
-		}
-		const commandId = crypto.randomUUID();
-		if (!isProcessing()) requestScrollOnNextContent();
-		const sentToSessionId = sid;
-		// An input the inbox hands straight off starts the sender's turn now; the
-		// row reports busy once the provider picks it up and ends the turn when it
-		// goes idle (ni8.35). A queued, paused or reset-held input starts nothing.
-		const { activity, messages } = getOrCreateSessionSlot(sid);
-		const startsTurn = activity.phase === "idle" && !isSessionBusy(sid) && sendsAt === undefined
-			&& !messages.transcript?.paused && !messages.transcript?.pending.length;
-		if (startsTurn) {
-			phaseToProcessing(activity);
-			activity.awaitingInputId = commandId;
-		}
-		steerRefusal = null;
-		const sent = new Promise<boolean>((resolve) => rateLimitChatSend(() => {
-			sendMessageRpc({
-				projectSlug,
-				sessionId: sentToSessionId,
-				text: messageText,
-				commandId,
-				...(delivery === "steer" ? { delivery } : {}),
-				...(imageUrls ? { images: imageUrls } : {}),
-				originId: getBrowserClientId(),
-			}).then((response) => {
-				if (!response.ok) {
-					if (draftSend.sessionId === sentToSessionId) draftSend.message = null;
-					steerRefusal = { sessionId: sentToSessionId, reason: response.reason };
-					return resolve(false);
-				}
-				if (response.sessionId !== sentToSessionId && sessionState.currentId === sentToSessionId)
-					switchToSession(response.sessionId, projectSlug, undefined, { replace: true });
-				resolve(true);
-			}).catch(() => {
-				if (draftSend.sessionId === sentToSessionId) draftSend.message = null;
-				if (startsTurn && !isSessionBusy(sentToSessionId)) followSessionBusy(sentToSessionId, false);
-				showToast("Failed to send message", { variant: "error" });
-				resolve(false);
-			});
-		}));
-		if (delivery === "steer") {
-			// A refused steer admits nothing, so its draft stays until the server takes it.
-			if (!(await sent)) return false;
-			if (sessionState.currentId !== sentToSessionId) {
-				inputDrafts.delete(sentToSessionId);
-				return true;
+			if (delivery === "steer") {
+				if (sessionState.currentId !== sentToSessionId) {
+					if (sentToSessionId) inputDrafts.delete(sentToSessionId);
+				} else if (textOverride === undefined) clearComposer();
 			}
+			return true;
+		} finally {
+			if (!sentFromSessionId) creatingSession = false;
 		}
-		if (textOverride !== undefined) return true;
-		clearComposer();
-		return true;
 	}
 
 	function clearComposer() {
@@ -936,57 +913,6 @@
 		if (await sendMessage(`/goal ${facts.endedGoal.condition}`)) undoneClearKey = key;
 	}
 
-	let taskStopToast: { id: string; sessionId: string; projectSlug: string } | null = $state(null);
-	let composerDestroyed = false;
-	$effect(() => {
-		const offer = taskStopToast;
-		if (!offer) return;
-		const count = currentSession?.backgroundTasks?.length ?? 0;
-		const active = sessionState.currentId === offer.sessionId && currentSession?.projectSlug === offer.projectSlug;
-		const toast = uiState.toasts.find((toast) => toast.id === offer.id);
-		untrack(() => {
-			if (!active || count === 0 || !toast) {
-				dismissToast(offer.id);
-				taskStopToast = null;
-			} else toast.title = `Turn stopped. ${count} ${count === 1 ? "task" : "tasks"} still running`;
-		});
-	});
-	onDestroy(() => {
-		composerDestroyed = true;
-		if (taskStopToast) dismissToast(taskStopToast.id);
-	});
-
-	function handleStop() {
-		const sessionId = sessionState.currentId;
-		const projectSlug = currentSession ? currentSession.projectSlug : getCurrentSlug();
-		if (!sessionId || !projectSlug) return;
-		const accountId = currentSession?.accountId;
-		const driver = getInstanceById(accountId ?? "")?.driver;
-		const hadTasks = driver === "claude" && (currentSession?.backgroundTasks?.length ?? 0) > 0;
-		void cancelSessionRpc({
-			projectSlug,
-			sessionId,
-			commandId: crypto.randomUUID(),
-		}).then(() => {
-			// An interrupt can end a turn the row never reported busy for, so
-			// nothing else would end it. A still-busy row ends it on idle.
-			if (!isSessionBusy(sessionId)) followSessionBusy(sessionId, false);
-			if (composerDestroyed || !hadTasks || sessionState.currentId !== sessionId || currentSession?.projectSlug !== projectSlug) return;
-			const count = findSession(sessionId)?.backgroundTasks?.length ?? 0;
-			if (count === 0) return;
-			if (taskStopToast) dismissToast(taskStopToast.id);
-			const id = showToast(`Turn stopped. ${count} ${count === 1 ? "task" : "tasks"} still running`, {
-				duration: 6000,
-				action: { label: "Stop them", run: () => {
-					if (sessionState.currentId === sessionId && currentSession?.projectSlug === projectSlug) void stopBackgroundTasks(sessionId, projectSlug);
-				} },
-			});
-			taskStopToast = { id, sessionId, projectSlug };
-		}).catch(() => {
-			showToast("Failed to stop session", { variant: "error" });
-		});
-	}
-
 	function handleSendClick(e: MouseEvent) {
 		sendComposer(steer && (e.metaKey || e.ctrlKey) ? "steer" : "queue");
 	}
@@ -1010,7 +936,7 @@
 	}
 
 	function handleAttachSetGoal(condition = "") {
-		if (discoveryState.currentProviderId !== "claude") return;
+		if (!discoveryState.currentTraits?.supportsGoalState) return;
 		inputText = `/goal ${condition}`;
 		cursorPos = inputText.length;
 		requestAnimationFrame(() => {
@@ -1023,9 +949,9 @@
 	$effect(() => {
 		function handleGoalAction(event: CustomEvent<GoalComposerAction>) {
 			const { action, sessionId, condition } = event.detail;
-			if (discoveryState.currentProviderId !== "claude" || sessionId !== sessionState.currentId) return;
+			if (!discoveryState.currentTraits?.supportsGoalState || sessionId !== sessionState.currentId) return;
 			switch (action) {
-				case "pause": handleStop(); break;
+				case "pause": if (sessionState.currentId) void stop(sessionState.currentId); break;
 				case "resume": void sendMessage("Continue."); break;
 				case "clear": void sendMessage("/goal clear", "steer"); break;
 				case "edit": handleAttachSetGoal(condition); break;
@@ -1092,10 +1018,11 @@
 			inputText = command;
 			newCursorPos = command.length;
 		}
-		// Move cursor to end of inserted command and focus the textarea
+		// Move cursor to end of inserted command and focus the textarea. tick, not a
+		// frame: keys typed before the next frame would land before the moved caret.
 		if (textareaEl) {
 			textareaEl.focus();
-			requestAnimationFrame(() => {
+			void tick().then(() => {
 				if (textareaEl) {
 					textareaEl.selectionStart = newCursorPos;
 					textareaEl.selectionEnd = newCursorPos;
@@ -1269,9 +1196,12 @@
 	<div id="input-wrapper" bind:clientWidth={sessionViewState.composerWidth} class="max-w-[760px] mx-auto relative">
 		<!-- Subagent context bar (above input area) -->
 		<SubagentBackBar bind:this={subagentBackBarRef} />
+		{#if readOnlySubagent}
+			<p data-testid="subagent-readonly-notice" class="px-[6px] pt-2 text-[11px] text-text-muted">{composerPresentation?.subagentNotice}</p>
+		{:else}
 
 		{#if !sessionState.currentId && routeSessionId === null && sessionViewState.compact}
-			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} /></div>
+			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} focusComposer={() => textareaEl?.focus()} /></div>
 		{/if}
 
 		{#if isGoalCommand}
@@ -1322,11 +1252,11 @@
 			onSteerRefused={(reason) => { if (sessionState.currentId) steerRefusal = { sessionId: sessionState.currentId, reason }; }}
 		/>
 
-		{#if steerRefusal && steerRefusal.sessionId === sessionState.currentId}
+		{#if visibleRefusal}
 			<div data-testid="composer-steer-refused" role="status" class="flex items-center gap-[7px] mb-2 rounded-2xl border border-border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-secondary">
 				<Icon name="info" size={14} class="shrink-0 text-status-amber" />
-				<span class="flex-1 min-w-0"><b class="font-semibold text-status-amber">Not steered.</b> {STEER_REFUSALS[steerRefusal.reason]}</span>
-				<Button variant="ghost" size="content" tone="muted" hoverFill="none" iconOnly icon="x" iconSize={12} ariaLabel="Dismiss" class="size-5 shrink-0" onclick={() => { steerRefusal = null; }} />
+				<span class="flex-1 min-w-0"><b class="font-semibold text-status-amber">Not steered.</b> {STEER_REFUSALS[visibleRefusal.reason]}</span>
+				<Button variant="ghost" size="content" tone="muted" hoverFill="none" iconOnly icon="x" iconSize={12} ariaLabel="Dismiss" class="size-5 shrink-0" onclick={() => { steerRefusal = null; dismissedRefusal = turnControl.refusal; }} />
 			</div>
 		{/if}
 
@@ -1407,7 +1337,11 @@
 								bind:value={inputText}
 								bind:element={textareaEl}
 								oninput={handleInput}
-								onfocus={() => requestSessionPreWarm(currentSession ? currentSession.projectSlug : getCurrentSlug(), sessionState.currentId)}
+								onfocus={() => {
+									composerFocused = true;
+									requestSessionPreWarm(sessionState.currentId);
+								}}
+								onblur={() => { composerFocused = false; }}
 								onkeydown={handleKeydown}
 								onkeyup={handleKeyup}
 								onclick={handleClick}
@@ -1470,12 +1404,12 @@
 												workspaceMissing={session.workspaceMissing}
 												workspaceMismatch={session.workspaceMismatch}
 												workspaceHint={session.workspaceHint}
-												loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
-												onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-												onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-												oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-												ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-												onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ projectSlug: composerProjectSlug, sessionId: session.id, branchName }) : undefined}
+												loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
+												onmove={(path) => rpc("MoveSessionWorkspace", { sessionId: session.id, path })}
+												onrecreate={() => rpc("RecreateSessionWorktree", { sessionId: session.id })}
+												oncontinue={() => rpc("ContinueSessionInMainFolder", { sessionId: session.id })}
+												ondismiss={(path) => rpc("DismissWorkspaceHint", { sessionId: session.id, path })}
+												onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { sessionId: session.id, branchName }) : undefined}
 											>
 												{#snippet children(attention, checkout, warning)}
 													{@render phoneMore(rows, attention, checkout, warning)}
@@ -1505,12 +1439,12 @@
 								workspaceMissing={session.workspaceMissing}
 								workspaceMismatch={session.workspaceMismatch}
 								workspaceHint={session.workspaceHint}
-								loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
-								onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-								onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-								oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-								ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-								onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ projectSlug: composerProjectSlug, sessionId: session.id, branchName }) : undefined}
+								loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
+								onmove={(path) => rpc("MoveSessionWorkspace", { sessionId: session.id, path })}
+								onrecreate={() => rpc("RecreateSessionWorktree", { sessionId: session.id })}
+								oncontinue={() => rpc("ContinueSessionInMainFolder", { sessionId: session.id })}
+								ondismiss={(path) => rpc("DismissWorkspaceHint", { sessionId: session.id, path })}
+								onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { sessionId: session.id, branchName }) : undefined}
 							/>
 						{/key}
 					{/if}
@@ -1521,7 +1455,7 @@
 					     something to steer with; otherwise stop stands alone. -->
 					<!-- No tone supplies text-white without a hover step; inherit leaves that colour local.
 					     transition-colors replaces the arbitrary transition; 150ms is its default. -->
-					{#if !isProcessing() || canSend}
+					{#if !working || canSend}
 					{#if hasSendMenu}
 					<div data-testid="composer-send-control" class="inline-flex shrink-0 items-center rounded-full border font-mono text-[10.5px] whitespace-nowrap {sendMode === 'switch' ? 'border-border text-text' : 'border-status-red/50 text-status-red'} {sessionViewState.compact ? 'h-[32px]' : 'h-[26px]'}">
 						<Button
@@ -1603,7 +1537,7 @@
 					/>
 					{/if}
 					{/if}
-					{#if isProcessing()}
+					{#if working}
 						<Button
 							variant="ghost"
 							size="content"
@@ -1614,7 +1548,7 @@
 							class="shrink-0 ml-[3px] w-[32px] h-[32px] rounded-[10px] bg-text text-bg touch-manipulation hover:opacity-90 active:opacity-70"
 							title={steerPending ? "Stop generating · A pending steer still runs" : "Stop generating"}
 							ariaLabel="Stop generating"
-							onclick={handleStop}
+							onclick={() => { if (sessionState.currentId) void stop(sessionState.currentId); }}
 						><i data-testid="stop-square" class="block w-[10px] h-[10px] rounded-[2px] bg-current"></i></Button>
 					{/if}
 				{/snippet}
@@ -1630,7 +1564,7 @@
 				{:else}
 				<div in:fade={{ duration: 180 }} data-testid="composer-words-left" class="inline-flex min-w-0 shrink-0 items-center gap-[5px]">
 					<InstanceModelPicker variant="words" />
-					{#if composerDriver !== "opencode"}
+					{#if (composerTraits?.composerModeControl ?? "permission-mode") === "permission-mode"}
 						<span aria-hidden="true" class="text-border-chip">·</span>
 						<PermissionModeSelector variant="words" />
 					{/if}
@@ -1648,12 +1582,12 @@
 									workspaceMissing={session.workspaceMissing}
 									workspaceMismatch={session.workspaceMismatch}
 									workspaceHint={session.workspaceHint}
-									loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
-									onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-									onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-									oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-									ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-									onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ projectSlug: composerProjectSlug, sessionId: session.id, branchName }) : undefined}
+									loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
+									onmove={(path) => rpc("MoveSessionWorkspace", { sessionId: session.id, path })}
+									onrecreate={() => rpc("RecreateSessionWorktree", { sessionId: session.id })}
+									oncontinue={() => rpc("ContinueSessionInMainFolder", { sessionId: session.id })}
+									ondismiss={(path) => rpc("DismissWorkspaceHint", { sessionId: session.id, path })}
+									onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { sessionId: session.id, branchName }) : undefined}
 								/>
 							{/key}
 						{/if}
@@ -1665,6 +1599,9 @@
 				{/if}
 			</div>
 		{/if}
+		{#if composerNotice}
+			<p data-testid="composer-provider-notice" class="px-[6px] pt-2 text-[11px] text-text-muted">{composerNotice}</p>
+		{/if}
 		{#if currentSession?.backgroundTasks?.length}
 			<!-- One pulse per live background task; the header row lists them. -->
 			<div data-testid="composer-task-dots" aria-hidden="true" class="flex justify-center gap-1.5 pt-[7px]">
@@ -1674,7 +1611,8 @@
 			</div>
 		{/if}
 		{#if !sessionState.currentId && routeSessionId === null && !sessionViewState.compact}
-			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} /></div>
+			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} focusComposer={() => textareaEl?.focus()} /></div>
+		{/if}
 		{/if}
 	</div>
 </div>

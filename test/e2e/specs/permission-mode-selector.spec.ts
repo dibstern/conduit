@@ -10,6 +10,7 @@
 // mode map) so re-sync paths return what a correct server would.
 
 import { expect, test } from "@playwright/test";
+import type { GetModelsResponse } from "../../../src/lib/contracts/ws-rpc.js";
 import type { MockMessage } from "../fixtures/mockup-state.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
@@ -91,14 +92,20 @@ interface PermissionModeHarness {
 	readonly relay: WsMockControl;
 	readonly rpc: RpcMockControl;
 	/** Server-side mode store (sessionId → mode), like OverridesState. */
-	readonly serverModes: Map<string, string>;
+	readonly serverModes: Map<
+		string,
+		NonNullable<GetModelsResponse["permissionMode"]>
+	>;
 }
 
 async function setup(
 	page: Page,
 	initMessages: MockMessage[],
 ): Promise<PermissionModeHarness> {
-	const serverModes = new Map<string, string>();
+	const serverModes = new Map<
+		string,
+		NonNullable<GetModelsResponse["permissionMode"]>
+	>();
 	const relay = await mockRelayWebSocket(page, {
 		initMessages,
 		responses: new Map(),
@@ -106,32 +113,39 @@ async function setup(
 		messageDelay: 0,
 	});
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			SwitchPermissionMode: (params) => {
-				serverModes.set(String(params["sessionId"]), String(params["mode"]));
-				return { projectSlug: "myapp", mode: params["mode"] };
-			},
-			"input.submit": (params) => ({
+		stubs: {
+			GetFileTree: () => ({ projectSlug: "myapp", entries: [] }),
+			"input.submit": ({ sessionId }) => ({
 				ok: true,
-				sessionId: params["sessionId"],
+				sessionId,
+				handedOff: true,
 			}),
 			ViewSession: () => ({ ok: true }),
-			GetAgents: () => ({ projectSlug: "myapp", agents: [] }),
+			SwitchPermissionMode: (params) => {
+				serverModes.set(params["sessionId"], params["mode"]);
+				return { projectSlug: "myapp", mode: params["mode"] };
+			},
+			GetAgents: () => ({
+				projectSlug: "myapp",
+				providerScope: { id: "opencode", name: "OpenCode" },
+				agents: [],
+			}),
 			GetCommands: () => ({ projectSlug: "myapp", commands: [] }),
 			GetModels: (params) => ({
+				defaultOpenCodeInstanceId: "opencode",
 				projectSlug: "myapp",
 				providers: [],
 				variant: { variant: "", variants: [] },
 				contextWindow: { contextWindow: "", options: [] },
-				permissionMode: serverModes.get(String(params["sessionId"])) ?? "ask",
+				permissionMode:
+					serverModes.get(
+						String("sessionId" in params ? params.sessionId : undefined),
+					) ?? "ask",
 			}),
-			ListSessions: () => ({ projectSlug: "myapp", sessions: [] }),
 			GetProjects: () => ({
 				projects: [{ slug: "myapp", title: "myapp", folders: ["/tmp/myapp"] }],
 				current: "myapp",
 			}),
-			GetFileTree: () => ({ projectSlug: "myapp", entries: [] }),
-			ListPtys: () => ({ projectSlug: "myapp", ptys: [] }),
 		},
 	});
 	const bound = initMessages !== unboundInit;

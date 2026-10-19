@@ -3,7 +3,6 @@
 
 import { SvelteMap } from "svelte/reactivity";
 import { busySessionIds as calculateBusySessionIds } from "../../session-busy.js";
-import { getScopeGroupKey } from "../../session-scope.js";
 import type { BackgroundTask } from "../../shared-types.js";
 import {
 	isBusy,
@@ -21,15 +20,7 @@ import type {
 	ForkSessionResponse,
 	ListDaemonSessionsResponse,
 } from "../transport/ws-rpc.js";
-import {
-	getAgentsRpc,
-	getCommandsRpc,
-	getModelsRpc,
-	listDaemonSessionsRpc,
-	reloadProviderSessionRpc,
-	type ViewSessionRpcInput,
-	viewSessionRpc,
-} from "../transport/ws-rpc-client.js";
+import { rpc } from "../transport/ws-rpc-client.js";
 import type {
 	AttentionGroups,
 	DateGroups,
@@ -41,33 +32,26 @@ import {
 	activateSessionChatState,
 	clearSessionChatState,
 	followSessionBusy,
-	handleInputSyncReceived,
+	followSessionCompaction,
+	followSessionRetry,
 	sessionActivity,
 	sessionMessages,
 } from "./chat.svelte.js";
-import { getBrowserClientId } from "./client-identity.js";
 import {
-	applyGetAgentsResponse,
-	applyGetCommandsResponse,
 	clearDraftSelection,
-	followModelsRead,
 	followSessionModelSettings,
+	handlePermissionModeInfo,
+	refreshCatalogs,
 } from "./discovery.svelte.js";
 import { goalDetails, sessionGoals } from "./goal.svelte.js";
-import { getProjectGroup } from "./project-state.svelte.js";
-import {
-	attachedProjectState,
-	getCurrentRoute,
-	getCurrentSessionId,
-	getCurrentSlug,
-	navigate,
-	replaceRoute,
-} from "./router.svelte.js";
+import { attachedProjectState, getCurrentSlug } from "./router.svelte.js";
+import { markSessionDeleted, selection } from "./selection.svelte.js";
 import { restoreServerUpdateBanner } from "./server-status.svelte.js";
 import type { SessionGrouping, SessionStatusFilter } from "./session-scope.js";
 import { getSessionScope } from "./session-scope.js";
 import { clearTodoState } from "./todo.svelte.js";
-import { showToast, updateContextPercent } from "./ui.svelte.js";
+import { applyTurnRow, deleteTurn, rebaseTurns } from "./turn.svelte.js";
+import { showToast } from "./ui.svelte.js";
 import { projectAttachedListeners } from "./ws-listeners.js";
 
 // Re-exported so chat.svelte.ts need not import the subscription directly,
@@ -81,10 +65,9 @@ export { isBusy };
 // Nothing outside can write it: `sessionState` hands it out as a `ReadonlyMap`.
 
 const serverSessions = $derived(sessionSubscription.rows);
+const isFamilyRoot = (row: Pick<SessionInfo, "parentID">) => !row.parentID;
 const rootSessions = $derived(
-	[...serverSessions.values()].filter(
-		(row) => !row.parentID && !row.sideThread,
-	),
+	[...serverSessions.values()].filter(isFamilyRoot),
 );
 // The viewed session's family (root and descendants), owned by its
 // SubscribeSessionFamily feed: `applyFamilyChange` is the only writer.
@@ -98,9 +81,7 @@ export function parentOf(id: string): string | null {
 	return (
 		serverSessions.get(id)?.parentID ??
 		familySessions.find((row) => row.id === id)?.parentID ??
-		(clientSession.announcedParent?.sessionId === id
-			? clientSession.announcedParent.parentId
-			: null)
+		null
 	);
 }
 
@@ -150,19 +131,14 @@ export function setAttachedProject(slug: string): void {
 // What this tab is looking at. Applying server rows never touches it.
 
 const clientSession = $state({
-	currentId: null as string | null,
-	announcedParent: null as {
+	announcedFork: null as {
 		sessionId: string;
-		parentId: string;
+		forkedFrom: string;
 		forkMessageId?: string;
 		forkPointTimestamp?: number;
 	} | null,
 	searchQuery: "",
-	daemonSessions: [] as SessionInfo[],
-	daemonUnavailableProjects: [] as string[],
-	daemonCursor: null as ListDaemonSessionsResponse["nextCursor"],
-	daemonHasMore: false,
-	daemonLoading: false,
+	searchIncludeArchived: false,
 	searchResults: null as SessionInfo[] | null,
 	searchCursor: null as ListDaemonSessionsResponse["nextCursor"],
 	searchHasMore: false,
@@ -170,18 +146,22 @@ const clientSession = $state({
 	now: Date.now(),
 });
 
-$effect.root(() => {
-	let previousId: string | null | undefined;
-	$effect(() => {
-		const id = clientSession.currentId;
-		if (previousId !== undefined && id !== previousId) goalDetails.open = false;
-		previousId = id;
-	});
+const currentSessionId = $derived.by(() => {
+	const shown = selection.shown;
+	return shown.kind === "drawn" ||
+		shown.kind === "placing" ||
+		shown.kind === "placed"
+		? shown.sessionId
+		: null;
 });
 
 /** Read view over both halves. The server half is read-only by type; the
  *  client half is a plain setting. */
 export const sessionState = {
+	/** Live placement sources exclude the provisional saved shell. */
+	get liveSessions(): ReadonlyMap<string, Immutable<SessionInfo>> {
+		return sessionSubscription.liveRows;
+	},
 	/** Server-owned. The shell feed is its only writer. */
 	get sessions(): ReadonlyMap<string, Immutable<SessionInfo>> {
 		return serverSessions;
@@ -191,21 +171,6 @@ export const sessionState = {
 	},
 	get familySessions(): readonly Immutable<SessionInfo>[] {
 		return familySessions;
-	},
-	get daemonSessions(): readonly SessionInfo[] {
-		return clientSession.daemonSessions;
-	},
-	get daemonUnavailableProjects(): readonly string[] {
-		return clientSession.daemonUnavailableProjects;
-	},
-	get daemonCursor() {
-		return clientSession.daemonCursor;
-	},
-	get daemonHasMore() {
-		return clientSession.daemonHasMore;
-	},
-	get daemonLoading() {
-		return clientSession.daemonLoading;
 	},
 	get searchResults(): readonly SessionInfo[] | null {
 		return clientSession.searchResults;
@@ -230,79 +195,43 @@ export const sessionState = {
 		return sessionSubscription.settled;
 	},
 	get currentId(): string | null {
-		return clientSession.currentId;
+		return currentSessionId;
 	},
 	get currentParentId(): string | null {
-		const id = clientSession.currentId;
+		const id = sessionState.currentId;
 		return id ? parentOf(id) : null;
 	},
 	get currentFork() {
-		const id = clientSession.currentId;
-		if (clientSession.announcedParent?.sessionId === id)
-			return clientSession.announcedParent;
-		// An OpenCode fork is projected before its parent is recorded, and the
-		// shell keeps that stale root row; the family row carries the lineage.
-		return familySessions.find((row) => row.id === id && row.parentID) ?? null;
-	},
-	set currentId(id: string | null) {
-		clientSession.currentId = id;
+		const id = sessionState.currentId;
+		// Stands in until the Fork's row arrives with its lineage.
+		return clientSession.announcedFork?.sessionId === id
+			? clientSession.announcedFork
+			: null;
 	},
 	get searchQuery(): string {
 		return clientSession.searchQuery;
+	},
+	get searchIncludeArchived(): boolean {
+		return clientSession.searchIncludeArchived;
 	},
 	set searchQuery(query: string) {
 		setSearchQuery(query);
 	},
 };
 
-let selectionGeneration = 0;
-
-/**
- * A session was deleted (the shell feed marked its remove deleted). Prune the
- * cross-project and search reads the feed does not cover, and move off it if
- * it is on screen. Runs before `forgetSession` clears the selection; a row
- * that merely left a snapshot is not deleted and must not come through here.
- */
+/** A deletion owns only its id; selection follows the tombstone. */
 export function leaveDeletedSession(id: string): void {
-	clientSession.daemonSessions = clientSession.daemonSessions.filter(
-		(row) => row.id !== id,
-	);
 	if (clientSession.searchResults)
 		clientSession.searchResults = clientSession.searchResults.filter(
 			(row) => row.id !== id,
 		);
-	const route = getCurrentRoute();
-	if (
-		route.page !== "chat" ||
-		route.sessionId !== id ||
-		(clientSession.currentId !== id && clientSession.currentId !== null)
-	)
-		return;
-	const survivor = getFilteredSessions().find((row) => row.id !== id);
-	if (survivor) {
-		switchToSession(survivor.id, survivor.projectSlug, undefined, {
-			replace: true,
-		});
-		return;
-	}
-	const activity = sessionActivity.get(id);
-	if (activity) activity.replayGeneration++;
-	updateContextPercent(0);
-	clearTodoState();
-	replaceRoute("/");
-	clientSession.currentId = null;
+	markSessionDeleted(id);
 }
 
 /** Drop the state this tab keeps for a session the map no longer holds. */
 export function forgetSession(id: string): void {
 	clearSessionChatState(id);
 	sessionGoals.delete(id);
-	// A session that is gone cannot still be the one we are looking at. The
-	// selection is what makes a session routable before its row arrives, so
-	// leaving it behind lets a late event rebuild the chat state we just threw
-	// away — and deleting the last session leaves no other for the server to
-	// switch us to, so nothing else would clear it.
-	if (clientSession.currentId === id) clientSession.currentId = null;
 }
 
 /**
@@ -404,7 +333,6 @@ $effect.root(() => {
 	$effect(() => {
 		const rows = [
 			...sessionState.rootSessions,
-			...sessionState.daemonSessions,
 			...(sessionState.searchResults ?? []),
 		];
 		const now = sessionState.now;
@@ -583,34 +511,68 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 	const next = reduce(familyApplied, change, (row) => row.id);
 	if (next === familyApplied) return;
 	const previousRows = familyApplied.rows;
-	// A child is not a shell row, so its settings follow the family feed.
-	const currentId = clientSession.currentId;
+	const reconnect = familyApplied.floor !== undefined;
+	// Children and archived roots have no shell row; their family owns settings.
+	const currentId = sessionState.currentId;
 	const viewed = currentId === null ? undefined : next.rows.get(currentId);
 	const previous = viewed && previousRows.get(viewed.id);
-	if (viewed?.parentID && viewed !== previous)
+	if (
+		viewed &&
+		(viewed.parentID !== undefined || viewed.archivedAt != null) &&
+		viewed !== previous
+	) {
 		followSessionModelSettings(viewed, previous);
+		if (
+			viewed.archivedAt != null &&
+			viewed.permissionMode !== undefined &&
+			viewed.permissionMode !== previous?.permissionMode
+		)
+			handlePermissionModeInfo({ mode: viewed.permissionMode });
+	}
 	familyApplied = next;
-	// The shell feed carries roots only, so a child's family row is the only
-	// status it has. Key on parentID, not shell membership: a root that gains a
-	// parent leaves the shell, and its family row is the one kept current.
+	if (change._tag === "upsert") applyTurnRow(change.item);
+	if (change._tag === "remove" && change.deleted === true) {
+		leaveDeletedSession(change.id);
+		forgetSession(change.id);
+		deleteTurn(change.id);
+	}
+	// Children and archived roots follow status here while live roots use shell.
 	if (change._tag === "snapshot") {
+		if (reconnect) rebaseTurns([...previousRows.keys(), ...next.rows.keys()]);
 		// A bounded rebase can omit a child that finished while disconnected.
 		for (const row of previousRows.values()) {
-			if (row.parentID !== undefined && !next.rows.has(row.id) && isBusy(row))
-				followSessionBusy(row.id, false);
+			if (
+				(row.parentID === undefined && row.archivedAt == null) ||
+				next.rows.has(row.id)
+			)
+				continue;
+			if (isBusy(row)) followSessionBusy(row.id, false);
+			followSessionCompaction(row.id, undefined);
+			followSessionRetry(row.id, undefined);
 		}
 		for (const row of next.rows.values()) {
-			if (row.parentID !== undefined) followSessionBusy(row.id, isBusy(row));
+			applyTurnRow(row);
+			if (row.parentID === undefined && row.archivedAt == null) continue;
+			followSessionBusy(row.id, isBusy(row), row.lastTurnEndVersion);
+			followSessionCompaction(row.id, row.compacting);
+			followSessionRetry(row.id, row.retrying);
 		}
 	}
-	if (change._tag === "upsert" && change.item.parentID !== undefined) {
+	if (
+		change._tag === "upsert" &&
+		(change.item.parentID !== undefined || change.item.archivedAt != null)
+	) {
 		const previousRow = previousRows.get(change.item.id);
 		const busy = isBusy(change.item);
 		if (
 			busy !== isBusy(previousRow) ||
 			(!busy && turnEnded(previousRow, change.item))
 		)
-			followSessionBusy(change.item.id, busy, change.item.lastTurnEndInputId);
+			followSessionBusy(change.item.id, busy, change.item.lastTurnEndVersion);
+		if (change.item.compacting !== previousRow?.compacting)
+			followSessionCompaction(change.item.id, change.item.compacting);
+		if (change.item.retrying !== previousRow?.retrying)
+			followSessionRetry(change.item.id, change.item.retrying);
 	}
 }
 
@@ -619,106 +581,8 @@ export function resetSessionFamily(): void {
 	familyApplied = emptySubscription();
 }
 
-/** How many cross-project rows one page asks for. Exported so the caller that
- *  fetches the first page uses the same size as the sentinel that fetches the
- *  rest -- a first page smaller than the viewport would never scroll, and so
- *  would never ask for a second. */
+/** Rows shown per browse page and requested per search page. */
 export const DAEMON_SESSION_PAGE_SIZE = 30;
-
-/** Bumped by anything that invalidates in-flight browse pages. A response
- *  carrying a stale token is dropped rather than appended, so a project switch
- *  cannot splice another project's page onto the new list. */
-let daemonBrowseToken = 0;
-
-/** Fetches the first cross-project page for the current scope, replacing
- *  whatever was listed. Run on connect and again whenever the scope changes. */
-export async function loadDaemonSessions(): Promise<void> {
-	const projectSlug = getCurrentSlug();
-	if (!projectSlug) return;
-	daemonBrowseToken += 1;
-	const token = daemonBrowseToken;
-	const scope = getSessionScope();
-	try {
-		const response = await listDaemonSessionsRpc({
-			projectSlug,
-			limit: DAEMON_SESSION_PAGE_SIZE,
-			// The sidebar shows other projects' roots only; this project's roots
-			// come from the shell feed. Pages of rows that never render keep the
-			// scroll sentinel in view, so the pager would walk the whole store.
-			roots: true,
-			exclude: projectSlug,
-			...(scope === null ? {} : { scope }),
-		});
-		if (token === daemonBrowseToken) applyListDaemonSessionsResponse(response);
-	} catch {
-		// The local project's rows arrive separately; the list stays usable.
-	}
-}
-
-/** Applies a FIRST page: replaces the accumulator rather than appending. */
-export function applyListDaemonSessionsResponse(
-	response: ListDaemonSessionsResponse,
-): void {
-	daemonBrowseToken += 1;
-	clientSession.daemonSessions = [...response.sessions];
-	clientSession.daemonCursor = response.nextCursor;
-	clientSession.daemonHasMore = response.hasMore;
-	clientSession.daemonLoading = false;
-	clientSession.daemonUnavailableProjects = response.availability
-		.filter((entry) => !entry.available)
-		.map((entry) => entry.projectSlug);
-}
-
-/** Appends the next cross-project page. No-ops at the end of the list and while
- *  a page is already in flight, which is what stops the scroll sentinel from
- *  re-requesting an exhausted cursor forever. */
-export async function loadMoreDaemonSessions(): Promise<void> {
-	const projectSlug = getCurrentSlug();
-	const cursor = sessionState.daemonCursor;
-	if (
-		!projectSlug ||
-		cursor === null ||
-		!sessionState.daemonHasMore ||
-		sessionState.daemonLoading
-	) {
-		return;
-	}
-	const token = daemonBrowseToken;
-	clientSession.daemonLoading = true;
-	try {
-		const scope = getSessionScope();
-		const response = await listDaemonSessionsRpc({
-			projectSlug,
-			limit: DAEMON_SESSION_PAGE_SIZE,
-			cursor,
-			roots: true,
-			exclude: projectSlug,
-			...(scope === null ? {} : { scope }),
-		});
-		if (token !== daemonBrowseToken) return;
-		// Dedupe by id. The keyset cursor does not re-emit rows, but a session
-		// whose updated_at moves between two requests can land on both pages, and
-		// a repeated key throws out of Svelte's keyed {#each}.
-		const seen = new Set(sessionState.daemonSessions.map((row) => row.id));
-		const incoming = response.sessions.filter(
-			(session) => !seen.has(session.id),
-		);
-		clientSession.daemonSessions = [
-			...sessionState.daemonSessions,
-			...incoming,
-		];
-		clientSession.daemonCursor = response.nextCursor;
-		clientSession.daemonHasMore = response.hasMore;
-		clientSession.daemonUnavailableProjects = response.availability
-			.filter((entry) => !entry.available)
-			.map((entry) => entry.projectSlug);
-	} catch {
-		// Keep the rows already on screen and leave hasMore alone, so scrolling
-		// again retries rather than declaring the list finished.
-	} finally {
-		if (token === daemonBrowseToken) clientSession.daemonLoading = false;
-	}
-}
 
 /** The query the server is currently answering. Distinct from
  *  sessionState.searchQuery, which is what the user has typed this instant:
@@ -727,6 +591,7 @@ let activeSearch: {
 	query: string;
 	roots: boolean;
 	scope: string | null;
+	includeArchived: boolean;
 } | null = null;
 let daemonSearchToken = 0;
 
@@ -741,7 +606,12 @@ export async function searchSessions(
 		return;
 	}
 	daemonSearchToken += 1;
-	activeSearch = { query: trimmed, roots, scope: getSessionScope() };
+	activeSearch = {
+		query: trimmed,
+		roots,
+		scope: getSessionScope(),
+		includeArchived: clientSession.searchIncludeArchived,
+	};
 	clientSession.searchCursor = null;
 	clientSession.searchHasMore = false;
 	// Results are left on screen until the new page lands. Blanking them first
@@ -769,6 +639,18 @@ export function clearSessionSearch(): void {
 	clientSession.searchCursor = null;
 	clientSession.searchHasMore = false;
 	clientSession.searchLoading = false;
+	clientSession.searchIncludeArchived = false;
+}
+
+export async function setSearchIncludeArchived(value: boolean): Promise<void> {
+	clientSession.searchIncludeArchived = value;
+	if (!value && clientSession.searchResults) {
+		clientSession.searchResults = clientSession.searchResults.filter(
+			(session) => session.archivedAt == null,
+		);
+	}
+	if (activeSearch)
+		await searchSessions(activeSearch.query, activeSearch.roots);
 }
 
 async function runSearchPage(token: number, replace: boolean): Promise<void> {
@@ -778,18 +660,19 @@ async function runSearchPage(token: number, replace: boolean): Promise<void> {
 	const cursor = replace ? null : sessionState.searchCursor;
 	clientSession.searchLoading = true;
 	try {
-		const response = await listDaemonSessionsRpc({
+		const response = await rpc("ListDaemonSessions", {
 			projectSlug,
 			roots: search.roots,
 			search: search.query,
 			limit: DAEMON_SESSION_PAGE_SIZE,
+			...(search.includeArchived ? { includeArchived: true } : {}),
 			...(search.scope === null ? {} : { scope: search.scope }),
 			...(cursor === null ? {} : { cursor }),
 		});
 		if (token !== daemonSearchToken) return;
 		applySearchResultsResponse(response, replace);
 	} catch {
-		// Same as browse paging: keep what is shown, allow a retry.
+		// Keep the previous search page visible and allow a retry.
 	} finally {
 		if (token === daemonSearchToken) clientSession.searchLoading = false;
 	}
@@ -818,20 +701,22 @@ export function applySearchResultsResponse(
  * This tab forked: select the fork and keep its lineage until the family row
  * arrives. Only the forking tab announces it.
  */
-export function followFork(response: ForkSessionResponse): void {
-	clientSession.announcedParent = {
+export function followFork(
+	from: typeof selection.scope,
+	response: ForkSessionResponse,
+): void {
+	clientSession.announcedFork = {
 		sessionId: response.sessionId,
-		parentId: response.parentId,
+		forkedFrom: response.forkedFrom,
 		...(response.forkMessageId && { forkMessageId: response.forkMessageId }),
 		...(response.forkPointTimestamp != null && {
 			forkPointTimestamp: response.forkPointTimestamp,
 		}),
 	};
 	showToast(
-		`Forked from "${findSession(response.parentId)?.title || "session"}"`,
+		`Forked from "${findSession(response.forkedFrom)?.title || "session"}"`,
 	);
-	if (clientSession.currentId !== response.sessionId)
-		switchToSession(response.sessionId, response.projectSlug);
+	selection.follow(from, response.sessionId, "push");
 }
 
 // Components should wrap these in $derived() for reactive caching.
@@ -842,7 +727,6 @@ export function findSession(id: string): Immutable<SessionInfo> | undefined {
 		serverSessions.get(id) ??
 		familySessions.find((row) => row.id === id) ??
 		rootSessions.find((row) => row.id === id) ??
-		sessionState.daemonSessions.find((row) => row.id === id) ??
 		sessionState.searchResults?.find((row) => row.id === id)
 	);
 }
@@ -910,48 +794,25 @@ function lastChangedAt(session: Immutable<SessionInfo>): number {
 /** The sidebar and its search show root sessions only. */
 export function getFilteredSessions(): SessionInfo[] {
 	const scope = getSessionScope();
-	const groupKey = getScopeGroupKey(scope);
-	const currentSlug = getCurrentSlug();
-	const inScope = (session: SessionInfo) => {
-		const slug = session.projectSlug;
-		return (
-			scope === null ||
-			(groupKey === null
-				? slug === scope
-				: getProjectGroup(slug)?.key === groupKey)
-		);
-	};
+	const inScope = (session: SessionInfo) =>
+		scope === null || session.projectSlug === scope;
 	let sessions: SessionInfo[];
 	if (sessionState.searchResults !== null) {
-		const searchSlug = currentSlug;
-		// Root rows carry the subtree rollup, so local search hits use the
-		// current shell row rather than a possibly older search result.
+		// The live feed holds every visible unarchived root, so a hit uses its live
+		// row, and an unarchived hit missing from the feed was hidden or removed
+		// after the search ran. Archived hits only exist in search results.
 		const liveRoots = new Map(
 			sessionState.rootSessions.map((session) => [session.id, session]),
 		);
 		sessions = sessionState.searchResults.flatMap((session) => {
-			if (session.parentID || session.sideThread || !inScope(session))
-				return [];
-			if (session.projectSlug !== searchSlug) {
-				return [session];
-			}
-			const liveSession = liveRoots.get(session.id);
-			return liveSession ? [liveSession] : [];
+			if (!isFamilyRoot(session) || !inScope(session)) return [];
+			const live = liveRoots.get(session.id);
+			if (live) return [live];
+			return session.archivedAt === undefined ? [] : [session];
 		});
 	} else {
-		const localSessions = sessionState.rootSessions;
 		const query = sessionState.searchQuery.toLowerCase().trim();
-		// Foreign rows stay in while a query is active and get title-filtered with
-		// the rest. The server search they will be replaced by now covers every
-		// project too, so the local filter and the landing results agree -- which is
-		// why these no longer have to stand down to avoid flashing in and out.
-		const foreignSessions = sessionState.daemonSessions.filter(
-			(session) =>
-				session.projectSlug !== currentSlug &&
-				!session.parentID &&
-				!session.sideThread,
-		);
-		sessions = [...localSessions, ...foreignSessions].filter(inScope);
+		sessions = sessionState.rootSessions.filter(inScope);
 		if (query)
 			sessions = sessions.filter((s) => s.title.toLowerCase().includes(query));
 	}
@@ -966,7 +827,7 @@ export function getFilteredSessions(): SessionInfo[] {
 
 /** Get the currently active session object (or undefined). */
 export function getActiveSession(): Immutable<SessionInfo> | undefined {
-	return findSession(clientSession.currentId ?? "");
+	return findSession(sessionState.currentId ?? "");
 }
 
 /** Group sessions into today/yesterday/older buckets. */
@@ -999,105 +860,25 @@ export function groupSessionsByDate(
 /** Set the sidebar's immediate local filter while the server query debounces. */
 export function setSearchQuery(query: string): void {
 	clientSession.searchQuery = query;
+	if (!query.trim()) clearSessionSearch();
 }
 
-export function setCurrentSession(id: string | null): void {
-	clientSession.currentId = id;
-}
-
-/**
- * Switch this tab to a different session.
- * Updates local state, navigates the URL, and sends `ViewSession` to the server.
- *
- * The two-tier per-session store retains session state across switches
- * (Tier 1 is unbounded, Tier 2 is LRU-capped).
- */
-export function switchToSession(
-	sessionId: string,
-	projectSlug?: string,
-	view?: typeof viewSessionRpc,
-	options?: { replace?: boolean },
+/** Per-session UI state follows what selection shows, including leaving it. */
+export function followShownSession(
+	sessionId: string | null,
+	previousId: string | null,
 ): void {
-	const generation = ++selectionGeneration;
-	const previousId = clientSession.currentId;
+	if (previousId !== sessionId) goalDetails.open = false;
 	if (previousId && previousId !== sessionId) {
 		const activity = sessionActivity.get(previousId);
 		if (activity) activity.replayGeneration++;
 	}
-
-	clientSession.currentId = sessionId;
+	if (sessionId) activateSessionChatState(sessionId);
 	clearDraftSelection();
-	if (clientSession.announcedParent?.sessionId !== sessionId)
-		clientSession.announcedParent = null;
-	activateSessionChatState(sessionId);
+	if (clientSession.announcedFork?.sessionId !== sessionId)
+		clientSession.announcedFork = null;
 	if (previousId !== sessionId) {
-		updateContextPercent(0);
 		clearTodoState();
-	}
-
-	const slug = projectSlug ?? getCurrentSlug();
-	if (getCurrentSessionId() !== sessionId) {
-		if (options?.replace) replaceRoute(`/s/${sessionId}`);
-		else navigate(`/s/${sessionId}`);
-	}
-	if (slug) {
-		const input: ViewSessionRpcInput = {
-			projectSlug: slug,
-			sessionId,
-			originId: getBrowserClientId(),
-		};
-		void (view ?? viewSessionRpc)(input)
-			.then(({ draft }) => {
-				// Viewing another project's session attaches this tab to it.
-				if (generation === selectionGeneration && getCurrentSlug() !== slug)
-					setAttachedProject(slug);
-				if (
-					draft !== undefined &&
-					generation === selectionGeneration &&
-					clientSession.currentId === sessionId &&
-					getCurrentSlug() === slug
-				)
-					handleInputSyncReceived({ text: draft });
-			})
-			.catch(() => undefined);
-	}
-	if (slug) {
-		const workspace = JSON.stringify(findSession(sessionId)?.workspace ?? null);
-		void getAgentsRpc({ projectSlug: slug, sessionId })
-			.then((response) => {
-				if (
-					generation === selectionGeneration &&
-					clientSession.currentId === sessionId &&
-					getCurrentSlug() === slug
-				)
-					applyGetAgentsResponse(response, sessionId);
-			})
-			.catch(() => undefined);
-		void getCommandsRpc({ projectSlug: slug, sessionId })
-			.then((response) => {
-				if (
-					generation === selectionGeneration &&
-					clientSession.currentId === sessionId &&
-					getCurrentSlug() === slug &&
-					JSON.stringify(findSession(sessionId)?.workspace ?? null) ===
-						workspace
-				)
-					applyGetCommandsResponse(response);
-			})
-			.catch(() => undefined);
-		// Re-syncs per-session overrides (variant, context window, permission
-		// mode) that connect-time hydration cannot see for later switches.
-		const applyModels = followModelsRead(sessionId);
-		void getModelsRpc({ projectSlug: slug, sessionId })
-			.then((response) => {
-				if (
-					generation === selectionGeneration &&
-					clientSession.currentId === sessionId &&
-					getCurrentSlug() === slug
-				)
-					applyModels(response);
-			})
-			.catch(() => undefined);
 	}
 }
 
@@ -1105,31 +886,16 @@ export function switchToSession(
  * Reload the provider session so it picks up skills/commands added on disk,
  * then refetch the command and model catalogs it changes.
  */
-export async function reloadProviderSession(
-	projectSlug: string,
-	sessionId: string,
-): Promise<void> {
-	await reloadProviderSessionRpc({
-		projectSlug,
+export async function reloadProviderSession(sessionId: string): Promise<void> {
+	await rpc("ReloadProviderSession", {
 		sessionId,
 		commandId: crypto.randomUUID(),
 	});
-	const workspace = JSON.stringify(findSession(sessionId)?.workspace ?? null);
-	const applyModels = followModelsRead(sessionId);
-	const [commands, models] = await Promise.all([
-		getCommandsRpc({ projectSlug, sessionId }),
-		getModelsRpc({ projectSlug, sessionId }),
-	]);
-	if (clientSession.currentId !== sessionId || getCurrentSlug() !== projectSlug)
-		return;
-	if (JSON.stringify(findSession(sessionId)?.workspace ?? null) === workspace)
-		applyGetCommandsResponse(commands);
-	applyModels(models);
+	await refreshCatalogs();
 }
 
 /** Clear all session state (for project switch). */
 export function clearSessionState(): void {
-	selectionGeneration++;
 	const held = [...serverSessions.keys()];
 	resetSessionSubscription();
 	for (const id of held) forgetSession(id);
@@ -1139,16 +905,9 @@ export function clearSessionState(): void {
 	])) {
 		clearSessionChatState(id);
 	}
-	clientSession.currentId = null;
-	clientSession.announcedParent = null;
+	clientSession.announcedFork = null;
 	setSearchQuery("");
 	resetSessionFamily();
 	readMarks.clear();
-	clientSession.daemonSessions = [];
-	clientSession.daemonUnavailableProjects = [];
-	clientSession.daemonCursor = null;
-	clientSession.daemonHasMore = false;
-	clientSession.daemonLoading = false;
-	daemonBrowseToken++;
 	clearSessionSearch();
 }

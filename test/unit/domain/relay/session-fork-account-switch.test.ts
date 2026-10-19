@@ -169,7 +169,8 @@ it.each([
 				variant: "high",
 				context_window: "200k",
 			});
-			expect(childRow?.parent_id).toBe("parent");
+			expect(childRow?.parent_id).toBeNull();
+			expect(childRow?.forked_from).toBe("parent");
 			expect(childRow?.fork_point_message_id).toBe(boundary);
 			const history = yield* read.getSessionMessagesWithParts(child.id);
 			expect(history.at(-1)?.id).toBe(`${boundary}_${child.id}`);
@@ -372,10 +373,10 @@ it.each([
 					(row) => row.id,
 				),
 			).toEqual(["first", "before"]);
-			const rejected = yield* Effect.either(
+			const rejected = yield* Effect.result(
 				forkSession("parent", { messageId: "uncovered" }),
 			);
-			expect(rejected._tag).toBe("Left");
+			expect(rejected._tag).toBe("Failure");
 			const child = yield* forkSession("parent");
 			const history = yield* read.getSessionMessagesWithParts(child.id);
 			expect

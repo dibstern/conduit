@@ -1,7 +1,14 @@
 import { Schema } from "effect";
 
-export const SessionModeSchema = Schema.Literal("local", "worktree");
+export const SessionModeSchema = Schema.Literals(["local", "worktree"]);
 export type SessionMode = typeof SessionModeSchema.Type;
+
+export const DefaultSessionModeSchema = Schema.Literals([
+	"local",
+	"worktree",
+	"last",
+]);
+export type DefaultSessionMode = typeof DefaultSessionModeSchema.Type;
 
 /** Settings read from conduit.json in the primary Project Folder. */
 export const ProjectFileSchema = Schema.Struct({

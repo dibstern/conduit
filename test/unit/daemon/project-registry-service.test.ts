@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Fiber, Layer, Option } from "effect";
 import { afterAll, afterEach, expect } from "vitest";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
@@ -32,6 +32,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
 import type { StoredProject } from "../../../src/lib/types.js";
+import { makeDaemonStoreTestLayer } from "../../helpers/daemon-rpc.js";
 
 const testProject: StoredProject = {
 	slug: "test-project",
@@ -66,11 +67,12 @@ const makeStubRelayCache = (): RelayCache => ({
 
 /** Compose a test layer with ProjectRegistry, DaemonEventBus, and a stub RelayCache. */
 const testLayer = Layer.mergeAll(
+	makeDaemonStoreTestLayer(),
 	makeProjectRegistryLive(),
 	DaemonEventBusLive,
 	makeDaemonStateLive({ configDir }),
 	ConfigPersistenceNoopLive,
-	Layer.succeed(RelayCacheTag, makeStubRelayCache()),
+	Layer.succeed(RelayCacheTag)(makeStubRelayCache()),
 );
 
 describe("projectInfos", () => {
@@ -231,7 +233,7 @@ describe("explicit project registration", () => {
 });
 
 describe("waitForRelay", () => {
-	it.scoped("resolves immediately if project is already Ready", () =>
+	it.effect("resolves immediately if project is already Ready", () =>
 		Effect.gen(function* () {
 			yield* addWithoutRelay(testProject);
 			yield* markReady(testProject.slug);
@@ -242,25 +244,27 @@ describe("waitForRelay", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("fails with ProjectNotFound for unknown slug", () =>
+	it.effect("fails with ProjectNotFound for unknown slug", () =>
 		Effect.gen(function* () {
 			const result = yield* waitForRelay("nonexistent", 1000).pipe(Effect.flip);
 			expect(result._tag).toBe("ProjectNotFound");
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("waits for InstanceStatusChanged then verifies Ready", () =>
+	it.effect("waits for InstanceStatusChanged then verifies Ready", () =>
 		Effect.gen(function* () {
 			yield* addWithoutRelay(testProject);
 
 			// Fork the wait in background
-			const fiber = yield* Effect.fork(waitForRelay(testProject.slug, 5000));
+			const fiber = yield* Effect.forkChild(
+				waitForRelay(testProject.slug, 5000),
+			);
 
 			// Simulate the project becoming ready (publishes InstanceStatusChanged)
 			yield* markReady(testProject.slug);
 
 			// The fiber should complete successfully
-			yield* fiber.await;
+			yield* Fiber.await(fiber);
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 });

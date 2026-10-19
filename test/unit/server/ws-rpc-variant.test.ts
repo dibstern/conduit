@@ -1,10 +1,10 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcTest } from "@effect/rpc";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { RpcTest } from "effect/rpc";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { getVariant } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
@@ -51,14 +51,13 @@ describe("WsRpcServerLayer SwitchVariant", () => {
 					VALUES ('session-1', 'opencode', 'Stored session', 'openai', 'gpt-4', 'standard', '', 1, 1)`;
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
 				const result = yield* client.SwitchVariant({
-					projectSlug: "project-a",
 					sessionId: "session-1",
 					variant: "fast",
 					originId: "browser-1",
 				});
 
 				expect(result).toEqual({
-					projectSlug: "project-a",
+					projectSlug: "test-project",
 					variant: "fast",
 					variants: ["standard", "fast"],
 				});
@@ -93,6 +92,7 @@ describe("WsRpcServerLayer SwitchVariant", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},

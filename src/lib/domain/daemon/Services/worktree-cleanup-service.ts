@@ -7,11 +7,12 @@ export interface WorktreeCleanupRequest {
 	readonly completion?: Deferred.Deferred<WorktreeCleanupReport>;
 }
 
-export class WorktreeCleanupQueueTag extends Context.Tag(
-	"WorktreeCleanupQueue",
-)<WorktreeCleanupQueueTag, Queue.Queue<WorktreeCleanupRequest>>() {}
+export class WorktreeCleanupQueueTag extends Context.Service<
+	WorktreeCleanupQueueTag,
+	Queue.Queue<WorktreeCleanupRequest>
+>()("WorktreeCleanupQueue") {}
 
-export const WorktreeCleanupQueueLive = Layer.scoped(
+export const WorktreeCleanupQueueLive = Layer.effect(
 	WorktreeCleanupQueueTag,
 	Effect.acquireRelease(
 		Queue.unbounded<WorktreeCleanupRequest>(),

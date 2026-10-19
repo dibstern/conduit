@@ -10,14 +10,13 @@ import { once } from "node:events";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
-import type { RpcMessage } from "@effect/rpc";
 import { Effect, Fiber, Stream } from "effect";
+import type { RpcMessage } from "effect/rpc";
 import { expect, it } from "vitest";
 import { WebSocket } from "ws";
-import {
-	type ProjectSetting,
-	type ProjectSettingsEnvelope,
-	SetDefaultPermissionMode,
+import type {
+	ProjectSetting,
+	ProjectSettingsEnvelope,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	loadRelaySettings,
@@ -40,7 +39,7 @@ it("fans global settings out to another live project's subscribers and defaults"
 	});
 	const receivedA: ProjectSettingsEnvelope[] = [];
 	const receivedB: ProjectSettingsEnvelope[] = [];
-	const subscribers: Fiber.RuntimeFiber<void, unknown>[] = [];
+	const subscribers: Fiber.Fiber<void, unknown>[] = [];
 	const startupGate = join(harness.root, "capabilities-probe-gated");
 	let snapshotB: ProjectSettingsEnvelope | undefined;
 	let variantSnapshotB: ProjectSettingsEnvelope | undefined;
@@ -193,7 +192,7 @@ it("fans global settings out to another live project's subscribers and defaults"
 					_tag: "Request",
 					id,
 					tag: "SetDefaultPermissionMode",
-					payload: new SetDefaultPermissionMode({ projectSlug, mode }),
+					payload: { _tag: "SetDefaultPermissionMode", projectSlug, mode },
 					headers: [],
 				} satisfies RpcMessage.RequestEncoded),
 			);
@@ -243,7 +242,6 @@ it("fans global settings out to another live project's subscribers and defaults"
 		const sessionId = await browserA.createSession("Global variant preference");
 		await Effect.runPromise(
 			browserA.rpc.SwitchVariant({
-				projectSlug: projectA,
 				sessionId,
 				variant: "",
 			}),

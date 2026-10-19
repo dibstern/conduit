@@ -11,6 +11,7 @@ import type {
 	SessionGoalChangedPayload,
 	SessionHandoffDeliveredPayload,
 } from "../contracts/stored-event.js";
+import type { ModelInfo as WireModelInfo } from "../contracts/ws-rpc.js";
 import type { NativeThread } from "../persistence/effect/provider-state-effect.js";
 import type {
 	ProviderPermissionUpdate,
@@ -105,13 +106,15 @@ export interface EventSink {
 /**
  * `joined`: the provider folded this input into a turn another input owns.
  * That input's result finalises the turn; a joined input finalises nothing.
+ * `steer-declined`: the provider did not run this input as a steer.
  */
 export type TurnStatus =
 	| "completed"
 	| "error"
 	| "interrupted"
 	| "cancelled"
-	| "joined";
+	| "joined"
+	| "steer-declined";
 
 export interface TurnTokens {
 	readonly input: number;
@@ -123,6 +126,12 @@ export interface TurnTokens {
 }
 
 export type TurnErrorCode =
+	| "auth_required"
+	| "agent_busy"
+	| "rate_limited"
+	| "model_unavailable"
+	| "network_error"
+	| "sandbox_unavailable"
 	| "send_failed"
 	| "provider_error"
 	| "interrupted"
@@ -133,6 +142,8 @@ export interface TurnError {
 	readonly code: TurnErrorCode;
 	readonly message: string;
 	readonly retryable?: boolean;
+	/** The provider has already applied its automatic retry policy. */
+	readonly retryHandled?: boolean;
 }
 
 export interface ProviderStateUpdate {
@@ -172,6 +183,7 @@ export interface ModelInfo {
 	readonly resolvedModel?: string;
 	readonly limit?: { context?: number; output?: number };
 	readonly variants?: Record<string, Record<string, unknown>>;
+	readonly parameters?: WireModelInfo["parameters"];
 	/** Full request ids for catalog entries grouped by routing scope. */
 	readonly routingOptions?: readonly ContextWindowOption[];
 	/**
@@ -273,7 +285,10 @@ export type PreWarmSessionInput = Pick<
 	| "variant"
 	| "contextWindow"
 	| "agent"
->;
+> & {
+	/** Recheck directory environment readiness when this reserved warm gets its first send. */
+	readonly draftPreWarm?: true;
+};
 
 export type CommandSource =
 	| "builtin"
@@ -335,14 +350,11 @@ export interface ProviderInstance {
 	/** Unique identifier for this provider (e.g. "opencode", "claude") */
 	readonly providerId: string;
 
-	/** The provider reads an input handed off mid-turn at its next tool
-	 *  boundary and reports when it starts (a steer). */
-	readonly steering: boolean;
-
 	/** Query the provider for available models, commands, and capabilities */
 	discoverEffect(
 		workspaceRoot?: string,
 		account?: Account,
+		options?: { readonly refresh?: boolean },
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure>;
 
 	/** Send a user turn to the provider and stream response events via EventSink */
@@ -379,6 +391,7 @@ export interface ProviderInstance {
 		sessionId: string,
 		requestId: string,
 		decision: PermissionDecision,
+		providerProcessId?: string,
 	): Effect.Effect<void, ProviderInstanceFailure>;
 
 	/** Resolve a pending question (from EventSink.requestQuestion) */

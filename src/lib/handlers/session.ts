@@ -1,8 +1,13 @@
-import { Cause, Effect, Either } from "effect";
+import { Effect, PubSub, Result } from "effect";
 import { accountRefFromSelection } from "../account-directory.js";
 import type { Account, AccountRef } from "../contracts/account.js";
 import type { AccountId } from "../contracts/provider-instance.js";
+import { getProviderDriver } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
+import {
+	DaemonEvent,
+	DaemonEventBusTag,
+} from "../domain/daemon/Services/daemon-pubsub.js";
 import { loadModelCatalog } from "../domain/relay/Services/model-catalog.js";
 import {
 	ProjectSettingsTag,
@@ -23,6 +28,7 @@ import {
 	cleanupSessionWorktrees,
 	prepareSessionWorktreeDeletion,
 } from "../domain/relay/Services/session-worktree-deletion.js";
+import * as Failure from "../effect/failure-classification.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import {
@@ -38,18 +44,76 @@ interface ViewSessionPayload {
 	readonly sessionId: string;
 }
 
-interface NewSessionPayload {
-	readonly title?: string;
-	readonly instanceId?: AccountId;
-	readonly providerId?: string;
+export interface NewSessionPayload {
+	readonly title?: string | undefined;
+	readonly instanceId?: AccountId | undefined;
+	readonly providerId?: string | undefined;
 	readonly permissionMode: SessionPermissionMode;
-	readonly model?: {
-		readonly modelId: string;
-		readonly providerId: string;
-		readonly variant?: string;
-		readonly contextWindow?: string;
-	};
+	readonly model?:
+		| {
+				readonly modelId: string;
+				readonly providerId: string;
+				readonly variant?: string | undefined;
+				readonly contextWindow?: string | undefined;
+		  }
+		| undefined;
 }
+
+/** Resolve the composer's pick once for both draft warming and creation. */
+export const resolveSessionCreationAccount = (
+	input: NewSessionPayload & {
+		readonly accountRef?: AccountRef | undefined;
+		readonly account?: Account | undefined;
+	},
+) =>
+	Effect.gen(function* () {
+		const accounts = yield* AccountDirectory;
+		return (
+			input.account ??
+			(yield* accounts.resolve(
+				input.accountRef ??
+					accountRefFromSelection({
+						instanceId: input.instanceId,
+						providerId: input.providerId,
+						model:
+							input.model === undefined
+								? undefined
+								: { providerID: input.model.providerId },
+					}),
+			))
+		);
+	});
+
+export const resolveSessionCreation = (
+	input: Parameters<typeof resolveSessionCreationAccount>[0],
+	options: { readonly startIfStopped?: boolean } = { startIfStopped: true },
+) =>
+	Effect.gen(function* () {
+		const account = yield* resolveSessionCreationAccount(input);
+		const { model, permissionMode } = input;
+		if (
+			permissionMode == null ||
+			!model?.modelId.trim() ||
+			!model.providerId.trim()
+		)
+			return yield* new PickRequired();
+		const catalog = yield* loadModelCatalog(
+			account.driver,
+			account.id,
+			options,
+		);
+		const resolved = resolveTurnSettings(
+			{
+				harness: account.driver,
+				model,
+				effort: model.variant ?? "",
+				contextWindow: model.contextWindow ?? "",
+			},
+			catalog,
+		);
+		if (Result.isFailure(resolved)) return yield* resolved.failure;
+		return { account, pick: resolved.success, permissionMode };
+	});
 
 interface DeleteSessionPayload {
 	readonly sessionId: string;
@@ -65,11 +129,11 @@ const shouldStartOpenCodePoller = (sessionId: string) =>
 	Effect.gen(function* () {
 		const readQuery = yield* ReadQueryEffectTag;
 
-		const rowResult = yield* Effect.either(readQuery.getSession(sessionId));
-		if (rowResult._tag === "Left") return true;
+		const rowResult = yield* Effect.result(readQuery.getSession(sessionId));
+		if (rowResult._tag === "Failure") return true;
 
-		const row = rowResult.right;
-		return !row || row.provider === "opencode";
+		const row = rowResult.success;
+		return !row || getProviderDriver(row.provider)?.runsOpenCodeServer === true;
 	});
 
 const switchClientToSession = (
@@ -138,6 +202,7 @@ export const createSessionForClient = <E = never>({
 	permissionMode,
 	initializeWorkspace,
 	sessionId,
+	resolvedCreation,
 }: {
 	readonly clientId: string;
 	readonly title?: string;
@@ -146,6 +211,9 @@ export const createSessionForClient = <E = never>({
 	readonly accountRef?: AccountRef;
 	readonly account?: Account;
 	readonly sessionId?: string;
+	readonly resolvedCreation?: Effect.Success<
+		ReturnType<typeof resolveSessionCreation>
+	>;
 	readonly permissionMode: SessionPermissionMode;
 	readonly model?: {
 		readonly modelId: string;
@@ -158,42 +226,19 @@ export const createSessionForClient = <E = never>({
 	Effect.gen(function* () {
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
-		const accounts = yield* AccountDirectory;
-		const account =
-			resolvedAccount ??
-			(yield* accounts.resolve(
-				accountRef ??
-					accountRefFromSelection({
-						instanceId,
-						providerId,
-						model:
-							model === undefined
-								? undefined
-								: { providerID: model.providerId },
-					}),
-			));
-		if (
-			permissionMode == null ||
-			!model?.modelId.trim() ||
-			!model.providerId.trim()
-		)
-			return yield* new PickRequired();
-		const catalog = yield* loadModelCatalog(account.driver, account.id, {
-			startIfStopped: true,
-		});
-		const resolved = resolveTurnSettings(
-			{
-				harness: account.driver,
+		const { account, pick } =
+			resolvedCreation ??
+			(yield* resolveSessionCreation({
+				instanceId,
+				providerId,
+				accountRef,
+				account: resolvedAccount,
 				model,
-				effort: model.variant ?? "",
-				contextWindow: model.contextWindow ?? "",
-			},
-			catalog,
-		);
-		if (Either.isLeft(resolved)) return yield* resolved.left;
+				permissionMode,
+			}));
 		const create = sessionManagerService.createSession(title, {
 			account,
-			pick: resolved.right,
+			pick,
 			permissionMode,
 			...(sessionId === undefined ? {} : { sessionId }),
 		});
@@ -209,10 +254,10 @@ export const createSessionForClient = <E = never>({
 						yield* switchClientToSession(clientId, session.id, {
 							skipPollerSeed: true,
 						});
-						if (model.variant !== undefined) {
+						if (model?.variant !== undefined) {
 							yield* Effect.gen(function* () {
 								const config = yield* ConfigTag;
-								const { model: pickModel, effort } = resolved.right;
+								const { model: pickModel, effort } = pick;
 								yield* Effect.try({
 									try: () =>
 										saveRelaySettings(
@@ -239,7 +284,7 @@ export const createSessionForClient = <E = never>({
 									yield* refreshGlobalDefaults;
 								}
 							}).pipe(
-								Effect.catchAllCause((cause) =>
+								Effect.catchCause((cause) =>
 									Effect.sync(() =>
 										log.warn(
 											`client=${clientId} session=${session.id} Failed to remember effort preference`,
@@ -302,11 +347,11 @@ export const deleteSessionForClient = ({
 			if (!id) return [];
 			const inspection = yield* prepareSessionWorktreeDeletion(id).pipe(
 				Effect.map((plan) => ({ plan, warnings: [] as string[] })),
-				Effect.catchAllCause((cause) =>
+				Effect.catchCause((cause) =>
 					Effect.succeed({
 						plan: undefined,
 						warnings: [
-							`Worktrees kept because inspection failed: ${Cause.pretty(cause).slice(0, 2_000)}`,
+							`Worktrees kept because inspection failed: ${Failure.renderCause(cause).slice(0, 2_000)}`,
 						],
 					}),
 				),
@@ -323,9 +368,9 @@ export const deleteSessionForClient = ({
 			) {
 				warnings.push(
 					...(yield* cleanupSessionWorktrees(id, inspection.plan).pipe(
-						Effect.catchAllCause((cause) =>
+						Effect.catchCause((cause) =>
 							Effect.succeed([
-								`Worktree cleanup failed: ${Cause.pretty(cause).slice(0, 2_000)}`,
+								`Worktree cleanup failed: ${Failure.renderCause(cause).slice(0, 2_000)}`,
 							]),
 						),
 					)),
@@ -389,13 +434,35 @@ export const setSessionSettledForClient = ({
 		const service = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 		if (yield* service.setSessionSettled(sessionId, { settled })) {
-			const config = yield* Effect.serviceOption(ConfigTag);
-			if (config._tag === "Some" && config.value.broadcastSessionListChanged) {
-				yield* Effect.tryPromise(config.value.broadcastSessionListChanged).pipe(
-					Effect.catchAll(() => Effect.void),
-				);
-			}
+			const bus = yield* Effect.serviceOption(DaemonEventBusTag);
+			if (bus._tag === "Some")
+				yield* PubSub.publish(bus.value, DaemonEvent.DaemonSessionsChanged());
 			log.info(`client=${clientId} Set settled=${settled}: ${sessionId}`);
+		}
+	});
+
+export const setSessionArchivedForClient = ({
+	clientId,
+	sessionId,
+	archived,
+}: {
+	readonly clientId: string;
+	readonly sessionId: string;
+	readonly archived: boolean;
+}) =>
+	Effect.gen(function* () {
+		const service = yield* SessionManagerServiceTag;
+		const log = yield* LoggerTag;
+		if (
+			yield* service.setSessionArchived(
+				sessionId,
+				archived ? { archived: true } : { archived: false },
+			)
+		) {
+			const bus = yield* Effect.serviceOption(DaemonEventBusTag);
+			if (bus._tag === "Some")
+				yield* PubSub.publish(bus.value, DaemonEvent.DaemonSessionsChanged());
+			log.info(`client=${clientId} Set archived=${archived}: ${sessionId}`);
 		}
 	});
 
@@ -429,12 +496,9 @@ export const setSessionAutoSettleForClient = ({
 		const service = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 		if (yield* service.setSessionAutoSettleDisabled(sessionId, disabled)) {
-			const config = yield* Effect.serviceOption(ConfigTag);
-			if (config._tag === "Some" && config.value.broadcastSessionListChanged) {
-				yield* Effect.tryPromise(config.value.broadcastSessionListChanged).pipe(
-					Effect.catchAll(() => Effect.void),
-				);
-			}
+			const bus = yield* Effect.serviceOption(DaemonEventBusTag);
+			if (bus._tag === "Some")
+				yield* PubSub.publish(bus.value, DaemonEvent.DaemonSessionsChanged());
 			log.info(
 				`client=${clientId} Set auto-settle disabled=${disabled}: ${sessionId}`,
 			);
@@ -609,7 +673,7 @@ export const forkSessionForClient = ({
 
 		return {
 			id: forked.id,
-			parentId: sessionId,
+			forkedFrom: sessionId,
 			...(forkMessageId && { forkMessageId }),
 			...(forkPointTimestamp != null && { forkPointTimestamp }),
 		};

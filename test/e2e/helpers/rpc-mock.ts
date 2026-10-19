@@ -1,47 +1,39 @@
-import type { Page, WebSocketRoute } from "@playwright/test";
+import { expect, type Page, type WebSocketRoute } from "@playwright/test";
+import { Cause, Effect, Exit, Schema, Scope, Stream } from "effect";
+import { RpcSchema } from "effect/rpc";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
-import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
 import {
 	DEFAULT_WORKTREE_CLEANUP,
-	WorktreeBranchRenameError,
-	WorktreeCreationError,
-	WorktreeRecoveryError,
+	type ProjectWorktreeCleanup,
+	type WorktreeCleanup,
 } from "../../../src/lib/contracts/worktree.js";
 import {
 	type Alert,
+	GetAgentsResponseSchema,
+	GetCommandsResponseSchema,
+	GetModelsResponseSchema,
+	GetProjectsResponseSchema,
 	type GetStatusResponse,
 	type ProjectSetting,
 	WsRpcError,
+	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { isRecord } from "../../../src/lib/utils.js";
+import { makeRpcStream, serveRpc } from "../../helpers/rpc-wire.js";
+import type { StubTable } from "../../helpers/stub-ws-rpc.js";
 import {
 	mockDetailPage,
 	mockDetailSnapshot,
 	subscribeMockDetail,
 } from "./detail-projection-mock.js";
 
-interface JsonRpcRequest {
-	readonly jsonrpc?: "2.0";
-	readonly id?: number | string | null;
-	readonly method: string;
-	readonly params?: Record<string, unknown>;
-}
-
 interface EffectRpcRequest {
 	readonly _tag: "Request";
-	readonly id: string;
+	// Effect 4 clients number their requests; other clients may send strings.
+	readonly id: string | number;
 	readonly tag: string;
 	readonly payload?: Record<string, unknown>;
 }
-
-interface EffectRpcPing {
-	readonly _tag: "Ping";
-}
-
-type RpcHandler = (
-	params: Record<string, unknown>,
-	request: JsonRpcRequest | EffectRpcRequest,
-) => unknown | Promise<unknown>;
 
 export const MOCK_SERVER_STATUS: GetStatusResponse = {
 	uptime: 273_600,
@@ -64,7 +56,6 @@ export const MOCK_SERVER_STATUS: GetStatusResponse = {
 type DaemonListTag =
 	| "SubscribeInstances"
 	| "SubscribeUsage"
-	| "SubscribeProjects"
 	| "SubscribeServerStatus";
 
 /** Subscriptions opened once per session, so each session gets its own stream. */
@@ -78,14 +69,14 @@ const isLiveOnlyStream = (tag: string): boolean =>
 	tag === "SubscribeAlerts" || tag === "SubscribeInputDraft";
 
 export interface RpcMockOptions {
-	readonly handlers: Record<string, RpcHandler>;
+	readonly stubs?: StubTable;
 	readonly streams?: Record<
 		string,
 		(params: Record<string, unknown>) => readonly unknown[]
 	>;
 }
 
-/** Mock-only catalog served by GetModels/GetAgents/GetCommands when a spec has no handler. */
+/** Mock-only catalog served by GetModels/GetAgents/GetCommands by default. */
 export interface MockCatalog {
 	instanceId?: string;
 	defaultOpenCodeInstanceId?: string;
@@ -114,17 +105,23 @@ export interface RecordedRpcRequest {
 export class RpcMockControl {
 	constructor(private readonly page: Page) {}
 	projectSlug = "myapp";
+	worktreeCleanupGlobal: WorktreeCleanup = DEFAULT_WORKTREE_CLEANUP;
+	readonly worktreeCleanupProjects = new Map<string, ProjectWorktreeCleanup>();
 	onConnect?: () => void;
 	onSendMessage?: (payload: Record<string, unknown>) => void;
 	private readonly sockets = new Set<WebSocketRoute>();
 	private connectionCount = 0;
 	private readonly requests: RecordedRpcRequest[] = [];
-	private readonly responseHandlers = new Map<string, RpcHandler>();
-	initialHandlers: Record<string, RpcHandler> = {};
 	private readonly streams = new Map<
 		string,
-		{ ws: WebSocketRoute; id: string }
+		{
+			ws: WebSocketRoute;
+			id: string;
+			emit: (values: readonly unknown[]) => void;
+			fail: (message: string) => void;
+		}
 	>();
+	private readonly socketCleanup = new Map<WebSocketRoute, () => void>();
 	shellRows: readonly unknown[] | null = null;
 	familyRows: readonly unknown[] | null = null;
 	private familySequence = 0;
@@ -137,46 +134,67 @@ export class RpcMockControl {
 	private readonly sessionTodos = new Map<string, readonly unknown[]>();
 	private sessionTodosSequence = 0;
 
-	setResponse(tag: string, value: unknown): void {
-		this.responseHandlers.set(tag, () => value);
+	stubs: StubTable = {};
+
+	/** Updates typed replies; a stub may throw a WsRpcError to fail the call. */
+	setStubs(stubs: StubTable): void {
+		Object.assign(this.stubs, stubs);
 	}
 
-	/** Answers `tag` from a handler, which may throw a WsRpcError to fail it. */
-	setHandler(tag: string, handler: RpcHandler): void {
-		this.responseHandlers.set(tag, handler);
-	}
-
-	getResponseHandler(tag: string): RpcHandler | undefined {
-		return this.responseHandlers.get(tag) ?? this.initialHandlers[tag];
-	}
-
-	catalogHandler(tag: string): RpcHandler | undefined {
-		const { providers, agents, commands, ...modelState } = this.catalog;
-		const projectSlug = this.projectSlug;
-		if (tag === "GetModels" && (providers || Object.keys(modelState).length))
-			return ({ sessionId }) => ({
-				projectSlug,
-				providers: providers ?? [],
-				...modelState,
-				...(sessionId && modelState.instanceId === undefined
-					? {
-							instanceId:
-								(modelState.active as { provider?: string } | undefined)
-									?.provider === "claude"
-									? "claude"
-									: "opencode",
-						}
-					: {}),
-			});
-		if (tag === "GetCommands" && commands)
-			return () => ({ projectSlug, commands });
-		if (tag === "GetAgents" && agents?.length)
-			return ({ instanceId }) => ({
-				projectSlug,
-				...(agents.find((list) => list.providerScope.id === instanceId) ??
-					agents.at(-1)),
-			});
-		return undefined;
+	catalogStubs(): Required<
+		Pick<StubTable, "GetModels" | "GetCommands" | "GetAgents">
+	> {
+		return {
+			GetModels: (payload) => {
+				const {
+					providers,
+					agents: _agents,
+					commands: _commands,
+					...modelState
+				} = this.catalog;
+				if (!providers && !Object.keys(modelState).length)
+					return new Promise<never>(() => {});
+				return checkedReply("GetModels", () =>
+					Schema.decodeUnknownSync(GetModelsResponseSchema)({
+						projectSlug: this.projectSlug,
+						defaultOpenCodeInstanceId: "opencode",
+						providers: providers ?? [],
+						...modelState,
+						...("sessionId" in payload &&
+						payload.sessionId &&
+						modelState.instanceId === undefined
+							? {
+									instanceId:
+										(modelState.active as { provider?: string } | undefined)
+											?.provider === "claude"
+											? "claude"
+											: "opencode",
+								}
+							: {}),
+					}),
+				);
+			},
+			GetCommands: () =>
+				this.catalog.commands
+					? checkedReply("GetCommands", () =>
+							Schema.decodeUnknownSync(GetCommandsResponseSchema)({
+								projectSlug: this.projectSlug,
+								commands: this.catalog.commands,
+							}),
+						)
+					: new Promise<never>(() => {}),
+			GetAgents: ({ instanceId }) =>
+				this.catalog.agents?.length
+					? checkedReply("GetAgents", () =>
+							Schema.decodeUnknownSync(GetAgentsResponseSchema)({
+								projectSlug: this.projectSlug,
+								...(this.catalog.agents?.find(
+									(list) => list.providerScope.id === instanceId,
+								) ?? this.catalog.agents?.at(-1)),
+							}),
+						)
+					: new Promise<never>(() => {}),
+		};
 	}
 
 	setDetailRows(sessionId: string, rows: readonly unknown[]): void {
@@ -214,7 +232,7 @@ export class RpcMockControl {
 		return this.detailFeed === "stall" ? frames.slice(0, 1) : frames;
 	}
 
-	/** The relay stamps its own project on every session row it streams. */
+	/** Unowned legacy fixture rows belong to the fixture project. */
 	owned(rows: readonly unknown[]): readonly unknown[] {
 		return rows.map((row) => ({
 			projectSlug: this.projectSlug,
@@ -231,7 +249,7 @@ export class RpcMockControl {
 				{
 					_tag: "snapshot",
 					sequence: this.shellSequence,
-					rows: this.owned(rows),
+					rows: this.visibleShellRows(rows),
 				},
 				{ _tag: "synchronized" },
 			]);
@@ -378,16 +396,70 @@ export class RpcMockControl {
 	}
 
 	initialShellFrames(): readonly unknown[] {
-		return this.shellRows === null
-			? []
-			: [
-					{
-						_tag: "snapshot",
-						sequence: this.shellSequence,
-						rows: this.owned(this.shellRows),
-					},
-					{ _tag: "synchronized" },
-				];
+		return [
+			...this.initialProjectsFrames(),
+			...(this.shellRows === null
+				? []
+				: [
+						{
+							_tag: "snapshot",
+							sequence: this.shellSequence,
+							rows: this.visibleShellRows(this.shellRows),
+						},
+						{ _tag: "synchronized" },
+					]),
+		];
+	}
+
+	private projects: Record<string, unknown> = { projects: [] };
+	private projectsSet = false;
+
+	private visibleShellRows(rows: readonly unknown[]): readonly unknown[] {
+		const owned = this.owned(rows);
+		if (!this.projectsSet) return owned;
+		const projects = Array.isArray(this.projects["projects"])
+			? this.projects["projects"]
+			: [];
+		const visible = new Set(
+			projects
+				.filter(
+					(project: { unavailableReason?: string }) =>
+						project.unavailableReason === undefined,
+				)
+				.map((project: { slug: string }) => project.slug),
+		);
+		return owned.filter((row) =>
+			visible.has((row as { projectSlug: string }).projectSlug),
+		);
+	}
+
+	/** Stays silent until a test sets projects: an empty list would read as the
+	 *  attached project being removed and navigate away. */
+	initialProjectsFrames(): readonly unknown[] {
+		return this.projectsSet ? [this.projectsFrame()] : [];
+	}
+
+	projectsFrame(): Record<string, unknown> {
+		return { ...this.projects, _tag: "projects" };
+	}
+
+	setProjects(value: Record<string, unknown>): void {
+		const membership = (list: Record<string, unknown>) =>
+			JSON.stringify(
+				(Array.isArray(list["projects"]) ? list["projects"] : [])
+					.map((project: { slug: string; unavailableReason?: string }) => [
+						project.slug,
+						project.unavailableReason !== undefined,
+					])
+					.sort(),
+			);
+		const changed = membership(this.projects) !== membership(value);
+		this.projects = value;
+		this.projectsSet = true;
+		if (this.streams.has("SubscribeShell")) {
+			this.sendChunk("SubscribeShell", [this.projectsFrame()]);
+			if (changed && this.shellRows !== null) this.setShellRows(this.shellRows);
+		}
 	}
 
 	/** The daemon-global lists, keyed by subscription tag; unset lists stay silent. */
@@ -416,9 +488,18 @@ export class RpcMockControl {
 	}
 
 	/** GetProjects answers from the mocked list, as the daemon does. */
-	projectsHandler(): RpcHandler | undefined {
-		const list = this.daemonLists.get("SubscribeProjects");
-		return list && (() => ({ projectSlug: this.projectSlug, ...list }));
+	projectsHandler(): StubTable["GetProjects"] | undefined {
+		const list = this.projects;
+		return (
+			list &&
+			(() =>
+				checkedReply("GetProjects", () =>
+					Schema.decodeUnknownSync(GetProjectsResponseSchema)({
+						projectSlug: this.projectSlug,
+						...list,
+					}),
+				))
+		);
 	}
 
 	record(tag: string, payload: Record<string, unknown>): void {
@@ -434,13 +515,16 @@ export class RpcMockControl {
 		return this.connectionCount;
 	}
 
-	registerSocket(ws: WebSocketRoute): void {
+	registerSocket(ws: WebSocketRoute, cleanup: () => void): void {
 		this.sockets.add(ws);
+		this.socketCleanup.set(ws, cleanup);
 		this.connectionCount++;
 	}
 
 	unregisterSocket(ws: WebSocketRoute): void {
 		this.sockets.delete(ws);
+		this.socketCleanup.get(ws)?.();
+		this.socketCleanup.delete(ws);
 		for (const [key, stream] of this.streams)
 			if (stream.ws === ws) this.streams.delete(key);
 	}
@@ -460,24 +544,27 @@ export class RpcMockControl {
 		tag: string,
 		ws: WebSocketRoute,
 		id: string,
+		emit: (values: readonly unknown[]) => void,
+		fail: (message: string) => void,
 		sessionId?: string,
 	): void {
-		this.streams.set(this.streamKey(tag, sessionId), { ws, id });
+		this.streams.set(this.streamKey(tag, sessionId), { ws, id, emit, fail });
 	}
 
 	hasStream(tag: string, sessionId?: string): boolean {
 		return this.streams.has(this.streamKey(tag, sessionId));
 	}
 
-	interruptStream(requestId: string): void {
+	interruptStream(requestId: string, ws?: WebSocketRoute): void {
 		for (const [key, stream] of this.streams)
-			if (stream.id === requestId) this.streams.delete(key);
+			if (stream.id === requestId && (!ws || stream.ws === ws))
+				this.streams.delete(key);
 	}
 
 	sendChunk(tag: string, values: readonly unknown[], sessionId?: string): void {
 		const stream = this.streams.get(this.streamKey(tag, sessionId));
 		if (!stream) throw new Error(`No active ${tag} stream`);
-		sendJson(stream.ws, { _tag: "Chunk", requestId: stream.id, values });
+		stream.emit(values);
 	}
 
 	failStream(tag: string, message: string, sessionId?: string): void {
@@ -485,14 +572,7 @@ export class RpcMockControl {
 		const stream = this.streams.get(key);
 		if (!stream) throw new Error(`No active ${tag} stream`);
 		this.streams.delete(key);
-		sendJson(stream.ws, {
-			_tag: "Exit",
-			requestId: stream.id,
-			exit: {
-				_tag: "Failure",
-				cause: { _tag: "Fail", error: { _tag: "WsRpcError", message } },
-			},
-		});
+		stream.fail(message);
 	}
 
 	closeStreamSocket(tag: string, sessionId?: string): void {
@@ -517,34 +597,11 @@ export class RpcMockControl {
 	}
 }
 
-const isJsonRpcRequest = (value: unknown): value is JsonRpcRequest =>
-	typeof value === "object" &&
-	value !== null &&
-	typeof (value as { method?: unknown }).method === "string";
-
 const isEffectRpcRequest = (value: unknown): value is EffectRpcRequest =>
-	typeof value === "object" &&
-	value !== null &&
-	(value as { _tag?: unknown })._tag === "Request" &&
-	typeof (value as { tag?: unknown }).tag === "string" &&
-	typeof (value as { id?: unknown }).id === "string";
-
-const isEffectRpcPing = (value: unknown): value is EffectRpcPing =>
-	typeof value === "object" &&
-	value !== null &&
-	(value as { _tag?: unknown })._tag === "Ping";
-
-const isEffectRpcInterrupt = (
-	value: unknown,
-): value is { _tag: "Interrupt"; requestId: string } =>
-	typeof value === "object" &&
-	value !== null &&
-	(value as { _tag?: unknown })._tag === "Interrupt" &&
-	typeof (value as { requestId?: unknown }).requestId === "string";
-
-const sendJson = (ws: WebSocketRoute, message: unknown) => {
-	ws.send(JSON.stringify(message));
-};
+	isRecord(value) &&
+	value["_tag"] === "Request" &&
+	typeof value["tag"] === "string" &&
+	(typeof value["id"] === "string" || typeof value["id"] === "number");
 
 const controls = new WeakMap<Page, RpcMockControl>();
 const pendingDaemonLists = new WeakMap<
@@ -552,6 +609,7 @@ const pendingDaemonLists = new WeakMap<
 	Map<DaemonListTag, Record<string, unknown>>
 >();
 const pendingShellRows = new WeakMap<Page, readonly unknown[]>();
+const pendingProjects = new WeakMap<Page, Record<string, unknown>>();
 const pendingFamilyRows = new WeakMap<Page, readonly unknown[]>();
 const pendingProjectSlugs = new WeakMap<Page, string>();
 const pendingCatalogs = new WeakMap<Page, MockCatalog>();
@@ -573,6 +631,16 @@ export function sendMockModelState(page: Page, state: MockModelState): void {
 	const control = controls.get(page);
 	if (control) control.setModelState(state);
 	else pendingCatalogs.set(page, { ...pendingCatalogs.get(page), ...state });
+}
+
+/** Mock-only input: publish project metadata through the shell feed. */
+export function sendMockProjects(
+	page: Page,
+	value: Record<string, unknown>,
+): void {
+	const control = controls.get(page);
+	if (control) control.setProjects(value);
+	else pendingProjects.set(page, value);
 }
 
 /** Mock-only input: deliver a daemon list through its RPC subscription. */
@@ -661,254 +729,264 @@ export function sendMockFamily(page: Page, rows: readonly unknown[]): void {
 	else pendingFamilyRows.set(page, rows);
 }
 
-async function handleMessage(
-	ws: WebSocketRoute,
-	handlers: Record<string, RpcHandler>,
-	streams: RpcMockOptions["streams"],
-	control: RpcMockControl,
-	raw: unknown,
-) {
-	if (Array.isArray(raw)) {
-		for (const item of raw) {
-			await handleMessage(ws, handlers, streams, control, item);
-		}
-		return;
-	}
-	if (isEffectRpcPing(raw)) {
-		sendJson(ws, { _tag: "Pong" });
-		return;
-	}
-	if (isEffectRpcInterrupt(raw)) {
-		control.interruptStream(raw.requestId);
-		return;
-	}
-	if (isEffectRpcRequest(raw)) {
-		control.record(raw.tag, raw.payload ?? {});
-		if (raw.tag === "SubscribeDraftModels") {
-			control.registerStream(raw.tag, ws, raw.id);
-			const handler =
-				control.getResponseHandler("GetModels") ??
-				handlers["GetModels"] ??
-				control.catalogHandler("GetModels");
-			if (handler) {
-				try {
-					const response = await handler(raw.payload ?? {}, {
-						...raw,
-						tag: "GetModels",
-					});
-					if (typeof response !== "object" || response === null)
-						throw new Error("Mock GetModels must return an object");
-					control.sendChunk(raw.tag, [
-						{
-							defaultOpenCodeInstanceId: "opencode",
-							...response,
-							instanceId: raw.payload?.["instanceId"],
-						},
-					]);
-				} catch (error) {
-					control.failStream(raw.tag, String(error));
-				}
-			}
-			return;
-		}
-		const daemonList =
-			raw.tag === "SubscribeInstances" ||
-			raw.tag === "SubscribeUsage" ||
-			raw.tag === "SubscribeProjects" ||
-			raw.tag === "SubscribeServerStatus"
-				? control.initialDaemonList(raw.tag)
-				: undefined;
-		const stream =
-			streams?.[raw.tag] ??
-			(raw.tag === "SubscribeShell" && control.initialShellFrames().length > 0
-				? () => control.initialShellFrames()
-				: raw.tag === "SubscribeSessionDetail"
-					? (payload: Record<string, unknown>) =>
-							control.initialDetailFrames(String(payload["sessionId"] ?? ""))
-					: raw.tag === "SubscribeSessionTodos"
-						? (payload: Record<string, unknown>) =>
-								control.initialSessionTodosFrames(
-									String(payload["sessionId"] ?? ""),
-								)
-						: raw.tag === "SubscribeSessionFamily"
-							? () => control.initialFamilyFrames()
-							: raw.tag === "SubscribeProjectSettings"
-								? () => control.initialProjectSettingsFrames()
-								: isLiveOnlyStream(raw.tag)
-									? () => [{ _tag: "synchronized" }]
-									: daemonList
-										? () => daemonList
-										: undefined);
-		if (stream) {
-			const sessionId = isSessionStream(raw.tag)
-				? String(raw.payload?.["sessionId"] ?? "")
-				: undefined;
-			control.registerStream(raw.tag, ws, raw.id, sessionId);
-			const values = stream(raw.payload ?? {});
-			if (values.length > 0) control.sendChunk(raw.tag, values, sessionId);
-			if (raw.tag === "SubscribeSessionDetail" && control.detailFeed === "fail")
-				control.failStream(raw.tag, "detail feed unavailable", sessionId);
-			return;
-		}
-		const handler =
-			control.getResponseHandler(raw.tag) ??
-			handlers[raw.tag] ??
-			control.catalogHandler(raw.tag) ??
-			(raw.tag === "ResolveSessionMode"
-				? () => ({ mode: "local", source: "global" })
-				: undefined) ??
-			(raw.tag === "GetProjects" ? control.projectsHandler() : undefined) ??
-			(raw.tag === "GetStatus" ? () => MOCK_SERVER_STATUS : undefined) ??
-			(raw.tag === "GetDefaultGroupingMode"
-				? () => ({ mode: "repository" })
-				: undefined) ??
-			(raw.tag === "GetWorktreeCleanupSetting"
-				? () => ({ worktreeCleanup: DEFAULT_WORKTREE_CLEANUP })
-				: raw.tag === "SetWorktreeCleanupSetting"
-					? ({ worktreeCleanup }) => ({ worktreeCleanup })
-					: undefined) ??
-			(raw.tag === "GetUsageLimitsSetting"
-				? () => ({
-						usageLimits: { autoResume: false, autoSwitch: false, order: [] },
-					})
-				: raw.tag === "ResolveSession"
-					? () => ({ projectSlug: control.projectSlug })
-					: raw.tag === "AttachProject"
-						? ({ projectSlug, sessionId }) => ({
-								projectSlug:
-									typeof projectSlug === "string"
-										? projectSlug
-										: control.projectSlug,
-								sessionSlug:
-									typeof sessionId === "string" ? control.projectSlug : null,
-							})
-						: raw.tag === "ViewSession"
-							? () => ({ ok: true })
-							: raw.tag === "InspectSessionWorktrees"
-								? () => ({ worktrees: [], removeWorktrees: false })
-								: raw.tag === "input.submit"
-									? ({ sessionId }) => ({ ok: true, sessionId })
-									: undefined);
-		if (!handler) return;
-		try {
-			const response = await handler(raw.payload ?? {}, raw);
-			const result =
-				raw.tag === "GetModels" && isRecord(response)
-					? { defaultOpenCodeInstanceId: "opencode", ...response }
-					: response;
-			// A mutation's answer is the daemon's new list, which it also fans out.
-			if (!raw.tag.startsWith("Get") && isRecord(result)) {
-				if (Array.isArray(result["projects"]))
-					control.setDaemonList("SubscribeProjects", {
-						projects: result["projects"],
-					});
-				if (Array.isArray(result["instances"]))
-					control.setDaemonList("SubscribeInstances", {
-						instances: result["instances"],
-					});
-			}
-			sendJson(ws, {
-				_tag: "Exit",
-				requestId: raw.id,
-				exit: { _tag: "Success", value: result },
-			});
-			if (raw.tag === "input.submit")
-				control.onSendMessage?.(raw.payload ?? {});
-		} catch (error) {
-			if (
-				error instanceof WsRpcError ||
-				error instanceof WorkspaceMoveError ||
-				error instanceof WorktreeBranchRenameError ||
-				error instanceof WorktreeCreationError ||
-				error instanceof WorktreeRecoveryError
-			) {
-				sendJson(ws, {
-					_tag: "Exit",
-					requestId: raw.id,
-					exit: {
-						_tag: "Failure",
-						cause: {
-							_tag: "Fail",
-							error:
-								error instanceof WorkspaceMoveError
-									? {
-											_tag: "WorkspaceMoveError",
-											path: error.path,
-											reason: error.reason,
-										}
-									: error instanceof WorktreeBranchRenameError
-										? {
-												_tag: error._tag,
-												folder: error.folder,
-												reason: error.reason,
-												message: error.message,
-											}
-										: error instanceof WorktreeCreationError ||
-												error instanceof WorktreeRecoveryError
-											? {
-													_tag: error._tag,
-													path: error.path,
-													reason: error.reason,
-													message: error.message,
-												}
-											: { _tag: "WsRpcError", message: error.message },
-						},
-					},
-				});
-				return;
-			}
-			sendJson(ws, {
-				_tag: "Defect",
-				defect: error instanceof Error ? error.message : String(error),
-			});
-		}
-		return;
-	}
-	if (!isJsonRpcRequest(raw)) return;
-
-	if (raw.method === "@effect/rpc/Ping") {
-		sendJson(ws, {
-			jsonrpc: "2.0",
-			method: "@effect/rpc/Pong",
-		});
-		return;
-	}
-
-	const handler =
-		control.getResponseHandler(raw.method) ?? handlers[raw.method];
-	if (!handler || raw.id == null) return;
-
+/** Validation makes an invalid typed fixture fail its owning Playwright spec.
+ * The real engine still owns every response frame and its serialization. */
+function checkedReply<A>(tag: string, validate: () => A): A {
 	try {
-		control.record(raw.method, raw.params ?? {});
-		const result = await handler(raw.params ?? {}, raw);
-		sendJson(ws, { jsonrpc: "2.0", id: raw.id, result });
-		if (raw.method === "input.submit")
-			control.onSendMessage?.(raw.params ?? {});
+		return validate();
 	} catch (error) {
-		sendJson(ws, {
-			jsonrpc: "2.0",
-			id: raw.id,
-			error: {
-				code: 0,
-				message: error instanceof Error ? error.message : String(error),
-			},
-		});
+		expect
+			.soft(false, `Invalid typed RPC reply for ${tag}: ${String(error)}`)
+			.toBe(true);
+		throw error;
 	}
+}
+
+function initialStream(
+	tag: string,
+	payload: Record<string, unknown>,
+	options: RpcMockOptions,
+	control: RpcMockControl,
+): readonly unknown[] {
+	const stream = options.streams?.[tag];
+	if (stream) {
+		const frames = stream(payload);
+		return tag === "SubscribeShell" &&
+			(frames[0] as { _tag?: string } | undefined)?._tag !== "projects"
+			? [...control.initialProjectsFrames(), ...frames]
+			: frames;
+	}
+	switch (tag) {
+		case "SubscribeShell":
+			return control.initialShellFrames();
+		case "SubscribeSessionDetail":
+			return control.initialDetailFrames(String(payload["sessionId"] ?? ""));
+		case "SubscribeSessionTodos":
+			return control.initialSessionTodosFrames(
+				String(payload["sessionId"] ?? ""),
+			);
+		case "SubscribeSessionFamily":
+			return control.initialFamilyFrames();
+		case "SubscribeProjectSettings":
+			return control.initialProjectSettingsFrames();
+		case "SubscribeInstances":
+		case "SubscribeUsage":
+		case "SubscribeServerStatus":
+			return control.initialDaemonList(tag);
+		default:
+			return isLiveOnlyStream(tag) ? [{ _tag: "synchronized" }] : [];
+	}
+}
+
+function socketTable(
+	ws: WebSocketRoute,
+	options: RpcMockOptions,
+	control: RpcMockControl,
+	requests: Map<string, EffectRpcRequest[]>,
+): StubTable {
+	// Iterating the group erases the tag/payload correlation checked by StubTable.
+	const stubs = control.stubs as Readonly<
+		Record<string, ((payload: Record<string, unknown>) => unknown) | undefined>
+	>;
+	const table: Record<string, (payload: never) => unknown> = {};
+	for (const rpc of WsRpcGroup.requests.values()) {
+		const streamSchema = RpcSchema.isStreamSchema(rpc.successSchema)
+			? rpc.successSchema
+			: undefined;
+		table[rpc._tag] = (payload: Record<string, unknown>) => {
+			const request = requests.get(rpc._tag)?.shift();
+			if (!request) throw new Error(`Missing request for ${rpc._tag}`);
+			const stub = stubs[rpc._tag];
+			if (streamSchema) {
+				const schema = Schema.make<Schema.Codec<unknown>>(
+					streamSchema.success.ast,
+				);
+				// The group's stream schema establishes this result's shape.
+				const source = stub
+					? (stub(payload) as Stream.Stream<unknown, unknown>)
+					: undefined;
+				return Stream.unwrap(
+					Effect.gen(function* () {
+						const queue = yield* makeRpcStream<unknown, WsRpcError>();
+						const sessionId = isSessionStream(rpc._tag)
+							? String(payload["sessionId"] ?? "")
+							: undefined;
+						control.registerStream(
+							rpc._tag,
+							ws,
+							String(request.id),
+							(values) => Effect.runSync(queue.emit(...values)),
+							(message) =>
+								Effect.runSync(queue.fail(new WsRpcError({ message }))),
+							sessionId,
+						);
+						if (source) {
+							return Stream.merge(source, queue.stream, {
+								haltStrategy: "left",
+							});
+						}
+						if (rpc._tag === "SubscribeDraftModels") {
+							const handler = stubs["GetModels"];
+							if (handler) {
+								const response = yield* Effect.tryPromise({
+									try: async () => handler(payload),
+									catch: (error) => new WsRpcError({ message: String(error) }),
+								});
+								if (!isRecord(response))
+									return yield* Effect.die(
+										new Error("Mock GetModels must return an object"),
+									);
+								yield* queue.emit({
+									defaultOpenCodeInstanceId: "opencode",
+									...response,
+									instanceId: payload["instanceId"],
+								});
+							}
+						} else {
+							yield* queue.emit(
+								...initialStream(rpc._tag, payload, options, control),
+							);
+						}
+						if (
+							rpc._tag === "SubscribeSessionDetail" &&
+							control.detailFeed === "fail"
+						)
+							yield* queue.fail(
+								new WsRpcError({ message: "detail feed unavailable" }),
+							);
+						return queue.stream;
+					}),
+				).pipe(
+					Stream.map((value) =>
+						stub
+							? checkedReply(rpc._tag, () => {
+									Schema.encodeUnknownSync(schema)(value);
+									return value;
+								})
+							: Schema.decodeUnknownSync(schema)(value),
+					),
+					Stream.mapError((error) =>
+						stub
+							? checkedReply(rpc._tag, () => {
+									Schema.encodeUnknownSync(
+										Schema.make<Schema.Codec<unknown>>(streamSchema.error.ast),
+									)(error);
+									return error;
+								})
+							: error,
+					),
+					Stream.ensuring(
+						Effect.sync(() => control.interruptStream(String(request.id), ws)),
+					),
+				);
+			}
+			if (!stub) return new Promise<never>(() => {});
+			return (async () => {
+				const response = await stub(payload);
+				const value = checkedReply(rpc._tag, () => {
+					Schema.encodeUnknownSync(
+						Schema.make<Schema.Codec<unknown>>(rpc.successSchema.ast),
+					)(response);
+					return response;
+				});
+				if (!rpc._tag.startsWith("Get") && isRecord(value)) {
+					if (Array.isArray(value["projects"]))
+						control.setProjects({
+							...control.projectsFrame(),
+							projects: value["projects"],
+						});
+					if (Array.isArray(value["instances"]))
+						control.setDaemonList("SubscribeInstances", {
+							instances: value["instances"],
+						});
+				}
+				return value;
+			})();
+		};
+	}
+	// Runtime iteration loses tag/payload correlation; the public stubs table retains it.
+	return table as StubTable;
 }
 
 export async function mockWsRpc(
 	page: Page,
-	options: RpcMockOptions,
+	options: RpcMockOptions = {},
 ): Promise<RpcMockControl> {
 	const control = controls.get(page) ?? new RpcMockControl(page);
 	controls.set(page, control);
-	control.initialHandlers = options.handlers;
+	control.stubs = {
+		"input.submit": ({ sessionId }) => ({
+			ok: true,
+			sessionId,
+			handedOff: true,
+		}),
+		GetProjects: (payload) =>
+			control.projectsHandler()?.(payload) ?? new Promise<never>(() => {}),
+		AttachProject: (payload) => ({
+			projectSlug:
+				"projectSlug" in payload && typeof payload.projectSlug === "string"
+					? payload.projectSlug
+					: control.projectSlug,
+			sessionSlug: "sessionId" in payload ? control.projectSlug : null,
+		}),
+		ResolveSession: () => ({ projectSlug: control.projectSlug }),
+		ViewSession: () => ({ ok: true }),
+		InspectSessionWorktrees: () => ({
+			worktrees: [],
+			removeWorktrees: false,
+			onDelete: "ask",
+		}),
+		...control.catalogStubs(),
+		ResolveSessionMode: () => ({ mode: "local", source: "global" }),
+		GetCursorAuth: () => ({
+			source: "none",
+			status: "logged-out",
+			expiresSoon: false,
+			login: { state: "idle" },
+		}),
+		GetStatus: () => MOCK_SERVER_STATUS,
+		GetWorktreeCleanupSetting: ({ projectSlug }) => ({
+			global: control.worktreeCleanupGlobal,
+			...(projectSlug !== undefined && {
+				project: control.worktreeCleanupProjects.get(projectSlug) ?? null,
+			}),
+		}),
+		SetWorktreeCleanupSetting: (payload) => {
+			if (payload.scope === "global") {
+				control.worktreeCleanupGlobal = payload.rules;
+				return { global: control.worktreeCleanupGlobal };
+			}
+			if (payload.override === null)
+				control.worktreeCleanupProjects.delete(payload.projectSlug);
+			else
+				control.worktreeCleanupProjects.set(
+					payload.projectSlug,
+					payload.override,
+				);
+			return {
+				global: control.worktreeCleanupGlobal,
+				project:
+					control.worktreeCleanupProjects.get(payload.projectSlug) ?? null,
+			};
+		},
+		GetUsageLimitsSetting: () => ({
+			usageLimits: {
+				autoResume: false,
+				autoSwitch: false,
+				warnAt: 80,
+				order: [],
+			},
+		}),
+		...options.stubs,
+	};
 	control.projectSlug = pendingProjectSlugs.get(page) ?? control.projectSlug;
 	control.catalog = pendingCatalogs.get(page) ?? control.catalog;
 	subscribeMockDetail(page, (sessionId, envelope) => {
 		if (control.hasStream("SubscribeSessionDetail", sessionId))
 			control.sendChunk("SubscribeSessionDetail", [envelope], sessionId);
 	});
+	const projects = pendingProjects.get(page);
+	if (projects) control.setProjects(projects);
 	const rows = pendingShellRows.get(page);
 	if (rows) control.setShellRows(rows);
 	const familyRows = pendingFamilyRows.get(page);
@@ -919,22 +997,67 @@ export async function mockWsRpc(
 		control.setProjectSetting(setting);
 	pendingProjectSettings.delete(page);
 	await page.routeWebSocket(/\/rpc/, (ws: WebSocketRoute) => {
-		control.registerSocket(ws);
-		ws.onClose(() => control.unregisterSocket(ws));
+		const scope = Effect.runSync(Scope.make());
+		const onClose = () => control.unregisterSocket(ws);
+		// Closing the scope makes the Effect 4 server reply to every pending call
+		// with an interrupt. A dropped connection delivers nothing, so mute it.
+		let closed = false;
+		const cleanup = () => {
+			closed = true;
+			page.off("close", onClose);
+			void Effect.runPromise(Scope.close(scope, Exit.void));
+		};
+		control.registerSocket(ws, cleanup);
+		ws.onClose(onClose);
+		page.once("close", onClose);
+		const requests = new Map<string, EffectRpcRequest[]>();
+		const submissions = new Map<string, Record<string, unknown>>();
+		const ready = Effect.runPromise(
+			serveRpc(socketTable(ws, options, control, requests), (json) =>
+				Effect.sync(() => {
+					if (closed) return;
+					ws.send(json);
+					if (submissions.size === 0) return;
+					const frame: unknown = JSON.parse(json);
+					if (!isRecord(frame) || frame["_tag"] !== "Exit") return;
+					const id = String(frame["requestId"]);
+					const payload = submissions.get(id);
+					submissions.delete(id);
+					// Replay a submitted turn after its answer, as the old mock did.
+					if (
+						payload &&
+						isRecord(frame["exit"]) &&
+						frame["exit"]["_tag"] === "Success"
+					)
+						control.onSendMessage?.(payload);
+				}),
+			).pipe(Scope.provide(scope)),
+		);
 		control.onConnect?.();
-		ws.onMessage((data) => {
+		ws.onMessage(async (data) => {
 			if (typeof data !== "string") return;
-			try {
-				void handleMessage(
-					ws,
-					options.handlers,
-					options.streams,
-					control,
-					JSON.parse(data),
-				);
-			} catch {
-				// Ignore malformed client frames in tests.
+			const raw: unknown = JSON.parse(data);
+			for (const frame of Array.isArray(raw) ? raw : [raw]) {
+				if (isEffectRpcRequest(frame)) {
+					control.record(frame.tag, frame.payload ?? {});
+					if (frame.tag === "input.submit")
+						submissions.set(String(frame.id), frame.payload ?? {});
+					const pending = requests.get(frame.tag) ?? [];
+					pending.push(frame);
+					requests.set(frame.tag, pending);
+				} else if (
+					isRecord(frame) &&
+					frame["_tag"] === "Interrupt" &&
+					(typeof frame["requestId"] === "string" ||
+						typeof frame["requestId"] === "number")
+				)
+					control.interruptStream(String(frame["requestId"]), ws);
 			}
+			const receive = await ready;
+			const exit = await Effect.runPromiseExit(receive(data));
+			// A frame that races the page closing its socket meets an interrupted server.
+			if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause))
+				throw Cause.squash(exit.cause);
 		});
 	});
 	return control;
@@ -947,10 +1070,15 @@ export async function ensureMockTranscriptRpc(
 	const control = controls.get(page);
 	if (control) return control;
 	return mockWsRpc(page, {
-		handlers: {
+		stubs: {
+			LoadMoreHistory: ({ sessionId, before }) => ({
+				projectSlug: "e2e-replay",
+				sessionId,
+				...mockDetailPage(page, sessionId, before),
+			}),
 			ViewSession: () => ({ ok: true }),
-			ResolveSession: ({ projectSlug }) => ({
-				projectSlug: String(projectSlug ?? "e2e-replay"),
+			ResolveSession: () => ({
+				projectSlug: "e2e-replay",
 			}),
 			ListDaemonSessions: () => ({
 				sessions: [],
@@ -958,14 +1086,11 @@ export async function ensureMockTranscriptRpc(
 				hasMore: false,
 				nextCursor: null,
 			}),
-			LoadMoreHistory: ({ projectSlug, sessionId, before }) => ({
-				projectSlug: String(projectSlug ?? "e2e-replay"),
-				sessionId: String(sessionId ?? ""),
-				...mockDetailPage(
-					page,
-					String(sessionId ?? ""),
-					typeof before === "string" ? before : undefined,
-				),
+			ListArchivedSessions: () => ({
+				sessions: [],
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
 			}),
 		},
 	});

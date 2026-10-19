@@ -13,12 +13,13 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Queue, Stream } from "effect";
 import { expect } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { subscribeApprovals } from "../../../src/lib/domain/relay/Services/approvals-subscription.js";
 import type { ReadModelRead } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
-import {
-	BackgroundLivenessTag,
-	ConfigTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { subscribeSessionDetail } from "../../../src/lib/domain/relay/Services/session-detail-subscription.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { subscribeSessionFamily } from "../../../src/lib/domain/relay/Services/session-family-subscription.js";
@@ -44,13 +45,13 @@ import {
 
 const makeTodoTestLayer = () => {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-todo-sub-"));
-	const cleanup = Layer.scopedDiscard(
+	const cleanup = Layer.effectDiscard(
 		Effect.addFinalizer(() =>
 			Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 		),
 	);
 	return Layer.mergeAll(
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		makePersistenceEffectLayer(
 			join(dir, "events.db"),
 			"test-project",
@@ -58,8 +59,8 @@ const makeTodoTestLayer = () => {
 			SessionEventBusLive,
 		),
 		SessionEventBusLive,
-		Layer.succeed(BackgroundLivenessTag, () => undefined),
-		Layer.succeed(ConfigTag, makeMockConfig({ slug: "test-project" })),
+		Layer.effect(SessionActivityTag, makeSessionActivity),
+		Layer.succeed(ConfigTag)(makeMockConfig({ slug: "test-project" })),
 		cleanup,
 	);
 };
@@ -149,7 +150,7 @@ const claudeTodos = (...pairs: [string, string][]) => ({
 });
 
 describe("subscribeSessionTodos", () => {
-	it.scopedLive(
+	it.live(
 		"two staggered subscribers share todo windows and text deltas only read their collections",
 		() =>
 			Effect.gen(function* () {
@@ -178,7 +179,11 @@ describe("subscribeSessionTodos", () => {
 						subscribeSessionDetail({ sessionId: "fanout" }),
 					);
 					const todos = yield* openTodos("fanout");
-					const shell = yield* openSubscription(subscribeShell());
+					const shell = yield* openSubscription(
+						subscribeShell().pipe(
+							Stream.filter((frame) => frame._tag !== "projects"),
+						),
+					);
 					const approvals = yield* openSubscription(subscribeApprovals());
 					const family = yield* openSubscription(
 						subscribeSessionFamily({ sessionId: "fanout" }),
@@ -213,8 +218,8 @@ describe("subscribeSessionTodos", () => {
 					yield* Queue.take(first.detail);
 					yield* Queue.take(second.detail);
 					yield* Effect.sleep("20 millis");
-					yield* Queue.takeAll(first.detail);
-					yield* Queue.takeAll(second.detail);
+					yield* Queue.clear(first.detail);
+					yield* Queue.clear(second.detail);
 					expect(yield* Queue.size(first.todos)).toBe(0);
 					expect(yield* Queue.size(second.todos)).toBe(0);
 					textChunks.push(counts(after));
@@ -284,10 +289,10 @@ describe("subscribeSessionTodos", () => {
 					expect(todoChanged["todos/fanout"]).toBe(1);
 					expect(todoUnchanged["todos/fanout"]).toBe(1);
 				}
-			}).pipe(Effect.provide(makeTodoTestLayer())),
+			}).pipe(Effect.provide(makeTodoTestLayer(), { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"todo updates land as ordered upserts after an empty base, and other writes stay silent",
 		() =>
 			Effect.gen(function* () {
@@ -344,10 +349,10 @@ describe("subscribeSessionTodos", () => {
 					throw new Error("expected upserts");
 				expect(second.sequence).toBeGreaterThan(first.sequence);
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(Effect.provide(makeTodoTestLayer())),
+			}).pipe(Effect.provide(makeTodoTestLayer(), { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"an OpenCode TodoWrite whose list lives only in its result still lands",
 		() =>
 			Effect.gen(function* () {
@@ -377,10 +382,10 @@ describe("subscribeSessionTodos", () => {
 						items: [{ id: "t1", subject: "Ship", status: "in_progress" }],
 					},
 				});
-			}).pipe(Effect.provide(makeTodoTestLayer())),
+			}).pipe(Effect.provide(makeTodoTestLayer(), { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"the session is the argument: a subscription for B never sees A's todos",
 		() =>
 			Effect.gen(function* () {
@@ -399,10 +404,10 @@ describe("subscribeSessionTodos", () => {
 					item: { sessionId: "B", items: [{ subject: "B's" }] },
 				});
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(Effect.provide(makeTodoTestLayer())),
+			}).pipe(Effect.provide(makeTodoTestLayer(), { local: true })),
 	);
 
-	it.scoped("a fresh subscription (a reload) starts from the stored list", () =>
+	it.effect("a fresh subscription (a reload) starts from the stored list", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([sessionCreated("A")]);
@@ -422,6 +427,6 @@ describe("subscribeSessionTodos", () => {
 					},
 				],
 			});
-		}).pipe(Effect.provide(makeTodoTestLayer())),
+		}).pipe(Effect.provide(makeTodoTestLayer(), { local: true })),
 	);
 });

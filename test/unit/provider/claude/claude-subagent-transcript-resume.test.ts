@@ -191,7 +191,7 @@ const setup = Effect.gen(function* () {
 afterEach(() => vi.restoreAllMocks());
 
 describe("Claude subagent transcripts across session contexts", () => {
-	it.scoped(
+	it.effect(
 		"emits nothing for persisted messages, indexed text, empty thinking and completed tools in a fresh context",
 		() =>
 			withStore(
@@ -209,7 +209,7 @@ describe("Claude subagent transcripts across session contexts", () => {
 			),
 	);
 
-	it.scoped(
+	it.effect(
 		"emits only the new suffix and a later message's tool result, retaining the issuing message",
 		() =>
 			withStore(
@@ -250,7 +250,7 @@ describe("Claude subagent transcripts across session contexts", () => {
 			),
 	);
 
-	it.scoped(
+	it.effect(
 		"retains a persisted tool's owner when only its later result is delivered after restart",
 		() =>
 			withStore(
@@ -271,28 +271,31 @@ describe("Claude subagent transcripts across session contexts", () => {
 			),
 	);
 
-	it.scoped(
+	it.effect(
 		"re-emits cascade-deleted parts after a message replacement even when their event ids already exist",
 		() =>
 			withStore(
 				Effect.gen(function* () {
 					const { store, persist, emitted, sink, feed, parts } = yield* setup;
 					yield* feed(context(sink), transcript("echo", true));
-					// Record the replacement so replay must reproduce its FK cascade.
-					yield* persist.persistEvents([
+					// Commit the replacement after the removal's tombstone version so
+					// ingestion accepts it; replay must still reproduce the FK cascade.
+					yield* persist.persistEvent(
 						canonicalEvent(
 							"message.removed",
 							CHILD,
 							{ messageId: MESSAGE },
 							{ provider: "claude" },
 						),
+					);
+					yield* persist.persistEvent(
 						canonicalEvent(
 							"message.created",
 							CHILD,
 							{ messageId: MESSAGE, sessionId: CHILD, role: "assistant" },
 							{ provider: "claude" },
 						),
-					]);
+					);
 					expect(
 						(yield* parts()).filter((part) => part.message_id === MESSAGE),
 					).toEqual([]);
@@ -344,7 +347,14 @@ describe("Claude subagent transcripts across session contexts", () => {
 							const replayStore = yield* EventStoreEffectTag;
 							const replayRunner = yield* ProjectionRunnerEffectTag;
 							const replayRead = yield* ReadQueryEffectTag;
-							yield* replayStore.appendBatch(events);
+							const liveEvents = events.filter(
+								(event) =>
+									event.type !== "session.read" &&
+									event.type !== "session.unread" &&
+									event.type !== "tool.input_updated",
+							);
+							expect(liveEvents).toHaveLength(events.length);
+							yield* replayStore.appendBatch(liveEvents);
 							const recovered = yield* replayRunner.recover();
 							expect(recovered.startCursor).toBe(0);
 							expect(recovered.totalReplayed).toBeGreaterThan(0);
@@ -362,7 +372,7 @@ describe("Claude subagent transcripts across session contexts", () => {
 			),
 	);
 
-	it.scoped(
+	it.effect(
 		"materializes a child with no message rows and never re-emits persisted thinking, including empty parts",
 		() =>
 			withStore(
@@ -388,7 +398,7 @@ describe("Claude subagent transcripts across session contexts", () => {
 			),
 	);
 
-	it.scoped(
+	it.effect(
 		"uses stable ids across clocks, distinguishes repeated slices by offset, and silently skips duplicate batches",
 		() =>
 			withStore(

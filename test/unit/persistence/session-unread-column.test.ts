@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { describe, expect, it } from "vitest";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 

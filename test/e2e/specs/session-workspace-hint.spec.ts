@@ -20,31 +20,37 @@ const hintPath = "/workspace/conduit-hint";
 
 async function openHint(page: Page, relayBaseUrl: string) {
 	const projects = [
-		{ slug: projectSlug, title: "Workspace project", folders: [main] },
+		{ slug: projectSlug, title: "Workspace project", folders: [main] as const },
 	];
 	const session = {
+		accountId: null,
 		id: "hint-session",
 		title: "Workspace hint",
-		status: "idle",
+		status: "idle" as const,
 		projectSlug,
 		provider: "claude",
 		git: { branch: "main" },
 		workspaceHint: hintPath,
 	};
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			GetProjects: () => ({ projects, current: projectSlug }),
+		stubs: {
+			MoveSessionWorkspace: ({ path }) => ({
+				projectSlug,
+				directory: String(path),
+			}),
+			DismissWorkspaceHint: () => ({ ok: true }),
 			ListDaemonSessions: () => ({
 				sessions: [session],
 				availability: [],
 				hasMore: false,
 				nextCursor: null,
 			}),
-			MoveSessionWorkspace: ({ path }) => ({
-				projectSlug,
-				directory: String(path),
+			GetModels: () => ({
+				defaultOpenCodeInstanceId: "opencode",
+				projectSlug: "e2e-replay",
+				providers: [],
 			}),
-			DismissWorkspaceHint: () => ({ ok: true }),
+			GetProjects: () => ({ projects, current: projectSlug }),
 		},
 	});
 	rpc.setShellRows([session]);

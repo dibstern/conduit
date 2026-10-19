@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
@@ -73,7 +74,10 @@ export function setClaudeAccounts(
 
 type StripAction = "Try again" | "Resume at reset" | "Cancel auto-resume";
 
-const stripActions: Record<StripAction, { testId: string; rpc: string }> = {
+const stripActions: Record<
+	StripAction,
+	{ testId: string; rpc: "ContinueSession" | "CancelContinuation" }
+> = {
 	"Try again": { testId: "usage-limit-try-again", rpc: "ContinueSession" },
 	"Resume at reset": {
 		testId: "usage-limit-resume-at-reset",
@@ -244,7 +248,9 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		name: "press Dismiss on the cut-off tag",
 		match: /^I press Dismiss on the cut-off tag$/,
 		run: async ({ world }) => {
-			requireRpcControl(world.page).setResponse("DismissCutOff", { ok: true });
+			requireRpcControl(world.page).setStubs({
+				DismissCutOff: () => ({ ok: true }),
+			});
 			await world.page.getByTestId("cut-off-dismiss").click();
 		},
 	},
@@ -256,7 +262,6 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				(candidate) => candidate.tag === "DismissCutOff",
 			);
 			expect(request.payload["sessionId"]).toBe(currentSessionId(world.page));
-			expect(request.payload["projectSlug"]).toBe("myapp");
 		},
 	},
 	{
@@ -265,7 +270,9 @@ export const usageLimitStripHandlers: StepHandler[] = [
 			/^I press (Try again|Resume at reset|Cancel auto-resume) on the usage limit strip$/,
 		run: async ({ world, match }) => {
 			const action = stripActions[match[1] as StripAction];
-			requireRpcControl(world.page).setResponse(action.rpc, { ok: true });
+			requireRpcControl(world.page).setStubs({
+				[action.rpc]: () => ({ ok: true }),
+			});
 			await world.page.getByTestId(action.testId).click();
 		},
 	},
@@ -278,7 +285,6 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				(candidate) => candidate.tag === "ContinueSession",
 			);
 			expect(request.payload["sessionId"]).toBe(currentSessionId(world.page));
-			expect(request.payload["projectSlug"]).toBe("myapp");
 			expect(request.payload["instanceId"]).toBe(match[1]);
 			expect(request.payload["expectedInstanceId"]).toBe(match[1]);
 			expect(request.payload["at"]).toBe(
@@ -294,7 +300,6 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				(candidate) => candidate.tag === "CancelContinuation",
 			);
 			expect(request.payload["sessionId"]).toBe(currentSessionId(world.page));
-			expect(request.payload["projectSlug"]).toBe("myapp");
 		},
 	},
 	{
@@ -392,7 +397,8 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				{
 					id: "msg-resumed-reply",
 					role: "assistant",
-					parentID: parent?.["id"],
+					// RPC JSON rejects an explicit undefined, so omit a missing parent.
+					...(parent && { parentID: parent["id"] }),
 					time: { created: at + 1, completed: at + 20_000 },
 					parts: [
 						{ id: "part-resumed-reply", type: "text", text: match[4] ?? "" },
@@ -446,44 +452,48 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		name: "quota check results for the accounts",
 		match: /^the quota check reads (.+)$/,
 		run: ({ world, match }) => {
-			const accounts = (match[1] ?? "").split(", ").map((reading) => {
-				const [instanceId = "", ...words] = reading.split(" ");
-				const said = words.join(" ");
-				const used = /^(\d+)% used$/.exec(said)?.[1];
-				const limitedUntil = /^limited until (\S+)$/.exec(said)?.[1];
-				const usage =
-					used !== undefined
-						? {
-								status: "available",
-								windows: [{ kind: "five_hour", utilization: Number(used) }],
-							}
-						: limitedUntil !== undefined
+			const accounts = (match[1] ?? "")
+				.split(", ")
+				.map((reading): UsageReading => {
+					const [instanceId = "", ...words] = reading.split(" ");
+					const said = words.join(" ");
+					const used = /^(\d+)% used$/.exec(said)?.[1];
+					const limitedUntil = /^limited until (\S+)$/.exec(said)?.[1];
+					const usage: Pick<UsageReading, "status" | "windows" | "reason"> =
+						used !== undefined
 							? {
-									status: "limited",
-									windows: [
-										{
-											kind: "seven_day",
-											utilization: 100,
-											resetsAt: limitedUntil,
-										},
-									],
+									status: "available",
+									windows: [{ kind: "five_hour", utilization: Number(used) }],
 								}
-							: said === "unavailable"
+							: limitedUntil !== undefined
 								? {
-										status: "unavailable",
-										windows: [],
-										reason: "not logged in",
+										status: "limited",
+										windows: [
+											{
+												kind: "seven_day",
+												utilization: 100,
+												resetsAt: limitedUntil,
+											},
+										],
 									}
-								: { status: "unknown", windows: [] };
-				return {
-					accountId: instanceId,
-					harness: "claude",
-					readAt: 0,
-					stale: false,
-					...usage,
-				};
+								: said === "unavailable"
+									? {
+											status: "unavailable",
+											windows: [],
+											reason: "not logged in",
+										}
+									: { status: "unknown", windows: [] };
+					return {
+						accountId: instanceId,
+						harness: "claude",
+						readAt: 0,
+						stale: false,
+						...usage,
+					};
+				});
+			requireRpcControl(world.page).setStubs({
+				QuotaForAccounts: () => accounts,
 			});
-			requireRpcControl(world.page).setResponse("QuotaForAccounts", accounts);
 		},
 	},
 	{
@@ -499,14 +509,16 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				tokens: 18_400,
 			};
 			const rpc = requireRpcControl(world.page);
-			rpc.setResponse("PreviewContinuation", summary);
-			rpc.setResponse("GetContinuationHandoff", {
-				handoff: {
-					...summary,
-					eventId: "evt-handoff",
-					instanceId: "self",
-					at: PINNED_CLOCK_MS - 60_000,
-				},
+			rpc.setStubs({ PreviewContinuation: () => summary });
+			rpc.setStubs({
+				GetContinuationHandoff: () => ({
+					handoff: {
+						...summary,
+						eventId: "evt-handoff",
+						instanceId: "self",
+						at: PINNED_CLOCK_MS - 60_000,
+					},
+				}),
 			});
 		},
 	},
@@ -561,7 +573,6 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				(candidate) => candidate.tag === "PreviewContinuation",
 			);
 			expect(request.payload["sessionId"]).toBe(currentSessionId(world.page));
-			expect(request.payload["projectSlug"]).toBe("myapp");
 			expect(request.payload["instanceId"]).toBe(match[1]);
 		},
 	},
@@ -628,8 +639,10 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		name: "the daemon refuses the switch",
 		match: /^the daemon refuses the switch with (.+)$/,
 		run: ({ world, match }) => {
-			requireRpcControl(world.page).setHandler("ContinueSession", () => {
-				throw new WsRpcError({ message: match[1] ?? "" });
+			requireRpcControl(world.page).setStubs({
+				ContinueSession: () => {
+					throw new WsRpcError({ message: match[1] ?? "" });
+				},
 			});
 		},
 	},
@@ -638,8 +651,8 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		match: /^I press Switch and continue$/,
 		run: async ({ world }) => {
 			const rpc = requireRpcControl(world.page);
-			if (!rpc.getResponseHandler("ContinueSession"))
-				rpc.setResponse("ContinueSession", { ok: true });
+			if (!rpc.stubs.ContinueSession)
+				rpc.setStubs({ ContinueSession: () => ({ ok: true }) });
 			await world.page.getByTestId("handoff-confirm").click();
 		},
 	},

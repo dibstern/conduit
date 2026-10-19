@@ -1,17 +1,19 @@
-import { SqlClient } from "@effect/sql";
-import * as Migrator from "@effect/sql/Migrator";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
+import * as Migrator from "effect/sql/Migrator";
+import type { SqlError } from "effect/sql/SqlError";
 import {
 	BACKFILL_COMPACTION_MESSAGES_MIGRATION,
 	COMPACT_REDUNDANT_EVENTS_MIGRATION,
 	CURRENT_EVENT_STORE_MIGRATION,
+	DAEMON_STORE_IMPORTS_MIGRATION,
 	DROP_ACTIVITIES_MIGRATION,
 	DROP_EVENTS_SESSION_FK_MIGRATION,
 	DURABLE_PROVIDER_COMMANDS_MIGRATION,
 	EVENTS_SESSION_TYPE_INDEX_MIGRATION,
 	EVENTS_UNSTAMPED_INDEX_MIGRATION,
 	FORK_POINT_TIMESTAMP_MIGRATION,
+	LEGACY_FORKS_MIGRATION,
 	MESSAGE_PART_METADATA_MIGRATION,
 	MESSAGE_PART_VERSIONS_MIGRATION,
 	MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION,
@@ -26,7 +28,9 @@ import {
 	PENDING_APPROVALS_VERSION_MIGRATION,
 	PENDING_INPUTS_MIGRATION,
 	PROJECT_PROVENANCE_MIGRATION,
+	PROJECT_TREE_DATA_MIGRATION,
 	PROJECTION_FAILURES_MIGRATION,
+	PROMPT_PROVIDER_REFERENCE_MIGRATION,
 	READ_MODEL_COUNTER_MIGRATION,
 	READ_MODEL_VERSION_MIGRATION,
 	READ_STATE_TO_TURN_ENDS_MIGRATION,
@@ -37,8 +41,10 @@ import {
 	SESSION_GIT_PUBLISHED_MIGRATION,
 	SESSION_GOALS_MIGRATION,
 	SESSION_PICK_BACKFILL_MIGRATION,
+	SESSION_PROJECT_SCOPE_MIGRATION,
 	SESSION_SIDEBAR_MIGRATION,
 	SESSION_SIDEBAR_TOMBSTONES_MIGRATION,
+	SESSIONS_ARCHIVED_MIGRATION,
 	SESSIONS_AUTO_SETTLE_MIGRATION,
 	SESSIONS_CLAUDE_WORKTREE_STATE_MIGRATION,
 	SESSIONS_FORKED_FROM_MIGRATION,
@@ -46,6 +52,7 @@ import {
 	SESSIONS_LAST_TURN_END_INPUT_ID_MIGRATION,
 	SESSIONS_LAST_TURN_ERROR_MIGRATION,
 	SESSIONS_LIMIT_RECOVERY_MIGRATION,
+	SESSIONS_LINEAGE_MIGRATION,
 	SESSIONS_MARKED_UNREAD_MIGRATION,
 	SESSIONS_MODEL_SETTINGS_MIGRATION,
 	SESSIONS_PENDING_REWIND_MIGRATION,
@@ -60,9 +67,14 @@ import {
 	STARTUP_RESTORE_INDEXES_MIGRATION,
 	STORE_IDENTITY_MIGRATION,
 	TOOL_CALL_INDEX_MIGRATION,
+	TOOL_RESULT_EVENT_REFS_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
-import { refreshSidebar } from "./sidebar-projection.js";
+import {
+	NEVER_CUT_TOOL_NAMES,
+	PREVIEW_CODE_POINTS,
+} from "../tool-wire-projection.js";
+import { refreshSidebar, rerootSession } from "./sidebar-projection.js";
 
 export const EFFECT_SQL_MIGRATIONS_TABLE = "effect_sql_migrations";
 
@@ -332,6 +344,10 @@ const expectedTableColumns = {
 		"last_turn_end_version",
 		"seen_version",
 		"pending_rewind_message_id",
+		"forked_from",
+		"archived_at",
+		"archived_automatically",
+		"unarchived_at",
 	],
 	tool_content: ["tool_id", "session_id", "content", "created_at"],
 	turns: [
@@ -431,7 +447,7 @@ const migrationKeyPattern = /^(\d+)_(.+)$/;
 
 function migrationRegistryError(message: string): Migrator.MigrationError {
 	return new Migrator.MigrationError({
-		reason: "bad-state",
+		kind: "BadState",
 		message,
 	});
 }
@@ -482,6 +498,11 @@ const appendedSessionColumns = [
 	"workspace_hint",
 	"workspace_hint_sequence",
 	"pending_rewind_message_id",
+	"project_id",
+	"forked_from",
+	"archived_at",
+	"archived_automatically",
+	"unarchived_at",
 ] as const;
 
 function sameStrings(
@@ -1006,6 +1027,11 @@ export const effectMigrationEntries = {
 		const sql = yield* SqlClient.SqlClient;
 		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 		if (!columns.some((column) => column.name === "forked_from")) return;
+		// Ledger repair can replay this after 0060. Its index distinguishes the
+		// new lineage column from the retired, unindexed local-build column.
+		const indexes = yield* sql<{ name: string }>`PRAGMA index_list(sessions)`;
+		if (indexes.some((index) => index.name === "idx_sessions_forked_from"))
+			return;
 		yield* executeSqlStatements(
 			readMigrationSql(SESSIONS_FORKED_FROM_MIGRATION),
 		);
@@ -1083,6 +1109,10 @@ export const effectMigrationEntries = {
 		yield* executeSqlStatements(
 			readMigrationSql(SESSION_SIDEBAR_TOMBSTONES_MIGRATION),
 		);
+		// A repaired ledger can replay this migration over newer session rows.
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+		if (columns.some((column) => column.name === "project_id"))
+			yield* sql`ALTER TABLE session_sidebar ADD COLUMN project_id TEXT`;
 		const roots = yield* sql<{ id: string }>`
 			SELECT id FROM sessions WHERE parent_id IS NULL
 			UNION SELECT session_id FROM session_sidebar`;
@@ -1172,6 +1202,89 @@ export const effectMigrationEntries = {
 	"0058_compact_redundant_events": executeSqlStatements(
 		readMigrationSql(COMPACT_REDUNDANT_EVENTS_MIGRATION),
 	),
+	"0059_session_project_scope": Effect.gen(function* () {
+		const statements = splitSqlStatements(
+			readMigrationSql(SESSION_PROJECT_SCOPE_MIGRATION),
+		);
+		for (const [index, table] of ["sessions", "session_sidebar"].entries()) {
+			const statement = statements[index];
+			if (statement)
+				yield* runAddColumnMigrationIfMissing(table, "project_id", statement);
+		}
+		for (const statement of statements.slice(2))
+			yield* executeSqlStatements(statement);
+	}),
+	"0060_daemon_store_imports": executeSqlStatements(
+		readMigrationSql(DAEMON_STORE_IMPORTS_MIGRATION),
+	),
+	"0061_sessions_lineage": runAddColumnMigrationIfMissing(
+		"sessions",
+		"forked_from",
+		readMigrationSql(SESSIONS_LINEAGE_MIGRATION),
+	),
+	"0062_legacy_forks": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const changed = yield* sql.unsafe<{ id: string; side_thread: number }>(
+			readMigrationSql(LEGACY_FORKS_MIGRATION),
+		);
+		if (changed.length === 0) return;
+		const [counter] = yield* sql<{ value: number }>`
+			UPDATE read_model_counter SET value = value + 1 WHERE id = 1 RETURNING value`;
+		const version = counter?.value ?? 0;
+		const affected = new Set(changed.map(({ id }) => id));
+		// All Forks are detached before walking, so a Fork of a Fork keeps its
+		// own subtree regardless of the order in which these rows are visited.
+		for (const row of changed) {
+			if (row.side_thread !== 0) continue;
+			for (const id of yield* rerootSession(row.id, version)) affected.add(id);
+		}
+		yield* sql`UPDATE sessions SET version = ${version}
+			WHERE id IN (SELECT value FROM json_each(${JSON.stringify(changed.map(({ id }) => id))}))`;
+		yield* refreshSidebar([...affected], version);
+	}),
+	"0063_sessions_archived": runAddColumnMigrationIfMissing(
+		"sessions",
+		"archived_at",
+		readMigrationSql(SESSIONS_ARCHIVED_MIGRATION),
+	),
+	"0064_prompt_provider_reference": runAddColumnMigrationIfMissing(
+		"pending_approvals",
+		"provider_process_id",
+		readMigrationSql(PROMPT_PROVIDER_REFERENCE_MIGRATION),
+	),
+	"0065_tool_result_event_refs": runAddColumnMigrationIfMissing(
+		"message_parts",
+		"result_event_seq",
+		readMigrationSql(TOOL_RESULT_EVENT_REFS_MIGRATION)
+			.replaceAll("{{PREVIEW_CODE_POINTS}}", String(PREVIEW_CODE_POINTS))
+			.replaceAll(
+				"{{NEVER_CUT_TOOL_NAMES}}",
+				NEVER_CUT_TOOL_NAMES.map(
+					(name) => `'${name.replaceAll("'", "''")}'`,
+				).join(", "),
+			),
+	),
+	"0066_project_tree_data": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		// Ledger repairs can replay migrations against the final schema.
+		const columns = yield* sql.unsafe<{ name: string }>(
+			"PRAGMA table_info(messages)",
+		);
+		if (columns.some(({ name }) => name === "is_human_sent")) return;
+		yield* executeSqlStatements(readMigrationSql(PROJECT_TREE_DATA_MIGRATION));
+		const changed = yield* sql<{ id: string }>`
+			SELECT id FROM sessions WHERE last_user_message_at IS NOT NULL`;
+		if (changed.length === 0) return;
+		const [counter] = yield* sql<{ value: number }>`
+			UPDATE read_model_counter SET value = value + 1 WHERE id = 1 RETURNING value`;
+		const version = counter?.value ?? 0;
+		yield* sql`UPDATE sessions SET version = ${version}
+			WHERE last_user_message_at IS NOT NULL`;
+		yield* refreshSidebar(
+			changed.map(({ id }) => id),
+			version,
+		);
+	}),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>
@@ -1306,7 +1419,7 @@ export function makeEffectSqlMigrator(
 								(cause) =>
 									new Migrator.MigrationError({
 										cause,
-										reason: "failed",
+										kind: "Failed",
 										message: `Migration "${id}_${name}" failed`,
 									}),
 							),

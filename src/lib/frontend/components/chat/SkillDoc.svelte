@@ -2,12 +2,14 @@
 	import { loadHighlighter } from "../../utils/load-highlighter.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { findSession } from "../../stores/session.svelte.js";
-	import { getSkillContentRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { failureLine } from "../../transport/rpc-errors.js";
 	import { renderMarkdown } from "../../utils/markdown.js";
 
 	let { name }: { name: string } = $props();
 	let skillDoc = $state<string | null>(null);
 	let skillState = $state<"loading" | "idle" | "missing">("loading");
+	let skillError = $state("");
 	const sessionId = $derived(getCurrentSessionId());
 	const workspace = $derived(JSON.stringify(sessionId ? findSession(sessionId)?.workspace ?? null : null));
 
@@ -32,9 +34,10 @@
 		const requestedWorkspace = workspace;
 		let active = true;
 		skillDoc = null;
+		skillError = "";
 		skillState = projectSlug && requestedName ? "loading" : "missing";
 		if (projectSlug && requestedName) {
-			void getSkillContentRpc({ projectSlug, name: requestedName, ...(sessionId ? { sessionId } : {}) })
+			void rpc("GetSkillContent", { ...(sessionId ? { sessionId } : { projectSlug }), name: requestedName })
 				.then((response) => {
 					if (!active || workspace !== requestedWorkspace) return;
 					// Markdown would read YAML frontmatter as a rule and a heading.
@@ -44,8 +47,11 @@
 					);
 					skillState = "idle";
 				})
-				.catch(() => {
-					if (active) skillState = "missing";
+				.catch((error) => {
+					if (active) {
+						skillState = "missing";
+						skillError = failureLine(error, "This skill's file could not be found on disk.");
+					}
 				});
 		}
 		return () => {
@@ -62,7 +68,7 @@
 		>{@html renderMarkdown(skillDoc)}</div>
 	{:else}
 		<span class="font-mono text-xs text-text-muted">
-			{skillState === "loading" ? "Loading skill…" : "This skill's file could not be found on disk."}
+			{skillState === "loading" ? "Loading skill…" : skillError || "This skill's file could not be found on disk."}
 		</span>
 	{/if}
 </div>

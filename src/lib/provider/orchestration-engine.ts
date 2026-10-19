@@ -1,14 +1,17 @@
+import { getProviderDriver } from "../contracts/provider-instance.js";
 import type { ClaudeLaunchConfig } from "./claude/claude-sdk-env.js";
+
 // src/lib/provider/orchestration-engine.ts
 // Central command processor for the provider instance layer (CQRS core loop).
 // Routes commands to the correct provider instance via ProviderRegistry.
 // Manages session-to-provider mapping.
 
-import type { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Deferred, Effect } from "effect";
+import type { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 
 import type { Account } from "../contracts/account.js";
+import type { SessionScope } from "../contracts/session-scope.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
@@ -111,6 +114,7 @@ export interface DiscoverCommand {
 	readonly providerId: string;
 	readonly account?: Account;
 	readonly workspaceRoot?: string;
+	readonly refresh?: boolean;
 }
 
 export interface EndSessionCommand {
@@ -182,12 +186,13 @@ export interface OrchestrationEngineOptions {
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 	readonly durableCommands?: DurableCommandStoreOptions;
 	readonly accountDirectory?: Pick<
-		AccountDirectory["Type"],
+		AccountDirectory["Service"],
 		"resolve" | "defaultFor"
 	>;
 }
 
 interface DurableCommandRuntime {
+	readonly projectId: string;
 	readonly commit: DurableCommandCommitRepository;
 	readonly receipts: CommandReadModelRepository;
 	readonly reactor: ProviderSideEffectReactor;
@@ -250,6 +255,7 @@ export class OrchestrationEngine {
 		if (options.durableCommands) {
 			const durable = options.durableCommands;
 			this.durable = {
+				projectId: durable.projectKey,
 				commit: new DurableCommandCommitRepository(
 					durable.sql,
 					durable.projectKey,
@@ -263,8 +269,10 @@ export class OrchestrationEngine {
 				// ProviderRuntimeIngestion (no-op sink when none is supplied).
 				reactor: new ProviderSideEffectReactor({
 					sql: durable.sql,
+					projectId: durable.projectKey,
 					registry: this.registry,
 					ingestion: durable.ingestion ?? { ingest: () => Effect.succeed(0) },
+					...(durable.write ? { write: durable.write } : {}),
 					...(durable.persistHandoffDelivered
 						? { persistHandoffDelivered: durable.persistHandoffDelivered }
 						: {}),
@@ -312,7 +320,7 @@ export class OrchestrationEngine {
 	dispatchEffect(
 		command: OrchestrationCommand,
 	): Effect.Effect<OrchestrationResult, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			yield* this.ensureMutatingCommandHasId(command);
 			if (!command.commandId) {
 				return yield* this.runCommandEffect(command);
@@ -354,7 +362,7 @@ export class OrchestrationEngine {
 	private runCommandEffect(
 		command: OrchestrationCommand,
 	): Effect.Effect<OrchestrationResult, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			switch (command.type) {
 				case "send_turn":
 					return yield* this.handleSendTurnEffect(command);
@@ -399,13 +407,17 @@ export class OrchestrationEngine {
 		command: SendTurnCommand,
 		durable: DurableCommandRuntime,
 	): Effect.Effect<TurnResult, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const hash = fingerprintHash(effectiveDispatchFingerprint(command));
 
 			const existing = yield* durable.receipts
 				.checkReceipt(command.commandId)
 				.pipe(Effect.orDie);
 			if (existing) {
+				if (existing.projectId !== durable.projectId)
+					return yield* Effect.fail(
+						new CommandFingerprintMismatch({ commandId: command.commandId }),
+					);
 				// The stored hash is only comparable to a freshly computed one within
 				// the same fingerprint scheme version. A version mismatch (a receipt
 				// written under an older scheme) is treated as a fingerprint mismatch:
@@ -437,6 +449,7 @@ export class OrchestrationEngine {
 						UPDATE provider_command_outbox
 						SET status = 'failed', error_code = 'orphaned', updated_at = ${durable.now()}
 						WHERE command_id = ${command.commandId}
+						  AND project_key = ${durable.projectId}
 						  AND status IN ('pending', 'running', 'retryable_failed')`.pipe(
 						Effect.orDie,
 					);
@@ -561,7 +574,7 @@ export class OrchestrationEngine {
 				try: () =>
 					JSON.stringify({
 						...payload,
-						...(driver === "claude" && pendingRewind
+						...(getProviderDriver(driver)?.supportsNativeResume && pendingRewind
 							? { rewind: pendingRewind.rewind }
 							: {}),
 						dispatchId,
@@ -595,7 +608,7 @@ export class OrchestrationEngine {
 	private handleInlineSendTurnEffect(
 		command: SendTurnCommand,
 	): Effect.Effect<TurnResult, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const instance = yield* this.getProviderInstanceEffect(
 				command.providerId,
 				command.input.account,
@@ -610,7 +623,7 @@ export class OrchestrationEngine {
 		command: SendTurnCommand,
 		instance: ProviderInstance,
 	): Effect.Effect<TurnResult, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			yield* Effect.sync(() =>
 				log.info(
 					`Dispatching sendTurn: session=${command.input.sessionId} provider=${command.providerId}`,
@@ -656,7 +669,7 @@ export class OrchestrationEngine {
 	private handleInterruptTurnEffect(
 		command: InterruptTurnCommand,
 	): Effect.Effect<void, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const providerId = yield* this.requireProviderForSessionEffect(
 				command.sessionId,
 			);
@@ -683,7 +696,7 @@ export class OrchestrationEngine {
 	private handleResolvePermissionEffect(
 		command: ResolvePermissionCommand,
 	): Effect.Effect<void, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const providerId = yield* this.requireProviderForSessionEffect(
 				command.sessionId,
 			);
@@ -710,7 +723,7 @@ export class OrchestrationEngine {
 	private handleResolveQuestionEffect(
 		command: ResolveQuestionCommand,
 	): Effect.Effect<void, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const providerId = yield* this.requireProviderForSessionEffect(
 				command.sessionId,
 			);
@@ -737,29 +750,32 @@ export class OrchestrationEngine {
 	private handleDiscoverEffect(
 		command: DiscoverCommand,
 	): Effect.Effect<ProviderCapabilities, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const instance = yield* this.getProviderInstanceEffect(
 				command.providerId,
 				command.account,
 			);
-			return yield* instance
-				.discoverEffect(command.workspaceRoot, command.account)
-				.pipe(
-					Effect.tapError((error) =>
-						Effect.sync(() =>
-							log.error(
-								`discover failed: provider=${command.providerId}: ${error.message}`,
-							),
+			const discovery = command.refresh
+				? instance.discoverEffect(command.workspaceRoot, command.account, {
+						refresh: true,
+					})
+				: instance.discoverEffect(command.workspaceRoot, command.account);
+			return yield* discovery.pipe(
+				Effect.tapError((error) =>
+					Effect.sync(() =>
+						log.error(
+							`discover failed: provider=${command.providerId}: ${error.message}`,
 						),
 					),
-				);
+				),
+			);
 		});
 	}
 
 	private handleEndSessionEffect(
 		command: EndSessionCommand,
 	): Effect.Effect<void, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const targetBindingRevision =
 				yield* this.sessionBindingReadModel.getBindingRevision(
 					command.sessionId,
@@ -777,7 +793,7 @@ export class OrchestrationEngine {
 				);
 				return;
 			}
-			const endSession = Effect.gen(this, function* () {
+			const endSession = Effect.gen({ self: this }, function* () {
 				const instance = yield* this.getProviderInstanceEffect(
 					providerId,
 					command.account,
@@ -832,8 +848,10 @@ export class OrchestrationEngine {
 	}
 
 	/** List all bound sessions with their provider IDs. */
-	listBoundSessionsEffect(): Effect.Effect<SessionBinding[]> {
-		return this.sessionBindingReadModel.listBoundSessions();
+	listBoundSessionsEffect(
+		scope: SessionScope,
+	): Effect.Effect<SessionBinding[]> {
+		return this.sessionBindingReadModel.listBoundSessions(scope);
 	}
 
 	/**
@@ -848,7 +866,7 @@ export class OrchestrationEngine {
 
 	/** Shutdown the engine and all provider instances. */
 	shutdownEffect(): Effect.Effect<void> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			yield* Effect.sync(() => log.info("OrchestrationEngine shutting down"));
 			yield* this.registry.shutdownAllEffect();
 			yield* Effect.sync(() => {

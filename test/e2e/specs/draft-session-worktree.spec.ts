@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
 import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
+import type { SessionInfo } from "../../../src/lib/contracts/ws-rpc.js";
 import type { WorktreeInfo } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
@@ -19,6 +20,14 @@ const worktrees: readonly WorktreeInfo[] = [
 	{ path: docsLinked, branch: "feature/docs", main: false },
 ];
 const controls = new WeakMap<Page, RpcMockControl>();
+const modelProviders = ["claude", "anthropic"].map((id) => ({
+	id,
+	name: id === "claude" ? "Claude" : "Anthropic",
+	configured: true,
+	models: [
+		{ id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", provider: id },
+	],
+}));
 
 async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 	const provider = supportsWorktree ? "claude" : "opencode";
@@ -26,13 +35,13 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 		{
 			slug: "e2e-replay",
 			title: "App",
-			folders: [main, docs],
+			folders: [main, docs] as const,
 			git: { branch: "main" },
 		},
 		{
 			slug: "other",
 			title: "Other",
-			folders: ["/workspace/other"],
+			folders: ["/workspace/other"] as const,
 			git: { branch: "dev" },
 		},
 	];
@@ -42,6 +51,7 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 				id: provider,
 				name: "Draft provider",
 				driver: provider,
+				isDefault: true,
 				port: 0,
 				managed: false,
 				status: "healthy",
@@ -51,33 +61,25 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 			},
 		],
 	};
-	let sessions: readonly Record<string, unknown>[] = [];
+	let sessions: readonly SessionInfo[] = [];
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			GetProjects: () => ({ projects, current: "e2e-replay" }),
-			GetInstances: () => instances,
-			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
-			GetAgents: () => ({
-				projectSlug: "e2e-replay",
-				instanceId: provider,
-				providerScope: { id: provider, name: "Draft provider" },
-				agents: [],
-			}),
+		stubs: {
+			ListWorktrees: () => ({ worktrees }),
 			ListDaemonSessions: () => ({
 				sessions,
 				availability: [],
 				hasMore: false,
 				nextCursor: null,
 			}),
-			ListWorktrees: () => ({ worktrees }),
 			CreateSession: ({ projectSlug, worktreePath }) => {
 				const selected = worktrees.find(({ path }) => path === worktreePath);
 				const folder = selected?.path === docsLinked ? docs : main;
 				sessions = [
 					{
+						accountId: null,
 						id: "draft-session",
 						title: "Started from draft",
-						status: "idle",
+						status: "idle" as const,
 						projectSlug,
 						workspace: selected
 							? {
@@ -89,7 +91,11 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 						git: {
 							branch: selected?.branch ?? "main",
 							...(selected && !selected.main
-								? { worktree: selected.path.split("/").at(-1) }
+								? {
+										worktree: selected.path.slice(
+											selected.path.lastIndexOf("/") + 1,
+										),
+									}
 								: {}),
 						},
 					},
@@ -97,7 +103,23 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 				rpc.setShellRows(sessions);
 				return { projectSlug, sessionId: "draft-session" };
 			},
-			PreWarmSession: () => ({ ok: true }),
+			PreWarmSession: () => undefined,
+			PreWarmDraft: () => undefined,
+			GetModels: (input) => ({
+				defaultOpenCodeInstanceId: "opencode",
+				projectSlug: "projectSlug" in input ? input.projectSlug : "e2e-replay",
+				providers: modelProviders.filter(
+					({ id }) =>
+						id === (input.instanceId === "claude" ? "claude" : "anthropic"),
+				),
+			}),
+			GetAgents: () => ({
+				projectSlug: "e2e-replay",
+				instanceId: provider,
+				providerScope: { id: provider, name: "Draft provider" },
+				agents: [],
+			}),
+			GetProjects: () => ({ projects, current: "e2e-replay" }),
 		},
 	});
 	await mockRelayWebSocket(page, {
@@ -108,6 +130,41 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 		responses: new Map(),
 	});
 	rpc.setDaemonList("SubscribeInstances", instances);
+	for (const account of instances.instances.filter(
+		({ driver }) => driver === "claude",
+	))
+		rpc.setProjectSetting({
+			_tag: "providerModels",
+			accountId: account.id,
+			providers: modelProviders.filter(({ id }) => id === "claude"),
+		});
+	rpc.setProjectSetting({
+		_tag: "harnessDefaults",
+		claude: {
+			status: "ok",
+			pick: {
+				providerId: "claude",
+				modelId: "claude-sonnet-4-5",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+		opencode: {
+			status: "ok",
+			pick: {
+				providerId: "anthropic",
+				modelId: "claude-sonnet-4-5",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+	});
+	rpc.setProjectSetting({
+		_tag: "defaultModel",
+		model: "claude-sonnet-4-5",
+		provider: provider === "claude" ? "claude" : "anthropic",
+		variant: "",
+	});
 	controls.set(page, rpc);
 	await page.goto(`${baseUrl}/new?project=e2e-replay`);
 	const picker = page.locator(
@@ -303,8 +360,10 @@ for (const mode of [
 			harness,
 		}) => {
 			const rpc = await openDraft(page, harness.relayBaseUrl);
-			rpc.setHandler("CreateSession", () => {
-				throw new WorkspaceMoveError({ path: linked, reason: "missing" });
+			rpc.setStubs({
+				CreateSession: () => {
+					throw new WorkspaceMoveError({ path: linked, reason: "missing" });
+				},
 			});
 			await page.locator("#input").fill("Keep this prompt");
 			await press(page.getByTestId("draft-start-chip"));

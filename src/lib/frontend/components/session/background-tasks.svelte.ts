@@ -1,15 +1,15 @@
 import { tick } from "svelte";
 import type { BackgroundTask } from "../../../shared-types.js";
 import { reveal } from "../../stores/reveal.svelte.js";
+import { selection } from "../../stores/selection.svelte.js";
 import {
 	findSession,
 	rootBackgroundTasks,
 	sessionState,
-	switchToSession,
 } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
-import { showToast } from "../../stores/ui.svelte.js";
-import { stopBackgroundTaskRpc } from "../../transport/ws-rpc-client.js";
+import { toastFailure } from "../../transport/rpc-errors.js";
+import { rpc } from "../../transport/ws-rpc-client.js";
 
 /** Whether the header's background-task pull-down is open. One per page, like goalDetails. */
 export const tasksPanel = $state({ open: false });
@@ -47,7 +47,7 @@ export function openTask(
 	const parentId = sessionState.currentId;
 	if (taskReturns.at(-1)?.childId !== parentId) taskReturns.length = 0;
 	if (parentId) taskReturns.push({ parentId, childId: task.sessionId, step });
-	switchToSession(task.sessionId);
+	selection.open(task.sessionId);
 }
 
 /** Back from a task opened on a phone, to the pull-down or launching step it
@@ -58,7 +58,7 @@ export function returnFromTask(): boolean {
 		taskReturns.length = 0;
 		return false;
 	}
-	switchToSession(back.parentId);
+	selection.open(back.parentId);
 	// The header closes its pull-downs as the session changes; reopen after.
 	void tick().then(() => {
 		if (sessionState.currentId !== back.parentId) return;
@@ -143,29 +143,29 @@ export function taskStopIds(
 /** Request one live subtree or all live tasks, children first, awaiting SDK row updates. */
 export async function stopBackgroundTasks(
 	sessionId: string | null,
-	projectSlug: string | null,
 	taskId?: string,
 ): Promise<void> {
-	if (!sessionId || !projectSlug) return;
+	if (!sessionId) return;
 	const ids = taskStopIds(
 		findSession(sessionId)?.backgroundTasks ?? [],
 		taskId,
 	);
 	let failed = false;
+	let failure: unknown;
 	for (const id of ids) {
 		try {
-			await stopBackgroundTaskRpc({ projectSlug, sessionId, taskId: id });
-		} catch {
+			await rpc("StopBackgroundTask", { sessionId, taskId: id });
+		} catch (error) {
 			failed = true;
+			failure = error;
 		}
 	}
 	if (failed)
-		showToast(
+		toastFailure(
 			taskId
 				? "Failed to stop background task"
 				: "Failed to stop background tasks",
-			{ variant: "error" },
-		);
+		)(failure);
 }
 
 /** Compact age: 40s, 6m, 1h 5m. The SDK gives no start time, so this counts from when conduit first saw the task. */

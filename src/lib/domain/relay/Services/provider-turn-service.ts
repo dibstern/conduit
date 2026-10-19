@@ -1,8 +1,12 @@
-import type { SqlClient } from "@effect/sql";
 import { Context, Deferred, Effect, FiberMap, Layer, type Scope } from "effect";
+import type { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import type { Account } from "../../../contracts/account.js";
 import type { InputDelivery } from "../../../contracts/stored-event.js";
-import type { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
+import type {
+	ClaudeEventPersistEffectTag,
+	ClaudeEventPersistFailure,
+} from "../../../persistence/effect/claude-event-persist-effect.js";
 import type { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import type { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import type { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
@@ -39,8 +43,6 @@ import {
 } from "./session-overrides-state.js";
 import type { SessionTitleServiceTag } from "./session-title-service.js";
 
-export { isProviderTurnInterruptProvider } from "./provider-turn-dispatch.js";
-
 export interface ProviderTurnServiceSendInput {
 	/** Continuation admission may already have resolved this immutable snapshot. */
 	readonly account?: Account;
@@ -62,6 +64,11 @@ export interface ProviderTurnServiceSendInput {
 	readonly steer?: boolean;
 	/** Committed with the handoff's outbox row, in one transaction. */
 	readonly events?: readonly CanonicalEvent[];
+	/** Return an undelivered steer to the inbox. */
+	readonly onSteerDeclined?: Effect.Effect<
+		void,
+		SqlError | ClaudeEventPersistFailure
+	>;
 }
 
 export interface ProviderTurnServicePrepareInput {
@@ -90,35 +97,35 @@ export interface ProviderTurnService {
 		answers?: Record<string, unknown>,
 	) => Effect.Effect<
 		void,
-		Effect.Effect.Error<ReturnType<typeof completeRecoveredQuestion>>
+		Effect.Error<ReturnType<typeof completeRecoveredQuestion>>
 	>;
 	readonly prepareTurnSession: (
 		input: ProviderTurnServicePrepareInput,
 	) => Effect.Effect<
 		string,
-		Effect.Effect.Error<ReturnType<typeof prepareTurnSession>>,
+		Effect.Error<ReturnType<typeof prepareTurnSession>>,
 		OverridesStateTag
 	>;
 	readonly sendTurn: (
 		input: ProviderTurnServiceSendInput,
 	) => Effect.Effect<
 		void,
-		Effect.Effect.Error<ReturnType<typeof sendTurn>>,
+		Effect.Error<ReturnType<typeof sendTurn>>,
 		OverridesStateTag
 	>;
 	readonly interruptTurn: (
 		input: ProviderTurnServiceInterruptInput,
 	) => Effect.Effect<
 		void,
-		Effect.Effect.Error<ReturnType<typeof interruptTurn>>,
+		Effect.Error<ReturnType<typeof interruptTurn>>,
 		OverridesStateTag
 	>;
 }
 
-export class ProviderTurnServiceTag extends Context.Tag("ProviderTurnService")<
+export class ProviderTurnServiceTag extends Context.Service<
 	ProviderTurnServiceTag,
 	ProviderTurnService
->() {}
+>()("ProviderTurnService") {}
 
 const makeProviderTurnService = Effect.gen(function* () {
 	const context = yield* Effect.context<
@@ -142,7 +149,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 		| EventStoreEffectTag
 		| ProjectionRunnerEffectTag
 	>();
-	const runtime = yield* Effect.runtime<OverridesStateTag>();
+	const runtime = yield* Effect.context<OverridesStateTag>();
 	const overridesRef = yield* OverridesStateTag;
 	const providedContext = Context.add(context, ProviderTurnTimeoutRuntimeTag, {
 		runtime,
@@ -175,7 +182,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 				}),
 				(hold) =>
 					Effect.sync(() => accountSwitches.delete(sessionId)).pipe(
-						Effect.zipRight(Deferred.succeed(hold, undefined)),
+						Effect.andThen(Deferred.succeed(hold, undefined)),
 					),
 			).pipe(Effect.asVoid),
 		completeRecoveredQuestion: (question, result, answers) =>
@@ -184,7 +191,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 			),
 		prepareTurnSession: (input) =>
 			awaitStop(input.sessionId).pipe(
-				Effect.zipRight(prepareTurnSession(input)),
+				Effect.andThen(prepareTurnSession(input)),
 				Effect.provide(providedContext),
 			),
 		sendTurn: (input) =>
@@ -209,7 +216,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 						Effect.sync(() => {
 							if (stopping.get(input.sessionId) === stop)
 								stopping.delete(input.sessionId);
-						}).pipe(Effect.zipRight(Deferred.succeed(stop, undefined))),
+						}).pipe(Effect.andThen(Deferred.succeed(stop, undefined))),
 					),
 				);
 			}).pipe(Effect.provide(providedContext)),
@@ -217,7 +224,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 	return service;
 });
 
-const ProviderTurnDispatchFibersLive = Layer.scoped(
+const ProviderTurnDispatchFibersLive = Layer.effect(
 	ProviderTurnDispatchFibersTag,
 	FiberMap.make<string, void, unknown>(),
 );

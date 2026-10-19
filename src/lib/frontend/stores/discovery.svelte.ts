@@ -1,13 +1,16 @@
 // Agents, models, providers, and commands.
 
-import { Effect, Either, Fiber, Stream } from "effect";
-import type { RuntimeFiber } from "effect/Fiber";
+import { Effect, Fiber, Result, Stream } from "effect";
 import { untrack } from "svelte";
 import { accountRefFromSelection } from "../../account-directory.js";
-import type { SessionMode } from "../../contracts/project-file.js";
-import type {
-	ProviderDriverKind,
-	ProviderSessionCapabilities,
+import type { DefaultSessionMode } from "../../contracts/project-file.js";
+import {
+	type BrowserDriverTraits,
+	isKnownDriverKind,
+	type KnownProviderDriverKind,
+	PROVIDER_DRIVERS,
+	type ProviderDriverKind,
+	type ProviderSessionCapabilities,
 } from "../../contracts/provider-instance.js";
 import {
 	catalogFromProviderList,
@@ -15,6 +18,7 @@ import {
 	offeredOptions,
 	resolveTurnSettings,
 } from "../../provider/turn-settings.js";
+import { getIsConnected } from "../transport/connection-status.svelte.js";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import type {
@@ -30,7 +34,7 @@ import type {
 	SwitchModelResponse,
 	SwitchVariantResponse,
 } from "../transport/ws-rpc.js";
-import { getModelsRpc } from "../transport/ws-rpc-client.js";
+import { rpc } from "../transport/ws-rpc-client.js";
 import type {
 	AgentInfo,
 	AgentProviderScope,
@@ -44,9 +48,16 @@ import type {
 	SessionInfo,
 	SessionPermissionMode,
 } from "../types.js";
-import { instanceState } from "./instance.svelte.js";
-import { getCurrentSlug } from "./router.svelte.js";
+import {
+	getDriverTraits,
+	getInstanceTraits,
+	instanceState,
+} from "./instance.svelte.js";
+import { getDraftProject } from "./project-state.svelte.js";
+import { attachedProjectState, getCurrentSlug } from "./router.svelte.js";
+import { selection } from "./selection.svelte.js";
 import { findSession, sessionState } from "./session.svelte.js";
+import { onShellSynchronized } from "./session-list.svelte.js";
 import { showToast } from "./ui.svelte.js";
 import { accountSnapshotChangedListeners } from "./ws-listeners.js";
 
@@ -113,6 +124,7 @@ const providersFromGetModelsResponse = (
 					}
 				: {}),
 			...(model.variants ? { variants: [...model.variants] } : {}),
+			...(model.parameters ? { parameters: model.parameters } : {}),
 			...(model.contextWindowOptions
 				? {
 						contextWindowOptions:
@@ -143,6 +155,9 @@ export interface InstanceOption {
 	readonly isNew?: boolean;
 	/** Live status from the configured-instance source, when known. */
 	readonly status?: InstanceStatus;
+	readonly available?: boolean | undefined;
+	readonly unavailableReason?: string | undefined;
+	readonly unavailableCode?: "auth_required" | undefined;
 	readonly capabilities?: ProviderSessionCapabilities | undefined;
 }
 
@@ -152,41 +167,239 @@ export interface InstanceOption {
 // module write it; `discoveryState` hands it out with no setters, so nothing
 // outside can.
 
+const missingHarnessDefaults = () =>
+	Object.fromEntries(
+		Object.keys(PROVIDER_DRIVERS).map((driver) => [
+			driver,
+			{ status: "missing" },
+		]),
+	) as Record<KnownProviderDriverKind, HarnessDefaultState>;
+
 const serverDiscovery = $state({
-	agents: [] as AgentInfo[],
-	agentProviderScope: null as AgentProviderScope | null,
-	activeAgentId: null as string | null,
-	providers: [] as ProviderInfo[],
 	currentModelId: "" as string,
 	currentProviderId: "" as string,
 	/** Retain session-scoped metadata so a switch never uses the previous provider. */
 	sessionProviderIds: {} as Record<string, string>,
-	commands: [] as CommandInfo[],
-	commandsFetched: false,
-	/** The project's model catalog has answered at least once. */
-	modelsLoaded: false,
 	defaultModelId: "" as string,
 	defaultProviderId: "" as string,
 	defaultVariant: "" as string,
 	defaultsLoaded: false,
-	defaultOpenCodeInstanceId: null as string | null,
-	harnessDefaults: {
-		claude: { status: "missing" },
-		opencode: { status: "missing" },
-	} as Record<"claude" | "opencode", HarnessDefaultState>,
+	harnessDefaults: missingHarnessDefaults(),
 	currentVariant: "" as string,
 	availableVariants: [] as string[],
 	currentContextWindow: "" as string,
 	availableContextWindowOptions: [] as ReadonlyArray<ContextWindowOption>,
-	modelExecution: null as GetModelsResponse["modelExecution"] | null,
 	permissionMode: "ask" as SessionPermissionMode,
 	defaultPermissionMode: "ask" as SessionPermissionMode,
-	defaultSessionMode: "local" as SessionMode,
+	defaultSessionMode: "local" as DefaultSessionMode,
 	/** Global hide-list keys: model `<providerId>/<modelId>`. */
 	hiddenModels: [] as string[],
 	/** Global hide-list keys: agent `<scopeId>/<agentId>`. */
 	hiddenAgents: [] as string[],
 });
+
+interface CatalogScope {
+	project: string;
+	sessionId: string | undefined;
+	instanceId: string | undefined;
+	key: string;
+	commandKey: string;
+}
+
+const emptyModels = () => ({
+	filledAtIssue: 0,
+	providers: [] as ProviderInfo[],
+	loaded: false,
+	active: undefined as GetModelsResponse["active"],
+	variant: undefined as GetModelsResponse["variant"],
+	contextWindow: undefined as GetModelsResponse["contextWindow"],
+	modelExecution: null as GetModelsResponse["modelExecution"] | null,
+	permissionMode: undefined as SessionPermissionMode | undefined,
+	hiddenModels: undefined as string[] | undefined,
+	permissionChoice: null as {
+		value: SessionPermissionMode;
+		click: symbol;
+	} | null,
+});
+const emptyAgents = () => ({
+	filledAtIssue: 0,
+	agents: [] as AgentInfo[],
+	providerScope: null as AgentProviderScope | null,
+	activeAgentId: null as string | null,
+	hiddenAgents: undefined as string[] | undefined,
+	choice: null as { value: string; click: symbol } | null,
+});
+const modelCatalogs = $state<Record<string, ReturnType<typeof emptyModels>>>(
+	{},
+);
+const accountModelCatalogs = $state<
+	Record<string, Record<string, ProviderInfo[]>>
+>({});
+const agentCatalogs = $state<Record<string, ReturnType<typeof emptyAgents>>>(
+	{},
+);
+const commandCatalogs = $state<
+	Record<string, { commands: CommandInfo[]; filledAtIssue: number }>
+>({});
+// Pruning entries must never reuse an issue number held by an in-flight read.
+let catalogReadIssue = 0;
+const projectCatalogDefaults = $state<Record<string, string>>({});
+const noModels = emptyModels();
+const noAgents = emptyAgents();
+
+function catalogScope(
+	sessionId: string | null = selection.scope?.sessionId ?? null,
+	instanceId = sessionId ? undefined : getEffectiveInstanceId(),
+	project = selection.scope?.project ?? "",
+): CatalogScope {
+	const key = JSON.stringify([
+		project,
+		sessionId ? "session" : "draft",
+		sessionId ?? instanceId ?? null,
+	]);
+	return {
+		project,
+		sessionId: sessionId ?? undefined,
+		instanceId,
+		key,
+		commandKey: JSON.stringify([
+			key,
+			sessionId ? (findSession(sessionId)?.workspace ?? null) : null,
+		]),
+	};
+}
+
+function modelsFor(scope = catalogScope()) {
+	return modelCatalogs[scope.key] ?? noModels;
+}
+function providersFor(scope = catalogScope()): ProviderInfo[] {
+	const accountId = scope.sessionId
+		? getSessionInstanceId(scope.sessionId)
+		: scope.instanceId;
+	const discovered =
+		accountModelCatalogs[scope.project]?.[accountId ?? ""] ?? [];
+	const providers = [
+		...modelsFor(scope).providers.filter(
+			(provider) => !discovered.some((next) => next.id === provider.id),
+		),
+		...discovered,
+	];
+	return providers.some((provider) => provider.id === "claude")
+		? providers.map((provider) =>
+				provider.id === "anthropic"
+					? { ...provider, name: "Anthropic - opencode" }
+					: provider,
+			)
+		: providers;
+}
+function agentsFor(scope = catalogScope()) {
+	return agentCatalogs[scope.key] ?? noAgents;
+}
+function draftCatalog(instanceId: string, project = getCurrentSlug() ?? "") {
+	const driver = instanceState.instances.find(
+		(account) => account.id === instanceId,
+	)?.driver;
+	return providersFor(catalogScope(null, instanceId, project)).filter(
+		(provider) =>
+			provider.instanceId !== undefined
+				? provider.instanceId === instanceId
+				: driverForProvider(provider.id) === driver,
+	);
+}
+
+/** All callers refresh the currently shown scope; replies retain their issued key. */
+export async function refreshCatalogs(): Promise<void> {
+	const scope = catalogScope();
+	if (
+		!selection.scope ||
+		!scope.project ||
+		scope.project !== attachedProjectState.slug
+	)
+		return;
+	await readCatalogs(scope);
+}
+
+function readCatalogs(
+	scope: CatalogScope,
+	catalogs: "all" | "models-agents" | "commands" = "all",
+): Promise<void> {
+	const issue = ++catalogReadIssue;
+	const payload = scope.sessionId
+		? { sessionId: scope.sessionId }
+		: {
+				projectSlug: scope.project,
+				...(scope.instanceId ? { instanceId: scope.instanceId } : {}),
+			};
+	const reads: Promise<unknown>[] = [];
+	if (catalogs !== "commands") {
+		const applyModels = followModelsRead(scope.sessionId, scope, issue);
+		reads.push(rpc("GetModels", payload).then(applyModels));
+		reads.push(
+			rpc("GetAgents", payload).then((response) =>
+				applyGetAgentsResponse(response, scope.sessionId, scope, issue),
+			),
+		);
+	}
+	if (catalogs !== "models-agents")
+		reads.push(
+			rpc("GetCommands", payload).then((response) =>
+				applyGetCommandsResponse(response, scope, issue),
+			),
+		);
+	return Promise.allSettled(reads).then(() => undefined);
+}
+
+/** Mounted once by the shell; reads follow selection's placed or attached scope. */
+export function watchCatalogs(): () => void {
+	return $effect.root(() => {
+		const modelKey = $derived(catalogScope().key);
+		const commandKey = $derived(catalogScope().commandKey);
+		$effect(() => {
+			const key = modelKey;
+			const connected = getIsConnected();
+			const attached = attachedProjectState.slug;
+			untrack(() => {
+				for (const held of Object.keys(modelCatalogs))
+					if (held !== key) delete modelCatalogs[held];
+				for (const held of Object.keys(agentCatalogs))
+					if (held !== key) delete agentCatalogs[held];
+				for (const held of Object.keys(draftModels))
+					if (held !== key) delete draftModels[held];
+				const scope = catalogScope();
+				if (connected && scope.project === attached && selection.scope !== null)
+					void readCatalogs(scope, "models-agents");
+			});
+		});
+		$effect(() => {
+			const key = commandKey;
+			const connected = getIsConnected();
+			const attached = attachedProjectState.slug;
+			untrack(() => {
+				for (const held of Object.keys(commandCatalogs))
+					if (held !== key) delete commandCatalogs[held];
+				const scope = catalogScope();
+				if (connected && scope.project === attached && selection.scope !== null)
+					void readCatalogs(scope, "commands");
+			});
+		});
+		const unsubscribe = onShellSynchronized(() => {
+			void refreshCatalogs();
+		});
+		$effect(() => () => unsubscribe());
+		$effect(() => {
+			const project =
+				selection.scope?.sessionId === null &&
+				(discoveryState.defaultsLoaded || discoveryState.hasInstanceChoice)
+					? getDraftProject()
+					: null;
+			const instanceId = getEffectiveInstanceId();
+			const ready =
+				instanceState.loaded && project === attachedProjectState.slug;
+			untrack(() => viewDraftModels(ready ? project : null, instanceId));
+		});
+		$effect(() => () => viewDraftModels(null));
+	});
+}
 
 // This tab's own state. No server message writes it.
 //
@@ -199,8 +412,6 @@ const serverDiscovery = $state({
 // `if (state.x === mine) state.x = previous` dance was written to dodge.
 
 const choice = $state({
-	agentId: null as string | null,
-	permissionMode: null as SessionPermissionMode | null,
 	hiddenModels: null as string[] | null,
 	hiddenAgents: null as string[] | null,
 	defaultModelId: null as string | null,
@@ -221,21 +432,27 @@ interface DraftPick {
 
 const draft = $state<{
 	instanceId: string | null;
-	driver: "claude" | "opencode" | null;
-	model: DraftPick["model"] | null;
+	driver: ProviderDriverKind | null;
 	permissionMode: SessionPermissionMode;
-}>({ instanceId: null, driver: null, model: null, permissionMode: "ask" });
-let draftPermissionChosen = false;
-const instanceCatalogs = $state<Record<string, ProviderInfo[]>>({});
+}>({ instanceId: null, driver: null, permissionMode: "ask" });
+const draftModels = $state<Record<string, DraftPick["model"] | null>>({});
+const draftModel = $derived(draftModels[catalogScope().key] ?? null);
+let draftPermissionChosen = $state(false);
+/** Like the permission mode, an untouched draft pick follows the server default. */
+let draftPickChosen = false;
 const modelMemory = new Map<string, Map<string, DraftPick["model"]>>();
 accountSnapshotChangedListeners.add(() => {
+	const pinned = draft.instanceId;
+	// A removed account, or an untouched draft's former default, falls back to its driver's default.
 	if (
-		draft.instanceId &&
+		pinned &&
 		draft.driver !== null &&
-		!getAvailableInstances().some((account) => account.id === draft.instanceId)
+		(!draftPickChosen ||
+			!getAvailableInstances().some((account) => account.id === pinned))
 	) {
 		draft.instanceId = null;
-		draft.model = null;
+		if (getEffectiveInstanceId() === pinned) draft.instanceId = pinned;
+		else draftModels[catalogScope().key] = null;
 	}
 	fillDraftDefault();
 });
@@ -247,7 +464,7 @@ export const draftModelInventory = $state({
 });
 let inventoryTarget: { projectSlug: string; instanceId: string } | null = null;
 let inventoryGeneration = 0;
-let inventoryFiber: RuntimeFiber<void, never> | null = null;
+let inventoryFiber: Fiber.Fiber<void, never> | null = null;
 
 /** The open browser draft owns one cancellable inventory subscription. */
 export function viewDraftModels(
@@ -260,7 +477,7 @@ export function viewDraftModels(
 		projectSlug &&
 		instanceId &&
 		instanceState.loaded &&
-		draftDriver(instanceId) === "opencode"
+		getInstanceTraits(instanceId)?.catalogSource === "server"
 			? { projectSlug, instanceId }
 			: null;
 	if (
@@ -270,6 +487,9 @@ export function viewDraftModels(
 	)
 		return;
 	inventoryTarget = target;
+	const scope = target
+		? catalogScope(null, target.instanceId, target.projectSlug)
+		: catalogScope(null);
 	const generation = ++inventoryGeneration;
 	const previous = inventoryFiber;
 	inventoryFiber = null;
@@ -280,12 +500,8 @@ export function viewDraftModels(
 		if (generation !== inventoryGeneration) return;
 		draftModelInventory.loading = false;
 		draftModelInventory.error = message;
-		serverDiscovery.modelsLoaded = true;
-		if (
-			!sessionState.currentId &&
-			getEffectiveInstanceId() === target?.instanceId
-		)
-			draft.model = null;
+		modelCatalogs[scope.key] = { ...modelsFor(scope), loaded: true };
+		draftModels[scope.key] = null;
 		showToast(message, { variant: "error" });
 	};
 	void (
@@ -296,7 +512,6 @@ export function viewDraftModels(
 			if (!target || generation !== inventoryGeneration) return;
 			const runtime = await getRuntime();
 			if (generation !== inventoryGeneration) return;
-			const applyModels = followModelsRead();
 			const next = runtime.runFork(
 				Effect.flatMap(WsRpcClients, (clients) =>
 					Effect.flatMap(
@@ -309,13 +524,17 @@ export function viewDraftModels(
 										if (generation !== inventoryGeneration) return;
 										draftModelInventory.loading = false;
 										draftModelInventory.error = null;
-										applyModels(response);
+										// Each stream emission is a fresh inventory, independent of unary reads.
+										applyGetModelsResponse(
+											response,
+											undefined,
+											undefined,
+											scope,
+										);
 									}),
 							),
 					),
-				).pipe(
-					Effect.catchAll((error) => Effect.sync(() => fail(error.message))),
-				),
+				).pipe(Effect.catch((error) => Effect.sync(() => fail(error.message)))),
 			);
 			if (generation === inventoryGeneration) inventoryFiber = next;
 			else runtime.runFork(Fiber.interrupt(next));
@@ -327,35 +546,31 @@ export function viewDraftModels(
 
 /** Creation copies the held draft; it does not resolve another pick. */
 export function getDraftPick(): Immutable<DraftPick> | undefined {
+	const instanceId = getEffectiveInstanceId();
 	if (
-		draftModelInventory.instanceId === getEffectiveInstanceId() &&
+		draftModelInventory.instanceId === instanceId &&
 		(draftModelInventory.loading || draftModelInventory.error)
 	)
 		return undefined;
+	if (!draftModel || !instanceId) return undefined;
 	if (
-		!draft.model ||
-		!draft.instanceId ||
-		draft.instanceId !== getEffectiveInstanceId()
-	)
-		return undefined;
-	if (
-		Either.isLeft(
+		Result.isFailure(
 			resolveTurnSettings(
 				{
-					harness: draftDriver(draft.instanceId),
-					model: draft.model,
-					effort: draft.model.variant,
-					contextWindow: draft.model.contextWindow,
+					harness: draftDriver(instanceId),
+					model: draftModel,
+					effort: draftModel.variant,
+					contextWindow: draftModel.contextWindow,
 				},
-				catalogFromProviderList(instanceCatalogs[draft.instanceId] ?? []),
+				catalogFromProviderList(draftCatalog(instanceId)),
 			),
 		)
 	)
 		return undefined;
 	return {
-		instanceId: draft.instanceId,
-		model: { ...draft.model },
-		permissionMode: draft.permissionMode,
+		instanceId,
+		model: { ...draftModel },
+		permissionMode: discoveryState.permissionMode,
 	};
 }
 
@@ -389,13 +604,14 @@ const sessionPicks = $state<
 		}
 	>
 >({});
-let discoveryGeneration = 0;
+// A project clear discards picks, but must not restart ordering for an in-flight read.
+const sessionReadSequences = new Map<string, number>();
 
 function sessionPickState(sessionId: string) {
 	return (sessionPicks[sessionId] ??= {
 		pick: undefined,
 		choice: {},
-		readSeq: 0,
+		readSeq: sessionReadSequences.get(sessionId) ?? 0,
 		appliedReadSeq: 0,
 		ackedAtReadSeq: {},
 	});
@@ -425,21 +641,48 @@ export function getSessionDriver(
 	const provider =
 		serverDiscovery.sessionProviderIds[sessionId] ??
 		getSessionPick(sessionId)?.providerId;
-	return provider ? (provider === "claude" ? "claude" : "opencode") : undefined;
+	return driverForProvider(provider);
+}
+
+/** Model namespaces name local drivers; server catalogs use their owning instance. */
+function driverForProvider(
+	provider: string | undefined,
+): ProviderDriverKind | undefined {
+	if (!provider) return undefined;
+	if (isKnownDriverKind(provider)) return provider;
+	const instanceId = Object.values(modelCatalogs)
+		.flatMap((catalog) => catalog.providers)
+		.find((entry) => entry.id === provider)?.instanceId;
+	return (
+		instanceState.instances.find((instance) => instance.id === instanceId)
+			?.driver ??
+		instanceState.instances.find(
+			(instance) => getDriverTraits(instance.driver)?.runsOpenCodeServer,
+		)?.driver ??
+		"opencode"
+	);
 }
 
 /** Order reads at dispatch independently of clicks and their acknowledgements. */
 export function followModelsRead(
 	sessionId?: string,
+	scope = catalogScope(sessionId ?? null),
+	issue = ++catalogReadIssue,
 ): (response: GetModelsResponse) => void {
-	const generation = discoveryGeneration;
 	const readSeq = untrack(() =>
-		sessionId ? ++sessionPickState(sessionId).readSeq : undefined,
+		sessionId ? nextSessionRead(sessionId) : undefined,
 	);
 	return (response) => {
-		if (generation !== discoveryGeneration) return;
-		applyGetModelsResponse(response, sessionId, readSeq);
+		applyGetModelsResponse(response, sessionId, readSeq, scope, issue);
 	};
+}
+
+function nextSessionRead(sessionId: string): number {
+	const state = sessionPickState(sessionId);
+	const sequence = state.readSeq + 1;
+	sessionReadSequences.set(sessionId, sequence);
+	state.readSeq = sequence;
+	return sequence;
 }
 
 /** Confirm replies beneath newer clicks; acknowledge only the owned overlay. */
@@ -461,9 +704,9 @@ export function followSessionPickChange(
 	};
 }
 
-function refreshSessionPick(projectSlug: string, sessionId: string): void {
+function refreshSessionPick(sessionId: string): void {
 	const apply = followModelsRead(sessionId);
-	void getModelsRpc({ projectSlug, sessionId })
+	void rpc("GetModels", { sessionId })
 		.then(apply)
 		.catch(() => undefined);
 }
@@ -474,7 +717,6 @@ function chooseSessionPick(
 ): UndoChoice {
 	const state = sessionPicks[sessionId];
 	if (!state?.pick) return () => {};
-	const projectSlug = getCurrentSlug();
 	const clickId = Symbol();
 	const fields = Object.keys(patch) as (keyof SessionPick)[];
 	for (const field of fields) {
@@ -489,7 +731,7 @@ function chooseSessionPick(
 				if (state.choice[field]?.clickId === clickId)
 					delete state.choice[field];
 			}
-			if (projectSlug) refreshSessionPick(projectSlug, sessionId);
+			refreshSessionPick(sessionId);
 		},
 		{ clickId },
 	);
@@ -500,36 +742,58 @@ function chooseSessionPick(
  *  ahead of the server read through `choice` first — see the `choose*`
  *  actions. */
 export const discoveryState = {
+	get currentDriver(): ProviderDriverKind | undefined {
+		return sessionState.currentId
+			? getSessionDriver(sessionState.currentId)
+			: (getAvailableInstances().find(
+					(instance) => instance.id === getEffectiveInstanceId(),
+				)?.driver ??
+					draft.driver ??
+					driverForProvider(this.currentProviderId || this.defaultProviderId));
+	},
+	get currentTraits(): BrowserDriverTraits | undefined {
+		return this.currentProviderId
+			? getDriverTraits(this.currentDriver)
+			: undefined;
+	},
 	// Server-owned.
 	get agents(): readonly Immutable<AgentInfo>[] {
-		return serverDiscovery.agents;
+		return agentsFor().agents;
 	},
 	get agentProviderScope(): Immutable<AgentProviderScope> | null {
-		return serverDiscovery.agentProviderScope;
+		return agentsFor().providerScope;
 	},
 	get activeAgentId(): string | null {
-		return choice.agentId ?? serverDiscovery.activeAgentId;
+		const entry = agentsFor();
+		return entry.choice?.value ?? entry.activeAgentId;
 	},
 	get providers(): readonly Immutable<ProviderInfo>[] {
-		return serverDiscovery.providers;
+		return providersFor();
 	},
 	get sessionProviderIds(): Readonly<Record<string, string>> {
 		return serverDiscovery.sessionProviderIds;
 	},
 	get commands(): readonly Immutable<CommandInfo>[] {
-		return serverDiscovery.commands;
+		return commandCatalogs[catalogScope().commandKey]?.commands ?? [];
 	},
 	get commandsFetched(): boolean {
-		return serverDiscovery.commandsFetched;
+		return commandCatalogs[catalogScope().commandKey] !== undefined;
 	},
 	get modelsLoaded(): boolean {
-		return serverDiscovery.modelsLoaded;
+		const scope = catalogScope();
+		const accountId = scope.sessionId
+			? getSessionInstanceId(scope.sessionId)
+			: scope.instanceId;
+		return (
+			modelsFor(scope).loaded ||
+			accountModelCatalogs[scope.project]?.[accountId ?? ""] !== undefined
+		);
 	},
 	get defaultVariant(): string {
 		return serverDiscovery.defaultVariant;
 	},
 	get harnessDefaults(): Readonly<
-		Record<"claude" | "opencode", HarnessDefaultState>
+		Record<KnownProviderDriverKind, HarnessDefaultState>
 	> {
 		return serverDiscovery.harnessDefaults;
 	},
@@ -546,7 +810,7 @@ export const discoveryState = {
 	get modelExecution(): Immutable<GetModelsResponse["modelExecution"]> | null {
 		if (sessionState.currentId)
 			return getSessionPick(sessionState.currentId)?.modelExecution ?? null;
-		return serverDiscovery.modelExecution;
+		return modelsFor().modelExecution;
 	},
 
 	// Server-owned, with this tab's unconfirmed click read first.
@@ -558,32 +822,36 @@ export const discoveryState = {
 	},
 	get hasModelChoice(): boolean {
 		if (sessionState.currentId) return false;
-		return draft.model !== null;
+		return draftModel !== null;
 	},
 	get currentModelId(): string {
 		if (sessionState.currentId)
 			return getSessionPick(sessionState.currentId)?.modelId ?? "";
-		return draft.model?.modelId ?? "";
+		return draftModel?.modelId ?? "";
 	},
 	get currentProviderId(): string {
 		if (sessionState.currentId)
 			return getSessionPick(sessionState.currentId)?.providerId ?? "";
-		return draft.model?.providerId ?? "";
+		return draftModel?.providerId ?? "";
 	},
 	get currentVariant(): string {
 		if (sessionState.currentId)
 			return getSessionPick(sessionState.currentId)?.variant ?? "";
-		return draft.model?.variant ?? "";
+		return draftModel?.variant ?? "";
 	},
 	get currentContextWindow(): string {
 		if (sessionState.currentId)
 			return getSessionPick(sessionState.currentId)?.contextWindow ?? "";
-		return draft.model?.contextWindow ?? "";
+		return draftModel?.contextWindow ?? "";
 	},
 	get permissionMode(): SessionPermissionMode {
 		return sessionState.currentId
-			? (choice.permissionMode ?? serverDiscovery.permissionMode)
-			: draft.permissionMode;
+			? (modelsFor().permissionChoice?.value ??
+					modelsFor().permissionMode ??
+					serverDiscovery.permissionMode)
+			: draftPermissionChosen
+				? draft.permissionMode
+				: (modelsFor().permissionMode ?? draft.permissionMode);
 	},
 	get defaultModelId(): string {
 		return choice.defaultModelId ?? serverDiscovery.defaultModelId;
@@ -596,14 +864,22 @@ export const discoveryState = {
 			choice.defaultPermissionMode ?? serverDiscovery.defaultPermissionMode
 		);
 	},
-	get defaultSessionMode(): SessionMode {
+	get defaultSessionMode(): DefaultSessionMode {
 		return serverDiscovery.defaultSessionMode;
 	},
 	get hiddenModels(): readonly string[] {
-		return choice.hiddenModels ?? serverDiscovery.hiddenModels;
+		return (
+			choice.hiddenModels ??
+			modelsFor().hiddenModels ??
+			serverDiscovery.hiddenModels
+		);
 	},
 	get hiddenAgents(): readonly string[] {
-		return choice.hiddenAgents ?? serverDiscovery.hiddenAgents;
+		return (
+			choice.hiddenAgents ??
+			agentsFor().hiddenAgents ??
+			serverDiscovery.hiddenAgents
+		);
 	},
 };
 
@@ -631,9 +907,9 @@ export function getActiveModel(
 		? getSessionInstanceId(sessionState.currentId)
 		: getEffectiveInstanceId();
 	const providers = sessionState.currentId
-		? serverDiscovery.providers
+		? discoveryState.providers
 		: instanceId
-			? (instanceCatalogs[instanceId] ?? [])
+			? draftCatalog(instanceId)
 			: [];
 	return providers
 		.find((provider) => provider.id === providerId)
@@ -661,6 +937,23 @@ export function getProviderGroups(): readonly Immutable<ProviderGroup>[] {
 	return discoveryState.providers
 		.filter((p) => p.models.length > 0)
 		.map((p) => ({ provider: p, models: p.models }));
+}
+
+/** Project defaults use each driver's default account, independently of the open session. */
+export function getHarnessDefaultProviders(
+	harness: KnownProviderDriverKind,
+): readonly Immutable<ProviderInfo>[] {
+	if (getDriverTraits(harness)?.catalogSource === "discovery") {
+		const account = getAvailableInstances().find(
+			(instance) => instance.driver === harness && instance.isDefault,
+		);
+		return account
+			? (accountModelCatalogs[catalogScope().project]?.[account.id] ?? [])
+			: [];
+	}
+	return discoveryState.providers.filter(
+		(provider) => driverForProvider(provider.id) === harness,
+	);
 }
 
 /** Agents visible in the dropdown after applying the global hide-list.
@@ -705,13 +998,22 @@ export function getAvailableInstances(): InstanceOption[] {
 			isDefault: inst.isDefault ?? false,
 			isCustom: !inst.isDefault,
 			status: inst.status,
+			available: inst.available,
+			unavailableReason: inst.unavailableReason,
+			unavailableCode: inst.unavailableCode,
 			capabilities:
-				inst.capabilities ?? instanceState.providerCapabilities[driver],
+				inst.capabilities ??
+				instanceState.providerCapabilities[driver] ??
+				getDriverTraits(driver)?.sessionCapabilities,
 		};
 	});
 	const rank = (i: InstanceOption) => {
-		if (i.isDefault && i.driver === "claude") return 0;
-		if (i.isDefault && i.driver === "opencode") return 1;
+		if (
+			i.isDefault &&
+			getDriverTraits(i.driver)?.accountKind === "config-directory"
+		)
+			return 0;
+		if (i.isDefault && getDriverTraits(i.driver)?.runsOpenCodeServer) return 1;
 		return 2;
 	};
 	return available.sort(
@@ -728,8 +1030,7 @@ export function getProviderGroupsForInstance(
 		(instance) => instance.id === instanceId,
 	)?.driver;
 	if (!driver) return [];
-	const claude = driver === "claude";
-	const cached = !sessionState.currentId && instanceCatalogs[instanceId];
+	const cached = !sessionState.currentId && draftCatalog(instanceId);
 	if (cached) {
 		const groups = cached.map((provider) => ({
 			provider,
@@ -750,10 +1051,9 @@ export function getProviderGroupsForInstance(
 	}
 	if (!sessionState.currentId) return [];
 	return getVisibleProviderGroups().filter((g) =>
-		g.provider.id === "claude"
-			? claude
-			: g.provider.instanceId === instanceId ||
-				(driver === "opencode" && g.provider.instanceId === undefined),
+		g.provider.instanceId !== undefined
+			? g.provider.instanceId === instanceId
+			: driverForProvider(g.provider.id) === driver,
 	);
 }
 
@@ -763,19 +1063,18 @@ export function getEffectiveInstanceId(): string | undefined {
 	if (draft.instanceId !== null)
 		return available.find((account) => account.id === draft.instanceId)?.id;
 	const provider = discoveryState.defaultProviderId;
-	const driver =
-		draft.driver ??
-		(provider ? (provider === "claude" ? "claude" : "opencode") : undefined);
+	const driver = draft.driver ?? driverForProvider(provider);
+	const defaultOpenCodeInstanceId =
+		projectCatalogDefaults[getCurrentSlug() ?? ""];
 	if (
-		driver === "opencode" &&
-		serverDiscovery.defaultOpenCodeInstanceId &&
+		getDriverTraits(driver)?.runsOpenCodeServer &&
+		defaultOpenCodeInstanceId &&
 		available.some(
 			(account) =>
-				account.id === serverDiscovery.defaultOpenCodeInstanceId &&
-				account.driver === driver,
+				account.id === defaultOpenCodeInstanceId && account.driver === driver,
 		)
 	)
-		return serverDiscovery.defaultOpenCodeInstanceId;
+		return defaultOpenCodeInstanceId;
 	return available.find(
 		(account) =>
 			account.isDefault && (driver === undefined || account.driver === driver),
@@ -787,11 +1086,11 @@ export function getSessionInstanceId(sessionId: string): string {
 	return findSession(sessionId)?.accountId ?? "";
 }
 
-function draftDriver(instanceId: string | undefined): "claude" | "opencode" {
-	return instanceState.instances.find((instance) => instance.id === instanceId)
-		?.driver === "claude"
-		? "claude"
-		: "opencode";
+function draftDriver(instanceId: string | undefined): KnownProviderDriverKind {
+	const driver = instanceState.instances.find(
+		(instance) => instance.id === instanceId,
+	)?.driver;
+	return isKnownDriverKind(driver) ? driver : "opencode";
 }
 
 /** Fill only an empty draft from the selected harness's resolved default. */
@@ -800,7 +1099,7 @@ function fillDraftDefault(): void {
 		!serverDiscovery.defaultsLoaded ||
 		(!instanceState.loaded && draft.instanceId === null) ||
 		sessionState.currentId ||
-		draft.model
+		draftModel
 	)
 		return;
 	const instanceId = getEffectiveInstanceId();
@@ -808,12 +1107,12 @@ function fillDraftDefault(): void {
 	const defaults = serverDiscovery.harnessDefaults[draftDriver(instanceId)];
 	if (
 		draft.instanceId === null &&
-		draftDriver(instanceId) === "opencode" &&
-		serverDiscovery.defaultOpenCodeInstanceId === null
+		getInstanceTraits(instanceId)?.runsOpenCodeServer &&
+		projectCatalogDefaults[getCurrentSlug() ?? ""] === undefined
 	)
 		return;
 	if (defaults.status !== "ok" || !defaults.pick) return;
-	const catalog = catalogFromProviderList(instanceCatalogs[instanceId] ?? []);
+	const catalog = catalogFromProviderList(draftCatalog(instanceId));
 	const resolved = resolveTurnSettings(
 		{
 			harness: draftDriver(instanceId),
@@ -823,7 +1122,7 @@ function fillDraftDefault(): void {
 		},
 		catalog,
 	);
-	if (Either.isLeft(resolved)) return;
+	if (Result.isFailure(resolved)) return;
 	if (!draftPermissionChosen)
 		draft.permissionMode = serverDiscovery.defaultPermissionMode;
 	setDraftModel(
@@ -833,12 +1132,18 @@ function fillDraftDefault(): void {
 	);
 }
 
-function rememberDraftModel(): void {
-	if (!draft.instanceId || !draft.model) return;
-	let models = modelMemory.get(draft.instanceId);
-	if (!models) modelMemory.set(draft.instanceId, (models = new Map()));
-	models.set(`${draft.model.providerId}/${draft.model.modelId}`, {
-		...draft.model,
+function rememberDraftModel(scope?: CatalogScope): void {
+	const target = scope ?? catalogScope();
+	const model = draftModels[target.key];
+	if (!target.instanceId || !model) return;
+	if (!scope) {
+		draft.instanceId = target.instanceId;
+		draft.driver = draftDriver(target.instanceId);
+	}
+	let models = modelMemory.get(target.instanceId);
+	if (!models) modelMemory.set(target.instanceId, (models = new Map()));
+	models.set(`${model.providerId}/${model.modelId}`, {
+		...model,
 	});
 }
 
@@ -846,8 +1151,10 @@ function setDraftModel(
 	model: { modelId: string; providerId: string },
 	effort?: string,
 	contextWindow?: string,
+	scope?: CatalogScope,
 ): void {
-	const instanceId = getEffectiveInstanceId();
+	const target = scope ?? catalogScope(null);
+	const instanceId = target.instanceId;
 	if (!instanceId) return;
 	if (
 		draftModelInventory.instanceId === instanceId &&
@@ -855,7 +1162,9 @@ function setDraftModel(
 	)
 		return;
 	const harness = draftDriver(instanceId);
-	const catalog = catalogFromProviderList(instanceCatalogs[instanceId] ?? []);
+	const catalog = catalogFromProviderList(
+		draftCatalog(instanceId, target.project),
+	);
 	const entry = findCatalogModel(harness, model, catalog);
 	if (!entry) return;
 	const options = offeredOptions(entry);
@@ -878,21 +1187,24 @@ function setDraftModel(
 		},
 		catalog,
 	);
-	if (Either.isLeft(resolved)) return;
-	draft.instanceId = instanceId;
-	draft.driver = harness;
-	draft.model = {
-		...resolved.right.model,
-		variant: resolved.right.effort,
-		contextWindow: resolved.right.contextWindow,
+	if (Result.isFailure(resolved)) return;
+	if (!scope) {
+		draft.instanceId = instanceId;
+		draft.driver = harness;
+	}
+	draftModels[target.key] = {
+		...resolved.success.model,
+		variant: resolved.success.effort,
+		contextWindow: resolved.success.contextWindow,
 	};
 	// Prefilling a harness default must not erase this model's browser memory.
 	if ((effort === undefined && contextWindow === undefined) || !remembered)
-		rememberDraftModel();
+		rememberDraftModel(target);
 }
 
 /** A different instance starts with its own default, never a neighboring model. */
 export function selectInstance(instanceId: string): void {
+	draftPickChosen = true;
 	const available = getAvailableInstances();
 	const ref = accountRefFromSelection({ providerId: instanceId });
 	const selected =
@@ -905,17 +1217,17 @@ export function selectInstance(instanceId: string): void {
 	if (!selected) {
 		draft.instanceId = ref._tag === "Id" ? instanceId : null;
 		draft.driver = ref._tag === "DriverDefault" ? ref.driver : null;
-		draft.model = null;
+		draftModels[catalogScope().key] = null;
 		return;
 	}
-	if (selected.driver !== "claude" && selected.driver !== "opencode") return;
 	if (draft.instanceId === selected.id) return;
 	draft.instanceId = selected.id;
 	draft.driver = selected.driver;
-	draft.model = null;
+	draftModels[catalogScope().key] = null;
 	if (
-		selected.driver !== "claude" &&
-		["plan", "auto", "dontAsk"].includes(draft.permissionMode)
+		!getDriverTraits(selected.driver)?.permissionModes.includes(
+			draft.permissionMode,
+		)
 	)
 		draft.permissionMode = "ask";
 	fillDraftDefault();
@@ -923,11 +1235,12 @@ export function selectInstance(instanceId: string): void {
 
 /** A created or viewed session consumes the draft's harness and model picks. */
 export function clearDraftSelection(): void {
+	for (const key of Object.keys(draftModels)) delete draftModels[key];
 	draft.instanceId = null;
 	draft.driver = null;
-	draft.model = null;
 	draft.permissionMode = serverDiscovery.defaultPermissionMode;
 	draftPermissionChosen = false;
+	draftPickChosen = false;
 }
 
 /** Format agent label for display. */
@@ -1009,94 +1322,105 @@ export function toProviderCommands(
 	);
 }
 
-export function handleAgentList({
-	agents,
-	activeAgentId,
-	providerScope,
-}: {
-	readonly agents: readonly AgentInfo[];
-	readonly providerScope: AgentProviderScope;
-	readonly activeAgentId?: string;
-}): void {
-	serverDiscovery.agents = [...agents];
-	serverDiscovery.agentProviderScope = providerScope;
-	if (activeAgentId) {
-		serverDiscovery.activeAgentId = activeAgentId;
-	} else {
-		serverDiscovery.activeAgentId = null;
-	}
-	choice.agentId = null;
+export function handleAgentList(
+	{
+		agents,
+		activeAgentId,
+		providerScope,
+	}: {
+		readonly agents: readonly AgentInfo[];
+		readonly providerScope: AgentProviderScope;
+		readonly activeAgentId?: string;
+	},
+	scope = catalogScope(),
+	issue = ++catalogReadIssue,
+): void {
+	agentCatalogs[scope.key] = {
+		...agentsFor(scope),
+		filledAtIssue: issue,
+		agents: [...agents],
+		providerScope,
+		activeAgentId: activeAgentId ?? null,
+		choice: null,
+	};
 }
 
 export function applyGetAgentsResponse(
 	response: GetAgentsResponse,
 	sessionId?: string,
+	scope = catalogScope(sessionId ?? null),
+	issue = ++catalogReadIssue,
 ): void {
-	handleAgentList({
-		providerScope: response.providerScope,
-		agents: response.agents.map((agent) => ({
-			id: agent.id,
-			name: agent.name,
-			...(agent.description != null ? { description: agent.description } : {}),
-			...(agent.model != null ? { model: agent.model } : {}),
-		})),
-		...(response.activeAgentId != null
-			? { activeAgentId: response.activeAgentId }
-			: {}),
-	});
+	if (issue < agentsFor(scope).filledAtIssue) return;
+	handleAgentList(
+		{
+			providerScope: response.providerScope,
+			agents: response.agents.map((agent) => ({
+				id: agent.id,
+				name: agent.name,
+				...(agent.description != null
+					? { description: agent.description }
+					: {}),
+				...(agent.model != null ? { model: agent.model } : {}),
+			})),
+			...(response.activeAgentId != null
+				? { activeAgentId: response.activeAgentId }
+				: {}),
+		},
+		scope,
+		issue,
+	);
 	if (sessionId) {
 		serverDiscovery.sessionProviderIds[sessionId] = response.providerScope.id;
 	}
 	if (response.hiddenAgents) {
-		serverDiscovery.hiddenAgents = [...response.hiddenAgents];
+		const entry = agentCatalogs[scope.key];
+		if (entry) entry.hiddenAgents = [...response.hiddenAgents];
 	}
 }
 
-export function handleModelList({
-	providers,
-	accountId,
-}: {
-	readonly providers: GetModelsResponse["providers"];
-	readonly accountId?: string;
-}): void {
+export function handleModelList(
+	{
+		providers,
+		accountId,
+	}: {
+		readonly providers: GetModelsResponse["providers"];
+		readonly accountId?: string | undefined;
+	},
+	project = getCurrentSlug() ?? "",
+): void {
+	const scope = catalogScope(sessionState.currentId, undefined, project);
 	const catalog = providersFromGetModelsResponse(providers);
 	const catalogAccountId =
 		accountId ??
-		(catalog.some((provider) => provider.id === "claude")
-			? getAvailableInstances().find(
-					(account) => account.driver === "claude" && account.isDefault,
-				)?.id
-			: undefined);
-	// Project settings can arrive before the daemon's account snapshot.
-	if (
-		catalogAccountId &&
-		!instanceState.instances.some(
+		getAvailableInstances().find(
 			(account) =>
-				account.id === catalogAccountId && account.driver !== "claude",
-		)
-	) {
-		instanceCatalogs[catalogAccountId] = catalog.filter(
-			(provider) => provider.id === "claude",
+				account.isDefault &&
+				getDriverTraits(account.driver)?.catalogSource === "discovery" &&
+				catalog.some((provider) => provider.id === account.driver),
+		)?.id;
+	if (catalogAccountId) {
+		(accountModelCatalogs[project] ??= {})[catalogAccountId] = catalog.filter(
+			(provider) => getDriverTraits(provider.id)?.catalogSource === "discovery",
 		);
-		if (
-			!sessionState.currentId &&
-			getEffectiveInstanceId() === catalogAccountId &&
-			draft.model
-		) {
-			const selected = draft.model;
-			draft.model = null;
-			setDraftModel(selected, selected.variant, selected.contextWindow);
-		}
 	}
-	const composerAccountId = sessionState.currentId
-		? getSessionInstanceId(sessionState.currentId)
-		: getEffectiveInstanceId();
-	if (accountId !== undefined && accountId !== composerAccountId) return;
-	serverDiscovery.providers = catalog;
-	serverDiscovery.modelsLoaded = true;
-	if (serverDiscovery.providers.some((provider) => provider.id === "claude")) {
-		for (const provider of serverDiscovery.providers)
-			if (provider.id === "anthropic") provider.name = "Anthropic - opencode";
+	const scopedProviders = catalogAccountId
+		? catalog.filter(
+				(provider) =>
+					getDriverTraits(provider.id)?.catalogSource !== "discovery",
+			)
+		: catalog;
+	if (scopedProviders.length || !catalogAccountId) {
+		modelCatalogs[scope.key] = {
+			...modelsFor(scope),
+			providers: scopedProviders,
+			loaded: true,
+		};
+	}
+	if (draftModel) {
+		const selected = draftModel;
+		draftModels[catalogScope().key] = null;
+		setDraftModel(selected, selected.variant, selected.contextWindow);
 	}
 	fillDraftDefault();
 }
@@ -1105,10 +1429,16 @@ export function applyGetModelsResponse(
 	response: GetModelsResponse,
 	sessionId?: string,
 	readSeq?: number,
+	scope = catalogScope(
+		sessionId ?? null,
+		sessionId ? undefined : (response.instanceId ?? getEffectiveInstanceId()),
+	),
+	issue = ++catalogReadIssue,
 ): void {
+	if (issue < modelsFor(scope).filledAtIssue) return;
 	if (sessionId) {
 		const state = sessionPickState(sessionId);
-		const seq = readSeq ?? ++state.readSeq;
+		const seq = readSeq ?? nextSessionRead(sessionId);
 		if (seq <= state.appliedReadSeq) return;
 		state.appliedReadSeq = seq;
 		const pick: SessionPick = {
@@ -1132,82 +1462,44 @@ export function applyGetModelsResponse(
 				}
 			}
 		}
-		// Cache off-screen picks without hydrating the open composer's shared state.
-		if (sessionState.currentId !== sessionId) return;
 	}
 	if (response.defaultOpenCodeInstanceId !== undefined)
-		serverDiscovery.defaultOpenCodeInstanceId =
-			response.defaultOpenCodeInstanceId;
-	serverDiscovery.modelsLoaded = true;
-	// Account-scoped Claude catalogues arrive on the providerModels stream.
-	const scopedDraft =
-		response.instanceId !== undefined &&
-		!sessionState.currentId &&
-		response.instanceId === getEffectiveInstanceId();
-	const claudeScope = instanceState.instances.some(
-		(account) =>
-			account.id === response.instanceId && account.driver === "claude",
-	);
-	if (
-		sessionId ||
-		response.instanceId === undefined ||
-		(scopedDraft && !claudeScope)
-	) {
-		// The retained shared Claude tail is display data, not this reply's catalog.
-		const cachedClaude = serverDiscovery.providers.filter(
-			(provider) =>
-				provider.id === "claude" &&
-				!response.providers.some((next) => next.id === "claude"),
-		);
-		handleModelList({
-			providers: response.providers,
-			...(response.instanceId !== undefined &&
-			response.providers.some((provider) => provider.id === "claude")
-				? { accountId: response.instanceId }
-				: {}),
-		});
-		serverDiscovery.providers = [...serverDiscovery.providers, ...cachedClaude];
-		if (cachedClaude.length)
-			for (const provider of serverDiscovery.providers)
-				if (provider.id === "anthropic") provider.name = "Anthropic - opencode";
-	}
-	if (!sessionId) {
-		if (response.instanceId !== undefined) {
-			if (draftDriver(response.instanceId) === "opencode")
-				instanceCatalogs[response.instanceId] = providersFromGetModelsResponse(
-					response.providers,
-				);
-			if (
-				!sessionState.currentId &&
-				(instanceState.loaded || draft.instanceId !== null) &&
-				(serverDiscovery.defaultsLoaded || draft.instanceId !== null) &&
-				response.instanceId === getEffectiveInstanceId() &&
-				!draft.model
-			) {
-				if (!draftPermissionChosen && response.permissionMode)
-					draft.permissionMode = response.permissionMode;
-				if (response.active)
-					setDraftModel(
-						{
-							modelId: response.active.model,
-							providerId: response.active.provider,
-						},
-						response.variant?.variant ?? "",
-						response.contextWindow?.contextWindow ?? "",
-					);
-				else fillDraftDefault();
-			}
-		}
-		serverDiscovery.modelExecution = response.modelExecution
+		projectCatalogDefaults[scope.project] = response.defaultOpenCodeInstanceId;
+	const previous = modelsFor(scope);
+	modelCatalogs[scope.key] = {
+		...previous,
+		filledAtIssue: issue,
+		providers: providersFromGetModelsResponse(response.providers),
+		loaded: true,
+		active: response.active,
+		variant: response.variant,
+		contextWindow: response.contextWindow,
+		modelExecution: response.modelExecution
 			? { ...response.modelExecution }
-			: null;
+			: null,
+		permissionMode: response.permissionMode ?? previous.permissionMode,
+		permissionChoice: response.permissionMode
+			? null
+			: previous.permissionChoice,
+		hiddenModels: response.hiddenModels
+			? [...response.hiddenModels]
+			: previous.hiddenModels,
+	};
+	// A fresh account reply can supply its own native default. Never refill from a cached active pick.
+	if (
+		!scope.sessionId &&
+		scope.instanceId &&
+		response.active &&
+		!draftModels[scope.key]
+	) {
+		setDraftModel(
+			{ modelId: response.active.model, providerId: response.active.provider },
+			response.variant?.variant ?? "",
+			response.contextWindow?.contextWindow ?? "",
+			scope,
+		);
 	}
-	if (sessionId && response.permissionMode) {
-		handlePermissionModeInfo({ mode: response.permissionMode });
-	}
-	if (response.hiddenModels) {
-		serverDiscovery.hiddenModels = [...response.hiddenModels];
-	}
+	fillDraftDefault();
 }
 
 export function handleModelInfo(msg: {
@@ -1219,26 +1511,41 @@ export function handleModelInfo(msg: {
 	if (provider) serverDiscovery.currentProviderId = provider;
 }
 
-export function handleCommandList({
-	commands,
-}: {
-	readonly commands: readonly CommandInfo[];
-}): void {
-	serverDiscovery.commands = [...commands];
-	serverDiscovery.commandsFetched = true;
+export function handleCommandList(
+	{
+		commands,
+	}: {
+		readonly commands: readonly CommandInfo[];
+	},
+	scope = catalogScope(),
+	issue = ++catalogReadIssue,
+): void {
+	commandCatalogs[scope.commandKey] = {
+		commands: [...commands],
+		filledAtIssue: issue,
+	};
 }
 
-export function applyGetCommandsResponse(response: GetCommandsResponse): void {
-	handleCommandList({
-		commands: response.commands.map((command) => ({
-			name: command.name,
-			...(command.description != null
-				? { description: command.description }
-				: {}),
-			...(command.args != null ? { args: command.args } : {}),
-			...(command.builtin ? { builtin: true } : {}),
-		})),
-	});
+export function applyGetCommandsResponse(
+	response: GetCommandsResponse,
+	scope = catalogScope(),
+	issue = ++catalogReadIssue,
+): void {
+	if (issue < (commandCatalogs[scope.commandKey]?.filledAtIssue ?? 0)) return;
+	handleCommandList(
+		{
+			commands: response.commands.map((command) => ({
+				name: command.name,
+				...(command.description != null
+					? { description: command.description }
+					: {}),
+				...(command.args != null ? { args: command.args } : {}),
+				...(command.builtin ? { builtin: true } : {}),
+			})),
+		},
+		scope,
+		issue,
+	);
 }
 
 export function handleDefaultModelInfo(msg: {
@@ -1246,6 +1553,15 @@ export function handleDefaultModelInfo(msg: {
 	readonly provider?: string | undefined;
 	readonly variant?: string | undefined;
 }): void {
+	if (
+		!draftPickChosen &&
+		((msg.model ?? "") !== serverDiscovery.defaultModelId ||
+			(msg.provider ?? "") !== serverDiscovery.defaultProviderId)
+	) {
+		draft.instanceId = null;
+		draft.driver = null;
+		draftModels[catalogScope().key] = null;
+	}
 	serverDiscovery.defaultModelId = msg.model ?? "";
 	serverDiscovery.defaultProviderId = msg.provider ?? "";
 	serverDiscovery.defaultVariant = msg.variant ?? "";
@@ -1258,9 +1574,10 @@ export function handleDefaultModelInfo(msg: {
 export function handleHarnessDefaults(
 	setting: Extract<ProjectSetting, { _tag: "harnessDefaults" }>,
 ): void {
+	const { _tag, ...defaults } = setting;
 	serverDiscovery.harnessDefaults = {
-		claude: setting.claude,
-		opencode: setting.opencode,
+		...missingHarnessDefaults(),
+		...defaults,
 	};
 	fillDraftDefault();
 }
@@ -1324,17 +1641,21 @@ export function followSessionModelSettings(
 		row.resumes?.at(-1)?.instanceId === previous.resumes?.at(-1)?.instanceId
 	)
 		return;
-	const projectSlug = getCurrentSlug();
 	const sessionId = sessionState.currentId;
-	if (!projectSlug || !sessionId) return;
-	refreshSessionPick(projectSlug, sessionId);
+	if (!sessionId) return;
+	refreshSessionPick(sessionId);
 }
 
 export function handlePermissionModeInfo(msg: {
 	readonly mode: SessionPermissionMode;
 }): void {
 	serverDiscovery.permissionMode = msg.mode;
-	choice.permissionMode = null;
+	const scope = catalogScope();
+	modelCatalogs[scope.key] = {
+		...modelsFor(scope),
+		permissionMode: msg.mode,
+		permissionChoice: null,
+	};
 }
 
 export function handleVisibilityInfo(msg: {
@@ -1343,6 +1664,15 @@ export function handleVisibilityInfo(msg: {
 }): void {
 	serverDiscovery.hiddenModels = [...msg.hiddenModels];
 	serverDiscovery.hiddenAgents = [...msg.hiddenAgents];
+	const scope = catalogScope();
+	modelCatalogs[scope.key] = {
+		...modelsFor(scope),
+		hiddenModels: [...msg.hiddenModels],
+	};
+	agentCatalogs[scope.key] = {
+		...agentsFor(scope),
+		hiddenAgents: [...msg.hiddenAgents],
+	};
 	choice.hiddenModels = null;
 	choice.hiddenAgents = null;
 }
@@ -1389,7 +1719,13 @@ const undoAll =
 	};
 
 export function chooseAgent(agentId: string): UndoChoice {
-	return propose("agentId", agentId);
+	const key = catalogScope().key;
+	const click = Symbol();
+	agentCatalogs[key] = { ...agentsFor(), choice: { value: agentId, click } };
+	return () => {
+		const entry = agentCatalogs[key];
+		if (entry?.choice?.click === click) entry.choice = null;
+	};
 }
 
 export function chooseModel(model: {
@@ -1415,6 +1751,7 @@ export function chooseModel(model: {
 				: "",
 		});
 	}
+	draftPickChosen = true;
 	setDraftModel(model);
 	return () => {};
 }
@@ -1423,10 +1760,11 @@ export function chooseVariant(variant: string): UndoChoice {
 	if (sessionState.currentId)
 		return chooseSessionPick(sessionState.currentId, { variant });
 	if (
-		draft.model &&
+		draftModel &&
 		(variant === "" || getActiveModelVariants().includes(variant))
 	) {
-		draft.model.variant = variant;
+		draftModel.variant = variant;
+		draftPickChosen = true;
 		rememberDraftModel();
 	}
 	return () => {};
@@ -1436,13 +1774,14 @@ export function chooseContextWindow(contextWindow: string): UndoChoice {
 	if (sessionState.currentId)
 		return chooseSessionPick(sessionState.currentId, { contextWindow });
 	if (
-		draft.model &&
+		draftModel &&
 		(contextWindow === "" ||
 			getActiveContextWindowOptions().some(
 				(option) => option.value === contextWindow,
 			))
 	) {
-		draft.model.contextWindow = contextWindow;
+		draftModel.contextWindow = contextWindow;
+		draftPickChosen = true;
 		rememberDraftModel();
 	}
 	return () => {};
@@ -1454,7 +1793,16 @@ export function choosePermissionMode(mode: SessionPermissionMode): UndoChoice {
 		draftPermissionChosen = true;
 		return () => {};
 	}
-	return propose("permissionMode", mode);
+	const key = catalogScope().key;
+	const click = Symbol();
+	modelCatalogs[key] = {
+		...modelsFor(),
+		permissionChoice: { value: mode, click },
+	};
+	return () => {
+		const entry = modelCatalogs[key];
+		if (entry?.permissionChoice?.click === click) entry.permissionChoice = null;
+	};
 }
 
 export function chooseDefaultModel(model: {
@@ -1529,47 +1877,40 @@ export function applyHiddenEntriesSet(
 export function applyDefaultPermissionMode(mode: SessionPermissionMode): void {
 	serverDiscovery.defaultPermissionMode = mode;
 	choice.defaultPermissionMode = null;
-	if (!draft.model && !draftPermissionChosen) draft.permissionMode = mode;
+	if (!draftModel && !draftPermissionChosen) draft.permissionMode = mode;
 }
 
-export function applyDefaultSessionMode(mode: SessionMode): void {
+export function applyDefaultSessionMode(mode: DefaultSessionMode): void {
 	serverDiscovery.defaultSessionMode = mode;
 }
 
 /** Clear all discovery state (for project switch). */
 export function clearDiscoveryState(): void {
-	discoveryGeneration++;
 	for (const id of Object.keys(sessionPicks)) delete sessionPicks[id];
-	serverDiscovery.agents = [];
-	serverDiscovery.agentProviderScope = null;
-	serverDiscovery.activeAgentId = null;
-	serverDiscovery.providers = [];
+	for (const key of Object.keys(modelCatalogs)) delete modelCatalogs[key];
+	for (const project of Object.keys(accountModelCatalogs))
+		delete accountModelCatalogs[project];
+	for (const key of Object.keys(agentCatalogs)) delete agentCatalogs[key];
+	for (const key of Object.keys(commandCatalogs)) delete commandCatalogs[key];
+	for (const key of Object.keys(projectCatalogDefaults))
+		delete projectCatalogDefaults[key];
 	serverDiscovery.currentModelId = "";
 	serverDiscovery.currentProviderId = "";
 	serverDiscovery.sessionProviderIds = {};
-	serverDiscovery.commands = [];
-	serverDiscovery.commandsFetched = false;
-	serverDiscovery.modelsLoaded = false;
 	serverDiscovery.defaultModelId = "";
 	serverDiscovery.defaultProviderId = "";
 	serverDiscovery.defaultVariant = "";
 	serverDiscovery.defaultsLoaded = false;
-	serverDiscovery.defaultOpenCodeInstanceId = null;
-	serverDiscovery.harnessDefaults = {
-		claude: { status: "missing" },
-		opencode: { status: "missing" },
-	};
+	serverDiscovery.harnessDefaults = missingHarnessDefaults();
 	serverDiscovery.currentVariant = "";
 	serverDiscovery.availableVariants = [];
 	serverDiscovery.currentContextWindow = "";
 	serverDiscovery.availableContextWindowOptions = [];
-	serverDiscovery.modelExecution = null;
 	serverDiscovery.permissionMode = "ask";
 	serverDiscovery.defaultPermissionMode = "ask";
 	serverDiscovery.hiddenModels = [];
 	serverDiscovery.hiddenAgents = [];
 	clearDraftSelection();
-	for (const id of Object.keys(instanceCatalogs)) delete instanceCatalogs[id];
 	for (const field of Object.keys(choice) as ChoiceField[]) {
 		choice[field] = null;
 		delete owner[field];

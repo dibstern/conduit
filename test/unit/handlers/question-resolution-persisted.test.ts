@@ -11,8 +11,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Effect, Layer, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -114,7 +114,7 @@ const withHandlerStack = async (
 ): Promise<void> => {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-question-resolved-"));
 	const advances: ReadModelAdvance[] = [];
-	const bus = Layer.succeed(SessionEventBusTag, {
+	const bus = Layer.succeed(SessionEventBusTag)({
 		publish: () => Effect.void,
 		publishAdvance: (advance) => Effect.sync(() => void advances.push(advance)),
 		subscribe: () => Effect.succeed(Stream.empty),
@@ -129,15 +129,15 @@ const withHandlerStack = async (
 	const layer = Layer.mergeAll(
 		persistence,
 		bus,
-		Layer.succeed(ConfigTag, makeMockConfig({ configDir: dir })),
+		Layer.succeed(ConfigTag)(makeMockConfig({ configDir: dir })),
 		PendingInteractionServiceLive,
-		Layer.succeed(OpenCodeAPITag, client),
-		Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
-		Layer.succeed(LoggerTag, createSilentLogger()),
-		Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
-		Layer.succeed(AgentServiceTag, makeMockAgentService()),
+		Layer.succeed(OpenCodeAPITag)(client),
+		Layer.succeed(WebSocketHandlerTag)(makeWsHandler()),
+		Layer.succeed(LoggerTag)(createSilentLogger()),
+		Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()),
+		Layer.succeed(AgentServiceTag)(makeMockAgentService()),
 		NoopProviderRuntimeIngestionLive,
-		Layer.succeed(ProviderTurnServiceTag, {
+		Layer.succeed(ProviderTurnServiceTag)({
 			holdUserTurnsForAccountSwitch: () => Effect.void,
 			prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 			sendTurn: () => Effect.void,
@@ -175,8 +175,8 @@ const withHandlerStack = async (
 
 				yield* body({ advances, pendingQuestions });
 			}).pipe(
-				Effect.provide(PassThroughSessionInbox),
-				Effect.provide(layer),
+				Effect.provide(PassThroughSessionInbox, { local: true }),
+				Effect.provide(layer, { local: true }),
 				Effect.orDie,
 			),
 		);
@@ -205,6 +205,7 @@ it("answering an OpenCode question resolves the row and announces the advance", 
 			}>`SELECT version FROM sessions WHERE id = ${SESSION}`;
 			expect(advances.at(-1)).toEqual({
 				version: rows[0]?.version,
+				projectIds: ["test-project"],
 				sessionIds: [SESSION],
 				removedSessionIds: [],
 				collections: ["sessions", "approvals", "sidebar"],
@@ -230,6 +231,7 @@ it("skipping an OpenCode question resolves the row and announces the advance", a
 			}>`SELECT version FROM sessions WHERE id = ${SESSION}`;
 			expect(advances.at(-1)).toEqual({
 				version: rows[0]?.version,
+				projectIds: ["test-project"],
 				sessionIds: [SESSION],
 				removedSessionIds: [],
 				collections: ["sessions", "approvals", "sidebar"],

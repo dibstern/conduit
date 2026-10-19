@@ -11,9 +11,9 @@ import {
 	Exit,
 	Layer,
 	Ref,
-	Runtime,
 } from "effect";
 import { WsRpcError } from "../../../contracts/ws-rpc.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { getClientIp, parseCookies } from "../../../server/http-utils.js";
 import type {
 	AttachDaemonProject,
@@ -30,7 +30,7 @@ import { ConfigPersistenceTag } from "../../daemon/Services/config-persistence-s
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
 import { DaemonEventBusTag } from "../../daemon/Services/daemon-pubsub.js";
 import { resolveDaemonSession } from "../../daemon/Services/daemon-session-reader.js";
-import { DaemonStateTag } from "../../daemon/Services/daemon-state.js";
+import type { DaemonStateTag } from "../../daemon/Services/daemon-state.js";
 import {
 	allProjects,
 	getProject,
@@ -40,6 +40,7 @@ import {
 	touchLastUsed as touchProjectLastUsed,
 } from "../../daemon/Services/project-registry-service.js";
 import { RelayCacheTag } from "../../daemon/Services/relay-cache.js";
+import { SessionDirectory } from "../../daemon/Services/session-directory.js";
 import { type AuthManagerService, AuthManagerTag } from "./auth-middleware.js";
 
 const RELAY_WAIT_TIMEOUT_MS = 10_000;
@@ -81,9 +82,10 @@ export interface WebSocketRelayRouter {
 	) => Effect.Effect<void, WebSocketUpgradeError>;
 }
 
-export class WebSocketRelayRouterTag extends Context.Tag(
-	"WebSocketRelayRouter",
-)<WebSocketRelayRouterTag, WebSocketRelayRouter>() {}
+export class WebSocketRelayRouterTag extends Context.Service<
+	WebSocketRelayRouterTag,
+	WebSocketRelayRouter
+>()("WebSocketRelayRouter") {}
 
 export const resolveProjectRpcContext = (
 	relayRouter: WebSocketRelayRouter,
@@ -99,7 +101,7 @@ export const resolveProjectRpcContext = (
 			);
 		return yield* relay.rpcWsHandler.context;
 	}).pipe(
-		Effect.catchAll((cause) =>
+		Effect.catch((cause) =>
 			Effect.fail(
 				cause instanceof WsRpcError
 					? cause
@@ -108,7 +110,7 @@ export const resolveProjectRpcContext = (
 						}),
 			),
 		),
-		Effect.catchAllDefect((cause) =>
+		Effect.catchDefect((cause) =>
 			Effect.fail(
 				new WsRpcError({
 					message: `Project "${slug}" unavailable: ${formatCause(cause)}`,
@@ -151,46 +153,46 @@ export const WebSocketRelayRouterLive: Layer.Layer<
 
 		const failRelayUnavailable = (slug: string, cause: unknown) =>
 			withProjectRegistry(markError(slug, formatCause(cause))).pipe(
-				Effect.catchAll(() => Effect.void),
-				Effect.zipRight(Effect.fail(toRelayUnavailable(slug, cause))),
+				Effect.catch(() => Effect.void),
+				Effect.andThen(Effect.fail(toRelayUnavailable(slug, cause))),
 			);
 
 		const loadRelay = (slug: string) =>
 			withProjectRegistry(getProject(slug)).pipe(
 				Effect.flatMap(() => relayCache.get(slug)),
 				Effect.tap(() => withProjectRegistry(markReady(slug))),
-				Effect.catchAll((cause) => failRelayUnavailable(slug, cause)),
-				Effect.catchAllDefect((cause) => failRelayUnavailable(slug, cause)),
+				Effect.catch((cause) => failRelayUnavailable(slug, cause)),
+				Effect.catchDefect((cause) => failRelayUnavailable(slug, cause)),
 			);
 
 		return {
 			ensureRelayStarted: (slug) => loadRelay(slug).pipe(Effect.asVoid),
 			waitForRelay: (slug, timeoutMs) =>
 				loadRelay(slug).pipe(
-					Effect.timeoutFail({
+					Effect.timeoutOrElse({
 						duration: Duration.millis(timeoutMs),
-						onTimeout: () =>
-							toRelayUnavailable(
-								slug,
-								new Error("Timed out waiting for relay"),
+						orElse: () =>
+							Effect.fail(
+								toRelayUnavailable(
+									slug,
+									new Error("Timed out waiting for relay"),
+								),
 							),
 					}),
-					Effect.catchAll((cause) =>
+					Effect.catch((cause) =>
 						Effect.fail(
 							cause instanceof WebSocketUpgradeError
 								? cause
 								: toRelayUnavailable(slug, cause),
 						),
 					),
-					Effect.catchAllDefect((cause) =>
+					Effect.catchDefect((cause) =>
 						Effect.fail(toRelayUnavailable(slug, cause)),
 					),
 				),
 			touchLastUsed: (slug) =>
 				withProjectRegistry(touchProjectLastUsed(slug)).pipe(
-					Effect.catchAll((cause) =>
-						Effect.fail(toRelayUnavailable(slug, cause)),
-					),
+					Effect.catch((cause) => Effect.fail(toRelayUnavailable(slug, cause))),
 				),
 		} satisfies WebSocketRelayRouter;
 	}),
@@ -268,17 +270,18 @@ export const WebSocketRoutingLive: Layer.Layer<
 	| ProjectRegistryTag
 	| DaemonStateTag
 	| ShutdownSignalTag
-> = Layer.scopedDiscard(
+	| SessionDirectory
+> = Layer.effectDiscard(
 	Effect.gen(function* () {
-		const { configDir } = yield* Ref.get(yield* DaemonStateTag);
 		const configRef = yield* DaemonConfigRefTag;
 		const httpServerRef = yield* HttpServerRefTag;
 		const auth = yield* AuthManagerTag;
 		const relayRouter = yield* WebSocketRelayRouterTag;
 		const daemonHandlers = yield* DaemonWsRpcHandlersTag;
 		const projectRegistry = yield* ProjectRegistryTag;
+		const directory = yield* SessionDirectory;
 		const shutdownSignal = yield* ShutdownSignalTag;
-		const runtime = yield* Effect.runtime<never>();
+		const context = yield* Effect.context<never>();
 		const server = yield* Ref.get(httpServerRef);
 
 		if (server === null) {
@@ -305,8 +308,8 @@ export const WebSocketRoutingLive: Layer.Layer<
 
 		const resolveRpcRelay = (slug: string) =>
 			resolveRelay(slug).pipe(
-				Effect.mapError((cause) => toRpcUnavailable(slug, cause)),
-				Effect.catchAllDefect((cause) =>
+				Failure.mapEffectFailures((error) => toRpcUnavailable(slug, error)),
+				Effect.catchDefect((cause) =>
 					Effect.fail(toRpcUnavailable(slug, cause)),
 				),
 			);
@@ -320,8 +323,15 @@ export const WebSocketRoutingLive: Layer.Layer<
 			Effect.gen(function* () {
 				const projects = yield* allProjects;
 				const sessionSlug = hints.sessionId
-					? yield* resolveDaemonSession(configDir, hints.sessionId)
+					? yield* resolveDaemonSession(hints.sessionId).pipe(
+							Effect.provideService(SessionDirectory, directory),
+						)
 					: null;
+				if (hints.sessionId && sessionSlug === null)
+					return yield* new WsRpcError({
+						code: "unknown-session",
+						message: `Unknown session: ${hints.sessionId}`,
+					});
 				const slug =
 					sessionSlug ??
 					projects.find((project) => project.slug === hints.projectSlug)
@@ -333,11 +343,12 @@ export const WebSocketRoutingLive: Layer.Layer<
 
 		const attachProject: AttachDaemonProject = (payload) =>
 			resolveAttachSlug(payload).pipe(
-				Effect.mapError(
-					(cause) =>
-						new WsRpcError({
-							message: `AttachProject failed: ${formatCause(cause)}`,
-						}),
+				Failure.mapEffectFailures((error) =>
+					error instanceof WsRpcError
+						? error
+						: new WsRpcError({
+								message: `AttachProject failed: ${formatCause(error)}`,
+							}),
 				),
 				Effect.tap(({ slug }) =>
 					slug === null ? Effect.void : resolveRpcRelay(slug),
@@ -391,7 +402,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 
 				yield* Effect.sync(() => rpcHandler.handleUpgrade(req, socket, head));
 			}).pipe(
-				Effect.catchAll((error) => handleFailure(error, req, socket)),
+				Effect.catch((error) => handleFailure(error, req, socket)),
 				Effect.annotateLogs("component", "ws-routing"),
 			);
 
@@ -400,7 +411,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 			socket: net.Socket,
 			head: Buffer,
 		) => {
-			Runtime.runCallback(runtime)(routeUpgrade(req, socket, head), {
+			Effect.runCallbackWith(context)(routeUpgrade(req, socket, head), {
 				onExit: (exit) => {
 					if (Exit.isFailure(exit) && !socket.destroyed) socket.destroy();
 				},
@@ -414,7 +425,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 			Effect.sync(() => {
 				server.off("upgrade", onUpgrade);
 			}).pipe(
-				Effect.zipRight(Effect.logInfo("WebSocket routing layer torn down")),
+				Effect.andThen(Effect.logInfo("WebSocket routing layer torn down")),
 			),
 		);
 	}).pipe(

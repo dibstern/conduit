@@ -21,7 +21,7 @@ export const PermissionTimeoutLive: Layer.Layer<
 	never,
 	never,
 	PendingInteractionServiceTag | LoggerTag
-> = Layer.scopedDiscard(
+> = Layer.effectDiscard(
 	Effect.gen(function* () {
 		const pendingInteractions = yield* PendingInteractionServiceTag;
 
@@ -36,6 +36,7 @@ export const PermissionTimeoutLive: Layer.Layer<
 				}),
 				Schedule.fixed(Duration.seconds(30)),
 			),
+			{ uninterruptible: "inherit" },
 		);
 	}),
 );

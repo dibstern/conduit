@@ -1,24 +1,40 @@
 // Single source of truth for all environment variables read by the relay.
 // Import from here instead of reading process.env directly.
 
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
 import type { LogFormat, LogLevel } from "./logger.js";
 
-/** Base config directory. Respects CONDUIT_CONFIG_DIR or XDG_CONFIG_HOME if set. */
-export const DEFAULT_CONFIG_DIR: string =
-	process.env["CONDUIT_CONFIG_DIR"] ??
-	(process.env["XDG_CONFIG_HOME"]
-		? join(process.env["XDG_CONFIG_HOME"], "conduit")
-		: join(homedir(), ".conduit"));
+function resolveConfigDir(
+	env: NodeJS.ProcessEnv,
+	home: string,
+	exists: (path: string) => boolean,
+): string {
+	if (env["CONDUIT_CONFIG_DIR"] != null) return env["CONDUIT_CONFIG_DIR"];
+	if (env["XDG_CONFIG_HOME"]) return join(env["XDG_CONFIG_HOME"], "conduit");
+	const legacyDir = join(home, ".conduit");
+	const configHome = join(home, ".config");
+	if (!exists(configHome)) return legacyDir;
+	const configDir = join(configHome, "conduit");
+	// Keep existing data in place when only the legacy directory exists.
+	return !exists(configDir) && exists(legacyDir) ? legacyDir : configDir;
+}
+
+/** Base config directory. Explicit overrides win; otherwise prefer ~/.config. */
+export const DEFAULT_CONFIG_DIR: string = resolveConfigDir(
+	process.env,
+	homedir(),
+	existsSync,
+);
 
 export const DEFAULT_PORT = 2633;
 export const DEFAULT_OC_PORT = 4096;
 export const DEFAULT_TRACE_MAX_BYTES = 10_485_760;
 export const DEFAULT_TRACE_MAX_FILES = 10;
 export const DEFAULT_TRACE_BATCH_WINDOW_MS = 200;
-export const DEFAULT_TRACE_SQL_MIN_MS = 5;
+export const DEFAULT_TRACE_MIN_MS = 5;
 
 export interface TraceEnvConfig {
 	readonly enabled: boolean;
@@ -26,7 +42,8 @@ export interface TraceEnvConfig {
 	readonly maxBytes: number;
 	readonly maxFiles: number;
 	readonly batchWindowMs: number;
-	readonly sqlMinMs?: number | undefined;
+	readonly minMs?: number | undefined;
+	readonly sessionId?: string | undefined;
 }
 
 const parseBoundedInteger = (
@@ -75,12 +92,13 @@ export const resolveTraceConfig = (
 			10,
 			60_000,
 		),
-		sqlMinMs: parseBoundedInteger(
-			env["CONDUIT_TRACE_SQL_MIN_MS"],
-			DEFAULT_TRACE_SQL_MIN_MS,
+		minMs: parseBoundedInteger(
+			env["CONDUIT_TRACE_MIN_MS"] ?? env["CONDUIT_TRACE_SQL_MIN_MS"],
+			DEFAULT_TRACE_MIN_MS,
 			0,
 			2_147_483_647,
 		),
+		sessionId: env["CONDUIT_TRACE_SESSION"] || undefined,
 	};
 };
 

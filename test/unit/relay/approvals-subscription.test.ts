@@ -32,7 +32,7 @@ const makeLayer = () => {
 			SessionEventBusLive,
 		),
 		SessionEventBusLive,
-		Layer.scopedDiscard(
+		Layer.effectDiscard(
 			Effect.addFinalizer(() =>
 				Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 			),
@@ -130,7 +130,7 @@ const take = <A>(q: Queue.Queue<A>, n: number) =>
 	Effect.forEach(Array.from({ length: n }), () => Queue.take(q));
 
 describe("subscribeApprovals", () => {
-	it.scoped(
+	it.effect(
 		"raise then resolve: snapshot, synchronized, upsert, remove, each version once",
 		() =>
 			Effect.gen(function* () {
@@ -200,10 +200,10 @@ describe("subscribeApprovals", () => {
 				expect(sequences).toEqual([...sequences].sort((a, b) => a - b));
 				expect(new Set(sequences).size).toBe(3);
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(Effect.provide(makeLayer())),
+			}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"serves the whole project: a subagent's approval needs no membership",
 		() =>
 			Effect.gen(function* () {
@@ -219,10 +219,10 @@ describe("subscribeApprovals", () => {
 					_tag: "upsert",
 					item: { requestId: "perm-child", sessionId: "child" },
 				});
-			}).pipe(Effect.provide(makeLayer())),
+			}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 
-	it.scoped("deleting a session removes the approvals it was holding", () =>
+	it.effect("deleting a session removes the approvals it was holding", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			const q = yield* open;
@@ -240,6 +240,6 @@ describe("subscribeApprovals", () => {
 				_tag: "remove",
 				id: "que-d",
 			});
-		}).pipe(Effect.provide(makeLayer())),
+		}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 });

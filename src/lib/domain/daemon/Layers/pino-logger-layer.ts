@@ -4,8 +4,9 @@
 // so entity IDs (sessionId, cmd, component, etc.) appear in structured output.
 // Effect log spans are forwarded as a "span" binding.
 
-import { Cause, HashMap, type Layer, List, Logger, Option } from "effect";
+import { type Layer, Logger, References } from "effect";
 import type { Logger as PinoLogger } from "pino";
+import * as Failure from "../../../effect/failure-classification.js";
 
 /**
  * Create a Layer that replaces Effect's default logger with one that routes
@@ -30,33 +31,28 @@ const formatPart = (part: unknown): string => {
 };
 
 export const makePinoLoggerLive = (pino: PinoLogger): Layer.Layer<never> =>
-	Logger.replace(
-		Logger.defaultLogger,
-		Logger.make(({ logLevel, message, annotations, spans, cause }) => {
+	Logger.layer([
+		Logger.tracerLogger,
+		Logger.make(({ logLevel, message, fiber, cause }) => {
 			// message is an array of parts — join them into a single string
 			const text = Array.isArray(message)
 				? message.map(formatPart).join(" ")
 				: formatPart(message);
 
-			// Convert Effect annotations HashMap to a plain object for Pino bindings
-			const bindings: Record<string, unknown> = {};
-			HashMap.forEach(annotations, (value, key) => {
-				bindings[key] = value;
-			});
+			const bindings: Record<string, unknown> = {
+				...fiber.getRef(References.CurrentLogAnnotations),
+			};
 
 			// Add the most recent span label if present
-			if (!List.isNil(spans)) {
-				const lastOpt = List.last(spans);
-				if (Option.isSome(lastOpt)) {
-					bindings["span"] = lastOpt.value.label;
-				}
-			}
+			const spans = fiber.getRef(References.CurrentLogSpans);
+			const lastSpan = spans[spans.length - 1];
+			if (lastSpan !== undefined) bindings["span"] = lastSpan[0];
 
 			// Create child logger with bindings, or use root if no bindings
 			const hasBindings = Object.keys(bindings).length > 0;
 			const target = hasBindings ? pino.child(bindings) : pino;
 
-			switch (logLevel._tag) {
+			switch (logLevel) {
 				case "Debug":
 				case "Trace":
 					target.debug(text);
@@ -64,13 +60,13 @@ export const makePinoLoggerLive = (pino: PinoLogger): Layer.Layer<never> =>
 				case "Info":
 					target.info(text);
 					break;
-				case "Warning":
+				case "Warn":
 					target.warn(text);
 					break;
 				case "Error":
 				case "Fatal":
-					if (!Cause.isEmpty(cause)) {
-						target.error({ err: Cause.pretty(cause) }, text);
+					if (!Failure.isEmpty(cause)) {
+						target.error({ err: Failure.renderCause(cause) }, text);
 					} else {
 						target.error(text);
 					}
@@ -79,7 +75,7 @@ export const makePinoLoggerLive = (pino: PinoLogger): Layer.Layer<never> =>
 					target.info(text);
 			}
 		}),
-	);
+	]);
 
 // Uses the existing Pino logger infrastructure with an "effect" tag.
 

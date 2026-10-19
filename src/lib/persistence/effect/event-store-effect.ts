@@ -1,8 +1,8 @@
 // All database operations are Effect programs using @effect/sql template literal queries.
 
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect, Schema } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import type { CanonicalEvent, StoredEvent } from "../events.js";
 import { CanonicalEventSchema } from "../events.js";
@@ -14,9 +14,26 @@ import {
 export class EventStoreError extends Data.TaggedError("EventStoreError")<{
 	readonly operation: string;
 	readonly cause: unknown;
+	readonly sessionId?: string;
+	readonly projectId?: string;
+	readonly ownerProjectId?: string;
 }> {}
 
 const DEFAULT_READ_LIMIT = 1000;
+// 9 bound values a row stays far below SQLite's 32766-variable limit.
+const APPEND_CHUNK_ROWS = 500;
+
+/** OpenCode asks are deduplicated by request id rather than event id. */
+const openCodeRequestId = (event: CanonicalEvent): string | undefined =>
+	event.provider === "opencode" &&
+	(event.type === "permission.asked" || event.type === "question.asked")
+		? event.data.id
+		: undefined;
+
+const isOpenCodeSeed = (event: CanonicalEvent): boolean =>
+	event.type === "session.created" &&
+	event.provider === "opencode" &&
+	event.eventId === `evt_opencode_session_created_${event.sessionId}`;
 
 export interface EventStoreEffect {
 	readonly projectId: string;
@@ -49,10 +66,10 @@ export interface EventStoreEffect {
 	) => Effect.Effect<number, EventStoreError | SqlError>;
 }
 
-export class EventStoreEffectTag extends Context.Tag("EventStoreEffect")<
+export class EventStoreEffectTag extends Context.Service<
 	EventStoreEffectTag,
 	EventStoreEffect
->() {}
+>()("EventStoreEffect") {}
 
 const decodeEventStoreRow = (
 	row: StoredEventRow,
@@ -63,10 +80,10 @@ const decodeEventStoreRow = (
 			new EventStoreError({ operation: "decodeStoredEventRow", cause }),
 	);
 
-const validateCanonicalEvent = (
+export const validateCanonicalEvent = (
 	event: CanonicalEvent,
 ): Effect.Effect<void, EventStoreError> =>
-	Schema.decodeUnknown(CanonicalEventSchema)(event).pipe(
+	Schema.decodeUnknownEffect(CanonicalEventSchema)(event).pipe(
 		Effect.asVoid,
 		Effect.mapError(
 			(cause) =>
@@ -77,6 +94,25 @@ const validateCanonicalEvent = (
 export const makeEventStoreEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const { projectId } = yield* PersistenceProjectTag;
+	const assertSessionOwnership = (sessionIds: readonly string[]) =>
+		Effect.gen(function* () {
+			// Reserve SQLite's writer slot before reading ownership. A deferred
+			// read snapshot cannot upgrade after another connection commits.
+			yield* sql`UPDATE sessions SET project_id = project_id WHERE 0`;
+			for (const sessionId of new Set(sessionIds)) {
+				const [session] = yield* sql<{ project_id: string | null }>`
+					SELECT project_id FROM sessions WHERE id = ${sessionId}`;
+				// An unstamped row (NULL or '') has no owner yet; the provenance stamp claims it.
+				if (session?.project_id && session.project_id !== projectId)
+					return yield* new EventStoreError({
+						operation: "appendOwnership",
+						sessionId,
+						projectId,
+						ownerProjectId: session.project_id,
+						cause: `Project ${projectId} cannot append to session ${sessionId} owned by project ${session.project_id}`,
+					});
+			}
+		});
 
 	const getNextStreamVersion = (
 		sessionId: string,
@@ -108,15 +144,8 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 
 			const dataJson = JSON.stringify(event.data);
 			const metadataJson = JSON.stringify(event.metadata);
-			const requestId =
-				event.provider === "opencode" &&
-				(event.type === "permission.asked" || event.type === "question.asked")
-					? event.data.id
-					: undefined;
-			const isOpenCodeSessionSeed =
-				event.type === "session.created" &&
-				event.provider === "opencode" &&
-				event.eventId === `evt_opencode_session_created_${event.sessionId}`;
+			const requestId = openCodeRequestId(event);
+			const isOpenCodeSessionSeed = isOpenCodeSeed(event);
 
 			// Check request identity in the first write statement so independent
 			// SQLite connections cannot race a read snapshot into a write upgrade.
@@ -190,9 +219,10 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 		event: CanonicalEvent,
 	): Effect.Effect<StoredEvent, EventStoreError | SqlError> =>
 		sql.withTransaction(
-			appendInCurrentTransaction(event).pipe(
-				Effect.map(({ stored }) => stored),
-			),
+			Effect.gen(function* () {
+				yield* assertSessionOwnership([event.sessionId]);
+				return (yield* appendInCurrentTransaction(event)).stored;
+			}),
 		);
 
 	const appendBatch = (
@@ -202,23 +232,85 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 
 		return sql.withTransaction(
 			Effect.gen(function* () {
+				yield* assertSessionOwnership(events.map((event) => event.sessionId));
 				const results: StoredEvent[] = [];
+				// Plain events are inserted many rows per statement: inside a caller's
+				// transaction each statement runs in a savepoint, where a one-row
+				// insert costs several times the row itself. The writer slot is held,
+				// so these versions cannot race another connection.
+				const nextVersions = new Map<string, number>();
+				let pending: CanonicalEvent[] = [];
+				const flush = Effect.gen(function* () {
+					if (pending.length === 0) return;
+					const chunk = pending;
+					pending = [];
+					const rows = [];
+					for (const event of chunk) {
+						const version =
+							nextVersions.get(event.sessionId) ??
+							(yield* getNextStreamVersion(event.sessionId));
+						nextVersions.set(event.sessionId, version + 1);
+						rows.push({
+							project_id: projectId,
+							event_id: event.eventId,
+							session_id: event.sessionId,
+							stream_version: version,
+							type: event.type,
+							data: JSON.stringify(event.data),
+							metadata: JSON.stringify(event.metadata),
+							provider: event.provider,
+							created_at: event.createdAt,
+						});
+					}
+					const inserted = yield* sql<StoredEventRow>`
+						INSERT INTO events ${sql.insert(rows)}
+						RETURNING
+							project_id, sequence, event_id, session_id, stream_version,
+							type, data, metadata, provider, created_at`.pipe(
+						Effect.mapError(
+							(cause) => new EventStoreError({ operation: "append", cause }),
+						),
+					);
+					// RETURNING order is unspecified; sequence follows VALUES order.
+					for (const row of [...inserted].sort(
+						(a, b) => a.sequence - b.sequence,
+					))
+						results.push(yield* decodeEventStoreRow(row));
+				});
 				for (const event of events) {
-					if (
+					// Re-projecting a child seed would reset a renamed title. OpenCode
+					// seeds still return their stored row for projection recovery.
+					const skipIfStored =
 						event.type === "message.snapshot" ||
+						(event.type === "session.created" &&
+							event.provider === "claude" &&
+							event.data.parentId !== undefined) ||
 						(event.type === "session.compaction" &&
 							event.provider === "opencode" &&
-							event.data.state === "completed")
+							event.data.state === "completed");
+					if (
+						!skipIfStored &&
+						openCodeRequestId(event) === undefined &&
+						!isOpenCodeSeed(event)
 					) {
+						yield* validateCanonicalEvent(event);
+						pending.push(event);
+						if (pending.length === APPEND_CHUNK_ROWS) yield* flush;
+						continue;
+					}
+					yield* flush;
+					if (skipIfStored) {
 						const existing = yield* sql<{ sequence: number }>`
 							SELECT sequence FROM events WHERE event_id = ${event.eventId}`;
 						if (existing.length > 0) continue;
 					}
 					const { stored, duplicateAsk } =
 						yield* appendInCurrentTransaction(event);
+					nextVersions.delete(event.sessionId);
 					// Recovery must not project an already stored ask again.
 					if (!duplicateAsk) results.push(stored);
 				}
+				yield* flush;
 				return results;
 			}),
 		);

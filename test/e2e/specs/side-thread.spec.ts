@@ -4,9 +4,9 @@
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
-import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
+import { RpcClient, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import NodeWebSocket from "ws";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { readNativeThread } from "../../helpers/native-thread.js";
@@ -14,7 +14,6 @@ import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
-const projectSlug = "e2e-replay";
 const parentPrompt =
 	"Remember the word 'alpha'. Reply with only: ok, remembered.";
 const question =
@@ -98,8 +97,8 @@ function transcript(dbPath: string, sessionId: string) {
 async function parentSettings(relayUrl: string, sessionId: string) {
 	return rpc(relayUrl, (client) =>
 		Effect.gen(function* () {
-			const models = yield* client.GetModels({ projectSlug, sessionId });
-			const agents = yield* client.GetAgents({ projectSlug, sessionId });
+			const models = yield* client.GetModels({ sessionId });
+			const agents = yield* client.GetAgents({ sessionId });
 			return {
 				model: models.active,
 				permissionMode: models.permissionMode,
@@ -178,7 +177,6 @@ test.describe("OpenCode Side Threads", () => {
 			await rpc(relayUrl, (client) =>
 				Effect.gen(function* () {
 					const catalog = yield* client.GetModels({
-						projectSlug,
 						sessionId: parentId,
 					});
 					const alternate = catalog.providers
@@ -187,18 +185,15 @@ test.describe("OpenCode Side Threads", () => {
 					if (!alternate)
 						throw new Error("Recording needs a second OpenCode model");
 					yield* client.SwitchModel({
-						projectSlug,
 						sessionId: parentId,
 						providerId: "opencode",
 						modelId: alternate.id,
 					});
 					yield* client.SwitchAgent({
-						projectSlug,
 						sessionId: parentId,
 						agentId: "plan",
 					});
 					yield* client.SwitchPermissionMode({
-						projectSlug,
 						sessionId: parentId,
 						mode: "full",
 					});
@@ -240,7 +235,6 @@ test.describe("OpenCode Side Threads", () => {
 			expect(await parentSettings(relayUrl, parentId)).toEqual(settingsBefore);
 			const sideSettings = await rpc(relayUrl, (client) =>
 				client.GetModels({
-					projectSlug,
 					sessionId: sideId,
 				}),
 			);
@@ -338,24 +332,23 @@ test.describe("OpenCode Side Threads", () => {
 			}
 			const eventsBeforeNested = sessionEvents(harness.eventsDbPath);
 			const nested = await rpc(relayUrl, (client) =>
-				Effect.either(
+				Effect.result(
 					client.StartSideThread({
-						projectSlug,
-						parentSessionId: sideId,
+						sessionId: sideId,
 						title: "Nested question",
 						inputId: randomUUID(),
 						text: "Nested question",
 					}),
 				),
 			);
-			expect(nested._tag).toBe("Left");
-			if (nested._tag !== "Left")
+			expect(nested._tag).toBe("Failure");
+			if (nested._tag !== "Failure")
 				throw new Error("Nested Side Thread was created");
-			expect(nested.left).toBeInstanceOf(WsRpcError);
-			if (!(nested.left instanceof WsRpcError))
+			expect(nested.failure).toBeInstanceOf(WsRpcError);
+			if (!(nested.failure instanceof WsRpcError))
 				throw new Error("Nested start failed outside the typed RPC contract");
-			expect(nested.left._tag).toBe("WsRpcError");
-			expect(nested.left.message).toBe(
+			expect(nested.failure._tag).toBe("WsRpcError");
+			expect(nested.failure.message).toBe(
 				"Cannot start a Side Thread from a Side Thread",
 			);
 			expect(sessionEvents(harness.eventsDbPath)).toEqual(eventsBeforeNested);
@@ -476,24 +469,23 @@ test.describe("OpenCode Side Threads", () => {
 		await new AppPage(page).goto(relayUrl);
 		const before = sessionEvents(harness.eventsDbPath);
 		const result = await rpc(relayUrl, (client) =>
-			Effect.either(
+			Effect.result(
 				client.StartSideThread({
-					projectSlug,
-					parentSessionId: "missing-side-thread-parent",
+					sessionId: "missing-side-thread-parent",
 					title: question,
 					inputId: randomUUID(),
 					text: question,
 				}),
 			),
 		);
-		expect(result._tag).toBe("Left");
-		if (result._tag !== "Left")
+		expect(result._tag).toBe("Failure");
+		if (result._tag !== "Failure")
 			throw new Error("Missing parent started a Side Thread");
-		expect(result.left).toBeInstanceOf(WsRpcError);
-		if (!(result.left instanceof WsRpcError))
+		expect(result.failure).toBeInstanceOf(WsRpcError);
+		if (!(result.failure instanceof WsRpcError))
 			throw new Error("Missing parent failed outside the typed RPC contract");
-		expect(result.left._tag).toBe("WsRpcError");
-		expect(result.left.message).toBe(
+		expect(result.failure._tag).toBe("WsRpcError");
+		expect(result.failure.message).toBe(
 			"Parent session missing-side-thread-parent was not found",
 		);
 		expect(sessionEvents(harness.eventsDbPath)).toEqual(before);
@@ -550,13 +542,12 @@ test.describe("Claude Side Threads", () => {
 				// A non-default mode, so a leak from the Side Thread cannot pass.
 				await rpc(relayUrl, (client) =>
 					client.SwitchPermissionMode({
-						projectSlug,
 						sessionId: parentId,
 						mode: "full",
 					}),
 				);
 				const settingsBefore = await rpc(relayUrl, (client) =>
-					client.GetModels({ projectSlug, sessionId: parentId }),
+					client.GetModels({ sessionId: parentId }),
 				).then(({ active, permissionMode }) => ({ active, permissionMode }));
 				expect(settingsBefore.permissionMode).toBe("full");
 				const parentTranscript = transcript(harness.eventsDbPath, parentId);
@@ -587,7 +578,7 @@ test.describe("Claude Side Threads", () => {
 					page.locator(`#session-list [data-session-id="${sideId}"]`),
 				).toHaveCount(0);
 				const sideSettings = await rpc(relayUrl, (client) =>
-					client.GetModels({ projectSlug, sessionId: sideId }),
+					client.GetModels({ sessionId: sideId }),
 				);
 				expect(sideSettings.permissionMode).toBe("ask");
 				// The Side Thread asked for Ask ("default"), not the parent's "full".
@@ -661,7 +652,7 @@ test.describe("Claude Side Threads", () => {
 				);
 				expect(
 					await rpc(relayUrl, (client) =>
-						client.GetModels({ projectSlug, sessionId: parentId }),
+						client.GetModels({ sessionId: parentId }),
 					).then(({ active, permissionMode }) => ({ active, permissionMode })),
 				).toEqual(settingsBefore);
 				await expect(
@@ -694,6 +685,115 @@ test.describe("Claude Side Threads", () => {
 			await expect(app.input).toHaveValue(text);
 			await expect(page).toHaveURL(new RegExp(`/s/${parentId}(?:\\?|$)`));
 			expect(sessionEvents(harness.eventsDbPath)).toEqual(before);
+		});
+	});
+
+	test.describe("before its first output", () => {
+		// Held mid auto-compaction: a long parent's inherited context makes the
+		// first turn compact before it says anything.
+		test.use({
+			claudeReplay: {
+				turns: ["pong-thinking-text-turn", "side-thread-compacting-turn"],
+				holdBefore: { turn: 2, message: 11 },
+			},
+		});
+
+		test("shows the Side Thread working, live and after a reload", async ({
+			page,
+			relayUrl,
+			harness,
+		}) => {
+			const app = new AppPage(page);
+			const chat = new ChatPage(page);
+			await app.goto(relayUrl);
+			const parentId = new URL(page.url()).pathname.split("/").at(-1);
+			await app.sendMessage(parentPrompt);
+			await expect(chat.assistantMessages).toHaveText([/pong/i]);
+			await chat.waitForStreamingComplete();
+			await expect
+				.poll(
+					async () =>
+						(await readNativeThread(harness.eventsDbPath, parentId ?? ""))
+							?.resumeSessionId,
+				)
+				.toBeTruthy();
+
+			await app.sendMessage(`$side ${question}`);
+			await expect(page).not.toHaveURL(new RegExp(`/s/${parentId}(?:\\?|$)`));
+			await harness.claudeReplayer?.held();
+			const compacting = page.getByText("Compacting conversation…");
+			await expect(
+				chat.userMessages.filter({ hasText: question }),
+			).toBeVisible();
+			await expect(chat.stopBtn).toBeVisible();
+			await expect(compacting).toBeVisible();
+
+			await page.reload();
+			await expect(
+				chat.userMessages.filter({ hasText: question }),
+			).toBeVisible();
+			await expect(chat.stopBtn).toBeVisible();
+			await expect(compacting).toBeVisible();
+
+			harness.claudeReplayer?.release();
+			await expect(chat.assistantMessages.last()).toContainText(/alpha/i);
+			await chat.waitForStreamingComplete();
+		});
+	});
+
+	test.describe("started while its parent is answering", () => {
+		test.use({
+			claudeReplay: {
+				turns: [
+					"pong-thinking-text-turn",
+					"pong-thinking-text-turn",
+					"side-thread-compacting-turn",
+				],
+				holdBefore: [
+					{ turn: 2, message: 10 },
+					{ turn: 3, message: 11 },
+				],
+			},
+		});
+
+		test("shows the Side Thread working", async ({
+			page,
+			relayUrl,
+			harness,
+		}) => {
+			const app = new AppPage(page);
+			const chat = new ChatPage(page);
+			await app.goto(relayUrl);
+			const parentId = new URL(page.url()).pathname.split("/").at(-1);
+			await app.sendMessage(parentPrompt);
+			await expect(chat.assistantMessages).toHaveText([/pong/i]);
+			await chat.waitForStreamingComplete();
+			await expect
+				.poll(
+					async () =>
+						(await readNativeThread(harness.eventsDbPath, parentId ?? ""))
+							?.resumeSessionId,
+				)
+				.toBeTruthy();
+			await app.sendMessage(parentPrompt);
+			await harness.claudeReplayer?.held();
+			await expect(chat.stopBtn).toBeVisible();
+
+			await app.sendMessage(`$side ${question}`);
+			await expect(page).not.toHaveURL(new RegExp(`/s/${parentId}(?:\\?|$)`));
+			await expect(
+				chat.userMessages.filter({ hasText: question }),
+			).toBeVisible();
+			await expect(chat.stopBtn).toBeVisible();
+			await page.reload();
+			await expect(
+				chat.userMessages.filter({ hasText: question }),
+			).toBeVisible();
+			await expect(chat.stopBtn).toBeVisible();
+
+			harness.claudeReplayer?.release();
+			harness.claudeReplayer?.release();
+			await expect(chat.assistantMessages.last()).toContainText(/alpha/i);
 		});
 	});
 });

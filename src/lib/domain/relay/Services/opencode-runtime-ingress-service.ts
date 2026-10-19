@@ -1,8 +1,9 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
-import { Cause, Context, Effect, type Fiber, FiberId } from "effect";
+import { Context, Effect, type Fiber, References, Semaphore } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../../errors.js";
 import type { Message } from "../../../instance/sdk-types.js";
 import {
@@ -24,6 +25,7 @@ import {
 } from "../../../provider/opencode/opencode-runtime-event-translator.js";
 import type { TurnSettings } from "../../../provider/turn-settings.js";
 import type { SSEEvent } from "../../../relay/opencode-events.js";
+import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
 import {
 	canSeedSession,
 	type ProviderRuntimeIngestion,
@@ -40,7 +42,12 @@ export interface OpenCodeRuntimeIngressLog {
 }
 
 export type OpenCodeRuntimeIngressResult =
-	| { ok: true; eventsWritten: number; sessionSeeded: boolean }
+	| {
+			ok: true;
+			eventsWritten: number;
+			sessionSeeded: boolean;
+			prompt?: { readonly id: string; readonly status: string };
+	  }
 	| {
 			ok: false;
 			reason: "no-session" | "not-translatable" | "error";
@@ -59,6 +66,7 @@ export interface EffectOpenCodeRuntimeIngressPort {
 		event: SSEEvent,
 		sessionId: string | undefined,
 		providerInstanceId: string,
+		providerProcessId?: string,
 	): Effect.Effect<OpenCodeRuntimeIngressResult>;
 	onReconnect(providerInstanceId?: string): Effect.Effect<void, SqlError>;
 	onInstanceStopped(
@@ -73,23 +81,23 @@ export interface EffectOpenCodeRuntimeIngressPort {
 	stopStatsLogging(): void;
 }
 
-export class OpenCodeHistoryReconcileTag extends Context.Tag(
-	"OpenCodeHistoryReconcile",
-)<
+export class OpenCodeHistoryReconcileTag extends Context.Service<
 	OpenCodeHistoryReconcileTag,
 	{ reconcileSession(sessionId: string): Effect.Effect<void> }
->() {}
+>()("OpenCodeHistoryReconcile") {}
 
-export class OpenCodeSessionCreationGateTag extends Context.Tag(
-	"OpenCodeSessionCreationGate",
-)<OpenCodeSessionCreationGateTag, Effect.Semaphore>() {}
+export class OpenCodeSessionCreationGateTag extends Context.Service<
+	OpenCodeSessionCreationGateTag,
+	Semaphore.Semaphore
+>()("OpenCodeSessionCreationGate") {}
 
 export interface EffectOpenCodeRuntimeIngressOptions {
+	readonly projectId: string;
 	readonly sql: SqlClient.SqlClient;
 	readonly projectionRunner: ProjectionRunnerEffect;
 	readonly ingestion: ProviderRuntimeIngestion;
 	readonly log: OpenCodeRuntimeIngressLog;
-	readonly sessionCreationGate?: Effect.Semaphore;
+	readonly sessionCreationGate?: Semaphore.Semaphore;
 	/** The provider's REST record of a session, for the first-sighting history
 	 *  backfill. Without it a session projects only what Conduit observes. */
 	readonly fetchSessionMessages?: (
@@ -118,6 +126,7 @@ const BACKFILL_PENDING_MAX_ATTEMPTS = 3;
 
 type StoredMessage = {
 	id: string;
+	is_inherited: number;
 	rest_digest: string | null;
 	rest_event_id: string | null;
 };
@@ -147,6 +156,7 @@ export class EffectOpenCodeRuntimeIngress
 	implements EffectOpenCodeRuntimeIngressPort
 {
 	private readonly sql: SqlClient.SqlClient;
+	private readonly projectId: string;
 	private readonly projectionRunner: ProjectionRunnerEffect;
 	private readonly ingestion: ProviderRuntimeIngestion;
 	private readonly retryingOf:
@@ -170,10 +180,10 @@ export class EffectOpenCodeRuntimeIngress
 	/** One permit per session. Provider callbacks for a session overlap, and
 	 *  translation state may only advance once the events it produced have
 	 *  committed, so translate → persist → keep runs as one critical section. */
-	private readonly sessionGates = new Map<string, Effect.Semaphore>();
-	private readonly sessionCreationGate: Effect.Semaphore;
+	private readonly sessionGates = new Map<string, Semaphore.Semaphore>();
+	private readonly sessionCreationGate: Semaphore.Semaphore;
 	private readonly backfillFetchPermits =
-		Effect.unsafeMakeSemaphore(BACKFILL_CONCURRENCY);
+		Semaphore.makeUnsafe(BACKFILL_CONCURRENCY);
 	/** Sessions whose history was reconciled with the provider's REST record
 	 *  since the stream last (re)connected. Unlike seenSessions it is cleared
 	 *  on reconnect, so the next event of each session backfills the gap. */
@@ -190,10 +200,7 @@ export class EffectOpenCodeRuntimeIngress
 	private readonly backfillsInFlight = new Set<string>();
 	private readonly historyRevisions = new Map<string, number>();
 	private readonly backfillControllers = new Map<string, AbortController>();
-	private readonly backfillFibers = new Map<
-		string,
-		Fiber.RuntimeFiber<void, never>
-	>();
+	private readonly backfillFibers = new Map<string, Fiber.Fiber<void, never>>();
 
 	private stats: OpenCodeRuntimeIngressStats = {
 		eventsReceived: 0,
@@ -206,6 +213,7 @@ export class EffectOpenCodeRuntimeIngress
 
 	constructor(opts: EffectOpenCodeRuntimeIngressOptions) {
 		this.sql = opts.sql;
+		this.projectId = opts.projectId;
 		this.projectionRunner = opts.projectionRunner;
 		this.ingestion = opts.ingestion;
 		this.retryingOf = opts.retryingOf;
@@ -214,7 +222,7 @@ export class EffectOpenCodeRuntimeIngress
 		this.selectedInstanceId =
 			opts.selectedInstanceId ?? MANAGED_OPENCODE_ACCOUNT_ID;
 		this.sessionCreationGate =
-			opts.sessionCreationGate ?? Effect.unsafeMakeSemaphore(1);
+			opts.sessionCreationGate ?? Semaphore.makeUnsafe(1);
 		this.fetchSessionMessages = opts.fetchSessionMessages;
 		this.translator = new OpenCodeRuntimeEventTranslator(
 			undefined,
@@ -232,7 +240,7 @@ export class EffectOpenCodeRuntimeIngress
 		events: readonly ProviderRuntimeEvent[],
 		options?: Parameters<ProviderRuntimeIngestion["ingestBatch"]>[1],
 	): Effect.Effect<number, ProviderRuntimeIngestionError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const picks = new Map<string, TurnSettings>();
 			for (const event of events) {
 				if (event.type !== "session.created" || !this.resolveSessionPick)
@@ -251,10 +259,10 @@ export class EffectOpenCodeRuntimeIngress
 		});
 	}
 
-	private sessionGate(sessionId: string): Effect.Semaphore {
+	private sessionGate(sessionId: string): Semaphore.Semaphore {
 		const existing = this.sessionGates.get(sessionId);
 		if (existing) return existing;
-		const gate = Effect.unsafeMakeSemaphore(1);
+		const gate = Semaphore.makeUnsafe(1);
 		this.sessionGates.set(sessionId, gate);
 		return gate;
 	}
@@ -289,7 +297,8 @@ export class EffectOpenCodeRuntimeIngress
 			Effect.flatMap(
 				SqlClient.SqlClient,
 				(sql) =>
-					sql`UPDATE sessions SET history_complete = 0 WHERE id = ${sessionId}`,
+					sql`UPDATE sessions SET history_complete = 0
+						WHERE id = ${sessionId} AND project_id = ${this.projectId}`,
 			),
 		).pipe(Effect.asVoid);
 	}
@@ -305,7 +314,8 @@ export class EffectOpenCodeRuntimeIngress
 				SqlClient.SqlClient,
 				(sql) =>
 					sql<{ history_complete: number }>`
-					SELECT history_complete FROM sessions WHERE id = ${sessionId}`,
+					SELECT history_complete FROM sessions
+					WHERE id = ${sessionId} AND project_id = ${this.projectId}`,
 			),
 		).pipe(
 			Effect.tap((rows) =>
@@ -329,10 +339,10 @@ export class EffectOpenCodeRuntimeIngress
 		)
 			return Effect.void;
 		this.backfillsInFlight.add(sessionId);
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const retry = this.backfillRetries.get(sessionId);
 			const delay = Math.max(0, (retry?.after ?? 0) - Date.now());
-			const fiber = yield* Effect.gen(this, function* () {
+			const fiber = yield* Effect.gen({ self: this }, function* () {
 				if (delay > 0) yield* Effect.sleep(delay);
 				if (
 					this.sessionInstanceIds.get(sessionId) !== providerInstanceId ||
@@ -344,7 +354,7 @@ export class EffectOpenCodeRuntimeIngress
 					providerInstanceId,
 					this.reconnectGenerations.get(providerInstanceId) ?? 0,
 				);
-			}).pipe(Effect.forkDaemon);
+			}).pipe(Effect.forkDetach({ uninterruptible: "inherit" }));
 			if (this.backfillsInFlight.has(sessionId))
 				this.backfillFibers.set(sessionId, fiber);
 		});
@@ -352,15 +362,15 @@ export class EffectOpenCodeRuntimeIngress
 
 	private hasProjectedSession(sessionId: string): Effect.Effect<boolean> {
 		return this.withSql(
-			Effect.gen(function* () {
+			Effect.gen({ self: this }, function* () {
 				const sql = yield* SqlClient.SqlClient;
 				const rows = yield* sql<{ id: string }>`
 					SELECT id FROM sessions
-					WHERE id = ${sessionId}
+					WHERE id = ${sessionId} AND project_id = ${this.projectId}
 					LIMIT 1`;
 				return rows.length > 0;
 			}),
-		).pipe(Effect.catchAllCause(() => Effect.succeed(false)));
+		).pipe(Effect.catchCause(() => Effect.succeed(false)));
 	}
 
 	private backfill(
@@ -370,13 +380,14 @@ export class EffectOpenCodeRuntimeIngress
 	): Effect.Effect<void> {
 		const fetchSessionMessages = this.fetchSessionMessages;
 		if (!fetchSessionMessages) return Effect.void;
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const historyRevision = this.historyRevisions.get(sessionId) ?? 0;
 			yield* this.withSql(
 				Effect.flatMap(
 					SqlClient.SqlClient,
 					(sql) =>
-						sql`UPDATE sessions SET history_complete = 0 WHERE id = ${sessionId}`,
+						sql`UPDATE sessions SET history_complete = 0
+							WHERE id = ${sessionId} AND project_id = ${this.projectId}`,
 				),
 			);
 			const controller = new AbortController();
@@ -388,9 +399,10 @@ export class EffectOpenCodeRuntimeIngress
 						providerInstanceId,
 						controller.signal,
 					).pipe(
-						Effect.timeoutFail({
+						Effect.timeoutOrElse({
 							duration: BACKFILL_TIMEOUT,
-							onTimeout: () => new Error(`timed out after ${BACKFILL_TIMEOUT}`),
+							orElse: () =>
+								Effect.fail(new Error(`timed out after ${BACKFILL_TIMEOUT}`)),
 						}),
 					),
 				)
@@ -417,7 +429,7 @@ export class EffectOpenCodeRuntimeIngress
 				),
 			);
 		}).pipe(
-			Effect.catchAllCause((cause) =>
+			Effect.catchCause((cause) =>
 				Effect.sync(() => {
 					if (
 						this.stopped ||
@@ -433,12 +445,12 @@ export class EffectOpenCodeRuntimeIngress
 					this.deferBackfill(sessionId);
 					this.log.warn(
 						"opencode-runtime-ingress: history backfill failed, retry scheduled",
-						{ sessionId, error: Cause.pretty(cause) },
+						{ sessionId, error: Failure.renderCause(cause) },
 					);
 				}),
 			),
 			Effect.ensuring(
-				Effect.gen(this, function* () {
+				Effect.gen({ self: this }, function* () {
 					this.backfillsInFlight.delete(sessionId);
 					this.backfillFibers.delete(sessionId);
 					const current =
@@ -487,7 +499,7 @@ export class EffectOpenCodeRuntimeIngress
 		generation: number,
 		historyRevision: number,
 	): Effect.Effect<void, unknown> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			if (
 				this.stopped ||
 				this.sessionInstanceIds.get(sessionId) !== providerInstanceId ||
@@ -500,8 +512,32 @@ export class EffectOpenCodeRuntimeIngress
 				Effect.flatMap(
 					SqlClient.SqlClient,
 					(sql) =>
-						sql<StoredMessage>`SELECT id, rest_digest, rest_event_id FROM messages WHERE session_id = ${sessionId}`,
+						sql<StoredMessage>`SELECT id, is_inherited, rest_digest, rest_event_id FROM messages WHERE session_id = ${sessionId}`,
 				),
+			);
+			// Native forks can arrive before their boundary row is projected. Resolve
+			// the copied provider history once per REST batch, then persist the fact.
+			const [fork] = yield* this.sql<{
+				fork_point_event: string | null;
+				fork_point_timestamp: number | null;
+			}>`
+				SELECT fork_point_event, fork_point_timestamp FROM sessions WHERE id = ${sessionId}`;
+			const boundary = rest.find(({ id }) => id === fork?.fork_point_event);
+			const boundaryTime =
+				boundary?.time?.created ?? fork?.fork_point_timestamp;
+			const inherited = new Set(
+				rest
+					.filter((message) => {
+						const created = message.time?.created;
+						return (
+							boundaryTime != null &&
+							created != null &&
+							(created < boundaryTime ||
+								(created === boundaryTime &&
+									message.id <= (fork?.fork_point_event ?? "")))
+						);
+					})
+					.map(({ id }) => id),
 			);
 			const stored = new Map(projected.map((row) => [row.id, row]));
 			const settled = rest.filter(isSettled);
@@ -511,15 +547,24 @@ export class EffectOpenCodeRuntimeIngress
 			const events: ProviderRuntimeEvent[] = settled
 				.filter(
 					(message) =>
-						stored.get(message.id)?.rest_digest !== digests.get(message.id),
+						stored.get(message.id)?.rest_digest !== digests.get(message.id) ||
+						(inherited.has(message.id) &&
+							stored.get(message.id)?.is_inherited !== 1),
 				)
-				.map((message) =>
-					synthesizeSnapshotEvent(
+				.map((message) => {
+					const snapshot = synthesizeSnapshotEvent(
 						sessionId,
 						message,
 						stored.get(message.id)?.rest_event_id ?? undefined,
-					),
-				);
+					);
+					return inherited.has(message.id)
+						? {
+								...snapshot,
+								eventId: `${snapshot.eventId}_inherited`,
+								metadata: { inherited: true },
+							}
+						: snapshot;
+				});
 			// Even an unchanged snapshot may predate compaction ingestion. Always
 			// offer the summary outcome; append deduplicates its durable message ID.
 			for (const message of settled) {
@@ -555,7 +600,7 @@ export class EffectOpenCodeRuntimeIngress
 			yield* this.ingestBatch(events, {
 				publishToRelay: false,
 				beforeCommit: this.withSql(
-					Effect.gen(this, function* () {
+					Effect.gen({ self: this }, function* () {
 						const sql = yield* SqlClient.SqlClient;
 						const rows = yield* sql<StoredMessage>`
 						SELECT id, rest_digest, rest_event_id FROM messages
@@ -572,7 +617,8 @@ export class EffectOpenCodeRuntimeIngress
 							);
 						// This flag caches the REST reconciliation proof. Rebuilding the
 						// read model from events resets it to 0 until the next sighting.
-						yield* sql`UPDATE sessions SET history_complete = ${complete ? 1 : 0} WHERE id = ${sessionId}`;
+						yield* sql`UPDATE sessions SET history_complete = ${complete ? 1 : 0}
+							WHERE id = ${sessionId} AND project_id = ${this.projectId}`;
 						if (
 							this.stopped ||
 							this.sessionInstanceIds.get(sessionId) !== providerInstanceId ||
@@ -586,7 +632,12 @@ export class EffectOpenCodeRuntimeIngress
 						}
 					}),
 				),
-			}).pipe(Effect.withMaxOpsBeforeYield(Number.MAX_SAFE_INTEGER));
+			}).pipe(
+				Effect.provideService(
+					References.MaxOpsBeforeYield,
+					Number.MAX_SAFE_INTEGER,
+				),
+			);
 			if (
 				!this.stopped &&
 				this.sessionInstanceIds.get(sessionId) === providerInstanceId &&
@@ -617,8 +668,9 @@ export class EffectOpenCodeRuntimeIngress
 		event: SSEEvent,
 		sessionId: string | undefined,
 		providerInstanceId: string,
+		providerProcessId?: string,
 	): Effect.Effect<OpenCodeRuntimeIngressResult> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			this.stats.eventsReceived++;
 
 			if (!sessionId) {
@@ -636,11 +688,12 @@ export class EffectOpenCodeRuntimeIngress
 			}
 			this.sessionInstanceIds.set(sessionId, providerInstanceId);
 			const result = yield* this.sessionGate(sessionId).withPermits(1)(
-				Effect.gen(this, function* () {
+				Effect.gen({ self: this }, function* () {
 					const ingest = this.ingestSessionEvent(
 						event,
 						sessionId,
 						providerInstanceId,
+						providerProcessId,
 					);
 					if (
 						this.seenSessions.has(sessionId) ||
@@ -655,7 +708,7 @@ export class EffectOpenCodeRuntimeIngress
 			if (event.type === "session.deleted") this.removeSession(sessionId);
 			return result;
 		}).pipe(
-			Effect.catchAll((err: unknown) =>
+			Effect.catch((err: unknown) =>
 				Effect.sync(() => {
 					this.stats.errors++;
 					const detail = formatErrorDetail(err);
@@ -674,8 +727,9 @@ export class EffectOpenCodeRuntimeIngress
 		event: SSEEvent,
 		sessionId: string,
 		providerInstanceId: string,
+		providerProcessId?: string,
 	): Effect.Effect<OpenCodeRuntimeIngressResult, unknown> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			if (yield* this.withSql(isSessionDeleted(sessionId))) {
 				this.removeSession(sessionId);
 				this.stats.eventsSkipped++;
@@ -804,7 +858,17 @@ export class EffectOpenCodeRuntimeIngress
 							),
 						]
 					: []),
-				...translated,
+				...translated.map((runtimeEvent) =>
+					providerProcessId
+						? {
+								...runtimeEvent,
+								providerRefs: {
+									...runtimeEvent.providerRefs,
+									providerProcessId,
+								},
+							}
+						: runtimeEvent,
+				),
 			];
 			// Persist and signal committed events to SessionEventBus, but never
 			// publish to the relay. The legacy SSE translator (sse-wiring.ts) is
@@ -825,7 +889,7 @@ export class EffectOpenCodeRuntimeIngress
 				...(translation.droppedRewrite
 					? { beforeCommit: this.invalidateHistory(sessionId) }
 					: {}),
-				afterCommit: Effect.gen(this, function* () {
+				afterCommit: Effect.gen({ self: this }, function* () {
 					this.translator.commitSession(sessionId, translation);
 					if (translation.droppedRewrite) this.syncedSessions.delete(sessionId);
 					if (
@@ -837,6 +901,26 @@ export class EffectOpenCodeRuntimeIngress
 					}
 				}),
 			});
+			const promptProperties: Record<string, unknown> = event.properties;
+			const providerRequestId =
+				typeof promptProperties["requestID"] === "string"
+					? promptProperties["requestID"]
+					: promptProperties["id"];
+			const prompt =
+				providerProcessId &&
+				typeof providerRequestId === "string" &&
+				(event.type.startsWith("permission.") ||
+					event.type.startsWith("question."))
+					? (yield* this.withSql(
+							this.sql<{ id: string; status: string }>`
+								SELECT id, status FROM pending_approvals
+								WHERE session_id = ${sessionId}
+									AND ((provider_process_id = ${providerProcessId}
+										AND provider_request_id = ${providerRequestId})
+										OR (id = ${providerRequestId} AND provider_process_id IS NULL))
+								ORDER BY provider_process_id IS NOT NULL DESC LIMIT 1`,
+						))[0]
+					: undefined;
 
 			yield* this.refreshSyncedSession(sessionId, event);
 			if (
@@ -856,6 +940,7 @@ export class EffectOpenCodeRuntimeIngress
 
 			return {
 				ok: true,
+				...(prompt ? { prompt } : {}),
 				eventsWritten: written,
 				sessionSeeded,
 			} satisfies OpenCodeRuntimeIngressResult;
@@ -868,7 +953,7 @@ export class EffectOpenCodeRuntimeIngress
 		isCurrent: () => boolean,
 	): Effect.Effect<void> {
 		return this.withSql(
-			Effect.gen(this, function* () {
+			Effect.gen({ self: this }, function* () {
 				if (this.stopped || !isCurrent()) return;
 				const sql = yield* SqlClient.SqlClient;
 				const defaultId = MANAGED_OPENCODE_ACCOUNT_ID;
@@ -882,7 +967,8 @@ export class EffectOpenCodeRuntimeIngress
 					provider: string;
 					status: string;
 				}>`
-					SELECT id, provider, status FROM sessions WHERE provider IN ${sql.in(instanceIds)}`;
+					SELECT id, provider, status FROM sessions
+					WHERE project_id = ${this.projectId} AND provider IN ${sql.in(instanceIds)}`;
 				for (const {
 					id: sessionId,
 					provider: boundInstanceId,
@@ -895,24 +981,22 @@ export class EffectOpenCodeRuntimeIngress
 					)
 						continue;
 					yield* this.sessionGate(sessionId).withPermits(1)(
-						Effect.gen(this, function* () {
+						Effect.gen({ self: this }, function* () {
 							if (this.stopped || !isCurrent()) return;
-							// An in-flight event may have changed the binding or added an ask
-							// while this stop waited for the session's ingestion gate.
+							// Recheck the binding after waiting for the ingestion gate. A
+							// confirmed stopped process cannot keep processing, even if its
+							// prompts still await expiration when a replacement connects.
 							const rows = yield* sql<{
 								provider_sid: string | null;
 								status: string;
 							}>`
 								SELECT s.provider_sid, s.status FROM sessions s
-								WHERE s.id = ${sessionId} AND s.provider = ${boundInstanceId}
+								WHERE s.id = ${sessionId} AND s.project_id = ${this.projectId}
+									AND s.provider = ${boundInstanceId}
 									AND EXISTS (
 										SELECT 1 FROM session_providers sp
 											WHERE sp.session_id = s.id AND sp.provider = ${boundInstanceId}
-											AND sp.status = 'active')
-									AND NOT EXISTS (
-										SELECT 1 FROM pending_approvals pa
-										WHERE pa.session_id = s.id AND pa.status = 'pending'
-											AND pa.type IN ('permission', 'question'))`;
+											AND sp.status = 'active')`;
 							const row = rows[0];
 							if (
 								!row ||
@@ -955,7 +1039,7 @@ export class EffectOpenCodeRuntimeIngress
 				}
 			}),
 		).pipe(
-			Effect.catchAll((cause) =>
+			Effect.catch((cause) =>
 				Effect.sync(() =>
 					this.log.warn("Failed to settle stopped OpenCode sessions", {
 						providerInstanceId,
@@ -992,15 +1076,19 @@ export class EffectOpenCodeRuntimeIngress
 		}
 		this.log.info("opencode-runtime-ingress: translator reset on reconnect");
 		return this.withSql(
-			Effect.gen(this, function* () {
+			Effect.gen({ self: this }, function* () {
 				const sql = yield* SqlClient.SqlClient;
 				for (const [sessionId, instanceId] of this.sessionInstanceIds) {
 					if (!instances.has(instanceId)) continue;
 					yield* this.sessionGate(sessionId).withPermits(1)(
-						Effect.gen(this, function* () {
+						Effect.gen({ self: this }, function* () {
 							if (this.sessionInstanceIds.get(sessionId) !== instanceId) return;
-							yield* sql`UPDATE sessions SET history_complete = 0 WHERE id = ${sessionId}`;
-							yield* this.startBackfill(sessionId, instanceId);
+							const rows = yield* sql<{
+								id: string;
+							}>`UPDATE sessions SET history_complete = 0
+								WHERE id = ${sessionId} AND project_id = ${this.projectId} RETURNING id`;
+							if (rows.length > 0)
+								yield* this.startBackfill(sessionId, instanceId);
 						}),
 					);
 				}
@@ -1015,7 +1103,8 @@ export class EffectOpenCodeRuntimeIngress
 				(sql) =>
 					sql<{
 						provider: string | null;
-					}>`SELECT provider FROM sessions WHERE id = ${sessionId}`,
+					}>`SELECT provider FROM sessions
+						WHERE id = ${sessionId} AND project_id = ${this.projectId}`,
 			),
 		).pipe(
 			Effect.flatMap((rows) => {
@@ -1024,12 +1113,12 @@ export class EffectOpenCodeRuntimeIngress
 				this.sessionInstanceIds.set(sessionId, instanceId);
 				return this.startBackfill(sessionId, instanceId);
 			}),
-			Effect.catchAll(() => Effect.void),
+			Effect.catch(() => Effect.void),
 		);
 	}
 
 	private removeSession(sessionId: string): void {
-		this.backfillFibers.get(sessionId)?.unsafeInterruptAsFork(FiberId.none);
+		this.backfillFibers.get(sessionId)?.interruptUnsafe();
 		this.backfillFibers.delete(sessionId);
 		this.backfillControllers.get(sessionId)?.abort();
 		this.backfillControllers.delete(sessionId);
@@ -1060,18 +1149,18 @@ export class EffectOpenCodeRuntimeIngress
 				SqlClient.SqlClient,
 				(sql) =>
 					sql<{ history_complete: number }>`
-					SELECT history_complete FROM sessions WHERE id = ${sessionId}`,
+					SELECT history_complete FROM sessions
+					WHERE id = ${sessionId} AND project_id = ${this.projectId}`,
 			),
 		).pipe(
 			Effect.map((rows) => rows[0]?.history_complete === 1),
-			Effect.catchAll(() => Effect.succeed(false)),
+			Effect.catch(() => Effect.succeed(false)),
 		);
 	}
 
 	shutdown(): void {
 		this.stopped = true;
-		for (const fiber of this.backfillFibers.values())
-			fiber.unsafeInterruptAsFork(FiberId.none);
+		for (const fiber of this.backfillFibers.values()) fiber.interruptUnsafe();
 		this.backfillFibers.clear();
 		for (const controller of this.backfillControllers.values())
 			controller.abort();
@@ -1129,18 +1218,23 @@ export const makeEffectOpenCodeRuntimeIngress = (
 ): Effect.Effect<
 	EffectOpenCodeRuntimeIngress,
 	ProjectionRunnerError | SqlError,
-	SqlClient.SqlClient | ProjectionRunnerEffectTag | ProviderRuntimeIngestionTag
+	| SqlClient.SqlClient
+	| ProjectionRunnerEffectTag
+	| ProviderRuntimeIngestionTag
+	| PersistenceProjectTag
 > =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const projectionRunner = yield* ProjectionRunnerEffectTag;
 		const ingestion = yield* ProviderRuntimeIngestionTag;
+		const { projectId } = yield* PersistenceProjectTag;
 		const creationGate = yield* Effect.serviceOption(
 			OpenCodeSessionCreationGateTag,
 		);
 		const retries = yield* Effect.serviceOption(SessionRetriesTag);
 		const config = yield* Effect.serviceOption(ConfigTag);
 		const ingress = new EffectOpenCodeRuntimeIngress({
+			projectId,
 			sql,
 			projectionRunner,
 			ingestion,
@@ -1158,6 +1252,6 @@ export const makeEffectOpenCodeRuntimeIngress = (
 		});
 		yield* ingress.recoverEffect();
 		// Reconciliation proof is valid only for the process that fetched REST.
-		yield* sql`UPDATE sessions SET history_complete = 0`;
+		yield* sql`UPDATE sessions SET history_complete = 0 WHERE project_id = ${projectId}`;
 		return ingress;
 	});

@@ -1,9 +1,10 @@
 import { Effect } from "effect";
 import { AccountUnroutable } from "../../contracts/limit-recovery.js";
+import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { RateLimiterTag } from "../../domain/relay/Layers/rate-limiter-layer.js";
-import { LoggerTag } from "../../domain/relay/Services/services.js";
+import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import {
 	type SessionInbox,
 	type SessionInboxOutcome,
@@ -41,7 +42,7 @@ const inboxCommand = <E>(
 				? { ok: true as const }
 				: { ok: false as const, reason: outcome },
 		),
-		Effect.catchAll((error) =>
+		Effect.catch((error) =>
 			Effect.fail(
 				new WsRpcError({ message: `${name} failed: ${String(error)}` }),
 			),
@@ -52,10 +53,11 @@ export const conversationHandlers = {
 	StopBackgroundTask: (request) =>
 		stopBackgroundTaskById(request.sessionId, request.taskId).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll(mapRpcFailure("StopBackgroundTask")),
+			Effect.catch(mapRpcFailure("StopBackgroundTask")),
 		),
 	SwitchPermissionMode: (request) =>
 		Effect.gen(function* () {
+			const config = yield* ConfigTag;
 			const previousMode = yield* getPermissionMode(request.sessionId);
 			const log = yield* LoggerTag;
 			yield* persistSessionPermissionMode(request.sessionId, request.mode);
@@ -75,10 +77,12 @@ export const conversationHandlers = {
 				);
 				if (
 					session?.side_thread === 1 &&
-					(yield* (yield* AccountDirectory).resolve({
-						_tag: "Id",
-						id: session.provider,
-					})).driver === "opencode"
+					PROVIDER_DRIVERS[
+						(yield* (yield* AccountDirectory).resolve({
+							_tag: "Id",
+							id: session.provider,
+						})).driver
+					].runsOpenCodeServer
 				) {
 					const opencode = registry.getInstance("opencode");
 					if (opencode?.setPermissionModeEffect) {
@@ -92,11 +96,11 @@ export const conversationHandlers = {
 				log.info(
 					`client=${request.originId ?? "rpc"} session=${request.sessionId} Switched permission mode to: ${request.mode}`,
 				);
-				return { projectSlug: request.projectSlug, mode: request.mode };
+				return { projectSlug: config.slug, mode: request.mode };
 			}).pipe(
 				Effect.tapError(() =>
 					persistSessionPermissionMode(request.sessionId, previousMode).pipe(
-						Effect.catchAll((compensationError) =>
+						Effect.catch((compensationError) =>
 							Effect.sync(() => {
 								log.error(
 									`session=${request.sessionId} Failed to restore permission mode to ${previousMode} after SwitchPermissionMode failure`,
@@ -107,7 +111,7 @@ export const conversationHandlers = {
 					),
 				),
 			);
-		}).pipe(Effect.catchAll(mapRpcFailure("SwitchPermissionMode"))),
+		}).pipe(Effect.catch(mapRpcFailure("SwitchPermissionMode"))),
 	RespondPermission: (request) =>
 		handlePermissionResponse(request.originId, {
 			requestId: request.requestId as PermissionId,
@@ -124,7 +128,7 @@ export const conversationHandlers = {
 				: {}),
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({
 						message: `RespondPermission failed: ${String(error)}`,
@@ -139,7 +143,7 @@ export const conversationHandlers = {
 			answers: request.answers,
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll(mapRpcFailure("AnswerQuestion")),
+			Effect.catch(mapRpcFailure("AnswerQuestion")),
 		),
 	RejectQuestion: (request) =>
 		handleQuestionReject(request.originId, {
@@ -147,7 +151,7 @@ export const conversationHandlers = {
 			commandId: request.commandId,
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll(mapRpcFailure("RejectQuestion")),
+			Effect.catch(mapRpcFailure("RejectQuestion")),
 		),
 	"input.submit": (request) =>
 		Effect.gen(function* () {
@@ -170,11 +174,15 @@ export const conversationHandlers = {
 				delivery: request.delivery,
 				...(request.images ? { images: request.images } : {}),
 			});
-			return sent.refused
+			return "refused" in sent
 				? { ok: false as const, reason: sent.refused }
-				: { ok: true as const, sessionId: sent.sessionId ?? request.sessionId };
+				: {
+						ok: true as const,
+						sessionId: sent.sessionId ?? request.sessionId,
+						handedOff: sent.handedOff,
+					};
 		}).pipe(
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					error instanceof AccountUnroutable
 						? error
@@ -207,7 +215,7 @@ export const conversationHandlers = {
 			...(request.originId ? { from: request.originId } : {}),
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({
 						message: `SyncInputDraft failed: ${String(error)}`,
@@ -218,7 +226,7 @@ export const conversationHandlers = {
 	CancelSession: (request) =>
 		cancelSessionById("rpc", request.sessionId, request.commandId).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll(mapRpcFailure("CancelSession")),
+			Effect.catch(mapRpcFailure("CancelSession")),
 		),
 } satisfies Pick<
 	WsRpcHandlerMap,

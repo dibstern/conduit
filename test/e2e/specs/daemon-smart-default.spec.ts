@@ -20,7 +20,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test as base, expect } from "@playwright/test";
-import { StartInstance } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
 	type ForegroundDaemonHandle,
@@ -83,10 +83,10 @@ const test = base.extend<{
 
 		// Startup never probes: the smart default resolves on first use, here
 		// Start Instance (what `conduit instance start opencode` sends).
-		await sendRpcRequest(
-			join(tmpDir, "relay.sock"),
-			new StartInstance({ instanceId: "opencode" }),
-		);
+		await sendRpcRequest(join(tmpDir, "relay.sock"), {
+			_tag: "StartInstance",
+			instanceId: "opencode",
+		});
 
 		try {
 			await use({ daemon, port, baseUrl, projectUrl });

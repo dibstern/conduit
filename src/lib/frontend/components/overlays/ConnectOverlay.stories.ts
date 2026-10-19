@@ -7,6 +7,7 @@ import {
 import { instanceState } from "../../stores/instance.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import { connectionState } from "../../transport/connection-status.svelte.js";
 import ConnectOverlay from "./ConnectOverlay.svelte";
 
@@ -74,7 +75,7 @@ export const InstanceActions: Story = {
 	beforeEach: () => {
 		const previousSession = sessionState.currentId;
 		clearDiscoveryState();
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		selectInstance("instance-stopped");
 		projectState.currentSlug = "demo";
 		projectState.projects = [
@@ -111,7 +112,7 @@ export const InstanceActions: Story = {
 		];
 		return () => {
 			clearDiscoveryState();
-			sessionState.currentId = previousSession;
+			openSessionForSetup(previousSession);
 			projectState.currentSlug = null;
 			projectState.projects = [];
 			instanceState.instances = [];

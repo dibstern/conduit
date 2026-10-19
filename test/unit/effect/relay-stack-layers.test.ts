@@ -3,10 +3,13 @@ import { Effect, HashMap, Layer, Ref } from "effect";
 import { expect } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RelayStateLive } from "../../../src/lib/domain/relay/Layers/relay-layer.js";
 import {
-	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
@@ -27,24 +30,22 @@ import {
 } from "../../helpers/mock-factories.js";
 
 const configLayer = Layer.mergeAll(
-	Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-	Layer.succeed(ConfigTag, makeMockConfig()),
+	Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+	Layer.succeed(ConfigTag)(makeMockConfig()),
 );
-const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
+const loggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
 const openCodeApi = makeMockOpenCodeAPI();
 const relayStateTestLayer = RelayStateLive.pipe(
 	Layer.provide(
 		Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, openCodeApi),
+			Layer.succeed(OpenCodeAPITag)(openCodeApi),
 			configLayer,
 			loggerLayer,
-			Layer.succeed(BackgroundLivenessTag, () => undefined),
-			Layer.succeed(
-				OpenCodeInstancesTag,
+			Layer.effect(SessionActivityTag, makeSessionActivity),
+			Layer.succeed(OpenCodeInstancesTag)(
 				makeOpenCodeInstancesStub({ opencode: openCodeApi }),
 			),
-			Layer.succeed(
-				OrchestrationEngineTag,
+			Layer.succeed(OrchestrationEngineTag)(
 				new OrchestrationEngine({ registry: new ProviderRegistry() }),
 			),
 			makePersistenceEffectLayer(":memory:", "test-project"),
@@ -53,7 +54,7 @@ const relayStateTestLayer = RelayStateLive.pipe(
 );
 
 describe("Relay stack Layer composition", () => {
-	it.scoped("RelayStateLive constructs all Effect-native state services", () =>
+	it.effect("RelayStateLive constructs all Effect-native state services", () =>
 		Effect.gen(function* () {
 			// Verify all state Tags are accessible through the composed Layer
 			const registryRef = yield* SessionRegistryStateTag;
@@ -74,7 +75,7 @@ describe("Relay stack Layer composition", () => {
 		}).pipe(Effect.provide(Layer.fresh(relayStateTestLayer))),
 	);
 
-	it.scoped("RelayStateLive composes with service dependencies provided", () =>
+	it.effect("RelayStateLive composes with service dependencies provided", () =>
 		Effect.gen(function* () {
 			// Just verify construction succeeds — bridge layers not needed
 			const ref = yield* SessionRegistryStateTag;

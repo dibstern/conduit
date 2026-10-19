@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { AccountChangeRejected } from "../../../contracts/account.js";
+	import { isKnownDriverKind, type KnownProviderDriverKind } from "../../../contracts/provider-instance.js";
 	import { onDestroy } from "svelte";
 	import type { ServerForm } from "./ServerSettingsTab.svelte";
+	import CursorAuthSettings from "./CursorAuthSettings.svelte";
 	import { refreshServerStatus } from "../../stores/server-status.svelte.js";
 	import Button from "../ui/Button.svelte";
 	import Badge from "../ui/Badge.svelte";
@@ -14,10 +15,12 @@
 	import TextButton from "../ui/TextButton.svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
-	import { applyDetectProxyResponse, applyInstanceListResponse, applyScanNowResponse, beginProxyDetection, beginScan, clearScanInFlight, getCachedInstances, getProxyDetection, getScanResult, instanceStatusColor, isScanInFlight } from "../../stores/instance.svelte.js";
+	import { applyDetectProxyResponse, applyInstanceListResponse, applyScanNowResponse, beginProxyDetection, beginScan, clearScanInFlight, getCachedInstances, getDriverTraits, getInstanceTraits, getProxyDetection, getScanResult, instanceStatusColor, isScanInFlight } from "../../stores/instance.svelte.js";
 	import { confirm, showToast } from "../../stores/ui.svelte.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
-	import { addInstanceRpc, detectProxyRpc, removeInstanceRpc, scanNowRpc, setDefaultRpc, startInstanceRpc, stopInstanceRpc, updateInstanceRpc } from "../../transport/ws-rpc-client.js";
+	import { getProviderPresentation, PROVIDER_PRESENTATION } from "../../utils/provider-presentation.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 
 	const INSTANCE_KEY_COPY_FEEDBACK_MS = 2_000;
 	let { openForm, onToggleForm, onOpenUsage }: { openForm: ServerForm | null; onToggleForm: (form: ServerForm) => void; onOpenUsage: () => void } = $props();
@@ -30,13 +33,14 @@
 		guidesOpen: false,
 		copiedKey: null as string | null,
 		copyTimer: null as ReturnType<typeof setTimeout> | null,
-		formDriver: "claude" as "claude" | "opencode",
+		formDriver: "claude" as KnownProviderDriverKind,
 		formName: "",
 		formConfigDir: "",
 		formManaged: true,
 		formPort: "",
 		formUrl: "",
 		formEnv: "",
+		initialFormEnv: "",
 		formEnvOpen: false,
 		formSaving: false,
 		defaultSaving: false,
@@ -44,22 +48,37 @@
 
 	$effect(() => {
 		beginProxyDetection();
-		void detectProxyRpc()
+		void rpc("DetectProxy", {})
 			.then(applyDetectProxyResponse)
 			.catch(() => applyDetectProxyResponse({ found: false, port: 8317 }));
 	});
 	onDestroy(() => {
 		if (state.copyTimer) clearTimeout(state.copyTimer);
 	});
-	const DRIVER_OPTIONS = ["claude", "opencode"] as const;
-	const DRIVER_TAB_OPTIONS = DRIVER_OPTIONS.map((driver) => ({
+	const DRIVER_OPTIONS = Object.keys(PROVIDER_PRESENTATION).filter(isKnownDriverKind);
+	const DRIVER_TAB_OPTIONS = $derived(DRIVER_OPTIONS.map((driver) => ({
 		value: driver,
-		label: driver === "claude" ? "Claude account" : "OpenCode server",
+		label: `${PROVIDER_PRESENTATION[driver].label} ${getDriverTraits(driver)?.accountKind === "config-directory" ? "account" : "server"}`,
 		testId: `instance-form-driver-${driver}`,
-	}));
+	})));
 	const instances = $derived(getCachedInstances());
-	const claudeAccounts = $derived(instances.filter((inst) => instanceDriver(inst) === "claude"));
-	const opencodeInstances = $derived(instances.filter((inst) => instanceDriver(inst) === "opencode"));
+	const instancesByDriver = $derived.by(() => {
+		const grouped: Record<string, typeof instances> = {};
+		for (const instance of instances) {
+			const driver = instance.driver ?? "opencode";
+			if (!isKnownDriverKind(driver)) continue;
+			(grouped[driver] ??= []).push(instance);
+		}
+		return grouped;
+	});
+	const configDirectoryDrivers = $derived(DRIVER_OPTIONS.filter((driver) => {
+		const traits = getDriverTraits(driver);
+		return traits?.accountKind === "config-directory";
+	}));
+	const serverInstances = $derived(instances.filter((inst) => getProviderPresentation(inst.driver ?? "opencode") && getInstanceTraits(inst.id)?.runsOpenCodeServer));
+	const unknownInstances = $derived(instances.filter((inst) => !getProviderPresentation(inst.driver ?? "opencode")));
+	const formTraits = $derived(getDriverTraits(state.formDriver));
+	const formPresentation = $derived(PROVIDER_PRESENTATION[state.formDriver]);
 	const scanInFlight = $derived(isScanInFlight());
 	const scanResult = $derived(getScanResult());
 	const proxyResult = $derived(getProxyDetection());
@@ -68,24 +87,24 @@
 		state.expandedInstanceId = state.expandedInstanceId === instanceId ? null : instanceId;
 	}
 	function handleStart(instanceId: string) {
-		void startInstanceRpc({ instanceId })
+		void rpc("StartInstance", { instanceId })
 			.then(applyInstanceListResponse)
 			.then(refreshServerStatus)
-			.catch(() => showToast("Failed to start instance", { variant: "warn" }));
+			.catch(toastFailure("Failed to start instance", "warn"));
 	}
 	function handleStop(instanceId: string) {
-		void stopInstanceRpc({ instanceId })
+		void rpc("StopInstance", { instanceId })
 			.then(applyInstanceListResponse)
 			.then(refreshServerStatus)
-			.catch(() => showToast("Failed to stop instance", { variant: "warn" }));
+			.catch(toastFailure("Failed to stop instance", "warn"));
 	}
 	async function handleMakeDefault(instanceId: string) {
 		if (state.defaultSaving) return;
 		state.defaultSaving = true;
 		try {
-			applyInstanceListResponse(await setDefaultRpc({ instanceId }));
+			applyInstanceListResponse(await rpc("SetDefault", { instanceId }));
 		} catch (error: unknown) {
-			showToast(error instanceof AccountChangeRejected ? error.reason : "Failed to change default account", { variant: "warn" });
+			toastFailure("Failed to change default account", "warn")(error);
 		} finally {
 			state.defaultSaving = false;
 		}
@@ -93,16 +112,11 @@
 	async function handleRemove(instanceId: string, instanceName: string) {
 		const confirmed = await confirm(`Remove instance "${instanceName}"? This cannot be undone.`);
 		if (confirmed) {
-			void removeInstanceRpc({ instanceId })
+			void rpc("RemoveInstance", { instanceId })
 				.then(applyInstanceListResponse)
 				.then(refreshServerStatus)
-				.catch((error: unknown) =>
-					showToast(error instanceof AccountChangeRejected ? error.reason : "Failed to remove instance", { variant: "warn" }),
-				);
+				.catch(toastFailure("Failed to remove instance", "warn"));
 		}
-	}
-	function instanceDriver(inst: { driver?: string }): "claude" | "opencode" {
-		return inst.driver === "claude" ? "claude" : "opencode";
 	}
 	function closeInstanceForm() {
 		if (instanceFormMode === "edit") state.expandedInstanceId = null;
@@ -114,10 +128,11 @@
 		state.formPort = "";
 		state.formUrl = "";
 		state.formEnv = "";
+		state.initialFormEnv = "";
 		state.formEnvOpen = false;
 		state.formSaving = false;
 	}
-	function openAddInstance(driver: "claude" | "opencode" = "claude") {
+	function openAddInstance(driver: KnownProviderDriverKind = "claude") {
 		if (openForm === "instance-add") { closeInstanceForm(); return; }
 		closeInstanceForm();
 		state.formDriver = driver;
@@ -134,7 +149,7 @@
 		env?: Record<string, string>;
 	}) {
 		if (openForm === `instance-edit:${inst.id}`) { closeInstanceForm(); return; }
-		state.formDriver = instanceDriver(inst);
+		state.formDriver = isKnownDriverKind(inst.driver) ? inst.driver : "opencode";
 		state.formName = inst.name;
 		state.formConfigDir = inst.configDir ?? "";
 		state.formManaged = inst.managed ?? false;
@@ -146,6 +161,7 @@
 					.map(([k, v]) => `${k}=${v}`)
 					.join("\n")
 			: "";
+		state.initialFormEnv = state.formEnv;
 		onToggleForm(`instance-edit:${inst.id}`);
 	}
 	/** Parse `KEY=VALUE` lines into an env record; blank/`#` lines are ignored. */
@@ -167,38 +183,40 @@
 			showToast("Instance name is required", { variant: "warn" });
 			return;
 		}
-		const isClaude = state.formDriver === "claude";
+		const usesConfigDirectory = formTraits?.accountKind === "config-directory";
 		const endpoint = state.formUrl.trim();
 		const portText = state.formManaged ? state.formPort.trim() : /^\d+$/.test(endpoint) ? endpoint : "";
 		const port = portText ? Number(portText) : undefined;
-		if (!isClaude && port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535)) {
+		if (formTraits?.runsOpenCodeServer && port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535)) {
 			showToast("Port must be a whole number between 1 and 65535", { variant: "warn" });
 			return;
 		}
-		if (!isClaude && !state.formManaged && !endpoint) {
+		if (formTraits?.runsOpenCodeServer && !state.formManaged && !endpoint) {
 			showToast("URL is required", { variant: "warn" });
 			return;
 		}
-		const env = !isClaude && state.formManaged ? parseEnv(state.formEnv) : undefined;
+		const env = (formTraits?.runsOpenCodeServer && state.formManaged) || formPresentation.environment ? parseEnv(state.formEnv) : undefined;
+		const configEnv = formPresentation.environment && state.formEnv !== state.initialFormEnv ? { env: env ?? {} } : {};
 		const configDir = state.formConfigDir.trim() || undefined;
 		const url = !state.formManaged && port === undefined ? endpoint || undefined : undefined;
 		state.formSaving = true;
 		const request =
 			instanceFormMode === "edit" && editingInstanceId
-				? updateInstanceRpc({
+				? rpc("UpdateInstance", {
 						instanceId: editingInstanceId,
 						name,
-						...(isClaude
-							? { configDir: configDir ?? "" }
+						...(usesConfigDirectory
+							? { configDir: configDir ?? "", ...configEnv }
 							: state.formManaged ? { ...(port !== undefined ? { port } : {}), env: env ?? {} } : {}),
 					})
-				: addInstanceRpc({
+				: rpc("AddInstance", {
 						name,
 						driver: state.formDriver,
-						...(isClaude
+						...(usesConfigDirectory
 							? {
 									managed: false,
 									...(configDir !== undefined ? { configDir } : {}),
+									...configEnv,
 								}
 							: {
 									managed: state.formManaged,
@@ -217,20 +235,17 @@
 			})
 			.catch((error: unknown) => {
 				state.formSaving = false;
-				showToast(
-					error instanceof AccountChangeRejected ? error.reason : `Failed to ${submittedForm?.startsWith("instance-edit:") ? "update" : "add"} instance`,
-					{ variant: "warn" },
-				);
+				toastFailure(`Failed to ${submittedForm?.startsWith("instance-edit:") ? "update" : "add"} instance`, "warn")(error);
 			});
 	}
 	function handleScanNow() {
 		beginScan();
-		void scanNowRpc()
+		void rpc("ScanNow", {})
 			.then(applyScanNowResponse)
 			.then(refreshServerStatus)
-			.catch(() => {
+			.catch((error) => {
 				clearScanInFlight();
-				showToast("Port scan failed", { variant: "warn" });
+				toastFailure("Port scan failed", "warn")(error);
 			});
 	}
 	async function handleCopy(text: string, key: string) {
@@ -292,18 +307,18 @@
 				<SegmentedControl bind:value={state.formDriver} label="Type" options={DRIVER_TAB_OPTIONS} variant="joined" class="whitespace-nowrap" />
 			{/if}
 		</div>
-		{#if state.formDriver === "opencode"}
+		{#if formTraits?.runsOpenCodeServer}
 			<SettingsRow label="Conduit starts it" description="Off: connect to one you run" checked={state.formManaged} onchange={() => { state.formManaged = !state.formManaged; }} disabled={state.formSaving || instanceFormMode === "edit"} testId="instance-form-managed" class="p-0" />
 		{/if}
 		<div class="grid grid-cols-1 gap-2 md:grid-cols-2">
 			<label for="instance-form-name" class="flex flex-col gap-1 text-[11px] text-text-muted">
 				Name
-				<TextInput id="instance-form-name" data-testid="instance-form-name" placeholder={state.formDriver === "claude" ? "Work Claude" : "Staging OC"} bind:value={state.formName} disabled={state.formSaving} required />
+				<TextInput id="instance-form-name" data-testid="instance-form-name" placeholder={formPresentation.namePlaceholder} bind:value={state.formName} disabled={state.formSaving} required />
 			</label>
-			{#if state.formDriver === "claude"}
+			{#if formTraits?.accountKind === "config-directory"}
 				<label for="instance-form-configdir" class="flex flex-col gap-1 text-[11px] text-text-muted">
 					Config directory (optional)
-					<TextInput id="instance-form-configdir" data-testid="instance-form-configdir" placeholder="~/.config/claude/work" bind:value={state.formConfigDir} disabled={state.formSaving} />
+					<TextInput id="instance-form-configdir" data-testid="instance-form-configdir" placeholder={formPresentation.configDirPlaceholder} bind:value={state.formConfigDir} disabled={state.formSaving} />
 				</label>
 			{:else if state.formManaged}
 				<label for="instance-form-port" class="flex flex-col gap-1 text-[11px] text-text-muted">
@@ -317,13 +332,15 @@
 				</label>
 			{/if}
 		</div>
-		{#if state.formDriver === "claude"}
+		{#if formTraits?.accountKind === "config-directory"}
 			<p class="text-[11px] text-text-muted">Folder changes apply on the next turn. Leave the folder empty to use the login Conduit was launched with.</p>
-		{:else if state.formManaged}
+		{/if}
+		{#if formPresentation.environment || (formTraits?.runsOpenCodeServer && state.formManaged)}
 			<SettingsGroup title="Environment variables" summary="KEY=VALUE per line" collapsible bind:open={state.formEnvOpen}>
 				<label for="instance-form-env" class="block p-3">
 					<span class="sr-only">Environment variables</span>
-					<Textarea id="instance-form-env" data-testid="instance-form-env" rows={2} class="resize-y font-mono" placeholder="ANTHROPIC_API_KEY=sk-ant-..." bind:value={state.formEnv} disabled={state.formSaving} />
+					<Textarea id="instance-form-env" data-testid="instance-form-env" rows={2} class="resize-y font-mono" placeholder={formPresentation.environment?.placeholder ?? "ANTHROPIC_API_KEY=sk-ant-..."} bind:value={state.formEnv} disabled={state.formSaving} />
+					{#if formPresentation.environment}<p class="mt-2 text-[11px] leading-[1.5] text-text-dimmer">{formPresentation.environment.hint}</p>{/if}
 				</label>
 			</SettingsGroup>
 		{/if}
@@ -335,64 +352,72 @@
 {/if}
 
 <div id="instance-settings-list" class="flex flex-col gap-[6px]">
-	{#if claudeAccounts.length > 0}
-		<div class="border border-border-subtle bg-bg-surface rounded-[9px] overflow-hidden" data-testid="claude-accounts-list">
-			<div class="flex items-center gap-[8px] bg-[rgba(var(--overlay-rgb),0.015)] px-[12px] py-[7px] text-[10.5px] font-semibold uppercase tracking-[0.07em] text-text-muted flex-wrap">
-				<h4>Claude accounts</h4>
-				<span class="ml-auto flex flex-wrap items-center justify-end gap-1 text-[11px] font-normal normal-case tracking-normal">
-					<span>Usage and switch order: </span>
-					<Button variant="ghost-accent" hoverFill="none" size="content" class="text-[11px] hover:underline" data-testid="claude-accounts-usage-link" onclick={onOpenUsage}>Usage ›</Button>
-				</span>
-			</div>
-			{#each claudeAccounts as inst (inst.id)}
-				<div class="border-t border-border-subtle" data-testid="instance-row-{inst.id}" data-driver="claude">
-					<Disclosure expanded={state.expandedInstanceId === inst.id} onToggle={() => handleToggleInstance(inst.id)} look="row" density="row" chevron={false} class="focus-visible:-outline-offset-2">
-						<AccountDot instanceId={inst.id} size={9} />
-						<div class="flex-1 min-w-0">
-							<div class="flex items-center gap-[6px] text-[12.5px] text-text">
-								<span class="truncate">{inst.name}</span>
-								{#if inst.isDefault}<Badge variant="quiet" size="xs" shape="pill" data-testid="default-account-marker">default</Badge>{/if}
-							</div>
-							<div class="font-mono text-[11px] leading-[1.35] text-text-muted truncate">{inst.configDir || "env"}</div>
-						</div>
-						<span aria-hidden="true" class="w-[10px] shrink-0 text-center not-italic text-text-muted transition-transform duration-150" class:rotate-90={state.expandedInstanceId === inst.id}>›</span>
-					</Disclosure>
-					{#if state.expandedInstanceId === inst.id}
-						<div class="flex flex-col gap-[8px] border-t border-border-subtle bg-[rgba(var(--overlay-rgb),0.015)] pt-[9px] pb-[10px] pr-[12px] pl-[40px] max-md:pl-[12px]">
-							<dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-[14px] gap-y-[3px] text-[11px] [&_dd]:truncate">
-								<dt class="text-text-muted">Config dir</dt>
-								<dd class="font-mono text-text">{inst.configDir || "env"}</dd>
-								<dt class="text-text-muted">Used by</dt>
-								<dd class="text-text">{inst.isDefault ? "New sessions, unless you pick another account" : "Sessions you move to it, and auto-switch"}</dd>
-							</dl>
-							<div class="flex flex-wrap items-center gap-2">
-								<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="edit-instance-btn" disabled={state.formSaving} aria-expanded={openForm === `instance-edit:${inst.id}`} aria-controls="instance-form" onclick={() => openEditInstance(inst)}>Edit</Button>
-								{#if !inst.isDefault}
-									<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="make-default-btn" disabled={state.formSaving || state.defaultSaving} onclick={() => handleMakeDefault(inst.id)}>Make default</Button>
-								{/if}
-								<Button variant="danger-outline" size="content" class="px-3 py-1 text-xs rounded" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>
-							</div>
-						</div>
+	{#each configDirectoryDrivers as driver (driver)}
+		{@const accounts = instancesByDriver[driver] ?? []}
+		{@const presentation = PROVIDER_PRESENTATION[driver]}
+		{#if presentation.auth}
+			<CursorAuthSettings account={accounts[0]} />
+		{:else if accounts.length > 0}
+			<div class="border border-border-subtle bg-bg-surface rounded-[9px] overflow-hidden" data-testid="{driver}-accounts-list">
+				<div class="flex items-center gap-[8px] bg-[rgba(var(--overlay-rgb),0.015)] px-[12px] py-[7px] text-[10.5px] font-semibold uppercase tracking-[0.07em] text-text-muted flex-wrap">
+					<h4>{presentation.label} accounts</h4>
+					{#if getDriverTraits(driver)?.usageHarness && accounts.some((account) => account.usageEligible !== false)}
+						<span class="ml-auto flex flex-wrap items-center justify-end gap-1 text-[11px] font-normal normal-case tracking-normal">
+							<span>Usage and switch order: </span>
+							<Button variant="ghost-accent" hoverFill="none" size="content" class="text-[11px] hover:underline" data-testid="{driver}-accounts-usage-link" onclick={onOpenUsage}>Usage ›</Button>
+						</span>
 					{/if}
 				</div>
-			{/each}
-		</div>
-	{:else}
-		<SettingsGroup testId="claude-empty-state">
-			<div class="bg-[rgba(var(--overlay-rgb),0.015)] px-3 py-2 text-[10.5px] font-semibold uppercase tracking-[0.07em] text-text-muted"><h4>Claude accounts</h4></div>
-			<div class="flex items-center justify-between gap-2 px-3 py-2 text-xs text-text-muted">
-				<p>No Claude accounts yet.</p>
-				<Button variant="ghost-accent" size="content" class="px-2 py-1 text-xs" data-testid="add-claude-account-settings-btn" disabled={state.formSaving} onclick={() => openAddInstance("claude")}>Add account</Button>
+				{#each accounts as inst (inst.id)}
+					<div class="border-t border-border-subtle" data-testid="instance-row-{inst.id}" data-driver={driver}>
+						<Disclosure expanded={state.expandedInstanceId === inst.id} onToggle={() => handleToggleInstance(inst.id)} look="row" density="row" chevron={false} class="focus-visible:-outline-offset-2">
+							<AccountDot instanceId={inst.id} size={9} />
+							<div class="flex-1 min-w-0">
+								<div class="flex items-center gap-[6px] text-[12.5px] text-text">
+									<span class="truncate">{inst.name}</span>
+									{#if inst.isDefault}<Badge variant="quiet" size="xs" shape="pill" data-testid="default-account-marker">default</Badge>{/if}
+								</div>
+								<div class="font-mono text-[11px] leading-[1.35] text-text-muted truncate">{inst.configDir || "env"}</div>
+							</div>
+							<span aria-hidden="true" class="w-[10px] shrink-0 text-center not-italic text-text-muted transition-transform duration-150" class:rotate-90={state.expandedInstanceId === inst.id}>›</span>
+						</Disclosure>
+						{#if state.expandedInstanceId === inst.id}
+							<div class="flex flex-col gap-[8px] border-t border-border-subtle bg-[rgba(var(--overlay-rgb),0.015)] pt-[9px] pb-[10px] pr-[12px] pl-[40px] max-md:pl-[12px]">
+								<dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-[14px] gap-y-[3px] text-[11px] [&_dd]:truncate">
+									<dt class="text-text-muted">Config dir</dt>
+									<dd class="font-mono text-text">{inst.configDir || "env"}</dd>
+									<dt class="text-text-muted">Used by</dt>
+									<dd class="text-text">{inst.isDefault ? "New sessions, unless you pick another account" : inst.usageEligible !== false && getDriverTraits(driver)?.usageHarness ? "Sessions you move to it, and auto-switch" : "Sessions you move to it"}</dd>
+								</dl>
+								<div class="flex flex-wrap items-center gap-2">
+									<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="edit-instance-btn" disabled={state.formSaving} aria-expanded={openForm === `instance-edit:${inst.id}`} aria-controls="instance-form" onclick={() => openEditInstance(inst)}>Edit</Button>
+									{#if !inst.isDefault}
+										<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="make-default-btn" disabled={state.formSaving || state.defaultSaving} onclick={() => handleMakeDefault(inst.id)}>Make default</Button>
+									{/if}
+									<Button variant="danger-outline" size="content" class="px-3 py-1 text-xs rounded" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>
+								</div>
+							</div>
+						{/if}
+					</div>
+				{/each}
 			</div>
-		</SettingsGroup>
-	{/if}
+		{:else}
+			<SettingsGroup testId="{driver}-empty-state">
+				<div class="bg-[rgba(var(--overlay-rgb),0.015)] px-3 py-2 text-[10.5px] font-semibold uppercase tracking-[0.07em] text-text-muted"><h4>{presentation.label} accounts</h4></div>
+				<div class="flex items-center justify-between gap-2 px-3 py-2 text-xs text-text-muted">
+					<p>No {presentation.label} accounts yet.</p>
+					<Button variant="ghost-accent" size="content" class="px-2 py-1 text-xs" data-testid="add-{driver}-account-settings-btn" disabled={state.formSaving} onclick={() => openAddInstance(driver)}>Add account</Button>
+				</div>
+			</SettingsGroup>
+		{/if}
+	{/each}
 	<SettingsGroup testId="opencode-servers-list">
 		<div class="flex items-center gap-[8px] bg-[rgba(var(--overlay-rgb),0.015)] px-[12px] py-[7px] text-[10.5px] font-semibold uppercase tracking-[0.07em] text-text-muted">
-			<h4>OpenCode servers</h4>
-			{#if opencodeInstances.length > 0}<span class="ml-auto text-[11px] font-normal normal-case tracking-normal">{opencodeInstances.length}</span>{/if}
+			<h4>{PROVIDER_PRESENTATION.opencode.label} servers</h4>
+			{#if serverInstances.length > 0}<span class="ml-auto text-[11px] font-normal normal-case tracking-normal">{serverInstances.length}</span>{/if}
 		</div>
-		{#each opencodeInstances as inst (inst.id)}
-			<div data-testid="instance-row-{inst.id}" data-driver="opencode">
+		{#each serverInstances as inst (inst.id)}
+			<div data-testid="instance-row-{inst.id}" data-driver={inst.driver ?? "opencode"}>
 				<Disclosure expanded={state.expandedInstanceId === inst.id} onToggle={() => handleToggleInstance(inst.id)} look="row" density="row" chevron={false} class="focus-visible:-outline-offset-2">
 					<span data-testid="instance-status-dot" class={"size-[7px] rounded-full shrink-0 " + instanceStatusColor(inst.status)}></span>
 					<div class="flex-1 min-w-0 flex items-center gap-[6px] text-[12.5px] text-text">
@@ -485,6 +510,37 @@
 			</div>
 		{/each}
 	</SettingsGroup>
+	{#if unknownInstances.length > 0}
+		<SettingsGroup title="Other accounts" testId="unknown-accounts-list">
+			{#each unknownInstances as inst (inst.id)}
+				<div data-testid="instance-row-{inst.id}" data-driver={inst.driver}>
+					<Disclosure expanded={state.expandedInstanceId === inst.id} onToggle={() => handleToggleInstance(inst.id)} look="row" density="row" chevron={false} class="focus-visible:-outline-offset-2">
+						<Icon name="bot" size={14} class="text-text-muted shrink-0" />
+						<div class="flex-1 min-w-0">
+							<div class="truncate text-[12.5px] text-text">{inst.name}</div>
+							<div class="text-[11px] text-text-muted">Unknown provider</div>
+						</div>
+						<span aria-hidden="true" class="w-[10px] shrink-0 text-center not-italic text-text-muted transition-transform duration-150" class:rotate-90={state.expandedInstanceId === inst.id}>›</span>
+					</Disclosure>
+					{#if state.expandedInstanceId === inst.id}
+						<div class="flex flex-col gap-[8px] border-t border-border-subtle bg-[rgba(var(--overlay-rgb),0.015)] pt-[9px] pb-[10px] pr-[12px] pl-[40px] max-md:pl-[12px]">
+							<dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-[14px] gap-y-[3px] text-[11px] [&_dd]:truncate">
+								<dt class="text-text-muted">Driver</dt>
+								<dd class="font-mono text-text">{inst.driver}</dd>
+								<dt class="text-text-muted">Status</dt>
+								<dd class="text-text capitalize">{inst.status}</dd>
+								{#if inst.configDir}<dt class="text-text-muted">Config dir</dt><dd class="font-mono text-text">{inst.configDir}</dd>{/if}
+								{#if inst.url}<dt class="text-text-muted">Address</dt><dd class="font-mono text-text">{inst.url}</dd>{/if}
+							</dl>
+							<div class="flex flex-wrap items-center gap-2">
+								<Button variant="danger-outline" size="sm" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>
+							</div>
+						</div>
+					{/if}
+				</div>
+			{/each}
+		</SettingsGroup>
+	{/if}
 </div>
 
 {#if scanResult && !scanInFlight}

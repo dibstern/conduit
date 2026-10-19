@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
-import { Chunk, Effect, PubSub, Queue } from "effect";
+import { Effect, PubSub } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
 import type { Alert } from "../../../src/lib/contracts/ws-rpc.js";
 import {
@@ -13,9 +13,8 @@ import {
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { translateDomainEventToRelay } from "../../../src/lib/relay/domain-event-to-relay.js";
 import { publishProviderRelayMessage } from "../../../src/lib/relay/relay-stack.js";
-import { tagWithSessionId } from "../../../src/lib/shared-types.js";
+import { turnEndedAlert } from "../../../src/lib/relay/turn-ended-alert.js";
 
 it("pushes canonical terminal alerts, preserves replay identity, and suppresses subagent completion", async () => {
 	const sendToAll = vi.fn(async () => ({
@@ -44,22 +43,23 @@ it("pushes canonical terminal alerts, preserves replay identity, and suppresses 
 				["s1", "m1"],
 				["child", "m3"],
 			] as const) {
-				const result = translateDomainEventToRelay(
+				const alert = turnEndedAlert(
 					canonicalEvent("turn.completed", sessionId, { messageId }),
 				);
-				if (result.kind !== "emit")
-					throw new Error("expected terminal messages");
-				for (const msg of result.messages)
-					yield* publishProviderRelayMessage(
-						tagWithSessionId(msg, sessionId),
-						deps,
-					).pipe(Effect.provideService(AlertLedgerTag, ledger));
+				if (!alert) throw new Error("expected turn-ended alert");
+				yield* publishProviderRelayMessage(alert, deps).pipe(
+					Effect.provideService(AlertLedgerTag, ledger),
+				);
 			}
-			return Chunk.toArray(yield* Queue.takeAll(subscribed));
+			return [
+				...(yield* PubSub.takeUpTo(subscribed, Number.POSITIVE_INFINITY)),
+			];
 		}).pipe(
 			Effect.scoped,
-			Effect.provide(AlertsLive),
-			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			Effect.provide(AlertsLive, { local: true }),
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project"), {
+				local: true,
+			}),
 		),
 	);
 	expect(sendToAll).toHaveBeenCalledTimes(2);

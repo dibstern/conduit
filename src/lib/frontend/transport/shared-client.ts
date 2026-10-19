@@ -17,21 +17,20 @@
 // client to change it — the per-call override stays available to the PTY
 // consumer.
 
-import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
 import {
 	Context,
 	Duration,
 	Effect,
-	ExecutionStrategy,
 	Exit,
 	Layer,
-	Mailbox,
 	Ref,
 	Schedule,
 	Scope,
+	Semaphore,
 	Stream,
 } from "effect";
+import { RpcClient, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import type { SessionDetailEnvelope } from "../../contracts/ws-rpc.js";
 import {
 	markControlSocketOpen,
@@ -58,13 +57,13 @@ export type TrafficClass = "control" | "stream";
 
 // The client description, reused by every transport below: an Effect is a
 // description, so providing it twice yields two independent clients.
-const wsRpcClient = RpcClient.make(WsRpcGroup);
+const wsRpcClient = RpcClient.make(WsRpcGroup, { flatten: true });
 
-export type WsRpcClient = Effect.Effect.Success<typeof wsRpcClient>;
+export type WsRpcClient = Effect.Success<typeof wsRpcClient>;
 
 // Subscriptions are handed out already resuming, and already on the right
 // socket, because both are transport decisions a consumer should not be able to
-// get wrong. A consumer that reached for `sockets.stream.SubscribeSessionDetail`
+// get wrong. A consumer that reached for `sockets.stream("SubscribeSessionDetail", ...)`
 // would get a stream that dies on the first drop; there is no reason to leave
 // that door open, so ni8.9/10/11/14 add a member here rather than a call site.
 const makeSubscriptions = (
@@ -79,11 +78,11 @@ const makeSubscriptions = (
 		} = {},
 	) =>
 		resumeStream(
-			(resumeFromSequence, resumeBase) =>
-				sockets.control.SubscribeShell({
-					projectSlug,
+			(resumeFromSequence, resumeBase, resumePoint) =>
+				sockets.control("SubscribeShell", {
 					...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
 					...(resumeBase === undefined ? {} : { resumeBase }),
+					...(resumePoint === undefined ? {} : { resumePoint }),
 				}),
 			{
 				ledger: makeResumeLedger(),
@@ -99,7 +98,7 @@ const makeSubscriptions = (
 	approvals: (options: { readonly onTransportDrop?: () => void } = {}) =>
 		resumeStream(
 			(resumeFromSequence) =>
-				sockets.control.SubscribeApprovals({
+				sockets.control("SubscribeApprovals", {
 					projectSlug,
 					...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
 				}),
@@ -119,11 +118,11 @@ const makeSubscriptions = (
 	}) =>
 		resumeStream(
 			(resumeFromSequence, resumeBase, resumePoint) =>
-				Stream.unwrapScoped(
+				Stream.unwrap(
 					Effect.map(
-						sockets.stream.SubscribeSessionDetail(
+						sockets.stream(
+							"SubscribeSessionDetail",
 							{
-								projectSlug,
 								sessionId: options.sessionId,
 								...(resumeFromSequence === undefined
 									? {}
@@ -131,11 +130,11 @@ const makeSubscriptions = (
 								...(resumeBase === undefined ? {} : { resumeBase }),
 								...(resumePoint === undefined ? {} : { resumePoint }),
 							},
-							{ asMailbox: true },
+							{ asQueue: true },
 						),
-						(mailbox) => {
+						(queue) => {
 							options.onSubscribe?.();
-							return Mailbox.toStream(mailbox);
+							return Stream.fromQueue(queue);
 						},
 					),
 				).pipe(decodeSessionDetail),
@@ -148,8 +147,7 @@ const makeSubscriptions = (
 	/** One session's todo list. Low-rate, so it rides the control socket. */
 	todos: (options: { readonly sessionId: string }) =>
 		resumeStream((resumeFromSequence) =>
-			sockets.control.SubscribeSessionTodos({
-				projectSlug,
+			sockets.control("SubscribeSessionTodos", {
 				sessionId: options.sessionId,
 				...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
 			}),
@@ -158,8 +156,7 @@ const makeSubscriptions = (
 	 *  at shell rate, not a hot stream, so it rides the control socket. */
 	family: (options: { readonly sessionId: string }) =>
 		resumeStream((resumeFromSequence) =>
-			sockets.control.SubscribeSessionFamily({
-				projectSlug,
+			sockets.control("SubscribeSessionFamily", {
 				sessionId: options.sessionId,
 				...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
 			}),
@@ -168,41 +165,40 @@ const makeSubscriptions = (
 	 * The project's terminals. Hot, so it rides the stream socket. PTYs carry no
 	 * sequence, so every re-issue is a cold snapshot with each scrollback ring.
 	 */
-	ptys: () => resumeStream(() => sockets.stream.SubscribePtys({ projectSlug })),
+	ptys: () =>
+		resumeStream(() => sockets.stream("SubscribePtys", { projectSlug })),
 	/** Default model, visibility, default approval mode, Claude overrides.
 	 *  Not in the read model, so a re-issue re-snapshots instead of resuming. */
 	projectSettings: () =>
 		resumeStream(() =>
-			sockets.control.SubscribeProjectSettings({ projectSlug }),
+			sockets.control("SubscribeProjectSettings", { projectSlug }),
 		),
 	/** This draft's OpenCode inventory also retains its borrowed instance. */
 	draftModels: (instanceId: string) =>
 		resumeStream(() =>
-			sockets.control.SubscribeDraftModels({ projectSlug, instanceId }),
+			sockets.control("SubscribeDraftModels", { projectSlug, instanceId }),
 		),
 	/** Done/error alerts for sessions no tab is viewing. Live-only: a re-issue
 	 *  never replays one, so a reconnect cannot re-fire a ding. */
 	alerts: () =>
-		resumeStream(() => sockets.control.SubscribeAlerts({ projectSlug })),
+		resumeStream(() => sockets.control("SubscribeAlerts", { projectSlug })),
 	/** One session's composer draft as other tabs type it. Live-only. */
 	inputDraft: (options: { readonly sessionId: string }) =>
 		resumeStream(() =>
-			sockets.control.SubscribeInputDraft({
-				projectSlug,
+			sockets.control("SubscribeInputDraft", {
 				sessionId: options.sessionId,
 			}),
 		),
 	/**
-	 * The daemon's instance and project lists. Daemon-global, so neither takes
-	 * the project; low-rate, so both ride the control socket.
+	 * The daemon's instance list and usage. Both ride the control socket.
 	 */
-	instances: () => resumeStream(() => sockets.control.SubscribeInstances({})),
-	usage: () => resumeStream(() => sockets.control.SubscribeUsage({})),
-	projects: () => resumeStream(() => sockets.control.SubscribeProjects({})),
+	instances: () =>
+		resumeStream(() => sockets.control("SubscribeInstances", {})),
+	usage: () => resumeStream(() => sockets.control("SubscribeUsage", {})),
 	/** The daemon's protocol, build and restart state, plus a revision that
 	 *  moves when the cross-project session lists go stale. */
 	serverStatus: (options: { readonly onTransportDrop?: () => void } = {}) =>
-		resumeStream(() => sockets.control.SubscribeServerStatus({}), options),
+		resumeStream(() => sockets.control("SubscribeServerStatus", {}), options),
 });
 
 /** Every stream subscription the frontend has, resume already applied. */
@@ -246,55 +242,43 @@ export type WsRpcConnect = (options: {
 // waits for the control socket to be back (session-list.svelte.ts re-runs them
 // on `synchronized`), so after a restart the five-second cap meant up to five
 // seconds of stale panels. One local daemon can absorb the extra dials.
-const reconnectSchedule = Schedule.exponential("100 millis", 1.5).pipe(
-	Schedule.union(Schedule.spaced("1 second")),
-);
+const reconnectSchedule = Schedule.min([
+	Schedule.exponential("100 millis", 1.5),
+	Schedule.spaced("1 second"),
+]);
 
-// After a drop the protocol refuses every request until its own `onOpen` clears
-// the stored error, which runs after the raw "open" event. Reporting connected
-// from that hook, not the raw event, means a caller that reacts to `connected`
-// (ChatLayout loading the file tree) is never refused.
-const controlSocket = (url: string, onCreate: (socket: WebSocket) => void) =>
-	Layer.effect(
-		Socket.Socket,
-		Effect.map(
-			Socket.makeWebSocket(url),
-			(socket): Socket.Socket => ({
-				...socket,
-				runRaw: (handler, options) =>
-					socket.runRaw(handler, {
-						onOpen: Effect.zipRight(
-							options?.onOpen ?? Effect.void,
-							Effect.sync(markControlSocketOpen),
-						),
-					}),
-			}),
-		),
-	).pipe(
-		Layer.provide(
-			Layer.succeed(Socket.WebSocketConstructor, (url, protocols) => {
-				const socket = new globalThis.WebSocket(url, protocols);
-				onCreate(socket);
-				trackControlSocket(socket);
-				return socket;
-			}),
-		),
-	);
+// A redial may reach a daemon from another build, whose RPC wire this tab may
+// not decode. Every redial after a socket has opened first asks the server's
+// build over plain HTTP (registered by server-status, which owns the reload);
+// the check resolves only when this tab may dial. The first dial skips it: the
+// daemon that served this page is the one it dials.
+let redialBuildCheck: () => Promise<void> = async () => {};
+export const setRedialBuildCheck = (check: () => Promise<void>) => {
+	redialBuildCheck = check;
+};
 
 const connectWebSocket: WsRpcConnect = ({ url, trafficClass, wake }) => {
 	let wakeVersion = wake?.version ?? 0;
 	let currentSocket: WebSocket | undefined;
+	let opened = false;
 	const onCreate = (socket: WebSocket) => {
 		currentSocket = socket;
 		wakeVersion = wake?.version ?? 0;
+		socket.addEventListener("open", () => {
+			opened = true;
+		});
 	};
+	const checkedUrl = Effect.promise(async () => {
+		if (opened) await redialBuildCheck();
+		return url;
+	});
 	const onWake = () => {
 		// Ignore healthy wakes, but keep a wake during CLOSING: tab visibility
 		// may close a stale socket before its asynchronous close event arrives.
 		if (currentSocket?.readyState === 1) wakeVersion = wake?.version ?? 0;
 	};
 	const retrySchedule = reconnectSchedule.pipe(
-		Schedule.modifyDelayEffect((_out, delay) =>
+		Schedule.modifyDelay(({ duration: delay }) =>
 			Effect.suspend(() => {
 				if (wake === undefined) return Effect.succeed(delay);
 				if (wake.version !== wakeVersion) {
@@ -314,7 +298,7 @@ const connectWebSocket: WsRpcConnect = ({ url, trafficClass, wake }) => {
 			}),
 		),
 	);
-	return Effect.zipRight(
+	return Effect.andThen(
 		wake === undefined
 			? Effect.void
 			: Effect.acquireRelease(
@@ -323,22 +307,29 @@ const connectWebSocket: WsRpcConnect = ({ url, trafficClass, wake }) => {
 						Effect.sync(() => wake.signal.removeEventListener("wake", onWake)),
 				),
 		Layer.build(
-			RpcClient.layerProtocolSocket({ retrySchedule }).pipe(
+			RpcClient.layerProtocolSocket({ retryPolicy: retrySchedule }).pipe(
 				Layer.provide(
-					trafficClass === "control"
-						? controlSocket(url, onCreate)
-						: Socket.layerWebSocket(url).pipe(
-								Layer.provide(
-									Layer.succeed(
-										Socket.WebSocketConstructor,
-										(url, protocols) => {
-											const socket = new globalThis.WebSocket(url, protocols);
-											onCreate(socket);
-											return socket;
-										},
-									),
-								),
-							),
+					Layer.effect(Socket.Socket, Socket.makeWebSocket(checkedUrl)).pipe(
+						Layer.provide(
+							Layer.succeed(Socket.WebSocketConstructor, (url) => {
+								const socket = new globalThis.WebSocket(url);
+								onCreate(socket);
+								if (trafficClass === "control") trackControlSocket(socket);
+								return socket;
+							}),
+						),
+					),
+				),
+				// The protocol clears its stored error before onConnect. A caller
+				// reacting to `connected` can therefore issue requests immediately.
+				Layer.provide(
+					Layer.succeed(RpcClient.ConnectionHooks, {
+						onConnect:
+							trafficClass === "control"
+								? Effect.sync(markControlSocketOpen)
+								: Effect.void,
+						onDisconnect: Effect.void,
+					}),
 				),
 				Layer.provide(RpcSerialization.layerJson),
 			),
@@ -346,7 +337,7 @@ const connectWebSocket: WsRpcConnect = ({ url, trafficClass, wake }) => {
 	);
 };
 
-export class WsRpcClients extends Context.Tag("WsRpcClients")<
+export class WsRpcClients extends Context.Service<
 	WsRpcClients,
 	{
 		/** Skip both sockets' current redial wait without closing healthy sockets. */
@@ -370,7 +361,7 @@ export class WsRpcClients extends Context.Tag("WsRpcClients")<
 			projectSlug: string,
 		) => Effect.Effect<WsRpcSockets, never, never>;
 	}
->() {}
+>()("WsRpcClients") {}
 
 type SocketPair = Pick<WsRpcSockets, "control" | "stream">;
 
@@ -391,7 +382,7 @@ const make = (connect: WsRpcConnect) =>
 				return wakeVersion;
 			},
 			wait: (after: number) =>
-				Effect.async<void>((resume) => {
+				Effect.callback<void>((resume) => {
 					const cleanup = Effect.sync(() =>
 						wakes.removeEventListener("wake", onWake),
 					);
@@ -416,7 +407,7 @@ const make = (connect: WsRpcConnect) =>
 		const current = yield* Ref.make<SocketPair | undefined>(undefined);
 		// Serialises get-or-open, so two concurrent callers cannot race four
 		// sockets open.
-		const lock = yield* Effect.makeSemaphore(1);
+		const lock = yield* Semaphore.make(1);
 
 		const pair = lock.withPermits(1)(
 			Effect.uninterruptibleMask((restore) =>
@@ -425,16 +416,13 @@ const make = (connect: WsRpcConnect) =>
 					if (existing) return existing;
 					// Only acquisition is interruptible; a failed or interrupted open
 					// closes its own scope, so a half-open pair is never published.
-					const scope = yield* Scope.fork(
-						appScope,
-						ExecutionStrategy.sequential,
-					);
+					const scope = yield* Scope.fork(appScope, "sequential");
 					const url = makeWsRpcUrl();
 					const [control, stream] = yield* restore(
 						Effect.all([
 							connect({ url, trafficClass: "control", wake }),
 							connect({ url, trafficClass: "stream", wake }),
-						]).pipe(Scope.extend(scope)),
+						]).pipe(Scope.provide(scope)),
 					).pipe(
 						Effect.onExit((exit) =>
 							Exit.isFailure(exit) ? Scope.close(scope, exit) : Effect.void,
@@ -460,7 +448,7 @@ const make = (connect: WsRpcConnect) =>
 /** The shared client over a caller-supplied transport. Test seam. */
 export const makeWsRpcClientsLayer = (
 	connect: WsRpcConnect,
-): Layer.Layer<WsRpcClients> => Layer.scoped(WsRpcClients, make(connect));
+): Layer.Layer<WsRpcClients> => Layer.effect(WsRpcClients, make(connect));
 
 /** The shared client over real WebSockets. Mounted by the transport runtime. */
 export const WsRpcClientsLayer = makeWsRpcClientsLayer(connectWebSocket);

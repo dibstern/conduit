@@ -2,13 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	GetCommands,
-	GetSessionSkills,
-	GetSkillContent,
-	MoveSessionWorkspace,
-	ResolveClaudeSettings,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -176,21 +170,31 @@ describe("Session directory discovery through the built daemon", () => {
 		});
 
 		async function readView(sessionId?: string) {
-			const context = {
-				projectSlug: "process-test",
-				...(sessionId ? { sessionId } : {}),
-			};
 			const { commands } = await sendRpcRequest(
 				socket,
-				new GetCommands(context),
+				sessionId
+					? { _tag: "GetCommands", sessionId }
+					: { _tag: "GetCommands", projectSlug: "process-test" },
 			);
 			const { resolved } = await sendRpcRequest(
 				socket,
-				new ResolveClaudeSettings({ ...context, instanceId: "claude" }),
+				sessionId
+					? { _tag: "ResolveClaudeSettings", sessionId, instanceId: "claude" }
+					: {
+							_tag: "ResolveClaudeSettings",
+							projectSlug: "process-test",
+							instanceId: "claude",
+						},
 			);
 			const skill = await sendRpcRequest(
 				socket,
-				new GetSkillContent({ ...context, name: "release-notes" }),
+				sessionId
+					? { _tag: "GetSkillContent", sessionId, name: "release-notes" }
+					: {
+							_tag: "GetSkillContent",
+							projectSlug: "process-test",
+							name: "release-notes",
+						},
 			);
 			return {
 				commands: [...commands].sort((a, b) => a.name.localeCompare(b.name)),
@@ -203,14 +207,11 @@ describe("Session directory discovery through the built daemon", () => {
 			name: "main-only",
 			description: "main main-only",
 		});
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				projectSlug: "process-test",
-				sessionId: moved,
-				path: worktree,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId: moved,
+			path: worktree,
+		});
 		const views = {
 			moved: await readView(moved),
 			unmoved: await readView(unmoved),
@@ -250,25 +251,21 @@ describe("Session directory discovery through the built daemon", () => {
 				`Use the ${label} skill instructions.`,
 			);
 		}
-		const unmovedContext = { projectSlug: "process-test", sessionId: unmoved };
-		const movedContext = { projectSlug: "process-test", sessionId: moved };
+		const unmovedContext = { sessionId: unmoved };
+		const movedContext = { sessionId: moved };
 		await expect(
-			sendRpcRequest(
-				socket,
-				new GetSkillContent({
-					...unmovedContext,
-					name: "changelog-style",
-				}),
-			),
+			sendRpcRequest(socket, {
+				_tag: "GetSkillContent",
+				...unmovedContext,
+				name: "changelog-style",
+			}),
 		).rejects.toMatchObject({ _tag: "WsRpcError" });
 		await expect(
-			sendRpcRequest(
-				socket,
-				new GetSkillContent({
-					...movedContext,
-					name: "main-only",
-				}),
-			),
+			sendRpcRequest(socket, {
+				_tag: "GetSkillContent",
+				...movedContext,
+				name: "main-only",
+			}),
 		).rejects.toMatchObject({ _tag: "WsRpcError" });
 
 		await browser.preWarmSession(moved, 45_000);
@@ -280,10 +277,10 @@ describe("Session directory discovery through the built daemon", () => {
 		const used = providerQuery(fixture, moved);
 		evidence["provider"] = used;
 		expect(used).toEqual({ cwd: worktree, alwaysThinkingEnabled: true });
-		const { loads } = await sendRpcRequest(
-			socket,
-			new GetSessionSkills({ projectSlug: "process-test", sessionId: moved }),
-		);
+		const { loads } = await sendRpcRequest(socket, {
+			_tag: "GetSessionSkills",
+			sessionId: moved,
+		});
 		evidence["loads"] = loads
 			.map(({ name, invokedBy, turnOrdinal, running }) => ({
 				name,
@@ -311,32 +308,26 @@ describe("Session directory discovery through the built daemon", () => {
 		);
 
 		// Resolve at each use, including a move back without a daemon restart.
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				projectSlug: "process-test",
-				sessionId: moved,
-				path: fixture.projectDir,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId: moved,
+			path: fixture.projectDir,
+		});
 		const returned = await readView(moved);
 		evidence["returned"] = returned;
 		expect(returned).toEqual(views.unmoved);
 		const missingContext = {
-			projectSlug: "process-test",
 			sessionId: "missing-session",
 		};
 		for (const request of [
-			new GetCommands(missingContext),
-			new GetSkillContent({
-				...missingContext,
-				name: "release-notes",
-			}),
-			new ResolveClaudeSettings({
+			{ _tag: "GetCommands", ...missingContext },
+			{ _tag: "GetSkillContent", ...missingContext, name: "release-notes" },
+			{
+				_tag: "ResolveClaudeSettings",
 				...missingContext,
 				instanceId: "claude",
-			}),
-		])
+			},
+		] as const)
 			await expect(sendRpcRequest(socket, request)).rejects.toMatchObject({
 				_tag: "WsRpcError",
 			});
@@ -347,14 +338,11 @@ describe("Session directory discovery through the built daemon", () => {
 		const browser = await fixture.connect();
 		const unmoved = await browser.createSession();
 		const moved = await browser.createSession();
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				projectSlug: "process-test",
-				sessionId: moved,
-				path: worktree,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId: moved,
+			path: worktree,
+		});
 		for (const [label, sessionId, directory, thinking] of [
 			["main", unmoved, fixture.projectDir, false],
 			["worktree", moved, worktree, true],

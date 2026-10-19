@@ -72,7 +72,7 @@ describe("a Claude API retry through the built daemon", () => {
 			history.flatMap(({ parts }) => parts ?? []).map(({ type }) => type),
 		).not.toContain("error");
 
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			const retries = db
 				.prepare(

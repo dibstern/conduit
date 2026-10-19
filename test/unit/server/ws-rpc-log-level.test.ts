@@ -1,6 +1,6 @@
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { getLogLevel, setLogLevel } from "../../../src/lib/logger.js";
@@ -30,6 +30,7 @@ describe("WsRpcServerLayer log level controls", () => {
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(Layer.provideMerge(makeTestHandlerLayer())),
+				{ local: true },
 			),
 		);
 	});

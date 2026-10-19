@@ -10,10 +10,10 @@ import type { ProviderInstance } from "./types.js";
 const log = createLogger("provider-registry");
 const PROVIDER_SHUTDOWN_CONCURRENCY = 4;
 
-export class ProviderRegistryTag extends Context.Tag("ProviderRegistry")<
+export class ProviderRegistryTag extends Context.Service<
 	ProviderRegistryTag,
 	ProviderRegistry
->() {}
+>()("ProviderRegistry") {}
 
 export const ProviderRegistryLive = (
 	instances: Iterable<ProviderInstance> = [],
@@ -88,7 +88,7 @@ export class ProviderRegistry {
 				instance
 					.shutdownEffect()
 					.pipe(
-						Effect.catchAll((error) =>
+						Effect.catch((error) =>
 							Effect.sync(() =>
 								log.warn(`Provider instance shutdown failed: ${error}`),
 							),

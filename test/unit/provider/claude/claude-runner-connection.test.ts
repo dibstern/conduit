@@ -2,18 +2,17 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import {
 	Deferred,
 	Effect,
 	Exit,
 	Fiber,
-	FiberRef,
 	Layer,
 	ManagedRuntime,
 	Option,
 	Stream,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, expect, it } from "vitest";
 import { BUILD_ID } from "../../../../src/lib/build-id.js";
 import {
@@ -26,25 +25,25 @@ import {
 } from "../../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import { connectClaudeRunner } from "../../../../src/lib/provider/claude/claude-runner-connection.js";
-import {
-	CLAUDE_RUNNER_PROTOCOL_VERSION,
-	type ClaudeRunnerMessage,
-	ClaudeRunnerSocket,
-	claudeRunnerFailure,
-} from "../../../../src/lib/provider/claude/claude-runner-protocol.js";
-import {
-	type ClaudeRunnerOutputReceipt,
-	currentClaudeRunnerOutput,
-	makeClaudeRunnerReceiptStore,
-} from "../../../../src/lib/provider/claude/claude-runner-receipts.js";
-import { ClaudeRunnerSpool } from "../../../../src/lib/provider/claude/claude-runner-spool.js";
+import { ClaudeRunnerSocket } from "../../../../src/lib/provider/claude/claude-runner-protocol.js";
 import { claudeRuntimeEvent } from "../../../../src/lib/provider/claude/claude-runtime-event.js";
-import type {
-	ClaudeSessionFailure,
-	ClaudeSessionOutput,
-	ClaudeSessionOutputReply,
-} from "../../../../src/lib/provider/claude/claude-session-runner.js";
 import { createRelayEventSink } from "../../../../src/lib/provider/relay-event-sink.js";
+import {
+	RUNNER_PROTOCOL_VERSION,
+	type RunnerMessage,
+	runnerFailure,
+} from "../../../../src/lib/provider/runner/runner-protocol.js";
+import {
+	currentRunnerOutput,
+	makeRunnerReceiptStore,
+	type RunnerOutputReceipt,
+} from "../../../../src/lib/provider/runner/runner-receipts.js";
+import { RunnerSpool } from "../../../../src/lib/provider/runner/runner-spool.js";
+import type {
+	SessionFailure,
+	SessionOutput,
+	SessionOutputReply,
+} from "../../../../src/lib/provider/runner/session-runner.js";
 import type { PermissionResponse } from "../../../../src/lib/provider/types.js";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -52,7 +51,7 @@ afterEach(async () => {
 	for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-const eventOutput = (id: string): ClaudeSessionOutput => ({
+const eventOutput = (id: string): SessionOutput => ({
 	type: "event",
 	sinkId: "sink",
 	event: claudeRuntimeEvent("message.created", "session", {
@@ -62,7 +61,7 @@ const eventOutput = (id: string): ClaudeSessionOutput => ({
 	}),
 });
 
-const terminalOutput = (id: string): ClaudeSessionOutput => ({
+const terminalOutput = (id: string): SessionOutput => ({
 	type: "event",
 	sinkId: "sink",
 	event: claudeRuntimeEvent("turn.completed", "session", { messageId: id }),
@@ -71,10 +70,10 @@ const terminalOutput = (id: string): ClaudeSessionOutput => ({
 async function fixture(beforePublish: Effect.Effect<void> = Effect.void) {
 	const directory = mkdtempSync(join(tmpdir(), "conduit-runner-race-"));
 	const published: unknown[] = [];
-	const bus = Layer.succeed(SessionEventBusTag, {
+	const bus = Layer.succeed(SessionEventBusTag)({
 		publish: (events) =>
 			beforePublish.pipe(
-				Effect.zipRight(Effect.sync(() => void published.push(...events))),
+				Effect.andThen(Effect.sync(() => void published.push(...events))),
 			),
 		publishAdvance: () => Effect.void,
 		subscribe: () => Effect.succeed(Stream.empty),
@@ -100,13 +99,13 @@ async function fixture(beforePublish: Effect.Effect<void> = Effect.void) {
 		(id, provider, title, status, created_at, updated_at)
 		VALUES ('session', 'claude', 'Runner session', 'idle', 0, 0)`);
 	const ingestion = await runtime.runPromise(ProviderRuntimeIngestionTag);
-	const receipts = await runtime.runPromise(makeClaudeRunnerReceiptStore(sql));
+	const receipts = await runtime.runPromise(makeRunnerReceiptStore(sql));
 	const peers: ClaudeRunnerSocket[] = [];
 	const closedPeers = new Set<ClaudeRunnerSocket>();
-	const frames: ClaudeRunnerMessage[] = [];
+	const frames: RunnerMessage[] = [];
 	let closing = false;
-	const fibers: Fiber.RuntimeFiber<void, unknown>[] = [];
-	const spool = new ClaudeRunnerSpool(join(directory, "runner.spool"));
+	const fibers: Fiber.Fiber<void, unknown>[] = [];
+	const spool = new RunnerSpool(join(directory, "runner.spool"));
 	const socketPath = join(directory, "runner.sock");
 	const server = createServer((socket) => {
 		const peer = new ClaudeRunnerSocket(
@@ -116,7 +115,7 @@ async function fixture(beforePublish: Effect.Effect<void> = Effect.void) {
 				if (message.type === "hello")
 					peer.write({
 						type: "hello",
-						protocolVersion: CLAUDE_RUNNER_PROTOCOL_VERSION,
+						protocolVersion: RUNNER_PROTOCOL_VERSION,
 						buildId: BUILD_ID,
 						runnerId: "runner",
 						sessionId: "session",
@@ -144,18 +143,18 @@ async function fixture(beforePublish: Effect.Effect<void> = Effect.void) {
 		await runtime.dispose();
 		rmSync(directory, { recursive: true, force: true });
 	});
-	const ingest = (output: ClaudeSessionOutput) =>
+	const ingest = (output: SessionOutput) =>
 		output.type === "event"
 			? ingestion.ingest(output.event).pipe(
-					Effect.as({} satisfies ClaudeSessionOutputReply),
-					Effect.mapError((cause) => claudeRunnerFailure("ingest", cause)),
+					Effect.as({} satisfies SessionOutputReply),
+					Effect.mapError((cause) => runnerFailure("ingest", cause)),
 				)
 			: Effect.succeed({});
 	const attach = (
 		emit: (
-			output: ClaudeSessionOutput,
-		) => Effect.Effect<ClaudeSessionOutputReply, ClaudeSessionFailure> = ingest,
-		restore: Effect.Effect<void, ClaudeSessionFailure> = Effect.void,
+			output: SessionOutput,
+		) => Effect.Effect<SessionOutputReply, SessionFailure> = ingest,
+		restore: Effect.Effect<void, SessionFailure> = Effect.void,
 	) =>
 		runtime.runPromise(
 			connectClaudeRunner({
@@ -193,7 +192,7 @@ it("acknowledges a durable terminal output while its event publication is still 
 	const release = await Effect.runPromise(Deferred.make<void>());
 	const f = await fixture(
 		Deferred.succeed(publishing, undefined).pipe(
-			Effect.zipRight(Deferred.await(release)),
+			Effect.andThen(Deferred.await(release)),
 		),
 	);
 	cleanups.push(async () => {
@@ -248,7 +247,7 @@ it("acknowledges a durable terminal output while its event publication is still 
 it("fires durable callbacks only for a claimed terminal receipt, never a fenced or duplicate receipt", async () => {
 	const f = await fixture();
 	let callbacks = 0;
-	const receipt: ClaudeRunnerOutputReceipt = {
+	const receipt: RunnerOutputReceipt = {
 		runnerId: "runner",
 		sequence: 1,
 		attachmentId: "old",
@@ -262,7 +261,7 @@ it("fires durable callbacks only for a claimed terminal receipt, never a fenced 
 	await f.runtime.runPromise(f.receipts.attach("runner", "replacement"));
 	const output = terminalOutput("claimed");
 	await f.runtime.runPromise(
-		f.ingest(output).pipe(Effect.locally(currentClaudeRunnerOutput, receipt)),
+		f.ingest(output).pipe(Effect.provideService(currentRunnerOutput, receipt)),
 	);
 	expect(callbacks).toBe(0);
 	expect(
@@ -277,12 +276,12 @@ it("fires durable callbacks only for a claimed terminal receipt, never a fenced 
 	await f.runtime.runPromise(
 		f
 			.ingest(output)
-			.pipe(Effect.locally(currentClaudeRunnerOutput, replacement)),
+			.pipe(Effect.provideService(currentRunnerOutput, replacement)),
 	);
 	expect(callbacks).toBe(1);
 	await f.runtime.runPromise(
 		f.ingest(output).pipe(
-			Effect.locally(currentClaudeRunnerOutput, {
+			Effect.provideService(currentRunnerOutput, {
 				...replacement,
 				consumed: false,
 				committed: await f.runtime.runPromise(Deferred.make<void>()),
@@ -300,7 +299,7 @@ it("does not acknowledge a rolled-back terminal transaction before its successfu
 	const releaseRetry = await Effect.runPromise(Deferred.make<void>());
 	const f = await fixture(
 		Deferred.succeed(publishing, undefined).pipe(
-			Effect.zipRight(Deferred.await(releasePublication)),
+			Effect.andThen(Deferred.await(releasePublication)),
 		),
 	);
 	cleanups.push(async () => {
@@ -325,7 +324,7 @@ it("does not acknowledge a rolled-back terminal transaction before its successfu
 						: Effect.void,
 			});
 			return {};
-		}).pipe(Effect.mapError((cause) => claudeRunnerFailure("ingest", cause))),
+		}).pipe(Effect.mapError((cause) => runnerFailure("ingest", cause))),
 	);
 	await expect
 		.poll(() => f.frames.some((frame) => frame.type === "replay"))
@@ -376,8 +375,8 @@ it("fences a disconnected attachment before its pending event can commit", async
 	const output = eventOutput("overlap");
 	const first = await f.attach((event) =>
 		Deferred.succeed(entered, undefined).pipe(
-			Effect.zipRight(Deferred.await(release)),
-			Effect.zipRight(f.ingest(event)),
+			Effect.andThen(Deferred.await(release)),
+			Effect.andThen(f.ingest(event)),
 			Effect.ensuring(Deferred.succeed(staleFinished, undefined)),
 		),
 	);
@@ -420,7 +419,7 @@ it("accepts a sequence already durably appended without publishing it twice", as
 		consumed: false,
 	};
 	await f.runtime.runPromise(
-		f.ingest(output).pipe(Effect.locally(currentClaudeRunnerOutput, receipt)),
+		f.ingest(output).pipe(Effect.provideService(currentRunnerOutput, receipt)),
 	);
 	const duplicate = {
 		...receipt,
@@ -428,7 +427,9 @@ it("accepts a sequence already durably appended without publishing it twice", as
 		committed: await f.runtime.runPromise(Deferred.make<void>()),
 	};
 	const result = await f.runtime.runPromiseExit(
-		f.ingest(output).pipe(Effect.locally(currentClaudeRunnerOutput, duplicate)),
+		f
+			.ingest(output)
+			.pipe(Effect.provideService(currentRunnerOutput, duplicate)),
 	);
 	expect(Exit.isSuccess(result)).toBe(true);
 	expect(
@@ -444,7 +445,7 @@ it("replays a retained frame after one transient ingestion failure and continues
 	await f.attach((output) => {
 		calls += 1;
 		return calls === 1
-			? Effect.fail(claudeRunnerFailure("ingest", "transient write failure"))
+			? Effect.fail(runnerFailure("ingest", "transient write failure"))
 			: f.ingest(output);
 	});
 	await expect
@@ -517,7 +518,7 @@ it("fences a pending approval's later resolution after its ask receipt was consu
 				toolName: "Bash",
 				toolInput: { command: "pwd" },
 			})
-			.pipe(Effect.locally(currentClaudeRunnerOutput, receipt)),
+			.pipe(Effect.provideService(currentRunnerOutput, receipt)),
 	);
 	cleanups.push(async () => {
 		await f.runtime.runPromise(Fiber.interrupt(request));
@@ -542,18 +543,18 @@ it("fences a pending approval's later resolution after its ask receipt was consu
 
 it("fences later events inherited from a previous hello restoration", async () => {
 	const f = await fixture();
-	let restored: ClaudeRunnerOutputReceipt | undefined;
+	let restored: RunnerOutputReceipt | undefined;
 	await f.attach(
 		undefined,
 		Effect.gen(function* () {
-			restored = yield* FiberRef.get(currentClaudeRunnerOutput);
+			restored = yield* currentRunnerOutput;
 		}),
 	);
 	await f.attach();
 	await f.runtime.runPromise(
 		f
 			.ingest(eventOutput("restored"))
-			.pipe(Effect.locally(currentClaudeRunnerOutput, restored)),
+			.pipe(Effect.provideService(currentRunnerOutput, restored)),
 	);
 	expect(
 		await f.runtime.runPromise(f.sql`SELECT event_id FROM events`),
@@ -570,9 +571,7 @@ it("migrates a legacy cursor while retaining its sequence and cached reply", asy
 	await f.runtime.runPromise(
 		f.sql`INSERT INTO claude_runner_cursors (runner_id, sequence, result_json) VALUES ('runner', 7, '{"children":[]}')`,
 	);
-	const migrated = await f.runtime.runPromise(
-		makeClaudeRunnerReceiptStore(f.sql),
-	);
+	const migrated = await f.runtime.runPromise(makeRunnerReceiptStore(f.sql));
 	expect(
 		await f.runtime.runPromise(migrated.attach("runner", "replacement")),
 	).toEqual({ sequence: 7, result: { children: [] } });

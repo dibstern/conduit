@@ -1,12 +1,21 @@
 import { channel } from "node:diagnostics_channel";
 import { lstat } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
-import { SqlClient } from "@effect/sql";
-import { type Context, Effect, Layer, Option, Schema } from "effect";
+import {
+	type Context,
+	Effect,
+	Layer,
+	Option,
+	PubSub,
+	Schema,
+	Semaphore,
+} from "effect";
+import { SqlClient } from "effect/sql";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import type { WorkspaceMissing } from "../../../contracts/worktree.js";
 import { daemonSessionGitCache } from "../../../git/session-git.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
+import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
 import {
@@ -14,6 +23,14 @@ import {
 	effectiveWorkingDirectory,
 } from "../../../session/session-workspace.js";
 import { type SessionGit, SessionGitSchema } from "../../../shared-types.js";
+import {
+	DaemonEvent,
+	DaemonEventBusTag,
+} from "../../daemon/Services/daemon-pubsub.js";
+import {
+	broadcastProjectList,
+	ProjectRegistryTag,
+} from "../../daemon/Services/project-registry-service.js";
 import { ConfigTag } from "../Services/services.js";
 import { SessionGitServiceTag } from "../Services/session-git-service.js";
 import { inspectSessionWorktree } from "../Services/session-workspace.js";
@@ -30,16 +47,19 @@ export const SessionGitLive = Layer.effect(
 	SessionGitServiceTag,
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
+		const registry = yield* Effect.serviceOption(ProjectRegistryTag);
+		const daemonEvents = yield* Effect.serviceOption(DaemonEventBusTag);
 		const read = yield* ReadQueryEffectTag;
+		const eventStore = yield* EventStoreEffectTag;
 		const sql = yield* SqlClient.SqlClient;
 		const commit = yield* makeCommitAndSignal;
-		const refreshes = yield* Effect.makeSemaphore(1);
+		const refreshes = yield* Semaphore.make(1);
 		// What browsers were last sent per folder. It is kept with the versions
 		// that sent it, so after a restart only folders whose git moved while
 		// down are stamped again, and until the first read the cache serves it,
 		// so a row's version still covers the git it carries.
 		const decodeGit = Schema.decodeUnknownOption(
-			Schema.parseJson(SessionGitSchema),
+			Schema.fromJsonString(SessionGitSchema),
 		);
 		let published = new Map<
 			string,
@@ -55,7 +75,7 @@ export const SessionGitLive = Layer.effect(
 			directory: string;
 			git: string | null;
 		}>`SELECT directory, git FROM session_git_published`.pipe(
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.logWarning(
 					"Could not read published git; every session is stamped again",
 					error,
@@ -104,9 +124,12 @@ export const SessionGitLive = Layer.effect(
 			directories.length === 0
 				? Effect.void
 				: sql`DELETE FROM session_git_published WHERE directory IN ${sql.in(directories)}`.pipe(
-						Effect.tap(() => {
-							for (const directory of directories) published.delete(directory);
-						}),
+						Effect.tap(() =>
+							Effect.sync(() => {
+								for (const directory of directories)
+									published.delete(directory);
+							}),
+						),
 					);
 		let queued:
 			| {
@@ -138,10 +161,13 @@ export const SessionGitLive = Layer.effect(
 								// become one follow-up; the other permit waiters then have no work.
 								const request = queued;
 								queued = undefined;
-								const sessions = yield* read.listSessionGitRefreshTargets({
-									sessionIds: [...request.sessionIds],
-									all: request.all,
-								});
+								const sessions = yield* read.listSessionGitRefreshTargets(
+									{ projectIds: [eventStore.projectId] },
+									{
+										sessionIds: [...request.sessionIds],
+										all: request.all,
+									},
+								);
 								const projectFolders = [
 									config.projectDir,
 									...(config.extraFolders ?? []),
@@ -251,14 +277,14 @@ export const SessionGitLive = Layer.effect(
 											}
 											const rows = yield* sql<
 												Pick<SessionRow, "id" | "workspace">
-											>`SELECT id, workspace FROM sessions`;
+											>`SELECT id, workspace FROM sessions WHERE project_id = ${eventStore.projectId}`;
 											const ids: string[] = [];
 											for (const row of rows) {
 												const workspace =
 													row.workspace == null
 														? null
-														: yield* Schema.decodeUnknown(
-																Schema.parseJson(SessionWorkspaceSchema),
+														: yield* Schema.decodeUnknownEffect(
+																Schema.fromJsonString(SessionWorkspaceSchema),
 															)(row.workspace);
 												if (
 													changed.has(
@@ -277,22 +303,32 @@ export const SessionGitLive = Layer.effect(
 											if (ids.length === 0) return [];
 											const moved = yield* sql<{
 												id: string;
-											}>`UPDATE sessions SET version = ${version} WHERE id IN ${sql.in(ids)} RETURNING id`;
-											yield* sql`UPDATE session_sidebar SET version = ${version}, row = json_set(row, '$.version', ${version}) WHERE session_id IN (SELECT root_id FROM sessions WHERE id IN ${sql.in(moved.map(({ id }) => id))})`;
+											}>`UPDATE sessions SET version = ${version} WHERE project_id = ${eventStore.projectId} AND id IN ${sql.in(ids)} RETURNING id`;
+											yield* sql`UPDATE session_sidebar SET version = ${version}, row = json_set(row, '$.version', ${version}) WHERE project_id = ${eventStore.projectId} AND session_id IN (SELECT root_id FROM sessions WHERE id IN ${sql.in(moved.map(({ id }) => id))})`;
 											return moved.map(({ id }) => id);
 										}),
 									),
 								);
-								yield* Effect.tryPromise(async () => {
-									await config.refreshSessionGit?.();
-									await config.broadcastSessionListChanged?.();
-								});
+								if (Option.isSome(daemonEvents)) {
+									if (Option.isSome(registry))
+										yield* broadcastProjectList.pipe(
+											Effect.provideService(ProjectRegistryTag, registry.value),
+											Effect.provideService(
+												DaemonEventBusTag,
+												daemonEvents.value,
+											),
+										);
+									yield* PubSub.publish(
+										daemonEvents.value,
+										DaemonEvent.DaemonSessionsChanged(),
+									);
+								}
 								published = next;
 								yield* forget(forgotten);
 							}
 						}),
 					);
 				}),
-		} satisfies Context.Tag.Service<typeof SessionGitServiceTag>;
+		} satisfies Context.Service.Shape<typeof SessionGitServiceTag>;
 	}),
 );

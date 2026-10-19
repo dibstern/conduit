@@ -1,14 +1,14 @@
-import type { ProviderRuntimeEventType } from "../../contracts/providers/provider-runtime-event.js";
-import {
-	createEventId,
-	type EventPayloadMap,
-} from "../../persistence/events.js";
+import type {
+	ProviderRuntimeEventPayloadMap,
+	ProviderRuntimeEventType,
+} from "../../contracts/providers/provider-runtime-event.js";
+import { createEventId } from "../../persistence/events.js";
 import { providerRefsFromRuntimeData } from "../provider-runtime-refs.js";
 
 export function claudeRuntimeEvent<K extends ProviderRuntimeEventType>(
 	type: K,
 	sessionId: string,
-	data: EventPayloadMap[K],
+	data: ProviderRuntimeEventPayloadMap[K],
 ) {
 	return {
 		eventId: createEventId(),

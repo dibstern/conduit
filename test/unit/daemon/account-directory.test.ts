@@ -6,7 +6,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Either, Option } from "effect";
+import { Result as Either, Option } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	type AccountsState,
@@ -96,6 +96,7 @@ describe("account directory reads", () => {
 		const input = state();
 		const alias = {
 			driver: "opencode" as const,
+			usageEligible: false as const,
 			id: AccountIdSchema.make("claude-sdk"),
 			name: "Alias account",
 		};
@@ -104,7 +105,7 @@ describe("account directory reads", () => {
 			accounts: [alias, ...input.accounts],
 			deleted: [{ id: alias.id, driver: "claude" as const }],
 		};
-		expect(route(withAlias, "claude-sdk")).toEqual(Either.right(alias));
+		expect(route(withAlias, "claude-sdk")).toEqual(Either.succeed(alias));
 		expect(route(input, "claude-sdk")).toEqual(route(input, "claude"));
 	});
 
@@ -114,15 +115,15 @@ describe("account directory reads", () => {
 		const moved = {
 			...input,
 			accounts: input.accounts.filter((account) => account.id !== "claude"),
-			defaults: { claude: Option.some(work.id) },
+			defaults: { ...input.defaults, claude: Option.some(work.id) },
 			deleted: [
 				{ id: AccountIdSchema.make("removed"), driver: "claude" as const },
 			],
 		};
 		for (const id of ["claude", "claude-sdk", "removed"])
-			expect(route(moved, id)).toEqual(Either.right(work));
+			expect(route(moved, id)).toEqual(Either.succeed(work));
 		expect(resolve(moved, { _tag: "DriverDefault", driver: "claude" })).toEqual(
-			Either.right(work),
+			Either.succeed(work),
 		);
 	});
 
@@ -131,7 +132,7 @@ describe("account directory reads", () => {
 			launchLogin: launch,
 			maxAccounts: 5,
 			accounts: [],
-			defaults: { claude: Option.none() },
+			defaults: { ...state().defaults, claude: Option.none() },
 			deleted: [],
 		};
 		for (const ref of [
@@ -141,10 +142,10 @@ describe("account directory reads", () => {
 			{ _tag: "DriverDefault", driver: "opencode" },
 		] as const) {
 			const result = resolve(empty, ref);
-			expect(Either.isLeft(result)).toBe(true);
-			if (Either.isLeft(result)) {
-				expect(result.left.ref).toEqual(ref);
-				expect(result.left.message).toContain(
+			expect(Either.isFailure(result)).toBe(true);
+			if (Either.isFailure(result)) {
+				expect(result.failure.ref).toEqual(ref);
+				expect(result.failure.message).toContain(
 					ref._tag === "Id" ? ref.id : ref.driver,
 				);
 			}
@@ -159,11 +160,14 @@ describe("account directory reads", () => {
 		for (const id of ["absent", "external"]) {
 			const dangling = {
 				...input,
-				defaults: { claude: Option.some(AccountIdSchema.make(id)) },
+				defaults: {
+					...input.defaults,
+					claude: Option.some(AccountIdSchema.make(id)),
+				},
 			};
 			expect(defaultFor(dangling, "claude")).toEqual(Option.none());
 			expect(
-				Either.isLeft(
+				Either.isFailure(
 					resolve(dangling, { _tag: "DriverDefault", driver: "claude" }),
 				),
 			).toBe(true);
@@ -269,18 +273,20 @@ describe("account directory reads", () => {
 		const dir = mkdtempSync(join(tmpdir(), "g4zp-directory-"));
 		tempDirs.push(dir);
 		const missing = loadAccountsState(dir, launch);
-		expect(Either.isRight(missing)).toBe(true);
-		if (Either.isRight(missing))
-			expect(Either.getOrThrow(route(missing.right, "claude"))).toMatchObject({
-				folder: launch,
-			});
+		expect(Either.isSuccess(missing)).toBe(true);
+		if (Either.isSuccess(missing))
+			expect(Either.getOrThrow(route(missing.success, "claude"))).toMatchObject(
+				{
+					folder: launch,
+				},
+			);
 		writeFileSync(join(dir, "daemon.json"), "{invalid");
 		const invalid = loadAccountsState(dir, launch);
-		expect(Either.isLeft(invalid) && invalid.left._tag).toBe("Invalid");
+		expect(Either.isFailure(invalid) && invalid.failure._tag).toBe("Invalid");
 		rmSync(join(dir, "daemon.json"));
 		mkdirSync(join(dir, "daemon.json"));
 		const unreadable = loadAccountsState(dir, launch);
-		expect(Either.isLeft(unreadable) && unreadable.left._tag).toBe(
+		expect(Either.isFailure(unreadable) && unreadable.failure._tag).toBe(
 			"Unreadable",
 		);
 	});

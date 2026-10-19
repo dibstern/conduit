@@ -2,7 +2,7 @@
 // this store keeps its last answer and derives the chip's rows from it.
 
 import type { GetSessionSkillsResponse } from "../../contracts/ws-rpc.js";
-import { getSessionSkillsRpc } from "../transport/ws-rpc-client.js";
+import { rpc } from "../transport/ws-rpc-client.js";
 import { getCurrentSlug } from "./router.svelte.js";
 import { sessionViewLoaded } from "./transcript.svelte.js";
 
@@ -83,8 +83,7 @@ export function loadSessionSkills(sessionId: string): Promise<void> {
 				if (request !== latestRequest) return;
 				pending.running = true;
 				try {
-					const { loads } = await getSessionSkillsRpc({
-						projectSlug,
+					const { loads } = await rpc("GetSessionSkills", {
 						sessionId,
 					});
 					if (request === latestRequest) sessionSkillsState.loads = loads;

@@ -3,13 +3,17 @@ import { access, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir, userInfo } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { Shutdown } from "../lib/contracts/ws-rpc.js";
 import {
 	type DaemonConfig,
 	defaultDaemonConfig,
 	loadDaemonConfigResult,
 	saveDaemonConfig,
 } from "../lib/daemon/config-persistence.js";
+import { sendRpcRequest } from "../lib/daemon/daemon-rpc-client.js";
+import { isDaemonRunning } from "../lib/daemon/daemon-utils.js";
 import { getVersion } from "../lib/version.js";
 import type { CommandContext } from "./cli-command-handlers.js";
 import { DEFAULT_CONFIG_DIR, type ParsedArgs } from "./cli-utils.js";
@@ -59,6 +63,7 @@ export interface ServiceRunner {
 	loadConfig: typeof loadDaemonConfigResult;
 	saveConfig: typeof saveDaemonConfig;
 	checkDaemon(): Promise<boolean>;
+	stopDaemon(configDir: string, pid: number): Promise<void>;
 	isPortAvailable(port: number, host: string): Promise<boolean>;
 }
 
@@ -202,6 +207,7 @@ ${Object.entries(environment)
 ExecStart=${systemdArgument(shell)} -l -c ${systemdArgument(script.replaceAll("$", () => "$$"))}
 Restart=always
 RestartSec=5
+KillMode=process
 StandardOutput=append:${paths.stdout.replaceAll("%", "%%")}
 StandardError=append:${paths.stderr.replaceAll("%", "%%")}
 
@@ -326,6 +332,21 @@ export async function runServiceCommand(
 	if (action === "uninstall") {
 		if (!state.installed && !state.loaded && !state.running)
 			return "Conduit service is not installed.\n";
+		if (state.pid !== undefined) {
+			if (!state.installed) {
+				// With no unit to locate its config, require the invocation to match.
+				const config = runner.loadConfig(paths.configDir);
+				if (config._tag === "Failure") throw config.failure;
+				if (config.success.pid !== state.pid) {
+					throw new Error(
+						`Conduit server ${state.pid} does not match ${paths.configDir}. Set CONDUIT_CONFIG_DIR to the installed service's config directory before uninstalling.`,
+					);
+				}
+			}
+			// Generated units keep their logs beside the config, which can differ
+			// from the config directory used by this CLI invocation.
+			await runner.stopDaemon(dirname(state.stdout), state.pid);
+		}
 		if (platform === "darwin") {
 			if (state.loaded)
 				await checkedExec(runner, "launchctl", ["bootout", target]);
@@ -361,9 +382,9 @@ export async function runServiceCommand(
 	}
 	// Read after stopping the old service so its shutdown flush is included.
 	const loaded = runner.loadConfig(paths.configDir);
-	if (loaded._tag === "Left" && loaded.left._tag !== "NotFound")
-		throw loaded.left;
-	const persisted = loaded._tag === "Right" ? loaded.right : null;
+	if (loaded._tag === "Failure" && loaded.failure._tag !== "NotFound")
+		throw loaded.failure;
+	const persisted = loaded._tag === "Success" ? loaded.success : null;
 	const config: DaemonConfig = {
 		...(persisted ?? {
 			...defaultDaemonConfig(),
@@ -501,6 +522,36 @@ export function createServiceRunner(
 		loadConfig: loadDaemonConfigResult,
 		saveConfig: saveDaemonConfig,
 		checkDaemon,
+		stopDaemon: async (configDir, pid) => {
+			const socketPath = join(configDir, "relay.sock");
+			if (!(await isDaemonRunning(socketPath))) return;
+			await sendRpcRequest(
+				socketPath,
+				Shutdown.payloadSchema.make({ _tag: "Shutdown" }),
+			);
+			// Shutdown acknowledges intent before disposing the runtime owners.
+			// The socket closes during disposal, so wait for the original process.
+			const deadline = Date.now() + 60_000;
+			while (true) {
+				try {
+					process.kill(pid, 0);
+				} catch (error) {
+					if (
+						error instanceof Error &&
+						"code" in error &&
+						error.code === "ESRCH"
+					)
+						return;
+					throw error;
+				}
+				if (Date.now() >= deadline) {
+					throw new Error(
+						`Timed out waiting for Conduit server ${pid} to stop.`,
+					);
+				}
+				await setTimeout(100);
+			}
+		},
 		isPortAvailable: (port, host) =>
 			new Promise((fulfil, reject) => {
 				const server = createServer();

@@ -43,8 +43,8 @@ import type { BrowserContext, Page } from "@playwright/test";
 import { Effect } from "effect";
 import type {
 	CanonicalEvent,
-	CanonicalEventType,
 	EventPayloadMap,
+	LiveEventType,
 } from "../../../src/lib/contracts/stored-event.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -64,7 +64,7 @@ const replyEnd = (tag: string, turn: number) => `END-OF-${tag}-${turn}.`;
 
 const event =
 	(sessionId: string, createdAt: number) =>
-	<T extends CanonicalEventType>(type: T, data: EventPayloadMap[T]) =>
+	<T extends LiveEventType>(type: T, data: EventPayloadMap[T]) =>
 		canonicalEvent(type, sessionId, data, { provider: "claude", createdAt });
 
 /** One prompt and its reply. `phase` keeps every seeding later than the last. */
@@ -119,7 +119,7 @@ const seed = (filename: string, events: readonly CanonicalEvent[]) =>
 			const commit = yield* makeCommitAndSignal;
 			yield* commit([...events], { publish: false });
 		}).pipe(
-			Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+			Effect.provide(makePersistenceEffectLayer(filename, "process-test")),
 		),
 	);
 
@@ -211,7 +211,7 @@ test("a session opened from its saved page ends where a cold open does", async (
 		"The cache and the wire are the same on every device.",
 	);
 	test.setTimeout(600_000);
-	const store = harness.projectStorePath();
+	const store = harness.daemonStorePath();
 	const viewport = testInfo.project.use.viewport ?? null;
 	const url = (sessionId: string) =>
 		`${harness.baseUrl}/s/${sessionId}?p=process-test`;

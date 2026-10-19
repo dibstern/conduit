@@ -27,11 +27,9 @@ test("@drift-layout drift indicator never covers the composer controls on mobile
 		responses: new Map(),
 	});
 	await mockWsRpc(page, {
-		handlers: {
-			GetProjects: async () => ({
-				projects: [{ slug: "myapp", name: "myapp", path: "/tmp/myapp" }],
-			}),
+		stubs: {
 			GetModels: async () => ({
+				defaultOpenCodeInstanceId: "opencode",
 				projectSlug: "myapp",
 				providers: modelExecutionProviders,
 				active: { model: "opus[1m]", provider: "claude" },
@@ -41,6 +39,9 @@ test("@drift-layout drift indicator never covers the composer controls on mobile
 				projectSlug: "myapp",
 				providerScope: { id: "claude", name: "Claude" },
 				agents: [{ id: "planner", name: "Planner" }],
+			}),
+			GetProjects: async () => ({
+				projects: [{ slug: "myapp", title: "myapp", folders: ["/tmp/myapp"] }],
 			}),
 		},
 	});

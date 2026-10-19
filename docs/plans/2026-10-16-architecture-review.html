@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Architecture review · conduit</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose", flowchart: { useMaxWidth: true, htmlLabels: true } });
+</script>
+<style>
+  body { color: var(--foreground, #0f172a); }
+  .r { border-radius: var(--radius, 14px); }
+  .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: #64748b; font-weight: 600; }
+  .chip { display: inline-block; font-family: ui-monospace, monospace; font-size: 10.5px; padding: 2px 6px; border-radius: 4px; border: 1px solid #cbd5e1; background: #f8fafc; color: #334155; margin: 2px 2px 0 0; }
+  .chip.leak { border-color: #fca5a5; background: #fef2f2; color: #b91c1c; }
+  .chip.deep { border-color: #0f172a; background: #0f172a; color: #f8fafc; }
+  .chip.faded { opacity: .55; }
+  table .chip { font-size: 9.5px; padding: 1px 4px; }
+  .deep { background: linear-gradient(135deg, #0f172a, #1e293b); color: #f8fafc; }
+  .band { border-left: 4px solid #94a3b8; background: #f1f5f9; padding: 6px 10px; font-size: 11.5px; line-height: 1.3; }
+  .band.leak { border-left-color: #dc2626; background: #fef2f2; }
+  .band.deep { border-left-color: #10b981; background: linear-gradient(135deg, #0f172a, #1e293b); color: #f8fafc; }
+  .seam { border-top: 2px dashed #64748b; }
+  .pane { border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; background: #fff; min-height: 300px; }
+  .mermaid svg { max-width: 100% !important; height: auto; }
+  .bar { border-radius: 6px; padding: 8px; font-size: 11px; line-height: 1.3; display: flex; align-items: flex-start; }
+  .card { background: #fff; color: #0f172a; }
+  .wins li::before { content: "→ "; color: #059669; font-weight: 700; }
+</style>
+</head>
+<body class="font-sans">
+<main class="max-w-5xl mx-auto py-10 space-y-10">
+
+<header class="space-y-4">
+  <div class="flex flex-wrap items-baseline justify-between gap-2">
+    <h1 class="text-lg font-semibold">Architecture review · conduit</h1>
+    <div class="text-sm opacity-70">2026-10-16 · 1348 commits since 2026-08-15</div>
+  </div>
+  <div class="card r border border-slate-200 p-4 grid sm:grid-cols-2 gap-6">
+    <div>
+      <div class="lbl mb-2">Hot spots · commits touching file</div>
+      <div class="space-y-1 text-[11px] font-mono">
+        <div class="flex items-center gap-2"><div class="w-40 truncate">contracts/ws-rpc.ts</div><div class="h-3 bg-red-500 rounded" style="width:135px"></div><span>135</span></div>
+        <div class="flex items-center gap-2"><div class="w-40 truncate">shared-types.ts</div><div class="h-3 bg-slate-400 rounded" style="width:108px"></div><span>108</span></div>
+        <div class="flex items-center gap-2"><div class="w-40 truncate">transport/ws-rpc-client.ts</div><div class="h-3 bg-red-500 rounded" style="width:85px"></div><span>85</span></div>
+        <div class="flex items-center gap-2"><div class="w-40 truncate">server/ws-rpc.ts</div><div class="h-3 bg-red-500 rounded" style="width:78px"></div><span>78</span></div>
+        <div class="flex items-center gap-2"><div class="w-40 truncate">input/InputArea.svelte</div><div class="h-3 bg-slate-400 rounded" style="width:74px"></div><span>74</span></div>
+        <div class="flex items-center gap-2"><div class="w-40 truncate">read-query-effect.ts</div><div class="h-3 bg-slate-400 rounded" style="width:70px"></div><span>70</span></div>
+        <div class="flex items-center gap-2"><div class="w-40 truncate">layout/ChatLayout.svelte</div><div class="h-3 bg-slate-400 rounded" style="width:65px"></div><span>65</span></div>
+        <div class="flex items-center gap-2"><div class="w-40 truncate">claude-provider-runtime.ts</div><div class="h-3 bg-slate-400 rounded" style="width:64px"></div><span>64</span></div>
+      </div>
+      <div class="text-[11px] text-slate-500 mt-2">Red: the browser RPC path. A contract commit averages 18 files.</div>
+    </div>
+    <div class="text-[12px] space-y-2 text-slate-700">
+      <div class="lbl mb-2">Legend</div>
+      <div class="flex items-center gap-2"><span class="inline-block w-6 h-4 border border-slate-400 rounded-sm bg-white"></span> module</div>
+      <div class="flex items-center gap-2"><span class="inline-block w-6 seam"></span> seam</div>
+      <div class="flex items-center gap-2"><span class="inline-block w-6 h-0.5 bg-red-600"></span> leakage / hand-synced restatement</div>
+      <div class="flex items-center gap-2"><span class="inline-block w-6 h-4 rounded-sm deep"></span> deep module</div>
+      <div class="pt-2 lbl">Already deep · leave alone</div>
+      <div><span class="chip deep">session-inbox</span><span class="chip deep">read-model-subscription</span><span class="chip deep">session-command (ADR-0004)</span><span class="chip deep">runner protocol</span><span class="chip deep">provider-runtime-event-to-domain</span><span class="chip deep">transcript appliers</span></div>
+    </div>
+  </div>
+</header>
+
+<section id="candidates" class="space-y-10">
+
+<!-- 1 -->
+<article id="c1" class="card r border border-slate-200 p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">1 · Derive the browser RPC client from the contract</h2>
+  <div class="flex flex-wrap gap-2 text-xs">
+    <span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold">Strong</span>
+    <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <ul class="font-mono text-xs text-slate-600 space-y-0.5">
+    <li>src/lib/frontend/transport/ws-rpc-client.ts · 1778 lines</li>
+    <li>src/lib/contracts/ws-rpc.ts · WsRpcRequest :2616 · WsRpcGroup :3050</li>
+    <li>src/lib/server/ws-rpc.ts · barrel :42-183 · DaemonRpcName :367-393</li>
+    <li>src/lib/frontend/transport/ws-rpc.ts · src/lib/handlers/index.ts (barrels)</li>
+    <li>test/e2e/helpers/rpc-mock.ts · test/unit/contracts/ws-rpc-contract.test.ts</li>
+  </ul>
+  <div class="grid sm:grid-cols-2 gap-4">
+    <div class="pane">
+      <div class="lbl mb-3">Before · ws-rpc-client is shallow</div>
+      <div class="flex gap-3 items-end" style="height:190px">
+        <div class="w-1/2 flex flex-col justify-end h-full">
+          <div class="bar border-2 border-red-500 bg-red-50 text-red-800" style="height:180px">Interface: 98 wrappers · 71 hand-copied *RpcInput types · typed errors opt-in (17 of 98)</div>
+          <div class="lbl mt-1">interface</div>
+        </div>
+        <div class="w-1/2 flex flex-col justify-end h-full">
+          <div class="bar border border-slate-400 bg-slate-100" style="height:40px">callControl · runTransportEffect</div>
+          <div class="lbl mt-1">implementation</div>
+        </div>
+      </div>
+      <div class="lbl mt-3">Touched per new RPC</div>
+      <div><span class="chip">class</span><span class="chip leak">WsRpcRequest</span><span class="chip leak">WsRpcGroup</span><span class="chip">handler</span><span class="chip leak">Pick list</span><span class="chip leak">failure label</span><span class="chip leak">client wrapper</span><span class="chip leak">*RpcInput</span><span class="chip">test stub</span><span class="chip leak">rpc-mock encoder</span></div>
+    </div>
+    <div class="pane">
+      <div class="lbl mb-3">After · one deep client</div>
+      <div class="flex gap-3 items-end" style="height:190px">
+        <div class="w-1/2 flex flex-col justify-end h-full">
+          <div class="bar border border-slate-400 bg-white" style="height:40px">One client typed by WsRpcGroup</div>
+          <div class="lbl mt-1">interface</div>
+        </div>
+        <div class="w-1/2 flex flex-col justify-end h-full">
+          <div class="bar deep" style="height:180px">Promise edge · project routing · typed-error delivery · transport lifecycle</div>
+          <div class="lbl mt-1">implementation</div>
+        </div>
+      </div>
+      <div class="lbl mt-3">Touched per new RPC</div>
+      <div><span class="chip">class + group entry</span><span class="chip">handler</span><span class="chip">test stub</span></div>
+    </div>
+  </div>
+  <dl class="grid gap-2 text-sm">
+    <div><dt class="lbl">Problem</dt><dd>Each RPC's name and payload are restated in 7–8 places, and the client module is 98 wrappers whose interface is as large as their bodies.</dd></div>
+    <div><dt class="lbl">Solution</dt><dd>One client derived from <code>WsRpcGroup</code> owns the Promise edge, project routing and typed errors; <code>WsRpcRequest</code> derives from the group; the barrels go.</dd></div>
+  </dl>
+  <ul class="wins text-sm grid sm:grid-cols-2 gap-1">
+    <li>Interface shrinks: 98 wrappers → 1</li>
+    <li>Leverage: 122 RPCs, one call path</li>
+    <li>Locality: typed errors handled once</li>
+    <li>Delete 71 hand-copied input types</li>
+    <li>Contract test stays the test surface</li>
+  </ul>
+</article>
+
+<!-- 2 -->
+<article id="c2" class="card r border border-slate-200 p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">2 · Declare each canonical event once</h2>
+  <div class="flex flex-wrap gap-2 text-xs">
+    <span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold">Strong</span>
+    <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <ul class="font-mono text-xs text-slate-600 space-y-0.5">
+    <li>src/lib/persistence/events.ts (6 sites per event) · src/lib/contracts/stored-event.ts</li>
+    <li>src/lib/provider/claude/event-type-guard.ts</li>
+    <li>src/lib/relay/domain-event-to-relay.ts · 233 lines · src/lib/relay/project-relay-publisher.ts:22</li>
+    <li>test/unit/provider/relay-event-sink-exhaustive.test.ts · test/unit/pipeline/__snapshots__/exhaustiveness-guards.test.ts.snap</li>
+  </ul>
+  <div class="grid sm:grid-cols-2 gap-4">
+    <div class="pane">
+      <div class="lbl mb-2">Before · one event, ~11 files</div>
+      <div class="flex gap-3 items-stretch">
+        <div class="flex items-center"><div class="border-2 border-slate-700 rounded px-2 py-3 text-[11px] font-semibold">new event</div></div>
+        <div class="flex items-center text-slate-400 text-lg">→</div>
+        <div class="flex-1 grid grid-cols-2 gap-1.5 text-[11px]">
+          <div class="border border-slate-400 rounded px-2 py-1.5">events.ts ×6</div>
+          <div class="border border-slate-400 rounded px-2 py-1.5">stored-event.ts</div>
+          <div class="border border-slate-400 rounded px-2 py-1.5">projector handler</div>
+          <div class="border-2 border-red-500 bg-red-50 text-red-800 rounded px-2 py-1.5">claude type guard</div>
+          <div class="border-2 border-red-500 bg-red-50 text-red-800 rounded px-2 py-1.5">relay silent case</div>
+          <div class="border-2 border-red-500 bg-red-50 text-red-800 rounded px-2 py-1.5">HANDLED_TYPES list</div>
+          <div class="border-2 border-red-500 bg-red-50 text-red-800 rounded px-2 py-1.5">snapshot + count</div>
+          <div class="border-2 border-red-500 bg-red-50 text-red-800 rounded px-2 py-1.5">reclassified list</div>
+        </div>
+      </div>
+      <div class="text-[11px] text-red-700 mt-2">Red: registration only, no behaviour</div>
+      <div class="lbl mt-2">domain-event-to-relay builds</div>
+      <div><span class="chip faded">delta</span><span class="chip faded">thinking</span><span class="chip faded">tool</span><span class="chip faded">result</span><span class="chip">done</span> <span class="text-xs text-red-700">publisher keeps only done</span></div>
+    </div>
+    <div class="pane">
+      <div class="lbl mb-2">After · one definition, derived guards</div>
+      <pre class="mermaid">
+flowchart LR
+  E["event definition<br/>payload · required fields · producer"] -.-> U["unions · payload map · schema"]
+  E -.-> G["producer guard"]
+  E --> P["projector handler"]
+  T["turn-ended alert<br/>~15 lines"]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a;
+  classDef faded fill:#f1f5f9,stroke:#cbd5e1,color:#64748b;
+  class E deep
+  class U,G faded
+      </pre>
+      <div class="lbl mt-2">Hand edits per event</div>
+      <div><span class="chip deep">definition</span><span class="chip">projector handler</span></div>
+    </div>
+  </div>
+  <dl class="grid gap-2 text-sm">
+    <div><dt class="lbl">Problem</dt><dd>A new event touches ~11 files, 5 only to register its name, and <code>domain-event-to-relay.ts</code> builds messages the publisher throws away except <code>done</code>.</dd></div>
+    <div><dt class="lbl">Solution</dt><dd>Each canonical event is declared once with its payload, required fields and producing Provider Runtime; unions and guards derive from that, and the relay translator shrinks to a turn-ended alert.</dd></div>
+  </dl>
+  <ul class="wins text-sm grid sm:grid-cols-2 gap-1">
+    <li>Locality: one event, one definition</li>
+    <li>Delete ~220 lines of discarded translation</li>
+    <li>Four hand-kept guard lists derive</li>
+    <li>Producer decision stays compile-checked</li>
+  </ul>
+  <div class="text-xs rounded-md bg-slate-50 border border-slate-200 px-3 py-2">Fits ADR-0004: events stay the mutation path; only their registration moves.</div>
+</article>
+
+<!-- 3 -->
+<article id="c3" class="card r border border-slate-200 p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">3 · Give the active session one owner in the frontend</h2>
+  <div class="flex flex-wrap gap-2 text-xs">
+    <span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold">Strong</span>
+    <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <ul class="font-mono text-xs text-slate-600 space-y-0.5">
+    <li>src/lib/frontend/components/layout/ChatLayout.svelte · 1032 lines · ~30 $effects</li>
+    <li>src/lib/frontend/components/input/InputArea.svelte · 1720 lines · canSend :504 · startsTurn :852</li>
+    <li>src/lib/frontend/stores/session.svelte.ts · transcript.svelte.ts · chat.svelte.ts</li>
+    <li>src/lib/frontend/transport/session-subscription.svelte.ts · src/lib/session-busy.ts</li>
+    <li>layout/SessionBar.svelte · model/InstanceModelPicker.svelte</li>
+  </ul>
+  <div class="grid sm:grid-cols-2 gap-4">
+    <div class="pane">
+      <div class="lbl mb-2">Before · rules live in the views</div>
+      <table class="w-full text-left mt-1"><thead><tr class="lbl"><th></th><th class="px-1">session</th><th class="px-1">transcript</th><th class="px-1">chat</th><th class="px-1">rpc</th></tr></thead><tbody><tr class="border-t border-slate-100"><td class="pr-2 py-1 text-[11px] font-semibold text-red-700">ChatLayout</td><td class="px-1 py-1"><span class="chip leak">write id</span></td><td class="px-1 py-1"><span class="chip">attach</span></td><td class="px-1 py-1 text-slate-300">·</td><td class="px-1 py-1"><span class="chip">catalog</span></td></tr><tr class="border-t border-slate-100"><td class="pr-2 py-1 text-[11px] font-semibold text-red-700">InputArea</td><td class="px-1 py-1"><span class="chip">read</span></td><td class="px-1 py-1 text-slate-300">·</td><td class="px-1 py-1"><span class="chip">write</span></td><td class="px-1 py-1"><span class="chip">send</span><span class="chip">stop</span><span class="chip">catalog</span></td></tr><tr class="border-t border-slate-100"><td class="pr-2 py-1 text-[11px] font-semibold">SessionBar</td><td class="px-1 py-1"><span class="chip">read</span></td><td class="px-1 py-1 text-slate-300">·</td><td class="px-1 py-1 text-slate-300">·</td><td class="px-1 py-1"><span class="chip">goal</span></td></tr><tr class="border-t border-slate-100"><td class="pr-2 py-1 text-[11px] font-semibold">ModelPicker</td><td class="px-1 py-1"><span class="chip">read</span></td><td class="px-1 py-1 text-slate-300">·</td><td class="px-1 py-1 text-slate-300">·</td><td class="px-1 py-1"><span class="chip">catalog</span></td></tr><tr class="border-t border-slate-100"><td class="pr-2 py-1 text-[11px] font-semibold">transcript store</td><td class="px-1 py-1"><span class="chip leak">write id</span></td><td class="px-1 py-1 text-slate-300">·</td><td class="px-1 py-1 text-slate-300">·</td><td class="px-1 py-1 text-slate-300">·</td></tr></tbody></table>
+      <div><span class="chip leak">3 notions of current id</span><span class="chip leak">2 meanings of busy</span><span class="chip leak">catalog fetched in 6 files, mixed guards</span><span class="chip leak">0 tests on canSend / stop</span></div>
+    </div>
+    <div class="pane">
+      <div class="lbl mb-2">After · views render one module</div>
+      <div class="grid grid-cols-4 gap-1.5 text-[11px] text-center mt-2">
+        <div class="border border-slate-400 rounded py-1.5">ChatLayout</div><div class="border border-slate-400 rounded py-1.5">InputArea</div><div class="border border-slate-400 rounded py-1.5">SessionBar</div><div class="border border-slate-400 rounded py-1.5">ModelPicker</div>
+      </div>
+      <div class="text-center text-slate-400 my-1">↓ ↓ ↓ ↓</div>
+      <div class="deep rounded-lg p-4 text-[12px]">
+        <div class="font-semibold mb-2">active session</div>
+        <span class="chip" style="opacity:.75">identity</span><span class="chip" style="opacity:.75">catalog</span><span class="chip" style="opacity:.75">can start a turn</span><span class="chip" style="opacity:.75">optimistic phase</span><span class="chip" style="opacity:.75">rollback</span>
+      </div>
+      <div class="seam my-3"></div>
+      <div class="bg-slate-100 text-slate-500 rounded p-2 text-[11px] text-center">feeds + transport</div>
+      <div><span class="chip">tested over the existing fake-wire layer</span></div>
+    </div>
+  </div>
+  <dl class="grid gap-2 text-sm">
+    <div><dt class="lbl">Problem</dt><dd>The active session's identity, catalog and send/stop rules are derived inside ChatLayout and InputArea, with six writers of the current id and catalog staleness guards that differ by call site.</dd></div>
+    <div><dt class="lbl">Solution</dt><dd>One frontend module owns the active session (which one it is, its catalog, whether a turn can start, the optimistic phase and its rollback); ChatLayout and InputArea render it.</dd></div>
+  </dl>
+  <ul class="wins text-sm grid sm:grid-cols-2 gap-1">
+    <li>Locality: one writer of current id</li>
+    <li>Send rules testable without mounting</li>
+    <li>Catalog staleness guard fixed once</li>
+    <li>ChatLayout test drops 18 mocks</li>
+    <li>Test adapter already exists</li>
+  </ul>
+</article>
+
+<!-- 4 -->
+<article id="c4" class="card r border border-slate-200 p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">4 · Assemble a project relay in one place</h2>
+  <div class="flex flex-wrap gap-2 text-xs">
+    <span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold">Worth exploring</span>
+    <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">local-substitutable</span>
+  </div>
+  <ul class="font-mono text-xs text-slate-600 space-y-0.5">
+    <li>src/lib/relay/relay-stack.ts · 1036 lines · createRelayStack :722 (test-only caller)</li>
+    <li>src/lib/relay/project-relay-layers.ts · 787 lines</li>
+    <li>src/lib/relay/project-relay-startup.ts · 484 lines</li>
+    <li>src/lib/domain/daemon/Layers/relay-factory-layer.ts · Promise callbacks :181-312</li>
+    <li>test/integration/helpers/relay-harness.ts</li>
+  </ul>
+  <div class="grid sm:grid-cols-2 gap-4">
+    <div class="pane space-y-1.5">
+      <div class="lbl mb-2">Before · four files, two round trips</div>
+      <div class="band">daemon · Effect</div>
+      <div class="band leak">relay-factory-layer · 13 Effects → Promise callbacks</div>
+      <div class="band leak">relay-stack · Promise API · env-var test hooks · mutable wsHandler <span class="float-right text-red-700 font-semibold">← harness enters here</span></div>
+      <div class="band leak">project-relay-layers · Promise → Effect re-wrap · hand-wired Layer graph</div>
+      <div class="band leak">project-relay-startup · runPromise · circular import ↔ relay-stack</div>
+      <div class="text-[11px] text-slate-500 pt-2">A new relay dependency (e.g. AccountDirectory) needed 3–4 of these edited.</div>
+    </div>
+    <div class="pane space-y-1.5">
+      <div class="lbl mb-2">After · one Layer, two callers</div>
+      <div class="band">daemon · Effect</div>
+      <div class="seam my-2"></div>
+      <div class="band deep" style="padding:28px 12px">project relay Layer · wiring · startup recovery · runtime</div>
+      <div class="seam my-2"></div>
+      <div class="band">integration harness · same Layer · fake Provider Runtime adapters</div>
+    </div>
+  </div>
+  <dl class="grid gap-2 text-sm">
+    <div><dt class="lbl">Problem</dt><dd>The relay is wired across four files with an Effect → Promise → Effect round trip, and 26 integration flows enter through test-only <code>createRelayStack</code>, not the daemon's path.</dd></div>
+    <div><dt class="lbl">Solution</dt><dd>The project relay becomes one Layer the daemon provides directly; the integration harness builds that same Layer with fake Provider Runtime adapters.</dd></div>
+  </dl>
+  <ul class="wins text-sm grid sm:grid-cols-2 gap-1">
+    <li>New dependency: one edit, not four</li>
+    <li>Tests cross the daemon's seam</li>
+    <li>Delete the Promise bridge</li>
+    <li>Test hooks leave production code</li>
+  </ul>
+</article>
+
+<!-- 5 -->
+<article id="c5" class="card r border border-slate-200 p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">5 · Make the Claude turn one module, replayable end to end</h2>
+  <div class="flex flex-wrap gap-2 text-xs">
+    <span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold">Worth exploring</span>
+    <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">true external · trace adapter</span>
+  </div>
+  <ul class="font-mono text-xs text-slate-600 space-y-0.5">
+    <li>src/lib/provider/claude/claude-provider-runtime.ts · 3390 lines (daemon :457-1161 · runner :1163-3390)</li>
+    <li>src/lib/provider/claude/claude-event-translator.ts · 2002 lines</li>
+    <li>src/lib/provider/claude/types.ts:205 · ClaudeSessionContext</li>
+    <li>test/unit/provider/claude/claude-sdk-trace-replay.test.ts · claude-provider-instance-send-turn.test.ts (3630 lines)</li>
+  </ul>
+  <div class="grid sm:grid-cols-2 gap-4">
+    <div class="pane space-y-3">
+      <div class="lbl">Before · one file, ten concerns, shared state</div>
+      <div class="flex gap-2">
+        <div class="w-1/4 border border-slate-400 rounded p-2 text-[11px]">daemon side</div>
+        <div class="w-3/4 border-2 border-red-500 rounded p-2">
+          <div class="text-[11px] font-semibold mb-1">runner side</div>
+          <span class="chip">lifecycle</span><span class="chip">rewind</span><span class="chip">permissions</span><span class="chip">settings</span><span class="chip">steer/queue</span><span class="chip">decode</span><span class="chip">subagents</span><span class="chip">usage limits</span><span class="chip">goals</span><span class="chip">turn resolution</span>
+        </div>
+      </div>
+      <div class="border-2 border-dashed border-red-400 rounded p-2 text-[11px] bg-red-50 text-red-800">ClaudeSessionContext · 46 mutable fields · written by runner 34 · translator 11 · usage-limit 7 · ownership 3</div>
+      <div class="text-[11px] text-slate-600">Turn end has two owners: translator <code>endTurn</code> and runner <code>resolveTurnEffect</code>.</div>
+      <div class="text-[11px] text-red-700">Runtime Trace replay enters at the translator only.</div>
+    </div>
+    <div class="pane space-y-3">
+      <div class="lbl">After · deep turn module behind the runner protocol</div>
+      <div class="border border-slate-400 rounded p-2 text-[11px]">daemon-side runtime (own file)</div>
+      <div class="seam"></div>
+      <div class="text-[10px] text-slate-500 -mt-2">runner protocol · already deep</div>
+      <div class="deep rounded-lg p-3 text-[12px]">
+        <div class="font-semibold">Claude turn module</div>
+        <div class="opacity-80 text-[11px] mt-1">SDK messages in → canonical events + turn outcome out · decode-skip · ownership · one turn-end owner</div>
+      </div>
+      <div class="flex items-center gap-2 text-[11px]"><span class="lbl">SDK query port</span><span class="flex-1 seam"></span></div>
+      <div class="flex gap-2"><div class="flex-1 border border-slate-400 rounded p-2 text-[11px] text-center">live SDK</div><div class="flex-1 border border-emerald-500 rounded p-2 text-[11px] text-center">Runtime Trace replay</div></div>
+    </div>
+  </div>
+  <dl class="grid gap-2 text-sm">
+    <div><dt class="lbl">Problem</dt><dd>The runner half mixes ~10 concerns over a 46-field mutable context the translator also writes, and trace replay skips the stream loop, ownership routing and turn resolution.</dd></div>
+    <div><dt class="lbl">Solution</dt><dd>Split the file at the runner-protocol seam, and make turn handling one module whose only injected dependency is the SDK query, so replay drives the whole loop.</dd></div>
+  </dl>
+  <ul class="wins text-sm grid sm:grid-cols-2 gap-1">
+    <li>Real seam: live SDK, trace replay</li>
+    <li>Turn end gets one owner</li>
+    <li>Replay covers turn resolution</li>
+    <li>Fewer reaches into private state (46)</li>
+  </ul>
+  <div class="text-xs rounded-md bg-slate-50 border border-slate-200 px-3 py-2">Extends ADR-0002 (replay pins more of the Provider Contract). ADR-0001's per-message decode-skip moves inside unchanged.</div>
+</article>
+
+<!-- 6 -->
+<article id="c6" class="card r border border-slate-200 p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">6 · Give the session-row roll-up one home</h2>
+  <div class="flex flex-wrap gap-2 text-xs">
+    <span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold">Worth exploring</span>
+    <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">local-substitutable</span>
+  </div>
+  <ul class="font-mono text-xs text-slate-600 space-y-0.5">
+    <li>src/lib/persistence/effect/read-query-effect.ts · 2421 lines · 29-method interface :440-748</li>
+    <li>src/lib/persistence/effect/sidebar-projection.ts · imports read-side mappers :20-23</li>
+    <li>src/lib/persistence/sidebar-row.ts · read-model-types.ts · src/lib/shared-types.ts</li>
+  </ul>
+  <div class="grid sm:grid-cols-2 gap-4">
+    <div class="pane">
+      <div class="lbl mb-2">Before · three assemblies</div>
+      <pre class="mermaid">
+flowchart LR
+  A["read-query :1302"] --> R1["roll-up"]
+  B["read-query :1941"] --> R2["roll-up"]
+  SP["sidebar-projection<br/>(write side)"] --> R3["roll-up"]
+  SP -.imports mappers.-> RQ["ReadQueryEffect<br/>29 methods · 21 single-caller"]
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#b91c1c,fill:#fef2f2;
+  class R1,R2,R3,RQ leak
+      </pre>
+      <div><span class="chip leak">pending-approval SQL ×3</span><span class="chip leak">family lookup 3 ways</span><span class="chip leak">tests stub all 29</span></div>
+    </div>
+    <div class="pane">
+      <div class="lbl mb-2">After · one roll-up, a narrow read interface</div>
+      <pre class="mermaid">
+flowchart LR
+  SP["sidebar projection"] --> SR
+  L["session list read"] --> SR
+  SR["session-row roll-up<br/>parents · side threads · unread<br/>status · pending counts"]
+  RQ["ReadQueryEffect · shared reads"]
+  X["single-caller lookups<br/>beside their callers"]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a;
+  classDef faded fill:#f1f5f9,stroke:#cbd5e1,color:#64748b;
+  class SR deep
+  class X faded
+      </pre>
+      <div><span class="chip">tests run on in-memory SQLite</span></div>
+    </div>
+  </div>
+  <dl class="grid gap-2 text-sm">
+    <div><dt class="lbl">Problem</dt><dd>The session-row roll-up is assembled three times and the write-side projection imports read-side mappers, while 21 of <code>ReadQueryEffect</code>'s 29 methods have one caller yet every test stubs the whole interface.</dd></div>
+    <div><dt class="lbl">Solution</dt><dd>One session-row module owns the roll-up for both the sidebar projection and the list read; single-caller lookups move next to their callers.</dd></div>
+  </dl>
+  <ul class="wins text-sm grid sm:grid-cols-2 gap-1">
+    <li>Locality: roll-up computed once</li>
+    <li>Read interface shrinks to shared reads</li>
+    <li>Stubs give way to real SQLite</li>
+    <li>New column: fewer restatements</li>
+  </ul>
+</article>
+
+<!-- 7 -->
+<article id="c7" class="card r border border-slate-200 p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">7 · Push provider differences behind the Provider Runtime seam</h2>
+  <div class="flex flex-wrap gap-2 text-xs">
+    <span class="px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 font-semibold">Speculative</span>
+    <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">ports &amp; adapters</span>
+  </div>
+  <ul class="font-mono text-xs text-slate-600 space-y-0.5">
+    <li>src/lib/provider/types.ts · ProviderInstance :334-422 · SendTurnInput :197-255</li>
+    <li>src/lib/domain/relay/Services/provider-turn-dispatch.ts · provider-turn-service.ts</li>
+    <li>src/lib/provider/orchestration-side-effect-reactor.ts:382-562</li>
+    <li>src/lib/handlers/model.ts (12) · permissions.ts (4)</li>
+  </ul>
+  <div class="grid sm:grid-cols-2 gap-4">
+    <div class="pane">
+      <div class="lbl mb-2">Before · callers ask "is this Claude?"</div>
+      <pre class="mermaid">
+flowchart LR
+  D["turn dispatch"] --> CI["Claude internals"]
+  D --> OI["OpenCode internals"]
+  X["side-effect reactor"] --> CI
+  M["handlers/model"] --> CI
+  M --> OI
+  P["handlers/permissions"] --> CI
+  RS["relay startup"] --> CI
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#b91c1c,fill:#fef2f2;
+  class D,X,M,P,RS leak
+      </pre>
+      <div><span class="chip leak">137 lines · 43 backend files</span><span class="chip leak">SendTurnInput: ~14 Claude-only fields</span></div>
+    </div>
+    <div class="pane">
+      <div class="lbl mb-2">After · branching once, at adapter choice</div>
+      <pre class="mermaid">
+flowchart LR
+  C["dispatch · reactor · handlers"] --> S{{"Provider Runtime seam"}}
+  S --> CA["Claude adapter"]
+  S --> OA["OpenCode adapter"]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a;
+  class CA,OA deep
+      </pre>
+      <div><span class="chip">two adapters: the seam is real</span></div>
+    </div>
+  </div>
+  <dl class="grid gap-2 text-sm">
+    <div><dt class="lbl">Problem</dt><dd>Provider branching leaks into 43 backend files, and the shared turn input carries Claude-only fields, so the seam changes with every Claude feature.</dd></div>
+    <div><dt class="lbl">Solution</dt><dd>Provider-specific turn preparation moves into each adapter; dispatch hands over a session view and never asks which Provider Runtime it has.</dd></div>
+  </dl>
+  <ul class="wins text-sm grid sm:grid-cols-2 gap-1">
+    <li>Dispatch stops branching on driver</li>
+    <li>Claude features stop editing shared types</li>
+    <li>Delete provider-turn-service pass-through</li>
+  </ul>
+  <div class="text-xs rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-amber-900">Wide reach and overlaps #5; some branching (model catalogs) may be legitimate. Do #5 first and see what is left.</div>
+</article>
+
+</section>
+
+<section class="card r border border-slate-200 p-6 space-y-3">
+  <div class="lbl">Leads that need no design · found by explorers, not yet verified</div>
+  <ul class="text-[12.5px] space-y-1 font-mono text-slate-700">
+    <li>src/lib/session/session-manager.ts · imported only by 5 tests</li>
+    <li>SessionManagerShape (services.ts:85) · HandlerDeps (handlers/types.ts:49) · no production users</li>
+    <li>SessionManagerService · 6 methods with no production caller</li>
+    <li>claude-translation-service.ts · 12-line empty subclass</li>
+    <li>src/lib/server/ws-router.ts · src/lib/frontend/effect-boundary.ts · tests only</li>
+    <li>uiState.contextPercent / getContextColor · never read</li>
+    <li>ADR-0004 still names assertHandledOrIgnored, which no longer exists</li>
+  </ul>
+</section>
+
+<section id="top-recommendation" class="r p-8 deep space-y-3">
+  <div class="lbl" style="color:#6ee7b7">Top recommendation</div>
+  <h2 class="font-serif text-3xl"><a href="#c1" class="underline decoration-emerald-400">1 · Derive the browser RPC client from the contract</a></h2>
+  <p class="text-sm opacity-90 max-w-3xl">It sits on the hottest path in the repo (135 contract commits in two months, 18 files each), it is in-process and mechanical, and the contract test is already its test surface. #2 is the natural follow-on: smaller, and mostly deletion.</p>
+</section>
+
+</main>
+</body>
+</html>

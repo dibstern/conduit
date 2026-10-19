@@ -353,8 +353,7 @@ test("a steering message survives Stop all and runs after the original result", 
 	const steps = recorder(page, harness, testInfo);
 	try {
 		const accepted = await Effect.runPromise(
-			browser.rpc.input.submit({
-				projectSlug: "process-test",
+			browser.rpc["input.submit"]({
 				sessionId,
 				originId: browser.originId,
 				inputId: randomUUID(),
@@ -552,7 +551,6 @@ test("a real failure keeps the row, duplicate clients and finished IDs are harml
 		const callsBeforeFinishedStop = requestedIds(harness);
 		await Effect.runPromise(
 			browser.rpc.StopBackgroundTask({
-				projectSlug: "process-test",
 				sessionId,
 				taskId: shell.task_id,
 			}),

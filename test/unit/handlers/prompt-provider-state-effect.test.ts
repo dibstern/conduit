@@ -2,9 +2,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -144,15 +144,14 @@ describe("handleMessage with Effect provider state persistence", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					AlertsLive,
-					Layer.succeed(OpenCodeAPITag, client),
-					Layer.succeed(WebSocketHandlerTag, ws),
-					Layer.succeed(LoggerTag, log),
-					Layer.succeed(
-						SessionManagerServiceTag,
+					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(WebSocketHandlerTag)(ws),
+					Layer.succeed(LoggerTag)(log),
+					Layer.succeed(SessionManagerServiceTag)(
 						makeMockSessionManagerService(),
 					),
-					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-					Layer.succeed(ConfigTag, {
+					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+					Layer.succeed(ConfigTag)({
 						httpServer: createServer(),
 						opencodeUrl: "http://127.0.0.1:1",
 						projectDir: MOCK_PROJECT_DIR,
@@ -162,9 +161,9 @@ describe("handleMessage with Effect provider state persistence", () => {
 						publishGlobalSetting: () => Effect.void,
 					} satisfies ProjectRelayConfig),
 					PendingInteractionServiceLive,
-					Layer.succeed(AgentServiceTag, makeMockAgentService()),
-					Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-					Layer.succeed(OrchestrationEngineTag, engine),
+					Layer.succeed(AgentServiceTag)(makeMockAgentService()),
+					Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
+					Layer.succeed(OrchestrationEngineTag)(engine),
 					persistence,
 					makeIngestionLayer(persistence),
 					makeOverridesStateLive(),
@@ -215,8 +214,8 @@ describe("handleMessage with Effect provider state persistence", () => {
 					deliveredThrough: expect.any(Number),
 				});
 			}).pipe(
-				Effect.provide(PassThroughSessionInbox),
-				Effect.provide(layer),
+				Effect.provide(PassThroughSessionInbox, { local: true }),
+				Effect.provide(layer, { local: true }),
 				Effect.ensuring(
 					Effect.sync(() => {
 						rmSync(dir, { recursive: true, force: true });
@@ -250,15 +249,14 @@ describe("handleMessage with Effect provider state persistence", () => {
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
 				AlertsLive,
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(
-					SessionManagerServiceTag,
+				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(log),
+				Layer.succeed(SessionManagerServiceTag)(
 					makeMockSessionManagerService(),
 				),
-				Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-				Layer.succeed(ConfigTag, {
+				Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+				Layer.succeed(ConfigTag)({
 					httpServer: createServer(),
 					opencodeUrl: "http://127.0.0.1:1",
 					projectDir: MOCK_PROJECT_DIR,
@@ -268,9 +266,9 @@ describe("handleMessage with Effect provider state persistence", () => {
 					publishGlobalSetting: () => Effect.void,
 				} satisfies ProjectRelayConfig),
 				PendingInteractionServiceLive,
-				Layer.succeed(AgentServiceTag, makeMockAgentService()),
-				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(AgentServiceTag)(makeMockAgentService()),
+				Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
+				Layer.succeed(OrchestrationEngineTag)(engine),
 				persistence,
 				makeIngestionLayer(persistence),
 				makeOverridesStateLive(),
@@ -321,8 +319,8 @@ describe("handleMessage with Effect provider state persistence", () => {
 				}),
 			);
 		}).pipe(
-			Effect.provide(PassThroughSessionInbox),
-			Effect.provide(layer),
+			Effect.provide(PassThroughSessionInbox, { local: true }),
+			Effect.provide(layer, { local: true }),
 			Effect.ensuring(
 				Effect.sync(() => {
 					rmSync(dir, { recursive: true, force: true });
@@ -361,15 +359,14 @@ describe("handleMessage with Effect provider state persistence", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					AlertsLive,
-					Layer.succeed(OpenCodeAPITag, client),
-					Layer.succeed(WebSocketHandlerTag, ws),
-					Layer.succeed(LoggerTag, log),
-					Layer.succeed(
-						SessionManagerServiceTag,
+					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(WebSocketHandlerTag)(ws),
+					Layer.succeed(LoggerTag)(log),
+					Layer.succeed(SessionManagerServiceTag)(
 						makeMockSessionManagerService(),
 					),
-					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-					Layer.succeed(ConfigTag, {
+					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+					Layer.succeed(ConfigTag)({
 						httpServer: createServer(),
 						opencodeUrl: "http://127.0.0.1:1",
 						projectDir: MOCK_PROJECT_DIR,
@@ -379,9 +376,9 @@ describe("handleMessage with Effect provider state persistence", () => {
 						publishGlobalSetting: () => Effect.void,
 					} satisfies ProjectRelayConfig),
 					PendingInteractionServiceLive,
-					Layer.succeed(AgentServiceTag, makeMockAgentService()),
-					Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-					Layer.succeed(OrchestrationEngineTag, engine),
+					Layer.succeed(AgentServiceTag)(makeMockAgentService()),
+					Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
+					Layer.succeed(OrchestrationEngineTag)(engine),
 					persistence,
 					makeIngestionLayer(persistence),
 					makeOverridesStateLive(),
@@ -427,8 +424,8 @@ describe("handleMessage with Effect provider state persistence", () => {
 					}),
 				]);
 			}).pipe(
-				Effect.provide(PassThroughSessionInbox),
-				Effect.provide(layer),
+				Effect.provide(PassThroughSessionInbox, { local: true }),
+				Effect.provide(layer, { local: true }),
 				Effect.ensuring(
 					Effect.sync(() => {
 						rmSync(dir, { recursive: true, force: true });
@@ -494,15 +491,14 @@ describe("handleMessage with Effect provider state persistence", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					AlertsLive,
-					Layer.succeed(OpenCodeAPITag, client),
-					Layer.succeed(WebSocketHandlerTag, ws),
-					Layer.succeed(LoggerTag, log),
-					Layer.succeed(
-						SessionManagerServiceTag,
+					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(WebSocketHandlerTag)(ws),
+					Layer.succeed(LoggerTag)(log),
+					Layer.succeed(SessionManagerServiceTag)(
 						makeMockSessionManagerService(),
 					),
-					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-					Layer.succeed(ConfigTag, {
+					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+					Layer.succeed(ConfigTag)({
 						httpServer: createServer(),
 						opencodeUrl: "http://127.0.0.1:1",
 						projectDir: MOCK_PROJECT_DIR,
@@ -512,9 +508,9 @@ describe("handleMessage with Effect provider state persistence", () => {
 						publishGlobalSetting: () => Effect.void,
 					} satisfies ProjectRelayConfig),
 					PendingInteractionServiceLive,
-					Layer.succeed(AgentServiceTag, makeMockAgentService()),
-					Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-					Layer.succeed(OrchestrationEngineTag, engine),
+					Layer.succeed(AgentServiceTag)(makeMockAgentService()),
+					Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
+					Layer.succeed(OrchestrationEngineTag)(engine),
 					persistence,
 					makeIngestionLayer(persistence),
 					makeOverridesStateLive(),
@@ -561,8 +557,8 @@ describe("handleMessage with Effect provider state persistence", () => {
 					}),
 				]);
 			}).pipe(
-				Effect.provide(PassThroughSessionInbox),
-				Effect.provide(layer),
+				Effect.provide(PassThroughSessionInbox, { local: true }),
+				Effect.provide(layer, { local: true }),
 				Effect.ensuring(
 					Effect.sync(() => {
 						rmSync(dir, { recursive: true, force: true });

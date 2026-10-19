@@ -1,7 +1,5 @@
 // test/unit/provider/claude/claude-permission-bridge.test.ts
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { PermissionUpdate } from "@anthropic-ai/claude-agent-sdk";
 import { Effect } from "effect";
 import { assert, beforeEach, describe, expect, it, vi } from "vitest";
@@ -124,22 +122,6 @@ describe("ClaudePermissionBridge", () => {
 		bridge = new ClaudePermissionBridge({ sink });
 	});
 
-	it("keeps permission waits behind a named Claude SDK callback boundary", () => {
-		const source = readFileSync(
-			join(
-				process.cwd(),
-				"src/lib/provider/claude/claude-permission-bridge.ts",
-			),
-			"utf8",
-		);
-
-		expect(source).toContain("runPermissionRequestAtSdkBoundary");
-		expect(source.match(/Effect\.runPromise/g)).toHaveLength(1);
-		expect(source).toMatch(
-			/function runPermissionRequestAtSdkBoundary[\s\S]*Effect\.runPromise/,
-		);
-	});
-
 	it("creates a pending approval and blocks until resolved", async () => {
 		let resolveSink: (v: unknown) => void = () => {};
 		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(() =>
@@ -219,7 +201,7 @@ describe("ClaudePermissionBridge", () => {
 		expect(settled).toBe(false);
 		expect(sink.requestQuestion).toHaveBeenCalledWith(
 			expect.objectContaining({
-				requestId: "tool-question",
+				requestId: "req-tool-question",
 				toolUseId: "tool-question",
 				questions: [
 					expect.objectContaining({

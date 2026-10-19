@@ -12,6 +12,7 @@ import {
 	sendMockDaemonList,
 	sendMockModelState,
 	sendMockProjectSetting,
+	sendMockProjects,
 	sendMockShellRowPatch,
 	sendMockShellSnapshot,
 	setMockRpcCatalog,
@@ -29,12 +30,8 @@ const OPENCODE_CONNECTION_STATES = [
 /** Mock-only inputs served over the daemon-global subscriptions. */
 const DAEMON_LIST_TAGS = new Map<
 	string,
-	| "SubscribeProjects"
-	| "SubscribeInstances"
-	| "SubscribeUsage"
-	| "SubscribeServerStatus"
+	"SubscribeInstances" | "SubscribeUsage" | "SubscribeServerStatus"
 >([
-	["project_list", "SubscribeProjects"],
 	["instance_list", "SubscribeInstances"],
 	["usage_readings", "SubscribeUsage"],
 	["server_status", "SubscribeServerStatus"],
@@ -42,6 +39,15 @@ const DAEMON_LIST_TAGS = new Map<
 
 /** Deliver a list message through its subscription; false if it is not one. */
 function sendDaemonList(page: Page, message: MockMessage): boolean {
+	if (message.type === "project_list") {
+		sendMockProjects(
+			page,
+			Object.fromEntries(
+				Object.entries(message).filter(([key]) => key !== "type"),
+			),
+		);
+		return true;
+	}
 	const tag = DAEMON_LIST_TAGS.get(message.type);
 	if (tag)
 		sendMockDaemonList(
@@ -313,7 +319,7 @@ export class WsMockControl {
 				lastTurnEndVersion:
 					(typeof row["lastTurnEndVersion"] === "number"
 						? row["lastTurnEndVersion"]
-						: -1) + 1,
+						: 0) + 1,
 			}));
 		const normalized = normalizeMockRelayMessage(msg, this.context);
 		if (projectLegacyRelayMessage(this.page, normalized)) return;

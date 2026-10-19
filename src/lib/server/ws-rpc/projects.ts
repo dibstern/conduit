@@ -1,24 +1,22 @@
 import { Effect } from "effect";
-import {
-	type AttachProject,
-	ProjectSaveRejected,
-	WsRpcError,
-} from "../../contracts/ws-rpc.js";
+import { ProjectSaveRejected, WsRpcError } from "../../contracts/ws-rpc.js";
 import { ProjectManagementServiceTag } from "../../domain/relay/Services/project-management-service.js";
+import * as Failure from "../../effect/failure-classification.js";
 import { normalizeProjectTitle } from "../../handlers/settings.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import type { WsRpcHandlerMap } from "./shared.js";
 
 export const projectsHandlers = {
 	// A standalone relay serves one project, so every tab attaches to it.
-	AttachProject: (request: AttachProject) =>
+	AttachProject: (request) =>
 		Effect.gen(function* () {
 			const projectService = yield* ProjectManagementServiceTag;
 			const projectSlug = yield* projectService.currentSlug();
 			const read = yield* ReadQueryEffectTag;
-			const session = request.sessionId
-				? yield* read.getSession(request.sessionId)
-				: undefined;
+			const session =
+				"sessionId" in request
+					? yield* read.getSession(request.sessionId)
+					: undefined;
 			const response: {
 				readonly projectSlug: string | null;
 				readonly sessionSlug: string | null;
@@ -28,9 +26,11 @@ export const projectsHandlers = {
 			};
 			return response;
 		}).pipe(
-			Effect.mapError(
+			Failure.mapEffectFailures(
 				(cause) =>
-					new WsRpcError({ message: `AttachProject failed: ${String(cause)}` }),
+					new WsRpcError({
+						message: `AttachProject failed: ${String(cause)}`,
+					}),
 			),
 		),
 	GetProjects: (request) =>
@@ -44,7 +44,7 @@ export const projectsHandlers = {
 				...(current ? { current } : {}),
 			};
 		}).pipe(
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({
 						message: `GetProjects failed: ${String(error)}`,
@@ -73,9 +73,6 @@ export const projectsHandlers = {
 				...(request.sessionMode !== undefined && {
 					sessionMode: request.sessionMode,
 				}),
-				...(request.groupingMode !== undefined && {
-					groupingMode: request.groupingMode,
-				}),
 			});
 			const current = yield* projectService.currentSlug();
 			return {
@@ -87,7 +84,7 @@ export const projectsHandlers = {
 				warnings: result.warnings,
 			};
 		}).pipe(
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				error instanceof ProjectSaveRejected || error instanceof WsRpcError
 					? Effect.fail(error)
 					: Effect.fail(
@@ -108,7 +105,7 @@ export const projectsHandlers = {
 				...(current ? { current } : {}),
 			};
 		}).pipe(
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({
 						message: `RemoveProject failed: ${String(error)}`,

@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
-import { Effect, Either } from "effect";
+import { Effect, Result as Either } from "effect";
 import { afterEach, expect, it, vi } from "vitest";
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
@@ -91,7 +91,7 @@ it.each([
 	);
 	await running.kill();
 	await pending;
-	const db = new Database(running.projectStorePath());
+	const db = new Database(running.daemonStorePath());
 	try {
 		const stored = db
 			.prepare<[string], { payload_json: string }>(
@@ -140,7 +140,8 @@ it.each([
 	if (invalid) {
 		const failure =
 			scenario === "missing-login-kind"
-				? '["_tag"]'
+				? // Effect 4 reports a missing union tag by listing the expected members.
+					'"_tag": "SdkDefault"'
 				: scenario === "invalid-default-path"
 					? "Claude SDK default folder must be a .claude directory"
 					: "Claude config directory must be non-empty";
@@ -160,7 +161,7 @@ it.each([
 	await after.view(sessionId);
 	await vi.waitFor(
 		() => {
-			const store = new Database(running.projectStorePath(), {
+			const store = new Database(running.daemonStorePath(), {
 				readonly: true,
 			});
 			try {
@@ -199,7 +200,7 @@ it.each([
 		} else expect(query.env["CLAUDE_CONFIG_DIR"]).toBe(expectedFolder);
 	}
 	if (!invalid) {
-		const store = new Database(running.projectStorePath(), { readonly: true });
+		const store = new Database(running.daemonStorePath(), { readonly: true });
 		try {
 			const receipt = store
 				.prepare<[string], { value: string }>(
@@ -329,7 +330,8 @@ it.skipIf(!process.env["CONDUIT_LEGACY_DIST"]).each([
 		await running.kill();
 		await first;
 		if (phase === "replay") {
-			const store = new Database(running.projectStorePath());
+			// The pre-cutover build still writes the per-project store.
+			const store = new Database(running.legacyProjectStorePath());
 			try {
 				const row = store
 					.prepare<[string], { payload_json: string }>(
@@ -363,7 +365,7 @@ it.skipIf(!process.env["CONDUIT_LEGACY_DIST"]).each([
 				? after.send(sessionId, "continue-legacy-folder")
 				: undefined;
 		await vi.waitFor(() => {
-			const store = new Database(running.projectStorePath(), {
+			const store = new Database(running.daemonStorePath(), {
 				readonly: true,
 			});
 			try {

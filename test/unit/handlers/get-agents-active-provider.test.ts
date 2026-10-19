@@ -1,7 +1,6 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
-import { GetAgents } from "../../../src/lib/contracts/ws-rpc.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -61,23 +60,21 @@ function agentHandlerLayer({
 	engine?: OrchestrationEngine;
 	log?: Logger;
 }) {
-	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
-	const wsLayer = Layer.succeed(WebSocketHandlerTag, ws);
+	const apiLayer = Layer.succeed(OpenCodeAPITag)(client);
+	const wsLayer = Layer.succeed(WebSocketHandlerTag)(ws);
 	const overridesLayer = makeOverridesStateLive();
-	const logLayer = Layer.succeed(LoggerTag, log);
+	const logLayer = Layer.succeed(LoggerTag)(log);
 	const deps = Layer.mergeAll(
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		apiLayer,
-		Layer.succeed(
-			OpenCodeInstancesTag,
+		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: client }),
 		),
 		wsLayer,
 		overridesLayer,
 		logLayer,
-		Layer.succeed(ConfigTag, makeMockConfig()),
-		Layer.succeed(
-			OrchestrationEngineTag,
+		Layer.succeed(ConfigTag)(makeMockConfig()),
+		Layer.succeed(OrchestrationEngineTag)(
 			engine ??
 				new OrchestrationEngineLive({ registry: new ProviderRegistry() }),
 		),
@@ -88,13 +85,10 @@ function agentHandlerLayer({
 /** The GetAgents RPC reply, minus the fields this suite does not cover. */
 const listAgents = (sessionId: string | undefined, instanceId?: string) =>
 	modelsHandlers
-		.GetAgents(
-			new GetAgents({
-				projectSlug: "demo",
-				...(sessionId === undefined ? {} : { sessionId }),
-				...(instanceId === undefined ? {} : { instanceId }),
-			}),
-		)
+		.GetAgents({
+			...(sessionId === undefined ? { projectSlug: "demo" } : { sessionId }),
+			...(instanceId === undefined ? {} : { instanceId }),
+		})
 		.pipe(
 			Effect.map(
 				({ projectSlug: _slug, hiddenAgents: _hidden, ...reply }) => reply,
@@ -151,7 +145,11 @@ describe("GetAgents active provider", () => {
 				],
 				activeAgentId: "Explore",
 			});
-		}).pipe(Effect.provide(agentHandlerLayer({ client, ws, engine })));
+		}).pipe(
+			Effect.provide(agentHandlerLayer({ client, ws, engine }), {
+				local: true,
+			}),
+		);
 	});
 
 	it.effect(
@@ -185,19 +183,23 @@ describe("GetAgents active provider", () => {
 			});
 
 			return listAgents("session-1").pipe(
-				Effect.provide(agentHandlerLayer({ client, ws, engine })),
-				Effect.tap((reply) => {
-					expect(reply).toEqual({
-						instanceId: "claude",
-						providerScope: { id: "claude", name: "Claude" },
-						agents: [
-							{ id: "Any", name: "Any" },
-							{ id: "OpusOnly", name: "OpusOnly", model: "opus" },
-							{ id: "SonnetOnly", name: "SonnetOnly", model: "sonnet" },
-							{ id: "HaikuWorker", name: "HaikuWorker", model: "haiku" },
-						],
-					});
+				Effect.provide(agentHandlerLayer({ client, ws, engine }), {
+					local: true,
 				}),
+				Effect.tap((reply) =>
+					Effect.sync(() => {
+						expect(reply).toEqual({
+							instanceId: "claude",
+							providerScope: { id: "claude", name: "Claude" },
+							agents: [
+								{ id: "Any", name: "Any" },
+								{ id: "OpusOnly", name: "OpusOnly", model: "opus" },
+								{ id: "SonnetOnly", name: "SonnetOnly", model: "sonnet" },
+								{ id: "HaikuWorker", name: "HaikuWorker", model: "haiku" },
+							],
+						});
+					}),
+				),
 			);
 		},
 	);
@@ -219,15 +221,19 @@ describe("GetAgents active provider", () => {
 			});
 
 			return listAgents("session-1").pipe(
-				Effect.provide(agentHandlerLayer({ client, ws, engine })),
-				Effect.tap((reply) => {
-					expect(engine.dispatchEffect).not.toHaveBeenCalled();
-					expect(reply).toEqual({
-						instanceId: "opencode",
-						providerScope: { id: "opencode", name: "OpenCode" },
-						agents: [{ id: "build", name: "build" }],
-					});
+				Effect.provide(agentHandlerLayer({ client, ws, engine }), {
+					local: true,
 				}),
+				Effect.tap((reply) =>
+					Effect.sync(() => {
+						expect(engine.dispatchEffect).not.toHaveBeenCalled();
+						expect(reply).toEqual({
+							instanceId: "opencode",
+							providerScope: { id: "opencode", name: "OpenCode" },
+							agents: [{ id: "build", name: "build" }],
+						});
+					}),
+				),
 			);
 		},
 	);
@@ -249,15 +255,19 @@ describe("GetAgents active provider", () => {
 			});
 
 			return listAgents("session-1", "opencode").pipe(
-				Effect.provide(agentHandlerLayer({ client, ws, engine })),
-				Effect.tap((reply) => {
-					expect(engine.dispatchEffect).not.toHaveBeenCalled();
-					expect(reply).toEqual({
-						instanceId: "opencode",
-						providerScope: { id: "opencode", name: "OpenCode" },
-						agents: [{ id: "build", name: "build" }],
-					});
+				Effect.provide(agentHandlerLayer({ client, ws, engine }), {
+					local: true,
 				}),
+				Effect.tap((reply) =>
+					Effect.sync(() => {
+						expect(engine.dispatchEffect).not.toHaveBeenCalled();
+						expect(reply).toEqual({
+							instanceId: "opencode",
+							providerScope: { id: "opencode", name: "OpenCode" },
+							agents: [{ id: "build", name: "build" }],
+						});
+					}),
+				),
 			);
 		},
 	);
@@ -273,14 +283,16 @@ describe("GetAgents active provider", () => {
 		});
 
 		return listAgents(undefined).pipe(
-			Effect.provide(agentHandlerLayer({ client, ws })),
-			Effect.tap((reply) => {
-				expect(client.app.agents).toHaveBeenCalledOnce();
-				expect(reply).toEqual({
-					providerScope: { id: "opencode", name: "OpenCode" },
-					agents: [{ id: "build", name: "build" }],
-				});
-			}),
+			Effect.provide(agentHandlerLayer({ client, ws }), { local: true }),
+			Effect.tap((reply) =>
+				Effect.sync(() => {
+					expect(client.app.agents).toHaveBeenCalledOnce();
+					expect(reply).toEqual({
+						providerScope: { id: "opencode", name: "OpenCode" },
+						agents: [{ id: "build", name: "build" }],
+					});
+				}),
+			),
 		);
 	});
 
@@ -313,22 +325,26 @@ describe("GetAgents active provider", () => {
 			});
 
 			return listAgents(undefined).pipe(
-				Effect.provide(agentHandlerLayer({ client, ws, engine })),
-				Effect.tap((reply) => {
-					expect(client.app.agents).toHaveBeenCalledOnce();
-					expect(engine.dispatchEffect).toHaveBeenCalledWith({
-						type: "discover",
-						providerId: "claude",
-						account: expect.objectContaining({
-							driver: "claude",
-							id: "claude",
-						}),
-					});
-					expect(reply).toEqual({
-						providerScope: { id: "claude", name: "Claude" },
-						agents: [{ id: "Explore", name: "Explore", model: "haiku" }],
-					});
+				Effect.provide(agentHandlerLayer({ client, ws, engine }), {
+					local: true,
 				}),
+				Effect.tap((reply) =>
+					Effect.sync(() => {
+						expect(client.app.agents).toHaveBeenCalledOnce();
+						expect(engine.dispatchEffect).toHaveBeenCalledWith({
+							type: "discover",
+							providerId: "claude",
+							account: expect.objectContaining({
+								driver: "claude",
+								id: "claude",
+							}),
+						});
+						expect(reply).toEqual({
+							providerScope: { id: "claude", name: "Claude" },
+							agents: [{ id: "Explore", name: "Explore", model: "haiku" }],
+						});
+					}),
+				),
 			);
 		},
 	);
@@ -377,7 +393,11 @@ describe("GetAgents active provider", () => {
 					providerScope: { id: "claude", name: "Claude" },
 					agents: [{ id: "Explore", name: "Explore", model: "haiku" }],
 				});
-			}).pipe(Effect.provide(agentHandlerLayer({ client, ws, engine })));
+			}).pipe(
+				Effect.provide(agentHandlerLayer({ client, ws, engine }), {
+					local: true,
+				}),
+			);
 		},
 	);
 
@@ -413,6 +433,10 @@ describe("GetAgents active provider", () => {
 				providerScope: { id: "claude", name: "Claude" },
 				agents: [{ id: "Explore", name: "Explore" }],
 			});
-		}).pipe(Effect.provide(agentHandlerLayer({ client, ws, engine })));
+		}).pipe(
+			Effect.provide(agentHandlerLayer({ client, ws, engine }), {
+				local: true,
+			}),
+		);
 	});
 });

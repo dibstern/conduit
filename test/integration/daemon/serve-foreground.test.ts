@@ -12,22 +12,16 @@ import {
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import {
-	GetStatus,
-	RemoveProject,
-	SaveProject,
-	Shutdown,
-	ViewSession,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { inspectManagedOpenCodeProcess } from "../../../src/lib/instance/managed-opencode-process.js";
 import {
-	prepareClaudeRunnerDirectory,
-	registerClaudeRunner,
-} from "../../../src/lib/provider/claude/claude-runner-registry.js";
+	prepareRunnerDirectory,
+	registerRunner,
+} from "../../../src/lib/provider/runner/runner-registry.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import {
 	ProcessHarness,
@@ -67,10 +61,10 @@ describe("foreground conduit serve", () => {
 		if (!harness) throw new Error("No process harness");
 		if (directory) {
 			mkdirSync(directory);
-			await sendRpcRequest(
-				join(harness.configDir, "relay.sock"),
-				new SaveProject({ folders: [directory] }),
-			);
+			await sendRpcRequest(join(harness.configDir, "relay.sock"), {
+				_tag: "SaveProject",
+				folders: [directory],
+			});
 		}
 		const browser = await harness.connect(undefined, undefined, projectSlug);
 		const sessionId = await browser.createSession(`recovery-${projectSlug}`);
@@ -337,8 +331,7 @@ describe("foreground conduit serve", () => {
 			join(harness.root, "healthy-project"),
 		);
 		await harness.signal("SIGINT");
-		const database = harness.projectStorePath();
-		const original = readFileSync(database);
+		const database = harness.legacyProjectStorePath("process-test");
 		writeFileSync(
 			database,
 			"isolated recovery failure: invalid SQLite database",
@@ -347,6 +340,13 @@ describe("foreground conduit serve", () => {
 			await harness.restart({ skipBrowserProbe: true });
 			const replacement = harness.generations.at(-1);
 			if (!replacement) throw new Error("Missing replacement generation");
+			const projects = await sendRpcRequest(
+				join(harness.configDir, "relay.sock"),
+				{ _tag: "GetProjects" },
+			);
+			expect(
+				projects.projects.find(({ slug }) => slug === "process-test"),
+			).toMatchObject({ unavailableReason: "History import failed (corrupt)" });
 			expect(alive(failed.runner.pid)).toBe(true);
 			const browser = await harness.connect(
 				healthy.sessionId,
@@ -370,7 +370,7 @@ describe("foreground conduit serve", () => {
 				replacement,
 			});
 		} finally {
-			writeFileSync(database, original);
+			rmSync(database, { force: true });
 		}
 	}, 60_000);
 
@@ -409,7 +409,7 @@ describe("foreground conduit serve", () => {
 			await vi.waitFor(() => expect(existsSync(interruptMarker)).toBe(true));
 			const response = await sendRpcRequest(
 				join(harness.configDir, "relay.sock"),
-				new Shutdown({}),
+				{ _tag: "Shutdown" },
 			);
 			expect(response).toEqual({ ok: true });
 			writeFileSync(release, "finish recovery");
@@ -465,7 +465,7 @@ describe("foreground conduit serve", () => {
 			await adopted.close();
 			const response = await sendRpcRequest(
 				join(harness.configDir, "relay.sock"),
-				new RemoveProject({ slug: "process-test" }),
+				{ _tag: "RemoveProject", slug: "process-test" },
 			);
 			expect(response.projects.map((project) => project.slug)).not.toContain(
 				removed.projectSlug,
@@ -477,7 +477,7 @@ describe("foreground conduit serve", () => {
 			expect(existsSync(release)).toBe(false);
 			const status = await sendRpcRequest(
 				join(harness.configDir, "relay.sock"),
-				new GetStatus({}),
+				{ _tag: "GetStatus" },
 			);
 			expect(status.projects.map((project) => project.slug)).not.toContain(
 				"process-test",
@@ -532,7 +532,7 @@ describe("foreground conduit serve", () => {
 			registration,
 		};
 		scenarios.push(evidence);
-		const db = new Database(harness.projectStorePath("rollback-project"), {
+		const db = new Database(harness.daemonStorePath(), {
 			readonly: true,
 		});
 		mkdirSync(join(failedDirectory, ".conduit"), { recursive: true });
@@ -571,14 +571,11 @@ describe("foreground conduit serve", () => {
 			});
 			expect(alive(failed.runner.pid)).toBe(true);
 			// Retry through ordinary lazy relay startup on this same live server.
-			const attempt = sendRpcRequest(
-				join(harness.configDir, "relay.sock"),
-				new ViewSession({
-					projectSlug: failed.projectSlug,
-					sessionId: failed.sessionId,
-					originId: "failed-lazy-adoption",
-				}),
-			);
+			const attempt = sendRpcRequest(join(harness.configDir, "relay.sock"), {
+				_tag: "ViewSession",
+				sessionId: failed.sessionId,
+				originId: "failed-lazy-adoption",
+			});
 			await expect(attempt).rejects.toBeDefined();
 			expect(alive(failed.runner.pid)).toBe(true);
 			expect(alive(replacement.pid)).toBe(true);
@@ -686,7 +683,7 @@ describe("foreground conduit serve", () => {
 				expect(alive(failed.runner.pid)).toBe(true);
 				const status = await sendRpcRequest(
 					join(harness.configDir, "relay.sock"),
-					new GetStatus({}),
+					{ _tag: "GetStatus" },
 				);
 				if (command === "signal") {
 					await harness.signal("SIGINT");
@@ -723,7 +720,7 @@ describe("foreground conduit serve", () => {
 		const browser = await harness.connect();
 		const sessionId = await browser.createSession("Detached completed turn");
 		const projectDirectory = harness.projectDir;
-		const storePath = harness.projectStorePath();
+		const storePath = harness.daemonStorePath();
 		const readTurn = () => {
 			const db = new Database(storePath, {
 				readonly: true,
@@ -934,10 +931,10 @@ describe("foreground conduit serve", () => {
 			});
 			evidence["pathRequest"] = readFileSync(`${gate}-started`, "utf8");
 			const started = Date.now();
-			const request = sendRpcRequest(
-				join(harness.configDir, "relay.sock"),
-				new RemoveProject({ slug: removed.projectSlug }),
-			);
+			const request = sendRpcRequest(join(harness.configDir, "relay.sock"), {
+				_tag: "RemoveProject",
+				slug: removed.projectSlug,
+			});
 			pendingRemoval = request;
 			const removal = await Promise.race([
 				request,
@@ -982,7 +979,7 @@ describe("foreground conduit serve", () => {
 		harness = await ProcessHarness.start({ dist: DIST, foregroundCli: true });
 		const runnerId = "012345abcdef";
 		const socketPath = join(
-			prepareClaudeRunnerDirectory(harness.projectDir, harness.configDir),
+			prepareRunnerDirectory(harness.projectDir, harness.configDir),
 			runnerId,
 		);
 		const fixture = spawn(
@@ -1004,7 +1001,7 @@ describe("foreground conduit serve", () => {
 		pids.add(fixture.pid);
 		const argvPath = join(harness.root, `runner-argv-${fixture.pid}.json`);
 		await vi.waitFor(() => expect(existsSync(argvPath)).toBe(true));
-		registerClaudeRunner({
+		registerRunner({
 			runnerId,
 			socketPath,
 			sessionId: "stale-pid-fixture",
@@ -1068,7 +1065,7 @@ describe("foreground conduit serve", () => {
 		try {
 			const removal = await sendRpcRequest(
 				join(harness.configDir, "relay.sock"),
-				new RemoveProject({ slug: removed.projectSlug }),
+				{ _tag: "RemoveProject", slug: removed.projectSlug },
 				{ requestTimeoutMs: 10_000 },
 			).catch((cause: unknown) => {
 				evidence["failure"] = String(cause);
@@ -1144,7 +1141,7 @@ describe("foreground conduit serve", () => {
 			expect(alive(server.pid)).toBe(true);
 			const removal = await sendRpcRequest(
 				join(harness.configDir, "relay.sock"),
-				new RemoveProject({ slug: removed.projectSlug }),
+				{ _tag: "RemoveProject", slug: removed.projectSlug },
 			);
 			expect(removal.projects.map((project) => project.slug)).not.toContain(
 				removed.projectSlug,
@@ -1209,10 +1206,7 @@ process.on("SIGTERM", () => { child.kill("SIGTERM"); process.exit(0); });
 `,
 		);
 		chmodSync(executable, 0o755);
-		mkdirSync(join(harness.configDir, "projects", "process-test"), {
-			recursive: true,
-		});
-		writeFileSync(harness.projectStorePath(), "invalid fixture database");
+		writeFileSync(harness.daemonStorePath(), "invalid fixture database");
 		await expect(harness.restart()).rejects.toThrow();
 		const record = JSON.parse(
 			readFileSync(
@@ -1372,14 +1366,12 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 		expect(alive(runner.pid)).toBe(true);
 		expect(alive(neverStarted.runner.pid)).toBe(true);
 		const databases = [
-			harness.projectStorePath(),
-			harness.projectStorePath("never-started-project"),
-		].map((path) => {
-			return { path, original: readFileSync(path) };
-		});
+			harness.legacyProjectStorePath("process-test"),
+			harness.legacyProjectStorePath("never-started-project"),
+		];
 		for (const database of databases)
 			writeFileSync(
-				database.path,
+				database,
 				"isolated recovery failure: invalid SQLite database",
 			);
 		const markCursor = harness.marks.length;
@@ -1404,7 +1396,7 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 			).toEqual([]);
 			const status = await sendRpcRequest(
 				join(harness.configDir, "relay.sock"),
-				new GetStatus({}),
+				{ _tag: "GetStatus" },
 			);
 			expect(status.projects).toHaveLength(2);
 			expect(
@@ -1428,8 +1420,7 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 				stop,
 			});
 		} finally {
-			for (const database of databases)
-				writeFileSync(database.path, database.original);
+			for (const database of databases) rmSync(database, { force: true });
 		}
 	}, 45_000);
 
@@ -1507,7 +1498,7 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 		);
 		const restoredStatus = await sendRpcRequest(
 			join(harness.configDir, "relay.sock"),
-			new GetStatus({}),
+			{ _tag: "GetStatus" },
 		);
 		const evidence: Record<string, unknown> = {
 			duplicate,
@@ -1538,7 +1529,7 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 		);
 		const autoServed = await sendRpcRequest(
 			join(harness.configDir, "relay.sock"),
-			new GetStatus({}),
+			{ _tag: "GetStatus" },
 		);
 		expect(
 			autoServed.projects.find((project) => project.slug === "process-test"),

@@ -10,6 +10,7 @@
  *                              // json   → {"level":30,"component":["relay","sse"],"msg":"Connected"}
  */
 
+import { appendFileSync, renameSync, statSync } from "node:fs";
 import { PassThrough, type Writable } from "node:stream";
 import type { DestinationStream, LogFn } from "pino";
 import pino from "pino";
@@ -54,6 +55,26 @@ interface PinoInstance {
 /** Current configuration — used when rebuilding the root pino instance. */
 let currentLevel: LogLevel = "info";
 let currentFormat: LogFormat = "json";
+
+let logFile: { path: string; size: number; maxBytes: number } | undefined;
+
+// Shared by every root so attaching a file also reaches existing child loggers.
+const fileDestination: DestinationStream = {
+	write(data: string) {
+		if (!logFile) return;
+		try {
+			const bytes = Buffer.byteLength(data);
+			if (logFile.size + bytes > logFile.maxBytes) {
+				renameSync(logFile.path, `${logFile.path}.1`);
+				logFile.size = 0;
+			}
+			appendFileSync(logFile.path, data);
+			logFile.size += bytes;
+		} catch {
+			// File failures must never interrupt stdout logging or callers.
+		}
+	},
+};
 
 /**
  * The stream where final formatted output lands (JSON lines or pretty text).
@@ -113,11 +134,18 @@ function buildPino(level: LogLevel, format: LogFormat): PinoInstance {
 
 	return pino(
 		{
-			level,
+			// The file always receives warnings, even when stdout is set to error.
+			level: level === "error" ? "warn" : level,
 			customLevels: CUSTOM_LEVELS,
 			useOnlyCustomLevels: false,
 		},
-		destination,
+		pino.multistream<LogLevel>(
+			[
+				{ level, stream: destination },
+				{ level: "warn", stream: fileDestination },
+			],
+			{ levels: CUSTOM_LEVELS },
+		),
 	) as unknown as PinoInstance;
 }
 
@@ -156,7 +184,7 @@ function wrapPino(p: PinoInstance): Logger {
 }
 
 /**
- * Set the minimum log level. Messages below this level are suppressed.
+ * Set the minimum stdout log level. The file still receives warn and above.
  * Recreates the root pino instance so all future loggers use the new level.
  */
 export function setLogLevel(level: LogLevel): void {
@@ -168,6 +196,17 @@ export function setLogLevel(level: LogLevel): void {
 /** Get the current log level. */
 export function getLogLevel(): LogLevel {
 	return currentLevel;
+}
+
+/** Attach a synchronous JSON warning/error log with one rotating backup. */
+export function setLogFile(path: string, maxBytes = 10 * 1024 * 1024): void {
+	logFile = undefined;
+	try {
+		appendFileSync(path, "");
+		logFile = { path, size: statSync(path).size, maxBytes };
+	} catch {
+		// An unavailable file must not prevent the daemon from starting.
+	}
 }
 
 /**

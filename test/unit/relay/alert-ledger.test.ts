@@ -2,8 +2,15 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
-import { Deferred, Effect, Either, Fiber, Layer, Stream } from "effect";
+import {
+	Deferred,
+	Effect,
+	Result as Either,
+	Fiber,
+	Layer,
+	Stream,
+} from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, it } from "vitest";
 import {
 	makeAlertLedger,
@@ -21,7 +28,7 @@ import {
 import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 
-const silentBus = Layer.succeed(SessionEventBusTag, {
+const silentBus = Layer.succeed(SessionEventBusTag)({
 	publish: () => Effect.void,
 	publishAdvance: () => Effect.void,
 	subscribe: () => Effect.succeed(Stream.empty),
@@ -50,10 +57,13 @@ const withStore = async <A>(
 		);
 	const reopen = <B>(
 		second: Effect.Effect<B, unknown, PersistenceEffectContext>,
-	) => Effect.runPromise(second.pipe(Effect.provide(layer()), Effect.orDie));
+	) =>
+		Effect.runPromise(
+			second.pipe(Effect.provide(layer(), { local: true }), Effect.orDie),
+		);
 	try {
 		return await Effect.runPromise(
-			body(reopen).pipe(Effect.provide(layer()), Effect.orDie),
+			body(reopen).pipe(Effect.provide(layer(), { local: true }), Effect.orDie),
 		);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
@@ -225,10 +235,10 @@ it("does not race a live pending send through a second ledger", async () => {
 				.deliver(
 					doneFor("s1"),
 					Deferred.succeed(started, undefined).pipe(
-						Effect.zipRight(Deferred.await(finish)),
+						Effect.andThen(Deferred.await(finish)),
 					),
 				)
-				.pipe(Effect.fork);
+				.pipe(Effect.forkChild);
 			yield* Deferred.await(started);
 			expect(
 				yield* second.deliver(doneFor("s1"), Effect.die("raced live send")),
@@ -254,12 +264,14 @@ it("keeps ownership while an interrupted network send is still in flight", async
 				.deliver(
 					doneFor("s1"),
 					Deferred.succeed(started, undefined).pipe(
-						Effect.zipRight(Effect.promise(() => network)),
+						Effect.andThen(Effect.promise(() => network)),
 					),
 				)
-				.pipe(Effect.fork);
+				.pipe(Effect.forkChild);
 			yield* Deferred.await(started);
-			const interrupting = yield* Fiber.interrupt(sending).pipe(Effect.fork);
+			const interrupting = yield* Fiber.interrupt(sending).pipe(
+				Effect.forkChild,
+			);
 			yield* Effect.sleep("10 millis");
 			const raced = yield* ledger.deliver(doneFor("s1"), Effect.void);
 			finishNetwork();
@@ -281,7 +293,7 @@ it("gives the claim back when the send fails, so the ding is not lost silently",
 			// A push that never reached the browser must not leave a ledger row
 			// claiming it did — that row would suppress every retry, and nothing
 			// anywhere would say the user was never told.
-			const failed = yield* Effect.either(
+			const failed = yield* Effect.result(
 				ledger.deliver(doneFor("s1"), Effect.fail("push endpoint gone")),
 			);
 			const rowsAfterFailure = yield* sql<{
@@ -290,7 +302,7 @@ it("gives the claim back when the send fails, so the ding is not lost silently",
 			const retried = yield* ledger.deliver(doneFor("s1"), Effect.void);
 
 			return {
-				failure: Either.isLeft(failed) ? failed.left : undefined,
+				failure: Either.isFailure(failed) ? failed.failure : undefined,
 				rowsAfterFailure: rowsAfterFailure[0]?.n,
 				retried,
 			};

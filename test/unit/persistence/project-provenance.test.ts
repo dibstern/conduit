@@ -8,15 +8,15 @@
 // - Renumbering provenance loses main's migration order or changes shipped SQL.
 // - Reopening runs UPDATEs despite every row already being stamped.
 // - A failed stamp commits only a prefix of the tables.
-// - Stored event, receipt and cursor contracts omit their project's identity.
+// - Stored event and receipt contracts omit their project's identity.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
+import { DatabaseSync } from "node:sqlite";
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import Database from "better-sqlite3";
 import { Effect, ManagedRuntime, Schema } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, expectTypeOf, it } from "vitest";
 import { StoredEventSchema } from "../../../src/lib/contracts/stored-event.js";
 import { PersistenceError } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
@@ -60,7 +60,7 @@ async function oldStore() {
 			).pipe(Effect.provide(SqliteClient.layer({ filename }))),
 		),
 	);
-	const db = new Database(filename);
+	const db = new DatabaseSync(filename);
 	try {
 		db.exec(`
 			INSERT INTO events (event_id, session_id, stream_version, type, data, metadata, provider, created_at)
@@ -109,6 +109,14 @@ describe("Bound project provenance", () => {
 			"0056_drop_activities",
 			"0057_session_pick_backfill",
 			"0058_compact_redundant_events",
+			"0059_session_project_scope",
+			"0060_daemon_store_imports",
+			"0061_sessions_lineage",
+			"0062_legacy_forks",
+			"0063_sessions_archived",
+			"0064_prompt_provider_reference",
+			"0065_tool_result_event_refs",
+			"0066_project_tree_data",
 		]);
 	});
 
@@ -133,7 +141,7 @@ describe("Bound project provenance", () => {
 		);
 	});
 
-	it("binds append, receipt, outbox, metadata and cursor ownership without per-write ids", async () => {
+	it("binds append, receipt, outbox and metadata ownership while cursors remain store-wide", async () => {
 		const runtime = ManagedRuntime.make(
 			makePersistenceEffectLayer(":memory:", "alpha"),
 		);
@@ -150,7 +158,10 @@ describe("Bound project provenance", () => {
 					);
 					const cursors = yield* ProjectorCursorEffectTag;
 					yield* cursors.upsert("session", stored.sequence);
-					expect((yield* cursors.get("session"))?.projectId).toBe("alpha");
+					expect(yield* cursors.get("session")).toMatchObject({
+						projectorName: "session",
+						lastAppliedSeq: stored.sequence,
+					});
 				}),
 			);
 			await runtime.runPromise(
@@ -207,7 +218,7 @@ describe("Bound project provenance", () => {
 
 	it("stamps legacy command keys, merges metadata progress and preserves event owners; reopens without updates", async () => {
 		const filename = await oldStore();
-		const before = new Database(filename);
+		const before = new DatabaseSync(filename);
 		const events = before
 			.prepare("SELECT * FROM events ORDER BY sequence")
 			.all();
@@ -220,7 +231,7 @@ describe("Bound project provenance", () => {
 		} finally {
 			await runtime.dispose();
 		}
-		const db = new Database(filename);
+		const db = new DatabaseSync(filename);
 		try {
 			for (const table of tables)
 				expect(
@@ -240,7 +251,10 @@ describe("Bound project provenance", () => {
 				},
 			]);
 			for (const table of tables.filter((table) => table !== "events"))
-				expect(db.pragma(`table_info(${table})`), table).not.toEqual(
+				expect(
+					db.prepare(`PRAGMA table_info(${table})`).all(),
+					table,
+				).not.toEqual(
 					expect.arrayContaining([
 						expect.objectContaining({ name: "project_id" }),
 					]),
@@ -282,7 +296,7 @@ describe("Bound project provenance", () => {
 		expected,
 	}) => {
 		const filename = await oldStore();
-		const db = new Database(filename);
+		const db = new DatabaseSync(filename);
 		db.prepare(
 			"UPDATE provider_command_meta SET last_applied_sequence = ? WHERE project_key = 'alpha'",
 		).run(canonical);
@@ -319,7 +333,7 @@ describe("Bound project provenance", () => {
 				),
 			),
 		);
-		const db = new Database(filename);
+		const db = new DatabaseSync(filename);
 		db.exec(
 			"UPDATE events SET project_id = ''; CREATE TRIGGER reject_stamp BEFORE UPDATE ON command_receipts BEGIN SELECT RAISE(ABORT, 'stamp failure'); END",
 		);

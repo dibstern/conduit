@@ -1,4 +1,9 @@
-import { Data, Either } from "effect";
+import { Data, Result } from "effect";
+import {
+	isKnownDriverKind,
+	type KnownProviderDriverKind,
+	PROVIDER_DRIVERS,
+} from "../contracts/provider-instance.js";
 import type { RelaySettings } from "../relay/relay-settings.js";
 import {
 	claudeApiModelId,
@@ -10,11 +15,14 @@ import type {
 	ModelSelection,
 } from "./types.js";
 
-export type Harness = "claude" | "opencode";
+export type Harness = KnownProviderDriverKind;
 
 /** Model namespaces identify a harness, independently of account bindings. */
 export function harnessForModelProvider(providerId: string): Harness {
-	return providerId === "claude" ? "claude" : "opencode";
+	return isKnownDriverKind(providerId) &&
+		PROVIDER_DRIVERS[providerId].catalogSource === "discovery"
+		? providerId
+		: "opencode";
 }
 
 export interface TurnPick {
@@ -57,7 +65,8 @@ export function harnessDefaultPick(
 		const legacy = parse(settings.defaultModel);
 		if (legacy && harnessForModelProvider(legacy.providerId) === harness)
 			model = legacy;
-		else if (harness === "opencode") model = parse(nativeDefaultModel);
+		else if (PROVIDER_DRIVERS[harness].runsOpenCodeServer)
+			model = parse(nativeDefaultModel);
 	}
 	if (!model) return undefined;
 	return {
@@ -143,7 +152,7 @@ export function findCatalogModel(
 				entry.id === model.modelId ||
 				entry.routingOptions?.some((option) => option.value === model.modelId),
 		) ??
-		(harness === "claude"
+		(PROVIDER_DRIVERS[harness].modelIdFormat === "context-window-suffix"
 			? candidates.find((entry) => isSameModelIdentity(entry.id, model.modelId))
 			: undefined)
 	);
@@ -153,16 +162,16 @@ export function findCatalogModel(
 export function resolveTurnSettings(
 	pick: TurnPick,
 	catalog: readonly ModelInfo[] | undefined,
-): Either.Either<TurnSettings, PickRejection> {
+): Result.Result<TurnSettings, PickRejection> {
 	if (harnessForModelProvider(pick.model.providerId) !== pick.harness) {
-		return Either.left(
+		return Result.fail(
 			new ModelNotInCatalog({ harness: pick.harness, ...pick.model }),
 		);
 	}
-	if (catalog === undefined) return Either.right(pick);
+	if (catalog === undefined) return Result.succeed(pick);
 	const model = findCatalogModel(pick.harness, pick.model, catalog);
 	if (!model) {
-		return Either.left(
+		return Result.fail(
 			new ModelNotInCatalog({ harness: pick.harness, ...pick.model }),
 		);
 	}
@@ -172,7 +181,7 @@ export function resolveTurnSettings(
 	// A "[1m]" id matched to its base model asks for the 1m window, which the
 	// base must then offer; an explicit window still wins.
 	const askedFor1m =
-		pick.harness === "claude" &&
+		PROVIDER_DRIVERS[pick.harness].modelIdFormat === "context-window-suffix" &&
 		!isRoutingOption &&
 		model.id !== pick.model.modelId &&
 		model.id === claudeApiModelId(pick.model.modelId, "200k");
@@ -180,13 +189,13 @@ export function resolveTurnSettings(
 	const modelId = isRoutingOption ? pick.model.modelId : model.id;
 	const { efforts, contextWindows } = offeredOptions(model);
 	if (pick.effort !== "" && !efforts.includes(pick.effort)) {
-		return Either.left(
+		return Result.fail(
 			new EffortNotOffered({ modelId, effort: pick.effort, offered: efforts }),
 		);
 	}
 	const offeredWindows = contextWindows.map((option) => option.value);
 	if (contextWindow !== "" && !offeredWindows.includes(contextWindow)) {
-		return Either.left(
+		return Result.fail(
 			new ContextWindowNotOffered({
 				modelId,
 				contextWindow,
@@ -194,7 +203,7 @@ export function resolveTurnSettings(
 			}),
 		);
 	}
-	return Either.right({
+	return Result.succeed({
 		harness: pick.harness,
 		model: { providerId: model.providerId, modelId },
 		effort: pick.effort,
@@ -221,6 +230,7 @@ export const catalogFromProviderList = (
 			readonly id: string;
 			readonly name: string;
 			readonly variants?: readonly string[] | undefined;
+			readonly parameters?: ModelInfo["parameters"];
 			readonly contextWindowOptions?: readonly ListedOption[] | undefined;
 			readonly routingOptions?: readonly ListedOption[] | undefined;
 		}[];
@@ -234,6 +244,7 @@ export const catalogFromProviderList = (
 			variants: Object.fromEntries(
 				(model.variants ?? []).map((effort) => [effort, {}]),
 			),
+			...(model.parameters ? { parameters: model.parameters } : {}),
 			...(model.contextWindowOptions
 				? { contextWindowOptions: copyOptions(model.contextWindowOptions) }
 				: {}),

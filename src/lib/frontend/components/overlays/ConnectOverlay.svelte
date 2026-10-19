@@ -9,9 +9,10 @@
 		applyInstanceListResponse,
 		getInstanceById,
 		getCachedInstanceById,
+		getInstanceTraits,
 		instanceState,
 	} from "../../stores/instance.svelte.js";
-	import { startInstanceRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import type { InstanceStatus } from "../../types.js";
 	import { CONNECT_FADEOUT_MS } from "../../ui-constants.js";
 	import { openSettings } from "../layout/chrome-actions.js";
@@ -33,7 +34,7 @@
 	let cachedInstanceId = $state<string | null>(null);
 	let cachedInstanceStatus = $state<InstanceStatus | null>(null);
 	let cachedMultiInstance = $state(false);
-	let cachedDriver = $state<string | null>(null);
+	let cachedRunsServer = $state(false);
 	let cachedSessionId = $state<string | null>(null);
 	const sameSession = $derived(cachedSessionId === sessionState.currentId);
 	const instanceId = $derived(sessionState.currentId
@@ -64,7 +65,7 @@
 			cachedSessionId = sessionState.currentId;
 			cachedInstanceId = currentInstance.id;
 			cachedInstanceStatus = currentInstance.status;
-			cachedDriver = currentInstance.driver ?? "opencode";
+			cachedRunsServer = getInstanceTraits(currentInstance.id)?.runsOpenCodeServer ?? false;
 		}
 		// Only update when instances are loaded (not after clearInstanceState)
 		if (instanceState.instances.length > 0) {
@@ -75,7 +76,7 @@
 	// Show instance action buttons when overlay is visible, instance was unhealthy/stopped,
 	// and there are multiple instances
 	const showInstanceActions = $derived(
-		sameSession && instanceId === cachedInstanceId && cachedDriver === "opencode" && !connected && cachedMultiInstance && cachedInstanceStatus != null &&
+		sameSession && instanceId === cachedInstanceId && cachedRunsServer && !connected && cachedMultiInstance && cachedInstanceStatus != null &&
 		cachedInstanceStatus !== "healthy" && cachedInstanceStatus !== "starting",
 	);
 
@@ -118,7 +119,7 @@
 
 	function handleStartInstance() {
 		if (sameSession && instanceId === cachedInstanceId && cachedInstanceId) {
-			void startInstanceRpc({
+			void rpc("StartInstance", {
 				instanceId: cachedInstanceId,
 			})
 				.then(applyInstanceListResponse)

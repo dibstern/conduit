@@ -1,13 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import {
-	Deferred,
-	Effect,
-	Fiber,
-	Option,
-	TestClock,
-	TestContext,
-} from "effect";
+import { Deferred, Effect, Fiber, Option } from "effect";
+import { TestClock, TestConsole } from "effect/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	makeOpenCodeInstancesLive,
@@ -119,16 +113,20 @@ describe("OpenCode Instances use during an idle stop", () => {
 					// No demand: the grace runs out and the idle stop begins.
 					yield* TestClock.adjust("1 second");
 					yield* Deferred.await(stopBegan);
-					const during = yield* Effect.fork(cwdViaUse);
+					const during = yield* Effect.forkChild(cwdViaUse);
 					yield* Effect.promise(
 						() => new Promise((done) => setTimeout(done, 200)),
 					);
-					const pendingDuringStop = Option.isNone(yield* Fiber.poll(during));
+					const pendingDuringStop = Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(during.pollUnsafe()),
+						),
+					);
 					yield* TestClock.adjust("300 millis");
 					const second = yield* Fiber.join(during);
 					return { first, pendingDuringStop, second };
 				}).pipe(Effect.provide(layer));
-			}).pipe(Effect.provide(TestContext.TestContext)),
+			}).pipe(Effect.provide([TestConsole.layer, TestClock.layer()])),
 		);
 		const evidence = {
 			scenario: "use-during-idle-stop",

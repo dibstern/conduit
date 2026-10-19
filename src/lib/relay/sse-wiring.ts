@@ -2,8 +2,8 @@
 // OpenCode, persists them, maintains timeouts, and publishes alerts and push
 // notifications using RPC viewer presence.
 
-import type { SqlError } from "@effect/sql/SqlError";
-import { Cause, Data, Effect, Either, Option, Runtime, Schema } from "effect";
+import { Data, Effect, Option, Result, Schema } from "effect";
+import type { SqlError } from "effect/sql/SqlError";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
 import { OpenCodeEventSchema } from "../contracts/providers/opencode-sdk.js";
 import type { OpenCodeConnectionStatus } from "../contracts/ws-rpc.js";
@@ -32,8 +32,10 @@ import {
 	resetProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
 import type { OpenCodeTerminalService } from "../domain/relay/Services/terminal-service.js";
+import * as Failure from "../effect/failure-classification.js";
 import type { Logger } from "../logger.js";
 import { notificationContent } from "../notification-content.js";
+import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import type {
 	PushDeliveryReport,
 	PushNotificationSender,
@@ -63,8 +65,8 @@ import {
 import type { SSEStreamEvents } from "./sse-stream.js";
 
 // Built once: envelope decoder for the fail-closed ingestion gate (see the
-// consumer "event" handler). Returns Either<OpenCodeEvent, ParseError>.
-const decodeOpenCodeEvent = Schema.decodeUnknownEither(OpenCodeEventSchema);
+// consumer "event" handler). Returns Result<OpenCodeEvent, SchemaError>.
+const decodeOpenCodeEvent = Schema.decodeUnknownResult(OpenCodeEventSchema);
 
 // OpenCode SSE events store sessionID in different locations by event type:
 //   - Top-level: message.part.delta, session.status, message.part.removed, etc.
@@ -116,6 +118,7 @@ export interface SSEWiringDeps {
 			event: SSEEvent,
 			sessionId: string | undefined,
 			providerInstanceId: string,
+			providerProcessId?: string,
 		): Effect.Effect<OpenCodeRuntimeIngressResult>;
 		onReconnect(providerInstanceId?: string): Effect.Effect<void, SqlError>;
 		onInstanceStopped?(
@@ -376,7 +379,7 @@ export const sendPushForEventEffect = (
 				),
 			),
 			// Without a claim, delivery could repeat an alert already sent.
-			Effect.catchAll((sqlError) =>
+			Effect.catch((sqlError) =>
 				Effect.sync(() =>
 					log.error(
 						`Alert ledger unavailable (${kind}); delivery deferred: ${sqlError}`,
@@ -390,23 +393,26 @@ const recordSSEEventStartEffect = (
 	deps: SSEWiringDeps,
 	event: SSEEvent,
 	eventSessionId: string | undefined,
+	providerProcessId?: string,
 ) =>
 	Effect.gen(function* () {
 		yield* Effect.sync(() =>
 			deps.log.verbose(`event=${event.type} session=${eventSessionId ?? "?"}`),
 		);
-		if (deps.opencodeRuntimeIngress) {
-			yield* deps.opencodeRuntimeIngress.onSSEEventEffect(
-				event,
-				eventSessionId,
-				deps.providerInstanceId,
-			);
-		}
+		const ingested = deps.opencodeRuntimeIngress
+			? yield* deps.opencodeRuntimeIngress.onSSEEventEffect(
+					event,
+					eventSessionId,
+					deps.providerInstanceId,
+					providerProcessId,
+				)
+			: undefined;
 
 		if (eventSessionId && event.type.startsWith("message.")) {
 			const sessionService = yield* SessionManagerServiceTag;
 			yield* sessionService.recordMessageActivity(eventSessionId, Date.now());
 		}
+		return ingested;
 	});
 
 function permissionRequestInput(
@@ -456,6 +462,7 @@ function permissionAskedPush(
 	event: SSEEvent,
 	eventSessionId: string | undefined,
 	pending: PendingPermission | null,
+	promptId?: string,
 ): Approval {
 	if (pending) {
 		return {
@@ -477,7 +484,7 @@ function permissionAskedPush(
 	return {
 		_tag: "permission",
 		sessionId: eventSessionId ?? "",
-		requestId: id as PermissionId,
+		requestId: (promptId ?? id) as PermissionId,
 		toolName: tool,
 		toolInput: {},
 	};
@@ -495,6 +502,7 @@ function questionAskedPush(
 	deps: SSEWiringDeps,
 	event: SSEEvent,
 	eventSessionId: string | undefined,
+	promptId?: string,
 ): Approval {
 	deps.log.debug(`question.asked: event received`);
 	if (!isQuestionAskedEvent(event)) {
@@ -505,14 +513,14 @@ function questionAskedPush(
 		return {
 			_tag: "question",
 			sessionId: eventSessionId ?? "",
-			toolId: typeof id === "string" ? id : "",
+			toolId: promptId ?? (typeof id === "string" ? id : ""),
 			questions: [],
 		};
 	}
 	return {
 		_tag: "question",
 		sessionId: eventSessionId ?? "",
-		toolId: event.properties.id,
+		toolId: promptId ?? event.properties.id,
 		questions: mapQuestionFields(event.properties.questions),
 	};
 }
@@ -523,7 +531,7 @@ const refreshLineageAfterUpdateEffect = (deps: SSEWiringDeps) =>
 		yield* sessionService
 			.refreshSessionLineage()
 			.pipe(
-				Effect.catchAll((err) =>
+				Effect.catch((err) =>
 					Effect.sync(() =>
 						deps.log.warn(
 							`Failed to refresh session lineage after session.updated: ${err}`,
@@ -664,11 +672,35 @@ const handleSSEEventAfterPendingEffect = (
 		}
 	});
 
-export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
+export const handleSSEEventEffect = (
+	deps: SSEWiringDeps,
+	event: SSEEvent,
+	providerProcessId?: string,
+) =>
 	Effect.gen(function* () {
 		const pendingInteractions = yield* PendingInteractionServiceTag;
 		const eventSessionId = extractSessionId(event);
-		yield* recordSSEEventStartEffect(deps, event, eventSessionId);
+		const ingested = yield* recordSSEEventStartEffect(
+			deps,
+			event,
+			eventSessionId,
+			providerProcessId,
+		);
+		const isPrompt =
+			event.type === "permission.asked" ||
+			event.type === "permission.replied" ||
+			event.type === "question.asked" ||
+			event.type === "question.replied" ||
+			event.type === "question.rejected";
+		const prompt = ingested?.ok ? ingested.prompt : undefined;
+		if (providerProcessId && deps.opencodeRuntimeIngress && isPrompt && !prompt)
+			return;
+		if (
+			(event.type === "permission.asked" || event.type === "question.asked") &&
+			prompt &&
+			prompt.status !== "pending"
+		)
+			return;
 
 		if (event.type === "permission.asked") {
 			const input = permissionRequestInput(event, eventSessionId);
@@ -676,41 +708,53 @@ export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
 				? yield* getPermissionMode(input.sessionId)
 				: ("ask" as const);
 			const reply = deps.replyPermission;
+			const providers = yield* Effect.serviceOption(ProviderRegistryTag);
+			const adapter = Option.isSome(providers)
+				? providers.value.getInstance("opencode")
+				: undefined;
 			let autoApproved = false;
-			if (
-				input?.sessionId &&
-				reply &&
-				opencodeModeCoversAsk(mode, input.toolName)
-			) {
-				const replied = yield* Effect.either(
-					Effect.tryPromise(() =>
-						reply(input.sessionId, input.requestId, "once"),
-					),
-				);
-				if (replied._tag === "Right") {
+			if (input?.sessionId && opencodeModeCoversAsk(mode, input.toolName)) {
+				const response: Effect.Effect<void, unknown> | undefined =
+					providerProcessId
+						? adapter?.resolvePermissionEffect(
+								input.sessionId,
+								input.requestId,
+								"once",
+								providerProcessId,
+							)
+						: reply
+							? Effect.tryPromise(() =>
+									reply(input.sessionId, input.requestId, "once"),
+								)
+							: undefined;
+				const replied = response ? yield* Effect.result(response) : undefined;
+				if (replied?._tag === "Success") {
 					autoApproved = true;
 					yield* Effect.sync(() =>
 						deps.log.info(
 							`auto-approved ${input.toolName} (mode=${mode}, session=${input.sessionId}, request=${input.requestId})`,
 						),
 					);
-				} else {
+				} else if (replied) {
 					yield* Effect.sync(() =>
 						deps.log.warn(
-							`auto-approve reply failed, falling back to card (request=${input.requestId}): ${replied.left}`,
+							`auto-approve reply failed, falling back to card (request=${input.requestId}): ${replied.failure}`,
 						),
 					);
 				}
 			}
 			if (!autoApproved) {
 				const pending = input
-					? yield* pendingInteractions.recordPermissionRequest(input)
+					? yield* pendingInteractions.recordPermissionRequest({
+							...input,
+							requestId: (prompt?.id ?? input.requestId) as PermissionId,
+						})
 					: null;
 				const pushManager = deps.pushManager;
 				if (pushManager)
 					yield* sendPushForEventEffect(
 						pushManager,
-						permissionAskedPush(event, eventSessionId, pending),
+						permissionAskedPush(event, eventSessionId, pending, prompt?.id),
 						deps.log,
 						buildPushContext(deps.slug, pending?.sessionId ?? eventSessionId),
 					);
@@ -718,7 +762,7 @@ export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
 		}
 		if (event.type === "question.asked") {
 			const askMsg = yield* Effect.sync(() =>
-				questionAskedPush(deps, event, eventSessionId),
+				questionAskedPush(deps, event, eventSessionId, prompt?.id),
 			);
 			const pushManager = deps.pushManager;
 			if (pushManager)
@@ -731,7 +775,7 @@ export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
 		}
 		if (isPermissionRepliedEvent(event)) {
 			yield* pendingInteractions.markPermissionReplied(
-				event.properties.requestID,
+				prompt?.id ?? event.properties.requestID,
 			);
 		}
 
@@ -739,7 +783,7 @@ export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
 	});
 
 interface SSEConsumerCallbacks {
-	handleEvent(event: SSEEvent): void;
+	handleEvent(event: SSEEvent, providerProcessId?: string): void;
 	onReconnect?(): void;
 	/** The instance's lifecycle state, for the banner on every tab. */
 	onConnectionStatus(
@@ -779,8 +823,8 @@ function wireSSEConsumerWithCallbacks(
 	// a warning but ALWAYS forward the raw event — a hard fail-closed drop would
 	// silently lose live traffic (e.g. a future server event) and regress today's
 	// pass-through behavior. Field-level consumption stays guarded per translator.
-	consumer.on("event", (event: unknown) => {
-		if (Either.isLeft(decodeOpenCodeEvent(event))) {
+	consumer.on("event", (event: unknown, providerProcessId?: string) => {
+		if (Result.isFailure(decodeOpenCodeEvent(event))) {
 			const type =
 				typeof (event as { type?: unknown } | null)?.type === "string"
 					? (event as { type: string }).type
@@ -789,7 +833,7 @@ function wireSSEConsumerWithCallbacks(
 				`SSE event failed OpenCodeEventSchema decode (forwarded raw): type=${type}`,
 			);
 		}
-		callbacks.handleEvent(event as SSEEvent);
+		callbacks.handleEvent(event as SSEEvent, providerProcessId);
 	});
 }
 
@@ -798,7 +842,7 @@ export const wireSSEConsumerEffect = (
 	consumer: SSEStreamEvents,
 ) =>
 	Effect.gen(function* () {
-		const runtime = yield* Effect.runtime<
+		const runtime = yield* Effect.context<
 			| PendingInteractionServiceTag
 			| OverridesStateTag
 			| SessionManagerServiceTag
@@ -806,7 +850,7 @@ export const wireSSEConsumerEffect = (
 			| AlertsTag
 		>();
 		yield* Effect.sync(() => {
-			const runFork = Runtime.runFork(runtime);
+			const runFork = Effect.runForkWith(runtime);
 			let connectionRevision = 0;
 			wireSSEConsumerWithCallbacks(deps, consumer, {
 				onConnectionStatus: (status, managedStopped) => {
@@ -834,17 +878,17 @@ export const wireSSEConsumerEffect = (
 						}),
 					);
 				},
-				handleEvent: (event) => {
+				handleEvent: (event, providerProcessId) => {
 					if (isPtyEvent(event)) {
 						deps.onPtysChanged?.(deps.providerInstanceId);
 						return;
 					}
 					runFork(
-						handleSSEEventEffect(deps, event).pipe(
-							Effect.catchAllCause((cause) =>
+						handleSSEEventEffect(deps, event, providerProcessId).pipe(
+							Effect.catchCause((cause) =>
 								Effect.sync(() =>
 									deps.log.warn(
-										`SSE event handling failed: ${Cause.pretty(cause)}`,
+										`SSE event handling failed: ${Failure.renderCause(cause)}`,
 									),
 								),
 							),
@@ -857,10 +901,10 @@ export const wireSSEConsumerEffect = (
 							deps.opencodeRuntimeIngress
 								.onReconnect(deps.providerInstanceId)
 								.pipe(
-									Effect.catchAllCause((cause) =>
+									Effect.catchCause((cause) =>
 										Effect.sync(() =>
 											deps.log.warn(
-												`OpenCode reconnect backfill scheduling failed: ${Cause.pretty(cause)}`,
+												`OpenCode reconnect backfill scheduling failed: ${Failure.renderCause(cause)}`,
 											),
 										),
 									),

@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { PendingQuestionInput } from "./pending-interaction-service.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
@@ -8,7 +9,10 @@ export const restoreClaudeQuestionsFromStore = Effect.gen(function* () {
 	const readQuery = yield* ReadQueryEffectTag;
 	if (!readQuery.listPendingClaudeQuestionTools) return;
 
-	const rows = yield* readQuery.listPendingClaudeQuestionTools();
+	const eventStore = yield* EventStoreEffectTag;
+	const rows = yield* readQuery.listPendingClaudeQuestionTools({
+		projectIds: [eventStore.projectId],
+	});
 	const questions: PendingQuestionInput[] = [];
 	for (const row of rows) {
 		try {
@@ -27,7 +31,13 @@ export const restoreClaudeQuestionsFromStore = Effect.gen(function* () {
 			)
 				continue;
 			questions.push({
-				requestId: row.call_id ?? row.id,
+				requestId: row.prompt_id ?? row.call_id ?? row.id,
+				...(row.provider_process_id
+					? { providerProcessId: row.provider_process_id }
+					: {}),
+				...(row.provider_request_id
+					? { providerRequestId: row.provider_request_id }
+					: {}),
 				sessionId: row.session_id,
 				toolCallId: row.call_id ?? row.id,
 				partId: row.id,

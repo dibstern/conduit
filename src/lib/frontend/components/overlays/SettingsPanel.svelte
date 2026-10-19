@@ -10,6 +10,7 @@
 	import Icon from "../ui/Icon.svelte";
 	import Tabs from "../ui/Tabs.svelte";
 	import ClaudeSettingsTab from "./ClaudeSettingsTab.svelte";
+	import ArchivedSettingsTab from "./ArchivedSettingsTab.svelte";
 	import UsageSettingsTab from "./UsageSettingsTab.svelte";
 	import NotificationsSettingsTab from "./NotificationsSettingsTab.svelte";
 	import AppearanceSettingsTab from "./AppearanceSettingsTab.svelte";
@@ -28,6 +29,7 @@
 		{ value: "general", label: "General", testId: "settings-tab-general" },
 		{ value: "models", label: "Models & agents", testId: "settings-tab-models" },
 		{ value: "claude", label: "Claude", testId: "settings-tab-claude" },
+		{ value: "archived", label: "Archived", testId: "settings-tab-archived" },
 		{ value: "usage", label: "Usage", testId: "settings-tab-usage", groupLabel: "This computer" },
 		{ value: "server", label: "Server", testId: "settings-tab-server" },
 	] as const;
@@ -158,6 +160,8 @@
 						<VisibilitySettingsTab />
 					{:else if shown === "claude"}
 						<ClaudeSettingsTab />
+					{:else if shown === "archived"}
+						<ArchivedSettingsTab {onClose} />
 					{:else if shown === "usage"}
 						<UsageSettingsTab />
 					{:else if shown === "server"}

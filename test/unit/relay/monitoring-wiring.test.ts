@@ -1,18 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
-import {
-	Chunk,
-	Effect,
-	Layer,
-	ManagedRuntime,
-	Option,
-	PubSub,
-	Queue,
-	Scope,
-} from "effect";
+import { Effect, Layer, ManagedRuntime, Option, PubSub, Scope } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
 import type { Alert } from "../../../src/lib/contracts/ws-rpc.js";
@@ -39,12 +30,14 @@ import type { Message } from "../../../src/lib/instance/sdk-types.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import {
 	wireMonitoring,
 	wireMonitoringEffect,
 } from "../../../src/lib/relay/monitoring-wiring.js";
 import { sendPushForEventEffect } from "../../../src/lib/relay/sse-wiring.js";
+import { turnEndedAlert } from "../../../src/lib/relay/turn-ended-alert.js";
 import type { PushNotificationSender } from "../../../src/lib/server/push.js";
 
 type ChangedCallback = Parameters<SessionStatusPollerService["on"]>[1];
@@ -430,22 +423,20 @@ describe("wireMonitoring shutdown", () => {
 					harness.emitStatus({ root: { type: "idle" } });
 					await flushPromises();
 					if (!harness.runtime) throw new Error("Missing test runtime");
+					const primary = turnEndedAlert(
+						canonicalEvent("turn.completed", "root", {
+							messageId: "message-1",
+						}),
+					);
+					if (!primary) throw new Error("Missing turn-ended alert");
 					await harness.runtime.runPromise(
-						sendPushForEventEffect(
-							pushManager,
-							{
-								type: "done",
-								sessionId: "root",
-								code: 0,
-								alertId: '["root","message-1","done"]',
-							},
-							createSilentLogger(),
-							{ sessionId: "root" },
-						),
+						sendPushForEventEffect(pushManager, primary, createSilentLogger(), {
+							sessionId: "root",
+						}),
 					);
 					expect(sendToAll).toHaveBeenCalledOnce();
 					expect(harness.alerts()).toContainEqual(
-						expect.objectContaining({ alertId: '["root","message-1","done"]' }),
+						expect.objectContaining({ alertId: primary.alertId }),
 					);
 				} finally {
 					harness.result.stopMonitoring();
@@ -636,8 +627,8 @@ describe("wireMonitoring shutdown", () => {
 			await harness.runtime?.runPromise(
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
-					yield* sql`INSERT INTO sessions (id, title, provider, created_at, updated_at)
-						VALUES ('claude-1', 'c', 'claude-sdk', 1, 1)`;
+					yield* sql`INSERT INTO sessions (id, title, provider, created_at, updated_at, project_id)
+						VALUES ('claude-1', 'c', 'claude-sdk', 1, 1, 'test-project')`;
 				}),
 			);
 			// OpenCode answers 404 for sessions it does not own (live: NotFoundError).
@@ -793,16 +784,16 @@ async function createEffectHarness(
 	const getClientsForSession = vi.fn((_id: string): string[] => []);
 	const alerts = Effect.runSync(PubSub.unbounded<Alert>());
 	const alertsSeen = Effect.runSync(
-		PubSub.subscribe(alerts).pipe(Scope.extend(Effect.runSync(Scope.make()))),
+		PubSub.subscribe(alerts).pipe(Scope.provide(Effect.runSync(Scope.make()))),
 	);
 	const unused = () => Effect.die("Unexpected service call");
 	const getSessionProviders = vi.fn<
 		SessionStatusPollerService["getSessionProviders"]
 	>(() => Effect.succeed(new Map()));
 	const layer = Layer.mergeAll(
-		Layer.succeed(AccountDirectory, accountDirectory()),
-		Layer.succeed(AlertsTag, alerts),
-		Layer.succeed(SessionManagerServiceTag, {
+		Layer.succeed(AccountDirectory)(accountDirectory()),
+		Layer.succeed(AlertsTag)(alerts),
+		Layer.succeed(SessionManagerServiceTag)({
 			initialize: unused,
 			getDefaultSessionId: unused,
 			getLastKnownSessionCount: unused,
@@ -811,11 +802,14 @@ async function createEffectHarness(
 			establishOpenCodeSession: unused,
 			createSession: unused,
 			deleteSession: unused,
+			deleteArchivedSessions: unused,
 			renameSession: unused,
 			markSessionRead: unused,
 			markSessionUnread: unused,
 			markSessionSeen: unused,
 			setSessionSettled: unused,
+			setSessionArchived: unused,
+			restoreSessionForSend: unused,
 			setSessionAutoSettleDisabled: unused,
 			setSessionPinned: unused,
 			snoozeSession: unused,
@@ -827,7 +821,7 @@ async function createEffectHarness(
 			refreshSessionLineage,
 			getSessionParentMap: () => Effect.succeed(new Map<string, string>()),
 		}),
-		Layer.succeed(StatusPollerTag, {
+		Layer.succeed(StatusPollerTag)({
 			on: (_event, callback) =>
 				Effect.sync(() => {
 					changed = callback;
@@ -879,12 +873,16 @@ async function createEffectHarness(
 				Effect.gen(function* () {
 					const readQuery = yield* ReadQueryEffectTag;
 					getSessionProviders.mockImplementation(() =>
-						readQuery.getAllSessionStatusesWithProviders().pipe(
-							Effect.map(
-								(rows) => new Map(rows.map((row) => [row.id, row.provider])),
+						readQuery
+							.getAllSessionStatusesWithProviders({
+								projectIds: ["test-project"],
+							})
+							.pipe(
+								Effect.map(
+									(rows) => new Map(rows.map((row) => [row.id, row.provider])),
+								),
+								Effect.orDie,
 							),
-							Effect.orDie,
-						),
 					);
 					if (seedTurn) {
 						const sql = yield* SqlClient.SqlClient;
@@ -898,7 +896,9 @@ async function createEffectHarness(
 			)
 		: await Effect.runPromise(monitoring.pipe(Effect.provide(layer)));
 	return {
-		alerts: () => Chunk.toArray(Effect.runSync(Queue.takeAll(alertsSeen))),
+		alerts: () => [
+			...Effect.runSync(PubSub.takeUpTo(alertsSeen, Number.POSITIVE_INFINITY)),
+		],
 		result,
 		runtime,
 		dispose: () => runtime?.dispose() ?? Promise.resolve(),

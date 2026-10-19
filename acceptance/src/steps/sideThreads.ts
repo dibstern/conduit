@@ -91,8 +91,8 @@ export const sideThreadsHandlers: StepHandler[] = [
 		name: "answer Side Thread requests",
 		match: /^the relay answers Side Thread requests$/,
 		run: async ({ world }) => {
-			requireRpcControl(world.page).setResponse("StartSideThread", {
-				sessionId: NEW_SIDE_THREAD,
+			requireRpcControl(world.page).setStubs({
+				StartSideThread: () => ({ sessionId: NEW_SIDE_THREAD }),
 			});
 		},
 	},
@@ -104,7 +104,7 @@ export const sideThreadsHandlers: StepHandler[] = [
 				(candidate) => candidate.tag === "StartSideThread",
 			);
 			expect(request.payload).toMatchObject({
-				parentSessionId: requireParentId(world.page),
+				sessionId: requireParentId(world.page),
 				title: match[1],
 			});
 			await expect(world.page).toHaveURL(

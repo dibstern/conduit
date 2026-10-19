@@ -1,11 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const rpc = vi.hoisted(() => ({
-	setSessionSettledRpc: vi.fn(async () => {}),
-	setSessionPinnedRpc: vi.fn(async () => {}),
-}));
-const list = vi.hoisted(() => ({
-	refreshListedSessions: vi.fn(async () => {}),
+	rpc: vi.fn(async () => {}),
 }));
 
 vi.mock(
@@ -13,13 +9,6 @@ vi.mock(
 	async (importOriginal) => ({
 		...(await importOriginal<object>()),
 		...rpc,
-	}),
-);
-vi.mock(
-	"../../../src/lib/frontend/stores/session-list.svelte.js",
-	async (importOriginal) => ({
-		...(await importOriginal<object>()),
-		...list,
 	}),
 );
 vi.mock(
@@ -60,23 +49,22 @@ describe("a session from another project (all-projects view)", () => {
 		);
 	});
 
-	it("sends the change to the session's own project, then refreshes its row", async () => {
+	it("addresses a settle command by session", async () => {
 		await sessionCommandActions.settle(foreign, true);
-		expect(rpc.setSessionSettledRpc).toHaveBeenCalledWith(
+		expect(rpc.rpc).toHaveBeenCalledWith(
+			"SetSessionSettled",
 			expect.objectContaining({
-				projectSlug: "elsewhere",
-				sessionId: "s1",
+				sessionId: foreign.id,
 				settled: true,
 			}),
 		);
-		expect(list.refreshListedSessions).toHaveBeenCalledOnce();
 	});
 
-	it("does not refresh for a session of the attached project", async () => {
+	it("addresses a pin command by session", async () => {
 		await sessionCommandActions.pin({ ...foreign, projectSlug: "home" }, true);
-		expect(rpc.setSessionPinnedRpc).toHaveBeenCalledWith(
-			expect.objectContaining({ projectSlug: "home", pinned: true }),
+		expect(rpc.rpc).toHaveBeenCalledWith(
+			"SetSessionPinned",
+			expect.objectContaining({ sessionId: foreign.id, pinned: true }),
 		);
-		expect(list.refreshListedSessions).not.toHaveBeenCalled();
 	});
 });

@@ -27,14 +27,21 @@ import {
 	Data,
 	Duration,
 	Effect,
-	Either,
 	HashMap,
 	Layer,
 	Option,
 	PubSub,
 	Ref,
+	Result,
+	Semaphore,
 	Stream,
 } from "effect";
+import { SqlClient } from "effect/sql";
+import { getProviderDriver } from "../../../contracts/provider-instance.js";
+import {
+	DEFAULT_WORKTREE_CLEANUP,
+	resolveWorktreeCleanup,
+} from "../../../contracts/worktree.js";
 import {
 	ProjectSaveRejected,
 	type ResolveSessionModeResponse,
@@ -48,31 +55,91 @@ import {
 	withCachedProjectGit,
 } from "../../../git/session-git.js";
 import { normalizeProjectTitle } from "../../../handlers/settings.js";
-import {
-	chooseProjectSlug,
-	projectEventsDbPath,
-	projectStorageDir,
-} from "../../../persistence/project-storage.js";
+import { PersistenceStore } from "../../../persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
+import { SessionRollupProjects } from "../../../persistence/effect/session-rollup-projects.js";
+import { refreshSidebar } from "../../../persistence/effect/sidebar-projection.js";
+import { chooseProjectSlug } from "../../../persistence/project-storage.js";
 import {
 	checkFolders,
 	type FolderIssue,
 	isPermissionDenied,
 } from "../../../project-folders.js";
-import { computeProjectGroups } from "../../../project-grouping.js";
-import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
+import { stopRegisteredRunners } from "../../../provider/runner/process-session-runner.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { StoredProject } from "../../../types.js";
+import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { isConduitWorktreePath } from "../Layers/worktree-layer.js";
 import {
 	ConfigPersistenceTag,
 	requestConfigSave,
 } from "./config-persistence-service.js";
+import {
+	commitDaemonRuntimeConfig,
+	DaemonConfigRefTag,
+} from "./daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 import { countRunningProjectSessions } from "./daemon-session-reader.js";
 import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
+import { DaemonStoreAvailability } from "./daemon-store-availability.js";
 import { RelayCacheTag } from "./relay-cache.js";
 
 const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
+
+/** Registration changes affect roots owned by other projects too. */
+const refreshProjectRollups = (changedSlugs: readonly string[]) =>
+	Effect.gen(function* () {
+		const store = yield* Effect.serviceOption(PersistenceStore);
+		if (Option.isNone(store)) return;
+		const projects = Context.get(store.value, SessionRollupProjects);
+		if (projects === undefined) return;
+		const sql = Context.get(store.value, SqlClient.SqlClient);
+		const runner = Context.get(store.value, ProjectionRunnerEffectTag);
+		const unavailable = yield* DaemonStoreAvailability;
+		const ref = yield* ProjectRegistryTag;
+		const { advance } = yield* sql
+			.withTransaction(
+				Effect.gen(function* () {
+					const registered = [...HashMap.keys(yield* Ref.get(ref))].filter(
+						(slug) => !unavailable.has(slug),
+					);
+					const roots = yield* sql<{ id: string; project_id: string }>`
+				SELECT DISTINCT root.id, root.project_id FROM sessions member
+				JOIN sessions root ON root.id = member.root_id
+				WHERE member.project_id IN ${sql.in(changedSlugs)}`;
+					if (roots.length === 0) return { registered, advance: undefined };
+					const version = yield* runner.nextVersion.pipe(
+						Effect.provideService(SqlClient.SqlClient, sql),
+					);
+					const sessionIds = roots.map(({ id }) => id);
+					yield* refreshSidebar(sessionIds, version, registered).pipe(
+						Effect.provideService(SqlClient.SqlClient, sql),
+					);
+					return {
+						registered,
+						advance: {
+							version,
+							sessionIds,
+							projectIds: [
+								...new Set(roots.map(({ project_id }) => project_id)),
+							],
+						},
+					};
+				}),
+			)
+			.pipe(
+				Effect.tap(({ registered }) => Ref.set(projects, registered)),
+				Effect.orDie,
+				Effect.uninterruptible,
+			);
+		const bus = yield* Effect.serviceOption(SessionEventBusTag);
+		if (advance && Option.isSome(bus))
+			yield* bus.value.publishAdvance({
+				...advance,
+				removedSessionIds: [],
+				collections: ["sidebar"],
+			});
+	});
 
 const formatRelayFailure = (cause: unknown): string =>
 	cause instanceof Error ? cause.message : String(cause);
@@ -129,7 +196,10 @@ const toStoredProject = (project: DaemonProject): StoredProject => ({
 	slug: project.slug,
 	folders: project.folders,
 	title: project.title ?? project.slug,
-	lastUsed: project.addedAt,
+	...(project.lastUsed !== undefined || project.addedAt !== undefined
+		? { lastUsed: project.lastUsed ?? project.addedAt }
+		: {}),
+	...(project.addedAt !== undefined && { addedAt: project.addedAt }),
 	...(project.shellEnv !== undefined && { shellEnv: project.shellEnv }),
 	...(project.setupScript !== undefined && {
 		setupScript: project.setupScript,
@@ -137,8 +207,8 @@ const toStoredProject = (project: DaemonProject): StoredProject => ({
 	...(project.sessionMode !== undefined && {
 		sessionMode: project.sessionMode,
 	}),
-	...(project.groupingMode !== undefined && {
-		groupingMode: project.groupingMode,
+	...(project.worktreeCleanup !== undefined && {
+		worktreeCleanup: project.worktreeCleanup,
 	}),
 	...(project.repositoryIdentities !== undefined && {
 		repositoryIdentities: project.repositoryIdentities,
@@ -150,7 +220,7 @@ const deriveRepositoryIdentities = (folders: readonly string[]) =>
 		folders,
 		(folder) =>
 			Effect.tryPromise(() => readRepositoryIdentity(folder)).pipe(
-				Effect.catchAll(() => Effect.succeed(undefined)),
+				Effect.catch(() => Effect.succeed(undefined)),
 				Effect.map((identity) =>
 					identity ? ([folder, identity] as const) : undefined,
 				),
@@ -178,15 +248,15 @@ const makeInitialProjectState = (
 		),
 	);
 
-export class ProjectRegistryTag extends Context.Tag("ProjectRegistry")<
+export class ProjectRegistryTag extends Context.Service<
 	ProjectRegistryTag,
 	Ref.Ref<ProjectRegistryState>
->() {}
+>()("ProjectRegistry") {}
 
-export class ProjectSaveLockTag extends Context.Tag("ProjectSaveLock")<
+export class ProjectSaveLockTag extends Context.Service<
 	ProjectSaveLockTag,
-	Effect.Semaphore
->() {}
+	Semaphore.Semaphore
+>()("ProjectSaveLock") {}
 
 /** Get a project entry by slug. Returns Option. */
 export const getEntry = (slug: string) =>
@@ -212,6 +282,17 @@ export const getProject = (slug: string) =>
 		Effect.withSpan("projectRegistry.getProject"),
 	);
 
+/** Read current global rules and the project's current daemon-only override. */
+export const getEffectiveWorktreeCleanup = (slug: string) =>
+	Effect.gen(function* () {
+		const project = yield* getProject(slug);
+		const config = yield* Ref.get(yield* DaemonConfigRefTag);
+		return resolveWorktreeCleanup(
+			config.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP,
+			project.worktreeCleanup,
+		);
+	});
+
 /** Resolve each draft from the primary folder's current file and persisted defaults. */
 export const resolveSessionMode = (slug: string) =>
 	Effect.gen(function* () {
@@ -231,8 +312,12 @@ export const resolveSessionMode = (slug: string) =>
 				source: "file",
 				...warning,
 			} satisfies ResolveSessionModeResponse;
+		const settings = loadRelaySettings(configDir);
 		return {
-			mode: loadRelaySettings(configDir).defaultSessionMode ?? "local",
+			mode:
+				settings.defaultSessionMode === "last"
+					? (settings.lastSessionMode ?? "local")
+					: (settings.defaultSessionMode ?? "local"),
 			source: "global",
 			...warning,
 		} satisfies ResolveSessionModeResponse;
@@ -280,6 +365,7 @@ export const allProjects = Effect.gen(function* () {
 }).pipe(Effect.withSpan("projectRegistry.allProjects"));
 
 export const projectInfos = Effect.gen(function* () {
+	const unavailable = yield* DaemonStoreAvailability;
 	const ref = yield* ProjectRegistryTag;
 	const projects = yield* allProjects;
 	// Cold projects need branches too. Share the relay cache and its refresh interval.
@@ -316,42 +402,28 @@ export const projectInfos = Effect.gen(function* () {
 			if (Option.isSome(persistence)) yield* persistence.value.requestSave;
 		}
 	}
-	const daemonState = yield* Effect.serviceOption(DaemonStateTag);
-	const defaultGroupingMode = Option.isSome(daemonState)
-		? (loadRelaySettings((yield* Ref.get(daemonState.value)).configDir)
-				.defaultGroupingMode ?? "repository")
-		: "repository";
-	const entries = withCachedProjectGit(
-		(yield* allProjects).map((project) => ({
-			slug: project.slug,
-			folders: project.folders,
-			title: project.title,
-			...(project.setupScript !== undefined && {
-				setupScript: project.setupScript,
-			}),
-			...(project.sessionMode !== undefined && {
-				sessionMode: project.sessionMode,
-			}),
-			...(project.groupingMode !== undefined && {
-				groupingMode: project.groupingMode,
-			}),
-			effectiveGroupingMode: project.groupingMode ?? defaultGroupingMode,
-			...(project.repositoryIdentities !== undefined && {
-				repositoryIdentities: project.repositoryIdentities,
-			}),
-			...(project.lastUsed !== undefined && { lastUsed: project.lastUsed }),
-		})),
+	return withCachedProjectGit(
+		(yield* allProjects).map((project) => {
+			const unavailableReason = unavailable.get(project.slug);
+			return {
+				slug: project.slug,
+				...(unavailableReason !== undefined && { unavailableReason }),
+				folders: project.folders,
+				title: project.title,
+				...(project.addedAt !== undefined && { addedAt: project.addedAt }),
+				...(project.setupScript !== undefined && {
+					setupScript: project.setupScript,
+				}),
+				...(project.sessionMode !== undefined && {
+					sessionMode: project.sessionMode,
+				}),
+				...(project.repositoryIdentities !== undefined && {
+					repositoryIdentities: project.repositoryIdentities,
+				}),
+				...(project.lastUsed !== undefined && { lastUsed: project.lastUsed }),
+			};
+		}),
 	);
-	const groups = computeProjectGroups(
-		entries.map((project) => ({
-			...project,
-			groupingMode: project.effectiveGroupingMode,
-		})),
-	);
-	return entries.map((project) => ({
-		...project,
-		group: groups[project.slug],
-	}));
 });
 
 export const broadcastProjectList = Effect.gen(function* () {
@@ -400,22 +472,31 @@ export const addWithoutRelay = (
 	Effect.gen(function* () {
 		const ref = yield* ProjectRegistryTag;
 		const bus = yield* DaemonEventBusTag;
+		const entry: ProjectRegistering = { _tag: "Registering", project };
 
 		// Atomic check-and-set via Ref.modify
 		const alreadyExists = yield* Ref.modify(ref, (state) => {
 			if (HashMap.has(state, project.slug)) {
 				return [true, state] as const;
 			}
-			const entry: ProjectRegistering = {
-				_tag: "Registering",
-				project,
-			};
 			return [false, HashMap.set(state, project.slug, entry)] as const;
 		});
 
 		if (alreadyExists) {
 			return yield* new ProjectAlreadyExists({ slug: project.slug });
 		}
+		yield* refreshProjectRollups([project.slug]).pipe(
+			Effect.onError(() =>
+				Ref.update(ref, (state) =>
+					Option.exists(
+						HashMap.get(state, project.slug),
+						(current) => current === entry,
+					)
+						? HashMap.remove(state, project.slug)
+						: state,
+				),
+			),
+		);
 
 		if (!options?.silent) {
 			yield* PubSub.publish(
@@ -427,6 +508,7 @@ export const addWithoutRelay = (
 		yield* requestConfigSave;
 		yield* Effect.logInfo("Project registered");
 	}).pipe(
+		Effect.uninterruptible,
 		Effect.annotateLogs("slug", project.slug),
 		Effect.withSpan("projectRegistry.addWithoutRelay", {
 			attributes: { slug: project.slug },
@@ -542,10 +624,11 @@ export const remove = (slug: string) =>
 					// Relay disposal only detaches; removal ends every registered runner afterwards.
 					yield* relayCache.invalidate(slug);
 					const state = yield* Ref.get(yield* DaemonStateTag);
-					yield* stopRegisteredClaudeRunners(
+					yield* stopRegisteredRunners(
 						removed.value.project.folders[0],
 						state.configDir,
 					);
+					yield* refreshProjectRollups([slug]);
 				}).pipe(
 					Effect.onError(() =>
 						// Failed removal must remain reachable by retries and a full stop.
@@ -559,11 +642,22 @@ export const remove = (slug: string) =>
 						).pipe(Effect.andThen(requestConfigSave)),
 					),
 				);
-
+				const config = yield* Effect.serviceOption(DaemonConfigRefTag);
+				if (Option.isSome(config)) {
+					yield* commitDaemonRuntimeConfig((current) => ({
+						...current,
+						...(current.projectOrder !== undefined && {
+							projectOrder: current.projectOrder.filter(
+								(item) => item !== slug,
+							),
+						}),
+					})).pipe(Effect.provideService(DaemonConfigRefTag, config.value));
+				}
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.InstanceRemoved({ instanceId: slug }),
 				);
+				yield* PubSub.publish(bus, DaemonEvent.ProjectsChanged());
 
 				yield* requestConfigSave;
 				yield* Effect.logInfo("Project removed");
@@ -591,7 +685,7 @@ export const updateProject = (
 			| "repositoryIdentities"
 			| "setupScript"
 			| "sessionMode"
-			| "groupingMode"
+			| "worktreeCleanup"
 		>
 	>,
 ) =>
@@ -690,8 +784,8 @@ export const startRelay = (slug: string) =>
 		// honest for both typed startup failures and defects.
 		yield* relayCache.get(slug).pipe(
 			Effect.flatMap(() => markReady(slug)),
-			Effect.catchAll((cause) => markError(slug, formatRelayFailure(cause))),
-			Effect.catchAllDefect((defect) =>
+			Effect.catch((cause) => markError(slug, formatRelayFailure(cause))),
+			Effect.catchDefect((defect) =>
 				markError(slug, formatRelayFailure(defect)),
 			),
 		);
@@ -716,6 +810,7 @@ export const removeAll = Effect.gen(function* () {
 
 	// Clear all entries atomically
 	yield* Ref.set(ref, HashMap.empty());
+	yield* refreshProjectRollups(allSlugs);
 
 	// Invalidate all relays and publish removal events
 	yield* Effect.forEach(
@@ -755,7 +850,7 @@ export const waitForRelay = (slug: string, timeoutMs: number) =>
 			return;
 		}
 
-		yield* Stream.fromQueue(sub).pipe(
+		yield* Stream.fromSubscription(sub).pipe(
 			Stream.filter(
 				(e) => e._tag === "InstanceStatusChanged" && e.instanceId === slug,
 			),
@@ -795,8 +890,8 @@ export const replaceRelay = (slug: string) =>
 		yield* relayCache.invalidate(slug);
 		yield* relayCache.get(slug).pipe(
 			Effect.flatMap(() => markReady(slug)),
-			Effect.catchAll((cause) => markError(slug, formatRelayFailure(cause))),
-			Effect.catchAllDefect((defect) =>
+			Effect.catch((cause) => markError(slug, formatRelayFailure(cause))),
+			Effect.catchDefect((defect) =>
 				markError(slug, formatRelayFailure(defect)),
 			),
 		);
@@ -818,7 +913,8 @@ export const openCodeInstanceFor = <
 	instances: readonly I[],
 ): I | undefined =>
 	instances.find((instance) => {
-		if (instance.driver === "claude") return false;
+		if (!getProviderDriver(instance.driver ?? "opencode")?.runsOpenCodeServer)
+			return false;
 		if (instance.managed === true || (instance.port ?? 0) > 0) return true;
 		if (instance.url !== undefined)
 			return URL.canParse(instance.url) && new URL(instance.url).port !== "0";
@@ -847,7 +943,7 @@ export const makeProjectRegistryLive = (
 			const ref = yield* Ref.make<ProjectRegistryState>(
 				makeInitialProjectState(initialProjects),
 			);
-			const lock = yield* Effect.makeSemaphore(1);
+			const lock = yield* Semaphore.make(1);
 			return Context.make(ProjectRegistryTag, ref).pipe(
 				Context.add(ProjectSaveLockTag, lock),
 			);
@@ -862,6 +958,24 @@ export const makeProjectRegistryFromDaemonStateLive: Layer.Layer<
 	Effect.gen(function* () {
 		const stateRef = yield* DaemonStateTag;
 		const state = yield* Ref.get(stateRef);
+		const missingDates = state.projects.filter(
+			(project) => project.addedAt === undefined,
+		);
+		const store = yield* Effect.serviceOption(PersistenceStore);
+		const dates =
+			missingDates.length > 0 && Option.isSome(store)
+				? yield* Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						return yield* sql<{ project_id: string; added_at: number }>`
+					SELECT project_id, MIN(created_at) AS added_at FROM sessions
+					WHERE project_id IN ${sql.in(missingDates.map(({ slug }) => slug))}
+					GROUP BY project_id`;
+					}).pipe(Effect.provide(store.value), Effect.orDie)
+				: [];
+		const addedAtBySlug = new Map(
+			dates.map((row) => [row.project_id, row.added_at]),
+		);
+		const now = Date.now();
 		// Refresh even cached identities before consumers (including HTTP/RPC) start.
 		const initialProjects = yield* Effect.forEach(
 			state.projects,
@@ -869,6 +983,7 @@ export const makeProjectRegistryFromDaemonStateLive: Layer.Layer<
 				deriveRepositoryIdentities(project.folders).pipe(
 					Effect.map((repositoryIdentities) => ({
 						...toStoredProject(project),
+						addedAt: project.addedAt ?? addedAtBySlug.get(project.slug) ?? now,
 						repositoryIdentities,
 					})),
 				),
@@ -877,7 +992,7 @@ export const makeProjectRegistryFromDaemonStateLive: Layer.Layer<
 		const ref = yield* Ref.make<ProjectRegistryState>(
 			makeInitialProjectState(initialProjects),
 		);
-		const lock = yield* Effect.makeSemaphore(1);
+		const lock = yield* Semaphore.make(1);
 		return Context.make(ProjectRegistryTag, ref).pipe(
 			Context.add(ProjectSaveLockTag, lock),
 		);
@@ -942,12 +1057,12 @@ export const saveProject = (input: SaveProjectInput) =>
 							kind: isPermissionDenied(cause) ? "permission-denied" : "missing",
 							path: folder.path,
 						}),
-					}).pipe(Effect.either);
-					if (Either.isLeft(owned)) {
-						issues.push(owned.left);
+					}).pipe(Effect.result);
+					if (Result.isFailure(owned)) {
+						issues.push(owned.failure);
 						continue;
 					}
-					if (owned.right) {
+					if (owned.success) {
 						issues.push({
 							kind: "conduit-worktree",
 							path: folder.originalPath,
@@ -967,13 +1082,13 @@ export const saveProject = (input: SaveProjectInput) =>
 							kind: isPermissionDenied(cause) ? "permission-denied" : "missing",
 							path: folder.path,
 						}),
-					}).pipe(Effect.either);
-					if (Either.isLeft(disk)) {
-						if (!folder.create || disk.left.kind === "permission-denied")
-							issues.push(disk.left);
+					}).pipe(Effect.result);
+					if (Result.isFailure(disk)) {
+						if (!folder.create || disk.failure.kind === "permission-denied")
+							issues.push(disk.failure);
 					} else if (folder.create) {
 						issues.push({ kind: "create-exists", path: folder.path });
-					} else if (!disk.right.isDirectory()) {
+					} else if (!disk.success.isDirectory()) {
 						issues.push({ kind: "not-a-folder", path: folder.path });
 					}
 				}
@@ -985,7 +1100,7 @@ export const saveProject = (input: SaveProjectInput) =>
 						project: yield* getProject(taken.slug),
 						warnings: [],
 					};
-				if (!Arr.isNonEmptyReadonlyArray(folders))
+				if (!Arr.isReadonlyArrayNonEmpty(folders))
 					return yield* new ProjectSaveRejected({
 						issues: [{ kind: "empty" }],
 					});
@@ -1002,20 +1117,17 @@ export const saveProject = (input: SaveProjectInput) =>
 					existing !== undefined &&
 					normalizeProjectDirectory(existing.folders[0]) !== mainFolder;
 				if (mainChanged) {
-					if (
-						projectEventsDbPath({ configDir, ...existing }) !==
-						resolve(projectStorageDir(configDir, existing.slug), "events.db")
-					) {
+					// Startup finds legacy history through the main folder, so moving it
+					// would orphan history that has not been imported yet.
+					const unavailableReason = (yield* DaemonStoreAvailability).get(
+						existing.slug,
+					);
+					if (unavailableReason !== undefined)
 						return yield* new WsRpcError({
-							message:
-								"Project history migration must complete before changing the main folder",
+							message: `Fix this project's history before changing its main folder: ${unavailableReason}`,
 						});
-					}
 					// A send admitted between this check and the relay swap is not blocked.
-					const count = yield* countRunningProjectSessions(
-						existing,
-						configDir,
-					).pipe(
+					const count = yield* countRunningProjectSessions(existing).pipe(
 						Effect.mapError(
 							(cause) =>
 								new WsRpcError({
@@ -1097,7 +1209,7 @@ export const saveProject = (input: SaveProjectInput) =>
 									try: () => rmSync(path, { recursive: true, force: true }),
 									catch: (cause) => cause,
 								}).pipe(
-									Effect.catchAll((cause) =>
+									Effect.catch((cause) =>
 										Effect.logWarning(
 											`Failed to remove created folder ${path}: ${formatRelayFailure(cause)}`,
 										),
@@ -1120,10 +1232,6 @@ export const saveProject = (input: SaveProjectInput) =>
 					input.sessionMode === undefined
 						? existing?.sessionMode
 						: (input.sessionMode ?? undefined);
-				const groupingMode =
-					input.groupingMode === undefined
-						? existing?.groupingMode
-						: (input.groupingMode ?? undefined);
 				const project: StoredProject = existing
 					? {
 							...existing,
@@ -1131,7 +1239,6 @@ export const saveProject = (input: SaveProjectInput) =>
 							repositoryIdentities,
 							setupScript,
 							sessionMode,
-							groupingMode,
 							...(title !== undefined && { title }),
 						}
 					: {
@@ -1140,9 +1247,9 @@ export const saveProject = (input: SaveProjectInput) =>
 							repositoryIdentities,
 							setupScript,
 							sessionMode,
-							groupingMode,
 							title: title ?? titleForDirectory(mainFolder),
 							lastUsed: Date.now(),
+							addedAt: Date.now(),
 						};
 				if (existing) {
 					yield* updateProject(slug, {
@@ -1151,7 +1258,6 @@ export const saveProject = (input: SaveProjectInput) =>
 						title: project.title,
 						setupScript,
 						sessionMode,
-						groupingMode,
 					});
 				} else {
 					yield* addWithoutRelay(project);
@@ -1166,11 +1272,8 @@ export const saveProject = (input: SaveProjectInput) =>
 				) {
 					yield* replaceRelay(slug);
 					if (mainChanged) {
-						yield* stopRegisteredClaudeRunners(
-							existing.folders[0],
-							configDir,
-						).pipe(
-							Effect.catchAllCause((cause) =>
+						yield* stopRegisteredRunners(existing.folders[0], configDir).pipe(
+							Effect.catchCause((cause) =>
 								Effect.logWarning(
 									`Failed to stop old project runners after saving ${slug}: ${formatRelayFailure(cause)}`,
 								),

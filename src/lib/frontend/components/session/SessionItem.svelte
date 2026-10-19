@@ -131,6 +131,7 @@
 	import Icon from "../ui/Icon.svelte";
 	import DitherGlyph from "../ui/DitherGlyph.svelte";
 	import Button from "../ui/Button.svelte";
+	import Badge from "../ui/Badge.svelte";
 	import SessionRenameInput from "./SessionRenameInput.svelte";
 	import ProjectSquare from "./ProjectSquare.svelte";
 	import { isSessionWoken } from "../../stores/session.svelte.js";
@@ -689,6 +690,9 @@
 			{#if sessionAttention(session) === "done-unread"}
 				<span data-testid="session-unread-dot" class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>
 			{/if}
+		{/if}
+		{#if session.archivedAt != null}
+			<Badge data-testid="session-archived-badge" class="leading-none">Archived</Badge>
 		{/if}
 		{#if pinned}
 			<span class="shrink-0 text-text-dimmer" title="Pinned session">

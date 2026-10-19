@@ -9,17 +9,22 @@ export const sessionModeDefaultHandlers: StepHandler[] = [
 			/^the next draft resolves to (local|worktree) from the project file$/,
 		run: ({ world, match }) => {
 			const rpc = requireRpcControl(world.page);
-			rpc.setResponse("ResolveSessionMode", { mode: match[1], source: "file" });
+			rpc.setStubs({
+				ResolveSessionMode: () => ({
+					mode: match[1] as "local" | "worktree",
+					source: "file",
+				}),
+			});
 			const projects = [
 				{
 					slug: "myapp",
 					title: "myapp",
-					folders: ["/myapp"],
+					folders: ["/myapp"] as const,
 					git: { branch: "main" },
 				},
 			];
-			rpc.setResponse("GetProjects", { projects, current: "myapp" });
-			rpc.setDaemonList("SubscribeProjects", { projects });
+			rpc.setStubs({ GetProjects: () => ({ projects, current: "myapp" }) });
+			rpc.setProjects({ projects });
 			rpc.setDaemonList("SubscribeInstances", {
 				instances: [
 					{

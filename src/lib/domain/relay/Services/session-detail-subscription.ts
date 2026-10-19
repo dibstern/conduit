@@ -14,8 +14,9 @@
 // removed while the client was away. The session's disappearance is the
 // shell's to report.
 
-import type { SqlError } from "@effect/sql/SqlError";
 import { Effect, Option, Schema, Stream } from "effect";
+import type { SqlError } from "effect/sql/SqlError";
+import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import {
 	PartRemovalId,
 	type ResumeBase,
@@ -34,7 +35,6 @@ import {
 	PAGE_FRAME_BUDGET,
 	PAGE_MESSAGES,
 } from "../../../persistence/session-history-adapter.js";
-import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeHistoryReconcileTag } from "./opencode-runtime-ingress-service.js";
 import { stream } from "./read-model-subscription.js";
@@ -65,15 +65,16 @@ const partRowId = (messageId: string, partId: string) =>
  * What a {@link ResumePoint} says, readable only here: the store and session
  * that sent the snapshot, and the base a resume from it is checked against.
  */
-const ResumePointBody = Schema.compose(
-	Schema.StringFromBase64Url,
-	Schema.parseJson(
-		Schema.Struct({
-			store: Schema.String,
-			session: Schema.String,
-			sequence: Schema.Number,
-			cursor: Schema.optional(Schema.NonEmptyString),
-		}),
+const ResumePointBody = Schema.StringFromBase64Url.pipe(
+	Schema.decodeTo(
+		Schema.fromJsonString(
+			Schema.Struct({
+				store: Schema.String,
+				session: Schema.String,
+				sequence: Schema.Number,
+				cursor: Schema.optionalKey(Schema.NonEmptyString),
+			}),
+		),
 	),
 );
 
@@ -107,13 +108,14 @@ export const subscribeSessionDetail = (options: {
 		Effect.gen(function* () {
 			const readQuery = yield* ReadQueryEffectTag;
 			const bus = yield* SessionEventBusTag;
-			const registry = yield* Effect.serviceOption(ProviderRegistryTag);
 			const directory = yield* AccountDirectory;
-			const sessionRow = yield* Effect.either(
+			const sessionRow = yield* Effect.result(
 				readQuery.getSession(options.sessionId),
 			);
 			let boundId =
-				sessionRow._tag === "Right" ? sessionRow.right?.provider : undefined;
+				sessionRow._tag === "Success"
+					? sessionRow.success?.provider
+					: undefined;
 			let account =
 				boundId === undefined
 					? undefined
@@ -121,10 +123,10 @@ export const subscribeSessionDetail = (options: {
 							.resolve({ _tag: "Id", id: boundId })
 							.pipe(Effect.option, Effect.map(Option.getOrUndefined));
 			if (
-				sessionRow._tag === "Right" &&
-				sessionRow.right?.history_complete === 0
+				sessionRow._tag === "Success" &&
+				sessionRow.success?.history_complete === 0
 			) {
-				if (account?.driver === "opencode") {
+				if (getProviderDriver(account?.driver)?.runsOpenCodeServer) {
 					const ingress = yield* Effect.serviceOption(
 						OpenCodeHistoryReconcileTag,
 					);
@@ -135,7 +137,7 @@ export const subscribeSessionDetail = (options: {
 			const store = yield* readQuery.readStoreIdentity();
 			const point = Option.getOrUndefined(
 				Option.filter(
-					Option.fromNullable(options.resumePoint).pipe(
+					Option.fromNullishOr(options.resumePoint).pipe(
 						Option.flatMap(Schema.decodeOption(ResumePointBody)),
 					),
 					(body) => body.store === store && body.session === options.sessionId,
@@ -233,7 +235,7 @@ export const subscribeSessionDetail = (options: {
 															inbox: {
 																paused: inbox.paused,
 																// Only the reasons that do not depend on the draft.
-																steer: providerSteers(registry, account)
+																steer: providerSteers(account)
 																	? inbox.promptOpen
 																		? "prompt_open"
 																		: null

@@ -1,12 +1,9 @@
-import { Rpc, RpcGroup } from "@effect/rpc";
-import { Effect, ParseResult, Schema } from "effect";
+import { Effect, Record, Schema, SchemaGetter, SchemaIssue } from "effect";
+import { Rpc, RpcGroup } from "effect/rpc";
 import { accountRefFromSelection } from "../account-directory.js";
 import type { FolderIssue } from "../project-folders.js";
 import {
 	ApprovalSchema,
-	type GroupingMode,
-	GroupingModeSchema,
-	ProjectGroupSchema,
 	RepositoryIdentitySchema,
 	SessionGitSchema,
 	type SessionInfo,
@@ -16,6 +13,7 @@ import {
 } from "../shared-types.js";
 import { AccountChangeRejected } from "./account.js";
 import {
+	ProjectWorktreeCleanupSchema,
 	WorktreeBranchRenameError,
 	WorktreeCleanupReportSchema,
 	WorktreeCleanupSchema,
@@ -42,9 +40,16 @@ import {
 	UsageLimitsSettingSchema,
 	UsageReadingSchema,
 } from "./limit-recovery.js";
-import { type SessionMode, SessionModeSchema } from "./project-file.js";
+import {
+	DefaultSessionModeSchema,
+	type SessionMode,
+	SessionModeSchema,
+} from "./project-file.js";
 import {
 	AccountIdSchema,
+	BrowserDriverTraitsSchema,
+	KnownProviderDriverKindSchema,
+	PROVIDER_DRIVERS,
 	ProviderDriverKindSchema,
 	ProviderSessionCapabilitiesSchema,
 } from "./provider-instance.js";
@@ -73,10 +78,10 @@ export const ResumeBase = Schema.Struct({
 export type ResumeBase = typeof ResumeBase.Type;
 
 /**
- * Where a saved snapshot can resume from, named by the store and session that
+ * Where a saved snapshot can resume from, named by its store and subscription scope
  * sent it (conduit-test-y7eo.14). Opaque to the browser, which only keeps it
  * and hands it back; it is not tamper-proof. The server validates it, refusing
- * one from another store or session with a fresh snapshot, and the resume
+ * one from another store or scope with a fresh snapshot, and the resume
  * checksum backs whatever it accepts.
  */
 export const ResumePoint = NonEmptyString.pipe(Schema.brand("ResumePoint"));
@@ -89,8 +94,8 @@ export type ResumePoint = typeof ResumePoint.Type;
  * what it applied.
  */
 export const ResumeChecksum = Schema.Struct({
-	hash: Schema.NonNegativeInt,
-	rows: Schema.NonNegativeInt,
+	hash: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+	rows: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
 }).pipe(Schema.brand("ResumeChecksum"));
 export type ResumeChecksum = typeof ResumeChecksum.Type;
 
@@ -117,14 +122,18 @@ export const digestRows = (
 	return { hash, rows: count };
 };
 
-export const EnvelopeSchema = <A, I, R>(itemSchema: Schema.Schema<A, I, R>) =>
-	Schema.Union(
+export const EnvelopeSchema = <A, I = A, RD = never, RE = RD>(
+	itemSchema: Schema.Codec<A, I, RD, RE>,
+) =>
+	Schema.Union([
 		Schema.Struct({
 			_tag: Schema.Literal("snapshot"),
 			rows: Schema.Array(itemSchema),
 			sequence: Schema.Number,
 			hasMore: Schema.optional(Schema.Boolean),
 			cursor: Schema.optional(NonEmptyString),
+			/** The opaque store and scope identity this snapshot resumes from. */
+			resumePoint: Schema.optional(ResumePoint),
 		}),
 		Schema.Struct({
 			_tag: Schema.Literal("synchronized"),
@@ -143,7 +152,7 @@ export const EnvelopeSchema = <A, I, R>(itemSchema: Schema.Schema<A, I, R>) =>
 			/** The item itself is gone, not only out of this collection. */
 			deleted: Schema.optional(Schema.Boolean),
 		}),
-	);
+	]);
 
 export const ContextWindowOptionSchema = Schema.Struct({
 	value: Schema.String,
@@ -168,6 +177,26 @@ export const ModelInfoSchema = Schema.Struct({
 		}),
 	),
 	variants: Schema.optional(Schema.Array(Schema.String)),
+	parameters: Schema.optional(
+		Schema.Struct({
+			rows: Schema.Array(
+				Schema.Struct({
+					id: Schema.String,
+					label: Schema.String,
+					values: Schema.Array(
+						Schema.Struct({ value: Schema.String, label: Schema.String }),
+					),
+				}),
+			),
+			combinations: Schema.Array(
+				Schema.Struct({
+					variant: Schema.String,
+					values: Schema.Record(Schema.String, Schema.String),
+					isDefault: Schema.optional(Schema.Boolean),
+				}),
+			),
+		}),
+	),
 	contextWindowOptions: Schema.optional(
 		Schema.Array(ContextWindowOptionSchema),
 	),
@@ -203,20 +232,22 @@ export const ModelExecutionSchema = Schema.Struct({
 	actualModel: Schema.String,
 	drifted: Schema.optional(Schema.Boolean),
 }).pipe(
-	Schema.filter(
-		(execution) =>
-			execution.drifted === undefined ||
-			(execution.expectedModel !== undefined &&
-				(execution.drifted === false ||
-					execution.actualModel !== execution.expectedModel)),
-		{
-			// Not a biconditional: two ids that differ only by the `[1m]`
-			// context-window suffix name the same model, so equal-identity /
-			// unequal-string is a legitimate `drifted: false`. Claiming drift
-			// between two identical ids is still nonsense.
-			message: () =>
-				"drifted requires expectedModel, and drifted=true requires actualModel to differ from expectedModel",
-		},
+	Schema.check(
+		Schema.makeFilter(
+			(execution) =>
+				execution.drifted === undefined ||
+				(execution.expectedModel !== undefined &&
+					(execution.drifted === false ||
+						execution.actualModel !== execution.expectedModel)),
+			{
+				// Not a biconditional: two ids that differ only by the `[1m]`
+				// context-window suffix name the same model, so equal-identity /
+				// unequal-string is a legitimate `drifted: false`. Claiming drift
+				// between two identical ids is still nonsense.
+				message:
+					"drifted requires expectedModel, and drifted=true requires actualModel to differ from expectedModel",
+			},
+		),
 	),
 );
 
@@ -243,27 +274,26 @@ export const CommandInfoSchema = Schema.Struct({
 export const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
+	addedAt: Schema.optional(Schema.Number),
 	folders: Schema.NonEmptyArray(Schema.String),
 	setupScript: Schema.optional(Schema.String),
 	sessionMode: Schema.optional(SessionModeSchema),
-	groupingMode: Schema.optional(GroupingModeSchema),
-	effectiveGroupingMode: Schema.optional(GroupingModeSchema),
-	group: Schema.optional(ProjectGroupSchema),
 	/** Keyed by Project Folder path; non-git folders have no entry. */
 	repositoryIdentities: Schema.optional(
-		Schema.Record({ key: Schema.String, value: RepositoryIdentitySchema }),
+		Schema.Record(Schema.String, RepositoryIdentitySchema),
 	),
 	missing: Schema.optional(Schema.Boolean),
+	unavailableReason: Schema.optional(Schema.String),
 	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),
 });
 
-export const InstanceStatusSchema = Schema.Literal(
+export const InstanceStatusSchema = Schema.Literals([
 	"starting",
 	"healthy",
 	"unhealthy",
 	"stopped",
-);
+]);
 
 export const OpenCodeInstanceSchema = Schema.Struct({
 	id: Schema.String,
@@ -273,6 +303,12 @@ export const OpenCodeInstanceSchema = Schema.Struct({
 	driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
 	isDefault: Schema.optional(Schema.Boolean),
 	usageEligible: Schema.optional(Schema.Boolean),
+	cursorUsageSource: Schema.optional(
+		Schema.Literals(["token", "keychain", "can_enable", "unsupported"]),
+	),
+	available: Schema.optional(Schema.Boolean),
+	unavailableReason: Schema.optional(Schema.String),
+	unavailableCode: Schema.optional(Schema.Literal("auth_required")),
 	capabilities: Schema.optional(
 		Schema.suspend(() => ProviderSessionCapabilitiesSchema),
 	),
@@ -280,9 +316,7 @@ export const OpenCodeInstanceSchema = Schema.Struct({
 	url: Schema.optional(Schema.String),
 	status: InstanceStatusSchema,
 	pid: Schema.optional(Schema.Number),
-	env: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.String }),
-	),
+	env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 	needsRestart: Schema.optional(Schema.Boolean),
 	exitCode: Schema.optional(Schema.Number),
 	lastHealthCheck: Schema.optional(Schema.Number),
@@ -292,7 +326,7 @@ export const OpenCodeInstanceSchema = Schema.Struct({
 
 export const FileEntrySchema = Schema.Struct({
 	name: Schema.String,
-	type: Schema.Literal("file", "directory"),
+	type: Schema.Literals(["file", "directory"]),
 	size: Schema.optional(Schema.Number),
 });
 
@@ -300,7 +334,7 @@ export const TodoItemSchema = Schema.Struct({
 	id: Schema.String,
 	subject: Schema.String,
 	description: Schema.optional(Schema.String),
-	status: Schema.Literal("pending", "in_progress", "completed", "cancelled"),
+	status: Schema.Literals(["pending", "in_progress", "completed", "cancelled"]),
 });
 
 export const PtyInfoSchema = Schema.Struct({
@@ -308,7 +342,7 @@ export const PtyInfoSchema = Schema.Struct({
 	title: Schema.String,
 	command: Schema.String,
 	cwd: Schema.String,
-	status: Schema.Literal("running", "exited"),
+	status: Schema.Literals(["running", "exited"]),
 	pid: Schema.Number,
 });
 
@@ -318,24 +352,24 @@ export const HistoryMessagePartSchema = Schema.Struct({
 	text: Schema.optional(Schema.String),
 	renderedHtml: Schema.optional(Schema.String),
 	state: Schema.optional(
-		Schema.Struct(
-			{
-				input: Schema.optionalWith(ToolInput, { exact: true }),
-				output: Schema.optionalWith(ToolText, { exact: true }),
-			},
-			Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+		Schema.StructWithRest(
+			Schema.Struct({
+				input: Schema.optionalKey(ToolInput),
+				output: Schema.optionalKey(ToolText),
+			}),
+			[Schema.Record(Schema.String, Schema.Unknown)],
 		),
 	),
 	callID: Schema.optional(Schema.String),
 	tool: Schema.optional(Schema.String),
 	time: Schema.optional(Schema.Unknown),
-}).pipe(
-	Schema.extend(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+}).pipe((schema) =>
+	Schema.StructWithRest(schema, [Schema.Record(Schema.String, Schema.Unknown)]),
 );
 
 export const HistoryMessageSchema = Schema.Struct({
 	id: Schema.String,
-	role: Schema.Literal("user", "assistant"),
+	role: Schema.Literals(["user", "assistant"]),
 	isBackfilled: Schema.optional(Schema.Boolean),
 	inputId: Schema.optional(Schema.String),
 	steered: Schema.optional(Schema.Boolean),
@@ -348,11 +382,9 @@ export const HistoryMessageSchema = Schema.Struct({
 		}),
 	),
 	cost: Schema.optional(Schema.Number),
-	turnCost: Schema.optionalWith(Schema.Number, { exact: true }),
-	contextTokens: Schema.optionalWith(Schema.Number, { exact: true }),
-	tokens: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-	),
+	turnCost: Schema.optionalKey(Schema.Number),
+	contextTokens: Schema.optionalKey(Schema.Number),
+	tokens: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
 	modelExecution: Schema.optional(ModelExecutionSchema),
 	turnTiming: Schema.optional(
 		Schema.Struct({
@@ -367,8 +399,8 @@ export const HistoryMessageSchema = Schema.Struct({
 			),
 		}),
 	),
-}).pipe(
-	Schema.extend(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+}).pipe((schema) =>
+	Schema.StructWithRest(schema, [Schema.Record(Schema.String, Schema.Unknown)]),
 );
 
 /**
@@ -379,7 +411,7 @@ export const HistoryMessageSchema = Schema.Struct({
  * - `part`: one part of the message `messageId`, placed among that message's
  *   parts by `sortOrder`.
  */
-export const SessionDetailItemSchema = Schema.Union(
+export const SessionDetailItemSchema = Schema.Union([
 	Schema.Struct({
 		_tag: Schema.Literal("message"),
 		message: HistoryMessageSchema,
@@ -390,41 +422,34 @@ export const SessionDetailItemSchema = Schema.Union(
 		sortOrder: Schema.Int,
 		part: HistoryMessagePartSchema,
 	}),
-	// The session's pending rewind point, or null when none is pending.
 	Schema.Struct({
 		_tag: Schema.Literal("rewind"),
 		messageId: Schema.NullOr(Schema.String),
 	}),
-	// One input conduit is holding for the session: queued behind a running
-	// turn, or sent as a steer and not yet placed. Its row id is
-	// `input:<inputId>`, so a `remove` never collides with a message id.
 	Schema.Struct({
 		_tag: Schema.Literal("pendingInput"),
 		input: Schema.Struct({
 			inputId: Schema.String,
-			state: Schema.Literal("queued", "steering"),
+			state: Schema.Literals(["queued", "steering"]),
 			request: InputRequestSchema,
 			admittedAt: Schema.Number,
 		}),
 	}),
-	// The session's inbox state, computed on read. Paused: inputs wait behind
-	// a turn that was stopped or failed, until Resume or a normal turn. Steer:
-	// why no draft could be steered now (capability or open prompt), or null.
 	Schema.Struct({
 		_tag: Schema.Literal("inbox"),
 		inbox: Schema.Struct({
 			paused: Schema.Boolean,
-			steer: Schema.NullOr(Schema.Literal("no_steering", "prompt_open")),
+			steer: Schema.NullOr(Schema.Literals(["no_steering", "prompt_open"])),
 		}),
 	}),
-);
+]);
 
 /**
  * A detail `remove` names a message by its id, and a part by this JSON pair of
  * its message's id and its own: a part may share its message's id.
  */
-export const PartRemovalId = Schema.parseJson(
-	Schema.Tuple(Schema.String, Schema.String),
+export const PartRemovalId = Schema.fromJsonString(
+	Schema.Tuple([Schema.String, Schema.String]),
 );
 
 /**
@@ -439,30 +464,21 @@ export const SENT_PART_LIMIT = 8;
 
 // Lengths are JavaScript string lengths (UTF-16 code units), not wire bytes.
 const TextSuffixSchema = Schema.Struct({
-	from: Schema.NonNegativeInt,
-	total: Schema.NonNegativeInt,
+	from: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+	total: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
 });
 const DetailEnvelope = EnvelopeSchema(SessionDetailItemSchema);
-export const SessionDetailEnvelopeSchema = Schema.Union(
-	DetailEnvelope.members[0].pipe(
-		Schema.extend(
-			Schema.Struct({
-				// What a client that saves this snapshot resumes it from.
-				resumePoint: Schema.optional(ResumePoint),
-			}),
-		),
-	),
+export const SessionDetailEnvelopeSchema = Schema.Union([
+	DetailEnvelope.members[0],
 	DetailEnvelope.members[1],
 	DetailEnvelope.members[2].pipe(
-		Schema.extend(
-			Schema.Struct({
-				// On a part row: its text is the suffix past what was last sent.
-				textSuffix: Schema.optional(TextSuffixSchema),
-			}),
-		),
+		Schema.fieldsAssign({
+			// On a part row: its text is the suffix past what was last sent.
+			textSuffix: Schema.optional(TextSuffixSchema),
+		}),
 	),
 	DetailEnvelope.members[3],
-);
+]);
 export type SessionDetailEnvelope = typeof SessionDetailEnvelopeSchema.Type;
 
 export const GetModelsResponseSchema = Schema.Struct({
@@ -505,14 +521,14 @@ export const HarnessDefaultStateSchema = Schema.Struct({
 			contextWindow: Schema.String,
 		}),
 	),
-	status: Schema.Literal("ok", "missing", "invalid", "unverified"),
+	status: Schema.Literals(["ok", "missing", "invalid", "unverified"]),
 	problem: Schema.optional(Schema.String),
 });
 export type HarnessDefaultState = typeof HarnessDefaultStateSchema.Type;
 
 export const SetHarnessDefaultResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
-	harness: Schema.Literal("claude", "opencode"),
+	harness: Schema.suspend(() => KnownProviderDriverKindSchema),
 	state: HarnessDefaultStateSchema,
 });
 export type SetHarnessDefaultResponse =
@@ -524,14 +540,14 @@ export const SetDefaultPermissionModeResponseSchema = Schema.Struct({
 });
 
 export const SetDefaultSessionModeResponseSchema = Schema.Struct({
-	mode: SessionModeSchema,
+	mode: DefaultSessionModeSchema,
 });
 export type SetDefaultSessionModeResponse =
 	typeof SetDefaultSessionModeResponseSchema.Type;
 
 export const ResolveSessionModeResponseSchema = Schema.Struct({
 	mode: SessionModeSchema,
-	source: Schema.Literal("project", "file", "global"),
+	source: Schema.Literals(["project", "file", "global"]),
 	warning: Schema.optional(Schema.String),
 });
 export type ResolveSessionModeResponse =
@@ -574,29 +590,32 @@ export const OkResponseSchema = Schema.Struct({
 	ok: Schema.Literal(true),
 });
 
-export const PermissionDecisionSchema = Schema.Literal(
+export const PermissionDecisionSchema = Schema.Literals([
 	"allow",
 	"allow_always",
 	"deny",
-);
+]);
 
-export const PermissionPersistScopeSchema = Schema.Literal("tool", "pattern");
-export const PermissionUpdateDestinationSchema = Schema.Literal(
+export const PermissionPersistScopeSchema = Schema.Literals([
+	"tool",
+	"pattern",
+]);
+export const PermissionUpdateDestinationSchema = Schema.Literals([
 	"userSettings",
 	"projectSettings",
 	"localSettings",
 	"session",
 	"cliArg",
-);
-export const RpcLogLevelSchema = Schema.Literal(
+]);
+export const RpcLogLevelSchema = Schema.Literals([
 	"debug",
 	"verbose",
 	"info",
 	"warn",
 	"error",
-);
+]);
 
-export const ProjectSessionAvailabilitySchema = Schema.Union(
+export const ProjectSessionAvailabilitySchema = Schema.Union([
 	Schema.Struct({
 		projectSlug: Schema.String,
 		available: Schema.Literal(true),
@@ -606,7 +625,7 @@ export const ProjectSessionAvailabilitySchema = Schema.Union(
 		available: Schema.Literal(false),
 		error: Schema.String,
 	}),
-);
+]);
 
 export const DaemonSessionCursorSchema = Schema.Struct({
 	updatedAt: Schema.Number,
@@ -621,6 +640,18 @@ export const ListDaemonSessionsResponseSchema = Schema.Struct({
 	nextCursor: Schema.NullOr(DaemonSessionCursorSchema),
 });
 
+export const ArchivedSessionCursorSchema = Schema.Struct({
+	archivedAt: Schema.Number,
+	id: Schema.String,
+});
+
+export const ListArchivedSessionsResponseSchema = Schema.Struct({
+	sessions: Schema.Array(SessionInfoSchema),
+	availability: Schema.Array(ProjectSessionAvailabilitySchema),
+	hasMore: Schema.Boolean,
+	nextCursor: Schema.NullOr(ArchivedSessionCursorSchema),
+});
+
 export const CreateSessionResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	sessionId: Schema.String,
@@ -633,25 +664,29 @@ export const ViewSessionResponseSchema = Schema.Struct({
 
 const SteerRefusedSchema = Schema.Struct({
 	ok: Schema.Literal(false),
-	reason: Schema.Literal(...STEER_BLOCKERS),
+	reason: Schema.Literals([...STEER_BLOCKERS]),
 });
 
 /** Ok, or a refused steer: nothing was admitted, so the browser keeps the text. */
-export const SubmitInputResponseSchema = Schema.Union(
-	Schema.Struct({ ok: Schema.Literal(true), sessionId: Schema.String }),
+export const SubmitInputResponseSchema = Schema.Union([
+	Schema.Struct({
+		ok: Schema.Literal(true),
+		sessionId: Schema.String,
+		handedOff: Schema.Boolean,
+	}),
 	SteerRefusedSchema,
-);
+]);
 
 /** Ok; or the input already started (or never existed) and cannot be changed;
  *  or Send now could not steer it, so it stays queued. */
-export const InboxCommandResponseSchema = Schema.Union(
+export const InboxCommandResponseSchema = Schema.Union([
 	Schema.Struct({ ok: Schema.Literal(true) }),
 	Schema.Struct({
 		ok: Schema.Literal(false),
 		reason: Schema.Literal("already_started"),
 	}),
 	SteerRefusedSchema,
-);
+]);
 
 export const LoadMoreHistoryResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
@@ -665,7 +700,7 @@ export const ForkSessionResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	sessionId: Schema.String,
 	/** Lineage for the forking tab until the fork's family row arrives. */
-	parentId: Schema.String,
+	forkedFrom: Schema.String,
 	forkMessageId: Schema.optional(Schema.String),
 	forkPointTimestamp: Schema.optional(Schema.Number),
 });
@@ -696,7 +731,7 @@ export const ProjectMutationResponseSchema = Schema.Struct({
 	current: Schema.optional(Schema.String),
 });
 
-export const FolderIssueSchema: Schema.Schema<FolderIssue> = Schema.Union(
+export const FolderIssueSchema: Schema.Codec<FolderIssue> = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("empty") }),
 	Schema.Struct({ kind: Schema.Literal("duplicate"), path: Schema.String }),
 	Schema.Struct({
@@ -738,15 +773,15 @@ export const FolderIssueSchema: Schema.Schema<FolderIssue> = Schema.Union(
 		kind: Schema.Literal("sessions-running"),
 		count: Schema.Number,
 	}),
-);
+]);
 
-export const ProjectFolderInputSchema = Schema.Union(
+export const ProjectFolderInputSchema = Schema.Union([
 	NonEmptyString,
 	Schema.Struct({
 		path: NonEmptyString,
 		create: Schema.Struct({ gitInit: Schema.Boolean }),
 	}),
-);
+]);
 
 export type ProjectFolderInput = typeof ProjectFolderInputSchema.Type;
 export interface SaveProjectInput {
@@ -755,13 +790,13 @@ export interface SaveProjectInput {
 	readonly folders: readonly ProjectFolderInput[];
 	readonly setupScript?: string | undefined;
 	readonly sessionMode?: SessionMode | null | undefined;
-	/** null clears an override; omission preserves it. */
-	readonly groupingMode?: GroupingMode | null | undefined;
 }
 
 export class ProjectSaveRejected extends Schema.TaggedError<ProjectSaveRejected>()(
 	"ProjectSaveRejected",
-	{ issues: Schema.Array(FolderIssueSchema) },
+	{
+		issues: Schema.Array(FolderIssueSchema),
+	},
 ) {
 	get message(): string {
 		return this.issues
@@ -784,15 +819,21 @@ export const SaveProjectResponseSchema = Schema.Struct({
 	warnings: Schema.Array(FolderIssueSchema),
 });
 
-const ProviderCapabilityMapSchema = Schema.Record({
-	key: Schema.String,
-	value: Schema.suspend(() => ProviderSessionCapabilitiesSchema),
-});
+const ProviderCapabilityMapSchema = Schema.Record(
+	Schema.String,
+	Schema.suspend(() => ProviderSessionCapabilitiesSchema),
+);
+
+const ProviderTraitsMapSchema = Schema.Record(
+	Schema.String,
+	Schema.suspend(() => BrowserDriverTraitsSchema),
+);
 
 export const InstanceListResponseSchema = Schema.Struct({
 	projectSlug: Schema.optional(Schema.String),
 	instances: Schema.Array(OpenCodeInstanceSchema),
 	providerCapabilities: Schema.optional(ProviderCapabilityMapSchema),
+	providerTraits: Schema.optional(ProviderTraitsMapSchema),
 	addedInstanceId: Schema.optional(Schema.String),
 });
 
@@ -818,10 +859,10 @@ export const GetStatusResponseSchema = Schema.Struct({
 	tailscaleServeEnabled: Schema.optional(Schema.Boolean),
 	tailscaleServeAvailable: Schema.optional(Schema.Boolean),
 	tailscaleServe: Schema.optional(
-		Schema.Union(
+		Schema.Union([
 			Schema.Struct({ url: Schema.String }),
 			Schema.Struct({ error: Schema.String }),
-		),
+		]),
 	),
 	keepAwake: Schema.Boolean,
 	keepAwakeCommand: Schema.NullOr(Schema.String),
@@ -875,7 +916,7 @@ export const FindFoldersResponseSchema = Schema.Struct({
 		Schema.Struct({
 			path: Schema.String,
 			isGitRepo: Schema.Boolean,
-			reason: Schema.Literal("recent", "sibling", "match"),
+			reason: Schema.Literals(["recent", "sibling", "match"]),
 			exists: Schema.Boolean,
 		}),
 	),
@@ -928,7 +969,7 @@ export const GetSessionSkillsResponseSchema = Schema.Struct({
 	loads: Schema.Array(
 		Schema.Struct({
 			name: Schema.String,
-			invokedBy: Schema.Literal("user", "agent"),
+			invokedBy: Schema.Literals(["user", "agent"]),
 			turnOrdinal: Schema.Number,
 			at: Schema.Number,
 			anchor: Schema.Struct({
@@ -993,6 +1034,8 @@ export type ProjectSessionAvailability =
 	typeof ProjectSessionAvailabilitySchema.Type;
 export type ListDaemonSessionsResponse =
 	typeof ListDaemonSessionsResponseSchema.Type;
+export type ListArchivedSessionsResponse =
+	typeof ListArchivedSessionsResponseSchema.Type;
 export type CreateSessionResponse = typeof CreateSessionResponseSchema.Type;
 export type ViewSessionResponse = typeof ViewSessionResponseSchema.Type;
 export type SubmitInputResponse = typeof SubmitInputResponseSchema.Type;
@@ -1007,1023 +1050,1040 @@ export type RpcLogLevel = typeof RpcLogLevelSchema.Type;
 
 export class WsRpcError extends Schema.TaggedError<WsRpcError>()("WsRpcError", {
 	message: Schema.String,
+	code: Schema.optional(Schema.Literal("unknown-session")),
 }) {}
 
-export class GetStatus extends Schema.TaggedRequest<GetStatus>()("GetStatus", {
-	failure: WsRpcError,
+export const GetStatus = Rpc.make("GetStatus", {
+	payload: Schema.TaggedStruct("GetStatus", {}),
 	success: GetStatusResponseSchema,
-	payload: {},
-}) {}
+	error: WsRpcError,
+});
 
 export class SetPinRejected extends Schema.TaggedError<SetPinRejected>()(
 	"SetPinRejected",
 	{
-		reason: Schema.Literal("wrong_pin", "locked_out"),
+		reason: Schema.Literals(["wrong_pin", "locked_out"]),
 		retryAfterSeconds: Schema.optional(Schema.Number),
 	},
 ) {}
 
-export class SetPin extends Schema.TaggedRequest<SetPin>()("SetPin", {
-	failure: Schema.Union(WsRpcError, SetPinRejected),
-	success: OkResponseSchema,
-	payload: {
-		pin: Schema.NullOr(Schema.String.pipe(Schema.pattern(/^\d{4,8}$/))),
+export const SetPin = Rpc.make("SetPin", {
+	payload: Schema.TaggedStruct("SetPin", {
+		pin: Schema.NullOr(
+			Schema.String.pipe(Schema.check(Schema.isPattern(/^\d{4,8}$/))),
+		),
 		currentPin: Schema.optional(
-			Schema.String.pipe(Schema.pattern(/^\d{4,8}$/)),
+			Schema.String.pipe(Schema.check(Schema.isPattern(/^\d{4,8}$/))),
 		),
-	},
-}) {}
-
-export class SetKeepAwake extends Schema.TaggedRequest<SetKeepAwake>()(
-	"SetKeepAwake",
-	{
-		failure: WsRpcError,
-		success: SetKeepAwakeResponseSchema,
-		payload: { enabled: Schema.Boolean },
-	},
-) {}
-
-export class SetKeepAwakeCommand extends Schema.TaggedRequest<SetKeepAwakeCommand>()(
-	"SetKeepAwakeCommand",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			command: NonEmptyString,
-			args: Schema.optionalWith(Schema.Array(Schema.String), {
-				default: () => [],
-			}),
-		},
-	},
-) {}
-
-export class SetTailscaleServe extends Schema.TaggedRequest<SetTailscaleServe>()(
-	"SetTailscaleServe",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: { enabled: Schema.Boolean },
-	},
-) {}
-
-export class Shutdown extends Schema.TaggedRequest<Shutdown>()("Shutdown", {
-	payload: {},
-	failure: WsRpcError,
+	}),
 	success: OkResponseSchema,
-}) {}
-
-export class SetAgent extends Schema.TaggedRequest<SetAgent>()("SetAgent", {
-	failure: WsRpcError,
-	success: OkResponseSchema,
-	payload: { slug: Schema.String, agent: Schema.String },
-}) {}
-
-export class RestartWithConfig extends Schema.TaggedRequest<RestartWithConfig>()(
-	"RestartWithConfig",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {},
-	},
-) {}
-
-export class GetInstances extends Schema.TaggedRequest<GetInstances>()(
-	"GetInstances",
-	{
-		failure: WsRpcError,
-		success: InstanceListResponseSchema,
-		payload: {},
-	},
-) {}
-
-export class GetInstanceStatus extends Schema.TaggedRequest<GetInstanceStatus>()(
-	"GetInstanceStatus",
-	{
-		failure: WsRpcError,
-		success: GetInstanceStatusResponseSchema,
-		payload: { instanceId: NonEmptyString },
-	},
-) {}
-
-export class GetAgents extends Schema.TaggedRequest<GetAgents>()("GetAgents", {
-	failure: WsRpcError,
-	success: GetAgentsResponseSchema,
-	payload: {
-		projectSlug: NonEmptyString,
-		sessionId: Schema.optional(Schema.String),
-		instanceId: Schema.optional(Schema.String),
-	},
-}) {}
-
-export class GetCommands extends Schema.TaggedRequest<GetCommands>()(
-	"GetCommands",
-	{
-		failure: WsRpcError,
-		success: GetCommandsResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: Schema.optional(Schema.String),
-		},
-	},
-) {}
-
-export class GetProjects extends Schema.TaggedRequest<GetProjects>()(
-	"GetProjects",
-	{
-		failure: WsRpcError,
-		success: GetProjectsResponseSchema,
-		payload: {
-			projectSlug: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
-
-export class SaveProject extends Schema.TaggedRequest<SaveProject>()(
-	"SaveProject",
-	{
-		failure: Schema.Union(WsRpcError, ProjectSaveRejected),
-		success: SaveProjectResponseSchema,
-		payload: {
-			projectSlug: Schema.optional(NonEmptyString),
-			slug: Schema.optional(NonEmptyString),
-			title: Schema.optional(NonEmptyString),
-			folders: Schema.Array(ProjectFolderInputSchema),
-			setupScript: Schema.optional(Schema.String),
-			sessionMode: Schema.optional(Schema.NullOr(SessionModeSchema)),
-			groupingMode: Schema.optional(Schema.NullOr(GroupingModeSchema)),
-		},
-	},
-) {}
-
-export class RemoveProject extends Schema.TaggedRequest<RemoveProject>()(
-	"RemoveProject",
-	{
-		failure: WsRpcError,
-		success: ProjectMutationResponseSchema,
-		payload: {
-			projectSlug: Schema.optional(NonEmptyString),
-			slug: NonEmptyString,
-		},
-	},
-) {}
-
-export class StartInstance extends Schema.TaggedRequest<StartInstance>()(
-	"StartInstance",
-	{
-		failure: WsRpcError,
-		success: InstanceListResponseSchema,
-		payload: {
-			projectSlug: Schema.optional(NonEmptyString),
-			instanceId: NonEmptyString,
-		},
-	},
-) {}
-
-export class StopInstance extends Schema.TaggedRequest<StopInstance>()(
-	"StopInstance",
-	{
-		failure: WsRpcError,
-		success: InstanceListResponseSchema,
-		payload: {
-			projectSlug: Schema.optional(NonEmptyString),
-			instanceId: NonEmptyString,
-		},
-	},
-) {}
-
-export class RemoveInstance extends Schema.TaggedRequest<RemoveInstance>()(
-	"RemoveInstance",
-	{
-		failure: Schema.Union(
-			WsRpcError,
-			Schema.suspend(() => AccountChangeRejected),
-		),
-		success: InstanceListResponseSchema,
-		payload: {
-			projectSlug: Schema.optional(NonEmptyString),
-			instanceId: NonEmptyString,
-		},
-	},
-) {}
-
-export class RenameInstance extends Schema.TaggedRequest<RenameInstance>()(
-	"RenameInstance",
-	{
-		failure: Schema.Union(
-			WsRpcError,
-			Schema.suspend(() => AccountChangeRejected),
-		),
-		success: InstanceListResponseSchema,
-		payload: {
-			projectSlug: Schema.optional(NonEmptyString),
-			instanceId: NonEmptyString,
-			name: NonEmptyString,
-		},
-	},
-) {}
-
-export class AddInstance extends Schema.TaggedRequest<AddInstance>()(
-	"AddInstance",
-	{
-		failure: Schema.Union(
-			WsRpcError,
-			Schema.suspend(() => AccountChangeRejected),
-		),
-		success: InstanceListResponseSchema,
-		payload: {
-			projectSlug: Schema.optional(NonEmptyString),
-			name: NonEmptyString,
-			driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
-			managed: Schema.optional(Schema.Boolean),
-			port: Schema.optional(Schema.Number),
-			url: Schema.optional(Schema.String),
-			env: Schema.optional(
-				Schema.Record({ key: Schema.String, value: Schema.String }),
-			),
-			configDir: Schema.optional(Schema.String),
-		},
-	},
-) {}
-
-export class UpdateInstance extends Schema.TaggedRequest<UpdateInstance>()(
-	"UpdateInstance",
-	{
-		failure: Schema.Union(
-			WsRpcError,
-			Schema.suspend(() => AccountChangeRejected),
-		),
-		success: InstanceListResponseSchema,
-		payload: {
-			projectSlug: Schema.optional(NonEmptyString),
-			instanceId: NonEmptyString,
-			driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
-			name: Schema.optional(Schema.String),
-			port: Schema.optional(Schema.Number),
-			env: Schema.optional(
-				Schema.Record({ key: Schema.String, value: Schema.String }),
-			),
-			configDir: Schema.optional(Schema.String),
-		},
-	},
-) {}
-
-export class SetDefault extends Schema.TaggedRequest<SetDefault>()(
-	"SetDefault",
-	{
-		failure: Schema.Union(
-			WsRpcError,
-			Schema.suspend(() => AccountChangeRejected),
-		),
-		success: InstanceListResponseSchema,
-		payload: {
-			instanceId: NonEmptyString,
-		},
-	},
-) {}
-
-const WorktreeCleanupSettingResponseSchema = Schema.Struct({
-	worktreeCleanup: WorktreeCleanupSchema,
+	error: Schema.Union([WsRpcError, SetPinRejected]),
 });
 
-export class GetWorktreeCleanupSetting extends Schema.TaggedRequest<GetWorktreeCleanupSetting>()(
-	"GetWorktreeCleanupSetting",
-	{
-		failure: WsRpcError,
-		success: WorktreeCleanupSettingResponseSchema,
-		payload: {},
-	},
-) {}
+export const SetKeepAwake = Rpc.make("SetKeepAwake", {
+	payload: Schema.TaggedStruct("SetKeepAwake", { enabled: Schema.Boolean }),
+	success: SetKeepAwakeResponseSchema,
+	error: WsRpcError,
+});
 
-export class SetWorktreeCleanupSetting extends Schema.TaggedRequest<SetWorktreeCleanupSetting>()(
-	"SetWorktreeCleanupSetting",
-	{
-		failure: WsRpcError,
-		success: WorktreeCleanupSettingResponseSchema,
-		payload: { worktreeCleanup: WorktreeCleanupSchema },
-	},
-) {}
+export const SetKeepAwakeCommand = Rpc.make("SetKeepAwakeCommand", {
+	payload: Schema.TaggedStruct("SetKeepAwakeCommand", {
+		command: NonEmptyString,
+		args: Schema.Array(Schema.String).pipe(
+			Schema.withDecodingDefaultType(Effect.sync(() => [])),
+			Schema.withConstructorDefault(Effect.sync(() => [])),
+		),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
-export class CleanUpWorktreesNow extends Schema.TaggedRequest<CleanUpWorktreesNow>()(
-	"CleanUpWorktreesNow",
+export const SetTailscaleServe = Rpc.make("SetTailscaleServe", {
+	payload: Schema.TaggedStruct("SetTailscaleServe", {
+		enabled: Schema.Boolean,
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
+
+export const Shutdown = Rpc.make("Shutdown", {
+	payload: Schema.TaggedStruct("Shutdown", {}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
+
+export const SetAgent = Rpc.make("SetAgent", {
+	payload: Schema.TaggedStruct("SetAgent", {
+		slug: Schema.String,
+		agent: Schema.String,
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
+
+export const RestartWithConfig = Rpc.make("RestartWithConfig", {
+	payload: Schema.TaggedStruct("RestartWithConfig", {}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
+
+export const CursorAuthStateSchema = Schema.Struct({
+	source: Schema.Literals(["environment", "sdk-login", "none"]),
+	status: Schema.Literals(["logged-in", "logged-out", "error"]),
+	email: Schema.optional(Schema.String),
+	apiKeyExpiresAtMs: Schema.optional(Schema.Number),
+	expiresSoon: Schema.Boolean,
+	error: Schema.optional(Schema.String),
+	login: Schema.Struct({
+		state: Schema.Literals([
+			"idle",
+			"pending",
+			"complete",
+			"cancelled",
+			"timed-out",
+			"error",
+		]),
+		url: Schema.optional(Schema.String),
+		deadlineAtMs: Schema.optional(Schema.Number),
+		error: Schema.optional(Schema.String),
+	}),
+});
+export type CursorAuthState = typeof CursorAuthStateSchema.Type;
+
+export const GetCursorAuth = Rpc.make("GetCursorAuth", {
+	payload: Schema.TaggedStruct("GetCursorAuth", {}),
+	success: CursorAuthStateSchema,
+	error: WsRpcError,
+});
+
+export const StartCursorLogin = Rpc.make("StartCursorLogin", {
+	payload: Schema.TaggedStruct("StartCursorLogin", {}),
+	success: CursorAuthStateSchema,
+	error: WsRpcError,
+});
+
+export const CancelCursorLogin = Rpc.make("CancelCursorLogin", {
+	payload: Schema.TaggedStruct("CancelCursorLogin", {}),
+	success: CursorAuthStateSchema,
+	error: WsRpcError,
+});
+
+export const LogoutCursor = Rpc.make("LogoutCursor", {
+	payload: Schema.TaggedStruct("LogoutCursor", {}),
+	success: CursorAuthStateSchema,
+	error: WsRpcError,
+});
+
+export const GetInstances = Rpc.make("GetInstances", {
+	payload: Schema.TaggedStruct("GetInstances", {}),
+	success: InstanceListResponseSchema,
+	error: WsRpcError,
+});
+
+export const GetInstanceStatus = Rpc.make("GetInstanceStatus", {
+	payload: Schema.TaggedStruct("GetInstanceStatus", {
+		instanceId: NonEmptyString,
+	}),
+	success: GetInstanceStatusResponseSchema,
+	error: WsRpcError,
+});
+
+export const GetAgents = Rpc.make("GetAgents", {
+	payload: Schema.TaggedStruct("GetAgents", {
+		projectSlug: NonEmptyString,
+
+		instanceId: Schema.optional(Schema.String),
+	}),
+	success: GetAgentsResponseSchema,
+	error: WsRpcError,
+});
+
+/** Session-scoped form of GetAgents; its owner supplies the project. */
+export const GetAgentsForSession = Rpc.make(GetAgents._tag, {
+	payload: Schema.TaggedStruct(GetAgents._tag, {
+		sessionId: NonEmptyString,
+		instanceId: Schema.optional(Schema.String),
+	}),
+	success: GetAgents.successSchema,
+	error: GetAgents.errorSchema,
+});
+
+export const GetCommands = Rpc.make("GetCommands", {
+	payload: Schema.TaggedStruct("GetCommands", {
+		projectSlug: NonEmptyString,
+		instanceId: Schema.optional(Schema.String),
+	}),
+	success: GetCommandsResponseSchema,
+	error: WsRpcError,
+});
+
+/** Session-scoped form of GetCommands; its owner supplies the project. */
+export const GetCommandsForSession = Rpc.make(GetCommands._tag, {
+	payload: Schema.TaggedStruct(GetCommands._tag, {
+		sessionId: NonEmptyString,
+		instanceId: Schema.optional(Schema.String),
+	}),
+	success: GetCommands.successSchema,
+	error: GetCommands.errorSchema,
+});
+
+export const GetProjects = Rpc.make("GetProjects", {
+	payload: Schema.TaggedStruct("GetProjects", {
+		projectSlug: Schema.optional(NonEmptyString),
+	}),
+	success: GetProjectsResponseSchema,
+	error: WsRpcError,
+});
+
+export const SaveProject = Rpc.make("SaveProject", {
+	payload: Schema.TaggedStruct("SaveProject", {
+		projectSlug: Schema.optional(NonEmptyString),
+		slug: Schema.optional(NonEmptyString),
+		title: Schema.optional(NonEmptyString),
+		folders: Schema.Array(ProjectFolderInputSchema),
+		setupScript: Schema.optional(Schema.String),
+		sessionMode: Schema.optional(Schema.NullOr(SessionModeSchema)),
+	}),
+	success: SaveProjectResponseSchema,
+	error: Schema.Union([WsRpcError, ProjectSaveRejected]),
+});
+
+export const SetProjectOrder = Rpc.make("SetProjectOrder", {
+	payload: Schema.TaggedStruct("SetProjectOrder", {
+		projectOrder: Schema.Array(Schema.String),
+	}),
+	success: Schema.Void,
+	error: WsRpcError,
+});
+
+export const RemoveProject = Rpc.make("RemoveProject", {
+	payload: Schema.TaggedStruct("RemoveProject", {
+		projectSlug: Schema.optional(NonEmptyString),
+		slug: NonEmptyString,
+	}),
+	success: ProjectMutationResponseSchema,
+	error: WsRpcError,
+});
+
+export const StartInstance = Rpc.make("StartInstance", {
+	payload: Schema.TaggedStruct("StartInstance", {
+		projectSlug: Schema.optional(NonEmptyString),
+		instanceId: NonEmptyString,
+	}),
+	success: InstanceListResponseSchema,
+	error: WsRpcError,
+});
+
+export const StopInstance = Rpc.make("StopInstance", {
+	payload: Schema.TaggedStruct("StopInstance", {
+		projectSlug: Schema.optional(NonEmptyString),
+		instanceId: NonEmptyString,
+	}),
+	success: InstanceListResponseSchema,
+	error: WsRpcError,
+});
+
+export const RemoveInstance = Rpc.make("RemoveInstance", {
+	payload: Schema.TaggedStruct("RemoveInstance", {
+		projectSlug: Schema.optional(NonEmptyString),
+		instanceId: NonEmptyString,
+	}),
+	success: InstanceListResponseSchema,
+	error: Schema.Union([
+		WsRpcError,
+		Schema.suspend(() => AccountChangeRejected),
+	]),
+});
+
+export const RenameInstance = Rpc.make("RenameInstance", {
+	payload: Schema.TaggedStruct("RenameInstance", {
+		projectSlug: Schema.optional(NonEmptyString),
+		instanceId: NonEmptyString,
+		name: NonEmptyString,
+	}),
+	success: InstanceListResponseSchema,
+	error: Schema.Union([
+		WsRpcError,
+		Schema.suspend(() => AccountChangeRejected),
+	]),
+});
+
+export const AddInstance = Rpc.make("AddInstance", {
+	payload: Schema.TaggedStruct("AddInstance", {
+		projectSlug: Schema.optional(NonEmptyString),
+		name: NonEmptyString,
+		driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
+		managed: Schema.optional(Schema.Boolean),
+		port: Schema.optional(Schema.Number),
+		url: Schema.optional(Schema.String),
+		env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+		configDir: Schema.optional(Schema.String),
+	}),
+	success: InstanceListResponseSchema,
+	error: Schema.Union([
+		WsRpcError,
+		Schema.suspend(() => AccountChangeRejected),
+	]),
+});
+
+export const UpdateInstance = Rpc.make("UpdateInstance", {
+	payload: Schema.TaggedStruct("UpdateInstance", {
+		projectSlug: Schema.optional(NonEmptyString),
+		instanceId: NonEmptyString,
+		driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
+		name: Schema.optional(Schema.String),
+		port: Schema.optional(Schema.Number),
+		env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+		configDir: Schema.optional(Schema.String),
+	}),
+	success: InstanceListResponseSchema,
+	error: Schema.Union([
+		WsRpcError,
+		Schema.suspend(() => AccountChangeRejected),
+	]),
+});
+
+export const SetDefault = Rpc.make("SetDefault", {
+	payload: Schema.TaggedStruct("SetDefault", {
+		instanceId: NonEmptyString,
+	}),
+	success: InstanceListResponseSchema,
+	error: Schema.Union([
+		WsRpcError,
+		Schema.suspend(() => AccountChangeRejected),
+	]),
+});
+
+const WorktreeCleanupSettingResponseSchema = Schema.Struct({
+	global: WorktreeCleanupSchema,
+	project: Schema.optional(Schema.NullOr(ProjectWorktreeCleanupSchema)),
+});
+
+export const GetWorktreeCleanupSetting = Rpc.make("GetWorktreeCleanupSetting", {
+	payload: Schema.TaggedStruct("GetWorktreeCleanupSetting", {
+		projectSlug: Schema.optional(NonEmptyString),
+	}),
+	success: WorktreeCleanupSettingResponseSchema,
+	error: WsRpcError,
+});
+
+export const SetWorktreeCleanupSetting = Rpc.make("SetWorktreeCleanupSetting", {
+	payload: Schema.TaggedStruct("SetWorktreeCleanupSetting", {
+		scope: Schema.Literal("global"),
+		rules: WorktreeCleanupSchema,
+	}),
+	success: WorktreeCleanupSettingResponseSchema,
+	error: WsRpcError,
+});
+
+export const SetProjectWorktreeCleanupSetting = Rpc.make(
+	SetWorktreeCleanupSetting._tag,
 	{
-		failure: WsRpcError,
-		success: WorktreeCleanupReportSchema,
-		payload: { projectSlug: Schema.optional(NonEmptyString) },
+		payload: Schema.TaggedStruct(SetWorktreeCleanupSetting._tag, {
+			scope: Schema.Literal("project"),
+			projectSlug: NonEmptyString,
+			override: Schema.NullOr(ProjectWorktreeCleanupSchema),
+		}),
+		success: SetWorktreeCleanupSetting.successSchema,
+		error: SetWorktreeCleanupSetting.errorSchema,
 	},
-) {}
+);
+
+export const CleanUpWorktreesNow = Rpc.make("CleanUpWorktreesNow", {
+	payload: Schema.TaggedStruct("CleanUpWorktreesNow", {
+		projectSlug: Schema.optional(NonEmptyString),
+	}),
+	success: WorktreeCleanupReportSchema,
+	error: WsRpcError,
+});
 
 const AutoSettleSettingResponseSchema = Schema.Struct({
 	autoSettleAfterDays: Schema.NullOr(Schema.Number),
 });
 
-export class GetAutoSettleSetting extends Schema.TaggedRequest<GetAutoSettleSetting>()(
-	"GetAutoSettleSetting",
-	{
-		failure: WsRpcError,
-		success: AutoSettleSettingResponseSchema,
-		payload: {},
-	},
-) {}
+export const GetAutoSettleSetting = Rpc.make("GetAutoSettleSetting", {
+	payload: Schema.TaggedStruct("GetAutoSettleSetting", {}),
+	success: AutoSettleSettingResponseSchema,
+	error: WsRpcError,
+});
 
-export class SetAutoSettleSetting extends Schema.TaggedRequest<SetAutoSettleSetting>()(
-	"SetAutoSettleSetting",
-	{
-		failure: WsRpcError,
-		success: AutoSettleSettingResponseSchema,
-		payload: { autoSettleAfterDays: Schema.NullOr(Schema.Number) },
-	},
-) {}
+export const SetAutoSettleSetting = Rpc.make("SetAutoSettleSetting", {
+	payload: Schema.TaggedStruct("SetAutoSettleSetting", {
+		autoSettleAfterDays: Schema.NullOr(Schema.Number),
+	}),
+	success: AutoSettleSettingResponseSchema,
+	error: WsRpcError,
+});
 
 const UsageLimitsSettingResponseSchema = Schema.Struct({
 	usageLimits: UsageLimitsSettingSchema,
 });
 
-export class GetUsageLimitsSetting extends Schema.TaggedRequest<GetUsageLimitsSetting>()(
-	"GetUsageLimitsSetting",
-	{
-		failure: WsRpcError,
-		success: UsageLimitsSettingResponseSchema,
-		payload: {},
-	},
-) {}
+const AutoArchiveSettingResponseSchema = Schema.Struct({
+	autoArchiveAfterDays: Schema.NullOr(Schema.Number),
+});
 
-export class SetUsageLimitsSetting extends Schema.TaggedRequest<SetUsageLimitsSetting>()(
-	"SetUsageLimitsSetting",
-	{
-		failure: WsRpcError,
-		success: UsageLimitsSettingResponseSchema,
-		payload: { usageLimits: UsageLimitsSettingSchema },
-	},
-) {}
+export const GetAutoArchiveSetting = Rpc.make("GetAutoArchiveSetting", {
+	payload: Schema.TaggedStruct("GetAutoArchiveSetting", {}),
+	success: AutoArchiveSettingResponseSchema,
+	error: WsRpcError,
+});
 
-export class ScanNow extends Schema.TaggedRequest<ScanNow>()("ScanNow", {
-	failure: WsRpcError,
-	success: ScanNowResponseSchema,
-	payload: {
+export const SetAutoArchiveSetting = Rpc.make("SetAutoArchiveSetting", {
+	payload: Schema.TaggedStruct("SetAutoArchiveSetting", {
+		autoArchiveAfterDays: Schema.NullOr(Schema.Number),
+	}),
+	success: AutoArchiveSettingResponseSchema,
+	error: WsRpcError,
+});
+
+const AutoDeleteArchivedSettingResponseSchema = Schema.Struct({
+	autoDeleteArchivedAfterDays: Schema.NullOr(Schema.Number),
+});
+
+export const GetAutoDeleteArchivedSetting = Rpc.make(
+	"GetAutoDeleteArchivedSetting",
+	{
+		payload: Schema.TaggedStruct("GetAutoDeleteArchivedSetting", {}),
+		success: AutoDeleteArchivedSettingResponseSchema,
+		error: WsRpcError,
+	},
+);
+
+export const SetAutoDeleteArchivedSetting = Rpc.make(
+	"SetAutoDeleteArchivedSetting",
+	{
+		payload: Schema.TaggedStruct("SetAutoDeleteArchivedSetting", {
+			autoDeleteArchivedAfterDays: Schema.NullOr(Schema.Number),
+		}),
+		success: AutoDeleteArchivedSettingResponseSchema,
+		error: WsRpcError,
+	},
+);
+
+export const GetUsageLimitsSetting = Rpc.make("GetUsageLimitsSetting", {
+	payload: Schema.TaggedStruct("GetUsageLimitsSetting", {}),
+	success: UsageLimitsSettingResponseSchema,
+	error: WsRpcError,
+});
+
+export const SetUsageLimitsSetting = Rpc.make("SetUsageLimitsSetting", {
+	payload: Schema.TaggedStruct("SetUsageLimitsSetting", {
+		usageLimits: UsageLimitsSettingSchema,
+	}),
+	success: UsageLimitsSettingResponseSchema,
+	error: WsRpcError,
+});
+
+export const SetCursorUsageKeychain = Rpc.make("SetCursorUsageKeychain", {
+	payload: Schema.TaggedStruct("SetCursorUsageKeychain", {
+		accountId: NonEmptyString,
+		enabled: Schema.Boolean,
+	}),
+	success: Schema.Struct({
+		enabled: Schema.Boolean,
+		reason: Schema.optional(Schema.String),
+	}),
+	error: WsRpcError,
+});
+
+export const ScanNow = Rpc.make("ScanNow", {
+	payload: Schema.TaggedStruct("ScanNow", {
 		projectSlug: Schema.optional(NonEmptyString),
-	},
-}) {}
+	}),
+	success: ScanNowResponseSchema,
+	error: WsRpcError,
+});
 
-export class DetectProxy extends Schema.TaggedRequest<DetectProxy>()(
-	"DetectProxy",
-	{
-		failure: WsRpcError,
-		success: DetectProxyResponseSchema,
-		payload: {
-			projectSlug: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const DetectProxy = Rpc.make("DetectProxy", {
+	payload: Schema.TaggedStruct("DetectProxy", {
+		projectSlug: Schema.optional(NonEmptyString),
+	}),
+	success: DetectProxyResponseSchema,
+	error: WsRpcError,
+});
 
-export class ListPtys extends Schema.TaggedRequest<ListPtys>()("ListPtys", {
-	failure: WsRpcError,
+export const ListPtys = Rpc.make("ListPtys", {
+	payload: Schema.TaggedStruct("ListPtys", {
+		projectSlug: NonEmptyString,
+		originId: NonEmptyString,
+	}),
 	success: PtyListResponseSchema,
-	payload: {
-		projectSlug: NonEmptyString,
-		originId: NonEmptyString,
-	},
-}) {}
+	error: WsRpcError,
+});
 
-export class CreatePty extends Schema.TaggedRequest<CreatePty>()("CreatePty", {
-	failure: WsRpcError,
-	success: OkResponseSchema,
-	payload: {
+export const CreatePty = Rpc.make("CreatePty", {
+	payload: Schema.TaggedStruct("CreatePty", {
 		projectSlug: NonEmptyString,
 		originId: NonEmptyString,
-		sessionId: Schema.optional(NonEmptyString),
+
 		accountId: Schema.optional(NonEmptyString),
 		root: Schema.optional(NonEmptyString),
-	},
-}) {}
-
-export class ResizePty extends Schema.TaggedRequest<ResizePty>()("ResizePty", {
-	failure: WsRpcError,
+	}),
 	success: OkResponseSchema,
-	payload: {
+	error: WsRpcError,
+});
+
+/** Session-scoped form of CreatePty; its owner supplies the project. */
+export const CreatePtyForSession = Rpc.make(CreatePty._tag, {
+	payload: Schema.TaggedStruct(CreatePty._tag, {
+		originId: NonEmptyString,
+		sessionId: NonEmptyString,
+		accountId: Schema.optional(NonEmptyString),
+		root: Schema.optional(NonEmptyString),
+	}),
+	success: CreatePty.successSchema,
+	error: CreatePty.errorSchema,
+});
+
+export const ResizePty = Rpc.make("ResizePty", {
+	payload: Schema.TaggedStruct("ResizePty", {
 		projectSlug: NonEmptyString,
 		ptyId: NonEmptyString,
 		originId: Schema.optional(NonEmptyString),
 		cols: Schema.optional(Schema.Number),
 		rows: Schema.optional(Schema.Number),
-	},
-}) {}
-
-export class ClosePty extends Schema.TaggedRequest<ClosePty>()("ClosePty", {
-	failure: WsRpcError,
+	}),
 	success: OkResponseSchema,
-	payload: {
+	error: WsRpcError,
+});
+
+export const ClosePty = Rpc.make("ClosePty", {
+	payload: Schema.TaggedStruct("ClosePty", {
 		projectSlug: NonEmptyString,
 		ptyId: NonEmptyString,
-	},
-}) {}
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
 /** Keystrokes for one terminal. Unary and never coalesced: input latency is
  *  the user's typing, so each call carries what was typed since the last ack. */
-export class PtyInput extends Schema.TaggedRequest<PtyInput>()("PtyInput", {
-	failure: WsRpcError,
-	success: OkResponseSchema,
-	payload: {
+export const PtyInput = Rpc.make("PtyInput", {
+	payload: Schema.TaggedStruct("PtyInput", {
 		projectSlug: NonEmptyString,
 		ptyId: NonEmptyString,
 		data: Schema.String,
-	},
-}) {}
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
-export class FindFolders extends Schema.TaggedRequest<FindFolders>()(
-	"FindFolders",
-	{
-		failure: Schema.Union(WsRpcError, ProjectSaveRejected),
-		success: FindFoldersResponseSchema,
-		payload: {
-			projectSlug: Schema.optional(NonEmptyString),
-			query: Schema.String,
-		},
-	},
-) {}
+export const FindFolders = Rpc.make("FindFolders", {
+	payload: Schema.TaggedStruct("FindFolders", {
+		projectSlug: Schema.optional(NonEmptyString),
+		query: Schema.String,
+	}),
+	success: FindFoldersResponseSchema,
+	error: Schema.Union([WsRpcError, ProjectSaveRejected]),
+});
 
-export class SwitchAgent extends Schema.TaggedRequest<SwitchAgent>()(
-	"SwitchAgent",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			agentId: NonEmptyString,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const SwitchAgent = Rpc.make("SwitchAgent", {
+	payload: Schema.TaggedStruct("SwitchAgent", {
+		sessionId: NonEmptyString,
+		agentId: NonEmptyString,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
-export class SwitchContextWindow extends Schema.TaggedRequest<SwitchContextWindow>()(
-	"SwitchContextWindow",
-	{
-		failure: WsRpcError,
-		success: SwitchContextWindowResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			contextWindow: Schema.String,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const SwitchContextWindow = Rpc.make("SwitchContextWindow", {
+	payload: Schema.TaggedStruct("SwitchContextWindow", {
+		sessionId: NonEmptyString,
+		contextWindow: Schema.String,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: SwitchContextWindowResponseSchema,
+	error: WsRpcError,
+});
 
-export class SwitchModel extends Schema.TaggedRequest<SwitchModel>()(
-	"SwitchModel",
-	{
-		failure: WsRpcError,
-		success: SwitchModelResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			modelId: NonEmptyString,
-			providerId: NonEmptyString,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const SwitchModel = Rpc.make("SwitchModel", {
+	payload: Schema.TaggedStruct("SwitchModel", {
+		sessionId: NonEmptyString,
+		modelId: NonEmptyString,
+		providerId: NonEmptyString,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: SwitchModelResponseSchema,
+	error: WsRpcError,
+});
 
-export class SetDefaultModel extends Schema.TaggedRequest<SetDefaultModel>()(
-	"SetDefaultModel",
-	{
-		failure: WsRpcError,
-		success: SetDefaultModelResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			model: NonEmptyString,
-			provider: NonEmptyString,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const SetDefaultModel = Rpc.make("SetDefaultModel", {
+	payload: Schema.TaggedStruct("SetDefaultModel", {
+		projectSlug: NonEmptyString,
+		model: NonEmptyString,
+		provider: NonEmptyString,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: SetDefaultModelResponseSchema,
+	error: WsRpcError,
+});
 
-export class SetHarnessDefault extends Schema.TaggedRequest<SetHarnessDefault>()(
-	"SetHarnessDefault",
-	{
-		failure: WsRpcError,
-		success: SetHarnessDefaultResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			harness: Schema.Literal("claude", "opencode"),
-			providerId: NonEmptyString,
-			modelId: NonEmptyString,
-			/** Omitted: the effort last saved for this model, if still offered. */
-			effort: Schema.optional(Schema.String),
-			contextWindow: Schema.String,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const SetHarnessDefault = Rpc.make("SetHarnessDefault", {
+	payload: Schema.TaggedStruct("SetHarnessDefault", {
+		projectSlug: NonEmptyString,
+		harness: Schema.suspend(() => KnownProviderDriverKindSchema),
+		providerId: NonEmptyString,
+		modelId: NonEmptyString,
+		/** Omitted: the effort last saved for this model, if still offered. */
+		effort: Schema.optional(Schema.String),
+		contextWindow: Schema.String,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: SetHarnessDefaultResponseSchema,
+	error: WsRpcError,
+});
 
-export class SetDefaultPermissionMode extends Schema.TaggedRequest<SetDefaultPermissionMode>()(
-	"SetDefaultPermissionMode",
-	{
-		failure: WsRpcError,
-		success: SetDefaultPermissionModeResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			mode: SessionPermissionModeSchema,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const SetDefaultPermissionMode = Rpc.make("SetDefaultPermissionMode", {
+	payload: Schema.TaggedStruct("SetDefaultPermissionMode", {
+		projectSlug: NonEmptyString,
+		mode: SessionPermissionModeSchema,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: SetDefaultPermissionModeResponseSchema,
+	error: WsRpcError,
+});
 
-export class SetDefaultSessionMode extends Schema.TaggedRequest<SetDefaultSessionMode>()(
-	"SetDefaultSessionMode",
-	{
-		failure: WsRpcError,
-		success: SetDefaultSessionModeResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			mode: SessionModeSchema,
-		},
-	},
-) {}
+export const SetDefaultSessionMode = Rpc.make("SetDefaultSessionMode", {
+	payload: Schema.TaggedStruct("SetDefaultSessionMode", {
+		projectSlug: NonEmptyString,
+		mode: DefaultSessionModeSchema,
+	}),
+	success: SetDefaultSessionModeResponseSchema,
+	error: WsRpcError,
+});
 
 /** Resolve draft defaults without attaching or starting a project relay. */
-export class ResolveSessionMode extends Schema.TaggedRequest<ResolveSessionMode>()(
-	"ResolveSessionMode",
-	{
-		failure: WsRpcError,
-		success: ResolveSessionModeResponseSchema,
-		payload: { projectSlug: NonEmptyString },
-	},
-) {}
-export class SetDefaultGroupingMode extends Schema.TaggedRequest<SetDefaultGroupingMode>()(
-	"SetDefaultGroupingMode",
-	{
-		failure: WsRpcError,
-		success: Schema.Struct({ mode: GroupingModeSchema }),
-		payload: { mode: GroupingModeSchema },
-	},
-) {}
+export const ResolveSessionMode = Rpc.make("ResolveSessionMode", {
+	payload: Schema.TaggedStruct("ResolveSessionMode", {
+		projectSlug: NonEmptyString,
+	}),
+	success: ResolveSessionModeResponseSchema,
+	error: WsRpcError,
+});
 
-export class GetDefaultGroupingMode extends Schema.TaggedRequest<GetDefaultGroupingMode>()(
-	"GetDefaultGroupingMode",
-	{
-		failure: WsRpcError,
-		success: Schema.Struct({ mode: GroupingModeSchema }),
-		payload: {},
-	},
-) {}
+export const SetHiddenEntries = Rpc.make("SetHiddenEntries", {
+	payload: Schema.TaggedStruct("SetHiddenEntries", {
+		projectSlug: NonEmptyString,
+		hiddenModels: Schema.optional(Schema.Array(Schema.String)),
+		hiddenAgents: Schema.optional(Schema.Array(Schema.String)),
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: SetHiddenEntriesResponseSchema,
+	error: WsRpcError,
+});
 
-export class SetHiddenEntries extends Schema.TaggedRequest<SetHiddenEntries>()(
-	"SetHiddenEntries",
-	{
-		failure: WsRpcError,
-		success: SetHiddenEntriesResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			hiddenModels: Schema.optional(Schema.Array(Schema.String)),
-			hiddenAgents: Schema.optional(Schema.Array(Schema.String)),
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const GetClaudeSettings = Rpc.make("GetClaudeSettings", {
+	payload: Schema.TaggedStruct("GetClaudeSettings", {
+		projectSlug: NonEmptyString,
+	}),
+	success: ClaudeSettingsResponseSchema,
+	error: WsRpcError,
+});
 
-export class GetClaudeSettings extends Schema.TaggedRequest<GetClaudeSettings>()(
-	"GetClaudeSettings",
-	{
-		failure: WsRpcError,
-		success: ClaudeSettingsResponseSchema,
-		payload: { projectSlug: NonEmptyString },
-	},
-) {}
+export const SetClaudeSettings = Rpc.make("SetClaudeSettings", {
+	payload: Schema.TaggedStruct("SetClaudeSettings", {
+		projectSlug: NonEmptyString,
+		overrides: ClaudeSettingsOverridesSchema,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: ClaudeSettingsResponseSchema,
+	error: Schema.Union([WsRpcError, ClaudeSettingsTrustBoundaryError]),
+});
 
-export class SetClaudeSettings extends Schema.TaggedRequest<SetClaudeSettings>()(
-	"SetClaudeSettings",
-	{
-		failure: Schema.Union(WsRpcError, ClaudeSettingsTrustBoundaryError),
-		success: ClaudeSettingsResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			overrides: ClaudeSettingsOverridesSchema,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+const ResolveClaudeSettingsWire = Rpc.make("ResolveClaudeSettings", {
+	payload: Schema.TaggedStruct("ResolveClaudeSettings", {
+		projectSlug: NonEmptyString,
+		instanceId: NonEmptyString,
+	}),
+	success: ResolveClaudeSettingsResponseSchema,
+	error: Schema.Union([
+		WsRpcError,
+		ClaudeSettingsResolveError,
+		Schema.suspend(() => AccountUnroutable),
+	]),
+});
 
-class ResolveClaudeSettingsWire extends Schema.TaggedRequest<ResolveClaudeSettingsWire>()(
-	"ResolveClaudeSettings",
-	{
-		failure: Schema.Union(
-			WsRpcError,
-			ClaudeSettingsResolveError,
-			Schema.suspend(() => AccountUnroutable),
-		),
-		success: ResolveClaudeSettingsResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			instanceId: NonEmptyString,
-			sessionId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
-
-export class ResolveClaudeSettings extends ResolveClaudeSettingsWire.transformOrFail<ResolveClaudeSettings>(
-	"ResolveClaudeSettings",
-)(
-	{ accountRef: Schema.optional(Schema.suspend(() => AccountRefSchema)) },
-	{
-		decode: (wire) =>
-			Effect.succeed({
-				...wire,
-				accountRef: { _tag: "Id" as const, id: wire.instanceId },
+export const ResolveClaudeSettings = Rpc.make(ResolveClaudeSettingsWire._tag, {
+	payload: ResolveClaudeSettingsWire.payloadSchema.pipe(
+		Schema.decodeTo(
+			Schema.Struct({
+				...ResolveClaudeSettingsWire.payloadSchema.fields,
+				accountRef: Schema.optional(Schema.suspend(() => AccountRefSchema)),
 			}),
-		encode: ({ accountRef, ...wire }, _options, ast) =>
-			accountRef?._tag === "DriverDefault"
-				? Effect.fail(
-						new ParseResult.Type(
-							ast,
-							accountRef,
-							"ResolveClaudeSettings requires an explicit account Id",
-						),
-					)
-				: Effect.succeed({
+			{
+				decode: SchemaGetter.transformEffect((wire) =>
+					Effect.succeed({
 						...wire,
-						instanceId: accountRef?.id ?? wire.instanceId,
+						accountRef: { _tag: "Id" as const, id: wire.instanceId },
 					}),
-	},
-) {
-	static readonly _tag = ResolveClaudeSettingsWire._tag;
-	static readonly success = ResolveClaudeSettingsWire.success;
-	static readonly failure = ResolveClaudeSettingsWire.failure;
-}
+				),
+				encode: SchemaGetter.transformEffect(({ accountRef, ...wire }) =>
+					accountRef?._tag === "DriverDefault"
+						? Effect.fail(
+								new SchemaIssue.InvalidValue(
+									{
+										message:
+											"ResolveClaudeSettings requires an explicit account Id",
+									},
+									accountRef,
+								),
+							)
+						: Effect.succeed({
+								...wire,
+								instanceId: accountRef?.id ?? wire.instanceId,
+							}),
+				),
+			},
+		),
+	),
+	success: ResolveClaudeSettingsWire.successSchema,
+	error: ResolveClaudeSettingsWire.errorSchema,
+});
 
-export class ReloadProviderSession extends Schema.TaggedRequest<ReloadProviderSession>()(
-	"ReloadProviderSession",
+/** Session-scoped form of ResolveClaudeSettings; its owner supplies the project. */
+export const ResolveClaudeSettingsForSession = Rpc.make(
+	ResolveClaudeSettings._tag,
 	{
-		failure: WsRpcError,
-		success: ReloadProviderSessionResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
+		payload: Schema.TaggedStruct(ResolveClaudeSettings._tag, {
+			instanceId: NonEmptyString,
 			sessionId: NonEmptyString,
-			commandId: NonEmptyString,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
-
-export class ListBranches extends Schema.TaggedRequest<ListBranches>()(
-	"ListBranches",
-	{
-		failure: WsRpcError,
-		success: Schema.Struct({
-			current: Schema.optional(Schema.String),
-			branches: Schema.Array(Schema.String),
 		}),
-		payload: { projectSlug: NonEmptyString },
+		success: ResolveClaudeSettings.successSchema,
+		error: ResolveClaudeSettings.errorSchema,
 	},
-) {}
+);
 
-export class ListWorktrees extends Schema.TaggedRequest<ListWorktrees>()(
-	"ListWorktrees",
-	{
-		failure: WsRpcError,
-		success: Schema.Struct({
-			worktrees: Schema.Array(WorktreeInfoSchema),
-			directory: Schema.optional(Schema.String),
-		}),
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const ReloadProviderSession = Rpc.make("ReloadProviderSession", {
+	payload: Schema.TaggedStruct("ReloadProviderSession", {
+		sessionId: NonEmptyString,
+		commandId: NonEmptyString,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: ReloadProviderSessionResponseSchema,
+	error: WsRpcError,
+});
 
-export class MoveSessionWorkspace extends Schema.TaggedRequest<MoveSessionWorkspace>()(
-	"MoveSessionWorkspace",
-	{
-		failure: Schema.Union(WsRpcError, WorkspaceMoveError),
-		success: Schema.Struct({ directory: Schema.String }),
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			path: NonEmptyString,
-		},
-	},
-) {}
+export const ListBranches = Rpc.make("ListBranches", {
+	payload: Schema.TaggedStruct("ListBranches", { projectSlug: NonEmptyString }),
+	success: Schema.Struct({
+		current: Schema.optional(Schema.String),
+		branches: Schema.Array(Schema.String),
+	}),
+	error: WsRpcError,
+});
 
-export class InspectSessionWorktrees extends Schema.TaggedRequest<InspectSessionWorktrees>()(
-	"InspectSessionWorktrees",
-	{
-		failure: WsRpcError,
-		success: Schema.Struct({
-			worktrees: Schema.Array(SessionWorktreeInspectionSchema),
-			removeWorktrees: Schema.Boolean,
-		}),
-		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
-	},
-) {}
+export const ListWorktrees = Rpc.make("ListWorktrees", {
+	payload: Schema.TaggedStruct("ListWorktrees", {
+		projectSlug: NonEmptyString,
+	}),
+	success: Schema.Struct({
+		worktrees: Schema.Array(WorktreeInfoSchema),
+		directory: Schema.optional(Schema.String),
+	}),
+	error: WsRpcError,
+});
 
-export class RenameSessionBranch extends Schema.TaggedRequest<RenameSessionBranch>()(
-	"RenameSessionBranch",
-	{
-		failure: Schema.Union(WsRpcError, WorktreeBranchRenameError),
-		success: Schema.Struct({ ok: Schema.Literal(true) }),
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			branchName: Schema.String,
-		},
-	},
-) {}
+/** Session-scoped form of ListWorktrees; its owner supplies the project. */
+export const ListWorktreesForSession = Rpc.make(ListWorktrees._tag, {
+	payload: Schema.TaggedStruct(ListWorktrees._tag, {
+		sessionId: NonEmptyString,
+	}),
+	success: ListWorktrees.successSchema,
+	error: ListWorktrees.errorSchema,
+});
 
-export class RecreateSessionWorktree extends Schema.TaggedRequest<RecreateSessionWorktree>()(
-	"RecreateSessionWorktree",
-	{
-		failure: Schema.Union(WsRpcError, WorktreeRecoveryError),
-		success: Schema.Struct({ directory: Schema.String }),
-		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
-	},
-) {}
+export const MoveSessionWorkspace = Rpc.make("MoveSessionWorkspace", {
+	payload: Schema.TaggedStruct("MoveSessionWorkspace", {
+		sessionId: NonEmptyString,
+		path: NonEmptyString,
+	}),
+	success: Schema.Struct({ directory: Schema.String }),
+	error: Schema.Union([WsRpcError, WorkspaceMoveError]),
+});
 
-export class ContinueSessionInMainFolder extends Schema.TaggedRequest<ContinueSessionInMainFolder>()(
+export const InspectSessionWorktrees = Rpc.make("InspectSessionWorktrees", {
+	payload: Schema.TaggedStruct("InspectSessionWorktrees", {
+		sessionId: NonEmptyString,
+	}),
+	success: Schema.Struct({
+		worktrees: Schema.Array(SessionWorktreeInspectionSchema),
+		removeWorktrees: Schema.Boolean,
+		onDelete: Schema.Literals(["ask", "remove"]),
+	}),
+	error: WsRpcError,
+});
+
+export const RenameSessionBranch = Rpc.make("RenameSessionBranch", {
+	payload: Schema.TaggedStruct("RenameSessionBranch", {
+		sessionId: NonEmptyString,
+		branchName: Schema.String,
+	}),
+	success: Schema.Struct({ ok: Schema.Literal(true) }),
+	error: Schema.Union([WsRpcError, WorktreeBranchRenameError]),
+});
+
+export const RecreateSessionWorktree = Rpc.make("RecreateSessionWorktree", {
+	payload: Schema.TaggedStruct("RecreateSessionWorktree", {
+		sessionId: NonEmptyString,
+	}),
+	success: Schema.Struct({ directory: Schema.String }),
+	error: Schema.Union([WsRpcError, WorktreeRecoveryError]),
+});
+
+export const ContinueSessionInMainFolder = Rpc.make(
 	"ContinueSessionInMainFolder",
 	{
-		failure: Schema.Union(WsRpcError, WorkspaceMoveError),
-		success: Schema.Struct({ directory: Schema.String }),
-		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
-	},
-) {}
-
-export class DismissWorkspaceHint extends Schema.TaggedRequest<DismissWorkspaceHint>()(
-	"DismissWorkspaceHint",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
+		payload: Schema.TaggedStruct("ContinueSessionInMainFolder", {
 			sessionId: NonEmptyString,
-			path: NonEmptyString,
-		},
+		}),
+		success: Schema.Struct({ directory: Schema.String }),
+		error: Schema.Union([WsRpcError, WorkspaceMoveError]),
 	},
-) {}
+);
+
+export const DismissWorkspaceHint = Rpc.make("DismissWorkspaceHint", {
+	payload: Schema.TaggedStruct("DismissWorkspaceHint", {
+		sessionId: NonEmptyString,
+		path: NonEmptyString,
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
 /** The managed OpenCode plugin attributes the declaration using ToolContext.sessionID. */
-export class OpenCodeUseWorktree extends Schema.TaggedRequest<OpenCodeUseWorktree>()(
-	"OpenCodeUseWorktree",
-	{
-		failure: Schema.Union(WsRpcError, WorkspaceMoveError),
-		success: Schema.Struct({ directory: Schema.String }),
-		payload: {
-			instanceId: NonEmptyString,
-			providerSessionId: NonEmptyString,
-			path: NonEmptyString,
-		},
-	},
-) {}
+export const OpenCodeUseWorktree = Rpc.make("OpenCodeUseWorktree", {
+	payload: Schema.TaggedStruct("OpenCodeUseWorktree", {
+		instanceId: NonEmptyString,
+		providerSessionId: NonEmptyString,
+		path: NonEmptyString,
+	}),
+	success: Schema.Struct({ directory: Schema.String }),
+	error: Schema.Union([WsRpcError, WorkspaceMoveError]),
+});
 
-export class RenameSession extends Schema.TaggedRequest<RenameSession>()(
-	"RenameSession",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			title: NonEmptyString,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const RenameSession = Rpc.make("RenameSession", {
+	payload: Schema.TaggedStruct("RenameSession", {
+		sessionId: NonEmptyString,
+		title: NonEmptyString,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
-export class MarkSessionUnread extends Schema.TaggedRequest<MarkSessionUnread>()(
-	"MarkSessionUnread",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const MarkSessionUnread = Rpc.make("MarkSessionUnread", {
+	payload: Schema.TaggedStruct("MarkSessionUnread", {
+		sessionId: NonEmptyString,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
 /**
  * `session.mark_seen`: the user picked the session in the sidebar, having seen
  * it up to stream version `upTo`. The server caps `upTo` at the latest turn
  * end, so a report can never mark a turn that has not happened yet as seen.
  */
-export class MarkSessionSeen extends Schema.TaggedRequest<MarkSessionSeen>()(
-	"MarkSessionSeen",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			upTo: Schema.NonNegativeInt,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const MarkSessionSeen = Rpc.make("MarkSessionSeen", {
+	payload: Schema.TaggedStruct("MarkSessionSeen", {
+		sessionId: NonEmptyString,
+		upTo: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
-export class MarkSessionRead extends Schema.TaggedRequest<MarkSessionRead>()(
-	"MarkSessionRead",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const MarkSessionRead = Rpc.make("MarkSessionRead", {
+	payload: Schema.TaggedStruct("MarkSessionRead", {
+		sessionId: NonEmptyString,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
-export class SetSessionSettled extends Schema.TaggedRequest<SetSessionSettled>()(
-	"SetSessionSettled",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			settled: Schema.Boolean,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const SetSessionSettled = Rpc.make("SetSessionSettled", {
+	payload: Schema.TaggedStruct("SetSessionSettled", {
+		sessionId: NonEmptyString,
+		settled: Schema.Boolean,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
-export class SetSessionPinned extends Schema.TaggedRequest<SetSessionPinned>()(
-	"SetSessionPinned",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			pinned: Schema.Boolean,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const SetSessionPinned = Rpc.make("SetSessionPinned", {
+	payload: Schema.TaggedStruct("SetSessionPinned", {
+		sessionId: NonEmptyString,
+		pinned: Schema.Boolean,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
-export class SetSessionAutoSettle extends Schema.TaggedRequest<SetSessionAutoSettle>()(
-	"SetSessionAutoSettle",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			disabled: Schema.Boolean,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const SetSessionArchived = Rpc.make("SetSessionArchived", {
+	payload: Schema.TaggedStruct("SetSessionArchived", {
+		sessionId: NonEmptyString,
+		archived: Schema.Boolean,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
-export class SnoozeSession extends Schema.TaggedRequest<SnoozeSession>()(
-	"SnoozeSession",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			until: Schema.NullOr(Schema.Number),
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const SetSessionAutoSettle = Rpc.make("SetSessionAutoSettle", {
+	payload: Schema.TaggedStruct("SetSessionAutoSettle", {
+		sessionId: NonEmptyString,
+		disabled: Schema.Boolean,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
-export class DismissCutOff extends Schema.TaggedRequest<DismissCutOff>()(
-	"DismissCutOff",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const SnoozeSession = Rpc.make("SnoozeSession", {
+	payload: Schema.TaggedStruct("SnoozeSession", {
+		sessionId: NonEmptyString,
+		until: Schema.NullOr(Schema.Number),
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
-class ContinueSessionWire extends Schema.TaggedRequest<ContinueSessionWire>()(
-	"ContinueSession",
-	{
-		failure: Schema.Union(WsRpcError, ContinuationErrorSchema),
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			instanceId: NonEmptyString,
-			expectedInstanceId: NonEmptyString,
-			/** Unix seconds. */
-			at: Schema.optional(Schema.Number.pipe(Schema.finite())),
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const DismissCutOff = Rpc.make("DismissCutOff", {
+	payload: Schema.TaggedStruct("DismissCutOff", {
+		sessionId: NonEmptyString,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
-export class ContinueSession extends ContinueSessionWire.transformOrFail<ContinueSession>(
-	"ContinueSession",
-)(
-	{ accountRef: Schema.optional(Schema.suspend(() => AccountRefSchema)) },
-	{
-		decode: (wire) =>
-			Effect.succeed({
-				...wire,
-				accountRef: { _tag: "Id" as const, id: wire.instanceId },
+const ContinueSessionWire = Rpc.make("ContinueSession", {
+	payload: Schema.TaggedStruct("ContinueSession", {
+		sessionId: NonEmptyString,
+		instanceId: NonEmptyString,
+		expectedInstanceId: NonEmptyString,
+		/** Unix seconds. */
+		at: Schema.optional(Schema.Number.pipe(Schema.check(Schema.isFinite()))),
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: OkResponseSchema,
+	error: Schema.Union([WsRpcError, ContinuationErrorSchema]),
+});
+
+export const ContinueSession = Rpc.make(ContinueSessionWire._tag, {
+	payload: ContinueSessionWire.payloadSchema.pipe(
+		Schema.decodeTo(
+			Schema.Struct({
+				...ContinueSessionWire.payloadSchema.fields,
+				accountRef: Schema.optional(Schema.suspend(() => AccountRefSchema)),
 			}),
-		encode: ({ accountRef, ...wire }, _options, ast) =>
-			accountRef?._tag === "DriverDefault"
-				? Effect.fail(
-						new ParseResult.Type(
-							ast,
-							accountRef,
-							"ContinueSession requires an explicit account Id",
-						),
-					)
-				: Effect.succeed({
+			{
+				decode: SchemaGetter.transformEffect((wire) =>
+					Effect.succeed({
 						...wire,
-						instanceId: accountRef?.id ?? wire.instanceId,
+						accountRef: { _tag: "Id" as const, id: wire.instanceId },
 					}),
-	},
-) {
-	static readonly _tag = ContinueSessionWire._tag;
-	static readonly success = ContinueSessionWire.success;
-	static readonly failure = ContinueSessionWire.failure;
-}
+				),
+				encode: SchemaGetter.transformEffect(({ accountRef, ...wire }) =>
+					accountRef?._tag === "DriverDefault"
+						? Effect.fail(
+								new SchemaIssue.InvalidValue(
+									{
+										message: "ContinueSession requires an explicit account Id",
+									},
+									accountRef,
+								),
+							)
+						: Effect.succeed({
+								...wire,
+								instanceId: accountRef?.id ?? wire.instanceId,
+							}),
+				),
+			},
+		),
+	),
+	success: ContinueSessionWire.successSchema,
+	error: ContinueSessionWire.errorSchema,
+});
 
-export class CancelContinuation extends Schema.TaggedRequest<CancelContinuation>()(
-	"CancelContinuation",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const CancelContinuation = Rpc.make("CancelContinuation", {
+	payload: Schema.TaggedStruct("CancelContinuation", {
+		sessionId: NonEmptyString,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
 export type PreviewContinuationResponse = typeof HandoffSummarySchema.Type;
 
-class PreviewContinuationWire extends Schema.TaggedRequest<PreviewContinuationWire>()(
-	"PreviewContinuation",
-	{
-		failure: Schema.Union(WsRpcError, ContinuationErrorSchema),
-		success: HandoffSummarySchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			instanceId: NonEmptyString,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+const PreviewContinuationWire = Rpc.make("PreviewContinuation", {
+	payload: Schema.TaggedStruct("PreviewContinuation", {
+		sessionId: NonEmptyString,
+		instanceId: NonEmptyString,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: HandoffSummarySchema,
+	error: Schema.Union([WsRpcError, ContinuationErrorSchema]),
+});
 
-export class PreviewContinuation extends PreviewContinuationWire.transformOrFail<PreviewContinuation>(
-	"PreviewContinuation",
-)(
-	{ accountRef: Schema.optional(Schema.suspend(() => AccountRefSchema)) },
-	{
-		decode: (wire) =>
-			Effect.succeed({
-				...wire,
-				accountRef: { _tag: "Id" as const, id: wire.instanceId },
+export const PreviewContinuation = Rpc.make(PreviewContinuationWire._tag, {
+	payload: PreviewContinuationWire.payloadSchema.pipe(
+		Schema.decodeTo(
+			Schema.Struct({
+				...PreviewContinuationWire.payloadSchema.fields,
+				accountRef: Schema.optional(Schema.suspend(() => AccountRefSchema)),
 			}),
-		encode: ({ accountRef, ...wire }, _options, ast) =>
-			accountRef?._tag === "DriverDefault"
-				? Effect.fail(
-						new ParseResult.Type(
-							ast,
-							accountRef,
-							"PreviewContinuation requires an explicit account Id",
-						),
-					)
-				: Effect.succeed({
+			{
+				decode: SchemaGetter.transformEffect((wire) =>
+					Effect.succeed({
 						...wire,
-						instanceId: accountRef?.id ?? wire.instanceId,
+						accountRef: { _tag: "Id" as const, id: wire.instanceId },
 					}),
-	},
-) {
-	static readonly _tag = PreviewContinuationWire._tag;
-	static readonly success = PreviewContinuationWire.success;
-	static readonly failure = PreviewContinuationWire.failure;
-}
+				),
+				encode: SchemaGetter.transformEffect(({ accountRef, ...wire }) =>
+					accountRef?._tag === "DriverDefault"
+						? Effect.fail(
+								new SchemaIssue.InvalidValue(
+									{
+										message:
+											"PreviewContinuation requires an explicit account Id",
+									},
+									accountRef,
+								),
+							)
+						: Effect.succeed({
+								...wire,
+								instanceId: accountRef?.id ?? wire.instanceId,
+							}),
+				),
+			},
+		),
+	),
+	success: PreviewContinuationWire.successSchema,
+	error: PreviewContinuationWire.errorSchema,
+});
 
 export const QuotaForAccountsResponseSchema = Schema.Array(UsageReadingSchema);
 export type QuotaForAccountsResponse =
 	typeof QuotaForAccountsResponseSchema.Type;
 
-export class QuotaForAccounts extends Schema.TaggedRequest<QuotaForAccounts>()(
-	"QuotaForAccounts",
-	{
-		failure: WsRpcError,
-		success: QuotaForAccountsResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const QuotaForAccounts = Rpc.make("QuotaForAccounts", {
+	payload: Schema.TaggedStruct("QuotaForAccounts", {
+		projectSlug: NonEmptyString,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: QuotaForAccountsResponseSchema,
+	error: WsRpcError,
+});
 
 export const ContinuationHandoffResponseSchema = Schema.Struct({
 	handoff: Schema.NullOr(
@@ -2039,399 +2099,419 @@ export type ContinuationHandoffResponse =
 	typeof ContinuationHandoffResponseSchema.Type;
 
 /** Link the first completed handoff to a durable resumes entry, including reload. */
-export class GetContinuationHandoff extends Schema.TaggedRequest<GetContinuationHandoff>()(
-	"GetContinuationHandoff",
-	{
-		failure: WsRpcError,
-		success: ContinuationHandoffResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			instanceId: NonEmptyString,
-			at: Schema.Number,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const GetContinuationHandoff = Rpc.make("GetContinuationHandoff", {
+	payload: Schema.TaggedStruct("GetContinuationHandoff", {
+		sessionId: NonEmptyString,
+		instanceId: NonEmptyString,
+		at: Schema.Number,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: ContinuationHandoffResponseSchema,
+	error: WsRpcError,
+});
 
-export class UnsnoozeSession extends Schema.TaggedRequest<UnsnoozeSession>()(
-	"UnsnoozeSession",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const UnsnoozeSession = Rpc.make("UnsnoozeSession", {
+	payload: Schema.TaggedStruct("UnsnoozeSession", {
+		sessionId: NonEmptyString,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
-export class SwitchVariant extends Schema.TaggedRequest<SwitchVariant>()(
-	"SwitchVariant",
-	{
-		failure: WsRpcError,
-		success: SwitchVariantResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			variant: Schema.String,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const SwitchVariant = Rpc.make("SwitchVariant", {
+	payload: Schema.TaggedStruct("SwitchVariant", {
+		sessionId: NonEmptyString,
+		variant: Schema.String,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: SwitchVariantResponseSchema,
+	error: WsRpcError,
+});
 
-export class SwitchPermissionMode extends Schema.TaggedRequest<SwitchPermissionMode>()(
-	"SwitchPermissionMode",
-	{
-		failure: WsRpcError,
-		success: SwitchPermissionModeResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			mode: SessionPermissionModeSchema,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const SwitchPermissionMode = Rpc.make("SwitchPermissionMode", {
+	payload: Schema.TaggedStruct("SwitchPermissionMode", {
+		sessionId: NonEmptyString,
+		mode: SessionPermissionModeSchema,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: SwitchPermissionModeResponseSchema,
+	error: WsRpcError,
+});
 
-export class GetFileTree extends Schema.TaggedRequest<GetFileTree>()(
-	"GetFileTree",
-	{
-		failure: WsRpcError,
-		success: GetFileTreeResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
-
-export class GetFileList extends Schema.TaggedRequest<GetFileList>()(
-	"GetFileList",
-	{
-		failure: WsRpcError,
-		success: GetFileListResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: Schema.optional(NonEmptyString),
-			root: Schema.optional(NonEmptyString),
-			path: Schema.optional(Schema.String),
-		},
-	},
-) {}
-
-export class GetFileContent extends Schema.TaggedRequest<GetFileContent>()(
-	"GetFileContent",
-	{
-		failure: WsRpcError,
-		success: GetFileContentResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: Schema.optional(NonEmptyString),
-			root: Schema.optional(NonEmptyString),
-			path: NonEmptyString,
-		},
-	},
-) {}
-
-export class GetToolDetails extends Schema.TaggedRequest<GetToolDetails>()(
-	"GetToolDetails",
-	{
-		failure: WsRpcError,
-		success: GetToolDetailsResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			toolIds: Schema.NonEmptyArray(ToolCallId),
-		},
-	},
-) {}
-
-export class GetSkillContent extends Schema.TaggedRequest<GetSkillContent>()(
-	"GetSkillContent",
-	{
-		failure: WsRpcError,
-		success: GetSkillContentResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			name: NonEmptyString,
-			sessionId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
-
-export class GetSessionSkills extends Schema.TaggedRequest<GetSessionSkills>()(
-	"GetSessionSkills",
-	{
-		failure: WsRpcError,
-		success: GetSessionSkillsResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-		},
-	},
-) {}
-
-export class GetModels extends Schema.TaggedRequest<GetModels>()("GetModels", {
-	failure: WsRpcError,
-	success: GetModelsResponseSchema,
-	payload: {
+export const GetFileTree = Rpc.make("GetFileTree", {
+	payload: Schema.TaggedStruct("GetFileTree", {
 		projectSlug: NonEmptyString,
-		sessionId: Schema.optional(Schema.String),
+	}),
+	success: GetFileTreeResponseSchema,
+	error: WsRpcError,
+});
+
+/** Session-scoped form of GetFileTree; its owner supplies the project. */
+export const GetFileTreeForSession = Rpc.make(GetFileTree._tag, {
+	payload: Schema.TaggedStruct(GetFileTree._tag, { sessionId: NonEmptyString }),
+	success: GetFileTree.successSchema,
+	error: GetFileTree.errorSchema,
+});
+
+export const GetFileList = Rpc.make("GetFileList", {
+	payload: Schema.TaggedStruct("GetFileList", {
+		projectSlug: NonEmptyString,
+
+		root: Schema.optional(NonEmptyString),
+		path: Schema.optional(Schema.String),
+	}),
+	success: GetFileListResponseSchema,
+	error: WsRpcError,
+});
+
+/** Session-scoped form of GetFileList; its owner supplies the project. */
+export const GetFileListForSession = Rpc.make(GetFileList._tag, {
+	payload: Schema.TaggedStruct(GetFileList._tag, {
+		sessionId: NonEmptyString,
+		root: Schema.optional(NonEmptyString),
+		path: Schema.optional(Schema.String),
+	}),
+	success: GetFileList.successSchema,
+	error: GetFileList.errorSchema,
+});
+
+export const GetFileContent = Rpc.make("GetFileContent", {
+	payload: Schema.TaggedStruct("GetFileContent", {
+		projectSlug: NonEmptyString,
+
+		root: Schema.optional(NonEmptyString),
+		path: NonEmptyString,
+	}),
+	success: GetFileContentResponseSchema,
+	error: WsRpcError,
+});
+
+/** Session-scoped form of GetFileContent; its owner supplies the project. */
+export const GetFileContentForSession = Rpc.make(GetFileContent._tag, {
+	payload: Schema.TaggedStruct(GetFileContent._tag, {
+		sessionId: NonEmptyString,
+		root: Schema.optional(NonEmptyString),
+		path: NonEmptyString,
+	}),
+	success: GetFileContent.successSchema,
+	error: GetFileContent.errorSchema,
+});
+
+export const GetToolDetails = Rpc.make("GetToolDetails", {
+	payload: Schema.TaggedStruct("GetToolDetails", {
+		sessionId: NonEmptyString,
+		toolIds: Schema.NonEmptyArray(ToolCallId),
+	}),
+	success: GetToolDetailsResponseSchema,
+	error: WsRpcError,
+});
+
+export const GetSkillContent = Rpc.make("GetSkillContent", {
+	payload: Schema.TaggedStruct("GetSkillContent", {
+		projectSlug: NonEmptyString,
+		name: NonEmptyString,
+	}),
+	success: GetSkillContentResponseSchema,
+	error: WsRpcError,
+});
+
+/** Session-scoped form of GetSkillContent; its owner supplies the project. */
+export const GetSkillContentForSession = Rpc.make(GetSkillContent._tag, {
+	payload: Schema.TaggedStruct(GetSkillContent._tag, {
+		name: NonEmptyString,
+		sessionId: NonEmptyString,
+	}),
+	success: GetSkillContent.successSchema,
+	error: GetSkillContent.errorSchema,
+});
+
+export const GetSessionSkills = Rpc.make("GetSessionSkills", {
+	payload: Schema.TaggedStruct("GetSessionSkills", {
+		sessionId: NonEmptyString,
+	}),
+	success: GetSessionSkillsResponseSchema,
+	error: WsRpcError,
+});
+
+export const GetModels = Rpc.make("GetModels", {
+	payload: Schema.TaggedStruct("GetModels", {
+		projectSlug: NonEmptyString,
+
 		instanceId: Schema.optional(Schema.String),
-	},
-}) {}
+	}),
+	success: GetModelsResponseSchema,
+	error: WsRpcError,
+});
 
-export class ListDaemonSessions extends Schema.TaggedRequest<ListDaemonSessions>()(
-	"ListDaemonSessions",
-	{
-		failure: WsRpcError,
-		success: ListDaemonSessionsResponseSchema,
-		payload: {
-			projectSlug: Schema.optional(NonEmptyString),
-			limit: Schema.optional(Schema.Number),
-			roots: Schema.optional(Schema.Boolean),
-			search: Schema.optional(Schema.String),
-			cursor: Schema.optional(DaemonSessionCursorSchema),
-			// A project slug or encodeGroupScope's reserved /group/<key> value.
-			scope: Schema.optional(NonEmptyString),
-			exclude: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+/** Session-scoped form of GetModels; its owner supplies the project. */
+export const GetModelsForSession = Rpc.make(GetModels._tag, {
+	payload: Schema.TaggedStruct(GetModels._tag, {
+		sessionId: NonEmptyString,
+		instanceId: Schema.optional(Schema.String),
+	}),
+	success: GetModels.successSchema,
+	error: GetModels.errorSchema,
+});
 
-class CreateSessionWire extends Schema.TaggedRequest<CreateSessionWire>()(
-	"CreateSession",
-	{
-		failure: Schema.Union(
-			WsRpcError,
-			Schema.suspend(() => AccountUnroutable),
-			WorkspaceMoveError,
-			WorktreeCreationError,
-		),
-		success: CreateSessionResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			originId: NonEmptyString,
-			title: Schema.optional(Schema.String),
-			instanceId: Schema.optional(
-				Schema.String.pipe(Schema.brand("AccountId")),
-			),
-			providerId: Schema.optional(Schema.String),
-			worktreePath: Schema.optional(NonEmptyString),
-			newWorktree: Schema.optional(Schema.Boolean),
-			// Local base for the primary folder; requires newWorktree.
-			worktreeBase: Schema.optional(NonEmptyString),
-			// The composer's displayed pick. The handler requires a real model.
-			permissionMode: SessionPermissionModeSchema,
-			model: Schema.optional(
-				Schema.Struct({
-					modelId: Schema.String,
-					providerId: Schema.String,
-					variant: Schema.optional(Schema.String),
-					contextWindow: Schema.optional(Schema.String),
-				}),
-			),
-		},
-	},
-) {}
+export const ListDaemonSessions = Rpc.make("ListDaemonSessions", {
+	payload: Schema.TaggedStruct("ListDaemonSessions", {
+		projectSlug: Schema.optional(NonEmptyString),
+		limit: Schema.optional(Schema.Number),
+		roots: Schema.optional(Schema.Boolean),
+		search: Schema.optional(Schema.String),
+		includeArchived: Schema.optional(Schema.Boolean),
+		cursor: Schema.optional(DaemonSessionCursorSchema),
+		// A registered project slug.
+		scope: Schema.optional(NonEmptyString),
+		exclude: Schema.optional(NonEmptyString),
+	}),
+	success: ListDaemonSessionsResponseSchema,
+	error: WsRpcError,
+});
 
-export class CreateSession extends CreateSessionWire.transformOrFail<CreateSession>(
-	"CreateSession",
-)(
-	{ accountRef: Schema.optional(Schema.suspend(() => AccountRefSchema)) },
-	{
-		decode: (wire) =>
-			Effect.succeed({
-				...wire,
-				accountRef: accountRefFromSelection({
-					instanceId: wire.instanceId,
-					providerId: wire.providerId,
-					model:
-						wire.model === undefined
-							? undefined
-							: { providerID: wire.model.providerId },
-				}),
-			}),
-		encode: ({ accountRef, ...wire }) =>
-			Effect.succeed({
-				...wire,
-				...(accountRef?._tag === "Id"
-					? { instanceId: AccountIdSchema.make(accountRef.id) }
-					: accountRef?._tag === "DriverDefault"
-						? { providerId: accountRef.driver, instanceId: undefined }
-						: {}),
-			}),
-	},
-) {
-	static readonly _tag = CreateSessionWire._tag;
-	static readonly success = CreateSessionWire.success;
-	static readonly failure = CreateSessionWire.failure;
-}
+export const ListArchivedSessions = Rpc.make("ListArchivedSessions", {
+	payload: Schema.TaggedStruct("ListArchivedSessions", {
+		limit: Schema.optional(Schema.Number),
+		cursor: Schema.optional(ArchivedSessionCursorSchema),
+	}),
+	success: ListArchivedSessionsResponseSchema,
+	error: WsRpcError,
+});
 
-export class ViewSession extends Schema.TaggedRequest<ViewSession>()(
-	"ViewSession",
-	{
-		failure: WsRpcError,
-		success: ViewSessionResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			originId: NonEmptyString,
-		},
-	},
-) {}
-
-export class PreWarmSession extends Schema.TaggedRequest<PreWarmSession>()(
-	"PreWarmSession",
-	{
-		failure: WsRpcError,
-		success: Schema.Void,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-		},
-	},
-) {}
-
-export class AttachProject extends Schema.TaggedRequest<AttachProject>()(
-	"AttachProject",
-	{
-		failure: WsRpcError,
-		// The project this tab is now attached to; null when none is registered.
-		success: Schema.Struct({
-			projectSlug: Schema.NullOr(Schema.String),
-			// Null means the requested session was not found, even if a fallback
-			// project was attached. Omitted requests also have no session location.
-			sessionSlug: Schema.NullOr(Schema.String),
+const draftSessionPayload = {
+	projectSlug: NonEmptyString,
+	originId: NonEmptyString,
+	instanceId: Schema.optional(Schema.String.pipe(Schema.brand("AccountId"))),
+	providerId: Schema.optional(Schema.String),
+	worktreePath: Schema.optional(NonEmptyString),
+	worktreeBase: Schema.optional(NonEmptyString),
+	permissionMode: SessionPermissionModeSchema,
+	model: Schema.optional(
+		Schema.Struct({
+			modelId: Schema.String,
+			providerId: Schema.String,
+			variant: Schema.optional(Schema.String),
+			contextWindow: Schema.optional(Schema.String),
 		}),
-		payload: {
-			// Hints, in priority order: the session's project, then projectSlug.
-			// The server falls back to its default project when neither resolves.
-			sessionId: Schema.optional(NonEmptyString),
-			projectSlug: Schema.optional(NonEmptyString),
-			originId: NonEmptyString,
-		},
-	},
-) {}
+	),
+};
 
-export class DeleteSession extends Schema.TaggedRequest<DeleteSession>()(
-	"DeleteSession",
-	{
-		failure: WsRpcError,
-		success: Schema.Struct({
-			ok: Schema.Literal(true),
-			worktreeWarnings: Schema.optional(Schema.Array(Schema.String)),
-		}),
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			originId: Schema.optional(NonEmptyString),
-			removeWorktrees: Schema.optional(Schema.Boolean),
-		},
-	},
-) {}
+const CreateSessionWire = Rpc.make("CreateSession", {
+	payload: Schema.TaggedStruct("CreateSession", {
+		...draftSessionPayload,
+		draftId: Schema.optional(NonEmptyString),
+		title: Schema.optional(Schema.String),
+		newWorktree: Schema.optional(Schema.Boolean),
+	}),
+	success: CreateSessionResponseSchema,
+	error: Schema.Union([
+		WsRpcError,
+		Schema.suspend(() => AccountUnroutable),
+		WorkspaceMoveError,
+		WorktreeCreationError,
+	]),
+});
 
-export class ForkSession extends Schema.TaggedRequest<ForkSession>()(
-	"ForkSession",
-	{
-		failure: Schema.Union(
-			WsRpcError,
-			Schema.suspend(() => AccountUnroutable),
+export const CreateSession = Rpc.make(CreateSessionWire._tag, {
+	payload: CreateSessionWire.payloadSchema.pipe(
+		Schema.decodeTo(
+			Schema.Struct({
+				...CreateSessionWire.payloadSchema.fields,
+				instanceId: Schema.toType(
+					CreateSessionWire.payloadSchema.fields.instanceId,
+				),
+				accountRef: Schema.optional(Schema.suspend(() => AccountRefSchema)),
+			}),
+			{
+				decode: SchemaGetter.transformEffect((wire) =>
+					Effect.succeed({
+						...wire,
+						accountRef: accountRefFromSelection({
+							instanceId: wire.instanceId,
+							providerId: wire.providerId,
+							model:
+								wire.model === undefined
+									? undefined
+									: { providerID: wire.model.providerId },
+						}),
+					}),
+				),
+				encode: SchemaGetter.transformEffect(
+					({
+						accountRef,
+						...wire
+					}): Effect.Effect<typeof CreateSessionWire.payloadSchema.Type> => {
+						if (accountRef?._tag === "DriverDefault") {
+							const { instanceId: _instanceId, ...payload } = wire;
+							return Effect.succeed({
+								...payload,
+								providerId: accountRef.driver,
+							});
+						}
+						return Effect.succeed({
+							...wire,
+							...(accountRef?._tag === "Id"
+								? { instanceId: AccountIdSchema.make(accountRef.id) }
+								: {}),
+						});
+					},
+				),
+			},
 		),
-		success: ForkSessionResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			originId: NonEmptyString,
-			sessionId: Schema.optional(NonEmptyString),
-			messageId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+	),
+	success: CreateSessionWire.successSchema,
+	error: CreateSessionWire.errorSchema,
+});
+
+export const ViewSession = Rpc.make("ViewSession", {
+	payload: Schema.TaggedStruct("ViewSession", {
+		sessionId: NonEmptyString,
+		originId: NonEmptyString,
+	}),
+	success: ViewSessionResponseSchema,
+	error: WsRpcError,
+});
+
+export const PreWarmSession = Rpc.make("PreWarmSession", {
+	payload: Schema.TaggedStruct("PreWarmSession", {
+		sessionId: NonEmptyString,
+	}),
+	success: Schema.Void,
+	error: WsRpcError,
+});
+
+export const PreWarmDraft = Rpc.make("PreWarmDraft", {
+	payload: Schema.TaggedStruct("PreWarmDraft", {
+		...draftSessionPayload,
+		draftId: NonEmptyString,
+	}),
+	success: Schema.Void,
+	error: WsRpcError,
+});
+
+export const AttachProject = Rpc.make("AttachProject", {
+	payload: Schema.TaggedStruct("AttachProject", {
+		// Omission attaches the daemon's default project.
+
+		projectSlug: Schema.optional(NonEmptyString),
+		originId: NonEmptyString,
+	}),
+	success: Schema.Struct({
+		projectSlug: Schema.NullOr(Schema.String),
+		// Project-only attaches have no session location.
+		sessionSlug: Schema.NullOr(Schema.String),
+	}),
+	error: WsRpcError,
+});
+
+/** Session-scoped form of AttachProject; its owner supplies the project. */
+export const AttachProjectForSession = Rpc.make(AttachProject._tag, {
+	payload: Schema.TaggedStruct(AttachProject._tag, {
+		sessionId: NonEmptyString,
+		originId: NonEmptyString,
+	}),
+	success: AttachProject.successSchema,
+	error: AttachProject.errorSchema,
+});
+
+export const DeleteSession = Rpc.make("DeleteSession", {
+	payload: Schema.TaggedStruct("DeleteSession", {
+		sessionId: NonEmptyString,
+		originId: Schema.optional(NonEmptyString),
+		removeWorktrees: Schema.optional(Schema.Boolean),
+	}),
+	success: Schema.Struct({
+		ok: Schema.Literal(true),
+		worktreeWarnings: Schema.optional(Schema.Array(Schema.String)),
+	}),
+	error: WsRpcError,
+});
+
+export const ForkSession = Rpc.make("ForkSession", {
+	payload: Schema.TaggedStruct("ForkSession", {
+		projectSlug: NonEmptyString,
+		originId: NonEmptyString,
+
+		messageId: Schema.optional(NonEmptyString),
+	}),
+	success: ForkSessionResponseSchema,
+	error: Schema.Union([WsRpcError, Schema.suspend(() => AccountUnroutable)]),
+});
+
+/** Session-scoped form of ForkSession; its owner supplies the project. */
+export const ForkSessionForSession = Rpc.make(ForkSession._tag, {
+	payload: Schema.TaggedStruct(ForkSession._tag, {
+		originId: NonEmptyString,
+		sessionId: NonEmptyString,
+		messageId: Schema.optional(NonEmptyString),
+	}),
+	success: ForkSession.successSchema,
+	error: ForkSession.errorSchema,
+});
 
 /** Fork a Side Thread and submit its first input there, so a reply lost to a
  *  dropped socket cannot lose the prompt. A retry with the same input id
  *  returns the Side Thread that input already reached. */
-export class StartSideThread extends Schema.TaggedRequest<StartSideThread>()(
-	"StartSideThread",
-	{
-		failure: Schema.Union(
-			WsRpcError,
-			Schema.suspend(() => AccountUnroutable),
-		),
-		success: Schema.Struct({ sessionId: Schema.String }),
-		payload: {
-			projectSlug: NonEmptyString,
-			parentSessionId: NonEmptyString,
-			title: NonEmptyString,
-			inputId: NonEmptyString,
-			text: NonEmptyString,
-			images: Schema.optional(Schema.Array(Schema.String)),
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const StartSideThread = Rpc.make("StartSideThread", {
+	payload: Schema.TaggedStruct("StartSideThread", {
+		sessionId: NonEmptyString,
+		title: NonEmptyString,
+		inputId: NonEmptyString,
+		text: NonEmptyString,
+		images: Schema.optional(Schema.Array(Schema.String)),
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: Schema.Struct({ sessionId: Schema.String }),
+	error: Schema.Union([WsRpcError, Schema.suspend(() => AccountUnroutable)]),
+});
 
-export class RespondPermission extends Schema.TaggedRequest<RespondPermission>()(
-	"RespondPermission",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			originId: NonEmptyString,
-			commandId: NonEmptyString,
-			requestId: NonEmptyString,
-			decision: PermissionDecisionSchema,
-			persistScope: Schema.optional(PermissionPersistScopeSchema),
-			persistPattern: Schema.optional(Schema.String),
-			permissionDestination: Schema.optional(PermissionUpdateDestinationSchema),
-		},
-	},
-) {}
+export const RespondPermission = Rpc.make("RespondPermission", {
+	payload: Schema.TaggedStruct("RespondPermission", {
+		projectSlug: NonEmptyString,
+		originId: NonEmptyString,
+		commandId: NonEmptyString,
+		requestId: NonEmptyString,
+		decision: PermissionDecisionSchema,
+		persistScope: Schema.optional(PermissionPersistScopeSchema),
+		persistPattern: Schema.optional(Schema.String),
+		permissionDestination: Schema.optional(PermissionUpdateDestinationSchema),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
-export class AnswerQuestion extends Schema.TaggedRequest<AnswerQuestion>()(
-	"AnswerQuestion",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			originId: NonEmptyString,
-			commandId: NonEmptyString,
-			toolId: NonEmptyString,
-			answers: Schema.Record({ key: Schema.String, value: Schema.String }),
-		},
-	},
-) {}
+export const AnswerQuestion = Rpc.make("AnswerQuestion", {
+	payload: Schema.TaggedStruct("AnswerQuestion", {
+		projectSlug: NonEmptyString,
+		originId: NonEmptyString,
+		commandId: NonEmptyString,
+		toolId: NonEmptyString,
+		answers: Schema.Record(Schema.String, Schema.String),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
-export class RejectQuestion extends Schema.TaggedRequest<RejectQuestion>()(
-	"RejectQuestion",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			originId: NonEmptyString,
-			commandId: NonEmptyString,
-			toolId: NonEmptyString,
-		},
-	},
-) {}
+export const RejectQuestion = Rpc.make("RejectQuestion", {
+	payload: Schema.TaggedStruct("RejectQuestion", {
+		projectSlug: NonEmptyString,
+		originId: NonEmptyString,
+		commandId: NonEmptyString,
+		toolId: NonEmptyString,
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
-export class LoadMoreHistory extends Schema.TaggedRequest<LoadMoreHistory>()(
-	"LoadMoreHistory",
-	{
-		failure: WsRpcError,
-		success: LoadMoreHistoryResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			before: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const LoadMoreHistory = Rpc.make("LoadMoreHistory", {
+	payload: Schema.TaggedStruct("LoadMoreHistory", {
+		sessionId: NonEmptyString,
+		before: Schema.optional(NonEmptyString),
+	}),
+	success: LoadMoreHistoryResponseSchema,
+	error: WsRpcError,
+});
 
 export const RewindSessionResponseSchema = Schema.Struct({
 	ok: Schema.Literal(true),
@@ -2441,18 +2521,14 @@ export const RewindSessionResponseSchema = Schema.Struct({
 
 export type RewindSessionResponse = typeof RewindSessionResponseSchema.Type;
 
-export class RewindSession extends Schema.TaggedRequest<RewindSession>()(
-	"RewindSession",
-	{
-		failure: WsRpcError,
-		success: RewindSessionResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			messageId: NonEmptyString,
-		},
-	},
-) {}
+export const RewindSession = Rpc.make("RewindSession", {
+	payload: Schema.TaggedStruct("RewindSession", {
+		sessionId: NonEmptyString,
+		messageId: NonEmptyString,
+	}),
+	success: RewindSessionResponseSchema,
+	error: WsRpcError,
+});
 
 export const UndoRewindResponseSchema = Schema.Struct({
 	ok: Schema.Literal(true),
@@ -2460,139 +2536,104 @@ export const UndoRewindResponseSchema = Schema.Struct({
 });
 export type UndoRewindResponse = typeof UndoRewindResponseSchema.Type;
 
-export class UndoRewind extends Schema.TaggedRequest<UndoRewind>()(
-	"UndoRewind",
-	{
-		failure: WsRpcError,
-		success: UndoRewindResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-		},
-	},
-) {}
+export const UndoRewind = Rpc.make("UndoRewind", {
+	payload: Schema.TaggedStruct("UndoRewind", {
+		sessionId: NonEmptyString,
+	}),
+	success: UndoRewindResponseSchema,
+	error: WsRpcError,
+});
 
 /** The composer's only send. The inbox hands it off when the session is idle
  *  and queues it otherwise, or with delivery "steer" hands it into the running
  *  turn; a refused steer admits nothing. A retry with the same input id is a
  *  no-op. */
-export class SubmitInput extends Schema.TaggedRequest<SubmitInput>()(
-	"input.submit",
-	{
-		failure: Schema.Union(
-			WsRpcError,
-			Schema.suspend(() => AccountUnroutable),
-		),
-		success: SubmitInputResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			inputId: NonEmptyString,
-			text: Schema.String,
-			images: Schema.optional(Schema.Array(Schema.String)),
-			delivery: Schema.Literal(...INPUT_DELIVERIES),
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const SubmitInput = Rpc.make("input.submit", {
+	payload: Schema.TaggedStruct("input.submit", {
+		sessionId: NonEmptyString,
+		inputId: NonEmptyString,
+		text: Schema.String,
+		images: Schema.optional(Schema.Array(Schema.String)),
+		delivery: Schema.Literals([...INPUT_DELIVERIES]),
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: SubmitInputResponseSchema,
+	error: Schema.Union([WsRpcError, Schema.suspend(() => AccountUnroutable)]),
+});
 
 /** Remove a queued input (the tray's Remove, and Edit before refilling). */
-export class CancelInput extends Schema.TaggedRequest<CancelInput>()(
-	"input.cancel",
-	{
-		failure: WsRpcError,
-		success: InboxCommandResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			inputId: NonEmptyString,
-		},
-	},
-) {}
+export const CancelInput = Rpc.make("input.cancel", {
+	payload: Schema.TaggedStruct("input.cancel", {
+		sessionId: NonEmptyString,
+		inputId: NonEmptyString,
+	}),
+	success: InboxCommandResponseSchema,
+	error: WsRpcError,
+});
 
 /** Hand a queued input off now; Resume calls it on the oldest row. */
-export class SendInputNow extends Schema.TaggedRequest<SendInputNow>()(
-	"input.sendNow",
-	{
-		failure: WsRpcError,
-		success: InboxCommandResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			inputId: NonEmptyString,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const SendInputNow = Rpc.make("input.sendNow", {
+	payload: Schema.TaggedStruct("input.sendNow", {
+		sessionId: NonEmptyString,
+		inputId: NonEmptyString,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: InboxCommandResponseSchema,
+	error: WsRpcError,
+});
 
-export class SyncInputDraft extends Schema.TaggedRequest<SyncInputDraft>()(
-	"SyncInputDraft",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			text: Schema.String,
-			originId: Schema.optional(NonEmptyString),
-		},
-	},
-) {}
+export const SyncInputDraft = Rpc.make("SyncInputDraft", {
+	payload: Schema.TaggedStruct("SyncInputDraft", {
+		sessionId: NonEmptyString,
+		text: Schema.String,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
-export class CancelSession extends Schema.TaggedRequest<CancelSession>()(
-	"CancelSession",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			commandId: NonEmptyString,
-		},
-	},
-) {}
+export const CancelSession = Rpc.make("CancelSession", {
+	payload: Schema.TaggedStruct("CancelSession", {
+		sessionId: NonEmptyString,
+		commandId: NonEmptyString,
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
-export class StopBackgroundTask extends Schema.TaggedRequest<StopBackgroundTask>()(
-	"StopBackgroundTask",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-			taskId: NonEmptyString,
-		},
-	},
-) {}
+export const StopBackgroundTask = Rpc.make("StopBackgroundTask", {
+	payload: Schema.TaggedStruct("StopBackgroundTask", {
+		sessionId: NonEmptyString,
+		taskId: NonEmptyString,
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
-export class SetLogLevel extends Schema.TaggedRequest<SetLogLevel>()(
-	"SetLogLevel",
-	{
-		failure: WsRpcError,
-		success: OkResponseSchema,
-		payload: {
-			projectSlug: Schema.optional(NonEmptyString),
-			level: RpcLogLevelSchema,
-		},
-	},
-) {}
+export const SetLogLevel = Rpc.make("SetLogLevel", {
+	payload: Schema.TaggedStruct("SetLogLevel", {
+		projectSlug: Schema.optional(NonEmptyString),
+		level: RpcLogLevelSchema,
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
 
-export class ResolveSession extends Schema.TaggedRequest<ResolveSession>()(
-	"ResolveSession",
-	{
-		failure: WsRpcError,
-		success: Schema.Struct({ projectSlug: Schema.NullOr(Schema.String) }),
-		payload: {
-			projectSlug: Schema.optional(NonEmptyString),
-			sessionId: NonEmptyString,
-		},
-	},
-) {}
+export const ResolveSession = Rpc.make("ResolveSession", {
+	payload: Schema.TaggedStruct("ResolveSession", {
+		sessionId: NonEmptyString,
+	}),
+	success: Schema.Struct({ projectSlug: Schema.NullOr(Schema.String) }),
+	error: WsRpcError,
+});
 
 export const GoalDetailsSchema = Schema.Struct({
 	checks: Schema.Array(
 		Schema.Struct({
-			iteration: Schema.NonNegativeInt,
+			iteration: Schema.Number.check(
+				Schema.isInt(),
+				Schema.isGreaterThanOrEqualTo(0),
+			),
 			at: Schema.Number,
 			reason: Schema.NullOr(Schema.String),
 		}),
@@ -2601,19 +2642,52 @@ export const GoalDetailsSchema = Schema.Struct({
 });
 export type GoalDetails = typeof GoalDetailsSchema.Type;
 
-export class GetGoalDetails extends Schema.TaggedRequest<GetGoalDetails>()(
-	"GetGoalDetails",
-	{
-		failure: WsRpcError,
-		success: GoalDetailsSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
-		},
-	},
-) {}
+export const GetGoalDetails = Rpc.make("GetGoalDetails", {
+	payload: Schema.TaggedStruct("GetGoalDetails", {
+		sessionId: NonEmptyString,
+	}),
+	success: GoalDetailsSchema,
+	error: WsRpcError,
+});
 
-export const WsRpcRequest = Schema.Union(
+// Paired forms let callers omit the tag, but the wire always carries it so
+// every encoded request still decodes as WsRpcRequest.
+const wireTag = <Tag extends string>(tag: Tag) =>
+	Schema.Literal(tag).pipe(
+		Schema.decodeTo(Schema.optionalKey(Schema.Literal(tag)), {
+			decode: SchemaGetter.passthrough(),
+			encode: SchemaGetter.withDefault(Effect.succeed(tag)),
+		}),
+	);
+
+// Preserve excess keys until the check, then expose only the declared fields.
+const closedPayload = <const Fields extends Schema.Struct.Fields>(
+	fields: Fields,
+) => {
+	const schema = Schema.Struct(fields);
+	const closed = Schema.StructWithRest(schema, [
+		Schema.Record(Schema.Union([Schema.String, Schema.Symbol]), Schema.Unknown),
+	]).check(
+		Schema.makeFilter(
+			(value) =>
+				Reflect.ownKeys(value).every((key) => Object.hasOwn(fields, key)),
+			{ message: "Unexpected property" },
+		),
+	);
+	// Validate encoding input without stripping its excess keys before the check.
+	return closed.pipe(
+		Schema.decodeTo(
+			Schema.declare<Schema.Struct.Type<Fields>>(
+				(value): value is Schema.Struct.Type<Fields> =>
+					Schema.is(closed)(value),
+			),
+		),
+	);
+};
+
+// One registration per RPC tag, shared by CLI/IPC decoding and browser RPC.
+// Paired forms share one wire tag while keeping their request definitions.
+const wsRpcRequests = [
 	GetStatus,
 	SetPin,
 	SetKeepAwake,
@@ -2623,12 +2697,64 @@ export const WsRpcRequest = Schema.Union(
 	SetAgent,
 	RestartWithConfig,
 	GetInstances,
+	GetCursorAuth,
+	StartCursorLogin,
+	CancelCursorLogin,
+	LogoutCursor,
 	GetInstanceStatus,
-	AttachProject,
+	{
+		requests: [AttachProjectForSession, AttachProject],
+		rpc: Rpc.make(AttachProject._tag, {
+			payload: Schema.Union([
+				closedPayload({
+					...AttachProjectForSession.payloadSchema.fields,
+					_tag: wireTag(AttachProjectForSession._tag),
+				}),
+				closedPayload({
+					...AttachProject.payloadSchema.fields,
+					_tag: wireTag(AttachProject._tag),
+				}),
+			]),
+			success: AttachProject.successSchema,
+			error: AttachProject.errorSchema,
+		}),
+	},
 	ResolveSession,
 	GetGoalDetails,
-	GetAgents,
-	GetCommands,
+	{
+		requests: [GetAgentsForSession, GetAgents],
+		rpc: Rpc.make(GetAgents._tag, {
+			payload: Schema.Union([
+				closedPayload({
+					...GetAgentsForSession.payloadSchema.fields,
+					_tag: wireTag(GetAgentsForSession._tag),
+				}),
+				closedPayload({
+					...GetAgents.payloadSchema.fields,
+					_tag: wireTag(GetAgents._tag),
+				}),
+			]),
+			success: GetAgents.successSchema,
+			error: GetAgents.errorSchema,
+		}),
+	},
+	{
+		requests: [GetCommandsForSession, GetCommands],
+		rpc: Rpc.make(GetCommands._tag, {
+			payload: Schema.Union([
+				closedPayload({
+					...GetCommandsForSession.payloadSchema.fields,
+					_tag: wireTag(GetCommandsForSession._tag),
+				}),
+				closedPayload({
+					...GetCommands.payloadSchema.fields,
+					_tag: wireTag(GetCommands._tag),
+				}),
+			]),
+			success: GetCommands.successSchema,
+			error: GetCommands.errorSchema,
+		}),
+	},
 	GetProjects,
 	FindFolders,
 	SwitchAgent,
@@ -2639,16 +2765,85 @@ export const WsRpcRequest = Schema.Union(
 	SetDefaultPermissionMode,
 	SetDefaultSessionMode,
 	ResolveSessionMode,
-	SetDefaultGroupingMode,
-	GetDefaultGroupingMode,
 	SetHiddenEntries,
 	GetClaudeSettings,
 	SetClaudeSettings,
-	ResolveClaudeSettings,
+	{
+		requests: [ResolveClaudeSettingsForSession, ResolveClaudeSettings],
+		rpc: Rpc.make(ResolveClaudeSettings._tag, {
+			payload: Schema.Union([
+				closedPayload({
+					...ResolveClaudeSettingsForSession.payloadSchema.fields,
+					_tag: wireTag(ResolveClaudeSettingsForSession._tag),
+				}),
+				closedPayload({
+					...ResolveClaudeSettingsWire.payloadSchema.fields,
+					_tag: wireTag(ResolveClaudeSettingsWire._tag),
+				}).pipe(
+					Schema.decodeTo(
+						closedPayload({
+							...ResolveClaudeSettings.payloadSchema.to.fields,
+							accountRef: Schema.optional(
+								Schema.Union([
+									closedPayload(AccountRefSchema.members[0].fields),
+									closedPayload(AccountRefSchema.members[1].fields),
+								]),
+							),
+							_tag: Schema.optionalKey(
+								Schema.Literal(ResolveClaudeSettings._tag),
+							),
+						}),
+						{
+							decode: SchemaGetter.transformEffect((wire) =>
+								Effect.succeed({
+									...wire,
+									accountRef: { _tag: "Id" as const, id: wire.instanceId },
+								}),
+							),
+							encode: SchemaGetter.transformEffect(({ accountRef, ...wire }) =>
+								accountRef?._tag === "DriverDefault"
+									? Effect.fail(
+											new SchemaIssue.InvalidValue(
+												{
+													message:
+														"ResolveClaudeSettings requires an explicit account Id",
+												},
+												accountRef,
+											),
+										)
+									: Effect.succeed({
+											...wire,
+											instanceId: accountRef?.id ?? wire.instanceId,
+										}),
+							),
+						},
+					),
+				),
+			]),
+			success: ResolveClaudeSettings.successSchema,
+			error: ResolveClaudeSettings.errorSchema,
+		}),
+	},
 	ReloadProviderSession,
 	RenameSession,
 	ListBranches,
-	ListWorktrees,
+	{
+		requests: [ListWorktreesForSession, ListWorktrees],
+		rpc: Rpc.make(ListWorktrees._tag, {
+			payload: Schema.Union([
+				closedPayload({
+					...ListWorktreesForSession.payloadSchema.fields,
+					_tag: wireTag(ListWorktreesForSession._tag),
+				}),
+				closedPayload({
+					...ListWorktrees.payloadSchema.fields,
+					_tag: wireTag(ListWorktrees._tag),
+				}),
+			]),
+			success: ListWorktrees.successSchema,
+			error: ListWorktrees.errorSchema,
+		}),
+	},
 	InspectSessionWorktrees,
 	RenameSessionBranch,
 	MoveSessionWorkspace,
@@ -2660,6 +2855,7 @@ export const WsRpcRequest = Schema.Union(
 	MarkSessionRead,
 	MarkSessionSeen,
 	SetSessionSettled,
+	SetSessionArchived,
 	SetSessionPinned,
 	SetSessionAutoSettle,
 	SnoozeSession,
@@ -2672,14 +2868,95 @@ export const WsRpcRequest = Schema.Union(
 	GetContinuationHandoff,
 	SwitchVariant,
 	SwitchPermissionMode,
-	GetFileTree,
-	GetFileList,
-	GetFileContent,
+	{
+		requests: [GetFileTreeForSession, GetFileTree],
+		rpc: Rpc.make(GetFileTree._tag, {
+			payload: Schema.Union([
+				closedPayload({
+					...GetFileTreeForSession.payloadSchema.fields,
+					_tag: wireTag(GetFileTreeForSession._tag),
+				}),
+				closedPayload({
+					...GetFileTree.payloadSchema.fields,
+					_tag: wireTag(GetFileTree._tag),
+				}),
+			]),
+			success: GetFileTree.successSchema,
+			error: GetFileTree.errorSchema,
+		}),
+	},
+	{
+		requests: [GetFileListForSession, GetFileList],
+		rpc: Rpc.make(GetFileList._tag, {
+			payload: Schema.Union([
+				closedPayload({
+					...GetFileListForSession.payloadSchema.fields,
+					_tag: wireTag(GetFileListForSession._tag),
+				}),
+				closedPayload({
+					...GetFileList.payloadSchema.fields,
+					_tag: wireTag(GetFileList._tag),
+				}),
+			]),
+			success: GetFileList.successSchema,
+			error: GetFileList.errorSchema,
+		}),
+	},
+	{
+		requests: [GetFileContentForSession, GetFileContent],
+		rpc: Rpc.make(GetFileContent._tag, {
+			payload: Schema.Union([
+				closedPayload({
+					...GetFileContentForSession.payloadSchema.fields,
+					_tag: wireTag(GetFileContentForSession._tag),
+				}),
+				closedPayload({
+					...GetFileContent.payloadSchema.fields,
+					_tag: wireTag(GetFileContent._tag),
+				}),
+			]),
+			success: GetFileContent.successSchema,
+			error: GetFileContent.errorSchema,
+		}),
+	},
 	GetToolDetails,
-	GetSkillContent,
+	{
+		requests: [GetSkillContentForSession, GetSkillContent],
+		rpc: Rpc.make(GetSkillContent._tag, {
+			payload: Schema.Union([
+				closedPayload({
+					...GetSkillContentForSession.payloadSchema.fields,
+					_tag: wireTag(GetSkillContentForSession._tag),
+				}),
+				closedPayload({
+					...GetSkillContent.payloadSchema.fields,
+					_tag: wireTag(GetSkillContent._tag),
+				}),
+			]),
+			success: GetSkillContent.successSchema,
+			error: GetSkillContent.errorSchema,
+		}),
+	},
 	GetSessionSkills,
-	GetModels,
+	{
+		requests: [GetModelsForSession, GetModels],
+		rpc: Rpc.make(GetModels._tag, {
+			payload: Schema.Union([
+				closedPayload({
+					...GetModelsForSession.payloadSchema.fields,
+					_tag: wireTag(GetModelsForSession._tag),
+				}),
+				closedPayload({
+					...GetModels.payloadSchema.fields,
+					_tag: wireTag(GetModels._tag),
+				}),
+			]),
+			success: GetModels.successSchema,
+			error: GetModels.errorSchema,
+		}),
+	},
 	SaveProject,
+	SetProjectOrder,
 	RemoveProject,
 	StartInstance,
 	StopInstance,
@@ -2690,24 +2967,79 @@ export const WsRpcRequest = Schema.Union(
 	SetDefault,
 	GetAutoSettleSetting,
 	SetAutoSettleSetting,
+	GetAutoArchiveSetting,
+	SetAutoArchiveSetting,
+	GetAutoDeleteArchivedSetting,
+	SetAutoDeleteArchivedSetting,
 	GetWorktreeCleanupSetting,
-	SetWorktreeCleanupSetting,
+	{
+		requests: [SetProjectWorktreeCleanupSetting, SetWorktreeCleanupSetting],
+		rpc: Rpc.make(SetWorktreeCleanupSetting._tag, {
+			payload: Schema.Union([
+				closedPayload({
+					...SetProjectWorktreeCleanupSetting.payloadSchema.fields,
+					_tag: wireTag(SetProjectWorktreeCleanupSetting._tag),
+				}),
+				closedPayload({
+					...SetWorktreeCleanupSetting.payloadSchema.fields,
+					_tag: wireTag(SetWorktreeCleanupSetting._tag),
+				}),
+			]),
+			success: SetWorktreeCleanupSetting.successSchema,
+			error: SetWorktreeCleanupSetting.errorSchema,
+		}),
+	},
 	CleanUpWorktreesNow,
 	GetUsageLimitsSetting,
 	SetUsageLimitsSetting,
+	SetCursorUsageKeychain,
 	ScanNow,
 	DetectProxy,
 	ListPtys,
-	CreatePty,
+	{
+		requests: [CreatePtyForSession, CreatePty],
+		rpc: Rpc.make(CreatePty._tag, {
+			payload: Schema.Union([
+				closedPayload({
+					...CreatePtyForSession.payloadSchema.fields,
+					_tag: wireTag(CreatePtyForSession._tag),
+				}),
+				closedPayload({
+					...CreatePty.payloadSchema.fields,
+					_tag: wireTag(CreatePty._tag),
+				}),
+			]),
+			success: CreatePty.successSchema,
+			error: CreatePty.errorSchema,
+		}),
+	},
 	ResizePty,
 	ClosePty,
 	PtyInput,
 	ListDaemonSessions,
+	ListArchivedSessions,
 	CreateSession,
 	ViewSession,
 	PreWarmSession,
+	PreWarmDraft,
 	DeleteSession,
-	ForkSession,
+	{
+		requests: [ForkSessionForSession, ForkSession],
+		rpc: Rpc.make(ForkSession._tag, {
+			payload: Schema.Union([
+				closedPayload({
+					...ForkSessionForSession.payloadSchema.fields,
+					_tag: wireTag(ForkSessionForSession._tag),
+				}),
+				closedPayload({
+					...ForkSession.payloadSchema.fields,
+					_tag: wireTag(ForkSession._tag),
+				}),
+			]),
+			success: ForkSession.successSchema,
+			error: ForkSession.errorSchema,
+		}),
+	},
 	StartSideThread,
 	RespondPermission,
 	AnswerQuestion,
@@ -2722,24 +3054,54 @@ export const WsRpcRequest = Schema.Union(
 	CancelSession,
 	StopBackgroundTask,
 	SetLogLevel,
+] as const;
+
+type WsRpcRequestEntry = (typeof wsRpcRequests)[number];
+type WsRpcRequestSchema<Entry = WsRpcRequestEntry> = Entry extends {
+	readonly requests: readonly (infer Request)[];
+}
+	? Request
+	: Entry;
+
+const wsRpcRequestSchemas = wsRpcRequests.flatMap(
+	(entry): readonly WsRpcRequestSchema["payloadSchema"][] =>
+		"requests" in entry
+			? entry.requests.map((request) => request.payloadSchema)
+			: [entry.payloadSchema],
 );
+
+export const WsRpcRequest = Schema.Union([...wsRpcRequestSchemas]);
 
 export type WsRpcRequest = typeof WsRpcRequest.Type;
 
+export const ShellProjectsFrameSchema = Schema.Struct({
+	_tag: Schema.Literal("projects"),
+	projects: Schema.Array(ProjectInfoSchema),
+	/** The project a new session prefills, on every client. */
+	newSessionProject: Schema.optional(Schema.String),
+	projectOrder: Schema.optional(Schema.Array(Schema.String)),
+});
+export type ShellProjectsFrame = typeof ShellProjectsFrameSchema.Type;
+
+export const ShellEnvelopeSchema = Schema.Union([
+	EnvelopeSchema(SessionInfoSchema),
+	ShellProjectsFrameSchema,
+]);
+export type ShellEnvelope = typeof ShellEnvelopeSchema.Type;
+
 export const SubscribeShell = Rpc.make("SubscribeShell", {
 	payload: {
-		projectSlug: NonEmptyString,
 		resumeFromSequence: Schema.optional(Schema.Number),
 		resumeBase: Schema.optional(ResumeBase),
+		resumePoint: Schema.optional(ResumePoint),
 	},
-	success: EnvelopeSchema(SessionInfoSchema),
+	success: ShellEnvelopeSchema,
 	error: WsRpcError,
 	stream: true,
 });
 
 export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
 	payload: {
-		projectSlug: NonEmptyString,
 		sessionId: NonEmptyString,
 		resumeFromSequence: Schema.optional(Schema.Number),
 		resumeBase: Schema.optional(ResumeBase),
@@ -2762,7 +3124,6 @@ export type SessionTodosEnvelope = typeof SessionTodosEnvelopeSchema.Type;
 
 export const SubscribeSessionTodos = Rpc.make("SubscribeSessionTodos", {
 	payload: {
-		projectSlug: NonEmptyString,
 		sessionId: NonEmptyString,
 		resumeFromSequence: Schema.optional(Schema.Number),
 	},
@@ -2778,7 +3139,6 @@ export const SubscribeSessionTodos = Rpc.make("SubscribeSessionTodos", {
  */
 export const SubscribeSessionFamily = Rpc.make("SubscribeSessionFamily", {
 	payload: {
-		projectSlug: NonEmptyString,
 		sessionId: NonEmptyString,
 		resumeFromSequence: Schema.optional(Schema.Number),
 	},
@@ -2817,7 +3177,7 @@ export const PtyRowSchema = Schema.Struct({
 	scrollback: Schema.String,
 });
 export type PtyRow = typeof PtyRowSchema.Type;
-const PtyEnvelopeSchema = Schema.Union(
+const PtyEnvelopeSchema = Schema.Union([
 	Schema.Struct({
 		_tag: Schema.Literal("snapshot"),
 		rows: Schema.Array(PtyRowSchema),
@@ -2826,7 +3186,7 @@ const PtyEnvelopeSchema = Schema.Union(
 	PtyUpsertSchema,
 	PtyOutputSchema,
 	PtyRemoveSchema,
-);
+]);
 export type PtyEnvelope = typeof PtyEnvelopeSchema.Type;
 
 export const SubscribePtys = Rpc.make("SubscribePtys", {
@@ -2862,6 +3222,7 @@ export const SubscribeInstances = Rpc.make("SubscribeInstances", {
 	success: Schema.Struct({
 		instances: Schema.Array(OpenCodeInstanceSchema),
 		providerCapabilities: Schema.optional(ProviderCapabilityMapSchema),
+		providerTraits: Schema.optional(ProviderTraitsMapSchema),
 	}),
 	error: WsRpcError,
 	stream: true,
@@ -2870,17 +3231,6 @@ export const SubscribeInstances = Rpc.make("SubscribeInstances", {
 export const SubscribeUsage = Rpc.make("SubscribeUsage", {
 	payload: {},
 	success: Schema.Struct({ readings: Schema.Array(UsageReadingSchema) }),
-	error: WsRpcError,
-	stream: true,
-});
-
-export const SubscribeProjects = Rpc.make("SubscribeProjects", {
-	payload: {},
-	success: Schema.Struct({
-		projects: Schema.Array(ProjectInfoSchema),
-		/** The project a new session prefills, on every client. */
-		newSessionProject: Schema.optional(Schema.String),
-	}),
 	error: WsRpcError,
 	stream: true,
 });
@@ -2906,13 +3256,13 @@ export const SubscribeServerStatus = Rpc.make("SubscribeServerStatus", {
 	stream: true,
 });
 
-export const OpenCodeConnectionStatusSchema = Schema.Literal(
+export const OpenCodeConnectionStatusSchema = Schema.Literals([
 	"stopped",
 	"starting",
 	"connected",
 	"reconnecting",
 	"failed",
-);
+]);
 export type OpenCodeConnectionStatus =
 	typeof OpenCodeConnectionStatusSchema.Type;
 
@@ -2921,7 +3271,7 @@ export type OpenCodeConnectionStatus =
  * `_tag`, so a duplicate or late delivery is idempotent and a new fact is a new
  * member rather than a reshape.
  */
-export const ProjectSettingSchema = Schema.Union(
+export const ProjectSettingSchema = Schema.Union([
 	Schema.TaggedStruct("defaultModel", {
 		model: Schema.optional(Schema.String),
 		provider: Schema.optional(Schema.String),
@@ -2935,35 +3285,29 @@ export const ProjectSettingSchema = Schema.Union(
 		mode: SessionPermissionModeSchema,
 	}),
 	Schema.TaggedStruct("defaultSessionMode", {
-		mode: SessionModeSchema,
-	}),
-	Schema.TaggedStruct("defaultGroupingMode", {
-		mode: GroupingModeSchema,
+		mode: DefaultSessionModeSchema,
 	}),
 	Schema.TaggedStruct("claudeSettings", {
 		overrides: ClaudeSettingsOverridesSchema,
 	}),
-	// Live facts the relay publishes as they change, not settings anyone writes.
-	/** Browser sockets attached to this project. */
 	Schema.TaggedStruct("clientCount", { count: Schema.Number }),
-	/**
-	 * One OpenCode instance's lifecycle, not the browser's own socket. The one
-	 * member keyed by `_tag` and `instanceId`: one slot per instance.
-	 */
 	Schema.TaggedStruct("opencodeConnection", {
 		instanceId: Schema.String,
 		status: OpenCodeConnectionStatusSchema,
 	}),
-	/** Claude models remain keyed by driver; the account identifies the discovery. */
 	Schema.TaggedStruct("providerModels", {
 		providers: Schema.Array(ProviderInfoSchema),
 		accountId: Schema.optional(Schema.String),
 	}),
-	Schema.TaggedStruct("harnessDefaults", {
-		claude: HarnessDefaultStateSchema,
-		opencode: HarnessDefaultStateSchema,
-	}),
-);
+	Schema.suspend(() =>
+		Schema.TaggedStruct(
+			"harnessDefaults",
+			Record.map(PROVIDER_DRIVERS, () =>
+				Schema.optionalKey(HarnessDefaultStateSchema),
+			),
+		),
+	),
+]);
 export type ProjectSetting = typeof ProjectSettingSchema.Type;
 /** Persisted settings shared by all projects; live facts stay per relay. */
 export type GlobalProjectSetting = Extract<
@@ -2973,7 +3317,6 @@ export type GlobalProjectSetting = Extract<
 			| "defaultModel"
 			| "defaultPermissionMode"
 			| "defaultSessionMode"
-			| "defaultGroupingMode"
 			| "visibility"
 			| "claudeSettings";
 	}
@@ -3002,16 +3345,16 @@ export const SubscribeDraftModels = Rpc.make("SubscribeDraftModels", {
 /** A session finished or failed in this project while no tab was viewing it. */
 export const AlertSchema = Schema.TaggedStruct("alert", {
 	/** `warning`: a launch went ahead degraded; the user is told, not dinged. */
-	kind: Schema.Literal("done", "error", "warning"),
+	kind: Schema.Literals(["done", "error", "warning"]),
 	alertId: NonEmptyString,
 	sessionId: Schema.optional(Schema.String),
 	message: Schema.optional(Schema.String),
 });
 export type Alert = typeof AlertSchema.Type;
-const AlertsEnvelopeSchema = Schema.Union(
+const AlertsEnvelopeSchema = Schema.Union([
 	Schema.Struct({ _tag: Schema.Literal("synchronized") }),
 	AlertSchema,
-);
+]);
 export type AlertsEnvelope = typeof AlertsEnvelopeSchema.Type;
 
 /**
@@ -3025,14 +3368,14 @@ export const SubscribeAlerts = Rpc.make("SubscribeAlerts", {
 	stream: true,
 });
 
-const InputDraftEnvelopeSchema = Schema.Union(
+const InputDraftEnvelopeSchema = Schema.Union([
 	Schema.Struct({ _tag: Schema.Literal("synchronized") }),
 	Schema.TaggedStruct("draft", {
 		text: Schema.String,
 		/** The writer's SyncInputDraft originId; that tab drops its own echo. */
 		from: Schema.optional(Schema.String),
 	}),
-);
+]);
 export type InputDraftEnvelope = typeof InputDraftEnvelopeSchema.Type;
 
 /**
@@ -3041,7 +3384,7 @@ export type InputDraftEnvelope = typeof InputDraftEnvelopeSchema.Type;
  * reconnect never clobbers text typed while offline.
  */
 export const SubscribeInputDraft = Rpc.make("SubscribeInputDraft", {
-	payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
+	payload: { sessionId: NonEmptyString },
 	success: InputDraftEnvelopeSchema,
 	error: WsRpcError,
 	stream: true,
@@ -3061,115 +3404,7 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribeInstances,
 	SubscribeUsage,
 	SubscribeServerStatus,
-	SubscribeProjects,
-	Rpc.fromTaggedRequest(GetStatus),
-	Rpc.fromTaggedRequest(SetPin),
-	Rpc.fromTaggedRequest(SetKeepAwake),
-	Rpc.fromTaggedRequest(SetKeepAwakeCommand),
-	Rpc.fromTaggedRequest(SetTailscaleServe),
-	Rpc.fromTaggedRequest(Shutdown),
-	Rpc.fromTaggedRequest(SetAgent),
-	Rpc.fromTaggedRequest(RestartWithConfig),
-	Rpc.fromTaggedRequest(GetInstances),
-	Rpc.fromTaggedRequest(GetInstanceStatus),
-	Rpc.fromTaggedRequest(AttachProject),
-	Rpc.fromTaggedRequest(ResolveSession),
-	Rpc.fromTaggedRequest(GetGoalDetails),
-	Rpc.fromTaggedRequest(GetAgents),
-	Rpc.fromTaggedRequest(GetCommands),
-	Rpc.fromTaggedRequest(GetProjects),
-	Rpc.fromTaggedRequest(FindFolders),
-	Rpc.fromTaggedRequest(SwitchAgent),
-	Rpc.fromTaggedRequest(SwitchContextWindow),
-	Rpc.fromTaggedRequest(SwitchModel),
-	Rpc.fromTaggedRequest(SetDefaultModel),
-	Rpc.fromTaggedRequest(SetHarnessDefault),
-	Rpc.fromTaggedRequest(SetDefaultPermissionMode),
-	Rpc.fromTaggedRequest(SetDefaultSessionMode),
-	Rpc.fromTaggedRequest(ResolveSessionMode),
-	Rpc.fromTaggedRequest(SetDefaultGroupingMode),
-	Rpc.fromTaggedRequest(GetDefaultGroupingMode),
-	Rpc.fromTaggedRequest(SetHiddenEntries),
-	Rpc.fromTaggedRequest(GetClaudeSettings),
-	Rpc.fromTaggedRequest(SetClaudeSettings),
-	Rpc.fromTaggedRequest(ResolveClaudeSettings),
-	Rpc.fromTaggedRequest(ReloadProviderSession),
-	Rpc.fromTaggedRequest(RenameSession),
-	Rpc.fromTaggedRequest(ListBranches),
-	Rpc.fromTaggedRequest(ListWorktrees),
-	Rpc.fromTaggedRequest(InspectSessionWorktrees),
-	Rpc.fromTaggedRequest(RenameSessionBranch),
-	Rpc.fromTaggedRequest(MoveSessionWorkspace),
-	Rpc.fromTaggedRequest(RecreateSessionWorktree),
-	Rpc.fromTaggedRequest(ContinueSessionInMainFolder),
-	Rpc.fromTaggedRequest(DismissWorkspaceHint),
-	Rpc.fromTaggedRequest(OpenCodeUseWorktree),
-	Rpc.fromTaggedRequest(MarkSessionUnread),
-	Rpc.fromTaggedRequest(MarkSessionRead),
-	Rpc.fromTaggedRequest(MarkSessionSeen),
-	Rpc.fromTaggedRequest(SetSessionSettled),
-	Rpc.fromTaggedRequest(SetSessionPinned),
-	Rpc.fromTaggedRequest(SetSessionAutoSettle),
-	Rpc.fromTaggedRequest(SnoozeSession),
-	Rpc.fromTaggedRequest(UnsnoozeSession),
-	Rpc.fromTaggedRequest(DismissCutOff),
-	Rpc.fromTaggedRequest(ContinueSession),
-	Rpc.fromTaggedRequest(CancelContinuation),
-	Rpc.fromTaggedRequest(PreviewContinuation),
-	Rpc.fromTaggedRequest(QuotaForAccounts),
-	Rpc.fromTaggedRequest(GetContinuationHandoff),
-	Rpc.fromTaggedRequest(SwitchVariant),
-	Rpc.fromTaggedRequest(SwitchPermissionMode),
-	Rpc.fromTaggedRequest(GetFileTree),
-	Rpc.fromTaggedRequest(GetFileList),
-	Rpc.fromTaggedRequest(GetFileContent),
-	Rpc.fromTaggedRequest(GetToolDetails),
-	Rpc.fromTaggedRequest(GetSkillContent),
-	Rpc.fromTaggedRequest(GetSessionSkills),
-	Rpc.fromTaggedRequest(GetModels),
-	Rpc.fromTaggedRequest(SaveProject),
-	Rpc.fromTaggedRequest(RemoveProject),
-	Rpc.fromTaggedRequest(StartInstance),
-	Rpc.fromTaggedRequest(StopInstance),
-	Rpc.fromTaggedRequest(RemoveInstance),
-	Rpc.fromTaggedRequest(RenameInstance),
-	Rpc.fromTaggedRequest(AddInstance),
-	Rpc.fromTaggedRequest(UpdateInstance),
-	Rpc.fromTaggedRequest(SetDefault),
-	Rpc.fromTaggedRequest(GetAutoSettleSetting),
-	Rpc.fromTaggedRequest(SetAutoSettleSetting),
-	Rpc.fromTaggedRequest(GetWorktreeCleanupSetting),
-	Rpc.fromTaggedRequest(SetWorktreeCleanupSetting),
-	Rpc.fromTaggedRequest(CleanUpWorktreesNow),
-	Rpc.fromTaggedRequest(GetUsageLimitsSetting),
-	Rpc.fromTaggedRequest(SetUsageLimitsSetting),
-	Rpc.fromTaggedRequest(ScanNow),
-	Rpc.fromTaggedRequest(DetectProxy),
-	Rpc.fromTaggedRequest(ListPtys),
-	Rpc.fromTaggedRequest(CreatePty),
-	Rpc.fromTaggedRequest(ResizePty),
-	Rpc.fromTaggedRequest(ClosePty),
-	Rpc.fromTaggedRequest(PtyInput),
-	Rpc.fromTaggedRequest(ListDaemonSessions),
-	Rpc.fromTaggedRequest(CreateSession),
-	Rpc.fromTaggedRequest(ViewSession),
-	Rpc.fromTaggedRequest(PreWarmSession),
-	Rpc.fromTaggedRequest(DeleteSession),
-	Rpc.fromTaggedRequest(ForkSession),
-	Rpc.fromTaggedRequest(StartSideThread),
-	Rpc.fromTaggedRequest(RespondPermission),
-	Rpc.fromTaggedRequest(AnswerQuestion),
-	Rpc.fromTaggedRequest(RejectQuestion),
-	Rpc.fromTaggedRequest(LoadMoreHistory),
-	Rpc.fromTaggedRequest(RewindSession),
-	Rpc.fromTaggedRequest(UndoRewind),
-	Rpc.fromTaggedRequest(SubmitInput),
-	Rpc.fromTaggedRequest(CancelInput),
-	Rpc.fromTaggedRequest(SendInputNow),
-	Rpc.fromTaggedRequest(SyncInputDraft),
-	Rpc.fromTaggedRequest(CancelSession),
-	Rpc.fromTaggedRequest(StopBackgroundTask),
-	Rpc.fromTaggedRequest(SetLogLevel),
+	...wsRpcRequests.map((entry) => ("rpc" in entry ? entry.rpc : entry)),
 );
 
 export type WsRpcGroup = typeof WsRpcGroup;

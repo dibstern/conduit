@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { describe, expect, it } from "vitest";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import {
@@ -25,12 +25,13 @@ describe("merged Effect projection", () => {
 				VALUES ('session', 'claude', 1, 1)`;
 				const projector = makeSessionProjector();
 				const read: StoredEvent = {
-					...canonicalEvent(
-						"session.read",
-						"session",
-						{ sessionId: "session" },
-						{ provider: "claude", createdAt: 100 },
-					),
+					eventId: "retired-read",
+					sessionId: "session",
+					type: "session.read",
+					data: { sessionId: "session" },
+					metadata: {},
+					provider: "claude",
+					createdAt: 100,
 					sequence: 1,
 					projectId: "test-project",
 					streamVersion: 1,
@@ -40,12 +41,13 @@ describe("merged Effect projection", () => {
 					yield* sql`SELECT version FROM sessions WHERE id = 'session'`,
 				).toEqual([{ version: 0 }]);
 				const unread: StoredEvent = {
-					...canonicalEvent(
-						"session.unread",
-						"session",
-						{ sessionId: "session" },
-						{ provider: "claude", createdAt: 101 },
-					),
+					eventId: "retired-unread",
+					sessionId: "session",
+					type: "session.unread",
+					data: { sessionId: "session" },
+					metadata: {},
+					provider: "claude",
+					createdAt: 101,
 					sequence: 2,
 					projectId: "test-project",
 					streamVersion: 2,
@@ -75,7 +77,7 @@ describe("merged Effect projection", () => {
 						version: 43,
 					},
 				]);
-			}).pipe(Effect.provide(database)),
+			}).pipe(Effect.provide(database, { local: true })),
 		);
 	});
 
@@ -108,7 +110,7 @@ describe("merged Effect projection", () => {
 				expect(
 					yield* sql`SELECT id, version FROM messages WHERE id = 'compaction-7'`,
 				).toEqual([{ id: "compaction-7", version: 42 }]);
-			}).pipe(Effect.provide(database)),
+			}).pipe(Effect.provide(database, { local: true })),
 		);
 	});
 
@@ -144,7 +146,7 @@ describe("merged Effect projection", () => {
 				expect(
 					yield* sql`SELECT woken_reason, version FROM sessions WHERE id = 'root'`,
 				).toEqual([{ woken_reason: "approval", version: 43 }]);
-			}).pipe(Effect.provide(database)),
+			}).pipe(Effect.provide(database, { local: true })),
 		);
 	});
 
@@ -181,7 +183,7 @@ describe("merged Effect projection", () => {
 				expect(
 					yield* sql`SELECT cost, tokens_in, tokens_out FROM turns WHERE id = 'turn'`,
 				).toEqual([{ cost: 3.5, tokens_in: 14, tokens_out: 2 }]);
-			}).pipe(Effect.provide(database)),
+			}).pipe(Effect.provide(database, { local: true })),
 		);
 	});
 });

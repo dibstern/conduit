@@ -8,6 +8,25 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock(
+	"../../../src/lib/frontend/stores/router.svelte.js",
+	async (importOriginal) => {
+		const router =
+			await importOriginal<
+				typeof import("../../../src/lib/frontend/stores/router.svelte.js")
+			>();
+		return {
+			...router,
+			navigate: (path: string) => {
+				router.routerState.path = path;
+			},
+			replaceRoute: (path: string) => {
+				router.routerState.path = path;
+			},
+		};
+	},
+);
+
 // Mock DOMPurify (browser-only) before importing the store
 vi.mock("dompurify", () => ({
 	default: { sanitize: (html: string) => html },
@@ -22,14 +41,14 @@ import {
 	type SessionActivity,
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 let ta: SessionActivity;
 let tm: SessionMessages;
 
 beforeEach(() => {
-	sessionState.currentId = "test-session";
+	openSessionForSetup("test-session", "project-a");
 	clearMessages();
 	ta = testActivity();
 	tm = testMessages();

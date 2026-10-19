@@ -145,7 +145,7 @@ async function waitForChatReady(page: import("@playwright/test").Page) {
 
 test.describe("Roots-only sidebar", () => {
 	test("hides subagent sessions by default", async ({ page, baseURL }) => {
-		await mockWsRpc(page, { handlers: {} });
+		await mockWsRpc(page);
 		await mockRelayWebSocket(page, {
 			initMessages,
 			responses: new Map(),
@@ -196,7 +196,7 @@ test.describe("Subagent navigation", () => {
 
 		let control!: Awaited<ReturnType<typeof mockRelayWebSocket>>;
 		const rpc = await mockWsRpc(page, {
-			handlers: {
+			stubs: {
 				ViewSession: (params) => {
 					if (params["sessionId"] === snapshot.childSession.id) {
 						void control.sendMessages(childSwitchMessages);
@@ -310,7 +310,7 @@ test.describe("Subagent navigation", () => {
 
 		let control!: Awaited<ReturnType<typeof mockRelayWebSocket>>;
 		const rpc = await mockWsRpc(page, {
-			handlers: {
+			stubs: {
 				ViewSession: (params) => {
 					if (params["sessionId"] === snapshot.parentSession.id) {
 						void control.sendMessages(parentSwitchMessages);

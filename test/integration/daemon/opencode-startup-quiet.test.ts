@@ -57,8 +57,9 @@ describe("Managed OpenCode starts on first use", () => {
 		sessionId?: string,
 	) => {
 		const scope = {
-			projectSlug: "process-test",
-			...(sessionId === undefined ? {} : { sessionId }),
+			...(sessionId === undefined
+				? { projectSlug: "process-test" }
+				: { sessionId }),
 		};
 		return Effect.runPromise(
 			Effect.all(
@@ -66,7 +67,7 @@ describe("Managed OpenCode starts on first use", () => {
 					models: browser.rpc.GetModels(scope),
 					agents: browser.rpc.GetAgents(scope),
 					commands: browser.rpc.GetCommands(scope),
-					files: browser.rpc.GetFileTree({ projectSlug: scope.projectSlug }),
+					files: browser.rpc.GetFileTree({ projectSlug: "process-test" }),
 				},
 				{ concurrency: 4 },
 			),
@@ -74,7 +75,7 @@ describe("Managed OpenCode starts on first use", () => {
 	};
 
 	function historyComplete(fixture: ProcessHarness, sessionId: string) {
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			return (
 				db
@@ -87,7 +88,7 @@ describe("Managed OpenCode starts on first use", () => {
 	}
 
 	function persistedStatus(fixture: ProcessHarness, sessionId: string) {
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			const row = db
 				.prepare("SELECT status FROM sessions WHERE id = ?")
@@ -230,7 +231,6 @@ describe("Managed OpenCode starts on first use", () => {
 		await browser.stopInstance(instanceId);
 		await Effect.runPromise(
 			browser.rpc.ReloadProviderSession({
-				projectSlug: "process-test",
 				sessionId,
 				commandId: randomUUID(),
 			}),
@@ -434,8 +434,7 @@ describe("Managed OpenCode starts on first use", () => {
 			// This fixture emits session status updates without a stored turn terminal.
 			const cursor = browser.frames.length;
 			const accepted = await Effect.runPromise(
-				browser.rpc.input.submit({
-					projectSlug: "process-test",
+				browser.rpc["input.submit"]({
 					sessionId,
 					text: "hello",
 					inputId: randomUUID(),
@@ -443,7 +442,7 @@ describe("Managed OpenCode starts on first use", () => {
 					delivery: "queue",
 				}),
 			);
-			expect(accepted).toEqual({ ok: true, sessionId });
+			expect(accepted).toEqual({ ok: true, sessionId, handedOff: true });
 			const busy = await browser.waitFor(
 				(message) =>
 					message["type"] === "session_row" &&

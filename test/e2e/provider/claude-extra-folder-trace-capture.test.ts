@@ -7,7 +7,6 @@
  * successful SDK result and a reply containing the marker. Review before committing.
  */
 import {
-	copyFileSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -15,11 +14,11 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { decodeClaudeSDKMessage } from "../../../src/lib/contracts/providers/claude-agent-sdk.js";
-import { SaveProject } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -32,6 +31,7 @@ describe.skipIf(!RUN_EXPENSIVE)(
 	() => {
 		it(
 			"captures a Read tool turn from a project's extra folder",
+			{ timeout: 150_000 },
 			async () => {
 				const fixturePath = join(
 					import.meta.dirname,
@@ -62,10 +62,11 @@ describe.skipIf(!RUN_EXPENSIVE)(
 					await harness.restart();
 					const saved = await sendRpcRequest(
 						join(harness.configDir, "relay.sock"),
-						new SaveProject({
+						{
+							_tag: "SaveProject",
 							slug: "process-test",
 							folders: [harness.projectDir, extra],
-						}),
+						},
 					);
 					evidence["save"] = saved;
 					expect(saved.warnings).toEqual([]);
@@ -108,7 +109,13 @@ describe.skipIf(!RUN_EXPENSIVE)(
 								),
 						),
 					).toBe(true);
-					copyFileSync(captured, fixturePath);
+					writeFileSync(
+						fixturePath,
+						readFileSync(captured, "utf8").replaceAll(
+							userInfo().homedir,
+							"/home/test",
+						),
+					);
 					evidence["captured"] = true;
 				} finally {
 					try {
@@ -125,7 +132,6 @@ describe.skipIf(!RUN_EXPENSIVE)(
 					}
 				}
 			},
-			{ timeout: 150_000 },
 		);
 	},
 );

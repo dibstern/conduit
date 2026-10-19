@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { describe, expect, it } from "vitest";
 import {
 	InMemoryProviderSessionBindingReadModel,
@@ -21,6 +21,38 @@ function revisionEntries(
 }
 
 describe("provider binding revisions", () => {
+	it("lists durable and transient bindings only in the selected project", async () => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT)`;
+				yield* sql`CREATE TABLE session_providers (
+				id TEXT PRIMARY KEY, session_id TEXT, provider TEXT, status TEXT, activated_at INTEGER)`;
+				yield* sql`INSERT INTO sessions VALUES ('a', 'project-a'), ('b', 'project-b')`;
+				yield* sql`INSERT INTO session_providers VALUES
+				('a-binding', 'a', 'opencode-a', 'active', 1),
+				('b-binding', 'b', 'opencode-b', 'active', 1)`;
+				const model = new SqliteProviderSessionBindingReadModel(sql);
+				model.bindSession("b", "replacement-b");
+				expect(
+					yield* model.listBoundSessions({ projectIds: ["project-a"] }),
+				).toEqual([{ sessionId: "a", providerId: "opencode-a" }]);
+				expect(
+					yield* model.listBoundSessions({ projectIds: ["project-b"] }),
+				).toEqual([{ sessionId: "b", providerId: "replacement-b" }]);
+				expect(
+					yield* model.listBoundSessions({
+						projectIds: ["project-a", "project-b"],
+					}),
+				).toEqual([
+					{ sessionId: "a", providerId: "opencode-a" },
+					{ sessionId: "b", providerId: "replacement-b" },
+				]);
+			}).pipe(
+				Effect.provide(EffectSqliteClient.layer({ filename: ":memory:" })),
+			),
+		);
+	});
 	it("preserves a same-provider replacement after its predecessor ends", async () => {
 		const model = new InMemoryProviderSessionBindingReadModel();
 		model.bindSession("session", "opencode");
@@ -55,7 +87,7 @@ describe("provider binding revisions", () => {
 			filename: join(dir, "events.db"),
 		}).pipe(
 			Layer.merge(
-				Layer.scopedDiscard(
+				Layer.effectDiscard(
 					Effect.addFinalizer(() =>
 						Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 					),
@@ -86,7 +118,7 @@ describe("provider binding revisions", () => {
 			filename: join(dir, "events.db"),
 		}).pipe(
 			Layer.merge(
-				Layer.scopedDiscard(
+				Layer.effectDiscard(
 					Effect.addFinalizer(() =>
 						Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 					),
@@ -117,7 +149,7 @@ describe("provider binding revisions", () => {
 			filename: join(dir, "events.db"),
 		}).pipe(
 			Layer.merge(
-				Layer.scopedDiscard(
+				Layer.effectDiscard(
 					Effect.addFinalizer(() =>
 						Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 					),
@@ -155,7 +187,11 @@ describe("provider binding revisions", () => {
 		model.bindSession("live-1", "opencode");
 		model.bindSession("live-2", "claude");
 		expect([...revisionEntries(model).keys()]).toEqual(["live-1", "live-2"]);
-		expect(await Effect.runPromise(model.listBoundSessions())).toEqual([
+		expect(
+			await Effect.runPromise(
+				model.listBoundSessions({ projectIds: ["test-project"] }),
+			),
+		).toEqual([
 			{ sessionId: "live-1", providerId: "opencode" },
 			{ sessionId: "live-2", providerId: "claude" },
 		]);
@@ -174,7 +210,11 @@ describe("provider binding revisions", () => {
 			0,
 		);
 		expect(revisionEntries(model).size).toBe(0);
-		expect(await Effect.runPromise(model.listBoundSessions())).toEqual([]);
+		expect(
+			await Effect.runPromise(
+				model.listBoundSessions({ projectIds: ["test-project"] }),
+			),
+		).toEqual([]);
 	});
 
 	it("SQLite revisions are released during churn and after successful CAS", async () => {
@@ -183,7 +223,7 @@ describe("provider binding revisions", () => {
 			filename: join(dir, "events.db"),
 		}).pipe(
 			Layer.merge(
-				Layer.scopedDiscard(
+				Layer.effectDiscard(
 					Effect.addFinalizer(() =>
 						Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 					),
@@ -193,6 +233,8 @@ describe("provider binding revisions", () => {
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
+				yield* sql`CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT)`;
+				yield* sql`INSERT INTO sessions VALUES ('live-1', 'test-project'), ('live-2', 'test-project')`;
 				yield* sql`CREATE TABLE session_providers (
 				id TEXT PRIMARY KEY, session_id TEXT NOT NULL, provider TEXT NOT NULL,
 				status TEXT NOT NULL, activated_at INTEGER NOT NULL)`;
@@ -209,7 +251,9 @@ describe("provider binding revisions", () => {
 					"live-1",
 					"live-2",
 				]);
-				expect(yield* model.listBoundSessions()).toEqual([
+				expect(
+					yield* model.listBoundSessions({ projectIds: ["test-project"] }),
+				).toEqual([
 					{ sessionId: "live-1", providerId: "opencode" },
 					{ sessionId: "live-2", providerId: "claude" },
 				]);

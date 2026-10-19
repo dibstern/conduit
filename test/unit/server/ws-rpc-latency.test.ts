@@ -1,21 +1,27 @@
 // Failure modes: concurrent requests share counters, routed streams lose SQL
 // attribution, stream lifetime is timed, queued time is omitted, or disabling
 // the warning still changes request execution.
-import { Rpc, RpcGroup, type RpcMessage, RpcServer } from "@effect/rpc";
-import { SqlClient, Statement } from "@effect/sql";
+
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import {
 	Deferred,
 	Effect,
 	Fiber,
-	HashMap,
 	Logger,
-	Mailbox,
 	Option,
 	Queue,
+	References,
 	Schema,
 	Stream,
 } from "effect";
+import {
+	Rpc,
+	RpcGroup,
+	type RpcMessage,
+	RpcSerialization,
+	RpcServer,
+} from "effect/rpc";
+import { SqlClient, Statement } from "effect/sql";
 import { describe, expect, it } from "vitest";
 import { withSlowRpcLogging } from "../../../src/lib/server/ws-rpc-handler.js";
 
@@ -50,17 +56,17 @@ const connect = (
 		const warnings = yield* Queue.unbounded<Record<string, unknown>>();
 		const records: Record<string, unknown>[] = [];
 		const ready = yield* Deferred.make<void>();
-		const disconnects = yield* Mailbox.make<number>();
-		const logger = Logger.make(({ message, annotations }) => {
+		const disconnects = yield* Queue.make<number>();
+		const logger = Logger.make(({ message, fiber }) => {
 			if (!Array.isArray(message) || message[0] !== "slow rpc") return;
-			const record = Object.fromEntries(HashMap.toEntries(annotations));
+			const record = { ...fiber.getRef(References.CurrentLogAnnotations) };
 			records.push(record);
-			warnings.unsafeOffer(record);
+			Queue.offerUnsafe(warnings, record);
 		});
 		const protocol = RpcServer.Protocol.of({
 			run: (handle) =>
 				Deferred.succeed(ready, undefined).pipe(
-					Effect.zipRight(
+					Effect.andThen(
 						Effect.forever(
 							Queue.take(requests).pipe(
 								Effect.flatMap((request) => handle(1, request)),
@@ -77,9 +83,12 @@ const connect = (
 			supportsAck: false,
 			supportsTransferables: false,
 			supportsSpanPropagation: false,
+			supportsNotifications: false,
+			codecFor: RpcSerialization.json.codecFor,
 		});
 		yield* RpcServer.make(group, {
 			concurrency: options.concurrency ?? 32,
+			spanPrefix: "RpcServer",
 			disableFatalDefects: true,
 		}).pipe(
 			Effect.provideService(
@@ -92,7 +101,7 @@ const connect = (
 					SubscribeProbe: () => Rpc.fork(options.stream ?? Stream.never),
 				}),
 			),
-			Effect.provide(Logger.replace(Logger.defaultLogger, logger)),
+			Effect.provide(Logger.layer([logger])),
 			Effect.forkScoped,
 		);
 		yield* Deferred.await(ready);
@@ -126,7 +135,7 @@ describe("slow browser RPC warnings", () => {
 							if (++active === 2) yield* Deferred.succeed(started, undefined);
 							yield* Deferred.await(started);
 							yield* Effect.sleep("5 millis");
-							const child = yield* Effect.fork(
+							const child = yield* Effect.forkChild(
 								Effect.forEach(
 									Array.from({ length: payload.statements }),
 									() => sql`SELECT 1`.pipe(Effect.orDie),
@@ -167,7 +176,7 @@ describe("slow browser RPC warnings", () => {
 					expect(transformed).toBe(8);
 				}),
 			).pipe(
-				Statement.withTransformer((statement) =>
+				Effect.provideService(Statement.CurrentTransformer, (statement) =>
 					Effect.sync(() => {
 						transformed++;
 						return statement;
@@ -187,7 +196,7 @@ describe("slow browser RPC warnings", () => {
 					const stream = Stream.fromEffect(
 						sql`SELECT 1`.pipe(
 							Effect.orDie,
-							Effect.zipRight(Effect.sleep("5 millis")),
+							Effect.andThen(Effect.sleep("5 millis")),
 							Effect.as(1),
 						),
 					).pipe(Stream.provideContext(context), Stream.concat(Stream.never));
@@ -217,7 +226,7 @@ describe("slow browser RPC warnings", () => {
 					expect(yield* Queue.take(server.responses)).toMatchObject({
 						_tag: "Exit",
 					});
-					yield* Effect.yieldNow();
+					yield* Effect.yieldNow;
 					expect(server.records).toHaveLength(1);
 				}),
 			).pipe(Effect.provide(SqliteClient.layer({ filename: ":memory:" }))),
@@ -230,7 +239,7 @@ describe("slow browser RPC warnings", () => {
 				Effect.gen(function* () {
 					const server = yield* connect((payload) =>
 						Effect.sleep("5 millis").pipe(
-							Effect.zipRight(
+							Effect.andThen(
 								payload.sessionId === "failure"
 									? Effect.fail("expected rejection")
 									: Effect.interrupt,
@@ -263,7 +272,7 @@ describe("slow browser RPC warnings", () => {
 					const server = yield* connect(() => Effect.void, {
 						stream: Stream.fromEffect(
 							Effect.sleep("5 millis").pipe(
-								Effect.zipRight(Effect.fail("unavailable")),
+								Effect.andThen(Effect.fail("unavailable")),
 							),
 						),
 					});
@@ -322,7 +331,7 @@ describe("slow browser RPC warnings", () => {
 						_tag: "Exit",
 						exit: { _tag: "Success" },
 					});
-					yield* Effect.yieldNow();
+					yield* Effect.yieldNow;
 					expect(server.records).toEqual([]);
 				}),
 			),

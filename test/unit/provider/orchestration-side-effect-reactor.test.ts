@@ -1,14 +1,7 @@
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
-import {
-	Deferred,
-	Duration,
-	Effect,
-	Fiber,
-	Layer,
-	Option,
-	TestClock,
-} from "effect";
+import { Deferred, Duration, Effect, Fiber, Layer, Option } from "effect";
+import { SqlClient } from "effect/sql";
+import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
@@ -63,7 +56,6 @@ function makeProvider(
 ): ProviderInstance {
 	return {
 		providerId: "claude",
-		steering: false,
 		discoverEffect: () => Effect.succeed(emptyCapabilities),
 		sendTurnEffect,
 		interruptTurnEffect: () => Effect.void,
@@ -117,6 +109,7 @@ describe("ProviderSideEffectReactor", () => {
 				);
 				const resolveAccount = vi.spyOn(accountDirectory, "resolve");
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry([makeProvider(sendTurn)]),
 					ingestion: { ingest: () => Effect.succeed(0) },
@@ -159,6 +152,7 @@ describe("ProviderSideEffectReactor", () => {
 			);
 			yield* seedSendTurnOutbox(sql);
 			const reactor = new ProviderSideEffectReactor({
+				projectId: "test-project",
 				sql,
 				registry: new ProviderRegistry([
 					{
@@ -228,6 +222,7 @@ describe("ProviderSideEffectReactor", () => {
 				);
 				yield* seedSendTurnOutbox(sql, { providerId: "work-claude" });
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry([makeProvider(sendTurn)]),
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -260,9 +255,9 @@ describe("ProviderSideEffectReactor", () => {
 				const events = yield* EventStoreEffectTag;
 				const ingestion = yield* ProviderRuntimeIngestionTag;
 				yield* sql`
-					INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-					VALUES ('session-1', 'work-claude', 'Work', 'idle', 1, 1),
-						('session-2', 'personal', 'Other', 'idle', 1, 1)`;
+					INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+					VALUES ('session-1', 'test-project', 'work-claude', 'Work', 'idle', 1, 1),
+						('session-2', 'test-project', 'personal', 'Other', 'idle', 1, 1)`;
 				yield* events.appendBatch([
 					canonicalEvent("session.created", "session-2", {
 						sessionId: "session-2",
@@ -297,6 +292,7 @@ describe("ProviderSideEffectReactor", () => {
 					Effect.succeed(completedTurn),
 				);
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry([makeProvider(sendTurn)]),
 					ingestion,
@@ -375,6 +371,7 @@ describe("ProviderSideEffectReactor", () => {
 			);
 			yield* seedSendTurnOutbox(sql);
 			const reactor = new ProviderSideEffectReactor({
+				projectId: "test-project",
 				sql,
 				registry: new ProviderRegistry([makeProvider(sendTurn)]),
 				ingestion: { ingest },
@@ -438,6 +435,7 @@ describe("ProviderSideEffectReactor", () => {
 			const ingest = vi.fn((_event: ProviderRuntimeEvent) => Effect.succeed(1));
 			yield* seedSendTurnOutbox(sql);
 			const reactor = new ProviderSideEffectReactor({
+				projectId: "test-project",
 				sql,
 				registry: new ProviderRegistry([makeProvider(sendTurn)]),
 				ingestion: { ingest },
@@ -476,6 +474,7 @@ describe("ProviderSideEffectReactor", () => {
 			);
 			yield* seedSendTurnOutbox(sql);
 			const reactor = new ProviderSideEffectReactor({
+				projectId: "test-project",
 				sql,
 				registry: new ProviderRegistry([makeProvider(sendTurn)]),
 				ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -567,6 +566,7 @@ describe("ProviderSideEffectReactor", () => {
 					["cmd-1"],
 				);
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry([makeProvider(sendTurn)]),
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -576,7 +576,7 @@ describe("ProviderSideEffectReactor", () => {
 				const row = {
 					request_sequence: 10,
 					command_id: "cmd-1",
-					project_key: "project-1",
+					project_key: "test-project",
 					session_id: "session-1",
 					provider_id: "claude",
 					effect_type: "send_turn",
@@ -617,6 +617,7 @@ describe("ProviderSideEffectReactor", () => {
 					[10],
 				);
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry(),
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -624,12 +625,24 @@ describe("ProviderSideEffectReactor", () => {
 					outcomePollTimeout: "500 millis",
 				});
 
-				const loser = yield* Effect.fork(reactor.runCommand("cmd-1"));
-				yield* Effect.yieldNow();
-				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+				const loser = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
+				yield* Effect.yieldNow;
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(loser.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 
 				yield* TestClock.adjust("100 millis");
-				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(loser.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 
 				yield* sql.unsafe(
 					"UPDATE command_receipts SET status = 'side_effect_completed' WHERE command_id = ?",
@@ -656,6 +669,7 @@ describe("ProviderSideEffectReactor", () => {
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry(),
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -674,9 +688,15 @@ describe("ProviderSideEffectReactor", () => {
 						[requestSequence],
 					);
 
-					const loser = yield* Effect.fork(reactor.runCommand(commandId));
-					yield* Effect.yieldNow();
-					expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+					const loser = yield* Effect.forkChild(reactor.runCommand(commandId));
+					yield* Effect.yieldNow;
+					expect(
+						Option.isNone(
+							yield* Effect.sync(() =>
+								Option.fromUndefinedOr(loser.pollUnsafe()),
+							),
+						),
+					).toBe(true);
 
 					yield* sql.withTransaction(
 						Effect.all([
@@ -715,6 +735,7 @@ describe("ProviderSideEffectReactor", () => {
 					[10],
 				);
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry(),
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -730,10 +751,16 @@ describe("ProviderSideEffectReactor", () => {
 					errorCode: null,
 				});
 
-				const loser = yield* Effect.fork(reactor.runCommand("cmd-1"));
-				yield* Effect.yieldNow();
+				const loser = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
+				yield* Effect.yieldNow;
 				yield* TestClock.adjust("200 millis");
-				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(loser.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 
 				yield* TestClock.adjust("100 millis");
 				const error = yield* Effect.flip(Fiber.join(loser));
@@ -758,6 +785,7 @@ describe("ProviderSideEffectReactor", () => {
 					[10],
 				);
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry(),
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -765,9 +793,15 @@ describe("ProviderSideEffectReactor", () => {
 					outcomePollTimeout: "100 millis",
 				});
 
-				const loser = yield* Effect.fork(reactor.runCommand("cmd-1"));
-				yield* Effect.yieldNow();
-				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+				const loser = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
+				yield* Effect.yieldNow;
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(loser.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 
 				yield* TestClock.adjust("100 millis");
 				const error = yield* Effect.flip(Fiber.join(loser));
@@ -798,6 +832,7 @@ describe("ProviderSideEffectReactor", () => {
 				yield* seedSendTurnOutbox(sql);
 				const registry = new ProviderRegistry([makeProvider(sendTurn)]);
 				const winnerReactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry,
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -805,6 +840,7 @@ describe("ProviderSideEffectReactor", () => {
 					outcomePollTimeout: "500 millis",
 				});
 				const loserReactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry,
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -812,15 +848,29 @@ describe("ProviderSideEffectReactor", () => {
 					outcomePollTimeout: "500 millis",
 				});
 
-				const winner = yield* Effect.fork(winnerReactor.runCommand("cmd-1"));
+				const winner = yield* Effect.forkChild(
+					winnerReactor.runCommand("cmd-1"),
+				);
 				yield* Deferred.await(winnerStarted);
-				const loser = yield* Effect.fork(loserReactor.runCommand("cmd-1"));
-				yield* Effect.yieldNow();
+				const loser = yield* Effect.forkChild(loserReactor.runCommand("cmd-1"));
+				yield* Effect.yieldNow;
 
-				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(loser.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 				yield* Deferred.succeed(releaseWinner, undefined);
 				expect((yield* Fiber.join(winner)).status).toBe("completed");
-				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(loser.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 
 				yield* TestClock.adjust("100 millis");
 				expect((yield* Fiber.join(loser)).status).toBe("completed");
@@ -837,6 +887,7 @@ describe("ProviderSideEffectReactor", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* seedSendTurnOutbox(sql);
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry(),
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -872,6 +923,7 @@ describe("ProviderSideEffectReactor", () => {
 			);
 			yield* seedSendTurnOutbox(sql, { payloadJson: "{not json" });
 			const reactor = new ProviderSideEffectReactor({
+				projectId: "test-project",
 				sql,
 				registry: new ProviderRegistry([makeProvider(sendTurn)]),
 				ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -907,6 +959,7 @@ describe("ProviderSideEffectReactor", () => {
 					payloadJson: JSON.stringify({ sessionId: "session-1" }),
 				});
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry([makeProvider(sendTurn)]),
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -959,6 +1012,7 @@ describe("ProviderSideEffectReactor", () => {
 				);
 				yield* seedSendTurnOutbox(sql);
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry([makeProvider(sendTurn)]),
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -1005,7 +1059,7 @@ function seedSendTurnOutbox(
 				"side_effect_requested",
 				1000,
 				"send_turn",
-				"project-1",
+				"test-project",
 				"sha256:abc",
 				1,
 				requestSequence,
@@ -1020,7 +1074,7 @@ function seedSendTurnOutbox(
 			[
 				requestSequence,
 				commandId,
-				"project-1",
+				"test-project",
 				"session-1",
 				options.providerId ?? "claude",
 				"send_turn",

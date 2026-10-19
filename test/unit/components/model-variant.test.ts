@@ -6,31 +6,39 @@ import {
 	clearDiscoveryState,
 	discoveryState,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import type { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 
-interface SwitchVariantInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly variant: string;
-}
+type SwitchVariantInput = Parameters<typeof rpc<"SwitchVariant">>[1];
 
 const switchVariantRpcSpy = vi.hoisted(() =>
-	vi.fn(async (input: SwitchVariantInput) => ({
-		projectSlug: input.projectSlug,
-		variant: input.variant,
-		variants: ["low", "medium", "high", "max"],
-	})),
+	vi.fn((input: SwitchVariantInput) =>
+		Promise.resolve({
+			projectSlug: "project-a",
+			variant: input.variant,
+			variants: ["low", "medium", "high", "max"],
+		}),
+	),
 );
 const emptyComponent = vi.hoisted(
 	() => async () => import("../../helpers/Empty.svelte"),
 );
 
 vi.mock("../../../src/lib/frontend/components/ui/Icon.svelte", emptyComponent);
-vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
-	getCurrentSlug: () => "project-a",
-}));
+vi.mock(
+	"../../../src/lib/frontend/stores/router.svelte.js",
+	async (importOriginal) => ({
+		...(await importOriginal<
+			typeof import("../../../src/lib/frontend/stores/router.svelte.js")
+		>()),
+		getCurrentSlug: () => "project-a",
+	}),
+);
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	switchVariantRpc: (input: SwitchVariantInput) => switchVariantRpcSpy(input),
+	rpc: (tag: string, input: SwitchVariantInput) =>
+		tag === "SwitchVariant"
+			? switchVariantRpcSpy(input)
+			: Promise.reject(new Error("Catalog not configured in this fixture")),
 }));
 
 describe("ModelVariant", () => {
@@ -48,12 +56,12 @@ describe("ModelVariant", () => {
 			},
 			"session-1",
 		);
-		sessionState.currentId = "session-1";
+		openSessionForSetup("session-1", "project-a");
 	});
 
 	afterEach(() => {
 		cleanup();
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 	});
 
 	it("switches variants through RPC for the active session", async () => {
@@ -64,7 +72,6 @@ describe("ModelVariant", () => {
 
 		await waitFor(() => {
 			expect(switchVariantRpcSpy).toHaveBeenCalledWith({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				variant: "high",
 			});

@@ -1,9 +1,8 @@
 import { Context, Data, Effect, Layer } from "effect";
-import {
+import type {
 	ProjectSaveRejected,
-	type SaveProjectInput,
+	SaveProjectInput,
 } from "../../../contracts/ws-rpc.js";
-import { withCachedProjectGit } from "../../../git/session-git.js";
 import type { FolderIssue } from "../../../project-folders.js";
 import type { ProjectInfo } from "../../../shared-types.js";
 import { ConfigTag } from "./services.js";
@@ -53,14 +52,10 @@ export interface ProjectManagementService {
 	>;
 }
 
-export class ProjectManagementServiceTag extends Context.Tag(
-	"ProjectManagementService",
-)<ProjectManagementServiceTag, ProjectManagementService>() {}
-
-const toError =
-	(operation: ProjectOperation) =>
-	(cause: unknown): ProjectManagementServiceError =>
-		new ProjectManagementServiceError({ operation, cause });
+export class ProjectManagementServiceTag extends Context.Service<
+	ProjectManagementServiceTag,
+	ProjectManagementService
+>()("ProjectManagementService") {}
 
 export const ProjectManagementServiceLive: Layer.Layer<
 	ProjectManagementServiceTag,
@@ -70,64 +65,23 @@ export const ProjectManagementServiceLive: Layer.Layer<
 	ProjectManagementServiceTag,
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
-
-		const listConfigProjects = (): Effect.Effect<
-			ReadonlyArray<ProjectInfo> | undefined,
-			ProjectManagementServiceError
-		> => {
-			const getProjects = config.getProjects;
-			if (getProjects == null) return Effect.succeed(undefined);
-			return Effect.tryPromise({
-				try: () => Promise.resolve(getProjects()),
-				catch: toError("list"),
-			}).pipe(Effect.map((projects) => withCachedProjectGit(projects)));
-		};
-
 		return {
 			currentSlug: () => Effect.succeed(config.slug),
-			list: () =>
-				listConfigProjects().pipe(Effect.map((projects) => projects ?? [])),
-			save: (input) =>
-				Effect.gen(function* () {
-					const saveProject = config.saveProject;
-					if (saveProject == null) {
-						return yield* new ProjectManagementNotSupported({
-							operation: "save",
-							message: "Saving projects is not supported in this mode",
-						});
-					}
-					const result = yield* Effect.tryPromise({
-						try: () => saveProject(input),
-						catch: (cause) =>
-							cause instanceof ProjectSaveRejected
-								? cause
-								: toError("save")(cause),
-					});
-					const { project } = result;
-					const projects =
-						(yield* listConfigProjects()) ?? withCachedProjectGit([project]);
-					return {
-						kind: result.kind,
-						project,
-						projects,
-						warnings: result.warnings,
-					};
-				}),
-			remove: (slug) =>
-				Effect.gen(function* () {
-					const removeProject = config.removeProject;
-					if (removeProject == null) {
-						return yield* new ProjectManagementNotSupported({
-							operation: "remove",
-							message: "Removing projects is not supported in this mode",
-						});
-					}
-					yield* Effect.tryPromise({
-						try: () => Promise.resolve(removeProject(slug)),
-						catch: toError("remove"),
-					});
-					return (yield* listConfigProjects()) ?? [];
-				}),
+			list: () => Effect.succeed([]),
+			save: () =>
+				Effect.fail(
+					new ProjectManagementNotSupported({
+						operation: "save",
+						message: "Saving projects is not supported in this mode",
+					}),
+				),
+			remove: () =>
+				Effect.fail(
+					new ProjectManagementNotSupported({
+						operation: "remove",
+						message: "Removing projects is not supported in this mode",
+					}),
+				),
 		};
 	}),
 );

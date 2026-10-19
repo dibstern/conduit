@@ -8,13 +8,11 @@ import {
 } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcServer } from "@effect/rpc";
-import { Deferred, Effect, Mailbox, Option, Ref } from "effect";
+import { Deferred, Effect, Layer, Option, Queue, Ref } from "effect";
+import { RpcSerialization, RpcServer } from "effect/rpc";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-	GetProjects,
-	RestartWithConfig,
-	Shutdown,
+	type GetProjects,
 	WsRpcError,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -28,6 +26,7 @@ import { ShutdownSignalTag } from "../../../src/lib/domain/daemon/Layers/daemon-
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { DaemonConfigRefTag } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { DaemonStateTag } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
+import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import {
 	type DaemonRpcHandlers,
 	makeRoutedWsRpcServerLayer,
@@ -43,7 +42,7 @@ describe("committed daemon shutdown replies", () => {
 						const signal = yield* ShutdownSignalTag;
 						const handlers = yield* DaemonWsRpcHandlersTag;
 						const replyAttempted = yield* Deferred.make<void>();
-						const disconnects = yield* Mailbox.make<number>();
+						const disconnects = yield* Queue.make<number>();
 						const protocol = RpcServer.Protocol.of({
 							run: (handle) =>
 								handle(1, {
@@ -52,7 +51,7 @@ describe("committed daemon shutdown replies", () => {
 									tag: command,
 									payload: { _tag: command },
 									headers: [],
-								}).pipe(Effect.zipRight(Effect.never)),
+								}).pipe(Effect.andThen(Effect.never)),
 							disconnects,
 							send: (_clientId, response) =>
 								Effect.gen(function* () {
@@ -69,6 +68,8 @@ describe("committed daemon shutdown replies", () => {
 							supportsAck: false,
 							supportsTransferables: false,
 							supportsSpanPropagation: false,
+							supportsNotifications: false,
+							codecFor: RpcSerialization.json.codecFor,
 						});
 						yield* RpcServer.make(WsRpcGroup).pipe(
 							Effect.provideService(
@@ -129,9 +130,13 @@ describe("daemon Unix RPC transport", () => {
 
 	it("rejects when the daemon socket never becomes ready", async () => {
 		await expect(
-			sendRpcRequest(join(directory, "missing.sock"), new GetProjects({}), {
-				startupRetries: 1,
-			}),
+			sendRpcRequest(
+				join(directory, "missing.sock"),
+				{ _tag: "GetProjects" },
+				{
+					startupRetries: 1,
+				},
+			),
 		).rejects.toThrow();
 	});
 
@@ -144,11 +149,13 @@ describe("daemon Unix RPC transport", () => {
 		]);
 		expect((await stat(path)).isSocket()).toBe(true);
 		await expect(
-			sendRpcRequest(path, new GetProjects({}), { startupRetries: 1 }),
+			sendRpcRequest(path, { _tag: "GetProjects" }, { startupRetries: 1 }),
 		).rejects.toMatchObject({ code: "ECONNREFUSED" });
 	});
 
-	it("rejects malformed RPC framing instead of hanging", async () => {
+	// Effect 4's ndjson parser drops lines that are not JSON, so the request
+	// settles on the socket close rather than on a decode error.
+	it("rejects instead of hanging when the server sends malformed framing", async () => {
 		const path = join(directory, "malformed.sock");
 		server = createServer((socket) => {
 			sockets.add(socket);
@@ -157,11 +164,8 @@ describe("daemon Unix RPC transport", () => {
 		});
 		await new Promise<void>((resolve) => server?.listen(path, resolve));
 		await expect(
-			sendRpcRequest(path, new GetProjects({}), { requestTimeoutMs: 500 }),
-		).rejects.toMatchObject({
-			reason: "Protocol",
-			message: "Error decoding message",
-		});
+			sendRpcRequest(path, { _tag: "GetProjects" }, { requestTimeoutMs: 500 }),
+		).rejects.toMatchObject({ _tag: "RpcClientError" });
 	});
 
 	it("never replays a request after its response times out", async () => {
@@ -185,7 +189,7 @@ describe("daemon Unix RPC transport", () => {
 		});
 		await new Promise<void>((resolve) => server?.listen(path, resolve));
 		await expect(
-			sendRpcRequest(path, new Shutdown({}), { requestTimeoutMs: 50 }),
+			sendRpcRequest(path, { _tag: "Shutdown" }, { requestTimeoutMs: 50 }),
 		).rejects.toThrow("RPC Shutdown timed out");
 		expect(requests, received).toBe(1);
 	});
@@ -195,7 +199,7 @@ describe("daemon Unix RPC transport", () => {
 		const shutdownCallbacks: string[] = [];
 		let shutdownDrain: Effect.Effect<void> = Effect.void;
 		const daemonHandlers = {
-			GetProjects: (request: GetProjects) =>
+			GetProjects: (request: typeof GetProjects.payloadSchema.Type) =>
 				request.projectSlug === "fail"
 					? Effect.fail(new WsRpcError({ message: "expected failure" }))
 					: Effect.succeed({ projectSlug: request.projectSlug, projects: [] }),
@@ -208,6 +212,12 @@ describe("daemon Unix RPC transport", () => {
 			// This fixture exercises only these daemon methods; all other routes
 			// retain the existing handlers and fail at the resolver above.
 			daemonHandlers as unknown as DaemonRpcHandlers,
+		).pipe(
+			Layer.provide(
+				Layer.succeed(SessionDirectory)({
+					projectOf: () => Effect.succeed(Option.none()),
+				}),
+			),
 		);
 		await Effect.runPromise(
 			Effect.scoped(
@@ -218,14 +228,17 @@ describe("daemon Unix RPC transport", () => {
 					const metadata = yield* Effect.promise(() => stat(path));
 					expect(metadata.mode & 0o777).toBe(0o600);
 					const result = yield* Effect.promise(() =>
-						sendRpcRequest(path, new GetProjects({})),
+						sendRpcRequest(path, { _tag: "GetProjects" }),
 					);
 					expect(result).toEqual({
 						projects: [],
 					});
 					yield* Effect.promise(() =>
 						expect(
-							sendRpcRequest(path, new GetProjects({ projectSlug: "fail" })),
+							sendRpcRequest(path, {
+								_tag: "GetProjects",
+								projectSlug: "fail",
+							}),
 						).rejects.toMatchObject({
 							_tag: "WsRpcError",
 							message: "expected failure",
@@ -233,12 +246,12 @@ describe("daemon Unix RPC transport", () => {
 					);
 					yield* Effect.promise(() =>
 						expect(
-							sendRpcRequest(path, new RestartWithConfig({})),
+							sendRpcRequest(path, { _tag: "RestartWithConfig" }),
 						).rejects.toMatchObject({ message: "restart rejected" }),
 					);
 					expect(shutdownCallbacks).toEqual([]);
 					const shutdown = yield* Effect.promise(() =>
-						sendRpcRequest(path, new Shutdown({})),
+						sendRpcRequest(path, { _tag: "Shutdown" }),
 					);
 					expect(shutdown).toEqual({ ok: true });
 					yield* Effect.sleep("20 millis");
@@ -265,7 +278,7 @@ describe("daemon Unix RPC transport", () => {
 						onSuccessfulShutdownResponse: (tag) =>
 							Effect.sync(() => {
 								shutdownCallbacks.push(tag);
-							}).pipe(Effect.zipRight(shutdownDrain)),
+							}).pipe(Effect.andThen(shutdownDrain)),
 					}),
 				),
 			),

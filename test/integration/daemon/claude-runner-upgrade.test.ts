@@ -37,7 +37,7 @@ function sdkProof(harness: ProcessHarness): ProcessMark[] {
 }
 
 function persisted(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath(), {
+	const db = new Database(harness.daemonStorePath(), {
 		readonly: true,
 	});
 	try {
@@ -81,13 +81,13 @@ function queryFor(harness: ProcessHarness, pid: number) {
 }
 
 function childFinalizerResult(harness: ProcessHarness) {
-	const db = new Database(harness.projectStorePath(), {
+	const db = new Database(harness.daemonStorePath(), {
 		readonly: true,
 	});
 	try {
 		return db
 			.prepare(
-				"SELECT session_id, type, data FROM events WHERE type = 'text.delta' AND json_extract(data, '$.text') = ? ORDER BY sequence",
+				"SELECT session_id, type, data FROM events WHERE project_id = 'process-test' AND type = 'text.delta' AND json_extract(data, '$.text') = ? ORDER BY sequence",
 			)
 			.all("late child finalizer result") as Array<{
 			session_id: string;
@@ -215,14 +215,26 @@ async function completed(
 						(mark) => mark.kind === "enqueue" && mark.prompt === prompt,
 					),
 				).toHaveLength(1);
-				for (const text of responseChunks(prompt))
-					expect(
-						events.filter(
-							(event) =>
-								event.type === "text.delta" && event.data["text"] === text,
-						),
-					).toHaveLength(1);
 			}
+			const assistantMessageIds = new Set(
+				events
+					.filter(
+						(event) =>
+							event.type === "message.created" &&
+							event.data["role"] === "assistant",
+					)
+					.map((event) => event.data["messageId"]),
+			);
+			expect(
+				events
+					.filter(
+						(event) =>
+							event.type === "text.delta" &&
+							assistantMessageIds.has(event.data["messageId"]),
+					)
+					.map((event) => event.data["text"])
+					.join(""),
+			).toBe(prompts.flatMap(responseChunks).join(""));
 		},
 		{ timeout: 10_000 },
 	);
@@ -293,6 +305,15 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			restartProof: true,
 			buildId: OLD_BUILD,
+			capabilityModels: ["sonnet", "claude-sonnet-4", "claude-opus-4"].map(
+				(id) => ({
+					id,
+					name: id,
+					providerId: "claude",
+					variants: { medium: {}, high: {} },
+					contextWindowOptions: [{ value: "200k", label: "200K" }],
+				}),
+			),
 			...options,
 		});
 		const details: Record<string, unknown> = {};
@@ -1123,7 +1144,6 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		);
 		await Effect.runPromise(
 			initial.rpc.CancelSession({
-				projectSlug: "process-test",
 				sessionId,
 				commandId: randomUUID(),
 			}),
@@ -1212,7 +1232,6 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		const originalQuery = queryFor(harness, old.pid);
 		await Effect.runPromise(
 			initial.rpc.CancelSession({
-				projectSlug: "process-test",
 				sessionId,
 				commandId: randomUUID(),
 			}),
@@ -1228,7 +1247,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 					state.events.filter((event) => event.type === "turn.interrupted"),
 				).toHaveLength(1);
 				expect(
-					await readNativeThread(harness.projectStorePath(), sessionId),
+					await readNativeThread(harness.daemonStorePath(), sessionId),
 				).toBeUndefined();
 			},
 			{ timeout: 10_000 },
@@ -1245,7 +1264,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		const expectedResume =
 			cursorSource === "incoming" ? randomUUID() : originalQuery.sessionId;
 		if (cursorSource === "incoming") {
-			const db = new Database(harness.projectStorePath());
+			const db = new Database(harness.daemonStorePath());
 			try {
 				db.prepare(
 					"INSERT INTO provider_state (session_id, key, value) VALUES (?, 'resumeSessionId', ?)",
@@ -1316,7 +1335,6 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		const original = queryFor(harness, old.pid);
 		await Effect.runPromise(
 			initial.rpc.CancelSession({
-				projectSlug: "process-test",
 				sessionId,
 				commandId: randomUUID(),
 			}),
@@ -1340,8 +1358,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		);
 		const rejected = "invalidated-resume-rejected-send";
 		await Effect.runPromise(
-			browser.rpc.input.submit({
-				projectSlug: "process-test",
+			browser.rpc["input.submit"]({
 				sessionId,
 				originId: browser.originId,
 				inputId: randomUUID(),
@@ -1367,7 +1384,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 					"failed",
 				]);
 				expect(
-					await readNativeThread(harness.projectStorePath(), sessionId),
+					await readNativeThread(harness.daemonStorePath(), sessionId),
 				).toBeUndefined();
 			},
 			{ timeout: 10_000 },
@@ -1436,7 +1453,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 					state.events.filter((event) => event.type === "turn.completed"),
 				).toHaveLength(1);
 				expect(
-					(await readNativeThread(harness.projectStorePath(), sessionId))
+					(await readNativeThread(harness.daemonStorePath(), sessionId))
 						?.resumeSessionId,
 				).toBe(fresh.sessionId);
 			},
@@ -1527,7 +1544,6 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		);
 		await Effect.runPromise(
 			browser.rpc.CancelSession({
-				projectSlug: "process-test",
 				sessionId,
 				commandId: randomUUID(),
 			}),
@@ -1629,7 +1645,6 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		);
 		await Effect.runPromise(
 			browser.rpc.CancelSession({
-				projectSlug: "process-test",
 				sessionId,
 				commandId: randomUUID(),
 			}),

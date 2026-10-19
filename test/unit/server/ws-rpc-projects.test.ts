@@ -1,8 +1,9 @@
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import type { ProjectManagementService } from "../../../src/lib/domain/relay/Services/project-management-service.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,
@@ -21,6 +22,17 @@ const project = {
 	missing: true,
 };
 
+const makeService = (
+	projects: readonly (typeof project)[],
+): ProjectManagementService => ({
+	currentSlug: () => Effect.succeed(project.slug),
+	list: () => Effect.succeed(projects),
+	save: vi.fn(() =>
+		Effect.succeed({ project: projects[0] ?? project, projects, warnings: [] }),
+	),
+	remove: vi.fn(() => Effect.succeed(projects)),
+});
+
 describe("WsRpcServerLayer project management", () => {
 	it.effect(
 		"round-trips project git state through the RPC project list",
@@ -36,12 +48,9 @@ describe("WsRpcServerLayer project management", () => {
 				},
 			};
 			const config = makeMockConfig({
-				saveProject: vi.fn(async () => ({
-					project: projectWithGit,
-					warnings: [],
-				})),
-				getProjects: () => [projectWithGit],
+				slug: project.slug,
 			});
+			const service = makeService([projectWithGit]);
 			return Effect.gen(function* () {
 				const client = yield* rpcClient;
 				const response = yield* client.SaveProject({
@@ -53,19 +62,24 @@ describe("WsRpcServerLayer project management", () => {
 				Effect.scoped,
 				Effect.provide(
 					WsRpcServerLayer.pipe(
-						Layer.provideMerge(makeTestHandlerLayer({ config })),
+						Layer.provideMerge(
+							makeTestHandlerLayer({
+								config,
+								projectManagementService: service,
+							}),
+						),
 					),
+					{ local: true },
 				),
 			);
 		},
 	);
 
 	it.effect("adds a project and returns the added slug", () => {
-		const saveProject = vi.fn(async () => ({ project, warnings: [] }));
+		const service = makeService([project]);
+		const saveProject = vi.mocked(service.save);
 		const config = makeMockConfig({
 			slug: "proj-1",
-			saveProject,
-			getProjects: () => [project],
 		});
 
 		return Effect.gen(function* () {
@@ -89,19 +103,21 @@ describe("WsRpcServerLayer project management", () => {
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ config })),
+					Layer.provideMerge(
+						makeTestHandlerLayer({ config, projectManagementService: service }),
+					),
 				),
+				{ local: true },
 			),
 		);
 	});
 
 	it.effect("removes a project and returns the updated list", () => {
-		const removeProject = vi.fn(async () => undefined);
+		const service = makeService([]);
+		const removeProject = vi.mocked(service.remove);
 		const wsHandler = makeMockWebSocketHandler();
 		const config = makeMockConfig({
 			slug: "proj-1",
-			removeProject,
-			getProjects: () => [],
 		});
 
 		return Effect.gen(function* () {
@@ -121,20 +137,26 @@ describe("WsRpcServerLayer project management", () => {
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ config, wsHandler })),
+					Layer.provideMerge(
+						makeTestHandlerLayer({
+							config,
+							wsHandler,
+							projectManagementService: service,
+						}),
+					),
 				),
+				{ local: true },
 			),
 		);
 	});
 
 	it.effect("renames a project and returns the updated list", () => {
 		const renamed = { ...project, title: "Renamed" };
-		const saveProject = vi.fn(async () => ({ project: renamed, warnings: [] }));
+		const service = makeService([renamed]);
+		const saveProject = vi.mocked(service.save);
 		const wsHandler = makeMockWebSocketHandler();
 		const config = makeMockConfig({
 			slug: "proj-1",
-			saveProject,
-			getProjects: () => [renamed],
 		});
 
 		return Effect.gen(function* () {
@@ -156,8 +178,15 @@ describe("WsRpcServerLayer project management", () => {
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ config, wsHandler })),
+					Layer.provideMerge(
+						makeTestHandlerLayer({
+							config,
+							wsHandler,
+							projectManagementService: service,
+						}),
+					),
 				),
+				{ local: true },
 			),
 		);
 	});

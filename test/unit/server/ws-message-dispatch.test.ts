@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { seedSessions } from "../stores/session-fixtures.js";
 // Full tool content and input drafts arrive through RPC replies.
 
@@ -37,6 +38,7 @@ import { applyInputDraft } from "../../../src/lib/frontend/stores/input-draft.js
 import { clearInstanceState } from "../../../src/lib/frontend/stores/instance.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { ToolMessage } from "../../../src/lib/frontend/types.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
@@ -51,7 +53,7 @@ beforeEach(() => {
 		...sessionState.sessions.values(),
 		{ id: "s1", title: "", status: "idle" },
 	]);
-	sessionState.currentId = "s1";
+	openSessionForSetup("s1", "project-a");
 	_ta = testActivity();
 	tm = testMessages();
 	clearInstanceState();

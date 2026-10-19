@@ -1,11 +1,15 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { HttpServerRequest, HttpServerResponse } from "@effect/platform";
 import {
 	NodeFileSystem,
 	NodeHttpServer,
 	NodePath,
 } from "@effect/platform-node";
-import { Context, Effect, HashMap, Layer, Option, Ref } from "effect";
+import { Context, Effect, HashMap, Layer, Option, Ref, Scope } from "effect";
+import {
+	HttpRouter,
+	type HttpServerRequest,
+	type HttpServerResponse,
+} from "effect/http";
 import type { AuthManager } from "../../../auth.js";
 import {
 	CaCertProvider,
@@ -49,9 +53,10 @@ export interface DaemonHttpRequestHandler {
 	) => Promise<void>;
 }
 
-export class DaemonHttpRequestHandlerTag extends Context.Tag(
-	"DaemonHttpRequestHandler",
-)<DaemonHttpRequestHandlerTag, DaemonHttpRequestHandler>() {}
+export class DaemonHttpRequestHandlerTag extends Context.Service<
+	DaemonHttpRequestHandlerTag,
+	DaemonHttpRequestHandler
+>()("DaemonHttpRequestHandler") {}
 
 export interface DaemonHttpRouterPushManager {
 	readonly getPublicKey: () => string | null | undefined;
@@ -154,16 +159,16 @@ const makeHttpRouterLayer = (options: HttpRouterRequestHandlerOptions) => {
 const buildHttpRouterRequestHandlerEffect = (
 	options: HttpRouterRequestHandlerOptions,
 ) =>
-	Effect.map(
-		NodeHttpServer.makeHandler(
-			effectRouterWithCors.pipe(Effect.provide(makeHttpRouterLayer(options))),
-		),
-		(effectHandler): DaemonHttpRequestHandler => ({
+	Effect.gen(function* () {
+		const scope = yield* Scope.Scope;
+		const router = yield* HttpRouter.toHttpEffect(effectRouterWithCors);
+		const effectHandler = yield* NodeHttpServer.makeHandler(router, { scope });
+		return {
 			handleRequest: async (req, res) => {
 				effectHandler(req, res);
 			},
-		}),
-	);
+		} satisfies DaemonHttpRequestHandler;
+	}).pipe(Effect.provide(makeHttpRouterLayer(options)));
 
 const routerStatusForProjectState = (
 	entry: ProjectState,
@@ -236,7 +241,7 @@ export const makeStandaloneHttpRouterRequestHandler = (
 			pushManager: options.pushManager,
 			caRootPath: options.caRootPath,
 			caCertDer: options.caCertDer,
-		}),
+		}).pipe(Effect.provideService(Scope.Scope, Scope.makeUnsafe())),
 	);
 
 export const makeDaemonHttpRouterLive = (staticDir: string) =>

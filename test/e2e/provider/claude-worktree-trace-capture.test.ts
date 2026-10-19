@@ -18,7 +18,7 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
@@ -76,6 +76,7 @@ function toolResult(
 describe.skipIf(!RUN_EXPENSIVE)("Claude worktree contract (real SDK)", () => {
 	it(
 		"pins cwd changes, sticky worktrees and ExitWorktree keep; captures move turns",
+		{ timeout: 1_200_000 },
 		async () => {
 			const at = new Date().toISOString();
 			const artifactDir = join(
@@ -90,8 +91,8 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude worktree contract (real SDK)", () => {
 			const repo = join(root, "repo");
 			const linkedWorktree = join(root, "repo-wt");
 			const enteredWorktree = join(repo, ".claude/worktrees", WORKTREE_NAME);
-			const configuredDir = process.env["CLAUDE_CONFIG_DIR"];
-			const configDir = configuredDir ?? join(homedir(), ".claude");
+			const configuredDir = process.env["CONDUIT_TEST_REAL_CLAUDE_CONFIG_DIR"];
+			const configDir = configuredDir ?? join(userInfo().homedir, ".claude");
 			const launchConfigDir =
 				configuredDir === undefined
 					? sdkDefaultClaudeConfigDir(configDir)
@@ -343,7 +344,7 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude worktree contract (real SDK)", () => {
 						[root, "/tmp/conduit-worktree-capture"],
 						[temporaryRoot, "/tmp/conduit-worktree-capture"],
 						...(configDir ? [[configDir, "/home/test/.claude"]] : []),
-						[homedir(), "/home/test"],
+						[userInfo().homedir, "/home/test"],
 					]) {
 						if (from && to) fixture = fixture.replaceAll(from, to);
 					}
@@ -372,6 +373,5 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude worktree contract (real SDK)", () => {
 				}
 			}
 		},
-		{ timeout: 1_200_000 },
 	);
 });

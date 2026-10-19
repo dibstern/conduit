@@ -1,0 +1,3522 @@
+[
+	{
+		"label": "session.archived required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 700000,
+			"event_id": "fixture-archive-0",
+			"session_id": "fixture-session",
+			"stream_version": 500,
+			"type": "session.archived",
+			"data": "{\"sessionId\":\"fixture\",\"automatic\":false}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.archived optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 700001,
+			"event_id": "fixture-archive-1",
+			"session_id": "fixture-session",
+			"stream_version": 501,
+			"type": "session.archived",
+			"data": "{\"sessionId\":\"fixture\",\"automatic\":true,\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.archived empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 700002,
+			"event_id": "fixture-archive-2",
+			"session_id": "fixture-session",
+			"stream_version": 502,
+			"type": "session.archived",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.archived missing automatic",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 700003,
+			"event_id": "fixture-archive-3",
+			"session_id": "fixture-session",
+			"stream_version": 503,
+			"type": "session.archived",
+			"data": "{\"sessionId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.unarchived required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 700004,
+			"event_id": "fixture-archive-4",
+			"session_id": "fixture-session",
+			"stream_version": 504,
+			"type": "session.unarchived",
+			"data": "{\"sessionId\":\"fixture\",\"cause\":\"manual\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.unarchived optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 700005,
+			"event_id": "fixture-archive-5",
+			"session_id": "fixture-session",
+			"stream_version": 505,
+			"type": "session.unarchived",
+			"data": "{\"sessionId\":\"fixture\",\"cause\":\"send\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.unarchived empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 700006,
+			"event_id": "fixture-archive-6",
+			"session_id": "fixture-session",
+			"stream_version": 506,
+			"type": "session.unarchived",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.unarchived invalid cause",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 700007,
+			"event_id": "fixture-archive-7",
+			"session_id": "fixture-session",
+			"stream_version": 507,
+			"type": "session.unarchived",
+			"data": "{\"sessionId\":\"fixture\",\"cause\":\"automatic\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "historical sequence 609186",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 609186,
+			"event_id": "fixture-1",
+			"session_id": "fixture-session",
+			"stream_version": 0,
+			"type": "message.created",
+			"data": "{\"messageId\":\"52feab57-ed40-4885-b23b-71dcd78209a8\",\"role\":\"user\",\"sessionId\":\"ses_c2d8cd521bc14f9f8f7700096bbf1d23\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "historical sequence 609189",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 609189,
+			"event_id": "fixture-2",
+			"session_id": "fixture-session",
+			"stream_version": 1,
+			"type": "session.status",
+			"data": "{\"sessionId\":\"ses_c2d8cd521bc14f9f8f7700096bbf1d23\",\"status\":\"busy\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508754212
+		}
+	},
+	{
+		"label": "historical sequence 609190",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 609190,
+			"event_id": "fixture-3",
+			"session_id": "fixture-session",
+			"stream_version": 2,
+			"type": "message.created",
+			"data": "{\"messageId\":\"msg_011Cf5xXKUsoCy42NPVLadL7\",\"role\":\"assistant\",\"sessionId\":\"ses_c2d8cd521bc14f9f8f7700096bbf1d23\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508756034
+		}
+	},
+	{
+		"label": "historical sequence 618377",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 618377,
+			"event_id": "fixture-4",
+			"session_id": "fixture-session",
+			"stream_version": 3,
+			"type": "turn.completed",
+			"data": "{\"messageId\":\"msg_011Cf5xXKUsoCy42NPVLadL7\",\"cost\":38.53352824999996,\"tokens\":{\"input\":2,\"output\":2,\"cacheRead\":98991,\"cacheWrite\":551,\"contextWindow\":1000000},\"duration\":14344789}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789523099007
+		}
+	},
+	{
+		"label": "historical sequence 618378",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 618378,
+			"event_id": "fixture-5",
+			"session_id": "fixture-session",
+			"stream_version": 4,
+			"type": "session.status",
+			"data": "{\"sessionId\":\"ses_c2d8cd521bc14f9f8f7700096bbf1d23\",\"status\":\"idle\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789523099007
+		}
+	},
+	{
+		"label": "historical sequence 618381",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 618381,
+			"event_id": "fixture-6",
+			"session_id": "fixture-session",
+			"stream_version": 5,
+			"type": "session.status",
+			"data": "{\"sessionId\":\"ses_c2d8cd521bc14f9f8f7700096bbf1d23\",\"status\":\"busy\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789523099075
+		}
+	},
+	{
+		"label": "historical sequence 620139",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 620139,
+			"event_id": "fixture-7",
+			"session_id": "fixture-session",
+			"stream_version": 6,
+			"type": "message.created",
+			"data": "{\"messageId\":\"msg_011Cf6GkkAtjRv8gwmBLLfEv\",\"role\":\"assistant\",\"sessionId\":\"ses_c2d8cd521bc14f9f8f7700096bbf1d23\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789523100019
+		}
+	},
+	{
+		"label": "historical sequence 620141",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 620141,
+			"event_id": "fixture-8",
+			"session_id": "fixture-session",
+			"stream_version": 7,
+			"type": "thinking.start",
+			"data": "{\"messageId\":\"msg_011Cf6GkkAtjRv8gwmBLLfEv\",\"partId\":\"b317a104-a8cc-4b16-ad62-851aac27cb3b\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789523100021
+		}
+	},
+	{
+		"label": "historical sequence 620143",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 620143,
+			"event_id": "fixture-9",
+			"session_id": "fixture-session",
+			"stream_version": 8,
+			"type": "tool.started",
+			"data": "{\"messageId\":\"msg_011Cf6GkkAtjRv8gwmBLLfEv\",\"partId\":\"toolu_01SbJvkue5vWuYHa1kJjp14w\",\"toolName\":\"Bash\",\"callId\":\"toolu_01SbJvkue5vWuYHa1kJjp14w\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789523102022
+		}
+	},
+	{
+		"label": "historical sequence 620146",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 620146,
+			"event_id": "fixture-10",
+			"session_id": "fixture-session",
+			"stream_version": 9,
+			"type": "tool.completed",
+			"data": "{\"messageId\":\"msg_011Cf6GkkAtjRv8gwmBLLfEv\",\"partId\":\"toolu_01SbJvkue5vWuYHa1kJjp14w\",\"result\":\"[WARN] The \\\"pnpm\\\" field in package.json is no longer read by pnpm. The following keys were ignored: \\\"pnpm.onlyBuiltDependencies\\\". See https://pnpm.io/settings for the new home of each setting.\\nError: http://localhost:6007 is already used, make sure that nothing is running on the port/url or set reuseExistingServer:true in config.webServer.\\n\\n---\\n0\",\"duration\":0}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789523102063
+		}
+	},
+	{
+		"label": "historical sequence 620377",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 620377,
+			"event_id": "fixture-11",
+			"session_id": "fixture-session",
+			"stream_version": 10,
+			"type": "turn.completed",
+			"data": "{\"messageId\":\"msg_011Cf6GkkAtjRv8gwmBLLfEv\",\"cost\":39.84541674999996,\"tokens\":{\"input\":2,\"output\":1,\"cacheRead\":114390,\"cacheWrite\":807,\"contextWindow\":1000000},\"duration\":1225673}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789524324664
+		}
+	},
+	{
+		"label": "historical sequence 622224",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 622224,
+			"event_id": "fixture-12",
+			"session_id": "fixture-session",
+			"stream_version": 11,
+			"type": "message.created",
+			"data": "{\"messageId\":\"msg_011Cf6KSN1V7VPjvDmrjhvug\",\"role\":\"assistant\",\"sessionId\":\"ses_c2d8cd521bc14f9f8f7700096bbf1d23\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789525211224
+		}
+	},
+	{
+		"label": "historical sequence 624452",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 624452,
+			"event_id": "fixture-13",
+			"session_id": "fixture-session",
+			"stream_version": 12,
+			"type": "tool.started",
+			"data": "{\"messageId\":\"msg_011Cf6KSN1V7VPjvDmrjhvug\",\"partId\":\"toolu_01LWbZBDotLb1mndjBZs6S8U\",\"toolName\":\"Bash\",\"callId\":\"toolu_01LWbZBDotLb1mndjBZs6S8U\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789525745828
+		}
+	},
+	{
+		"label": "message.created required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 14,
+			"event_id": "fixture-14",
+			"session_id": "fixture-session",
+			"stream_version": 13,
+			"type": "message.created",
+			"data": "{\"messageId\":\"fixture\",\"role\":\"user\",\"sessionId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "message.created optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 15,
+			"event_id": "fixture-15",
+			"session_id": "fixture-session",
+			"stream_version": 14,
+			"type": "message.created",
+			"data": "{\"messageId\":\"fixture\",\"role\":\"user\",\"sessionId\":\"fixture\",\"parentID\":\"fixture\",\"turnId\":\"fixture\",\"inputId\":\"fixture\",\"backfilled\":true,\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "message.created empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 16,
+			"event_id": "fixture-16",
+			"session_id": "fixture-session",
+			"stream_version": 15,
+			"type": "message.created",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "message.removed required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 17,
+			"event_id": "fixture-17",
+			"session_id": "fixture-session",
+			"stream_version": 16,
+			"type": "message.removed",
+			"data": "{\"messageId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "message.removed optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 18,
+			"event_id": "fixture-18",
+			"session_id": "fixture-session",
+			"stream_version": 17,
+			"type": "message.removed",
+			"data": "{\"messageId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "message.removed empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 19,
+			"event_id": "fixture-19",
+			"session_id": "fixture-session",
+			"stream_version": 18,
+			"type": "message.removed",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "message.part.removed required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 20,
+			"event_id": "fixture-20",
+			"session_id": "fixture-session",
+			"stream_version": 19,
+			"type": "message.part.removed",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "message.part.removed optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 21,
+			"event_id": "fixture-21",
+			"session_id": "fixture-session",
+			"stream_version": 20,
+			"type": "message.part.removed",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "message.part.removed empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 22,
+			"event_id": "fixture-22",
+			"session_id": "fixture-session",
+			"stream_version": 21,
+			"type": "message.part.removed",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "message.snapshot required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 23,
+			"event_id": "fixture-23",
+			"session_id": "fixture-session",
+			"stream_version": 22,
+			"type": "message.snapshot",
+			"data": "{\"messageId\":\"fixture\",\"digest\":\"fixture\",\"message\":{\"id\":\"message\",\"sessionID\":\"fixture-session\",\"role\":\"assistant\",\"parts\":[{\"id\":\"part\",\"type\":\"text\",\"extra\":42}],\"time\":\"historically unchecked\",\"tokens\":{\"input\":\"also unchecked\"},\"extra\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "message.snapshot optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 24,
+			"event_id": "fixture-24",
+			"session_id": "fixture-session",
+			"stream_version": 23,
+			"type": "message.snapshot",
+			"data": "{\"messageId\":\"fixture\",\"digest\":\"fixture\",\"supersedesEventId\":\"fixture\",\"message\":{\"id\":\"message\",\"sessionID\":\"fixture-session\",\"role\":\"assistant\",\"parts\":[{\"id\":\"part\",\"type\":\"text\",\"extra\":42}],\"time\":\"historically unchecked\",\"tokens\":{\"input\":\"also unchecked\"},\"extra\":true},\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "message.snapshot empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 25,
+			"event_id": "fixture-25",
+			"session_id": "fixture-session",
+			"stream_version": 24,
+			"type": "message.snapshot",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "text.delta required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 26,
+			"event_id": "fixture-26",
+			"session_id": "fixture-session",
+			"stream_version": 25,
+			"type": "text.delta",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\",\"text\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "text.delta optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 27,
+			"event_id": "fixture-27",
+			"session_id": "fixture-session",
+			"stream_version": 26,
+			"type": "text.delta",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\",\"text\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "text.delta empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 28,
+			"event_id": "fixture-28",
+			"session_id": "fixture-session",
+			"stream_version": 27,
+			"type": "text.delta",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "thinking.start required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 29,
+			"event_id": "fixture-29",
+			"session_id": "fixture-session",
+			"stream_version": 28,
+			"type": "thinking.start",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "thinking.start optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 30,
+			"event_id": "fixture-30",
+			"session_id": "fixture-session",
+			"stream_version": 29,
+			"type": "thinking.start",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "thinking.start empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 31,
+			"event_id": "fixture-31",
+			"session_id": "fixture-session",
+			"stream_version": 30,
+			"type": "thinking.start",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "thinking.delta required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 32,
+			"event_id": "fixture-32",
+			"session_id": "fixture-session",
+			"stream_version": 31,
+			"type": "thinking.delta",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\",\"text\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "thinking.delta optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 33,
+			"event_id": "fixture-33",
+			"session_id": "fixture-session",
+			"stream_version": 32,
+			"type": "thinking.delta",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\",\"text\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "thinking.delta empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 34,
+			"event_id": "fixture-34",
+			"session_id": "fixture-session",
+			"stream_version": 33,
+			"type": "thinking.delta",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "thinking.end required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 35,
+			"event_id": "fixture-35",
+			"session_id": "fixture-session",
+			"stream_version": 34,
+			"type": "thinking.end",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "thinking.end optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 36,
+			"event_id": "fixture-36",
+			"session_id": "fixture-session",
+			"stream_version": 35,
+			"type": "thinking.end",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "thinking.end empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 37,
+			"event_id": "fixture-37",
+			"session_id": "fixture-session",
+			"stream_version": 36,
+			"type": "thinking.end",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "tool.started required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 38,
+			"event_id": "fixture-38",
+			"session_id": "fixture-session",
+			"stream_version": 37,
+			"type": "tool.started",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\",\"toolName\":\"fixture\",\"callId\":\"fixture\",\"input\":{\"tool\":\"Read\",\"filePath\":\"fixture\"}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "tool.started optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 39,
+			"event_id": "fixture-39",
+			"session_id": "fixture-session",
+			"stream_version": 38,
+			"type": "tool.started",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\",\"toolName\":\"fixture\",\"callId\":\"fixture\",\"input\":{\"tool\":\"Read\",\"filePath\":\"fixture\",\"offset\":1,\"limit\":1},\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "tool.started empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 40,
+			"event_id": "fixture-40",
+			"session_id": "fixture-session",
+			"stream_version": 39,
+			"type": "tool.started",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "tool.running required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 41,
+			"event_id": "fixture-41",
+			"session_id": "fixture-session",
+			"stream_version": 40,
+			"type": "tool.running",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "tool.running optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 42,
+			"event_id": "fixture-42",
+			"session_id": "fixture-session",
+			"stream_version": 41,
+			"type": "tool.running",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\",\"metadata\":{},\"input\":{\"tool\":\"Read\",\"filePath\":\"fixture\",\"offset\":1,\"limit\":1},\"callId\":\"fixture\",\"toolName\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "tool.running empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 43,
+			"event_id": "fixture-43",
+			"session_id": "fixture-session",
+			"stream_version": 42,
+			"type": "tool.running",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "tool.completed required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 44,
+			"event_id": "fixture-44",
+			"session_id": "fixture-session",
+			"stream_version": 43,
+			"type": "tool.completed",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\",\"result\":null,\"duration\":1}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "tool.completed optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 45,
+			"event_id": "fixture-45",
+			"session_id": "fixture-session",
+			"stream_version": 44,
+			"type": "tool.completed",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\",\"result\":null,\"duration\":1,\"metadata\":{},\"input\":{\"tool\":\"Read\",\"filePath\":\"fixture\",\"offset\":1,\"limit\":1},\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "tool.completed empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 46,
+			"event_id": "fixture-46",
+			"session_id": "fixture-session",
+			"stream_version": 45,
+			"type": "tool.completed",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "file.attached required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 47,
+			"event_id": "fixture-47",
+			"session_id": "fixture-session",
+			"stream_version": 46,
+			"type": "file.attached",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\",\"mime\":\"fixture\",\"url\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "file.attached optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 48,
+			"event_id": "fixture-48",
+			"session_id": "fixture-session",
+			"stream_version": 47,
+			"type": "file.attached",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\",\"mime\":\"fixture\",\"filename\":\"fixture\",\"url\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "file.attached empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 49,
+			"event_id": "fixture-49",
+			"session_id": "fixture-session",
+			"stream_version": 48,
+			"type": "file.attached",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "tool.input_updated required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 50,
+			"event_id": "fixture-50",
+			"session_id": "fixture-session",
+			"stream_version": 49,
+			"type": "tool.input_updated",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "tool.input_updated optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 51,
+			"event_id": "fixture-51",
+			"session_id": "fixture-session",
+			"stream_version": 50,
+			"type": "tool.input_updated",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "tool.input_updated empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 52,
+			"event_id": "fixture-52",
+			"session_id": "fixture-session",
+			"stream_version": 51,
+			"type": "tool.input_updated",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "turn.completed required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 53,
+			"event_id": "fixture-53",
+			"session_id": "fixture-session",
+			"stream_version": 52,
+			"type": "turn.completed",
+			"data": "{\"messageId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "turn.completed optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 54,
+			"event_id": "fixture-54",
+			"session_id": "fixture-session",
+			"stream_version": 53,
+			"type": "turn.completed",
+			"data": "{\"messageId\":\"fixture\",\"userMessageId\":\"fixture\",\"cost\":1,\"providerCostTotalUsd\":1,\"providerSessionId\":\"fixture\",\"contextTokens\":1,\"tokens\":{\"input\":1,\"output\":1,\"cacheRead\":1,\"cacheWrite\":1,\"contextWindow\":1},\"duration\":1,\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "turn.completed empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 55,
+			"event_id": "fixture-55",
+			"session_id": "fixture-session",
+			"stream_version": 54,
+			"type": "turn.completed",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "turn.error required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 56,
+			"event_id": "fixture-56",
+			"session_id": "fixture-session",
+			"stream_version": 55,
+			"type": "turn.error",
+			"data": "{\"messageId\":\"fixture\",\"error\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "turn.error optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 57,
+			"event_id": "fixture-57",
+			"session_id": "fixture-session",
+			"stream_version": 56,
+			"type": "turn.error",
+			"data": "{\"messageId\":\"fixture\",\"userMessageId\":\"fixture\",\"error\":\"fixture\",\"code\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "turn.error empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 58,
+			"event_id": "fixture-58",
+			"session_id": "fixture-session",
+			"stream_version": 57,
+			"type": "turn.error",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "turn.interrupted required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 59,
+			"event_id": "fixture-59",
+			"session_id": "fixture-session",
+			"stream_version": 58,
+			"type": "turn.interrupted",
+			"data": "{\"messageId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "turn.interrupted optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 60,
+			"event_id": "fixture-60",
+			"session_id": "fixture-session",
+			"stream_version": 59,
+			"type": "turn.interrupted",
+			"data": "{\"messageId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "turn.interrupted empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 61,
+			"event_id": "fixture-61",
+			"session_id": "fixture-session",
+			"stream_version": 60,
+			"type": "turn.interrupted",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "turn.model_resolved required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 62,
+			"event_id": "fixture-62",
+			"session_id": "fixture-session",
+			"stream_version": 61,
+			"type": "turn.model_resolved",
+			"data": "{\"actualModel\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "turn.model_resolved optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 63,
+			"event_id": "fixture-63",
+			"session_id": "fixture-session",
+			"stream_version": 62,
+			"type": "turn.model_resolved",
+			"data": "{\"requestedModel\":\"fixture\",\"expectedModel\":\"fixture\",\"actualModel\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "turn.model_resolved empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 64,
+			"event_id": "fixture-64",
+			"session_id": "fixture-session",
+			"stream_version": 63,
+			"type": "turn.model_resolved",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "input.admitted required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 65,
+			"event_id": "fixture-65",
+			"session_id": "fixture-session",
+			"stream_version": 64,
+			"type": "input.admitted",
+			"data": "{\"sessionId\":\"fixture\",\"inputId\":\"fixture\",\"delivery\":\"queue\",\"request\":{\"text\":\"fixture\"}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "input.admitted optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 66,
+			"event_id": "fixture-66",
+			"session_id": "fixture-session",
+			"stream_version": 65,
+			"type": "input.admitted",
+			"data": "{\"sessionId\":\"fixture\",\"inputId\":\"fixture\",\"delivery\":\"queue\",\"request\":{\"text\":\"fixture\",\"images\":[],\"model\":{\"providerID\":\"fixture\",\"modelID\":\"fixture\"},\"agent\":\"fixture\",\"variant\":\"fixture\",\"contextWindow\":\"fixture\"},\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "input.admitted empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 67,
+			"event_id": "fixture-67",
+			"session_id": "fixture-session",
+			"stream_version": 66,
+			"type": "input.admitted",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "input.sent required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 68,
+			"event_id": "fixture-68",
+			"session_id": "fixture-session",
+			"stream_version": 67,
+			"type": "input.sent",
+			"data": "{\"sessionId\":\"fixture\",\"inputId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "input.sent optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 69,
+			"event_id": "fixture-69",
+			"session_id": "fixture-session",
+			"stream_version": 68,
+			"type": "input.sent",
+			"data": "{\"sessionId\":\"fixture\",\"inputId\":\"fixture\",\"steer\":true,\"workspaceMoveSequence\":1,\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "input.sent empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 70,
+			"event_id": "fixture-70",
+			"session_id": "fixture-session",
+			"stream_version": 69,
+			"type": "input.sent",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "input.cancelled required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 71,
+			"event_id": "fixture-71",
+			"session_id": "fixture-session",
+			"stream_version": 70,
+			"type": "input.cancelled",
+			"data": "{\"sessionId\":\"fixture\",\"inputId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "input.cancelled optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 72,
+			"event_id": "fixture-72",
+			"session_id": "fixture-session",
+			"stream_version": 71,
+			"type": "input.cancelled",
+			"data": "{\"sessionId\":\"fixture\",\"inputId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "input.cancelled empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 73,
+			"event_id": "fixture-73",
+			"session_id": "fixture-session",
+			"stream_version": 72,
+			"type": "input.cancelled",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "input.interrupt_requested required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 74,
+			"event_id": "fixture-74",
+			"session_id": "fixture-session",
+			"stream_version": 73,
+			"type": "input.interrupt_requested",
+			"data": "{\"sessionId\":\"fixture\",\"inputId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "input.interrupt_requested optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 75,
+			"event_id": "fixture-75",
+			"session_id": "fixture-session",
+			"stream_version": 74,
+			"type": "input.interrupt_requested",
+			"data": "{\"sessionId\":\"fixture\",\"inputId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "input.interrupt_requested empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 76,
+			"event_id": "fixture-76",
+			"session_id": "fixture-session",
+			"stream_version": 75,
+			"type": "input.interrupt_requested",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.created required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 77,
+			"event_id": "fixture-77",
+			"session_id": "fixture-session",
+			"stream_version": 76,
+			"type": "session.created",
+			"data": "{\"sessionId\":\"fixture\",\"title\":\"fixture\",\"provider\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.created optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 78,
+			"event_id": "fixture-78",
+			"session_id": "fixture-session",
+			"stream_version": 77,
+			"type": "session.created",
+			"data": "{\"sessionId\":\"fixture\",\"title\":\"fixture\",\"provider\":\"fixture\",\"parentId\":\"fixture\",\"forkPointEvent\":\"fixture\",\"forkPointTimestamp\":1,\"forkPointMessageId\":\"fixture\",\"providerSessionId\":\"fixture\",\"sideThread\":true,\"startInputId\":\"fixture\",\"permissionMode\":\"ask\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.created empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 79,
+			"event_id": "fixture-79",
+			"session_id": "fixture-session",
+			"stream_version": 78,
+			"type": "session.created",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.renamed required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 80,
+			"event_id": "fixture-80",
+			"session_id": "fixture-session",
+			"stream_version": 79,
+			"type": "session.renamed",
+			"data": "{\"sessionId\":\"fixture\",\"title\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.renamed optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 81,
+			"event_id": "fixture-81",
+			"session_id": "fixture-session",
+			"stream_version": 80,
+			"type": "session.renamed",
+			"data": "{\"sessionId\":\"fixture\",\"title\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.renamed empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 82,
+			"event_id": "fixture-82",
+			"session_id": "fixture-session",
+			"stream_version": 81,
+			"type": "session.renamed",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.rewound required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 83,
+			"event_id": "fixture-83",
+			"session_id": "fixture-session",
+			"stream_version": 82,
+			"type": "session.rewound",
+			"data": "{\"messageId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.rewound optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 84,
+			"event_id": "fixture-84",
+			"session_id": "fixture-session",
+			"stream_version": 83,
+			"type": "session.rewound",
+			"data": "{\"messageId\":\"fixture\",\"previousMessageId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.rewound empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 85,
+			"event_id": "fixture-85",
+			"session_id": "fixture-session",
+			"stream_version": 84,
+			"type": "session.rewound",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.rewind_undone required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 86,
+			"event_id": "fixture-86",
+			"session_id": "fixture-session",
+			"stream_version": 85,
+			"type": "session.rewind_undone",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.rewind_undone optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 87,
+			"event_id": "fixture-87",
+			"session_id": "fixture-session",
+			"stream_version": 86,
+			"type": "session.rewind_undone",
+			"data": "{\"previousMessageId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.rewind_undone empty payload",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 88,
+			"event_id": "fixture-88",
+			"session_id": "fixture-session",
+			"stream_version": 87,
+			"type": "session.rewind_undone",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.rewind_committed required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 89,
+			"event_id": "fixture-89",
+			"session_id": "fixture-session",
+			"stream_version": 88,
+			"type": "session.rewind_committed",
+			"data": "{\"messageId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.rewind_committed optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 90,
+			"event_id": "fixture-90",
+			"session_id": "fixture-session",
+			"stream_version": 89,
+			"type": "session.rewind_committed",
+			"data": "{\"messageId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.rewind_committed empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 91,
+			"event_id": "fixture-91",
+			"session_id": "fixture-session",
+			"stream_version": 90,
+			"type": "session.rewind_committed",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.workspace_changed required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 92,
+			"event_id": "fixture-92",
+			"session_id": "fixture-session",
+			"stream_version": 91,
+			"type": "session.workspace_changed",
+			"data": "{\"sessionId\":\"fixture\",\"cause\":\"launch\",\"worktrees\":{},\"origin\":\"existing\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.workspace_changed optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 93,
+			"event_id": "fixture-93",
+			"session_id": "fixture-session",
+			"stream_version": 92,
+			"type": "session.workspace_changed",
+			"data": "{\"sessionId\":\"fixture\",\"path\":\"fixture\",\"ownership\":[],\"cause\":\"launch\",\"worktrees\":{},\"origin\":\"existing\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.workspace_changed empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 94,
+			"event_id": "fixture-94",
+			"session_id": "fixture-session",
+			"stream_version": 93,
+			"type": "session.workspace_changed",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.workspace_hint_changed required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 95,
+			"event_id": "fixture-95",
+			"session_id": "fixture-session",
+			"stream_version": 94,
+			"type": "session.workspace_hint_changed",
+			"data": "{\"path\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.workspace_hint_changed optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 96,
+			"event_id": "fixture-96",
+			"session_id": "fixture-session",
+			"stream_version": 95,
+			"type": "session.workspace_hint_changed",
+			"data": "{\"path\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.workspace_hint_changed empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 97,
+			"event_id": "fixture-97",
+			"session_id": "fixture-session",
+			"stream_version": 96,
+			"type": "session.workspace_hint_changed",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.workspace_started required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 98,
+			"event_id": "fixture-98",
+			"session_id": "fixture-session",
+			"stream_version": 97,
+			"type": "session.workspace_started",
+			"data": "{\"sessionId\":\"fixture\",\"path\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.workspace_started optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 99,
+			"event_id": "fixture-99",
+			"session_id": "fixture-session",
+			"stream_version": 98,
+			"type": "session.workspace_started",
+			"data": "{\"sessionId\":\"fixture\",\"path\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.workspace_started empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 100,
+			"event_id": "fixture-100",
+			"session_id": "fixture-session",
+			"stream_version": 99,
+			"type": "session.workspace_started",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.setup_started required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 101,
+			"event_id": "fixture-101",
+			"session_id": "fixture-session",
+			"stream_version": 100,
+			"type": "session.setup_started",
+			"data": "{\"sessionId\":\"fixture\",\"source\":\"daemon\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.setup_started optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 102,
+			"event_id": "fixture-102",
+			"session_id": "fixture-session",
+			"stream_version": 101,
+			"type": "session.setup_started",
+			"data": "{\"sessionId\":\"fixture\",\"source\":\"daemon\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.setup_started empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 103,
+			"event_id": "fixture-103",
+			"session_id": "fixture-session",
+			"stream_version": 102,
+			"type": "session.setup_started",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.setup_output required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 104,
+			"event_id": "fixture-104",
+			"session_id": "fixture-session",
+			"stream_version": 103,
+			"type": "session.setup_output",
+			"data": "{\"sessionId\":\"fixture\",\"output\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.setup_output optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 105,
+			"event_id": "fixture-105",
+			"session_id": "fixture-session",
+			"stream_version": 104,
+			"type": "session.setup_output",
+			"data": "{\"sessionId\":\"fixture\",\"output\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.setup_output empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 106,
+			"event_id": "fixture-106",
+			"session_id": "fixture-session",
+			"stream_version": 105,
+			"type": "session.setup_output",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.setup_finished required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 107,
+			"event_id": "fixture-107",
+			"session_id": "fixture-session",
+			"stream_version": 106,
+			"type": "session.setup_finished",
+			"data": "{\"sessionId\":\"fixture\",\"status\":\"succeeded\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.setup_finished optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 108,
+			"event_id": "fixture-108",
+			"session_id": "fixture-session",
+			"stream_version": 107,
+			"type": "session.setup_finished",
+			"data": "{\"sessionId\":\"fixture\",\"status\":\"succeeded\",\"exitCode\":1,\"message\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.setup_finished empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 109,
+			"event_id": "fixture-109",
+			"session_id": "fixture-session",
+			"stream_version": 108,
+			"type": "session.setup_finished",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.read required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 110,
+			"event_id": "fixture-110",
+			"session_id": "fixture-session",
+			"stream_version": 109,
+			"type": "session.read",
+			"data": "{\"sessionId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.read optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 111,
+			"event_id": "fixture-111",
+			"session_id": "fixture-session",
+			"stream_version": 110,
+			"type": "session.read",
+			"data": "{\"sessionId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.read empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 112,
+			"event_id": "fixture-112",
+			"session_id": "fixture-session",
+			"stream_version": 111,
+			"type": "session.read",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.unread required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 113,
+			"event_id": "fixture-113",
+			"session_id": "fixture-session",
+			"stream_version": 112,
+			"type": "session.unread",
+			"data": "{\"sessionId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.unread optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 114,
+			"event_id": "fixture-114",
+			"session_id": "fixture-session",
+			"stream_version": 113,
+			"type": "session.unread",
+			"data": "{\"sessionId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.unread empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 115,
+			"event_id": "fixture-115",
+			"session_id": "fixture-session",
+			"stream_version": 114,
+			"type": "session.unread",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.settled required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 116,
+			"event_id": "fixture-116",
+			"session_id": "fixture-session",
+			"stream_version": 115,
+			"type": "session.settled",
+			"data": "{\"sessionId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.settled optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 117,
+			"event_id": "fixture-117",
+			"session_id": "fixture-session",
+			"stream_version": 116,
+			"type": "session.settled",
+			"data": "{\"sessionId\":\"fixture\",\"automatic\":true,\"mergedHead\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.settled empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 118,
+			"event_id": "fixture-118",
+			"session_id": "fixture-session",
+			"stream_version": 117,
+			"type": "session.settled",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.unsettled required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 119,
+			"event_id": "fixture-119",
+			"session_id": "fixture-session",
+			"stream_version": 118,
+			"type": "session.unsettled",
+			"data": "{\"sessionId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.unsettled optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 120,
+			"event_id": "fixture-120",
+			"session_id": "fixture-session",
+			"stream_version": 119,
+			"type": "session.unsettled",
+			"data": "{\"sessionId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.unsettled empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 121,
+			"event_id": "fixture-121",
+			"session_id": "fixture-session",
+			"stream_version": 120,
+			"type": "session.unsettled",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.pinned required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 122,
+			"event_id": "fixture-122",
+			"session_id": "fixture-session",
+			"stream_version": 121,
+			"type": "session.pinned",
+			"data": "{\"sessionId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.pinned optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 123,
+			"event_id": "fixture-123",
+			"session_id": "fixture-session",
+			"stream_version": 122,
+			"type": "session.pinned",
+			"data": "{\"sessionId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.pinned empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 124,
+			"event_id": "fixture-124",
+			"session_id": "fixture-session",
+			"stream_version": 123,
+			"type": "session.pinned",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.unpinned required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 125,
+			"event_id": "fixture-125",
+			"session_id": "fixture-session",
+			"stream_version": 124,
+			"type": "session.unpinned",
+			"data": "{\"sessionId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.unpinned optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 126,
+			"event_id": "fixture-126",
+			"session_id": "fixture-session",
+			"stream_version": 125,
+			"type": "session.unpinned",
+			"data": "{\"sessionId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.unpinned empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 127,
+			"event_id": "fixture-127",
+			"session_id": "fixture-session",
+			"stream_version": 126,
+			"type": "session.unpinned",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.snoozed required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 128,
+			"event_id": "fixture-128",
+			"session_id": "fixture-session",
+			"stream_version": 127,
+			"type": "session.snoozed",
+			"data": "{\"sessionId\":\"fixture\",\"until\":1}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.snoozed optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 129,
+			"event_id": "fixture-129",
+			"session_id": "fixture-session",
+			"stream_version": 128,
+			"type": "session.snoozed",
+			"data": "{\"sessionId\":\"fixture\",\"until\":1,\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.snoozed empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 130,
+			"event_id": "fixture-130",
+			"session_id": "fixture-session",
+			"stream_version": 129,
+			"type": "session.snoozed",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.auto_settle_set required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 131,
+			"event_id": "fixture-131",
+			"session_id": "fixture-session",
+			"stream_version": 130,
+			"type": "session.auto_settle_set",
+			"data": "{\"sessionId\":\"fixture\",\"disabled\":true}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.auto_settle_set optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 132,
+			"event_id": "fixture-132",
+			"session_id": "fixture-session",
+			"stream_version": 131,
+			"type": "session.auto_settle_set",
+			"data": "{\"sessionId\":\"fixture\",\"disabled\":true,\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.auto_settle_set empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 133,
+			"event_id": "fixture-133",
+			"session_id": "fixture-session",
+			"stream_version": 132,
+			"type": "session.auto_settle_set",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.unsnoozed required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 134,
+			"event_id": "fixture-134",
+			"session_id": "fixture-session",
+			"stream_version": 133,
+			"type": "session.unsnoozed",
+			"data": "{\"sessionId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.unsnoozed optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 135,
+			"event_id": "fixture-135",
+			"session_id": "fixture-session",
+			"stream_version": 134,
+			"type": "session.unsnoozed",
+			"data": "{\"sessionId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.unsnoozed empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 136,
+			"event_id": "fixture-136",
+			"session_id": "fixture-session",
+			"stream_version": 135,
+			"type": "session.unsnoozed",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.deleted required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 137,
+			"event_id": "fixture-137",
+			"session_id": "fixture-session",
+			"stream_version": 136,
+			"type": "session.deleted",
+			"data": "{\"sessionId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.deleted optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 138,
+			"event_id": "fixture-138",
+			"session_id": "fixture-session",
+			"stream_version": 137,
+			"type": "session.deleted",
+			"data": "{\"sessionId\":\"fixture\",\"childSessionIds\":[],\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.deleted empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 139,
+			"event_id": "fixture-139",
+			"session_id": "fixture-session",
+			"stream_version": 138,
+			"type": "session.deleted",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.forked required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 140,
+			"event_id": "fixture-140",
+			"session_id": "fixture-session",
+			"stream_version": 139,
+			"type": "session.forked",
+			"data": "{\"sessionId\":\"fixture\",\"parentId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.forked optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 141,
+			"event_id": "fixture-141",
+			"session_id": "fixture-session",
+			"stream_version": 140,
+			"type": "session.forked",
+			"data": "{\"sessionId\":\"fixture\",\"parentId\":\"fixture\",\"forkPointEvent\":\"fixture\",\"forkPointTimestamp\":1,\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.forked empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 142,
+			"event_id": "fixture-142",
+			"session_id": "fixture-session",
+			"stream_version": 141,
+			"type": "session.forked",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.status required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 143,
+			"event_id": "fixture-143",
+			"session_id": "fixture-session",
+			"stream_version": 142,
+			"type": "session.status",
+			"data": "{\"sessionId\":\"fixture\",\"status\":\"idle\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.status optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 144,
+			"event_id": "fixture-144",
+			"session_id": "fixture-session",
+			"stream_version": 143,
+			"type": "session.status",
+			"data": "{\"sessionId\":\"fixture\",\"status\":\"idle\",\"turnId\":\"fixture\",\"message\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.status empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 145,
+			"event_id": "fixture-145",
+			"session_id": "fixture-session",
+			"stream_version": 144,
+			"type": "session.status",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.compaction required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 146,
+			"event_id": "fixture-146",
+			"session_id": "fixture-session",
+			"stream_version": 145,
+			"type": "session.compaction",
+			"data": "{\"sessionId\":\"fixture\",\"state\":\"started\",\"detail\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.compaction optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 147,
+			"event_id": "fixture-147",
+			"session_id": "fixture-session",
+			"stream_version": 146,
+			"type": "session.compaction",
+			"data": "{\"sessionId\":\"fixture\",\"state\":\"started\",\"detail\":\"fixture\",\"preTokens\":1,\"postTokens\":1,\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.compaction empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 148,
+			"event_id": "fixture-148",
+			"session_id": "fixture-session",
+			"stream_version": 147,
+			"type": "session.compaction",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.provider_changed required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 149,
+			"event_id": "fixture-149",
+			"session_id": "fixture-session",
+			"stream_version": 148,
+			"type": "session.provider_changed",
+			"data": "{\"sessionId\":\"fixture\",\"oldProvider\":\"fixture\",\"newProvider\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.provider_changed optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 150,
+			"event_id": "fixture-150",
+			"session_id": "fixture-session",
+			"stream_version": 149,
+			"type": "session.provider_changed",
+			"data": "{\"sessionId\":\"fixture\",\"oldProvider\":\"fixture\",\"newProvider\":\"fixture\",\"reason\":\"user\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.provider_changed empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 151,
+			"event_id": "fixture-151",
+			"session_id": "fixture-session",
+			"stream_version": 150,
+			"type": "session.provider_changed",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.provider_cleanup_failed required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 152,
+			"event_id": "fixture-152",
+			"session_id": "fixture-session",
+			"stream_version": 151,
+			"type": "session.provider_cleanup_failed",
+			"data": "{\"sessionId\":\"fixture\",\"provider\":\"fixture\",\"reason\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.provider_cleanup_failed optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 153,
+			"event_id": "fixture-153",
+			"session_id": "fixture-session",
+			"stream_version": 152,
+			"type": "session.provider_cleanup_failed",
+			"data": "{\"sessionId\":\"fixture\",\"provider\":\"fixture\",\"instanceId\":\"fixture\",\"reason\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.provider_cleanup_failed empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 154,
+			"event_id": "fixture-154",
+			"session_id": "fixture-session",
+			"stream_version": 153,
+			"type": "session.provider_cleanup_failed",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.permission_mode_changed required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 155,
+			"event_id": "fixture-155",
+			"session_id": "fixture-session",
+			"stream_version": 154,
+			"type": "session.permission_mode_changed",
+			"data": "{\"sessionId\":\"fixture\",\"mode\":\"ask\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.permission_mode_changed optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 156,
+			"event_id": "fixture-156",
+			"session_id": "fixture-session",
+			"stream_version": 155,
+			"type": "session.permission_mode_changed",
+			"data": "{\"sessionId\":\"fixture\",\"mode\":\"ask\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.permission_mode_changed empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 157,
+			"event_id": "fixture-157",
+			"session_id": "fixture-session",
+			"stream_version": 156,
+			"type": "session.permission_mode_changed",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.model_changed required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 158,
+			"event_id": "fixture-158",
+			"session_id": "fixture-session",
+			"stream_version": 157,
+			"type": "session.model_changed",
+			"data": "{\"sessionId\":\"fixture\",\"modelId\":\"fixture\",\"providerId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.model_changed optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 159,
+			"event_id": "fixture-159",
+			"session_id": "fixture-session",
+			"stream_version": 158,
+			"type": "session.model_changed",
+			"data": "{\"sessionId\":\"fixture\",\"modelId\":\"fixture\",\"providerId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.model_changed empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 160,
+			"event_id": "fixture-160",
+			"session_id": "fixture-session",
+			"stream_version": 159,
+			"type": "session.model_changed",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.variant_changed required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 161,
+			"event_id": "fixture-161",
+			"session_id": "fixture-session",
+			"stream_version": 160,
+			"type": "session.variant_changed",
+			"data": "{\"sessionId\":\"fixture\",\"variant\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.variant_changed optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 162,
+			"event_id": "fixture-162",
+			"session_id": "fixture-session",
+			"stream_version": 161,
+			"type": "session.variant_changed",
+			"data": "{\"sessionId\":\"fixture\",\"variant\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.variant_changed empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 163,
+			"event_id": "fixture-163",
+			"session_id": "fixture-session",
+			"stream_version": 162,
+			"type": "session.variant_changed",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.context_window_changed required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 164,
+			"event_id": "fixture-164",
+			"session_id": "fixture-session",
+			"stream_version": 163,
+			"type": "session.context_window_changed",
+			"data": "{\"sessionId\":\"fixture\",\"contextWindow\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.context_window_changed optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 165,
+			"event_id": "fixture-165",
+			"session_id": "fixture-session",
+			"stream_version": 164,
+			"type": "session.context_window_changed",
+			"data": "{\"sessionId\":\"fixture\",\"contextWindow\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.context_window_changed empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 166,
+			"event_id": "fixture-166",
+			"session_id": "fixture-session",
+			"stream_version": 165,
+			"type": "session.context_window_changed",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.goal_changed required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 167,
+			"event_id": "fixture-167",
+			"session_id": "fixture-session",
+			"stream_version": 166,
+			"type": "session.goal_changed",
+			"data": "{\"sessionId\":\"fixture\",\"goal\":{\"condition\":\"fixture\",\"iterations\":1,\"setAt\":1,\"tokensAtStart\":1}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.goal_changed optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 168,
+			"event_id": "fixture-168",
+			"session_id": "fixture-session",
+			"stream_version": 167,
+			"type": "session.goal_changed",
+			"data": "{\"sessionId\":\"fixture\",\"goal\":{\"condition\":\"fixture\",\"iterations\":1,\"setAt\":1,\"tokensAtStart\":1,\"lastReason\":\"fixture\"},\"ended\":\"met\",\"endedGoal\":{\"condition\":\"fixture\",\"iterations\":1,\"setAt\":1,\"tokensAtStart\":1,\"lastReason\":\"fixture\"},\"endedAt\":1,\"pausedReason\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.goal_changed empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 169,
+			"event_id": "fixture-169",
+			"session_id": "fixture-session",
+			"stream_version": 168,
+			"type": "session.goal_changed",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.handoff_delivered required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 170,
+			"event_id": "fixture-170",
+			"session_id": "fixture-session",
+			"stream_version": 169,
+			"type": "session.handoff_delivered",
+			"data": "{\"included\":1,\"omitted\":1,\"tokens\":1}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.handoff_delivered optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 171,
+			"event_id": "fixture-171",
+			"session_id": "fixture-session",
+			"stream_version": 170,
+			"type": "session.handoff_delivered",
+			"data": "{\"included\":1,\"omitted\":1,\"tokens\":1,\"firstMessageIncluded\":true,\"instanceId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.handoff_delivered empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 172,
+			"event_id": "fixture-172",
+			"session_id": "fixture-session",
+			"stream_version": 171,
+			"type": "session.handoff_delivered",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.usage_limited required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 173,
+			"event_id": "fixture-173",
+			"session_id": "fixture-session",
+			"stream_version": 172,
+			"type": "session.usage_limited",
+			"data": "{\"instanceId\":\"fixture\",\"rateLimitType\":\"fixture\",\"cutOffMessageId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.usage_limited optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 174,
+			"event_id": "fixture-174",
+			"session_id": "fixture-session",
+			"stream_version": 173,
+			"type": "session.usage_limited",
+			"data": "{\"instanceId\":\"fixture\",\"rateLimitType\":\"fixture\",\"resetsAt\":1,\"cutOffMessageId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.usage_limited empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 175,
+			"event_id": "fixture-175",
+			"session_id": "fixture-session",
+			"stream_version": 174,
+			"type": "session.usage_limited",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.cut_off_dismissed required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 176,
+			"event_id": "fixture-176",
+			"session_id": "fixture-session",
+			"stream_version": 175,
+			"type": "session.cut_off_dismissed",
+			"data": "{\"cutOffMessageId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.cut_off_dismissed optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 177,
+			"event_id": "fixture-177",
+			"session_id": "fixture-session",
+			"stream_version": 176,
+			"type": "session.cut_off_dismissed",
+			"data": "{\"cutOffMessageId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.cut_off_dismissed empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 178,
+			"event_id": "fixture-178",
+			"session_id": "fixture-session",
+			"stream_version": 177,
+			"type": "session.cut_off_dismissed",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.resumed required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 179,
+			"event_id": "fixture-179",
+			"session_id": "fixture-session",
+			"stream_version": 178,
+			"type": "session.resumed",
+			"data": "{\"reason\":\"user\",\"instanceId\":\"fixture\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.resumed optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 180,
+			"event_id": "fixture-180",
+			"session_id": "fixture-session",
+			"stream_version": 179,
+			"type": "session.resumed",
+			"data": "{\"reason\":\"user\",\"instanceId\":\"fixture\",\"from\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.resumed empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 181,
+			"event_id": "fixture-181",
+			"session_id": "fixture-session",
+			"stream_version": 180,
+			"type": "session.resumed",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.resume_scheduled required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 182,
+			"event_id": "fixture-182",
+			"session_id": "fixture-session",
+			"stream_version": 181,
+			"type": "session.resume_scheduled",
+			"data": "{\"instanceId\":\"fixture\",\"at\":1}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.resume_scheduled optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 183,
+			"event_id": "fixture-183",
+			"session_id": "fixture-session",
+			"stream_version": 182,
+			"type": "session.resume_scheduled",
+			"data": "{\"instanceId\":\"fixture\",\"at\":1,\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.resume_scheduled empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 184,
+			"event_id": "fixture-184",
+			"session_id": "fixture-session",
+			"stream_version": 183,
+			"type": "session.resume_scheduled",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.resume_cancelled required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 185,
+			"event_id": "fixture-185",
+			"session_id": "fixture-session",
+			"stream_version": 184,
+			"type": "session.resume_cancelled",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.resume_cancelled optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 186,
+			"event_id": "fixture-186",
+			"session_id": "fixture-session",
+			"stream_version": 185,
+			"type": "session.resume_cancelled",
+			"data": "{\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.resume_cancelled empty payload",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 187,
+			"event_id": "fixture-187",
+			"session_id": "fixture-session",
+			"stream_version": 186,
+			"type": "session.resume_cancelled",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "permission.asked required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 188,
+			"event_id": "fixture-188",
+			"session_id": "fixture-session",
+			"stream_version": 187,
+			"type": "permission.asked",
+			"data": "{\"id\":\"fixture\",\"sessionId\":\"fixture\",\"toolName\":\"fixture\",\"input\":null}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "permission.asked optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 189,
+			"event_id": "fixture-189",
+			"session_id": "fixture-session",
+			"stream_version": 188,
+			"type": "permission.asked",
+			"data": "{\"id\":\"fixture\",\"sessionId\":\"fixture\",\"toolName\":\"fixture\",\"input\":null,\"toolUseId\":\"fixture\",\"always\":[],\"permissionSuggestions\":[],\"permissionTitle\":\"fixture\",\"permissionDisplayName\":\"fixture\",\"permissionDescription\":\"fixture\",\"permissionReason\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "permission.asked empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 190,
+			"event_id": "fixture-190",
+			"session_id": "fixture-session",
+			"stream_version": 189,
+			"type": "permission.asked",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "permission.resolved required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 191,
+			"event_id": "fixture-191",
+			"session_id": "fixture-session",
+			"stream_version": 190,
+			"type": "permission.resolved",
+			"data": "{\"id\":\"fixture\",\"decision\":\"once\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "permission.resolved optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 192,
+			"event_id": "fixture-192",
+			"session_id": "fixture-session",
+			"stream_version": 191,
+			"type": "permission.resolved",
+			"data": "{\"id\":\"fixture\",\"decision\":\"once\",\"resolvedBy\":\"auto\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "permission.resolved empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 193,
+			"event_id": "fixture-193",
+			"session_id": "fixture-session",
+			"stream_version": 192,
+			"type": "permission.resolved",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "question.asked required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 194,
+			"event_id": "fixture-194",
+			"session_id": "fixture-session",
+			"stream_version": 193,
+			"type": "question.asked",
+			"data": "{\"id\":\"fixture\",\"sessionId\":\"fixture\",\"questions\":null}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "question.asked optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 195,
+			"event_id": "fixture-195",
+			"session_id": "fixture-session",
+			"stream_version": 194,
+			"type": "question.asked",
+			"data": "{\"id\":\"fixture\",\"sessionId\":\"fixture\",\"questions\":null,\"toolUseId\":\"fixture\",\"providerId\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "question.asked empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 196,
+			"event_id": "fixture-196",
+			"session_id": "fixture-session",
+			"stream_version": 195,
+			"type": "question.asked",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "question.resolved required fields",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 197,
+			"event_id": "fixture-197",
+			"session_id": "fixture-session",
+			"stream_version": 196,
+			"type": "question.resolved",
+			"data": "{\"id\":\"fixture\",\"answers\":{}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "question.resolved optional fields and extras",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 198,
+			"event_id": "fixture-198",
+			"session_id": "fixture-session",
+			"stream_version": 197,
+			"type": "question.resolved",
+			"data": "{\"id\":\"fixture\",\"answers\":{},\"futureField\":{\"retained\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "question.resolved empty payload",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 199,
+			"event_id": "fixture-199",
+			"session_id": "fixture-session",
+			"stream_version": 198,
+			"type": "question.resolved",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.workspace_changed boundary 199",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 200,
+			"event_id": "fixture-200",
+			"session_id": "fixture-session",
+			"stream_version": 199,
+			"type": "session.workspace_changed",
+			"data": "{\"sessionId\":\"fixture-session\",\"cause\":\"user\",\"origin\":\"existing\",\"worktrees\":{},\"path\":null}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.settled boundary 200",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 201,
+			"event_id": "fixture-201",
+			"session_id": "fixture-session",
+			"stream_version": 200,
+			"type": "session.settled",
+			"data": "{\"sessionId\":\"fixture-session\",\"automatic\":null,\"mergedHead\":null}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.rewound boundary 201",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 202,
+			"event_id": "fixture-202",
+			"session_id": "fixture-session",
+			"stream_version": 201,
+			"type": "session.rewound",
+			"data": "{\"messageId\":\"message\",\"previousMessageId\":null}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.rewind_undone boundary 202",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 203,
+			"event_id": "fixture-203",
+			"session_id": "fixture-session",
+			"stream_version": 202,
+			"type": "session.rewind_undone",
+			"data": "{\"previousMessageId\":null}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "message.snapshot boundary 203",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 204,
+			"event_id": "fixture-204",
+			"session_id": "fixture-session",
+			"stream_version": 203,
+			"type": "message.snapshot",
+			"data": "{\"messageId\":\"message\",\"digest\":\"digest\",\"message\":{\"id\":\"m\",\"sessionID\":\"s\",\"role\":\"system\",\"parts\":[]}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "message.snapshot boundary 204",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 205,
+			"event_id": "fixture-205",
+			"session_id": "fixture-session",
+			"stream_version": 204,
+			"type": "message.snapshot",
+			"data": "{\"messageId\":\"message\",\"digest\":\"digest\",\"message\":{\"id\":\"m\",\"sessionID\":\"s\",\"role\":\"user\",\"parts\":[{\"type\":\"text\"}]}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "tool.input_updated boundary 205",
+		"accepted": true,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 206,
+			"event_id": "fixture-206",
+			"session_id": "fixture-session",
+			"stream_version": 205,
+			"type": "tool.input_updated",
+			"data": "{\"messageId\":\"m\",\"partId\":\"p\",\"arbitrary\":{\"nested\":true}}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "turn.model_resolved boundary 206",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 207,
+			"event_id": "fixture-207",
+			"session_id": "fixture-session",
+			"stream_version": 206,
+			"type": "turn.model_resolved",
+			"data": "{\"actualModel\":\"\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "session.handoff_delivered boundary 207",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 208,
+			"event_id": "fixture-208",
+			"session_id": "fixture-session",
+			"stream_version": 207,
+			"type": "session.handoff_delivered",
+			"data": "{\"included\":-1,\"omitted\":0,\"tokens\":0}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "not.a.canonical.event boundary 208",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 209,
+			"event_id": "fixture-209",
+			"session_id": "fixture-session",
+			"stream_version": 208,
+			"type": "not.a.canonical.event",
+			"data": "{}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "invalid payload JSON",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 210,
+			"event_id": "fixture-210",
+			"session_id": "fixture-session",
+			"stream_version": 209,
+			"type": "session.created",
+			"data": "{invalid",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "invalid metadata JSON",
+		"accepted": false,
+		"row": {
+			"project_id": "test-project",
+			"sequence": 211,
+			"event_id": "fixture-211",
+			"session_id": "fixture-session",
+			"stream_version": 210,
+			"type": "session.read",
+			"data": "{\"sessionId\":\"fixture-session\"}",
+			"metadata": "{invalid",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	},
+	{
+		"label": "invalid envelope",
+		"accepted": false,
+		"row": {
+			"project_id": "",
+			"sequence": 212,
+			"event_id": "fixture-212",
+			"session_id": "fixture-session",
+			"stream_version": 211,
+			"type": "session.read",
+			"data": "{\"sessionId\":\"fixture-session\"}",
+			"metadata": "{}",
+			"provider": "claude",
+			"created_at": 1789508753985
+		}
+	}
+]

@@ -66,15 +66,14 @@ function makeLayer({
 	log?: Logger;
 	engine?: OrchestrationEngine;
 } = {}) {
-	const apiLayer = Layer.succeed(OpenCodeAPITag, api);
+	const apiLayer = Layer.succeed(OpenCodeAPITag)(api);
 	const overridesLayer = makeOverridesStateLive();
-	const loggerLayer = Layer.succeed(LoggerTag, log);
-	const engineLayer = Layer.succeed(OrchestrationEngineTag, engine);
+	const loggerLayer = Layer.succeed(LoggerTag)(log);
+	const engineLayer = Layer.succeed(OrchestrationEngineTag)(engine);
 	const deps = Layer.mergeAll(
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		apiLayer,
-		Layer.succeed(
-			OpenCodeInstancesTag,
+		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: api }),
 		),
 		overridesLayer,

@@ -64,6 +64,33 @@ function stateEntries(state: ProviderRuntimeDomainMapperState) {
 
 describe("translateProviderRuntimeEventToDomain", () => {
 	it.each([
+		"claude.sdk.message",
+		"opencode.sse",
+		"opencode.rest",
+		"claude.subagent.transcript",
+	])("persists only metadata with readers for %s", (kind) => {
+		const { events } = translateProviderRuntimeEventToDomain(
+			runtimeEvent({
+				eventId: "compact-metadata",
+				type: "message.created",
+				providerId: kind.startsWith("opencode") ? "opencode" : "claude",
+				rawSource: { kind },
+				metadata: { source: "test-source" },
+				data: { messageId: "message-1", role: "assistant" },
+			}),
+		);
+
+		expect(events).toHaveLength(1);
+		expect(events[0]?.metadata).toEqual({
+			source: "test-source",
+			...(kind === "opencode.rest" || kind === "claude.subagent.transcript"
+				? { rawSource: kind }
+				: {}),
+		});
+		expect(events[0]?.metadata).not.toHaveProperty("providerRuntimeEventId");
+	});
+
+	it.each([
 		"text.delta",
 		"thinking.delta",
 	])("emits the first empty %s to open its part and drops later empty deltas", (type) => {
@@ -211,11 +238,7 @@ describe("translateProviderRuntimeEventToDomain", () => {
 					sessionId: "session-123",
 					turnId: "turn-1",
 				},
-				metadata: {
-					providerRuntimeEventId: "runtime-event-1",
-					rawSource: "claude.sdk.message",
-					providerRefs: BASE_EVENT.providerRefs,
-				},
+				metadata: {},
 			}),
 		]);
 		expect(state.currentAssistantMessageIds.get("session-123:turn-1")).toBe(
@@ -274,9 +297,7 @@ describe("translateProviderRuntimeEventToDomain", () => {
 					partId: "message-1:text",
 					text: "hello",
 				},
-				metadata: expect.objectContaining({
-					providerRuntimeEventId: "runtime-event-2",
-				}),
+				metadata: {},
 			}),
 		]);
 	});
@@ -745,6 +766,16 @@ describe("translateProviderRuntimeEventToDomain", () => {
 		];
 
 		const result = foldRuntimeEvents(sequence);
+		const permission = result.events.find(
+			(event) => event.type === "permission.asked",
+		);
+		const question = result.events.find(
+			(event) => event.type === "question.asked",
+		);
+		expect(permission?.data.id).toBeTypeOf("string");
+		expect(permission?.data.id).not.toBe("permission-1");
+		expect(question?.data.id).toBeTypeOf("string");
+		expect(question?.data.id).not.toBe("question-1");
 
 		expect(result.events.map((event) => event.type)).toEqual([
 			"session.renamed",
@@ -759,22 +790,26 @@ describe("translateProviderRuntimeEventToDomain", () => {
 				title: "New session title",
 			},
 			{
-				id: "permission-1",
+				id: permission?.data.id,
+				providerRequestId: "permission-1",
 				sessionId: "session-123",
 				toolName: "Bash",
 				input: { command: "pnpm test" },
 			},
 			{
-				id: "permission-1",
+				id: permission?.data.id,
+				providerRequestId: "permission-1",
 				decision: "always",
 			},
 			{
-				id: "question-1",
+				id: question?.data.id,
+				providerRequestId: "question-1",
 				sessionId: "session-123",
 				questions: [{ id: "target", question: "Which target?" }],
 			},
 			{
-				id: "question-1",
+				id: question?.data.id,
+				providerRequestId: "question-1",
 				answers: { target: "unit" },
 			},
 		]);
@@ -810,6 +845,7 @@ describe("translateProviderRuntimeEventToDomain", () => {
 				type: "permission.resolved",
 				data: {
 					id: "permission-1",
+					providerRequestId: "permission-1",
 					decision: expectedDecision,
 				},
 			}),

@@ -1200,9 +1200,10 @@ describe("economics", () => {
 		});
 	});
 
-	it("omits the context reading entirely when no window is reported", () => {
+	it("omits the context reading when neither occupancy nor a window is reported", () => {
 		const e = withResult({ inputTokens: 2_311, cacheRead: 41_900 });
 		expect(e.context).toBeUndefined();
+		expect(e.contextWithoutCapacity).toBeUndefined();
 		expect(e.tokensIn).toBe(2_311);
 	});
 
@@ -1210,9 +1211,20 @@ describe("economics", () => {
 		expect(withResult({ context_window: 200_000 }).context).toBeUndefined();
 	});
 
-	it("treats a zero window as unreported rather than dividing by it", () => {
+	it.each([
+		{},
+		{ context_window: 0 },
+		{ context_window: -1 },
+	])("shows only positive explicit occupancy when capacity is unknown: %j", (window) => {
+		const e = withResult({
+			inputTokens: 10,
+			contextTokens: 40_000,
+			...window,
+		});
+		expect(e.context).toBeUndefined();
+		expect(e.contextWithoutCapacity).toBe(40_000);
 		expect(
-			withResult({ inputTokens: 10, context_window: 0 }).context,
+			withResult({ contextTokens: 0, ...window }).contextWithoutCapacity,
 		).toBeUndefined();
 	});
 

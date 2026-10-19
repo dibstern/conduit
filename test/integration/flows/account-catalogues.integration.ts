@@ -89,18 +89,14 @@ describe("Integration: account catalogues", () => {
 		);
 		const before = harness.mock.diagnostics.length;
 		for (const scope of [
-			{ instanceId: "missing-account" },
+			{ projectSlug: "integration-test", instanceId: "missing-account" },
 			{ sessionId: "ses-unroutable" },
 		]) {
 			await expect(
-				client.rpcCall((rpc) =>
-					rpc.GetModels({ projectSlug: "integration-test", ...scope }),
-				),
+				client.rpcCall((rpc) => rpc.GetModels(scope)),
 			).rejects.toThrow(/missing-account/);
 			await expect(
-				client.rpcCall((rpc) =>
-					rpc.GetAgents({ projectSlug: "integration-test", ...scope }),
-				),
+				client.rpcCall((rpc) => rpc.GetAgents(scope)),
 			).rejects.toThrow(/missing-account/);
 		}
 		expect(
@@ -153,7 +149,7 @@ describe("Integration: account catalogues", () => {
 				registry,
 				DaemonEventBusLive,
 				DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
-				Layer.succeed(ConfigPersistenceTag, {
+				Layer.succeed(ConfigPersistenceTag)({
 					requestSave: Effect.void,
 					flush: Effect.fail(new Error("Fixture never flushes config")),
 				}),
@@ -184,6 +180,16 @@ describe("Integration: account catalogues", () => {
 		await client.waitFor("shell", {
 			predicate: (message) => message["_tag"] === "synchronized",
 		});
+		// A draft has no session yet; its picked account still owns the catalogue.
+		const draft = await client.rpcCall((rpc) =>
+			rpc.GetCommands({
+				projectSlug: "integration-test",
+				instanceId: "personal-account",
+			}),
+		);
+		expect(draft.commands.map((command) => command.name)).toContain(
+			"account-skill",
+		);
 		const created = await client.createSession("Personal commands", {
 			instanceId: "personal-account",
 			model: {
@@ -196,13 +202,11 @@ describe("Integration: account catalogues", () => {
 		const sessionId = created["id"];
 		if (typeof sessionId !== "string")
 			throw new Error("CreateSession returned no id");
-		const agents = await client.rpcCall((rpc) =>
-			rpc.GetAgents({ projectSlug: "integration-test", sessionId }),
-		);
+		const agents = await client.rpcCall((rpc) => rpc.GetAgents({ sessionId }));
 		expect(agents.providerScope.id).toBe("claude");
 		expect(agents.instanceId).toBe("personal-account");
 		const commands = await client.rpcCall((rpc) =>
-			rpc.GetCommands({ projectSlug: "integration-test", sessionId }),
+			rpc.GetCommands({ sessionId }),
 		);
 		expect(commands.commands.map((command) => command.name)).toContain(
 			"account-command",

@@ -26,8 +26,8 @@ import type { Page } from "@playwright/test";
 import { Effect } from "effect";
 import type {
 	CanonicalEvent,
-	CanonicalEventType,
 	EventPayloadMap,
+	LiveEventType,
 } from "../../../src/lib/contracts/stored-event.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -52,7 +52,7 @@ const prose = (label: string, bytes: number) =>
 
 const event =
 	(sessionId: string, createdAt: number) =>
-	<T extends CanonicalEventType>(type: T, data: EventPayloadMap[T]) =>
+	<T extends LiveEventType>(type: T, data: EventPayloadMap[T]) =>
 		canonicalEvent(type, sessionId, data, { provider: "claude", createdAt });
 
 const userId = (sessionId: string, turn: number) => `${sessionId}-u${turn}`;
@@ -107,7 +107,7 @@ const seed = (filename: string, events: readonly CanonicalEvent[]) =>
 			const commit = yield* makeCommitAndSignal;
 			yield* commit([...events], { publish: false });
 		}).pipe(
-			Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+			Effect.provide(makePersistenceEffectLayer(filename, "process-test")),
 		),
 	);
 
@@ -154,7 +154,7 @@ test("returning to a session after a rewind or its undo resumes it", async ({
 		"The wire is the same on every device; desktop shows the sidebar beside the transcript.",
 	);
 	test.setTimeout(300_000);
-	const store = harness.projectStorePath();
+	const store = harness.daemonStorePath();
 	const viewport = testInfo.project.use.viewport ?? null;
 	const url = (sessionId: string) =>
 		`${harness.baseUrl}/s/${sessionId}?p=process-test`;
@@ -320,7 +320,6 @@ test("returning to a session after a rewind or its undo resumes it", async ({
 		// Rewind to the last prompt: its turn leaves the transcript.
 		await Effect.runPromise(
 			rpc.RewindSession({
-				projectSlug: "process-test",
 				sessionId: id,
 				messageId: userId(id, last),
 			}),
@@ -338,9 +337,7 @@ test("returning to a session after a rewind or its undo resumes it", async ({
 		});
 
 		// Undo it: the turn comes back.
-		await Effect.runPromise(
-			rpc.UndoRewind({ projectSlug: "process-test", sessionId: id }),
-		);
+		await Effect.runPromise(rpc.UndoRewind({ sessionId: id }));
 		await expect(notice).toBeHidden({ timeout: 30_000 });
 		await expect(messages).toContainText(replyEnd(id, last));
 		scenarios.push({

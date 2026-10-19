@@ -12,7 +12,7 @@ import {
 } from "../../helpers/process-harness.js";
 
 function persisted(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath(), {
+	const db = new Database(harness.daemonStorePath(), {
 		readonly: true,
 	});
 	try {
@@ -609,7 +609,6 @@ describe("Claude session process runner", () => {
 				cancelCommandIds.map((commandId) =>
 					Effect.runPromise(
 						browser.rpc.CancelSession({
-							projectSlug: "process-test",
 							sessionId,
 							commandId,
 						}),
@@ -648,7 +647,6 @@ describe("Claude session process runner", () => {
 			// turn or add another terminal event after notification cleanup.
 			await Effect.runPromise(
 				browser.rpc.CancelSession({
-					projectSlug: "process-test",
 					sessionId,
 					commandId: randomUUID(),
 				}),

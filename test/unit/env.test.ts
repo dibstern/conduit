@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 describe("env module", () => {
@@ -9,13 +12,20 @@ describe("env module", () => {
 		vi.unstubAllEnvs();
 	});
 
-	it("exports DEFAULT_CONFIG_DIR from homedir when XDG_CONFIG_HOME is unset", async () => {
+	it("exports DEFAULT_CONFIG_DIR under an existing ~/.config when XDG_CONFIG_HOME is unset", async () => {
 		// CONDUIT_CONFIG_DIR takes precedence over the XDG/homedir logic, so it
 		// must be cleared to exercise the fallback (it is set in this machine's env).
 		vi.stubEnv("CONDUIT_CONFIG_DIR", undefined);
 		vi.stubEnv("XDG_CONFIG_HOME", undefined);
-		const { DEFAULT_CONFIG_DIR } = await import("../../src/lib/env.js");
-		expect(DEFAULT_CONFIG_DIR).toMatch(/\.conduit$/);
+		const home = mkdtempSync(join(tmpdir(), "conduit-env-"));
+		vi.stubEnv("HOME", home);
+		mkdirSync(join(home, ".config"));
+		try {
+			const { DEFAULT_CONFIG_DIR } = await import("../../src/lib/env.js");
+			expect(DEFAULT_CONFIG_DIR).toBe(join(home, ".config/conduit"));
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
 	});
 
 	it("respects XDG_CONFIG_HOME when set", async () => {
@@ -87,7 +97,8 @@ describe("env module", () => {
 			maxBytes: 10_485_760,
 			maxFiles: 10,
 			batchWindowMs: 200,
-			sqlMinMs: 5,
+			minMs: 5,
+			sessionId: undefined,
 		});
 	});
 
@@ -97,12 +108,12 @@ describe("env module", () => {
 		["0", 0],
 		["-1", 5],
 		["invalid", 5],
-	])("parses the local SQL span threshold %s as %i ms", async (value, expected) => {
+	])("parses the local span threshold %s as %i ms", async (value, expected) => {
 		const { resolveTraceConfig } = await import("../../src/lib/env.js");
 		expect(
 			resolveTraceConfig("/tmp/conduit-config", {
-				CONDUIT_TRACE_SQL_MIN_MS: value,
-			}).sqlMinMs,
+				CONDUIT_TRACE_MIN_MS: value,
+			}).minMs,
 		).toBe(expected);
 	});
 
@@ -121,11 +132,13 @@ describe("env module", () => {
 			CONDUIT_TRACE_MAX_BYTES: "123abc",
 			CONDUIT_TRACE_MAX_FILES: "200",
 			CONDUIT_TRACE_BATCH_WINDOW_MS: "not-a-number",
+			CONDUIT_TRACE_SESSION: "debug-session",
 		});
 
 		expect(config.maxBytes).toBe(10_485_760);
 		expect(config.maxFiles).toBe(100);
 		expect(config.batchWindowMs).toBe(200);
+		expect(config.sessionId).toBe("debug-session");
 	});
 
 	it("resolveTraceConfig clamps complete numeric strings only", async () => {

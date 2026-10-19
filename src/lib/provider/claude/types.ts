@@ -13,7 +13,7 @@
  * pending approvals, tool tracking, etc.) are defined here.
  */
 
-import type { Effect, Fiber } from "effect";
+import type { Effect, Fiber, Semaphore } from "effect";
 import type { ClaudeSDKCommandLifecycleMessage } from "../../contracts/providers/claude-agent-sdk.js";
 import type { NativeThread } from "../../persistence/effect/provider-state-effect.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
@@ -210,7 +210,7 @@ export interface ClaudeSubagentLivePoller {
 	readonly childSessionId: string;
 	readonly parentClaudeSessionId: string;
 	active: boolean;
-	fiber?: Fiber.RuntimeFiber<void, never>;
+	fiber?: Fiber.Fiber<void, never>;
 }
 
 /**
@@ -231,7 +231,7 @@ export interface ClaudeSessionContext {
 	readonly configDir: ClaudeConfigDir;
 	/** Serializes turn admission while each caller awaits the prior turn.
 	 *  Runtime-owned contexts always set this; translator-only test contexts may omit it. */
-	readonly turnAdmissionSemaphore?: Effect.Semaphore;
+	readonly turnAdmissionSemaphore?: Semaphore.Semaphore;
 	readonly pendingApprovals: Map<string, PendingApproval>;
 	readonly pendingQuestions: Map<string, PendingQuestion>;
 	readonly inFlightTools: Map<number, ToolInFlight>;
@@ -239,7 +239,7 @@ export interface ClaudeSessionContext {
 	readonly subagentPollers?: Map<string, ClaudeSubagentLivePoller>;
 	messageOwnership?: ClaudeMessageOwnership;
 	/** Serializes ownership decisions and their delivery across SDK and feed inputs. */
-	messageOwnershipPermit?: Effect.Semaphore;
+	messageOwnershipPermit?: Semaphore.Semaphore;
 	/** Shared by stream routing and transcript reads, retained across parent results. */
 	subagentTranscripts?: Map<string, ClaudeSubagentTranscriptCursor>;
 	failedSubagentSessions?: Set<string>;

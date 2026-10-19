@@ -1,14 +1,15 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import {
 	Context,
 	Deferred,
 	Effect,
-	FiberRef,
 	Layer,
 	Ref,
 	Schema,
+	Semaphore,
 } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
+import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import { makeAppendEventsWithClaudeTurnCosts } from "../../../persistence/effect/claude-event-persist-effect.js";
@@ -16,9 +17,9 @@ import {
 	type CommitAndSignalProject,
 	makeCommitAndSignal,
 } from "../../../persistence/effect/commit-and-signal.js";
-import type {
+import {
 	EventStoreEffectTag,
-	EventStoreError,
+	type EventStoreError,
 } from "../../../persistence/effect/event-store-effect.js";
 import { readPendingRewindCommit } from "../../../persistence/effect/pending-rewind.js";
 import type {
@@ -29,23 +30,24 @@ import { isSessionDeleted } from "../../../persistence/effect/session-seeder-eff
 import { type CanonicalEvent, EventId } from "../../../persistence/events.js";
 import { SESSION_SUBTREE_SQL } from "../../../persistence/projectors/session-handlers.js";
 import {
-	commitClaudeRunnerOutput,
-	createClaudeRunnerPermissionReplies,
-	currentClaudeRunnerOutput,
-	currentClaudeRunnerPermissionReply,
-	ownsClaudeRunnerAttachment,
-} from "../../../provider/claude/claude-runner-receipts.js";
-import {
 	emptyProviderRuntimeDomainMapperState,
 	partKey,
+	promptKey,
+	requestId,
 	restoreRuntimeToolStart,
 	translateProviderRuntimeEventToDomain,
 } from "../../../provider/provider-runtime-event-to-domain.js";
+import {
+	commitRunnerOutput,
+	createRunnerPermissionReplies,
+	currentRunnerOutput,
+	currentRunnerPermissionReply,
+	ownsRunnerAttachment,
+} from "../../../provider/runner/runner-receipts.js";
 import type { TurnSettings } from "../../../provider/turn-settings.js";
-import { translateDomainEventToRelay } from "../../../relay/domain-event-to-relay.js";
+import { turnEndedAlert } from "../../../relay/turn-ended-alert.js";
 import type { makeSessionCompactions } from "../../../session/session-compactions.js";
 import type { makeSessionRetries } from "../../../session/session-retries.js";
-import { tagWithSessionId } from "../../../shared-types.js";
 import type { RelayMessage } from "../../../types.js";
 import { isRecord } from "../../../utils.js";
 import type { UsageService } from "../../daemon/Services/usage.js";
@@ -85,6 +87,7 @@ export type ProviderRuntimeIngestionError =
 export interface ProviderRuntimeIngestion {
 	readonly ingest: (
 		event: ProviderRuntimeEvent,
+		onPrompt?: (id: string) => Effect.Effect<void>,
 	) => Effect.Effect<number, ProviderRuntimeIngestionError>;
 	readonly ingestBatch: (
 		events: readonly ProviderRuntimeEvent[],
@@ -99,12 +102,15 @@ export interface ProviderRuntimeIngestion {
 	readonly drain: () => Effect.Effect<void>;
 }
 
-export class ProviderRuntimeIngestionTag extends Context.Tag(
-	"ProviderRuntimeIngestion",
-)<ProviderRuntimeIngestionTag, ProviderRuntimeIngestion>() {}
+export class ProviderRuntimeIngestionTag extends Context.Service<
+	ProviderRuntimeIngestionTag,
+	ProviderRuntimeIngestion
+>()("ProviderRuntimeIngestion") {}
 
 export interface ProviderRuntimeRelayPublisher {
-	readonly publish: (message: RelayMessage) => Effect.Effect<void>;
+	readonly publish: (
+		message: Extract<RelayMessage, { type: "done" }>,
+	) => Effect.Effect<void>;
 }
 
 export interface ProviderRuntimeIngestionLiveOptions {
@@ -140,6 +146,7 @@ export const makeProviderRuntimeIngestionLive = (
 			const commitAndSignal = yield* makeCommitAndSignal;
 			const appendEvents = yield* makeAppendEventsWithClaudeTurnCosts;
 			const sql = yield* SqlClient.SqlClient;
+			const eventStore = yield* EventStoreEffectTag;
 			const continuation = yield* ContinuationTag;
 			const services = yield* Effect.context<
 				EventStoreEffectTag | ProjectionRunnerEffectTag | SqlClient.SqlClient
@@ -147,7 +154,7 @@ export const makeProviderRuntimeIngestionLive = (
 			const mapperStateRef = yield* Ref.make(
 				emptyProviderRuntimeDomainMapperState,
 			);
-			const ingestSemaphore = yield* Effect.makeSemaphore(1);
+			const ingestSemaphore = yield* Semaphore.make(1);
 
 			const ingestBatch = (
 				events: readonly ProviderRuntimeEvent[],
@@ -157,6 +164,7 @@ export const makeProviderRuntimeIngestionLive = (
 					readonly publishToRelay?: boolean;
 					readonly beforeCommit?: Effect.Effect<void, SqlError>;
 					readonly afterCommit?: Effect.Effect<void>;
+					readonly onPrompt?: (id: string) => Effect.Effect<void>;
 				} = {},
 			): Effect.Effect<number, ProviderRuntimeIngestionError> =>
 				Effect.gen(function* () {
@@ -186,20 +194,72 @@ export const makeProviderRuntimeIngestionLive = (
 					);
 					return yield* ingestSemaphore.withPermits(1)(
 						Effect.gen(function* () {
-							const context = yield* FiberRef.get(currentClaudeRunnerOutput);
-							const permissionReply = yield* FiberRef.get(
-								currentClaudeRunnerPermissionReply,
-							);
+							const context = yield* currentRunnerOutput;
+							const permissionReply = yield* currentRunnerPermissionReply;
 							const receipt =
 								context && !context.consumed ? context : undefined;
 							const currentState = yield* Ref.get(mapperStateRef);
 							let nextState = currentState;
 							let domainEvents: CanonicalEvent[] = [];
+							const promptIds: string[] = [];
 							const seedableSessions = new Set(
 								events.filter(canSeedSession).map((event) => event.sessionId),
 							);
 
 							for (const { event } of prepared) {
+								const promptEvent =
+									event.type.startsWith("permission.") ||
+									event.type.startsWith("question.");
+								let redelivered = false;
+								if (promptEvent) {
+									const data = isRecord(event.data) ? event.data : {};
+									const providerRequestId = requestId(event, data);
+									const processId = event.providerRefs.providerProcessId;
+									let [stored] = processId
+										? yield* sql<{
+												id: string;
+												status: string;
+											}>`SELECT id, status FROM pending_approvals WHERE session_id = ${event.sessionId} AND provider_process_id = ${processId} AND provider_request_id = ${providerRequestId}`
+										: [];
+									// Reconciled asks from any provider must retain legacy ids.
+									// Unknown resolutions still require the process reference or
+									// a previously observed ask (or a retained runner snapshot).
+									if (
+										!stored &&
+										(event.type.endsWith(".asked") ||
+											context?.consumed ||
+											nextState.promptIds?.has(promptKey(event)))
+									) {
+										[stored] = yield* sql<{
+											id: string;
+											status: string;
+										}>`SELECT id, status FROM pending_approvals WHERE session_id = ${event.sessionId} AND id = ${providerRequestId} AND provider_process_id IS NULL`;
+									}
+									// A late answer from a replaced process cannot resolve an
+									// unrelated legacy row that happens to have its request id.
+									if (
+										processId &&
+										event.type.endsWith(".resolved") &&
+										!stored &&
+										!nextState.promptIds?.has(promptKey(event))
+									)
+										continue;
+									redelivered =
+										event.type.endsWith(".asked") &&
+										nextState.promptIds?.has(promptKey(event)) === true;
+									if (stored) {
+										nextState = {
+											...nextState,
+											promptIds: new Map(nextState.promptIds).set(
+												promptKey(event),
+												stored.id,
+											),
+										};
+										redelivered =
+											event.type.endsWith(".asked") ||
+											stored.status === "resolved";
+									}
+								}
 								if (context && event.type === "tool.completed") {
 									const data = event.data as { partId?: string };
 									const partId =
@@ -246,7 +306,14 @@ export const makeProviderRuntimeIngestionLive = (
 										}),
 									);
 								}
-								domainEvents.push(...result.events);
+								for (const domain of result.events) {
+									if (
+										domain.type === "permission.asked" ||
+										domain.type === "question.asked"
+									)
+										promptIds.push(domain.data.id);
+								}
+								if (!redelivered) domainEvents.push(...result.events);
 								nextState = result.state;
 							}
 
@@ -257,13 +324,14 @@ export const makeProviderRuntimeIngestionLive = (
 							const beforeCommit = Effect.gen(function* () {
 								yield* ingestOptions.beforeCommit ?? Effect.void;
 								if (permissionReply) {
-									yield* createClaudeRunnerPermissionReplies(sql);
+									yield* createRunnerPermissionReplies(sql);
 									yield* sql`INSERT OR REPLACE INTO claude_runner_permission_replies (session_id, request_id, response_json) VALUES (${permissionReply.sessionId}, ${permissionReply.requestId}, ${JSON.stringify(permissionReply.response)})`;
 								}
 								if (options.usage)
 									for (const event of events) {
 										if (
-											event.providerId !== "claude" ||
+											getProviderDriver(event.providerId)?.usageHarness ===
+												undefined ||
 											(event.type !== "turn.completed" &&
 												event.type !== "turn.error" &&
 												event.type !== "turn.interrupted")
@@ -274,7 +342,7 @@ export const makeProviderRuntimeIngestionLive = (
 										const [session] = yield* sql<{ provider: string }>`
 											SELECT provider FROM sessions WHERE id = ${event.sessionId}
 										`.pipe(
-											Effect.catchAll((error) =>
+											Effect.catch((error) =>
 												Effect.logWarning(
 													"Could not refresh usage after turn",
 													error,
@@ -288,6 +356,8 @@ export const makeProviderRuntimeIngestionLive = (
 							const afterCommit = Effect.gen(function* () {
 								if (appended) {
 									yield* Ref.set(mapperStateRef, nextState);
+									for (const id of promptIds)
+										yield* ingestOptions.onPrompt?.(id) ?? Effect.void;
 									if (options.usage)
 										for (const accountId of completedAccounts)
 											yield* options.usage.turnEnded(accountId);
@@ -307,14 +377,14 @@ export const makeProviderRuntimeIngestionLive = (
 							};
 							yield* commitAndSignal
 								.write(
-									(project) =>
+									(project, stamp) =>
 										Effect.gen(function* () {
 											// Claim inside the append transaction, before event IDs or
 											// projections are written. Replayed and fenced frames are no-ops.
 											if (context && (receipt || context.attachmentId))
 												appended = receipt
-													? yield* commitClaudeRunnerOutput(sql, receipt)
-													: yield* ownsClaudeRunnerAttachment(sql, context);
+													? yield* commitRunnerOutput(sql, receipt)
+													: yield* ownsRunnerAttachment(sql, context);
 											if (!appended) return;
 											// Check under the same write permit and transaction as local
 											// deletion. Neither seeding nor publication may revive a deletion.
@@ -355,7 +425,11 @@ export const makeProviderRuntimeIngestionLive = (
 														message_id: string;
 													}>`SELECT message_id
 														FROM message_tombstones WHERE session_id = ${event.sessionId}
-														AND message_id = ${event.data.messageId}`;
+														AND message_id = ${event.data.messageId}
+														AND NOT EXISTS (
+															SELECT 1 FROM messages
+															WHERE id = message_tombstones.message_id
+																AND version > message_tombstones.version)`;
 													if (removed) continue;
 												}
 												if (
@@ -367,7 +441,7 @@ export const makeProviderRuntimeIngestionLive = (
 													// deletion too. Keep its tombstone for parentless late events.
 													event = {
 														...event,
-														eventId: Schema.decodeSync(EventId)(
+														eventId: Schema.decodeUnknownSync(EventId)(
 															`evt_parent_deleted_session_${event.sessionId}`,
 														),
 														type: "session.deleted",
@@ -442,12 +516,27 @@ export const makeProviderRuntimeIngestionLive = (
 												)
 													needsSessionRow.set(event.sessionId, event.provider);
 											}
+											const seededSessionIds: string[] = [];
 											for (const [sessionId, provider] of needsSessionRow) {
 												const seededAt = Date.now();
-												yield* sql`INSERT OR IGNORE INTO sessions
-											(id, provider, title, status, created_at, updated_at)
-											VALUES (${sessionId}, ${provider}, 'Untitled', 'idle', ${seededAt}, ${seededAt})`;
+												const seeded = yield* sql<{
+													readonly id: string;
+												}>`INSERT OR IGNORE INTO sessions
+											(id, project_id, provider, title, status, created_at, updated_at)
+											VALUES (${sessionId}, ${eventStore.projectId}, ${provider}, 'Untitled', 'idle', ${seededAt}, ${seededAt}) RETURNING id`;
+												seededSessionIds.push(...seeded.map(({ id }) => id));
 											}
+											// A first provider event need not project a session touch.
+											// Enroll actual inserts in the same committed advance.
+											if (seededSessionIds.length > 0)
+												yield* stamp((version) =>
+													sql<{
+														readonly id: string;
+													}>`UPDATE sessions SET version = ${version}
+												WHERE id IN (SELECT value FROM json_each(${JSON.stringify(seededSessionIds)})) RETURNING id`.pipe(
+														Effect.map((rows) => rows.map(({ id }) => id)),
+													),
+												);
 											for (const { event, record } of prepared)
 												if (!deleted.has(event.sessionId))
 													yield* record?.(project) ?? Effect.void;
@@ -525,7 +614,7 @@ export const makeProviderRuntimeIngestionLive = (
 								{ discard: true },
 							).pipe(
 								Effect.provide(services),
-								Effect.catchAllCause((cause) =>
+								Effect.catchCause((cause) =>
 									Effect.logWarning(
 										"failed to announce transient status",
 										cause,
@@ -549,7 +638,8 @@ export const makeProviderRuntimeIngestionLive = (
 				});
 
 			return {
-				ingest: (event) => ingestBatch([event]),
+				ingest: (event, onPrompt) =>
+					ingestBatch([event], onPrompt ? { onPrompt } : {}),
 				ingestBatch,
 				drain: () => Effect.void,
 			} satisfies ProviderRuntimeIngestion;
@@ -568,14 +658,8 @@ function publishRelayMessages(
 	return Effect.forEach(
 		events,
 		(event) => {
-			const translated = translateDomainEventToRelay(event);
-			if (translated.kind === "silent") return Effect.void;
-			return Effect.forEach(
-				translated.messages,
-				(message) =>
-					publisher.publish(tagWithSessionId(message, event.sessionId)),
-				{ discard: true },
-			);
+			const alert = turnEndedAlert(event);
+			return alert ? publisher.publish(alert) : Effect.void;
 		},
 		{ discard: true },
 	);

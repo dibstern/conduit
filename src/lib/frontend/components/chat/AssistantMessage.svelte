@@ -20,10 +20,11 @@
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { isLoading, sessionMessages } from "../../stores/chat.svelte.js";
 	import { followFork, sessionState } from "../../stores/session.svelte.js";
+	import { selection } from "../../stores/selection.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import { forkSessionRpc } from "../../transport/ws-rpc-client.js";
-	import { showToast } from "../../stores/ui.svelte.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { assertNever } from "../../../utils.js";
 	import Button from "../ui/Button.svelte";
 	import MessageTime from "./MessageTime.svelte";
@@ -349,13 +350,13 @@
 			const projectSlug = getCurrentSlug();
 			if (!projectSlug) return;
 			const sourceSessionId = sessionId ?? sessionState.currentId;
-			void forkSessionRpc({
-				projectSlug,
+			const from = selection.scope;
+			void rpc("ForkSession", {
+				...(sourceSessionId ? { sessionId: sourceSessionId } : { projectSlug }),
 				originId: getBrowserClientId(),
-				...(sourceSessionId ? { sessionId: sourceSessionId } : {}),
 				messageId: forkMessageId,
-			}).then(followFork)
-				.catch(() => showToast("Failed to fork session", { variant: "error" }));
+			}).then((response) => followFork(from, response))
+				.catch(toastFailure("Failed to fork session"));
 		}
 	}
 

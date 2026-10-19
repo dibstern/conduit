@@ -1,5 +1,4 @@
-import { RpcClient, type RpcMessage } from "@effect/rpc";
-import { Effect, Exit } from "effect";
+import { Effect } from "effect";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ProjectSaveRejected } from "../../../../src/lib/contracts/ws-rpc.js";
 import { disposeRuntime } from "../../../../src/lib/frontend/transport/runtime.js";
@@ -7,12 +6,8 @@ import type {
 	TrafficClass,
 	WsRpcConnect,
 } from "../../../../src/lib/frontend/transport/shared-client.js";
-import { WsRpcGroup } from "../../../../src/lib/frontend/transport/ws-rpc.js";
-import {
-	saveProjectRpc,
-	setLogLevelRpc,
-	syncInputDraftRpc,
-} from "../../../../src/lib/frontend/transport/ws-rpc-client.js";
+import { rpc } from "../../../../src/lib/frontend/transport/ws-rpc-client.js";
+import { makeRpcWire } from "../../../helpers/rpc-wire.js";
 
 const harness = vi.hoisted(() => ({
 	connect: undefined as WsRpcConnect | undefined,
@@ -59,21 +54,7 @@ beforeEach(() => {
 				super();
 				legacySockets.push(url);
 			}
-			send(data: string) {
-				const message = JSON.parse(data);
-				if (message._tag === "Request")
-					queueMicrotask(() =>
-						this.dispatchEvent(
-							new MessageEvent("message", {
-								data: JSON.stringify({
-									_tag: "Exit",
-									requestId: message.id,
-									exit: { _tag: "Success", value: { ok: true } },
-								}),
-							}),
-						),
-					);
-			}
+			send() {}
 			close() {
 				this.readyState = 3;
 			}
@@ -83,28 +64,22 @@ beforeEach(() => {
 		Effect.gen(function* () {
 			const transport = { url, trafficClass, tags: [] as string[] };
 			transports.push(transport);
-			let respond:
-				| ((requestId: RpcMessage.RequestId) => Effect.Effect<void>)
-				| undefined;
-			const built = yield* RpcClient.makeNoSerialization(WsRpcGroup, {
-				onFromClient: ({ message }) =>
-					message._tag === "Request"
-						? Effect.suspend(() => {
-								transport.tags.push(message.tag);
-								return respond?.(message.id) ?? Effect.void;
-							})
-						: Effect.void,
-			});
-			respond = (requestId) =>
-				built.write({
-					_tag: "Exit",
-					clientId: 0,
-					requestId,
-					exit: harness.saveFailure
-						? Exit.fail(harness.saveFailure)
-						: Exit.succeed({ ok: true }),
-				});
-			return built.client;
+			return yield* makeRpcWire(
+				{
+					SetLogLevel: () => ({ ok: true }),
+					SyncInputDraft: () => ({ ok: true }),
+					SaveProject: () => {
+						if (harness.saveFailure) throw harness.saveFailure;
+						throw new Error("SaveProject fixture not installed");
+					},
+				},
+				{
+					beforeSend: (frame) =>
+						Effect.sync(() => {
+							if (frame._tag === "Request") transport.tags.push(frame.tag);
+						}),
+				},
+			).connect({ url, trafficClass });
 		});
 });
 
@@ -121,12 +96,12 @@ it("preserves typed folder issues at the SaveProject Promise boundary", async ()
 	harness.saveFailure = failure;
 
 	await expect(
-		saveProjectRpc({
+		rpc("SaveProject", {
 			projectSlug: "alpha",
 			title: "Notes",
 			folders: [{ path: "/missing/parent/notes", create: { gitInit: true } }],
 		}),
-	).rejects.toBe(failure);
+	).rejects.toEqual(failure);
 });
 
 afterEach(async () => {
@@ -136,16 +111,18 @@ afterEach(async () => {
 
 it("shares one control transport across unary helpers and projects", async () => {
 	await Promise.all([
-		setLogLevelRpc({ projectSlug: "alpha", level: "debug" }),
-		syncInputDraftRpc({ projectSlug: "alpha", sessionId: "s1", text: "draft" }),
+		rpc("SetLogLevel", { projectSlug: "alpha", level: "debug" }),
+		rpc("SyncInputDraft", {
+			sessionId: "s1",
+			text: "draft",
+		}),
 	]);
-	await setLogLevelRpc({ projectSlug: "alpha", level: "info" });
-	await syncInputDraftRpc({
-		projectSlug: "beta",
+	await rpc("SetLogLevel", { projectSlug: "alpha", level: "info" });
+	await rpc("SyncInputDraft", {
 		sessionId: "s2",
 		text: "other",
 	});
-	await setLogLevelRpc({ projectSlug: "beta", level: "info" });
+	await rpc("SetLogLevel", { projectSlug: "beta", level: "info" });
 	// Include legacy attempts in the assertion diagnostic for the red run.
 	expect({ legacySockets }).toEqual({ legacySockets: [] });
 	expect(transports).toEqual([

@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { test as base, expect, type Page } from "@playwright/test";
-import { RemoveProject, SetPin } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { ProcessHarness } from "../../helpers/process-harness.js";
 import { AppPage } from "../page-objects/app.page.js";
 
@@ -21,9 +21,12 @@ const test = base.extend<{
 			});
 			try {
 				await harness.restart({ startupTimeoutMs: 60_000 });
-				await harness.requestRpc(new RemoveProject({ slug: "process-test" }));
+				await harness.requestRpc({
+					_tag: "RemoveProject",
+					slug: "process-test",
+				});
 				if (initialPin !== null)
-					await harness.requestRpc(new SetPin({ pin: initialPin }));
+					await harness.requestRpc({ _tag: "SetPin", pin: initialPin });
 				await use(harness);
 			} finally {
 				writeFileSync(testInfo.outputPath("daemon.log"), harness.logTail);

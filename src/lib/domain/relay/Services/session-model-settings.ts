@@ -1,12 +1,12 @@
-import { SqlClient } from "@effect/sql";
 import { Effect, Ref, Schema } from "effect";
+import { SqlClient } from "effect/sql";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import {
-	type CanonicalEventType,
 	canonicalEvent,
 	type EventPayloadMap,
+	type LiveEventType,
 } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { SessionPermissionModeSchema } from "../../../shared-types.js";
@@ -26,7 +26,7 @@ import {
 // Child sessions are not shell rows; the same version bump reaches their
 // viewers as a family-feed upsert (ni8.28).
 
-const commitSessionSetting = <T extends CanonicalEventType>(
+const commitSessionSetting = <T extends LiveEventType>(
 	type: T,
 	sessionId: string,
 	data: EventPayloadMap[T],
@@ -98,6 +98,7 @@ export const selectSessionContextWindow = (
 export const restoreSessionSettings = () =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		const store = yield* EventStoreEffectTag;
 		const projectionRunner = yield* ProjectionRunnerEffectTag;
 		if (!(yield* projectionRunner.isRecovered()))
 			yield* projectionRunner.recover().pipe(
@@ -120,8 +121,9 @@ export const restoreSessionSettings = () =>
 				| "permission_mode"
 			>
 		>`SELECT id, model_id, model_provider, variant, context_window, permission_mode
-			FROM sessions WHERE model_id IS NOT NULL OR model_provider IS NOT NULL
-				OR variant IS NOT NULL OR context_window IS NOT NULL OR permission_mode IS NOT NULL`.pipe(
+			FROM sessions WHERE project_id = ${store.projectId}
+				AND (model_id IS NOT NULL OR model_provider IS NOT NULL
+				OR variant IS NOT NULL OR context_window IS NOT NULL OR permission_mode IS NOT NULL)`.pipe(
 			Effect.mapError(
 				(cause) =>
 					new SessionManagerError({

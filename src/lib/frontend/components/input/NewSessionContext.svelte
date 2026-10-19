@@ -5,11 +5,13 @@
 	import type { WorktreeInfo } from "../../../shared-types.js";
 	import { getAvailableInstances, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
 	import { getInstanceById } from "../../stores/instance.svelte.js";
-	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
-	import { DRAFT_PROJECT_PARAM, getCurrentSearchParams, replaceRoute } from "../../stores/router.svelte.js";
+	import { tick } from "svelte";
+	import { applyProjectList, getDraftProject, projectState } from "../../stores/project.svelte.js";
+	import { selection } from "../../stores/selection.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
-	import { showToast } from "../../stores/ui.svelte.js";
-	import { listBranchesRpc, listWorktreesRpc, type resolveSessionModeRpc } from "../../transport/ws-rpc-client.js";
+	import type { SaveProjectResponse } from "../../transport/ws-rpc.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { projectAccent } from "../session/session-list-project.js";
 	import ProjectSquare from "../session/ProjectSquare.svelte";
 	import Button from "../ui/Button.svelte";
@@ -21,18 +23,19 @@
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 
-	let { worktree = $bindable<WorktreeInfo | null>(null), newWorktree = $bindable(false), worktreeBase = $bindable<string | null>(null), modeChosen = $bindable(false), sessionModeDefault, loadWorktrees = listWorktreesRpc, loadBranches = listBranchesRpc }: {
+	let { worktree = $bindable<WorktreeInfo | null>(null), newWorktree = $bindable(false), worktreeBase = $bindable<string | null>(null), modeChosen = $bindable(false), sessionModeDefault, focusComposer, loadWorktrees = (projectSlug: string) => rpc("ListWorktrees", { projectSlug }), loadBranches = (projectSlug: string) => rpc("ListBranches", { projectSlug }) }: {
 		worktree?: WorktreeInfo | null;
 		newWorktree?: boolean;
 		worktreeBase?: string | null;
 		modeChosen?: boolean;
-		sessionModeDefault?: Awaited<ReturnType<typeof resolveSessionModeRpc>> | undefined;
-		loadWorktrees?: (projectSlug: string) => Promise<{ readonly worktrees: readonly WorktreeInfo[] }>;
-		loadBranches?: typeof listBranchesRpc;
+		sessionModeDefault?: Awaited<ReturnType<typeof rpc<"ResolveSessionMode">>> | undefined;
+		focusComposer?: (() => void) | undefined;
+		loadWorktrees?: (projectSlug: string) => ReturnType<typeof rpc<"ListWorktrees">>;
+		loadBranches?: (projectSlug: string) => ReturnType<typeof rpc<"ListBranches">>;
 	} = $props();
 	let showWorktrees = $state(false);
 	let worktrees = $state<readonly WorktreeInfo[] | undefined>();
-	let branchList = $state<Awaited<ReturnType<typeof listBranchesRpc>> | undefined>();
+	let branchList = $state<Awaited<ReturnType<typeof rpc<"ListBranches">>> | undefined>();
 
 	const slug = $derived(getDraftProject());
 	const project = $derived(projectState.projects.find((p) => p.slug === slug));
@@ -77,22 +80,47 @@
 		multiFolder && instance?.capabilities?.supportsMultiFolder === false ? explanationId : "",
 		sessionModeDefault?.warning ? warningId : "",
 	].filter(Boolean).join(" ") || undefined);
-	const available = $derived(projectState.projects.filter((p) => !p.missing));
+	const available = $derived(projectState.projects.filter((p) => !p.missing && !p.unavailableReason));
 	const missing = $derived(projectState.projects.filter((p) => p.missing));
+	const unavailable = $derived(projectState.projects.filter((p) => !p.missing && p.unavailableReason));
 	const presentation = $derived(sessionViewState.compact ? "sheet" : "popover");
 
 	const chipClass =
 		"min-w-0 gap-1 rounded-full border border-border-chip bg-bg-alt px-[8px] py-[5px] md:px-[7px] md:py-[4px] text-[11.5px] md:text-[11px] leading-none font-medium font-brand";
 	const rowClass = "min-h-[44px] md:min-h-0";
+	let picked = false;
 
-	function chooseProject(next: string) {
+	// A pick hands focus to the composer, where the prompt goes next. Left on the
+	// chip, the prompt's first space reopened the menu and its letters picked
+	// again by typeahead. Escape still returns focus to the chip.
+	function focusComposerAfterPick(event: Event) {
+		const handOff = picked ? focusComposer : undefined;
+		picked = false;
+		if (!handOff) return;
+		event.preventDefault();
+		handOff();
+	}
+
+	// The checkout belongs to the old project, so a new project starts from its defaults.
+	function startIn(next: string) {
 		worktree = null;
 		newWorktree = false;
 		worktreeBase = null;
 		modeChosen = false;
-		const params = getCurrentSearchParams();
-		params.set(DRAFT_PROJECT_PARAM, next);
-		replaceRoute(`/new?${params}`);
+		selection.openDraft(next);
+	}
+
+	let addProjectOpen = $state(false);
+
+	// The draft lands in the saved project, including one that already held the
+	// folder. The sidebar scope stays put: this only answers where the draft starts.
+	async function projectAdded(response: SaveProjectResponse) {
+		applyProjectList(response);
+		startIn(response.savedSlug);
+		addProjectOpen = false;
+		// Closing hands focus back to the chip; the prompt is what comes next.
+		await tick();
+		focusComposer?.();
 	}
 
 	async function openWorktrees() {
@@ -103,10 +131,10 @@
 		try {
 			const result = await loadWorktrees(slug);
 			if (context === worktreeContext) worktrees = result.worktrees;
-		} catch {
+		} catch (error) {
 			if (context !== worktreeContext) return;
 			worktrees = [];
-			showToast("Could not list worktrees", { variant: "error" });
+			toastFailure("Could not list worktrees")(error);
 		}
 	}
 
@@ -119,16 +147,16 @@
 			if (projectSlug !== slug) return;
 			branchList = result;
 			if (worktreeBase === result.current) worktreeBase = null;
-		} catch {
+		} catch (error) {
 			if (projectSlug !== slug) return;
 			branchList = { branches: [] };
-			showToast("Could not list branches", { variant: "error" });
+			toastFailure("Could not list branches")(error);
 		}
 	}
 </script>
 
 <div class="flex min-w-0 items-center gap-1.5 px-1" data-testid="new-session-context">
-	<Menu ariaLabel="Start in project" {presentation}>
+	<Menu ariaLabel="Start in project" {presentation} onCloseAutoFocus={focusComposerAfterPick}>
 		{#snippet trigger({ props })}
 			<Button {...props} variant="ghost" size="content" tone="default" touchTarget class={chipClass} title="Project" data-testid="draft-project-chip">
 				{#if slug}<ProjectSquare label={title} accent={projectAccent(slug)} />{/if}
@@ -137,7 +165,7 @@
 			</Button>
 		{/snippet}
 		<MenuGroup label="Start in…">
-			<MenuRadioGroup value={slug ?? ""} onvaluechange={chooseProject}>
+			<MenuRadioGroup value={slug ?? ""} onvaluechange={(next) => { picked = true; startIn(next); }}>
 				{#each available as p (p.slug)}
 					<MenuRadioItem value={p.slug} class={rowClass}>
 						<span class="flex min-w-0 items-center gap-2">
@@ -157,9 +185,19 @@
 				{/each}
 			</MenuGroup>
 		{/if}
+		{#if unavailable.length > 0}
+			<MenuSeparator />
+			<MenuGroup label="History unavailable">
+				{#each unavailable as p (p.slug)}
+					<MenuItem disabled class={rowClass} title={p.unavailableReason}>{p.title || p.slug}</MenuItem>
+				{/each}
+			</MenuGroup>
+		{/if}
+		<MenuSeparator />
+		<MenuItem class={rowClass} data-testid="draft-new-project" onselect={() => { addProjectOpen = true; }}>New project…</MenuItem>
 	</Menu>
 
-	<Menu ariaLabel="Where the session starts" {presentation} onopenchange={(open) => { if (!open) showWorktrees = false; }}>
+	<Menu ariaLabel="Where the session starts" {presentation} onCloseAutoFocus={focusComposerAfterPick} onopenchange={(open) => { if (!open) showWorktrees = false; }}>
 		{#snippet trigger({ props })}
 			<Button {...props} variant="ghost" size="content" tone="default" touchTarget class={chipClass} title="Where it starts" data-testid="draft-start-chip" aria-describedby={startDescription}>
 				<Icon name={worktree || newWorktree ? "worktree" : branch ? "git-branch" : "folder"} size={12} />
@@ -169,7 +207,7 @@
 		{/snippet}
 		<MenuGroup label="Workspace">
 			<MenuRadioGroup value={worktree || newWorktree ? "" : "current"}>
-				<MenuRadioItem value="current" onselect={() => { modeChosen = true; worktree = null; newWorktree = false; worktreeBase = null; }} class={rowClass}>Current checkout</MenuRadioItem>
+				<MenuRadioItem value="current" onselect={() => { picked = true; modeChosen = true; worktree = null; newWorktree = false; worktreeBase = null; }} class={rowClass}>Current checkout</MenuRadioItem>
 			</MenuRadioGroup>
 			<MenuItem disabled={!slug || !supportsWorktree} closeOnSelect={false} onselect={() => void openWorktrees()} class={rowClass}>Existing worktree {#if !supportsWorktree}<span class="ml-auto text-text-dimmer">Not supported by {providerName}</span>{/if}</MenuItem>
 			{#if showWorktrees}
@@ -179,7 +217,7 @@
 					{:else if worktrees.length === 0}
 						<MenuItem disabled class={rowClass}>No worktrees available</MenuItem>
 					{:else}
-						<MenuRadioGroup value={worktree?.path ?? ""} onvaluechange={(path) => { modeChosen = true; newWorktree = false; worktreeBase = null; worktree = worktrees?.find((entry) => entry.path === path) ?? null; }}>
+						<MenuRadioGroup value={worktree?.path ?? ""} onvaluechange={(path) => { picked = true; modeChosen = true; newWorktree = false; worktreeBase = null; worktree = worktrees?.find((entry) => entry.path === path) ?? null; }}>
 							{#each worktrees as entry (entry.path)}
 								<MenuRadioItem value={entry.path} class={rowClass}>
 									<span class="flex min-w-0 flex-1 flex-col">
@@ -192,7 +230,7 @@
 					{/if}
 				</MenuGroup>
 			{/if}
-			<MenuItem disabled={!canCreateWorktree} onselect={() => { modeChosen = true; worktree = null; newWorktree = true; }} class={rowClass}>New worktree {#if !canCreateWorktree}<span class="ml-auto text-text-dimmer">{!supportsNewWorktree ? `Not supported by ${providerName}` : !slug ? "Choose a project" : !hasGitFolder ? "Requires a Git folder" : "Choose a provider"}</span>{/if}</MenuItem>
+			<MenuItem disabled={!canCreateWorktree} onselect={() => { picked = true; modeChosen = true; worktree = null; newWorktree = true; }} class={rowClass}>New worktree {#if !canCreateWorktree}<span class="ml-auto text-text-dimmer">{!supportsNewWorktree ? `Not supported by ${providerName}` : !slug ? "Choose a project" : !hasGitFolder ? "Requires a Git folder" : "Choose a provider"}</span>{/if}</MenuItem>
 		</MenuGroup>
 		{#if branch}
 			<MenuSeparator />
@@ -206,7 +244,7 @@
 	</Menu>
 
 	{#if newWorktree}
-		<Menu ariaLabel="Base branch" {presentation} onopenchange={(open) => { if (open) void openBranches(); }}>
+		<Menu ariaLabel="Base branch" {presentation} onCloseAutoFocus={focusComposerAfterPick} onopenchange={(open) => { if (open) void openBranches(); }}>
 			{#snippet trigger({ props })}
 				<Button {...props} variant="ghost" size="content" tone="default" touchTarget class={chipClass} title="Base branch" data-testid="draft-base-branch-chip">
 					<Icon name="git-branch" size={12} />
@@ -220,7 +258,7 @@
 				{:else if branchList.branches.length === 0}
 					<MenuItem disabled class={rowClass}>No local branches available</MenuItem>
 				{:else}
-					<MenuRadioGroup value={baseBranch ?? ""} onvaluechange={(value) => { modeChosen = true; worktreeBase = value === currentBranch ? null : value; }}>
+					<MenuRadioGroup value={baseBranch ?? ""} onvaluechange={(value) => { picked = true; modeChosen = true; worktreeBase = value === currentBranch ? null : value; }}>
 						{#each branchList.branches as name (name)}
 							<MenuRadioItem value={name} class={rowClass}>{name}</MenuRadioItem>
 						{/each}
@@ -239,4 +277,16 @@
 
 {#if multiFolder && instance?.capabilities?.supportsMultiFolder === false}
 	<p id={explanationId} role="status" data-testid="draft-provider-explanation" class="px-1 pt-1 text-[11px] text-text-secondary">{providerName} works in the main folder only. Pick another provider to use every folder.</p>
+{/if}
+
+{#if addProjectOpen}
+	{#await import("../project/ProjectDialog.svelte") then { default: ProjectDialog }}
+		<ProjectDialog
+			open
+			projects={projectState.projects}
+			onclose={() => { addProjectOpen = false; }}
+			onsaved={(response) => void projectAdded(response)}
+			returnFocus={() => document.querySelector('[data-testid="draft-project-chip"]')}
+		/>
+	{/await}
 {/if}

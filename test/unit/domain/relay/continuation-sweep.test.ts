@@ -24,7 +24,6 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { it as effectIt } from "@effect/vitest";
 import {
 	Context,
@@ -33,11 +32,15 @@ import {
 	Layer,
 	Queue,
 	Schedule,
+	Schema,
+	Semaphore,
 	Stream,
-	TestClock,
 } from "effect";
+import { SqlClient } from "effect/sql";
+import { TestClock } from "effect/testing";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { accountsStateFromConfig } from "../../../../src/lib/account-directory.js";
+import { AccountSchema } from "../../../../src/lib/contracts/account.js";
 import type { UsageReading } from "../../../../src/lib/contracts/limit-recovery.js";
 import { defaultDaemonConfig } from "../../../../src/lib/daemon/config-persistence.js";
 import {
@@ -45,6 +48,7 @@ import {
 	makeAccountDirectory,
 } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
 import { Usage } from "../../../../src/lib/domain/daemon/Services/usage.js";
+import { PersistenceProjectTag } from "../../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../../src/lib/domain/relay/Services/alerts.js";
@@ -62,6 +66,7 @@ import { SessionEventBusLive } from "../../../../src/lib/domain/relay/Services/s
 import {
 	decideInbox,
 	type InboxView,
+	providerSteers,
 	SessionInboxLive,
 	SessionInboxTag,
 } from "../../../../src/lib/domain/relay/Services/session-inbox.js";
@@ -70,8 +75,12 @@ import {
 	startProcessingTimeout,
 } from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
-import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
+import {
+	EventStoreEffectTag,
+	makeEventStoreEffect,
+} from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
@@ -85,6 +94,25 @@ import {
 	makeMockOpenCodeAPI,
 } from "../../../helpers/mock-factories.js";
 import { usageReading } from "../../../helpers/usage.js";
+
+it.each([
+	["claude", true],
+	["opencode", false],
+	["cursor", true],
+] as const)("steering follows the %s driver for a named account without a registry", (driver, expected) => {
+	const account = Schema.decodeUnknownSync(AccountSchema)({
+		driver,
+		id: "named-account",
+		name: "Named account",
+		folder: configuredClaudeConfigDir("/tmp/claude"),
+		usageEligible: false,
+	});
+	expect(providerSteers(account)).toBe(expected);
+});
+
+it("does not steer without a resolved account", () => {
+	expect(providerSteers(undefined)).toBe(false);
+});
 
 let isolatedRoot: string;
 beforeEach(() => {
@@ -145,7 +173,6 @@ const withSwitchServices = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 	const registry = new ProviderRegistry([
 		{
 			providerId: "claude",
-			steering: false,
 			discoverEffect: () => Effect.die("Continuation never discovers"),
 			sendTurnEffect: () => Effect.die("Turns use ProviderTurnService"),
 			interruptTurnEffect: () => Effect.void,
@@ -203,9 +230,10 @@ const withSwitchServices = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 };
 
 const withContinuationAdmission = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
-	const permit = Effect.unsafeMakeSemaphore(1);
+	const permit = Semaphore.makeUnsafe(1);
 	return effect.pipe(
 		Effect.provideService(SessionInboxTag, {
+			steerDeclined: () => Effect.void,
 			withSession: (_sessionId, admission) => permit.withPermits(1)(admission),
 			start: Effect.void,
 			submit: () => Effect.die("This fixture only dispatches continuations"),
@@ -214,6 +242,83 @@ const withContinuationAdmission = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 		}),
 	);
 };
+
+it("sweeps due continuations only for its own project in a shared store", async () => {
+	const dispatched: string[] = [];
+	let probes = 0;
+	await Effect.runPromise(
+		Effect.scoped(
+			Effect.gen(function* () {
+				const { continuation, read } = yield* seed();
+				const foreignStore = yield* makeEventStoreEffect.pipe(
+					Effect.provideService(PersistenceProjectTag, {
+						projectId: "foreign",
+					}),
+				);
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.projectBatch(
+					yield* foreignStore.appendBatch([
+						canonicalEvent("session.created", "foreign", {
+							sessionId: "foreign",
+							title: "Foreign due continuation",
+							provider: "claude",
+						}),
+						canonicalEvent("message.created", "foreign", {
+							sessionId: "foreign",
+							messageId: "foreign-user",
+							role: "user",
+						}),
+						canonicalEvent("session.usage_limited", "foreign", {
+							instanceId: "claude",
+							rateLimitType: "seven_day",
+							cutOffMessageId: "foreign-user",
+							resetsAt: 5,
+						}),
+						canonicalEvent("session.resume_scheduled", "foreign", {
+							instanceId: "claude",
+							at: 10,
+						}),
+					]),
+				);
+				const before = yield* read.getSession("foreign");
+				const beforeEvents = yield* foreignStore.readAllBySession("foreign");
+				yield* continuation.sweepDueContinuations(10);
+				expect(dispatched).toEqual(["s1"]);
+				expect(probes).toBe(1);
+				expect(yield* read.getSession("foreign")).toEqual(before);
+				expect(yield* foreignStore.readAllBySession("foreign")).toEqual(
+					beforeEvents,
+				);
+			}).pipe(
+				Effect.provideService(ConfigTag, config),
+				Effect.provideService(Usage, {
+					readings: Stream.empty,
+					latest: () => Effect.succeed(undefined),
+					turnEnded: () => Effect.void,
+					refresh: () =>
+						Effect.sync(() => {
+							probes++;
+							return [usageReading("claude", { status: "available" })];
+						}),
+					pickFailover: () => Effect.succeed(undefined),
+				}),
+				Effect.provideService(ProviderTurnServiceTag, {
+					holdUserTurnsForAccountSwitch: () => Effect.void,
+					prepareTurnSession: (input) => Effect.succeed(input.sessionId),
+					sendTurn: (input) =>
+						Effect.sync(() => {
+							dispatched.push(input.sessionId);
+						}),
+					interruptTurn: () => Effect.void,
+				}),
+				withSwitchServices,
+				withContinuationAdmission,
+				Effect.provide(makeOverridesStateLive()),
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
+		),
+	);
+});
 
 for (const delivery of ["queue", "steer"] as const) {
 	it(`the usage hold admits ${delivery} inputs and blocks Drain but not SendNow`, () => {
@@ -275,7 +380,7 @@ const resetInboxFixture = Effect.gen(function* () {
 	const continuation = yield* makeContinuation;
 	const sent = yield* Queue.unbounded<string>();
 	const dispatches: string[] = [];
-	const turns: ProviderTurnServiceTag["Type"] = {
+	const turns: ProviderTurnServiceTag["Service"] = {
 		holdUserTurnsForAccountSwitch: () => Effect.void,
 		prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 		interruptTurn: () => Effect.void,
@@ -355,7 +460,7 @@ const resetInboxFixture = Effect.gen(function* () {
 const withResetInbox = <A, E, R>(
 	reading: () => UsageReading,
 	use: (
-		fixture: Effect.Effect.Success<typeof resetInboxFixture>,
+		fixture: Effect.Success<typeof resetInboxFixture>,
 	) => Effect.Effect<A, E, R>,
 ) =>
 	Effect.flatMap(resetInboxFixture, (fixture) =>
@@ -413,14 +518,16 @@ it("a due continuation waits for the session admission lock before dispatch", as
 						"s1",
 						Effect.gen(function* () {
 							const fiber = yield* Effect.forkScoped(fixture.sweep);
-							yield* fixture.read.listSessionInfos().pipe(
-								Effect.repeat({
-									until: (sessions) =>
-										sessions[0]?.limitRecovery?.continued === true,
-									schedule: Schedule.spaced("5 millis"),
-								}),
-								Effect.timeout("3 seconds"),
-							);
+							yield* fixture.read
+								.listSessionInfos({ projectIds: ["test-project"] })
+								.pipe(
+									Effect.repeat({
+										until: (sessions) =>
+											sessions[0]?.limitRecovery?.continued === true,
+										schedule: Schedule.spaced("5 millis"),
+									}),
+									Effect.timeout("3 seconds"),
+								);
 							expect(fixture.dispatches).toEqual([]);
 							return fiber;
 						}),
@@ -433,7 +540,7 @@ it("a due continuation waits for the session admission lock before dispatch", as
 });
 
 for (const admission of ["user", "quota-reset"] as const) {
-	effectIt.scoped(
+	effectIt.effect(
 		`pending rewind allows ${admission} scheduling and blocks continuation dispatch`,
 		() =>
 			withResetInbox(
@@ -475,11 +582,12 @@ for (const admission of ["user", "quota-reset"] as const) {
 											),
 										)
 								: fixture.submit("q1")
-						).pipe(Effect.either);
-						expect(scheduled).toMatchObject({ _tag: "Right" });
+						).pipe(Effect.result);
+						expect(scheduled).toMatchObject({ _tag: "Success" });
 						expect(
-							(yield* fixture.read.listSessionInfos())[0]?.limitRecovery
-								?.scheduledAt,
+							(yield* fixture.read.listSessionInfos({
+								projectIds: ["test-project"],
+							}))[0]?.limitRecovery?.scheduledAt,
 						).toBe(10);
 						expect(
 							(yield* fixture.read.getSession("s1"))?.pending_rewind_message_id,
@@ -494,11 +602,11 @@ for (const admission of ["user", "quota-reset"] as const) {
 							})
 							.pipe(
 								Effect.provideService(ProviderTurnServiceTag, fixture.turns),
-								Effect.either,
+								Effect.result,
 							);
 						expect(immediate).toMatchObject({
-							_tag: "Left",
-							left: { _tag: "SessionBusy" },
+							_tag: "Failure",
+							failure: { _tag: "SessionBusy" },
 						});
 						expect(yield* fixture.store.readAllBySession("s1")).toEqual(before);
 						expect(fixture.dispatches).toEqual([]);
@@ -518,7 +626,7 @@ for (const schedule of [
 	"cancelled",
 	"later-stopped",
 ] as const) {
-	effectIt.scoped(
+	effectIt.effect(
 		`send at reset: ${schedule} schedules once and releases in turn order`,
 		() => {
 			let reading = usageReading("claude", {
@@ -605,8 +713,9 @@ for (const schedule of [
 							),
 						).toHaveLength(1);
 						expect(
-							(yield* fixture.read.listSessionInfos())[0]?.limitRecovery
-								?.scheduledAt,
+							(yield* fixture.read.listSessionInfos({
+								projectIds: ["test-project"],
+							}))[0]?.limitRecovery?.scheduledAt,
 						).toBe(10);
 						expect(
 							yield* fixture.sql<{
@@ -615,7 +724,7 @@ for (const schedule of [
 						).toEqual([{ input_id: "q1" }, { input_id: "q2" }]);
 						if (schedule === "cancelled") {
 							yield* fixture.continuation.cancelContinuation("s1");
-							yield* Effect.yieldNow().pipe(Effect.repeat(Schedule.recurs(10)));
+							yield* Effect.yieldNow.pipe(Effect.repeat(Schedule.recurs(10)));
 							expect(
 								(yield* fixture.store.readAllBySession("s1")).filter(
 									(event) => event.type === "session.resume_scheduled",
@@ -651,7 +760,7 @@ for (const schedule of [
 							]);
 						yield* fixture.sweep;
 						if (schedule === "later-stopped") {
-							yield* Effect.yieldNow().pipe(Effect.repeat(Schedule.recurs(10)));
+							yield* Effect.yieldNow.pipe(Effect.repeat(Schedule.recurs(10)));
 							expect(fixture.dispatches).toEqual([]);
 							return;
 						}
@@ -661,7 +770,9 @@ for (const schedule of [
 							yield* fixture.finish("u1");
 						} else
 							expect(
-								(yield* fixture.read.listSessionInfos())[0]?.limitRecovery,
+								(yield* fixture.read.listSessionInfos({
+									projectIds: ["test-project"],
+								}))[0]?.limitRecovery,
 							).toBeNull();
 						expect(yield* fixture.next).toBe("q1");
 						expect(fixture.dispatches).toEqual(
@@ -679,7 +790,7 @@ for (const schedule of [
 }
 
 for (const reset of ["expired", "missing", "invalid"] as const) {
-	effectIt.scoped(`send at reset: a ${reset} reset holds nothing`, () =>
+	effectIt.effect(`send at reset: a ${reset} reset holds nothing`, () =>
 		withResetInbox(
 			() =>
 				usageReading("claude", {
@@ -846,7 +957,9 @@ for (const scenario of [
 					scenario.endsWith("during-probe");
 				expect(probes).toBe(probed ? 1 : 0);
 				expect(dispatches).toBe(resumes ? 1 : 0);
-				const recovery = (yield* read.listSessionInfos())[0]?.limitRecovery;
+				const recovery = (yield* read.listSessionInfos({
+					projectIds: ["test-project"],
+				}))[0]?.limitRecovery;
 				if (scenario === "future" || scenario === "rescheduled-during-probe")
 					expect(recovery?.scheduledAt).toBe(scenario === "future" ? 11 : 20);
 				else expect(recovery?.scheduledAt).toBeUndefined();
@@ -1114,7 +1227,7 @@ for (const scenario of [
 					yield* continuation.queueLimitPolicy("barrier");
 					// The later row's schedule proves the earlier policy has finished,
 					// including paths that intentionally make no switch or dispatch.
-					yield* read.listSessionInfos().pipe(
+					yield* read.listSessionInfos({ projectIds: ["test-project"] }).pipe(
 						Effect.repeat({
 							schedule: Schedule.spaced("5 millis"),
 							until: (rows) =>
@@ -1147,9 +1260,9 @@ for (const scenario of [
 							: ["target"],
 					);
 					expect(dispatched).toEqual(switched ? ["s1"] : []);
-					const session = (yield* read.listSessionInfos()).find(
-						(row) => row.id === "s1",
-					);
+					const session = (yield* read.listSessionInfos({
+						projectIds: ["test-project"],
+					})).find((row) => row.id === "s1");
 					expect((yield* read.getSession("s1"))?.provider).toBe(
 						switched || scenario === "stale-during-probe" ? "target" : "claude",
 					);
@@ -1246,7 +1359,7 @@ it("a cancelled invalid due row does not prevent another due row from resuming",
 			yield* continuation.sweepDueContinuations(10);
 			expect(dispatched).toEqual(["s2"]);
 			expect(
-				(yield* read.listSessionInfos()).every(
+				(yield* read.listSessionInfos({ projectIds: ["test-project"] })).every(
 					(session) => session.limitRecovery?.scheduledAt === undefined,
 				),
 			).toBe(true);
@@ -1282,16 +1395,18 @@ for (const freshReset of [42, undefined]) {
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const { store, read, continuation } = yield* seed();
-				expect((yield* read.listSessionInfos())[0]?.limitRecovery?.rearms).toBe(
-					0,
-				);
+				expect(
+					(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
+						?.limitRecovery?.rearms,
+				).toBe(0);
 				let now = 10;
 				for (let rearms = 1; rearms <= 3; rearms++) {
 					yield* continuation.sweepDueContinuations(now);
 					const scheduledAt =
 						freshReset === undefined ? now + 300 : freshReset * rearms;
 					expect(
-						(yield* read.listSessionInfos())[0]?.limitRecovery,
+						(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
+							?.limitRecovery,
 					).toMatchObject({
 						cutOffMessageId: "u1",
 						continued: false,
@@ -1301,7 +1416,9 @@ for (const freshReset of [42, undefined]) {
 					now = scheduledAt;
 				}
 				yield* continuation.sweepDueContinuations(now);
-				const recovery = (yield* read.listSessionInfos())[0]?.limitRecovery;
+				const recovery = (yield* read.listSessionInfos({
+					projectIds: ["test-project"],
+				}))[0]?.limitRecovery;
 				expect(recovery).toMatchObject({
 					cutOffMessageId: "u1",
 					rearms: 3,

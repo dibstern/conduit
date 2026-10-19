@@ -1,5 +1,6 @@
-import type { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import type { SqlClient } from "effect/sql";
+import type { SessionScope } from "../contracts/session-scope.js";
 
 export interface ProviderSessionBinding {
 	readonly sessionId: string;
@@ -20,7 +21,9 @@ export interface ProviderSessionBindingReadModel {
 		bindingRevision: ProviderSessionBindingRevision,
 	): Effect.Effect<void>;
 	getProviderForSession(sessionId: string): Effect.Effect<string | undefined>;
-	listBoundSessions(): Effect.Effect<ProviderSessionBinding[]>;
+	listBoundSessions(
+		scope: SessionScope,
+	): Effect.Effect<ProviderSessionBinding[]>;
 	clearTransientBindings(): void;
 }
 
@@ -79,7 +82,9 @@ export class InMemoryProviderSessionBindingReadModel
 		return Effect.sync(() => this.bindings.get(sessionId));
 	}
 
-	listBoundSessions(): Effect.Effect<ProviderSessionBinding[]> {
+	listBoundSessions(
+		_scope: SessionScope,
+	): Effect.Effect<ProviderSessionBinding[]> {
 		return Effect.sync(() =>
 			[...this.bindings.entries()].map(([sessionId, providerId]) => ({
 				sessionId,
@@ -143,7 +148,7 @@ export class SqliteProviderSessionBindingReadModel
 		providerId: string,
 		bindingRevision: ProviderSessionBindingRevision,
 	): Effect.Effect<void> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const currentProvider = yield* this.getProviderForSession(sessionId);
 			const currentRevision = yield* this.getBindingRevision(sessionId);
 			if (
@@ -174,26 +179,30 @@ export class SqliteProviderSessionBindingReadModel
 		});
 	}
 
-	listBoundSessions(): Effect.Effect<ProviderSessionBinding[]> {
-		return this.sql<ProviderSessionBindingRow>`
-			SELECT active.session_id, active.provider
-			FROM session_providers AS active
-			JOIN (
-				SELECT session_id, MAX(activated_at) AS activated_at
-				FROM session_providers
-				WHERE status = 'active'
-				GROUP BY session_id
-			) AS latest
-			ON latest.session_id = active.session_id
-			AND latest.activated_at = active.activated_at
-			WHERE active.status = 'active'
-			ORDER BY active.session_id, active.id`.pipe(
+	listBoundSessions(
+		scope: SessionScope,
+	): Effect.Effect<ProviderSessionBinding[]> {
+		return this.sql<{ session_id: string; provider: string | null }>`
+			SELECT owner.id AS session_id, active.provider
+			FROM sessions AS owner
+			LEFT JOIN session_providers AS active ON active.id = (
+				SELECT id FROM session_providers WHERE session_id = owner.id AND status = 'active'
+				ORDER BY activated_at DESC, id DESC LIMIT 1
+			)
+			WHERE owner.project_id IN ${this.sql.in(scope.projectIds)}
+			ORDER BY owner.id`.pipe(
 			Effect.orDie,
 			Effect.map((rows) => {
+				const scopedSessions = new Set(rows.map((row) => row.session_id));
 				const bindings = new Map(
-					rows.map((row) => [row.session_id, row.provider] as const),
+					rows.flatMap((row) =>
+						row.provider === null
+							? []
+							: [[row.session_id, row.provider] as const],
+					),
 				);
 				for (const [sessionId, providerId] of this.transientBindings) {
+					if (!scopedSessions.has(sessionId)) continue;
 					if (providerId == null) {
 						bindings.delete(sessionId);
 					} else {

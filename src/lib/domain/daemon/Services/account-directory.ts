@@ -1,4 +1,4 @@
-import { Context, Effect, Either, Layer, Ref } from "effect";
+import { Context, Effect, Layer, Ref, Result, Semaphore } from "effect";
 import {
 	type AccountChange,
 	type AccountsState,
@@ -18,9 +18,10 @@ import type { AccountUnroutable } from "../../../contracts/limit-recovery.js";
 import type { KnownProviderDriverKind } from "../../../contracts/provider-instance.js";
 import { loadAccountsState } from "../../../daemon/config-persistence.js";
 import type { ClaudeConfigDir } from "../../../provider/claude/claude-sdk-env.js";
+import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import type { DaemonInstanceConfig } from "./daemon-state.js";
 
-export class AccountDirectory extends Context.Tag("AccountDirectory")<
+export class AccountDirectory extends Context.Service<
 	AccountDirectory,
 	{
 		/** Read-only persistence projection; account mutations still go through apply. */
@@ -38,18 +39,47 @@ export class AccountDirectory extends Context.Tag("AccountDirectory")<
 			afterCommit?: (state: AccountsState) => Effect.Effect<void, E, R>,
 		) => Effect.Effect<AccountsState, AccountChangeRejected | E, R>;
 	}
->() {}
+>()("AccountDirectory") {}
 
 export function makeAccountDirectory(
 	read: Effect.Effect<AccountsState>,
-	commit?: AccountDirectory["Type"]["apply"],
-): AccountDirectory["Type"] {
+	commit?: AccountDirectory["Service"]["apply"],
+): AccountDirectory["Service"] {
+	// Cursor's Keychain binding is read from the caller's context, so a reader
+	// running outside the daemon's request context must provide DaemonConfigRefTag
+	// or bound accounts look ineligible.
+	const eligible = Effect.gen(function* () {
+		const state = yield* read;
+		const config = yield* Effect.serviceOption(DaemonConfigRefTag);
+		const binding =
+			config._tag === "Some"
+				? (yield* Ref.get(config.value)).cursorUsageBinding
+				: undefined;
+		return {
+			...state,
+			accounts: state.accounts.map((account) =>
+				account.driver === "cursor"
+					? {
+							...account,
+							usageEligible: Boolean(
+								account.env?.["CURSOR_AUTH_TOKEN"]?.trim() ||
+									process.env["CURSOR_AUTH_TOKEN"]?.trim() ||
+									binding?.accountId === account.id,
+							),
+						}
+					: account,
+			),
+		};
+	});
 	return {
-		snapshot: read,
-		list: Effect.map(read, list),
+		snapshot: eligible,
+		list: Effect.map(eligible, list),
 		defaultFor: (driver) =>
-			Effect.map(read, (state) => defaultFor(state, driver)),
-		resolve: (ref) => Effect.flatMap(read, (state) => resolve(state, ref)),
+			Effect.map(eligible, (state) => defaultFor(state, driver)),
+		resolve: (ref) =>
+			Effect.flatMap(eligible, (state) =>
+				Effect.fromResult(resolve(state, ref)),
+			),
 		apply:
 			commit ??
 			((change) =>
@@ -65,7 +95,7 @@ export function makeAccountDirectory(
 const makeWritableAccountDirectory = (initial: AccountsState) =>
 	Effect.gen(function* () {
 		const state = yield* Ref.make(initial);
-		const changes = yield* Effect.makeSemaphore(1);
+		const changes = yield* Semaphore.make(1);
 		return makeAccountDirectory(
 			changes.withPermits(1)(Ref.get(state)),
 			<E, R>(
@@ -79,10 +109,10 @@ const makeWritableAccountDirectory = (initial: AccountsState) =>
 							const result = apply(current, change, usageOrder);
 							return [
 								{ previous: current, result },
-								Either.isRight(result) ? result.right : current,
+								Result.isSuccess(result) ? result.success : current,
 							] as const;
 						});
-						const next = yield* committed.result;
+						const next = yield* Effect.fromResult(committed.result);
 						// A failed process stop must retain the account and its recovery identity.
 						// Serialize readers and changes until the post-commit work has settled.
 						if (afterCommit !== undefined)
@@ -122,7 +152,9 @@ export const AccountDirectoryFromConfigLive = (
 	Layer.effect(
 		AccountDirectory,
 		Effect.flatMap(
-			Effect.suspend(() => loadAccountsState(configDir, launchLogin)),
+			Effect.suspend(() =>
+				Effect.fromResult(loadAccountsState(configDir, launchLogin)),
+			),
 			makeWritableAccountDirectory,
 		),
 	);

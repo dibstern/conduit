@@ -1,10 +1,10 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcTest } from "@effect/rpc";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { RpcTest } from "effect/rpc";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
@@ -60,6 +60,7 @@ describe("WsRpcServerLayer SetDefaultPermissionMode", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 			Effect.ensuring(
 				Effect.sync(() => rmSync(configDir, { recursive: true, force: true })),
@@ -82,24 +83,21 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 		return Effect.gen(function* () {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 			const result = yield* client.SwitchPermissionMode({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				mode: "full",
 				originId: "browser-1",
 			});
 
-			expect(result).toEqual({ projectSlug: "project-a", mode: "full" });
+			expect(result).toEqual({ projectSlug: "test-project", mode: "full" });
 			expect(yield* getPermissionMode("session-1")).toBe("full");
 
 			const models = yield* client.GetModels({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 			});
 			expect(models.permissionMode).toBe("full");
 			expect(setSdkPermissionMode).toHaveBeenCalledWith("session-1", "full");
 
 			yield* client.SwitchPermissionMode({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				mode: "auto",
 				originId: "browser-1",
@@ -123,8 +121,9 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 							log: makeMockLogger(),
 						}),
 					),
-					Layer.provideMerge(Layer.succeed(LoggerTag, makeMockLogger())),
+					Layer.provideMerge(Layer.succeed(LoggerTag)(makeMockLogger())),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -147,12 +146,11 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			yield* sql`
-				INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-				VALUES (${sessionId}, 'claude', 'Restart session', 'idle', 1000, 1000)`;
+				INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+				VALUES (${sessionId}, 'test-project', 'claude', 'Restart session', 'idle', 1000, 1000)`;
 
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 			yield* client.SwitchPermissionMode({
-				projectSlug: "project-a",
 				sessionId,
 				mode: "auto",
 				originId: "browser-1",
@@ -177,9 +175,10 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 							persistenceLayer,
 						}),
 					),
-					Layer.provideMerge(Layer.succeed(LoggerTag, makeMockLogger())),
+					Layer.provideMerge(Layer.succeed(LoggerTag)(makeMockLogger())),
 					Layer.provideMerge(persistenceLayer),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -211,25 +210,26 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`
 					INSERT INTO sessions (
-						id, provider, title, status, permission_mode, created_at, updated_at
+						id, project_id, provider, title, status, permission_mode, created_at, updated_at
 					)
 					VALUES (
-						${sessionId}, 'claude', 'Rejected switch', 'idle', 'ask', 1000, 1000
+						${sessionId}, 'test-project', 'claude', 'Rejected switch', 'idle', 'ask', 1000, 1000
 					)`;
 
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					client.SwitchPermissionMode({
-						projectSlug: "project-a",
 						sessionId,
 						mode: "full",
 						originId: "browser-1",
 					}),
 				);
 
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left") {
-					expect(result.left.message).toContain("SDK rejected permission mode");
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure") {
+					expect(result.failure.message).toContain(
+						"SDK rejected permission mode",
+					);
 				}
 				expect(yield* getPermissionMode(sessionId)).toBe("ask");
 				const rows = yield* sql<{ readonly permission_mode: string | null }>`
@@ -248,9 +248,10 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 								persistenceLayer,
 							}),
 						),
-						Layer.provideMerge(Layer.succeed(LoggerTag, makeMockLogger())),
+						Layer.provideMerge(Layer.succeed(LoggerTag)(makeMockLogger())),
 						Layer.provideMerge(persistenceLayer),
 					),
+					{ local: true },
 				),
 			);
 		},

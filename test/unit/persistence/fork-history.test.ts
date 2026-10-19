@@ -5,9 +5,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -92,12 +92,6 @@ const history = [
 		"parent",
 		{ messageId: "msg_assistant_1", partId: "prt_tool", callId: "call_1" },
 		{ createdAt: 109 },
-	),
-	canonicalEvent(
-		"tool.input_updated",
-		"parent",
-		{ messageId: "msg_assistant_1", partId: "prt_tool", input: "updated" },
-		{ createdAt: 109.5 },
 	),
 	canonicalEvent(
 		"tool.completed",
@@ -195,13 +189,15 @@ describe("readForkSource", () => {
 					"thinking.end",
 					"tool.started",
 					"tool.running",
-					"tool.input_updated",
 					"tool.completed",
 					"text.delta",
 					"turn.completed",
 					"turn.model_resolved",
 				]);
 				expect(events.every((event) => event.createdAt < 114)).toBe(true);
+				expect(events.every((event) => event.metadata.inherited === true)).toBe(
+					true,
+				);
 				expect(events.every((event) => event.sessionId === "ses_fork_a")).toBe(
 					true,
 				);
@@ -226,26 +222,26 @@ describe("readForkSource", () => {
 				expect(events[0]?.eventId).toBe(`${history[2].eventId}_ses_fork_a`);
 				expect(events[0]).not.toHaveProperty("sequence");
 				expect(events[0]).not.toHaveProperty("streamVersion");
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("refuses an unknown point without copying", () =>
 		Effect.gen(function* () {
 			yield* seed();
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				readForkSource("parent", {
 					messageId: "missing",
 					sideThread: false,
 				}),
 			);
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left")
-				expect(result.left).toMatchObject({
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure")
+				expect(result.failure).toMatchObject({
 					_tag: "ForkRefusal",
 					reason: "message_not_found",
 					messageId: "missing",
 				});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -254,22 +250,22 @@ describe("readForkSource", () => {
 			Effect.gen(function* () {
 				const commit = yield* makeCommitAndSignal;
 				yield* commit([history[0]]);
-				const empty = yield* Effect.either(
+				const empty = yield* Effect.result(
 					readForkSource("parent", { sideThread: false }),
 				);
-				expect(empty._tag).toBe("Left");
-				if (empty._tag === "Left")
-					expect(empty.left).toMatchObject({ reason: "no_transcript" });
+				expect(empty._tag).toBe("Failure");
+				if (empty._tag === "Failure")
+					expect(empty.failure).toMatchObject({ reason: "no_transcript" });
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at)
 				VALUES ('projected-only', 'parent', 'assistant', 1, 1)`;
-				const missing = yield* Effect.either(
+				const missing = yield* Effect.result(
 					readForkSource("parent", { sideThread: false }),
 				);
-				expect(missing._tag).toBe("Left");
-				if (missing._tag === "Left")
-					expect(missing.left).toMatchObject({ reason: "point_not_found" });
-			}).pipe(Effect.provide(testLayer)),
+				expect(missing._tag).toBe("Failure");
+				if (missing._tag === "Failure")
+					expect(missing.failure).toMatchObject({ reason: "point_not_found" });
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -311,7 +307,7 @@ describe("readForkSource", () => {
 				expect(first.map((event) => event.createdAt)).toEqual(
 					history.slice(2).map((event) => event.createdAt),
 				);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("excludes a prompt queued before the target's last event", () =>
@@ -357,7 +353,7 @@ describe("readForkSource", () => {
 					"messageId" in event.data ? event.data.messageId : undefined,
 				),
 			).toEqual(["msg_a_ses_fork", "msg_a_ses_fork", "msg_a_ses_fork"]);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("keeps completed compactions before the cut", () =>
@@ -391,7 +387,7 @@ describe("readForkSource", () => {
 				sessionId: "ses_fork",
 				data: { sessionId: "ses_fork", preTokens: 900, postTokens: 100 },
 			});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -440,7 +436,7 @@ describe("readForkSource", () => {
 				expect((yield* source.copy("child")).at(-1)?.data).toEqual({
 					actualModel: "adjacent",
 				});
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -480,7 +476,7 @@ describe("readForkSource", () => {
 				expect(
 					(yield* source.copy("child")).map((event) => event.type),
 				).toEqual(["turn.completed", "message.created", "text.delta"]);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -529,7 +525,7 @@ describe("readForkSource", () => {
 					data: { text: "AB" },
 				});
 				expect(events[2]?.data).toMatchObject({ text: "CD" });
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -559,16 +555,18 @@ describe("readForkSource", () => {
 						messageId: "msg_assistant_1",
 					}),
 				]);
-				const removed = yield* Effect.either(
+				const removed = yield* Effect.result(
 					readForkSource("parent", {
 						messageId: "msg_assistant_1",
 						sideThread: false,
 					}),
 				);
-				expect(removed._tag).toBe("Left");
-				if (removed._tag === "Left")
-					expect(removed.left).toMatchObject({ reason: "message_not_found" });
-			}).pipe(Effect.provide(testLayer)),
+				expect(removed._tag).toBe("Failure");
+				if (removed._tag === "Failure")
+					expect(removed.failure).toMatchObject({
+						reason: "message_not_found",
+					});
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -591,16 +589,16 @@ describe("readForkSource", () => {
 					{ id: "a", role: "assistant", created_at: 10 },
 				]);
 				expect(pending.historyMessageId).toBe("a");
-				const hidden = yield* Effect.either(
+				const hidden = yield* Effect.result(
 					readForkSource("parent", { messageId: "b", sideThread: false }),
 				);
-				expect(hidden._tag).toBe("Left");
+				expect(hidden._tag).toBe("Failure");
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`UPDATE messages SET created_at = 20 WHERE id = 'b'`;
 				const moved = yield* readForkSource("parent", { sideThread: false });
 				expect(moved.retained.map((message) => message.id)).toEqual(["a", "c"]);
 				expect(moved.historyMessageId).toBe("c");
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -634,7 +632,7 @@ describe("readForkSource", () => {
 						.filter((event) => event.type === "message.created")
 						.map((event) => event.data.messageId),
 				).toEqual(["msg_user_1_child", "msg_assistant_1_child"]);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -665,7 +663,7 @@ describe("readForkSource", () => {
 					"claude-sdk",
 				]);
 				expect(source.boundary.sequence).toBe(5);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -685,9 +683,9 @@ describe("readForkSource", () => {
 					messageId: "msg_assistant_2",
 					sideThread: false,
 				});
-				const invalid = yield* Effect.either(later.copy("child"));
-				expect(invalid._tag).toBe("Left");
-			}).pipe(Effect.provide(testLayer)),
+				const invalid = yield* Effect.result(later.copy("child"));
+				expect(invalid._tag).toBe("Failure");
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it("copies a bounded prefix of the heavy session-load fixture", async () => {
@@ -745,12 +743,12 @@ describe("Side Thread boundary reads", () => {
 		() =>
 			Effect.gen(function* () {
 				yield* seed([
-					...history.slice(0, 15),
+					...history.slice(0, 14),
 					canonicalEvent("session.status", "parent", {
 						sessionId: "parent",
 						status: "idle",
 					}),
-					...history.slice(15),
+					...history.slice(14),
 					canonicalEvent("session.status", "parent", {
 						sessionId: "parent",
 						status: "busy",
@@ -777,7 +775,7 @@ describe("Side Thread boundary reads", () => {
 				const idle = yield* readForkSource("parent", { sideThread: true });
 				expect(idle.historyMessageId).toBeUndefined();
 				expect(idle.boundary.messageId).toBe("msg_assistant_2");
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -785,12 +783,12 @@ describe("Side Thread boundary reads", () => {
 		() =>
 			Effect.gen(function* () {
 				yield* seed([
-					...history.slice(0, 15),
+					...history.slice(0, 14),
 					canonicalEvent("session.status", "parent", {
 						sessionId: "parent",
 						status: "idle",
 					}),
-					history[15],
+					history[14],
 				]);
 				const queued = yield* readForkSource("parent", { sideThread: true });
 				expect(queued.historyMessageId).toBe("msg_assistant_1");
@@ -800,13 +798,13 @@ describe("Side Thread boundary reads", () => {
 						sessionId: "parent",
 						status: "busy",
 					}),
-					history[16],
-					history[18],
+					history[15],
+					history[17],
 				]);
 				expect(yield* readSideThreadForkBoundary("parent")).toBe(
 					"msg_assistant_1",
 				);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -817,18 +815,18 @@ describe("Side Thread boundary reads", () => {
 					history[0],
 					history[2],
 					history[4],
-					history[13],
+					history[12],
 					canonicalEvent("session.status", "parent", {
 						sessionId: "parent",
 						status: "busy",
 					}),
 				]);
-				const first = yield* Effect.either(
+				const first = yield* Effect.result(
 					readForkSource("parent", { sideThread: true }),
 				);
-				expect(first._tag).toBe("Left");
-				if (first._tag === "Left")
-					expect(first.left).toMatchObject({ reason: "no_completed_turn" });
+				expect(first._tag).toBe("Failure");
+				if (first._tag === "Failure")
+					expect(first.failure).toMatchObject({ reason: "no_completed_turn" });
 				const commit = yield* makeCommitAndSignal;
 				yield* commit([
 					canonicalEvent("session.created", "empty", {
@@ -842,6 +840,6 @@ describe("Side Thread boundary reads", () => {
 					}),
 				]);
 				expect(yield* readSideThreadForkBoundary("empty")).toBeUndefined();
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });

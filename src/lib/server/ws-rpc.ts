@@ -1,23 +1,25 @@
-import { Rpc, type RpcGroup } from "@effect/rpc";
 import {
+	type Array as Arr,
+	type Cause,
 	Context,
 	Effect,
 	Fiber,
 	Layer,
+	Option,
 	Queue,
 	type Scope,
 	Stream,
-	Struct,
-	type Take,
 } from "effect";
+import { Rpc, type RpcGroup, RpcSchema } from "effect/rpc";
 import type { UsageReading } from "../contracts/limit-recovery.js";
 import {
 	type OpenCodeInstance,
-	type ProjectInfo,
 	type ServerStatus,
+	type ShellEnvelope,
 	WsRpcError,
 	WsRpcGroup,
 } from "../contracts/ws-rpc.js";
+import { SessionDirectory } from "../domain/daemon/Services/session-directory.js";
 import { subscribeAlerts } from "../domain/relay/Services/alerts.js";
 import { subscribeApprovals } from "../domain/relay/Services/approvals-subscription.js";
 import { subscribeInputDraft } from "../domain/relay/Services/input-drafts.js";
@@ -28,6 +30,7 @@ import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-
 import { subscribeSessionFamily } from "../domain/relay/Services/session-family-subscription.js";
 import { subscribeShell } from "../domain/relay/Services/shell-subscription.js";
 import { subscribeSessionTodos } from "../domain/relay/Services/todo-subscription.js";
+import * as Failure from "../effect/failure-classification.js";
 import { conversationHandlers } from "./ws-rpc/conversation.js";
 import { daemonOnlyHandlers } from "./ws-rpc/daemon.js";
 import { filesHandlers } from "./ws-rpc/files.js";
@@ -39,148 +42,7 @@ import { sessionsHandlers } from "./ws-rpc/sessions.js";
 import { settingsHandlers } from "./ws-rpc/settings.js";
 import { terminalsHandlers } from "./ws-rpc/terminals.js";
 
-export {
-	AnswerQuestion,
-	AttachProject,
-	CancelContinuation,
-	CancelInput,
-	CancelSession,
-	type ClaudeSettingsResponse,
-	ClosePty,
-	type ContinuationHandoffResponse,
-	ContinueSession,
-	CreatePty,
-	CreateSession,
-	type CreateSessionResponse,
-	DeleteSession,
-	DetectProxy,
-	type DetectProxyResponse,
-	DismissCutOff,
-	DismissWorkspaceHint,
-	FindFolders,
-	type FindFoldersResponse,
-	ForkSession,
-	type ForkSessionResponse,
-	GetAgents,
-	type GetAgentsResponse,
-	GetClaudeSettings,
-	GetCommands,
-	type GetCommandsResponse,
-	GetContinuationHandoff,
-	GetDefaultGroupingMode,
-	GetFileContent,
-	type GetFileContentResponse,
-	GetFileList,
-	type GetFileListResponse,
-	GetFileTree,
-	type GetFileTreeResponse,
-	GetGoalDetails,
-	GetInstanceStatus,
-	type GetInstanceStatusResponse,
-	GetInstances,
-	GetModels,
-	type GetModelsResponse,
-	GetProjects,
-	type GetProjectsResponse,
-	GetSessionSkills,
-	type GetSessionSkillsResponse,
-	GetSkillContent,
-	type GetSkillContentResponse,
-	GetStatus,
-	type GetStatusResponse,
-	GetToolDetails,
-	type GetToolDetailsResponse,
-	type GoalDetails,
-	InspectSessionWorktrees,
-	type InstanceListResponse,
-	ListBranches,
-	ListDaemonSessions,
-	type ListDaemonSessionsResponse,
-	ListPtys,
-	ListWorktrees,
-	LoadMoreHistory,
-	type LoadMoreHistoryResponse,
-	MarkSessionRead,
-	MarkSessionSeen,
-	MarkSessionUnread,
-	type ModelInfo,
-	MoveSessionWorkspace,
-	PreviewContinuation,
-	type PreviewContinuationResponse,
-	type ProjectMutationResponse,
-	type ProviderInfo,
-	type PtyEnvelope,
-	type PtyInfo,
-	PtyInput,
-	type PtyListResponse,
-	QuotaForAccounts,
-	type QuotaForAccountsResponse,
-	RejectQuestion,
-	ReloadProviderSession,
-	type ReloadProviderSessionResponse,
-	RemoveInstance,
-	RemoveProject,
-	RenameInstance,
-	RenameSession,
-	ResizePty,
-	ResolveClaudeSettings,
-	type ResolveClaudeSettingsResponse,
-	ResolveSession,
-	ResolveSessionMode,
-	type ResolveSessionModeResponse,
-	RespondPermission,
-	RestartWithConfig,
-	RewindSession,
-	SaveProject,
-	type SaveProjectResponse,
-	ScanNow,
-	type ScanNowResponse,
-	SendInputNow,
-	type SessionInfo,
-	SetAgent,
-	SetClaudeSettings,
-	SetDefaultGroupingMode,
-	SetDefaultModel,
-	type SetDefaultModelResponse,
-	SetDefaultPermissionMode,
-	type SetDefaultPermissionModeResponse,
-	SetDefaultSessionMode,
-	type SetDefaultSessionModeResponse,
-	SetKeepAwake,
-	SetKeepAwakeCommand,
-	type SetKeepAwakeResponse,
-	SetLogLevel,
-	SetPin,
-	SetSessionAutoSettle,
-	SetSessionPinned,
-	SetSessionSettled,
-	Shutdown,
-	SnoozeSession,
-	StartInstance,
-	StopBackgroundTask,
-	StopInstance,
-	SubmitInput,
-	SubscribePtys,
-	SubscribeSessionDetail,
-	SubscribeSessionTodos,
-	SubscribeShell,
-	SwitchAgent,
-	SwitchContextWindow,
-	type SwitchContextWindowResponse,
-	SwitchModel,
-	type SwitchModelResponse,
-	SwitchPermissionMode,
-	type SwitchPermissionModeResponse,
-	SwitchVariant,
-	type SwitchVariantResponse,
-	SyncInputDraft,
-	UndoRewind,
-	UnsnoozeSession,
-	ViewSession,
-	WsRpcError,
-	WsRpcGroup,
-	WsRpcRequest,
-} from "../contracts/ws-rpc.js";
+export * from "../contracts/ws-rpc.js";
 
 const unaryHandlers = {
 	...daemonOnlyHandlers,
@@ -198,7 +60,7 @@ const unaryHandlers = {
 const subscribeSessionDetailWithPresence = (
 	options: Parameters<typeof subscribeSessionDetail>[0],
 ) =>
-	Stream.unwrapScoped(
+	Stream.unwrap(
 		Effect.gen(function* () {
 			const wsHandler = yield* WebSocketHandlerTag;
 			yield* Effect.acquireRelease(
@@ -209,110 +71,9 @@ const subscribeSessionDetailWithPresence = (
 		}),
 	);
 
-export const wsRpcHandlers = WsRpcGroup.of({
-	SubscribeShell: (request) =>
-		Rpc.fork(
-			subscribeShell({
-				...(request.resumeFromSequence === undefined
-					? {}
-					: { resumeFromSequence: request.resumeFromSequence }),
-				...(request.resumeBase === undefined
-					? {}
-					: { resumeBase: request.resumeBase }),
-			}).pipe(
-				Stream.mapError(
-					(error) =>
-						new WsRpcError({
-							message: `SubscribeShell failed: ${String(error)}`,
-						}),
-				),
-			),
-		),
-	SubscribeApprovals: (request) =>
-		Rpc.fork(
-			subscribeApprovals(
-				request.resumeFromSequence === undefined
-					? {}
-					: { resumeFromSequence: request.resumeFromSequence },
-			).pipe(
-				Stream.mapError(
-					(error) =>
-						new WsRpcError({
-							message: `SubscribeApprovals failed: ${String(error)}`,
-						}),
-				),
-			),
-		),
-	SubscribeSessionDetail: (request) =>
-		Rpc.fork(
-			subscribeSessionDetailWithPresence({
-				sessionId: request.sessionId,
-				...(request.resumeFromSequence === undefined
-					? {}
-					: { resumeFromSequence: request.resumeFromSequence }),
-				...(request.resumeBase === undefined
-					? {}
-					: { resumeBase: request.resumeBase }),
-				...(request.resumePoint === undefined
-					? {}
-					: { resumePoint: request.resumePoint }),
-			}).pipe(
-				Stream.mapError(
-					(error) =>
-						new WsRpcError({
-							message: `SubscribeSessionDetail failed: ${String(error)}`,
-						}),
-				),
-			),
-		),
-	SubscribeSessionTodos: (request) =>
-		Rpc.fork(
-			subscribeSessionTodos({
-				sessionId: request.sessionId,
-				...(request.resumeFromSequence === undefined
-					? {}
-					: { resumeFromSequence: request.resumeFromSequence }),
-			}).pipe(
-				Stream.mapError(
-					(error) =>
-						new WsRpcError({
-							message: `SubscribeSessionTodos failed: ${String(error)}`,
-						}),
-				),
-			),
-		),
-	SubscribeSessionFamily: (request) =>
-		Rpc.fork(
-			subscribeSessionFamily({
-				sessionId: request.sessionId,
-				...(request.resumeFromSequence === undefined
-					? {}
-					: { resumeFromSequence: request.resumeFromSequence }),
-			}).pipe(
-				Stream.mapError(
-					(error) =>
-						new WsRpcError({
-							message: `SubscribeSessionFamily failed: ${String(error)}`,
-						}),
-				),
-			),
-		),
-	SubscribePtys: () =>
-		Rpc.fork(
-			subscribePtys().pipe(
-				Stream.mapError(
-					(error) =>
-						new WsRpcError({
-							message: `SubscribePtys failed: ${String(error)}`,
-						}),
-				),
-			),
-		),
-	SubscribeProjectSettings: () => Rpc.fork(subscribeProjectSettings()),
-	SubscribeDraftModels: (request) => Rpc.fork(subscribeDraftModels(request)),
-	SubscribeAlerts: () => Rpc.fork(subscribeAlerts()),
-	SubscribeInputDraft: (request) =>
-		Rpc.fork(subscribeInputDraft(request.sessionId)),
+type WsRpcs = RpcGroup.Rpcs<typeof WsRpcGroup>;
+
+const daemonOnlyStreamHandlers = {
 	SubscribeInstances: () =>
 		Stream.fail(
 			new WsRpcError({ message: "SubscribeInstances requires daemon mode" }),
@@ -321,24 +82,121 @@ export const wsRpcHandlers = WsRpcGroup.of({
 		Stream.fail(
 			new WsRpcError({ message: "SubscribeUsage requires daemon mode" }),
 		),
-	SubscribeProjects: () =>
-		Stream.fail(
-			new WsRpcError({ message: "SubscribeProjects requires daemon mode" }),
-		),
 	SubscribeServerStatus: () =>
 		Stream.fail(
 			new WsRpcError({ message: "SubscribeServerStatus requires daemon mode" }),
 		),
+};
+
+const streamHandlers = {
+	SubscribeShell: (request) =>
+		subscribeShell({
+			...(request.resumeFromSequence === undefined
+				? {}
+				: { resumeFromSequence: request.resumeFromSequence }),
+			...(request.resumeBase === undefined
+				? {}
+				: { resumeBase: request.resumeBase }),
+			...(request.resumePoint === undefined
+				? {}
+				: { resumePoint: request.resumePoint }),
+		}),
+	SubscribeApprovals: (request) =>
+		subscribeApprovals(
+			request.resumeFromSequence === undefined
+				? {}
+				: { resumeFromSequence: request.resumeFromSequence },
+		),
+	SubscribeSessionDetail: (request) =>
+		subscribeSessionDetailWithPresence({
+			sessionId: request.sessionId,
+			...(request.resumeFromSequence === undefined
+				? {}
+				: { resumeFromSequence: request.resumeFromSequence }),
+			...(request.resumeBase === undefined
+				? {}
+				: { resumeBase: request.resumeBase }),
+			...(request.resumePoint === undefined
+				? {}
+				: { resumePoint: request.resumePoint }),
+		}),
+	SubscribeSessionTodos: (request) =>
+		subscribeSessionTodos({
+			sessionId: request.sessionId,
+			...(request.resumeFromSequence === undefined
+				? {}
+				: { resumeFromSequence: request.resumeFromSequence }),
+		}),
+	SubscribeSessionFamily: (request) =>
+		subscribeSessionFamily({
+			sessionId: request.sessionId,
+			...(request.resumeFromSequence === undefined
+				? {}
+				: { resumeFromSequence: request.resumeFromSequence }),
+		}),
+	SubscribePtys: () => subscribePtys(),
+	SubscribeProjectSettings: () => subscribeProjectSettings(),
+	SubscribeDraftModels: (request) => subscribeDraftModels(request),
+	SubscribeAlerts: () => subscribeAlerts(),
+	SubscribeInputDraft: (request) => subscribeInputDraft(request.sessionId),
+	...daemonOnlyStreamHandlers,
+} satisfies {
+	[K in WsRpcs as Rpc.IsStream<K, K["_tag"]> extends never
+		? never
+		: K["_tag"]]: (
+		request: Rpc.Payload<K>,
+	) => Stream.Stream<Rpc.SuccessChunk<K>, unknown, unknown>;
+};
+
+type RegisteredStreamHandlers = {
+	[K in keyof typeof streamHandlers]: (
+		request: Rpc.Payload<Rpc.ExtractTag<WsRpcs, K>>,
+	) => Rpc.Wrapper<
+		Stream.Stream<
+			Stream.Success<ReturnType<(typeof streamHandlers)[K]>>,
+			WsRpcError,
+			Stream.Services<ReturnType<(typeof streamHandlers)[K]>>
+		>
+	>;
+};
+
+type StreamHandlerContext = Stream.Services<
+	ReturnType<(typeof streamHandlers)[keyof typeof streamHandlers]>
+>;
+
+export const wsRpcHandlers = WsRpcGroup.of({
 	...unaryHandlers,
+	// entries/fromEntries erases the correlation between each tag and its handler.
+	...(Object.fromEntries(
+		Object.entries(streamHandlers).map(([name, handler]) => [
+			name,
+			(request: never) => {
+				const stream: Stream.Stream<unknown, unknown, StreamHandlerContext> =
+					handler(request);
+				return Rpc.fork(
+					stream.pipe(
+						Failure.mapStreamFailures((error) =>
+							error instanceof WsRpcError
+								? error
+								: new WsRpcError({
+										message: `${name} failed: ${String(error)}`,
+									}),
+						),
+					),
+				);
+			},
+		]),
+	) as RegisteredStreamHandlers),
 });
 
 export const WsRpcServerLayer = WsRpcGroup.toLayer(wsRpcHandlers);
 
-export class RpcSubscriptionScopeTag extends Context.Tag(
-	"RpcSubscriptionScope",
-)<RpcSubscriptionScopeTag, Scope.Scope>() {}
+export class RpcSubscriptionScopeTag extends Context.Service<
+	RpcSubscriptionScopeTag,
+	Scope.Scope
+>()("RpcSubscriptionScope") {}
 
-export const RpcSubscriptionScopeLive = Layer.scoped(
+export const RpcSubscriptionScopeLive = Layer.effect(
 	RpcSubscriptionScopeTag,
 	Effect.scope,
 );
@@ -347,7 +205,7 @@ export type ResolveRpcContext = (
 	projectSlug: string,
 ) => Effect.Effect<
 	Context.Context<
-		Layer.Layer.Context<typeof WsRpcServerLayer> | RpcSubscriptionScopeTag
+		Layer.Services<typeof WsRpcServerLayer> | RpcSubscriptionScopeTag
 	>,
 	WsRpcError
 >;
@@ -378,35 +236,38 @@ export type DaemonRpcName =
 	| "SetDefault"
 	| "GetAutoSettleSetting"
 	| "SetAutoSettleSetting"
+	| "GetAutoDeleteArchivedSetting"
+	| "SetAutoDeleteArchivedSetting"
 	| "GetWorktreeCleanupSetting"
 	| "SetWorktreeCleanupSetting"
 	| "CleanUpWorktreesNow"
-	| "SetDefaultGroupingMode"
-	| "GetDefaultGroupingMode"
 	| "GetUsageLimitsSetting"
 	| "SetUsageLimitsSetting"
+	| "SetCursorUsageKeychain"
 	| "ScanNow"
 	| "DetectProxy"
 	| "FindFolders"
 	| "ListDaemonSessions"
+	| "ListArchivedSessions"
 	| "SetLogLevel"
 	| "ResolveSession";
 
-export class RpcCaller extends Context.Tag("RpcCaller")<
+export class RpcCaller extends Context.Service<
 	RpcCaller,
 	{ readonly kind: "browser"; readonly ip: string } | { readonly kind: "cli" }
->() {}
+>()("RpcCaller") {}
 
 /** Browser mutations revoke connections after their reply has been written. */
-export class RpcPinChangeResponse extends Context.Tag("RpcPinChangeResponse")<
+export class RpcPinChangeResponse extends Context.Service<
 	RpcPinChangeResponse,
 	(invalidate: () => void) => void
->() {}
+>()("RpcPinChangeResponse") {}
 
 /** Connection invalidators share the daemon lifetime; Unix clients never register. */
-export class BrowserRpcConnectionsTag extends Context.Tag(
-	"BrowserRpcConnections",
-)<BrowserRpcConnectionsTag, Set<() => void>>() {}
+export class BrowserRpcConnectionsTag extends Context.Service<
+	BrowserRpcConnectionsTag,
+	Set<() => void>
+>()("BrowserRpcConnections") {}
 
 export const BrowserRpcConnectionsLive = Layer.sync(
 	BrowserRpcConnectionsTag,
@@ -432,13 +293,9 @@ export type DaemonRpcHandlers = {
 		{ readonly readings: readonly UsageReading[] },
 		WsRpcError
 	>;
-	readonly SubscribeProjects: () => Stream.Stream<
-		{
-			readonly projects: readonly ProjectInfo[];
-			readonly newSessionProject?: string;
-		},
-		WsRpcError
-	>;
+	readonly SubscribeShell: (
+		request: Rpc.Payload<Rpc.ExtractTag<WsRpcs, "SubscribeShell">>,
+	) => Stream.Stream<ShellEnvelope, WsRpcError>;
 	readonly SubscribeServerStatus: () => Stream.Stream<ServerStatus, WsRpcError>;
 	/** Told after a session is created in `projectSlug`. */
 	readonly sessionCreated: (projectSlug: string) => Effect.Effect<void>;
@@ -451,193 +308,225 @@ export const makeRoutedWsRpcServerLayer = <
 	daemonHandlers?: D,
 	defaultProjectSlug?: string,
 	attachProject?: AttachDaemonProject,
-) => {
-	const routeHandler =
-		<P extends { readonly projectSlug?: string }, A, E, R>(
-			handler: (payload: P) => Effect.Effect<A, E, R>,
-			fallbackProjectSlug?: string,
-		) =>
-		(payload: P) =>
-			Effect.gen(function* () {
-				const slug = payload.projectSlug ?? fallbackProjectSlug;
-				if (slug === undefined)
-					return yield* Effect.fail(
-						new WsRpcError({ message: "projectSlug is required" }),
-					);
-				const context = yield* resolveContext(slug);
-				return yield* Effect.provide(handler(payload), context);
-			});
-
-	const daemon: DaemonRpcHandlers | undefined = daemonHandlers;
-	const daemonUnaryHandlers =
-		daemon &&
-		Struct.omit(
-			daemon,
-			"SubscribeInstances",
-			"SubscribeUsage",
-			"SubscribeProjects",
-			"SubscribeServerStatus",
-			"sessionCreated",
-		);
-	// Object.entries/fromEntries loses the key-to-payload/result correlation.
-	// Each wrapper preserves its original handler's payload and success type.
-	const handlers = Object.fromEntries(
-		Object.entries({ ...unaryHandlers, ...daemonUnaryHandlers }).map(
-			([name, handler]) => [
-				name,
-				(daemonUnaryHandlers && Object.hasOwn(daemonUnaryHandlers, name)) ||
-				Object.hasOwn(daemonOnlyHandlers, name)
-					? handler
-					: routeHandler<never, unknown, unknown, unknown>(
-							handler,
-							name === "CreateSession" ? undefined : defaultProjectSlug,
-						),
-			],
-		),
-	) as {
-		-readonly [K in keyof typeof unaryHandlers]: (
-			payload: Parameters<(typeof unaryHandlers)[K]>[0],
-		) => Effect.Effect<
-			Effect.Effect.Success<ReturnType<(typeof unaryHandlers)[K]>>,
-			Effect.Effect.Error<ReturnType<(typeof unaryHandlers)[K]>> | WsRpcError,
-			K extends "SetPin"
-				? D extends DaemonRpcHandlers
-					? Effect.Effect.Context<ReturnType<D["SetPin"]>>
-					: never
-				: never
-		>;
-	};
-	if (attachProject) handlers.AttachProject = attachProject;
-	if (daemonHandlers) {
-		const routeCreateSession = routeHandler(unaryHandlers.CreateSession);
-		handlers.CreateSession = (
-			payload: Parameters<(typeof unaryHandlers)["CreateSession"]>[0],
-		) =>
-			routeCreateSession(payload).pipe(
-				Effect.tap(() => daemonHandlers.sessionCreated(payload.projectSlug)),
-			);
-	}
-	const routeStream = <
-		A,
-		E,
-		R extends Layer.Layer.Context<typeof WsRpcServerLayer>,
-	>(
-		projectSlug: string,
-		make: () => Stream.Stream<A, E, R>,
-	) =>
-		Rpc.fork(
-			Stream.unwrapScoped(
+) =>
+	Layer.unwrap(
+		Effect.gen(function* () {
+			const directory = yield* SessionDirectory;
+			const projectSlugFor = (payload: object, fallback?: string) =>
 				Effect.gen(function* () {
-					const context = yield* resolveContext(projectSlug);
-					const queue = yield* Effect.acquireRelease(
-						Queue.bounded<Take.Take<A, E>>(2),
-						Queue.shutdown,
-					);
-					// Project removal and browser cancellation both await this producer
-					// before SQLite closes. Queue shutdown ends the consumer cleanly.
-					yield* Effect.acquireRelease(
-						Stream.runIntoQueue(
-							Stream.provideContext(make(), context),
-							queue,
-						).pipe(
-							Effect.interruptible,
-							Effect.onInterrupt(() => Queue.shutdown(queue)),
-							Effect.forkIn(Context.get(context, RpcSubscriptionScopeTag)),
-						),
-						Fiber.interrupt,
-					);
-					return Stream.fromQueue(queue).pipe(
-						Stream.flattenTake,
-						Stream.mapError(
-							(error) =>
-								new WsRpcError({
-									message: `Subscription failed: ${String(error)}`,
-								}),
-						),
-					);
-				}),
-			),
-		);
-	return WsRpcGroup.toLayer({
-		...handlers,
-		SubscribeShell: (request) =>
-			routeStream(request.projectSlug, () =>
-				subscribeShell({
-					...(request.resumeFromSequence === undefined
-						? {}
-						: { resumeFromSequence: request.resumeFromSequence }),
-					...(request.resumeBase === undefined
-						? {}
-						: { resumeBase: request.resumeBase }),
-				}),
-			),
-		SubscribeApprovals: (request) =>
-			routeStream(request.projectSlug, () =>
-				subscribeApprovals(
-					request.resumeFromSequence === undefined
-						? {}
-						: { resumeFromSequence: request.resumeFromSequence },
+					if ("sessionId" in payload && typeof payload.sessionId === "string") {
+						const owner = yield* directory.projectOf(payload.sessionId).pipe(
+							Failure.mapEffectFailures(
+								(error) =>
+									new WsRpcError({
+										message: error.message,
+									}),
+							),
+						);
+						if (Option.isNone(owner))
+							return yield* new WsRpcError({
+								code: "unknown-session",
+								message: `Unknown session: ${payload.sessionId}`,
+							});
+						return owner.value;
+					}
+					const slug =
+						"projectSlug" in payload && typeof payload.projectSlug === "string"
+							? payload.projectSlug
+							: fallback;
+					if (slug === undefined)
+						return yield* new WsRpcError({
+							message: "projectSlug is required",
+						});
+					return slug;
+				});
+			const routeHandler =
+				<P extends object, A, E, R>(
+					handler: (payload: P) => Effect.Effect<A, E, R>,
+					fallbackProjectSlug?: string,
+				) =>
+				(payload: P) =>
+					Effect.gen(function* () {
+						const slug = yield* projectSlugFor(payload, fallbackProjectSlug);
+						const context = yield* resolveContext(slug);
+						return yield* Effect.provide(handler(payload), context);
+					});
+
+			const daemon: DaemonRpcHandlers | undefined = daemonHandlers;
+			const daemonUnaryHandlers =
+				daemon &&
+				(Object.fromEntries(
+					Object.entries(daemon).filter(([name]) => {
+						const rpc = WsRpcGroup.requests.get(name);
+						return (
+							rpc !== undefined && !RpcSchema.isStreamSchema(rpc.successSchema)
+						);
+					}),
+				) as
+					| Pick<
+							DaemonRpcHandlers,
+							Extract<keyof DaemonRpcHandlers, keyof typeof unaryHandlers>
+					  >
+					| undefined);
+			const daemonStreamHandlers =
+				daemon &&
+				(Object.fromEntries(
+					Object.entries(daemon).filter(([name]) => {
+						const rpc = WsRpcGroup.requests.get(name);
+						return (
+							rpc !== undefined && RpcSchema.isStreamSchema(rpc.successSchema)
+						);
+					}),
+				) as
+					| Pick<
+							DaemonRpcHandlers,
+							Extract<keyof DaemonRpcHandlers, keyof typeof streamHandlers>
+					  >
+					| undefined);
+
+			// Test-only: the named unary RPC dies, so the process harness can pin
+			// how an unexpected defect reaches the browser.
+			const defectRpc =
+				process.env["NODE_ENV"] === "test"
+					? process.env["CONDUIT_TEST_RPC_DEFECT"]
+					: undefined;
+			// Object.entries/fromEntries loses the key-to-payload/result correlation.
+			// Each wrapper preserves its original handler's payload and success type.
+			const handlers = Object.fromEntries(
+				Object.entries({ ...unaryHandlers, ...daemonUnaryHandlers }).map(
+					([name, handler]) => [
+						name,
+						name === defectRpc
+							? () => Effect.die(new Error(`Test RPC defect: ${name}`))
+							: (daemonUnaryHandlers &&
+										Object.hasOwn(daemonUnaryHandlers, name)) ||
+									Object.hasOwn(daemonOnlyHandlers, name)
+								? handler
+								: routeHandler<never, unknown, unknown, unknown>(
+										handler,
+										name === "CreateSession" ? undefined : defaultProjectSlug,
+									),
+					],
 				),
-			),
-		SubscribeSessionDetail: (request) =>
-			routeStream(request.projectSlug, () =>
-				subscribeSessionDetailWithPresence({
-					sessionId: request.sessionId,
-					...(request.resumeFromSequence === undefined
-						? {}
-						: { resumeFromSequence: request.resumeFromSequence }),
-					...(request.resumeBase === undefined
-						? {}
-						: { resumeBase: request.resumeBase }),
-					...(request.resumePoint === undefined
-						? {}
-						: { resumePoint: request.resumePoint }),
+			) as {
+				-readonly [K in keyof typeof unaryHandlers]: (
+					payload: Parameters<(typeof unaryHandlers)[K]>[0],
+				) => Effect.Effect<
+					Effect.Success<ReturnType<(typeof unaryHandlers)[K]>>,
+					Effect.Error<ReturnType<(typeof unaryHandlers)[K]>> | WsRpcError,
+					K extends "SetPin"
+						? D extends DaemonRpcHandlers
+							? Effect.Services<ReturnType<D["SetPin"]>>
+							: never
+						: never
+				>;
+			};
+			if (attachProject) handlers.AttachProject = attachProject;
+			if (daemonHandlers) {
+				const routeCreateSession = routeHandler(unaryHandlers.CreateSession);
+				handlers.CreateSession = (
+					payload: Parameters<(typeof unaryHandlers)["CreateSession"]>[0],
+				) =>
+					routeCreateSession(payload).pipe(
+						Effect.tap(() =>
+							daemonHandlers.sessionCreated(payload.projectSlug),
+						),
+					);
+			}
+			const routeStream = <
+				A,
+				E,
+				R extends Layer.Services<typeof WsRpcServerLayer>,
+			>(
+				payload: object,
+				make: () => Stream.Stream<A, E, R>,
+				fallbackProjectSlug?: string,
+			) =>
+				Rpc.fork(
+					Stream.unwrap(
+						Effect.gen(function* () {
+							const projectSlug = yield* projectSlugFor(
+								payload,
+								fallbackProjectSlug,
+							);
+							const context = yield* resolveContext(projectSlug);
+							const queue = yield* Effect.acquireRelease(
+								Queue.bounded<Arr.NonEmptyReadonlyArray<A>, E | Cause.Done>(2),
+								Queue.shutdown,
+							);
+							// Project removal and browser cancellation both await this producer
+							// before SQLite closes. Queue shutdown ends the consumer cleanly.
+							yield* Effect.acquireRelease(
+								Stream.runForEachArray(
+									Stream.provideContext(make(), context),
+									(values) => Queue.offer(queue, values),
+								).pipe(
+									Effect.matchCauseEffect({
+										onFailure: (cause) => Queue.failCause(queue, cause),
+										onSuccess: () => Queue.end(queue),
+									}),
+									Effect.interruptible,
+									Effect.onInterrupt(() =>
+										// Shutdown retains Done and discards buffered batches on project removal.
+										Queue.end(queue).pipe(
+											Effect.andThen(Queue.shutdown(queue)),
+											Effect.asVoid,
+										),
+									),
+									Effect.forkIn(Context.get(context, RpcSubscriptionScopeTag)),
+								),
+								Fiber.interrupt,
+							);
+							return Stream.fromQueue(queue).pipe(
+								Stream.flattenArray,
+								Failure.mapStreamFailures(
+									(error) =>
+										new WsRpcError({
+											message: `Subscription failed: ${String(error)}`,
+										}),
+								),
+							);
+						}),
+					),
+				);
+			return WsRpcGroup.toLayer({
+				...handlers,
+				// The same stream definitions serve direct and project-routed clients.
+				...(Object.fromEntries(
+					Object.entries(streamHandlers).map(([name, handler]) => {
+						const daemonHandler =
+							daemonStreamHandlers?.[
+								name as keyof typeof daemonStreamHandlers
+							] ??
+							(Object.hasOwn(daemonOnlyStreamHandlers, name)
+								? daemonOnlyStreamHandlers[
+										name as keyof typeof daemonOnlyStreamHandlers
+									]
+								: undefined);
+						return [
+							name,
+							(
+								request: never,
+							): Rpc.Wrapper<Stream.Stream<unknown, WsRpcError>> => {
+								if (daemonHandler) return Rpc.fork(daemonHandler(request));
+								return routeStream<unknown, unknown, StreamHandlerContext>(
+									request,
+									() => handler(request),
+									name === "SubscribeShell" ? defaultProjectSlug : undefined,
+								);
+							},
+						];
+					}),
+				) as {
+					[K in keyof typeof streamHandlers]: (
+						request: Rpc.Payload<Rpc.ExtractTag<WsRpcs, K>>,
+					) => Rpc.Wrapper<
+						Stream.Stream<
+							Rpc.SuccessChunk<Rpc.ExtractTag<WsRpcs, K>>,
+							WsRpcError
+						>
+					>;
 				}),
-			),
-		SubscribeSessionTodos: (request) =>
-			routeStream(request.projectSlug, () =>
-				subscribeSessionTodos({
-					sessionId: request.sessionId,
-					...(request.resumeFromSequence === undefined
-						? {}
-						: { resumeFromSequence: request.resumeFromSequence }),
-				}),
-			),
-		SubscribeSessionFamily: (request) =>
-			routeStream(request.projectSlug, () =>
-				subscribeSessionFamily({
-					sessionId: request.sessionId,
-					...(request.resumeFromSequence === undefined
-						? {}
-						: { resumeFromSequence: request.resumeFromSequence }),
-				}),
-			),
-		SubscribePtys: (request) => routeStream(request.projectSlug, subscribePtys),
-		SubscribeProjectSettings: (request) =>
-			routeStream(request.projectSlug, () => subscribeProjectSettings()),
-		SubscribeDraftModels: (request) =>
-			routeStream(request.projectSlug, () => subscribeDraftModels(request)),
-		SubscribeAlerts: (request) =>
-			routeStream(request.projectSlug, subscribeAlerts),
-		SubscribeInputDraft: (request) =>
-			routeStream(request.projectSlug, () =>
-				subscribeInputDraft(request.sessionId),
-			),
-		SubscribeInstances: () =>
-			daemonHandlers
-				? Rpc.fork(daemonHandlers.SubscribeInstances())
-				: wsRpcHandlers.SubscribeInstances(),
-		SubscribeUsage: () =>
-			daemonHandlers
-				? Rpc.fork(daemonHandlers.SubscribeUsage())
-				: wsRpcHandlers.SubscribeUsage(),
-		SubscribeProjects: () =>
-			daemonHandlers
-				? Rpc.fork(daemonHandlers.SubscribeProjects())
-				: wsRpcHandlers.SubscribeProjects(),
-		SubscribeServerStatus: () =>
-			daemonHandlers
-				? Rpc.fork(daemonHandlers.SubscribeServerStatus())
-				: wsRpcHandlers.SubscribeServerStatus(),
-	});
-};
+			});
+		}),
+	);

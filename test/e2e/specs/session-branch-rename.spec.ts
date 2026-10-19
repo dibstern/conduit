@@ -70,14 +70,7 @@ async function openSession(
 		},
 	};
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			GetProjects: () => ({ projects, current: projectSlug }),
-			ListDaemonSessions: () => ({
-				sessions: [session],
-				availability: [],
-				hasMore: false,
-				nextCursor: null,
-			}),
+		stubs: {
 			RenameSessionBranch: ({ branchName }) => {
 				if (options.error) throw options.error;
 				if (typeof branchName !== "string")
@@ -99,6 +92,18 @@ async function openSession(
 				rpc.upsertShellRow(session);
 				return { ok: true };
 			},
+			ListDaemonSessions: () => ({
+				sessions: [session],
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
+			}),
+			GetModels: () => ({
+				defaultOpenCodeInstanceId: "opencode",
+				projectSlug: "e2e-replay",
+				providers: [],
+			}),
+			GetProjects: () => ({ projects, current: projectSlug }),
 		},
 	});
 	rpc.setShellRows([session]);

@@ -2,8 +2,6 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
-import { SqlError } from "@effect/sql/SqlError";
 import {
 	Deferred,
 	Effect,
@@ -13,7 +11,17 @@ import {
 	Queue,
 	Stream,
 } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SqlClient } from "effect/sql";
+import { SqlError, UnknownError } from "effect/sql/SqlError";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	type Mocked,
+	vi,
+} from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import {
@@ -208,13 +216,13 @@ describe("selected OpenCode stop through the relay graph", () => {
 					rows
 						.map((row) => ({
 							...row,
-							status:
-								row.id.endsWith("work") &&
-								(stoppedId === selectedId
+							status: (
+								stoppedId === selectedId
 									? row.provider === selectedId || row.provider === "opencode"
-									: row.provider === stoppedId)
-									? "idle"
-									: "busy",
+									: row.provider === stoppedId
+							)
+								? "idle"
+								: "busy",
 						}))
 						.sort((a, b) => a.id.localeCompare(b.id)),
 				);
@@ -254,12 +262,7 @@ function makeRuntime(filename: string) {
 	);
 }
 
-function makeLogger(): OpenCodeRuntimeIngressLog & {
-	warn: ReturnType<typeof vi.fn>;
-	debug: ReturnType<typeof vi.fn>;
-	info: ReturnType<typeof vi.fn>;
-	verbose: ReturnType<typeof vi.fn>;
-} {
+function makeLogger(): Mocked<OpenCodeRuntimeIngressLog> {
 	return {
 		warn: vi.fn(),
 		debug: vi.fn(),
@@ -273,6 +276,7 @@ function makeProjectionRunner(): ProjectionRunnerEffect {
 		projectEvent: vi.fn(() =>
 			Effect.succeed({
 				version: 0,
+				projectIds: [],
 				sessionIds: [],
 				removedSessionIds: [],
 				collections: [],
@@ -281,6 +285,7 @@ function makeProjectionRunner(): ProjectionRunnerEffect {
 		projectBatch: vi.fn(() =>
 			Effect.succeed({
 				version: 0,
+				projectIds: [],
 				sessionIds: [],
 				removedSessionIds: [],
 				collections: [],
@@ -317,11 +322,13 @@ function makeFakeIngress(options?: {
 				ingestOptions?: { readonly afterCommit?: Effect.Effect<void> },
 			) =>
 				(options?.ingestBatch?.(events) ?? Effect.succeed(events.length)).pipe(
-					Effect.tap(() => {
-						for (const event of events)
-							if (event.type === "session.created")
-								projected.add(event.sessionId);
-					}),
+					Effect.tap(() =>
+						Effect.sync(() => {
+							for (const event of events)
+								if (event.type === "session.created")
+									projected.add(event.sessionId);
+						}),
+					),
 					// Stand in for the durable boundary: only a batch that committed
 					// runs afterCommit.
 					Effect.tap(() => ingestOptions?.afterCommit ?? Effect.void),
@@ -331,6 +338,7 @@ function makeFakeIngress(options?: {
 	} satisfies ProviderRuntimeIngestion;
 	const log = makeLogger();
 	const hook = new EffectOpenCodeRuntimeIngress({
+		projectId: "test-project",
 		sql: ((strings: TemplateStringsArray, ...values: unknown[]) =>
 			Effect.succeed(
 				strings.join("?").includes("FROM sessions") &&
@@ -445,8 +453,8 @@ describe("EffectOpenCodeRuntimeIngress", () => {
 							ingestion.ingestBatch(events, {
 								...options,
 								beforeCommit: Deferred.succeed(entered, undefined).pipe(
-									Effect.zipRight(Deferred.await(release)),
-									Effect.zipRight(options.beforeCommit ?? Effect.void),
+									Effect.andThen(Deferred.await(release)),
+									Effect.andThen(options.beforeCommit ?? Effect.void),
 								),
 							}),
 					}),
@@ -737,7 +745,12 @@ describe("EffectOpenCodeRuntimeIngress ProviderRuntimeIngestion boundary", () =>
 		const { hook } = makeFakeIngress({
 			ingestBatch: () =>
 				Effect.fail(
-					new SqlError({ message: "SQLITE_BUSY: database is locked" }),
+					new SqlError({
+						reason: new UnknownError({
+							cause: new Error("SQLITE_BUSY: database is locked"),
+							message: "SQLITE_BUSY: database is locked",
+						}),
+					}),
 				),
 		});
 		const event = makeSSEEvent("message.created", {

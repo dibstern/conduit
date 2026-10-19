@@ -2,13 +2,10 @@ import { createHash } from "node:crypto";
 import type { SessionMessage } from "@anthropic-ai/claude-agent-sdk";
 import type {
 	ProviderRuntimeEvent,
+	ProviderRuntimeEventPayloadMap,
 	ProviderRuntimeEventType,
 } from "../../contracts/providers/provider-runtime-event.js";
-import type {
-	CanonicalEvent,
-	EventPayloadMap,
-	MessageRole,
-} from "../../persistence/events.js";
+import type { CanonicalEvent, MessageRole } from "../../persistence/events.js";
 import { isRecord } from "../../utils.js";
 import {
 	emptyProviderRuntimeDomainMapperState,
@@ -151,7 +148,7 @@ function runtimeEventsToDomain(
 function providerRuntimeEvent<K extends ProviderRuntimeEventType>(
 	type: K,
 	sessionId: string,
-	data: EventPayloadMap[K],
+	data: ProviderRuntimeEventPayloadMap[K],
 	options: {
 		readonly provider?: typeof PROVIDER;
 		readonly createdAt: number;

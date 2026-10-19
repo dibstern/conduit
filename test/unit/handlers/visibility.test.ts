@@ -2,16 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import {
-	Cause,
-	Chunk,
-	Effect,
-	Exit,
-	Layer,
-	Option,
-	PubSub,
-	Queue,
-} from "effect";
+import { Cause, Effect, Exit, Layer, Option, PubSub } from "effect";
 import { expect } from "vitest";
 import {
 	ProjectSettingsLive,
@@ -40,22 +31,22 @@ function makeLayer(configDir: string) {
 	return Layer.mergeAll(
 		ProjectSettingsLive,
 		makeOverridesStateLive(),
-		Layer.succeed(LoggerTag, makeMockLogger() as Logger),
-		Layer.succeed(ConfigTag, makeMockConfig({ configDir })),
+		Layer.succeed(LoggerTag)(makeMockLogger() as Logger),
+		Layer.succeed(ConfigTag)(makeMockConfig({ configDir })),
 	);
 }
 
 /** What open project-settings subscribers would hear from here on. */
 const published = Effect.flatMap(ProjectSettingsTag, ({ changes }) =>
 	Effect.map(PubSub.subscribe(changes), (dequeue) =>
-		Effect.map(Queue.takeAll(dequeue), (taken) =>
-			Chunk.toArray(taken).map((change) => change.item),
+		Effect.map(PubSub.takeUpTo(dequeue, Number.POSITIVE_INFINITY), (taken) =>
+			[...taken].map((change) => change.item),
 		),
 	),
 );
 
 describe("setHiddenEntriesForRelay", () => {
-	it.scoped(
+	it.effect(
 		"persists provided lists to relay settings and publishes the visibility setting",
 		() => {
 			const configDir = mkdtempSync(join(tmpdir(), "conduit-visibility-"));
@@ -83,11 +74,11 @@ describe("setHiddenEntriesForRelay", () => {
 					hiddenModels: ["a/b"],
 					hiddenAgents: ["opencode/plan"],
 				});
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 
-	it.scoped("leaves the omitted list untouched", () => {
+	it.effect("leaves the omitted list untouched", () => {
 		const configDir = mkdtempSync(join(tmpdir(), "conduit-visibility-"));
 		saveRelaySettings({ hiddenAgents: ["claude/researcher"] }, configDir);
 		const layer = makeLayer(configDir);
@@ -113,10 +104,10 @@ describe("setHiddenEntriesForRelay", () => {
 				hiddenModels: ["x/y"],
 				hiddenAgents: ["claude/researcher"],
 			});
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(layer, { local: true }));
 	});
 
-	it.scoped(
+	it.effect(
 		"surfaces fs failures as a catchable typed failure, not a defect",
 		() => {
 			// configDir points at a FILE, so saveRelaySettings' mkdirSync throws.
@@ -133,14 +124,14 @@ describe("setHiddenEntriesForRelay", () => {
 
 				expect(Exit.isFailure(exit)).toBe(true);
 				const failure = Exit.isFailure(exit)
-					? Cause.failureOption(exit.cause) // Some only for a Fail, not a Die
+					? Cause.findErrorOption(exit.cause) // Some only for a Fail, not a Die
 					: Option.none();
 				expect(Option.isSome(failure)).toBe(true);
 				if (Option.isSome(failure)) {
 					expect(failure.value._tag).toBe("RelaySettingsSaveError");
 				}
 				expect(yield* takePublished).toEqual([]);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 });

@@ -80,8 +80,7 @@ test("a just-added Claude account can run a session immediately", async ({
 	);
 	const prompt = "immediate-account-session";
 	await Effect.runPromise(
-		browser.rpc.input.submit({
-			projectSlug: "process-test",
+		browser.rpc["input.submit"]({
 			sessionId,
 			text: prompt,
 			inputId: "immediate-account-send",
@@ -96,7 +95,7 @@ test("a just-added Claude account can run a session immediately", async ({
 		.poll(() => JSON.stringify(readProofMarks(harness.root)))
 		.toContain(`done(${prompt})`);
 	const history = await Effect.runPromise(
-		browser.rpc.LoadMoreHistory({ projectSlug: "process-test", sessionId }),
+		browser.rpc.LoadMoreHistory({ sessionId }),
 	);
 	expect(history.messages.some((message) => message.role === "assistant")).toBe(
 		true,
@@ -221,13 +220,11 @@ for (const stale of [false, true]) {
 			);
 			const observed: SessionInfo[] = [];
 			const subscription = Effect.runFork(
-				Stream.runForEach(
-					browser.rpc.SubscribeShell({ projectSlug }),
-					(envelope) =>
-						Effect.sync(() => {
-							if (envelope._tag === "snapshot") observed.push(...envelope.rows);
-							if (envelope._tag === "upsert") observed.push(envelope.item);
-						}),
+				Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+					Effect.sync(() => {
+						if (envelope._tag === "snapshot") observed.push(...envelope.rows);
+						if (envelope._tag === "upsert") observed.push(envelope.item);
+					}),
 				),
 			);
 			const latest = () =>
@@ -235,8 +232,7 @@ for (const stale of [false, true]) {
 			const proofMarks = () => readProofMarks(harness.root);
 			const send = (text: string, commandId: string) =>
 				Effect.runPromise(
-					browser.rpc.input.submit({
-						projectSlug,
+					browser.rpc["input.submit"]({
 						sessionId,
 						text,
 						inputId: commandId,
@@ -247,7 +243,6 @@ for (const stale of [false, true]) {
 			const switchTo = (instanceId: string, expectedInstanceId: string) =>
 				Effect.runPromise(
 					browser.rpc.ContinueSession({
-						projectSlug,
 						sessionId,
 						instanceId,
 						expectedInstanceId,
@@ -257,7 +252,6 @@ for (const stale of [false, true]) {
 			const previewForAccount = (instanceId: string) =>
 				Effect.runPromise(
 					browser.rpc.PreviewContinuation({
-						projectSlug,
 						sessionId,
 						instanceId,
 						originId: browser.originId,
@@ -292,7 +286,7 @@ for (const stale of [false, true]) {
 				if (native?.kind !== "query")
 					throw new Error("No account 1 native session");
 				const delivered = await Effect.runPromise(
-					browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+					browser.rpc.LoadMoreHistory({ sessionId }),
 				);
 				await switchTo(account2.id, account1.id);
 				await send(elsewhere, "return-elsewhere");
@@ -306,7 +300,7 @@ for (const stale of [false, true]) {
 					.toBeTruthy();
 				await expect.poll(() => latest()?.status).toBe("idle");
 				const history = await Effect.runPromise(
-					browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+					browser.rpc.LoadMoreHistory({ sessionId }),
 				);
 				const preview = await previewForAccount(account1.id);
 				expect(preview.included + preview.omitted).toBe(
@@ -426,24 +420,23 @@ for (const dismiss of [false, true]) {
 			if (!slug) throw new Error("No project slug");
 			const observed: { sequence: number; session: SessionInfo }[] = [];
 			const subscription = Effect.runFork(
-				Stream.runForEach(
-					browser.rpc.SubscribeShell({ projectSlug: slug }),
-					(envelope) =>
-						Effect.sync(() => {
-							if (envelope._tag === "snapshot")
-								for (const session of envelope.rows)
-									observed.push({ sequence: envelope.sequence, session });
-							if (envelope._tag === "upsert")
-								observed.push({
-									sequence: envelope.sequence,
-									session: envelope.item,
-								});
-						}),
+				Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+					Effect.sync(() => {
+						if (envelope._tag === "snapshot")
+							for (const session of envelope.rows)
+								observed.push({ sequence: envelope.sequence, session });
+						if (envelope._tag === "upsert")
+							observed.push({
+								sequence: envelope.sequence,
+								session: envelope.item,
+							});
+					}),
 				),
 			);
 			const snapshot = () =>
 				Effect.runPromise(
-					browser.rpc.SubscribeShell({ projectSlug: slug }).pipe(
+					browser.rpc.SubscribeShell({}).pipe(
+						Stream.filter((frame) => frame._tag !== "projects"),
 						Stream.take(1),
 						Stream.runCollect,
 						Effect.map((envelopes) => Array.from(envelopes)[0]),
@@ -555,9 +548,7 @@ for (const dismiss of [false, true]) {
 						continued: false,
 					});
 					// Repeated Dismiss is an error-free no-op through the same RPC.
-					await Effect.runPromise(
-						browser.rpc.DismissCutOff({ projectSlug: slug, sessionId }),
-					);
+					await Effect.runPromise(browser.rpc.DismissCutOff({ sessionId }));
 				}
 				const typedText = dismiss
 					? "Continue after Dismiss."
@@ -721,24 +712,23 @@ for (const decision of [
 		);
 		const observed: { sequence: number; session: SessionInfo }[] = [];
 		const subscription = Effect.runFork(
-			Stream.runForEach(
-				browser.rpc.SubscribeShell({ projectSlug }),
-				(envelope) =>
-					Effect.sync(() => {
-						if (envelope._tag === "snapshot")
-							for (const session of envelope.rows)
-								observed.push({ sequence: envelope.sequence, session });
-						if (envelope._tag === "upsert")
-							observed.push({
-								sequence: envelope.sequence,
-								session: envelope.item,
-							});
-					}),
+			Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+				Effect.sync(() => {
+					if (envelope._tag === "snapshot")
+						for (const session of envelope.rows)
+							observed.push({ sequence: envelope.sequence, session });
+					if (envelope._tag === "upsert")
+						observed.push({
+							sequence: envelope.sequence,
+							session: envelope.item,
+						});
+				}),
 			),
 		);
 		const snapshot = () =>
 			Effect.runPromise(
-				browser.rpc.SubscribeShell({ projectSlug }).pipe(
+				browser.rpc.SubscribeShell({}).pipe(
+					Stream.filter((frame) => frame._tag !== "projects"),
 					Stream.take(1),
 					Stream.runCollect,
 					Effect.map((envelopes) => Array.from(envelopes)[0]),
@@ -753,8 +743,7 @@ for (const decision of [
 			// Release background duplicates before taking stable gate snapshots.
 			writeFileSync(join(harness.root, "release-limit-repeats"), "release");
 			await Effect.runPromise(
-				browser.rpc.input.submit({
-					projectSlug,
+				browser.rpc["input.submit"]({
 					sessionId,
 					text: cutOffText,
 					inputId: `cut-off-${decision}`,
@@ -812,8 +801,7 @@ for (const decision of [
 				throw new Error("No native cut-off session");
 			if (decision === "busy") {
 				await Effect.runPromise(
-					browser.rpc.input.submit({
-						projectSlug,
+					browser.rpc["input.submit"]({
 						sessionId,
 						text: "upgrade-long-turn",
 						inputId: "held-turn",
@@ -842,7 +830,7 @@ for (const decision of [
 						JSON.stringify(
 							(
 								await Effect.runPromise(
-									browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+									browser.rpc.LoadMoreHistory({ sessionId }),
 								)
 							).messages,
 						),
@@ -867,14 +855,13 @@ for (const decision of [
 					: await Effect.runPromise(
 							browser.rpc
 								.ContinueSession({
-									projectSlug,
 									sessionId,
 									instanceId,
 									expectedInstanceId:
 										decision === "stale" ? "stale-account" : instanceId,
 									originId: browser.originId,
 								})
-								.pipe(Effect.either),
+								.pipe(Effect.result),
 						);
 			evidence["before"] = before;
 			evidence["result"] = result;
@@ -896,9 +883,9 @@ for (const decision of [
 				stale: "StaleSwitch",
 			};
 			if (decision in refusal) {
-				expect(result?._tag).toBe("Left");
-				if (result?._tag !== "Left") throw new Error("Expected refusal");
-				expect(result.left._tag).toBe(
+				expect(result?._tag).toBe("Failure");
+				if (result?._tag !== "Failure") throw new Error("Expected refusal");
+				expect(result.failure._tag).toBe(
 					refusal[decision as keyof typeof refusal],
 				);
 				const after = await snapshot();
@@ -908,7 +895,7 @@ for (const decision of [
 					await tryAgain.click();
 					await expect(
 						page.locator('.toast-card[data-variant="error"]'),
-					).toContainText(result.left.message);
+					).toContainText(result.failure.message);
 					await expect(strip).toBeVisible();
 					await expect(tryAgain).toBeEnabled();
 					await page.screenshot({ path: join(artifacts, "02-refused.png") });
@@ -919,7 +906,7 @@ for (const decision of [
 						.some((call) => call.prompt === "Continue where you left off."),
 				).toBe(false);
 			} else {
-				if (result) expect(result._tag).toBe("Right");
+				if (result) expect(result._tag).toBe("Success");
 				if (decision === "hang")
 					expect(Date.now() - started).toBeGreaterThanOrEqual(4_900);
 				await expect.poll(() => latest()?.limitRecovery?.continued).toBe(true);
@@ -965,7 +952,7 @@ for (const decision of [
 				if (resumeId != null) expect(resumeId).toBe(native.sessionId);
 				evidence["nativeQuery"] = query;
 				const history = await Effect.runPromise(
-					browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+					browser.rpc.LoadMoreHistory({ sessionId }),
 				);
 				evidence["historyBeforeReply"] = history;
 				expect(
@@ -1131,13 +1118,11 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 		);
 		const observed: SessionInfo[] = [];
 		const subscription = Effect.runFork(
-			Stream.runForEach(
-				browser.rpc.SubscribeShell({ projectSlug }),
-				(envelope) =>
-					Effect.sync(() => {
-						if (envelope._tag === "snapshot") observed.push(...envelope.rows);
-						if (envelope._tag === "upsert") observed.push(envelope.item);
-					}),
+			Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+				Effect.sync(() => {
+					if (envelope._tag === "snapshot") observed.push(...envelope.rows);
+					if (envelope._tag === "upsert") observed.push(envelope.item);
+				}),
 			),
 		);
 		const latest = () => observed.filter((row) => row.id === sessionId).at(-1);
@@ -1158,8 +1143,7 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 			"usage-limit-account-1-no-reset: finish the original request";
 		const send = (text: string, commandId: string) =>
 			Effect.runPromise(
-				browser.rpc.input.submit({
-					projectSlug,
+				browser.rpc["input.submit"]({
 					sessionId,
 					text,
 					inputId: commandId,
@@ -1327,9 +1311,7 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 			expect(switched?.prompt?.endsWith(cutOff)).toBe(true);
 			expect(switched?.resumeId).toBeNull();
 			expect(
-				await Effect.runPromise(
-					browser.rpc.GetAgents({ projectSlug, sessionId }),
-				),
+				await Effect.runPromise(browser.rpc.GetAgents({ sessionId })),
 			).toMatchObject({ instanceId: target.id });
 			const probes = () =>
 				proofMarks()
@@ -1494,19 +1476,17 @@ for (const scenario of [
 		const observed: { sequence: number; session: SessionInfo }[] = [];
 		const subscribe = () =>
 			Effect.runFork(
-				Stream.runForEach(
-					browser.rpc.SubscribeShell({ projectSlug }),
-					(envelope) =>
-						Effect.sync(() => {
-							if (envelope._tag === "snapshot")
-								for (const session of envelope.rows)
-									observed.push({ sequence: envelope.sequence, session });
-							if (envelope._tag === "upsert")
-								observed.push({
-									sequence: envelope.sequence,
-									session: envelope.item,
-								});
-						}),
+				Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+					Effect.sync(() => {
+						if (envelope._tag === "snapshot")
+							for (const session of envelope.rows)
+								observed.push({ sequence: envelope.sequence, session });
+						if (envelope._tag === "upsert")
+							observed.push({
+								sequence: envelope.sequence,
+								session: envelope.item,
+							});
+					}),
 				),
 			);
 		let subscription = subscribe();
@@ -1514,7 +1494,8 @@ for (const scenario of [
 			observed.filter((row) => row.session.id === sessionId).at(-1)?.session;
 		const snapshot = () =>
 			Effect.runPromise(
-				browser.rpc.SubscribeShell({ projectSlug }).pipe(
+				browser.rpc.SubscribeShell({}).pipe(
+					Stream.filter((frame) => frame._tag !== "projects"),
 					Stream.take(1),
 					Stream.runCollect,
 					Effect.map((envelopes) => Array.from(envelopes)[0]),
@@ -1541,8 +1522,7 @@ for (const scenario of [
 			const at = Math.floor(Date.now() / 1000) + (ui ? 20 : 10);
 			writeFileSync(join(configDir, "conduit-test-resets-at"), String(at));
 			await Effect.runPromise(
-				browser.rpc.input.submit({
-					projectSlug,
+				browser.rpc["input.submit"]({
 					sessionId,
 					text: "usage-limit-account-1: finish the original request after reset",
 					inputId: `cut-off-${scenario}`,
@@ -1575,7 +1555,7 @@ for (const scenario of [
 				throw new Error("No native cut-off session");
 			const limited = latest()?.limitRecovery;
 			const historyBefore = await Effect.runPromise(
-				browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+				browser.rpc.LoadMoreHistory({ sessionId }),
 			);
 			// Even a known Limited account must be schedulable without a quota probe.
 			writeFileSync(join(configDir, "conduit-test-quota"), "limited");
@@ -1590,7 +1570,6 @@ for (const scenario of [
 			} else
 				await Effect.runPromise(
 					browser.rpc.ContinueSession({
-						projectSlug,
 						sessionId,
 						instanceId,
 						expectedInstanceId: instanceId,
@@ -1718,7 +1697,7 @@ for (const scenario of [
 				const resumeId = continuations()[0]?.resumeId;
 				if (resumeId != null) expect(resumeId).toBe(native.sessionId);
 				const history = await Effect.runPromise(
-					browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+					browser.rpc.LoadMoreHistory({ sessionId }),
 				);
 				// The hidden prompt adds no user message; it reopens the cut-off
 				// turn, so that turn is working again and has no end yet.
@@ -1895,19 +1874,17 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 		);
 		const observed: { sequence: number; session: SessionInfo }[] = [];
 		const subscription = Effect.runFork(
-			Stream.runForEach(
-				browser.rpc.SubscribeShell({ projectSlug }),
-				(envelope) =>
-					Effect.sync(() => {
-						if (envelope._tag === "snapshot")
-							for (const session of envelope.rows)
-								observed.push({ sequence: envelope.sequence, session });
-						if (envelope._tag === "upsert")
-							observed.push({
-								sequence: envelope.sequence,
-								session: envelope.item,
-							});
-					}),
+			Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+				Effect.sync(() => {
+					if (envelope._tag === "snapshot")
+						for (const session of envelope.rows)
+							observed.push({ sequence: envelope.sequence, session });
+					if (envelope._tag === "upsert")
+						observed.push({
+							sequence: envelope.sequence,
+							session: envelope.item,
+						});
+				}),
 			),
 		);
 		const latest = () =>
@@ -1927,8 +1904,7 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 			writeFileSync(join(configDir, "conduit-test-quota"), "available");
 			const noReset = scenario === "no-reset";
 			await Effect.runPromise(
-				browser.rpc.input.submit({
-					projectSlug,
+				browser.rpc["input.submit"]({
 					sessionId,
 					text: noReset
 						? "usage-limit-account-1-no-reset: finish the original request"
@@ -2533,26 +2509,25 @@ for (const behavior of [
 		);
 		const observed: { sequence: number; session: SessionInfo }[] = [];
 		const subscription = Effect.runFork(
-			Stream.runForEach(
-				browser.rpc.SubscribeShell({ projectSlug }),
-				(envelope) =>
-					Effect.sync(() => {
-						if (envelope._tag === "snapshot")
-							for (const session of envelope.rows)
-								observed.push({ sequence: envelope.sequence, session });
-						if (envelope._tag === "upsert")
-							observed.push({
-								sequence: envelope.sequence,
-								session: envelope.item,
-							});
-					}),
+			Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+				Effect.sync(() => {
+					if (envelope._tag === "snapshot")
+						for (const session of envelope.rows)
+							observed.push({ sequence: envelope.sequence, session });
+					if (envelope._tag === "upsert")
+						observed.push({
+							sequence: envelope.sequence,
+							session: envelope.item,
+						});
+				}),
 			),
 		);
 		const latest = () =>
 			observed.filter((row) => row.session.id === sessionId).at(-1)?.session;
 		const snapshot = () =>
 			Effect.runPromise(
-				browser.rpc.SubscribeShell({ projectSlug }).pipe(
+				browser.rpc.SubscribeShell({}).pipe(
+					Stream.filter((frame) => frame._tag !== "projects"),
 					Stream.take(1),
 					Stream.runCollect,
 					Effect.map((envelopes) => Array.from(envelopes)[0]),
@@ -2560,8 +2535,7 @@ for (const behavior of [
 			);
 		const send = (text: string, commandId: string) =>
 			Effect.runPromise(
-				browser.rpc.input.submit({
-					projectSlug,
+				browser.rpc["input.submit"]({
 					sessionId,
 					text,
 					inputId: commandId,
@@ -2582,7 +2556,6 @@ for (const behavior of [
 			await expect.poll(() => latest()?.status).toBe("idle");
 			await Effect.runPromise(
 				browser.rpc.RenameSession({
-					projectSlug,
 					sessionId,
 					title: "Keep my session title",
 				}),
@@ -2615,53 +2588,48 @@ for (const behavior of [
 				await expect(strip).toBeVisible();
 				// Clicking in the session view marks it read (ADR-0004), so start
 				// read: the refused switch must leave nothing else changed.
-				await Effect.runPromise(
-					browser.rpc.MarkSessionRead({ projectSlug, sessionId }),
-				);
+				await Effect.runPromise(browser.rpc.MarkSessionRead({ sessionId }));
 				await expect.poll(() => latest()?.attention).toBe("idle");
 			}
 			const before = await snapshot();
 			const historyBefore = await Effect.runPromise(
-				browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+				browser.rpc.LoadMoreHistory({ sessionId }),
 			);
 			expect(
-				await Effect.runPromise(
-					browser.rpc.GetAgents({ projectSlug, sessionId }),
-				),
+				await Effect.runPromise(browser.rpc.GetAgents({ sessionId })),
 			).toMatchObject({ instanceId: source.id });
 			const callsBefore = harness.claudeOptions().length;
 			const preview = await Effect.runPromise(
 				browser.rpc
 					.PreviewContinuation({
-						projectSlug,
 						sessionId,
 						instanceId: target.id,
 						originId: browser.originId,
 					})
-					.pipe(Effect.either),
+					.pipe(Effect.result),
 			);
 			evidence["preview"] = preview;
 			expect(await snapshot()).toEqual(before);
 			expect(harness.claudeOptions()).toHaveLength(callsBefore);
 			if (behavior === "too-large") {
 				expect(preview).toMatchObject({
-					_tag: "Left",
-					left: { _tag: "HandoffTooLarge", message: expect.any(String) },
+					_tag: "Failure",
+					failure: { _tag: "HandoffTooLarge", message: expect.any(String) },
 				});
 			} else {
-				expect(preview._tag).toBe("Right");
-				if (preview._tag !== "Right") throw new Error("Preview failed");
-				expect(preview.right).toMatchObject({
+				expect(preview._tag).toBe("Success");
+				if (preview._tag !== "Success") throw new Error("Preview failed");
+				expect(preview.success).toMatchObject({
 					included: expect.any(Number),
 					omitted: expect.any(Number),
 					firstMessageIncluded: true,
 					tokens: expect.any(Number),
 				});
-				expect(preview.right.included).toBeGreaterThanOrEqual(2);
-				expect(preview.right.included + preview.right.omitted).toBe(
+				expect(preview.success.included).toBeGreaterThanOrEqual(2);
+				expect(preview.success.included + preview.success.omitted).toBe(
 					historyBefore.messages.length - (hasCutOff ? 1 : 0),
 				);
-				expect(preview.right.tokens).toBeGreaterThan(0);
+				expect(preview.success.tokens).toBeGreaterThan(0);
 			}
 			writeFileSync(
 				join(target.configDir, "conduit-test-quota"),
@@ -2707,16 +2675,15 @@ for (const behavior of [
 				Effect.runPromise(
 					browser.rpc
 						.ContinueSession({
-							projectSlug,
 							sessionId,
 							instanceId: target.id,
 							expectedInstanceId: source.id,
 							originId: browser.originId,
 						})
-						.pipe(Effect.either),
+						.pipe(Effect.result),
 				);
 			const switchFromStrip = async () => {
-				if (preview._tag !== "Right") throw new Error("Preview failed");
+				if (preview._tag !== "Success") throw new Error("Preview failed");
 				await page.getByTestId("usage-limit-switch-account").click();
 				const row = page.locator(
 					`[data-testid="account-switch-option"][data-account="${target.id}"]`,
@@ -2738,14 +2705,14 @@ for (const behavior of [
 				);
 				// The count the dialog shows is the preview's, the handoff's own budget.
 				await expect(page.getByTestId("handoff-message-count")).toHaveText(
-					handoffMessagesLine(preview.right, mobile),
+					handoffMessagesLine(preview.success, mobile),
 				);
 				await page.screenshot({ path: join(artifacts, "02-confirm.png") });
 				await page.getByTestId("handoff-confirm").click();
 				await expect(dialog).toHaveCount(0);
 				if (behavior !== "unavailable") {
 					await expect(strip).toHaveCount(0);
-					return { _tag: "Right" } as const;
+					return { _tag: "Success" } as const;
 				}
 				const toast = page.locator('.toast-card[data-variant="error"]');
 				await expect(toast).toContainText("Couldn't switch to Account 2");
@@ -2753,8 +2720,8 @@ for (const behavior of [
 				await page.screenshot({ path: join(artifacts, "03-refused.png") });
 				// The typed refusal behind the toast; asking again changes nothing either.
 				const refused = await continueSession();
-				if (refused._tag === "Left")
-					await expect(toast).toContainText(refused.left.message);
+				if (refused._tag === "Failure")
+					await expect(toast).toContainText(refused.failure.message);
 				return refused;
 			};
 			const switching = viaStrip ? switchFromStrip() : continueSession();
@@ -2785,8 +2752,8 @@ for (const behavior of [
 			evidence["result"] = result;
 			if (["unavailable", "limited", "too-large"].includes(behavior)) {
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: {
+					_tag: "Failure",
+					failure: {
 						_tag:
 							behavior === "too-large"
 								? "HandoffTooLarge"
@@ -2796,18 +2763,14 @@ for (const behavior of [
 				});
 				expect(await snapshot()).toEqual(before);
 				expect(
-					await Effect.runPromise(
-						browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
-					),
+					await Effect.runPromise(browser.rpc.LoadMoreHistory({ sessionId })),
 				).toEqual(historyBefore);
 				expect(harness.claudeOptions()).toHaveLength(callsBefore);
 				return;
 			}
-			expect(result._tag).toBe("Right");
+			expect(result._tag).toBe("Success");
 			expect(
-				await Effect.runPromise(
-					browser.rpc.GetAgents({ projectSlug, sessionId }),
-				),
+				await Effect.runPromise(browser.rpc.GetAgents({ sessionId })),
 			).toMatchObject({ instanceId: target.id });
 			await expect.poll(() => latest()?.resumes?.length).toBe(1);
 			const resume = latest()?.resumes?.[0];
@@ -2825,7 +2788,6 @@ for (const behavior of [
 			const receipt = () =>
 				Effect.runPromise(
 					browser.rpc.GetContinuationHandoff({
-						projectSlug,
 						sessionId,
 						instanceId: target.id,
 						at: resume.at,
@@ -2897,23 +2859,21 @@ for (const behavior of [
 					throw new Error("No native parent query");
 				const fork = await Effect.runPromise(
 					browser.rpc.ForkSession({
-						projectSlug,
 						sessionId,
 						messageId: point.id,
 						originId: browser.originId,
 					}),
 				);
-				expect(fork.parentId).toBe(sessionId);
+				expect(fork.forkedFrom).toBe(sessionId);
 				expect(fork.forkMessageId).toBe(point.id);
 				const expectedAccount = behavior === "fork-before" ? source : target;
 				expect(
 					await Effect.runPromise(
-						browser.rpc.GetAgents({ projectSlug, sessionId: fork.sessionId }),
+						browser.rpc.GetAgents({ sessionId: fork.sessionId }),
 					),
 				).toMatchObject({ instanceId: expectedAccount.id });
 				const forkHistory = await Effect.runPromise(
 					browser.rpc.LoadMoreHistory({
-						projectSlug,
 						sessionId: fork.sessionId,
 					}),
 				);
@@ -2946,8 +2906,7 @@ for (const behavior of [
 					]);
 				const forkPrompt = `Continue the ${behavior} fork.`;
 				await Effect.runPromise(
-					browser.rpc.input.submit({
-						projectSlug,
+					browser.rpc["input.submit"]({
 						sessionId: fork.sessionId,
 						text: forkPrompt,
 						inputId: `continue-${behavior}`,
@@ -3049,9 +3008,7 @@ for (const behavior of [
 				}
 				if (behavior === "fork-uncovered")
 					await verifyFork(
-						await Effect.runPromise(
-							browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
-						),
+						await Effect.runPromise(browser.rpc.LoadMoreHistory({ sessionId })),
 					);
 				writeFileSync(join(harness.root, "release-switch-turn"), "release");
 				await expect
@@ -3068,10 +3025,10 @@ for (const behavior of [
 				if (
 					behavior !== "die-once" &&
 					behavior !== "fork-uncovered" &&
-					preview._tag === "Right"
+					preview._tag === "Success"
 				) {
 					const delivered = (await receipt()).handoff;
-					expect(delivered).toMatchObject(preview.right);
+					expect(delivered).toMatchObject(preview.success);
 				}
 				await expect.poll(() => latest()?.limitRecovery).toBeNull();
 				await expect.poll(() => latest()?.status).toBe("idle");
@@ -3101,7 +3058,6 @@ for (const behavior of [
 					expect(
 						await Effect.runPromise(
 							reconnected.rpc.GetContinuationHandoff({
-								projectSlug,
 								sessionId,
 								instanceId: target.id,
 								at: resume.at,
@@ -3117,7 +3073,7 @@ for (const behavior of [
 				title: "Keep my session title",
 			});
 			const historyAfter = await Effect.runPromise(
-				browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+				browser.rpc.LoadMoreHistory({ sessionId }),
 			);
 			// A continuation updates turn timing while preserving the user message.
 			for (const message of historyBefore.messages.filter(
@@ -3208,7 +3164,7 @@ test("story 16: composer account cards switch the session, not the project", asy
 	);
 	const observed: SessionInfo[] = [];
 	const subscription = Effect.runFork(
-		Stream.runForEach(browser.rpc.SubscribeShell({ projectSlug }), (envelope) =>
+		Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
 			Effect.sync(() => {
 				if (envelope._tag === "snapshot") observed.push(...envelope.rows);
 				if (envelope._tag === "upsert") observed.push(envelope.item);
@@ -3218,8 +3174,7 @@ test("story 16: composer account cards switch the session, not the project", asy
 	const latest = () => observed.filter((row) => row.id === sessionId).at(-1);
 	const send = (text: string, commandId: string) =>
 		Effect.runPromise(
-			browser.rpc.input.submit({
-				projectSlug,
+			browser.rpc["input.submit"]({
 				sessionId,
 				text,
 				inputId: commandId,
@@ -3269,9 +3224,7 @@ test("story 16: composer account cards switch the session, not the project", asy
 		await expect(dialog).toHaveCount(0);
 
 		expect(
-			await Effect.runPromise(
-				browser.rpc.GetAgents({ projectSlug, sessionId }),
-			),
+			await Effect.runPromise(browser.rpc.GetAgents({ sessionId })),
 		).toMatchObject({ instanceId: target.id });
 		await expect.poll(() => latest()?.resumes?.length).toBe(1);
 		expect(latest()?.resumes?.[0]).toMatchObject({

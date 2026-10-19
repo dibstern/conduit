@@ -209,7 +209,7 @@ describe("handleSSEEventEffect", () => {
 				if (expected === "clear") expect(after).toBeUndefined();
 				else if (expected === "reset") expect(after).not.toBe(before);
 				else expect(after).toBe(before);
-			}).pipe(Effect.provide(services.layer)),
+			}).pipe(Effect.provide(services.layer, { local: true })),
 		);
 	});
 

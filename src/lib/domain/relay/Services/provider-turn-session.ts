@@ -1,5 +1,9 @@
 import { Effect } from "effect";
 import type { Account } from "../../../contracts/account.js";
+import {
+	PROVIDER_DRIVERS,
+	type ProviderDriverTraits,
+} from "../../../contracts/provider-instance.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { createEventId } from "../../../persistence/events.js";
@@ -10,10 +14,7 @@ import {
 	type PendingQuestion,
 } from "./pending-interaction-service.js";
 import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
-import {
-	CLAUDE_PROVIDER_ID,
-	isProviderTurnInterruptProvider,
-} from "./provider-turn-dispatch.js";
+import { CLAUDE_PROVIDER_ID } from "./provider-turn-dispatch.js";
 import type {
 	ProviderTurnServiceInterruptInput,
 	ProviderTurnServicePrepareInput,
@@ -73,7 +74,16 @@ export const completeRecoveredQuestion = (
 			...completedEvent,
 			eventId: createEventId(),
 			type: "question.resolved" as const,
-			data: { id: question.requestId, answers },
+			providerRefs: {
+				...completedEvent.providerRefs,
+				...(question.providerProcessId
+					? { providerProcessId: question.providerProcessId }
+					: {}),
+				...(question.providerRequestId
+					? { providerRequestId: question.providerRequestId }
+					: {}),
+			},
+			data: { id: question.providerRequestId ?? question.requestId, answers },
 		};
 		if (question.messageId) {
 			// A fresh mapper has not seen the stored tool start. Seed its identity
@@ -135,17 +145,17 @@ const materializeOpenCodeSession = (
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const readQuery = yield* ReadQueryEffectTag;
 
-		const rowResult = yield* Effect.either(
+		const rowResult = yield* Effect.result(
 			readQuery.getSession(input.sessionId),
 		);
-		if (rowResult._tag === "Left") {
+		if (rowResult._tag === "Failure") {
 			log.warn(
-				`Could not inspect session provider before OpenCode dispatch for ${input.sessionId}: ${formatErrorDetail(rowResult.left)}`,
+				`Could not inspect session provider before OpenCode dispatch for ${input.sessionId}: ${formatErrorDetail(rowResult.failure)}`,
 			);
 			return input.sessionId;
 		}
 
-		const row = rowResult.right;
+		const row = rowResult.success;
 		if (!row || row.provider === providerId) {
 			return input.sessionId;
 		}
@@ -153,7 +163,8 @@ const materializeOpenCodeSession = (
 			_tag: "Id",
 			id: row.provider,
 		});
-		if (source.driver === "opencode") return input.sessionId;
+		if (PROVIDER_DRIVERS[source.driver].runsOpenCodeServer)
+			return input.sessionId;
 		const session = yield* sessionManagerService.createSession(row.title, {
 			account,
 			sourceSessionId: row.id,
@@ -179,29 +190,43 @@ export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 			_tag: "Id",
 			id: providerId,
 		});
-		if (account.driver === "claude") {
-			if (input.delivery !== "steer")
-				yield* resolvePendingClaudeQuestions(input);
-			return input.sessionId;
-		}
-		return yield* materializeOpenCodeSession(
-			input,
-			account,
-			providerId ?? account.id,
-		).pipe(Effect.provideService(OrchestrationEngineTag, orchestrationEngine));
+		const traits: ProviderDriverTraits = PROVIDER_DRIVERS[account.driver];
+		if (
+			traits.readOnlySubagents &&
+			session?.parent_id &&
+			session.side_thread !== 1 &&
+			!session.fork_point_event &&
+			session.fork_point_message_id == null &&
+			session.fork_point_timestamp == null
+		)
+			return yield* Effect.fail(new Error("Subagent sessions are read-only."));
+		if (
+			traits.interactionSink === "permission-asking" &&
+			input.delivery !== "steer"
+		)
+			yield* resolvePendingClaudeQuestions(input);
+		if (traits.runsOpenCodeServer)
+			return yield* materializeOpenCodeSession(
+				input,
+				account,
+				providerId ?? account.id,
+			).pipe(
+				Effect.provideService(OrchestrationEngineTag, orchestrationEngine),
+			);
+		return input.sessionId;
 	});
 
 const interruptLegacyTurn = (input: ProviderTurnServiceInterruptInput) =>
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
 		const log = yield* LoggerTag;
-		const abortResult = yield* Effect.either(
+		const abortResult = yield* Effect.result(
 			Effect.tryPromise(() => client.session.abort(input.sessionId)),
 		);
-		if (abortResult._tag === "Left") {
+		if (abortResult._tag === "Failure") {
 			log.warn(
 				`client=${input.clientId} session=${input.sessionId} Abort failed:`,
-				formatErrorDetail(abortResult.left),
+				formatErrorDetail(abortResult.failure),
 			);
 		}
 	});
@@ -224,23 +249,24 @@ export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 			_tag: "Id",
 			id: providerId,
 		});
-		if (!isProviderTurnInterruptProvider(account.driver)) {
+		if (PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
 			yield* interruptLegacyTurn(input);
 			return;
 		}
+		if (!PROVIDER_DRIVERS[account.driver].interruptViaEngine) return;
 
-		const interruptResult = yield* Effect.either(
+		const interruptResult = yield* Effect.result(
 			engine.dispatchEffect({
 				type: "interrupt_turn",
 				commandId: input.commandId,
 				sessionId: input.sessionId,
 			}),
 		);
-		if (interruptResult._tag === "Left") {
+		if (interruptResult._tag === "Failure") {
 			log.warn(
 				`client=${input.clientId} session=${input.sessionId} engine interrupt_turn failed:`,
-				formatErrorDetail(interruptResult.left),
+				formatErrorDetail(interruptResult.failure),
 			);
-			yield* Effect.fail(interruptResult.left);
+			yield* Effect.fail(interruptResult.failure);
 		}
 	});

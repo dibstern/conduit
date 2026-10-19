@@ -10,10 +10,16 @@
  * - File edits and a primary-folder change must apply on the next resolve.
  * - A global edit must reach another project and a subsequent draft resolve.
  * - Unknown project-file keys must be ignored.
+ * - Global Last must fall back to Local until a composer session records a mode.
+ * - Composer creates must remember Local and New worktree even before Last is set.
+ * - Creates without a draft or with an existing worktree must not change Last.
+ * - The remembered mode must survive restart and yield to a project override.
+ * - A settings write failure must not fail an otherwise successful create.
  * Browser-only failure cases are covered by session-mode-default.spec.ts:
  * no Git folder/provider capability, a user's earlier choice, project switches,
  * and a global change applying to the next draft.
  */
+import { execFileSync } from "node:child_process";
 import {
 	mkdirSync,
 	readFileSync,
@@ -22,15 +28,12 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import type { SessionMode } from "../../../src/lib/contracts/project-file.js";
-import {
-	GetProjects,
-	ResolveSessionMode,
-	type ResolveSessionModeResponse,
-	SaveProject,
-	SetDefaultSessionMode,
-} from "../../../src/lib/contracts/ws-rpc.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type {
+	DefaultSessionMode,
+	SessionMode,
+} from "../../../src/lib/contracts/project-file.js";
+import type { ResolveSessionModeResponse } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -39,35 +42,34 @@ describe("Session-mode defaults through the built daemon", () => {
 	let scenario = "setup";
 	let cases: Array<{ name: string } & ResolveSessionModeResponse> = [];
 
-	async function start(name: string) {
+	async function start(name: string, logLevel?: "warn") {
 		scenario = name;
 		cases = [];
-		harness = ProcessHarness.create();
+		harness = ProcessHarness.create(logLevel ? { logLevel } : {});
 		const fixture = harness;
 		await fixture.restart({ startupTimeoutMs: 120_000 });
 		const socket = join(fixture.configDir, "relay.sock");
 		const resolve = async (name: string, projectSlug = "process-test") => {
-			const result = await sendRpcRequest(
-				socket,
-				new ResolveSessionMode({ projectSlug }),
-			);
+			const result = await sendRpcRequest(socket, {
+				_tag: "ResolveSessionMode",
+				projectSlug,
+			});
 			cases.push({ name, ...result });
 			return result;
 		};
 		const save = (sessionMode?: SessionMode | null) =>
-			sendRpcRequest(
-				socket,
-				new SaveProject({
-					slug: "process-test",
-					folders: [fixture.projectDir],
-					...(sessionMode !== undefined && { sessionMode }),
-				}),
-			);
-		const global = (mode: SessionMode) =>
-			sendRpcRequest(
-				socket,
-				new SetDefaultSessionMode({ projectSlug: "process-test", mode }),
-			);
+			sendRpcRequest(socket, {
+				_tag: "SaveProject",
+				slug: "process-test",
+				folders: [fixture.projectDir],
+				...(sessionMode !== undefined && { sessionMode }),
+			});
+		const global = (mode: DefaultSessionMode) =>
+			sendRpcRequest(socket, {
+				_tag: "SetDefaultSessionMode",
+				projectSlug: "process-test",
+				mode,
+			});
 		return { fixture, socket, resolve, save, global };
 	}
 
@@ -120,10 +122,11 @@ describe("Session-mode defaults through the built daemon", () => {
 		});
 		const second = join(fixture.root, "second");
 		mkdirSync(second);
-		const added = await sendRpcRequest(
-			socket,
-			new SaveProject({ title: "Second", folders: [second] }),
-		);
+		const added = await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			title: "Second",
+			folders: [second],
+		});
 		expect(await resolve("another-project", added.savedSlug)).toEqual({
 			mode: "worktree",
 			source: "global",
@@ -140,6 +143,115 @@ describe("Session-mode defaults through the built daemon", () => {
 			source: "global",
 		});
 	});
+
+	it("remembers only composer workspace choices for Last across restart and project overrides", async () => {
+		const { fixture, socket, resolve, save, global } = await start(
+			"last",
+			"warn",
+		);
+		const gitEnv = { ...process.env };
+		for (const key of [
+			"GIT_DIR",
+			"GIT_INDEX_FILE",
+			"GIT_WORK_TREE",
+			"GIT_COMMON_DIR",
+		])
+			delete gitEnv[key];
+		const git = (...args: string[]) =>
+			execFileSync("git", ["-C", fixture.projectDir, ...args], {
+				env: gitEnv,
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+		git("init", "-b", "main");
+		git(
+			"-c",
+			"user.name=Workspace test",
+			"-c",
+			"user.email=workspace@example.test",
+			"-c",
+			"core.hooksPath=/dev/null",
+			"commit",
+			"--allow-empty",
+			"-m",
+			"Initial commit",
+		);
+		const create = (options: {
+			draftId?: string;
+			newWorktree?: boolean;
+			worktreePath?: string;
+		}) =>
+			sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				permissionMode: "ask",
+				model: { providerId: "claude", modelId: "sonnet" },
+				projectSlug: "process-test",
+				originId: "session-mode-defaults-test",
+				providerId: "claude",
+				...options,
+			});
+		expect(await global("last")).toEqual({ mode: "last" });
+		expect(await resolve("last-never-recorded")).toEqual({
+			mode: "local",
+			source: "global",
+		});
+		await global("local");
+		await create({ draftId: "draft-worktree", newWorktree: true });
+		await global("last");
+		expect(await resolve("last-composer-worktree")).toEqual({
+			mode: "worktree",
+			source: "global",
+		});
+		await fixture.shutdown();
+		await fixture.restart({ startupTimeoutMs: 120_000 });
+		expect(await resolve("last-after-restart")).toEqual({
+			mode: "worktree",
+			source: "global",
+		});
+		await save("local");
+		expect(await resolve("last-project-override")).toEqual({
+			mode: "local",
+			source: "project",
+		});
+		await save(null);
+		const existing = join(fixture.root, "existing-worktree");
+		git("worktree", "add", "-b", "feature/existing", existing);
+		await create({ draftId: "draft-existing", worktreePath: existing });
+		expect(await resolve("last-existing-worktree")).toEqual({
+			mode: "worktree",
+			source: "global",
+		});
+		await create({ draftId: "draft-local" });
+		expect(await resolve("last-composer-local")).toEqual({
+			mode: "local",
+			source: "global",
+		});
+		await create({ newWorktree: true });
+		expect(await resolve("last-without-draft")).toEqual({
+			mode: "local",
+			source: "global",
+		});
+		const blockedWrite = join(fixture.configDir, ".settings.jsonc.tmp");
+		mkdirSync(blockedWrite);
+		try {
+			const created = await create({
+				draftId: "draft-write-failure",
+				newWorktree: true,
+			});
+			expect(created.sessionId).toBeTruthy();
+			await vi.waitFor(() =>
+				expect(fixture.logTail).toContain(
+					"Failed to persist last session mode",
+				),
+			);
+			expect(await resolve("last-after-write-failure")).toEqual({
+				mode: "local",
+				source: "global",
+			});
+		} finally {
+			rmSync(blockedWrite, { recursive: true });
+		}
+	}, 60_000);
 
 	it("uses the checked-in file over global and reads edits afresh", async () => {
 		const { fixture, resolve, global } = await start("file");
@@ -220,7 +332,7 @@ describe("Session-mode defaults through the built daemon", () => {
 		});
 		await fixture.shutdown();
 		await fixture.restart({ startupTimeoutMs: 120_000 });
-		const projects = (await sendRpcRequest(socket, new GetProjects({})))
+		const projects = (await sendRpcRequest(socket, { _tag: "GetProjects" }))
 			.projects;
 		expect(
 			projects.find(({ slug }) => slug === "process-test")?.sessionMode,
@@ -260,24 +372,20 @@ describe("Session-mode defaults through the built daemon", () => {
 			'{"sessionMode":"worktree"}',
 		);
 		writeFileSync(join(second, "conduit.json"), '{"sessionMode":"local"}');
-		await sendRpcRequest(
-			socket,
-			new SaveProject({
-				slug: "process-test",
-				folders: [fixture.projectDir, second],
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [fixture.projectDir, second],
+		});
 		expect(await resolve("first-primary")).toEqual({
 			mode: "worktree",
 			source: "file",
 		});
-		await sendRpcRequest(
-			socket,
-			new SaveProject({
-				slug: "process-test",
-				folders: [second, fixture.projectDir],
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [second, fixture.projectDir],
+		});
 		expect(await resolve("second-primary")).toEqual({
 			mode: "local",
 			source: "file",

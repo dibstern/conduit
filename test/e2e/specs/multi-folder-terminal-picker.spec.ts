@@ -51,17 +51,21 @@ for (const scenario of [
 				{
 					slug: projectSlug,
 					title: "Terminal folders project",
-					folders: scenario.roots.map(({ root }) => root),
+					folders: [
+						primary,
+						...scenario.roots.slice(1).map(({ root }) => root),
+					] as const,
 				},
 			];
 			const session = {
+				accountId: null,
 				id: "terminal-folders-session",
 				title: "Terminal folders session",
-				status: "idle",
+				status: "idle" as const,
 				projectSlug,
 				workspace: {
-					cause: "user",
-					origin: "existing",
+					cause: "user" as const,
+					origin: "existing" as const,
 					worktrees: {
 						[primary]: "/workspace/web-worktree",
 						...(secondary ? { [secondary]: "/workspace/api-worktree" } : {}),
@@ -71,13 +75,11 @@ for (const scenario of [
 			let terminalCount = 0;
 			let rpc: RpcMockControl;
 			rpc = await mockWsRpc(page, {
-				handlers: {
-					GetProjects: () => ({ projects, current: projectSlug }),
-					GetAgents: () => ({
+				stubs: {
+					GetFileTree: () => ({
 						projectSlug,
-						agents: [],
-						providerScope: { id: "claude", name: "Claude" },
-						instanceId: "claude",
+						entries: [],
+						...(secondary ? { roots: scenario.roots } : {}),
 					}),
 					ListDaemonSessions: () => ({
 						sessions: [session],
@@ -85,11 +87,19 @@ for (const scenario of [
 						hasMore: false,
 						nextCursor: null,
 					}),
-					GetFileTree: () => ({
-						projectSlug,
-						entries: [],
-						...(secondary ? { roots: scenario.roots } : {}),
+					GetModels: (input) => ({
+						defaultOpenCodeInstanceId: "opencode",
+						projectSlug:
+							"projectSlug" in input ? input.projectSlug : projectSlug,
+						providers: [],
 					}),
+					GetAgents: () => ({
+						projectSlug,
+						agents: [],
+						providerScope: { id: "claude", name: "Claude" },
+						instanceId: "claude",
+					}),
+					GetProjects: () => ({ projects, current: projectSlug }),
 					CreatePty: ({ root }) => {
 						const id = `pty-${++terminalCount}`;
 						rpc.sendChunk("SubscribePtys", [

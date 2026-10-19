@@ -7,8 +7,9 @@ import type {
 } from "../../../contracts/ws-rpc.js";
 import type { DaemonLifecycleContext } from "../../../daemon/daemon-lifecycle.js";
 import type { DaemonStatus } from "../../../daemon/daemon-types.js";
+import { PersistenceStore } from "../../../persistence/effect/live.js";
 import type { FolderIssue } from "../../../project-folders.js";
-import type { ClaudeRuntimeError } from "../../../provider/event-sink-errors.js";
+import type { RunnerProcessError } from "../../../provider/runner/process-session-runner.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
 import { KeepAwakeTag } from "../Layers/keep-awake-layer.js";
 import { AccountDirectory } from "./account-directory.js";
@@ -17,6 +18,7 @@ import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import { DaemonLifecycleContextTag } from "./daemon-lifecycle-context.js";
 import { DaemonEventBusTag } from "./daemon-pubsub.js";
 import { DaemonStateTag } from "./daemon-state.js";
+import { DaemonStoreAvailability } from "./daemon-store-availability.js";
 import {
 	getInstances as getEffectInstances,
 	InstanceManagerStateTag,
@@ -44,21 +46,21 @@ export interface EffectDaemonHandle {
 		| ProjectSaveRejected
 		| WsRpcError
 		| ProjectNotFound
-		| ClaudeRuntimeError
+		| RunnerProcessError
 		| import("./project-registry-service.js").ProjectAlreadyExists
 	>;
 	readonly removeProject: (
 		slug: string,
-	) => Effect.Effect<void, ProjectNotFound | ClaudeRuntimeError | WsRpcError>;
+	) => Effect.Effect<void, ProjectNotFound | RunnerProcessError | WsRpcError>;
 	readonly getStatus: () => Effect.Effect<DaemonStatus>;
 	readonly getProjects: () => Effect.Effect<ReadonlyArray<StoredProject>>;
 	readonly getInstances: () => Effect.Effect<ReadonlyArray<OpenCodeInstance>>;
 }
 
-export class DaemonHandleTag extends Context.Tag("DaemonHandle")<
+export class DaemonHandleTag extends Context.Service<
 	DaemonHandleTag,
 	EffectDaemonHandle
->() {}
+>()("DaemonHandle") {}
 
 const sortedStatusProjects = (
 	projects: DaemonStatus["projects"],
@@ -87,6 +89,7 @@ export const DaemonHandleLive: Layer.Layer<
 	| AccountDirectory
 	| DaemonStateTag
 	| KeepAwakeTag
+	| PersistenceStore
 > = Layer.effect(
 	DaemonHandleTag,
 	Effect.gen(function* () {
@@ -101,6 +104,8 @@ export const DaemonHandleLive: Layer.Layer<
 		const accounts = yield* AccountDirectory;
 		const daemonState = yield* DaemonStateTag;
 		const keepAwake = yield* KeepAwakeTag;
+		const store = yield* PersistenceStore;
+		const unavailable = yield* DaemonStoreAvailability;
 
 		const port = Ref.get(configRef).pipe(Effect.map((config) => config.port));
 		const onboardingPort = Effect.sync(() =>
@@ -113,6 +118,8 @@ export const DaemonHandleLive: Layer.Layer<
 		const saveProject = (input: SaveProjectInput) =>
 			Effect.gen(function* () {
 				const result = yield* saveProjectToRegistry(input).pipe(
+					Effect.provideService(PersistenceStore, store),
+					Effect.provideService(DaemonStoreAvailability, unavailable),
 					Effect.provideService(ProjectRegistryTag, projectRef),
 					Effect.provideService(DaemonEventBusTag, bus),
 					Effect.provideService(ConfigPersistenceTag, persistence),
@@ -130,6 +137,8 @@ export const DaemonHandleLive: Layer.Layer<
 					Effect.provideService(ProjectRegistryTag, projectRef),
 				);
 				yield* removeProjectFromEffectRegistry(slug).pipe(
+					Effect.provideService(PersistenceStore, store),
+					Effect.provideService(DaemonStoreAvailability, unavailable),
 					Effect.provideService(ProjectRegistryTag, projectRef),
 					Effect.provideService(ProjectSaveLockTag, projectSaveLock),
 					Effect.provideService(DaemonEventBusTag, bus),

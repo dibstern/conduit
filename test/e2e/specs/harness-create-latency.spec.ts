@@ -11,6 +11,10 @@ import {
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 
+// Failures distinguish sidebar latency, insufficient streaming load, shell
+// replacement reads, missing slow-RPC logs, and trace filtering regressions.
+// Successful spans below the floor must belong to the debugged session through
+// their own sessionId or an ancestor in the file; errors are always retained.
 const parameter = (name: string, fallback: number): number => {
 	const value = Number(process.env[name] ?? fallback);
 	if (!Number.isSafeInteger(value) || value <= 0)
@@ -26,7 +30,7 @@ const parameters = {
 	streams: 3,
 	streamIntervalMs: 100,
 	slowRpcMs: 1,
-	traceSqlMinMs: 5,
+	traceMinMs: 5,
 };
 // Calibrated 2026-10-16: worst p90 of three runs (30.7 ms) x 1.5, rounded up to 25 ms.
 const budgetMs = parameter("CREATE_LATENCY_P90_BUDGET_MS", 50);
@@ -132,6 +136,67 @@ const records = (file: string): Record<string, unknown>[] =>
 				.map((line) => JSON.parse(line) as Record<string, unknown>)
 		: [];
 
+const traceSummary = (file: string, debuggedSessionId: string | null) => {
+	const spans = records(file).filter(
+		(record) => record["type"] === "effect-span",
+	);
+	const byId = new Map(
+		spans.map((span) => [`${span["traceId"]}:${span["spanId"]}`, span]),
+	);
+	const belongsToDebuggedSession = (span: Record<string, unknown>): boolean => {
+		if (debuggedSessionId === null) return false;
+		let current: Record<string, unknown> | undefined = span;
+		const seen = new Set<Record<string, unknown>>();
+		while (current !== undefined && !seen.has(current)) {
+			seen.add(current);
+			const attributes = current["attributes"];
+			if (
+				typeof attributes === "object" &&
+				attributes !== null &&
+				"sessionId" in attributes &&
+				attributes.sessionId === debuggedSessionId
+			)
+				return true;
+			current = byId.get(`${current["traceId"]}:${current["parentSpanId"]}`);
+		}
+		return false;
+	};
+	const shortSuccesses = spans.filter((span) => {
+		const exit = span["exit"];
+		return (
+			typeof exit === "object" &&
+			exit !== null &&
+			"_tag" in exit &&
+			exit._tag === "Success" &&
+			typeof span["durationMs"] === "number" &&
+			span["durationMs"] < parameters.traceMinMs
+		);
+	});
+	const debuggedShortSpans = shortSuccesses.filter(belongsToDebuggedSession);
+	const sqlSpans = spans.filter((span) => span["name"] === "sqlite");
+	return {
+		spans: spans.length,
+		debuggedSessionId,
+		subFloorSpansForDebuggedSession: debuggedShortSpans.length,
+		subFloorSpansForOtherSessions:
+			shortSuccesses.length - debuggedShortSpans.length,
+		createSessionSpans: spans.filter(
+			(span) => span["name"] === "RpcServer.CreateSession",
+		).length,
+		sqlSpans: sqlSpans.length,
+		shortSqlSpans: sqlSpans.filter(
+			(span) => Number(span["durationMs"]) < parameters.traceMinMs,
+		).length,
+		minimumSqlMs:
+			sqlSpans.length === 0
+				? null
+				: sqlSpans.reduce(
+						(minimum, span) => Math.min(minimum, Number(span["durationMs"])),
+						Number.POSITIVE_INFINITY,
+					),
+	};
+};
+
 interface Sample {
 	readonly index: number;
 	readonly submittedAt: number;
@@ -175,9 +240,22 @@ test("creates reach every sidebar under streaming write load", async ({
 	const shellReads: Record<string, number> = {};
 	let fixture: Awaited<ReturnType<typeof seedSessionLoadFixture>> | null = null;
 	let stopped = false;
+	let debuggedSessionId: string | null = null;
 	try {
+		// The fixture server can create the session before tracing is configured.
+		// Seeding appends to its store, so the existing restart preserves this ID
+		// and enables record-all before any streams or latency measurements start.
+		const setupDriver = await harness.connect(
+			undefined,
+			undefined,
+			undefined,
+			false,
+		);
+		debuggedSessionId = await setupDriver.createSession("Latency stream 0");
 		await harness.terminate();
-		fixture = await seedSessionLoadFixture(harness.projectStorePath());
+		fixture = await seedSessionLoadFixture(harness.daemonStorePath(), {
+			projectId: "process-test",
+		});
 		await harness.restart({
 			keepPort: true,
 			skipBrowserProbe: true,
@@ -188,7 +266,8 @@ test("creates reach every sidebar under streaming write load", async ({
 				CONDUIT_TRACE_ENABLED: "1",
 				CONDUIT_TRACE_FILE: traceFile,
 				CONDUIT_TRACE_MAX_BYTES: String(1_073_741_824),
-				CONDUIT_TRACE_SQL_MIN_MS: String(parameters.traceSqlMinMs),
+				CONDUIT_TRACE_MIN_MS: String(parameters.traceMinMs),
+				CONDUIT_TRACE_SESSION: debuggedSessionId,
 			},
 		});
 		const driver = await harness.connect(
@@ -200,12 +279,16 @@ test("creates reach every sidebar under streaming write load", async ({
 		await expect
 			.poll(() => harness.generations.at(-1)?.fakeSdkActive)
 			.toBe(true);
+		await driver.view(debuggedSessionId);
+		await driver.history(debuggedSessionId);
 		const streams: string[] = [];
 		for (let index = 0; index < parameters.streams; index++) {
-			const sessionId = await driver.createSession(`Latency stream ${index}`);
+			const sessionId =
+				index === 0
+					? debuggedSessionId
+					: await driver.createSession(`Latency stream ${index}`);
 			await Effect.runPromise(
-				driver.rpc.input.submit({
-					projectSlug: "process-test",
+				driver.rpc["input.submit"]({
 					sessionId,
 					originId: driver.originId,
 					inputId: randomUUID(),
@@ -229,7 +312,7 @@ test("creates reach every sidebar under streaming write load", async ({
 				page.locator(`[data-session-id="${HEAVY_SESSION_ID}"]`).first(),
 			).toBeVisible({ timeout: 30_000 });
 		}
-		const database = new DatabaseSync(harness.projectStorePath(), {
+		const database = new DatabaseSync(harness.daemonStorePath(), {
 			readOnly: true,
 		});
 		try {
@@ -340,12 +423,7 @@ test("creates reach every sidebar under streaming write load", async ({
 		const slowRecords = records(logFile).filter(
 			(record) => record["msg"] === "slow rpc",
 		);
-		const traceRecords = records(traceFile).filter(
-			(record) => record["type"] === "effect-span",
-		);
-		const sqlSpans = traceRecords.filter(
-			(record) => record["name"] === "sql.execute",
-		);
+		const trace = traceSummary(traceFile, debuggedSessionId);
 		expect.soft(fixture.sessions).toBeGreaterThanOrEqual(10_000);
 		expect.soft(samples).toHaveLength(parameters.creates);
 		expect
@@ -379,7 +457,7 @@ test("creates reach every sidebar under streaming write load", async ({
 			)
 			.toBeGreaterThan(0);
 		expect
-			.soft(traceRecords.length, "Local trace must contain completed spans")
+			.soft(trace.spans, "Local trace must contain completed spans")
 			.toBeGreaterThan(0);
 		expect
 			.soft(
@@ -398,14 +476,22 @@ test("creates reach every sidebar under streaming write load", async ({
 			.toBeGreaterThan(0);
 		expect
 			.soft(
-				sqlSpans.filter(
-					(record) =>
-						typeof record["durationMs"] !== "number" ||
-						record["durationMs"] < parameters.traceSqlMinMs,
-				).length,
-				"Local trace must omit sql.execute spans shorter than CONDUIT_TRACE_SQL_MIN_MS",
+				trace.subFloorSpansForOtherSessions,
+				"Successful spans below CONDUIT_TRACE_MIN_MS must belong to the debugged session or its descendants",
 			)
 			.toBe(0);
+		expect
+			.soft(
+				trace.subFloorSpansForDebuggedSession,
+				"CONDUIT_TRACE_SESSION must retain short successful spans for the debugged session",
+			)
+			.toBeGreaterThan(0);
+		expect
+			.soft(
+				trace.createSessionSpans,
+				"Local trace must retain a RpcServer.CreateSession span",
+			)
+			.toBeGreaterThan(0);
 	} finally {
 		const cleanupErrors: string[] = [];
 		if (!stopped) {
@@ -461,10 +547,6 @@ test("creates reach every sidebar under streaming write load", async ({
 				(record["method"] === "CreateSession" ||
 					record["method"] === "SubscribeShell"),
 		);
-		const traceRecords = records(traceFile);
-		const sqlSpans = traceRecords.filter(
-			(record) => record["name"] === "sql.execute",
-		);
 		const report = {
 			parameters,
 			budgetMs,
@@ -502,21 +584,7 @@ test("creates reach every sidebar under streaming write load", async ({
 				replacements: shellReads["replacement"] ?? 0,
 			},
 			slowRpc: slowRecords,
-			trace: {
-				spans: traceRecords.length,
-				sqlSpans: sqlSpans.length,
-				shortSqlSpans: sqlSpans.filter(
-					(record) => Number(record["durationMs"]) < parameters.traceSqlMinMs,
-				).length,
-				minimumSqlMs:
-					sqlSpans.length === 0
-						? null
-						: sqlSpans.reduce(
-								(minimum, record) =>
-									Math.min(minimum, Number(record["durationMs"])),
-								Number.POSITIVE_INFINITY,
-							),
-			},
+			trace: traceSummary(traceFile, debuggedSessionId),
 		};
 		mkdirSync("test-results", { recursive: true });
 		const output = join(
@@ -536,6 +604,285 @@ test("creates reach every sidebar under streaming write load", async ({
 			.toBe(0);
 		expect
 			.soft(diagnosticErrors, "Create phase diagnostics must be available")
+			.toEqual([]);
+		expect
+			.soft(cleanupErrors, "Isolated harness cleanup must succeed")
+			.toEqual([]);
+	}
+});
+
+test("overflow catches up every sidebar through create and delete bursts", async ({
+	browser,
+	harness,
+}, testInfo) => {
+	test.setTimeout(280_000);
+	const contexts: BrowserContext[] = [];
+	const devices: {
+		device: number;
+		converged: boolean;
+		ms: number | null;
+		error?: string;
+	}[] = Array.from({ length: 4 }, (_, device) => ({
+		device,
+		converged: false,
+		ms: null,
+	}));
+	const created: { id: string; title: string }[] = [];
+	let deleted: typeof created = [];
+	let surviving: typeof created = [];
+	const metricsFile = join(harness.root, "overflow-catch-up-metrics.json");
+	const shellReads = { overflow: 0, window: 0, replacement: 0 };
+	const diagnosticErrors: string[] = [];
+	const cleanupErrors: string[] = [];
+	let phaseStart: number | null = null;
+	let phaseEnd: number | null = null;
+	let metricsFlushedAt: number | null = null;
+	let backgroundTicks = 0;
+	try {
+		await harness.terminate();
+		await seedSessionLoadFixture(harness.daemonStorePath(), {
+			projectId: "process-test",
+		});
+		await harness.restart({
+			keepPort: true,
+			skipBrowserProbe: true,
+			metricsFile,
+			serviceEnvironment: { CONDUIT_TEST_ADVANCE_BUS_CAPACITY: "1" },
+		});
+		const driver = await harness.connect(
+			undefined,
+			undefined,
+			undefined,
+			false,
+		);
+		await expect
+			.poll(() => harness.generations.at(-1)?.fakeSdkActive)
+			.toBe(true);
+		const streams: string[] = [];
+		for (let index = 0; index < parameters.streams; index++) {
+			const sessionId = await driver.createSession(`Overflow stream ${index}`);
+			await Effect.runPromise(
+				driver.rpc["input.submit"]({
+					sessionId,
+					originId: driver.originId,
+					inputId: randomUUID(),
+					text: `load-stream-${index}`,
+					delivery: "queue",
+				}),
+			);
+			streams.push(sessionId);
+		}
+		const pages: Page[] = [];
+		for (const { device } of devices) {
+			const context = await browser.newContext({
+				viewport: { width: 1440, height: 900 },
+				isMobile: false,
+			});
+			contexts.push(context);
+			const page = await context.newPage();
+			pages[device] = page;
+			await new AppPage(page).goto(`${harness.baseUrl}/?p=process-test`);
+			await expect(
+				page.locator(`[data-session-id="${HEAVY_SESSION_ID}"]`).first(),
+			).toBeVisible({ timeout: 30_000 });
+		}
+		const database = new DatabaseSync(harness.daemonStorePath(), {
+			readOnly: true,
+		});
+		try {
+			const tickQuery = database.prepare(`
+				SELECT coalesce(sum((length(json_extract(data, '$.text')) -
+					length(replace(json_extract(data, '$.text'), 'tick(', ''))) / 5), 0) AS n
+				FROM events WHERE type = 'text.delta'
+				AND session_id IN (${streams.map(() => "?").join(",")})
+			`);
+			const ticks = () => Number(tickQuery.get(...streams)?.["n"] ?? 0);
+			await expect.poll(ticks).toBeGreaterThan(parameters.streams * 10);
+			// Keep setup snapshots outside the measured burst, as in the latency test.
+			await new Promise((resolve) => setTimeout(resolve, 500));
+			const beforeTicks = ticks();
+			phaseStart = now();
+			await Promise.all(
+				Array.from({ length: 20 }, async (_, index) => {
+					const title = `Overflow ${index}: ${randomUUID()}`;
+					const reply = await Effect.runPromise(
+						driver.rpc
+							.CreateSession({
+								projectSlug: "process-test",
+								providerId: "claude",
+								permissionMode: "ask",
+								originId: driver.originId,
+								title,
+								model: {
+									providerId: "claude",
+									modelId: "sonnet",
+									variant: "",
+									contextWindow: "200k",
+								},
+							})
+							.pipe(Effect.timeout("15 seconds")),
+					);
+					created.push({ id: reply.sessionId, title });
+				}),
+			);
+			deleted = created.slice(0, 5);
+			surviving = created.slice(5);
+			await Promise.all(
+				deleted.map(({ id }) =>
+					Effect.runPromise(
+						driver.rpc
+							.DeleteSession({
+								sessionId: id,
+								originId: driver.originId,
+							})
+							.pipe(Effect.timeout("15 seconds")),
+					),
+				),
+			);
+			await Promise.all(
+				devices.map(async (device) => {
+					const page = pages[device.device];
+					if (!page) throw new Error(`Missing sidebar device ${device.device}`);
+					try {
+						const result = await page.waitForFunction(
+							({ surviving, deleted }) => {
+								const sidebar = document.querySelector(
+									"#sidebar-panel-sessions",
+								);
+								if (!sidebar) return false;
+								const allSurvived = surviving.every(({ id, title }) => {
+									const row = sidebar.querySelector(
+										`[data-session-id="${id}"]`,
+									);
+									return (
+										row !== null &&
+										row.getClientRects().length > 0 &&
+										row.textContent?.includes(title)
+									);
+								});
+								const allDeleted = deleted.every(
+									({ id, title }) =>
+										!sidebar.querySelector(`[data-session-id="${id}"]`) &&
+										!sidebar.textContent?.includes(title),
+								);
+								return allSurvived && allDeleted
+									? performance.timeOrigin + performance.now()
+									: false;
+							},
+							{ surviving, deleted },
+							{ timeout: 30_000 },
+						);
+						const at = await result.jsonValue();
+						await result.dispose();
+						if (typeof at !== "number")
+							throw new Error("Sidebar convergence did not return a timestamp");
+						device.ms = at - (phaseStart ?? at);
+						device.converged = true;
+					} catch (error) {
+						device.error = String(error);
+					}
+				}),
+			);
+			await expect.poll(ticks).toBeGreaterThan(beforeTicks);
+			backgroundTicks = ticks() - beforeTicks;
+		} finally {
+			database.close();
+		}
+	} finally {
+		phaseEnd = now();
+		if (phaseStart !== null) {
+			try {
+				await expect
+					.poll(
+						() =>
+							(JSON.parse(readFileSync(metricsFile, "utf8")) as Metrics)
+								.flushedAt,
+					)
+					.toBeGreaterThan(phaseEnd);
+			} catch (error) {
+				diagnosticErrors.push(`Metrics flush: ${String(error)}`);
+			}
+		}
+		try {
+			await harness.terminate();
+		} catch (error) {
+			cleanupErrors.push(String(error));
+		}
+		try {
+			const metrics = JSON.parse(readFileSync(metricsFile, "utf8")) as Metrics;
+			metricsFlushedAt = metrics.flushedAt;
+			for (const read of metrics.readModelReads) {
+				if (
+					read.source === "shell" &&
+					phaseStart !== null &&
+					read.at >= phaseStart &&
+					read.at <= phaseEnd &&
+					(read.kind === "overflow" ||
+						read.kind === "window" ||
+						read.kind === "replacement")
+				)
+					shellReads[read.kind] += 1;
+			}
+		} catch (error) {
+			diagnosticErrors.push(`Shell read measurement: ${String(error)}`);
+		}
+		for (const result of await Promise.allSettled(
+			contexts.map((context) => context.close()),
+		)) {
+			if (result.status === "rejected")
+				cleanupErrors.push(String(result.reason));
+		}
+		mkdirSync("test-results", { recursive: true });
+		const output = join(
+			"test-results",
+			`overflow-catch-up.${testInfo.project.name}.json`,
+		);
+		writeFileSync(
+			output,
+			`${JSON.stringify(
+				{
+					parameters: {
+						devices: 4,
+						creates: 20,
+						deletes: 5,
+						advanceBusCapacity: 1,
+					},
+					phaseStart,
+					phaseEnd,
+					devices,
+					created,
+					deleted,
+					surviving,
+					backgroundTicks,
+					shell: { metricsFlushedAt, reads: shellReads },
+					diagnosticErrors,
+					cleanupErrors,
+				},
+				null,
+				2,
+			)}\n`,
+		);
+		await testInfo.attach("overflow-catch-up", {
+			path: output,
+			contentType: "application/json",
+		});
+		expect
+			.soft(shellReads.overflow, "Overflow catch-up must run")
+			.toBeGreaterThan(0);
+		expect
+			.soft(shellReads.replacement, "Shell must not replace its view")
+			.toBe(0);
+		expect.soft(created).toHaveLength(20);
+		expect.soft(deleted).toHaveLength(5);
+		expect.soft(surviving).toHaveLength(15);
+		expect
+			.soft(
+				devices.filter(({ converged }) => !converged),
+				"Every sidebar must converge",
+			)
+			.toEqual([]);
+		expect
+			.soft(diagnosticErrors, "Overflow diagnostics must be available")
 			.toEqual([]);
 		expect
 			.soft(cleanupErrors, "Isolated harness cleanup must succeed")

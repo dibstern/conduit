@@ -1,7 +1,6 @@
-import { FileSystem } from "@effect/platform";
-import { SystemError } from "@effect/platform/Error";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Ref } from "effect";
+import { Effect, FileSystem, Layer, Ref } from "effect";
+import { systemError } from "effect/PlatformError";
 import { expect } from "vitest";
 import {
 	PersistencePathTag,
@@ -25,8 +24,8 @@ const makeTestFileSystem = () => {
 				const content = files.get(path);
 				if (content === undefined) {
 					return yield* Effect.fail(
-						new SystemError({
-							reason: "NotFound",
+						systemError({
+							_tag: "NotFound",
 							module: "FileSystem",
 							method: "readFileString",
 							description: `File not found: ${path}`,
@@ -55,7 +54,7 @@ const makeTestFileSystem = () => {
 			}),
 	});
 
-	const layer = Layer.succeed(FileSystem.FileSystem, fs);
+	const layer = Layer.succeed(FileSystem.FileSystem)(fs);
 
 	return { files, renames, directories, layer };
 };
@@ -68,7 +67,7 @@ const makeTestLayers = (
 ) =>
 	Layer.mergeAll(
 		testFs.layer,
-		Layer.succeed(PersistencePathTag, CONFIG_PATH),
+		Layer.succeed(PersistencePathTag)(CONFIG_PATH),
 		makeDaemonStateLive(stateOverrides),
 	);
 
@@ -129,8 +128,8 @@ describe("daemon-config-persistence", () => {
 						const content = files.get(path);
 						if (content === undefined) {
 							return yield* Effect.fail(
-								new SystemError({
-									reason: "NotFound",
+								systemError({
+									_tag: "NotFound",
 									module: "FileSystem",
 									method: "readFileString",
 									description: `File not found: ${path}`,
@@ -144,12 +143,12 @@ describe("daemon-config-persistence", () => {
 					Effect.gen(function* () {
 						// Yield to the scheduler so other fibers can run and
 						// attempt to acquire the pendingSave lock.
-						yield* Effect.yieldNow();
+						yield* Effect.yieldNow;
 						files.set(path, data);
 					}),
 				rename: (oldPath: string, newPath: string) =>
 					Effect.gen(function* () {
-						yield* Effect.yieldNow();
+						yield* Effect.yieldNow;
 						const content = files.get(oldPath);
 						if (content !== undefined) {
 							files.set(newPath, content);
@@ -164,8 +163,8 @@ describe("daemon-config-persistence", () => {
 			});
 
 			const layers = Layer.mergeAll(
-				Layer.succeed(FileSystem.FileSystem, slowFs),
-				Layer.succeed(PersistencePathTag, CONFIG_PATH),
+				Layer.succeed(FileSystem.FileSystem)(slowFs),
+				Layer.succeed(PersistencePathTag)(CONFIG_PATH),
 				makeDaemonStateLive({ port: 7777 }),
 			);
 
@@ -194,8 +193,8 @@ describe("daemon-config-persistence", () => {
 
 			const layers = Layer.mergeAll(
 				testFs.layer,
-				Layer.succeed(PersistencePathTag, CONFIG_PATH),
-				Layer.succeed(DaemonStateTag, ref),
+				Layer.succeed(PersistencePathTag)(CONFIG_PATH),
+				Layer.succeed(DaemonStateTag)(ref),
 			);
 
 			yield* persistConfig.pipe(Effect.provide(layers));

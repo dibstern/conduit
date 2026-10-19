@@ -1,6 +1,7 @@
-import type { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Effect } from "effect";
+import type { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
+import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import {
 	type AutoSettleFacts,
 	shouldSettleIdleSession,
@@ -13,7 +14,6 @@ export interface AutoSettleSweepPorts<SettleError> {
 	readonly hasLiveBackgroundWork: (sessionId: string) => boolean;
 	readonly setSettled: (
 		sessionId: string,
-		mergedHead?: string,
 	) => Effect.Effect<boolean, SettleError>;
 }
 
@@ -21,8 +21,13 @@ export const settleIdleSessions = <SettleError>(
 	ports: AutoSettleSweepPorts<SettleError>,
 	idleWindowMs: number,
 	now: number,
-): Effect.Effect<number, SqlError | SettleError, SqlClient.SqlClient> =>
+): Effect.Effect<
+	number,
+	SqlError | SettleError,
+	SqlClient.SqlClient | PersistenceProjectTag
+> =>
 	Effect.gen(function* () {
+		const { projectId } = yield* PersistenceProjectTag;
 		const decide = (sessionId: string, facts: AutoSettleFacts) =>
 			shouldSettleIdleSession(
 				{
@@ -35,6 +40,7 @@ export const settleIdleSessions = <SettleError>(
 			);
 		const candidates = [
 			...(yield* readPersistedAutoSettleFacts(
+				projectId,
 				now,
 				undefined,
 				ports.projectDir,
@@ -45,12 +51,13 @@ export const settleIdleSessions = <SettleError>(
 			// Read again at the decision point: another command may have changed the
 			// projection since discovery, or a browser/task may have arrived.
 			const facts = (yield* readPersistedAutoSettleFacts(
+				projectId,
 				now,
 				sessionId,
 				ports.projectDir,
 			)).get(sessionId);
 			if (facts === undefined || !decide(sessionId, facts)) continue;
-			if (yield* ports.setSettled(sessionId, facts.mergedHead)) settled++;
+			if (yield* ports.setSettled(sessionId)) settled++;
 		}
 		return settled;
 	});

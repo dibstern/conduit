@@ -27,13 +27,13 @@ const DIRECT_ANTHROPIC_ENV_KEYS = [
 ] as const;
 
 export const ClaudeConfigDirSchema = ClaudeConfigDirWireSchema.pipe(
-	Schema.filter(
-		(folder) =>
+	Schema.check(
+		Schema.makeFilter((folder) =>
 			folder._tag === "Configured" ||
-			basename(resolve(folder.path)) === ".claude",
-		{
-			message: () => "Claude SDK default folder must be a .claude directory",
-		},
+			basename(resolve(folder.path)) === ".claude"
+				? undefined
+				: "Claude SDK default folder must be a .claude directory",
+		),
 	),
 );
 
@@ -78,11 +78,11 @@ export function captureClaudeLaunchLogin(
 		: configuredClaudeConfigDir(override);
 }
 
-export const ClaudeFolderSourceSchema = Schema.Literal(
+export const ClaudeFolderSourceSchema = Schema.Literals([
 	"account",
 	"implicitDefault",
 	"legacyDefault",
-);
+]);
 
 /** A complete login and the policy for selecting its native folder. */
 export interface ClaudeLaunchConfig {

@@ -3,7 +3,6 @@
 // store's family list through `applyFamilyChange`, its only writer.
 
 import { Effect, Fiber, Stream } from "effect";
-import type { RuntimeFiber } from "effect/Fiber";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { supervise } from "../transport/supervise.js";
@@ -13,7 +12,7 @@ import { accountSnapshotChangedListeners } from "./ws-listeners.js";
 
 let viewed: { project: string; sessionId: string } | null = null;
 let generation = 0;
-let fiber: RuntimeFiber<void, never> | null = null;
+let fiber: Fiber.Fiber<void, never> | null = null;
 accountSnapshotChangedListeners.add(() => {
 	if (viewed !== null) viewFamily(viewed.project, viewed.sessionId, true);
 });

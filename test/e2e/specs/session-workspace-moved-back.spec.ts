@@ -26,26 +26,40 @@ for (const viewport of [
 		const projectSlug = "e2e-replay";
 		const main = "/workspace/main";
 		const projects = [
-			{ slug: projectSlug, title: "Workspace project", folders: [main] },
+			{
+				slug: projectSlug,
+				title: "Workspace project",
+				folders: [main] as const,
+			},
 		];
 		const session = {
+			accountId: null,
 			id: "moved-back-session",
 			title: "Removed worktree",
-			status: "idle",
+			status: "idle" as const,
 			projectSlug,
 			provider: "claude",
 			git: { branch: "main" },
-			workspace: { cause: "missing", origin: "existing", worktrees: {} },
+			workspace: {
+				cause: "missing" as const,
+				origin: "existing" as const,
+				worktrees: {},
+			},
 		};
 		const rpc = await mockWsRpc(page, {
-			handlers: {
-				GetProjects: () => ({ projects, current: projectSlug }),
+			stubs: {
 				ListDaemonSessions: () => ({
 					sessions: [session],
 					availability: [],
 					hasMore: false,
 					nextCursor: null,
 				}),
+				GetModels: (input) => ({
+					defaultOpenCodeInstanceId: "opencode",
+					projectSlug: "projectSlug" in input ? input.projectSlug : projectSlug,
+					providers: [],
+				}),
+				GetProjects: () => ({ projects, current: projectSlug }),
 			},
 		});
 		rpc.setShellRows([session]);
@@ -75,8 +89,8 @@ for (const viewport of [
 		rpc.upsertShellRow({
 			...session,
 			workspace: {
-				cause: "user",
-				origin: "existing",
+				cause: "user" as const,
+				origin: "existing" as const,
 				worktrees: { [main]: "/workspace/next-worktree" },
 			},
 			git: { branch: "next", worktree: "next-worktree" },

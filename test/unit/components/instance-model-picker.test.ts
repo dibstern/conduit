@@ -13,40 +13,47 @@ import {
 	selectInstance,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { applyInstanceListResponse } from "../../../src/lib/frontend/stores/instance.svelte.js";
-import {
-	clearSessionState,
-	sessionState,
-} from "../../../src/lib/frontend/stores/session.svelte.js";
+import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
+import { clearSessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { ProviderInfo } from "../../../src/lib/frontend/types.js";
 import { seedRootSessions } from "../stores/session-fixtures.js";
 
 const getAgentsRpcSpy = vi.hoisted(() =>
-	vi.fn(async (_input: unknown) => ({ projectSlug: "project-a", agents: [] })),
+	vi.fn((_input: unknown) =>
+		Promise.resolve({ projectSlug: "project-a", agents: [] }),
+	),
 );
 const switchModelRpcSpy = vi.hoisted(() =>
-	vi.fn(async (input: { modelId: string; providerId: string }) => ({
-		projectSlug: "project-a",
-		model: input.modelId,
-		provider: input.providerId,
-		variant: "fast",
-		variants: ["standard", "fast"],
-	})),
+	vi.fn((input: { modelId: string; providerId: string }) =>
+		Promise.resolve({
+			projectSlug: "project-a",
+			model: input.modelId,
+			provider: input.providerId,
+			variant: "fast",
+			variants: ["standard", "fast"],
+		}),
+	),
 );
 const setDefaultModelRpcSpy = vi.hoisted(() =>
-	vi.fn(async (input: { model: string; provider: string }) => ({
-		projectSlug: "project-a",
-		model: input.model,
-		provider: input.provider,
-		variant: "",
-		variants: [],
-	})),
+	vi.fn((input: { model: string; provider: string }) =>
+		Promise.resolve({
+			projectSlug: "project-a",
+			model: input.model,
+			provider: input.provider,
+			variant: "",
+			variants: [],
+		}),
+	),
 );
-const reloadProviderSessionRpcSpy = vi.hoisted(() =>
-	vi.fn(async (input: { projectSlug: string; sessionId: string }) => ({
-		projectSlug: input.projectSlug,
-		sessionId: input.sessionId,
-	})),
+const reloadSessionSpy = vi.hoisted(() =>
+	vi.fn((_tag: string, input: { sessionId: string }) =>
+		Promise.resolve({
+			projectSlug: "project-a",
+			sessionId: input.sessionId,
+		}),
+	),
 );
 const showToastSpy = vi.hoisted(() => vi.fn());
 const emptyComponent = vi.hoisted(
@@ -69,16 +76,25 @@ vi.mock(
 	}),
 );
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	getAgentsRpc: (input: unknown) => getAgentsRpcSpy(input),
-	reloadProviderSessionRpc: (input: {
-		projectSlug: string;
-		sessionId: string;
-		commandId: string;
-	}) => reloadProviderSessionRpcSpy(input),
-	setDefaultModelRpc: (input: { model: string; provider: string }) =>
-		setDefaultModelRpcSpy(input),
-	switchModelRpc: (input: { modelId: string; providerId: string }) =>
-		switchModelRpcSpy(input),
+	rpc: (
+		tag:
+			| "GetModels"
+			| "GetCommands"
+			| "GetAgents"
+			| "SetDefaultModel"
+			| "SwitchModel"
+			| "ReloadProviderSession",
+		input: never,
+	) =>
+		tag === "GetModels" || tag === "GetCommands"
+			? Promise.reject(new Error("Catalog not configured in this fixture"))
+			: tag === "ReloadProviderSession"
+				? reloadSessionSpy(tag, input)
+				: {
+						GetAgents: getAgentsRpcSpy,
+						SetDefaultModel: setDefaultModelRpcSpy,
+						SwitchModel: switchModelRpcSpy,
+					}[tag](input),
 }));
 vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 	showToast: showToastSpy,
@@ -109,10 +125,11 @@ describe("InstanceModelPicker", () => {
 		getAgentsRpcSpy.mockClear();
 		switchModelRpcSpy.mockClear();
 		setDefaultModelRpcSpy.mockClear();
-		reloadProviderSessionRpcSpy.mockClear();
+		reloadSessionSpy.mockClear();
 		showToastSpy.mockClear();
 		clearDiscoveryState();
 		clearSessionState();
+		attachedProjectState.slug = "project-a";
 		applyInstanceListResponse({
 			instances: [
 				{
@@ -157,7 +174,7 @@ describe("InstanceModelPicker", () => {
 			variant: "",
 		});
 		handleModelList({ providers: [CLAUDE_PROVIDER] });
-		sessionState.currentId = "session-1";
+		openSessionForSetup("session-1", "project-a");
 		applyGetModelsResponse(
 			{
 				projectSlug: "project-a",
@@ -184,7 +201,7 @@ describe("InstanceModelPicker", () => {
 		null,
 		"session-1",
 	])("keeps held draft and session models when the project default updates (%s)", async (sessionId) => {
-		sessionState.currentId = sessionId;
+		openSessionForSetup(sessionId, "project-a");
 		if (!sessionId) {
 			selectInstance("claude");
 			chooseModel({ modelId: "claude-sonnet-4-7", providerId: "claude" });
@@ -206,7 +223,7 @@ describe("InstanceModelPicker", () => {
 		null,
 		"session-1",
 	])("uses Claude context metadata when OpenCode has the same model id (%s)", async (sessionId) => {
-		sessionState.currentId = sessionId;
+		openSessionForSetup(sessionId, "project-a");
 		handleModelList({
 			providers: [
 				{
@@ -304,14 +321,12 @@ describe("InstanceModelPicker", () => {
 
 		await waitFor(() => {
 			expect(switchModelRpcSpy).toHaveBeenCalledWith({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				modelId: "claude-opus-4-7",
 				providerId: "claude",
 			});
 		});
 		expect(getAgentsRpcSpy).toHaveBeenCalledWith({
-			projectSlug: "project-a",
 			sessionId: "session-1",
 		});
 		expect(discoveryState.currentVariant).toBe("fast");
@@ -332,7 +347,6 @@ describe("InstanceModelPicker", () => {
 
 		await waitFor(() => {
 			expect(switchModelRpcSpy).toHaveBeenCalledWith({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				modelId: "claude-opus-4-7",
 				providerId: "claude",
@@ -340,7 +354,6 @@ describe("InstanceModelPicker", () => {
 		});
 		await waitFor(() => {
 			expect(getAgentsRpcSpy).toHaveBeenCalledWith({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 			});
 		});
@@ -389,8 +402,7 @@ describe("InstanceModelPicker", () => {
 		await fireEvent.click(getByTitle("Reload skills and commands from disk"));
 
 		await waitFor(() => {
-			expect(reloadProviderSessionRpcSpy).toHaveBeenCalledWith({
-				projectSlug: "project-a",
+			expect(reloadSessionSpy).toHaveBeenCalledWith("ReloadProviderSession", {
 				sessionId: "session-1",
 				commandId: expect.any(String),
 			});

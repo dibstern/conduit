@@ -5,6 +5,7 @@
      actions sit at the right of the row, on a wrapped second row on phones.
      With another Claude account to go to, Switch account leads both states. -->
 <script lang="ts">
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import type { LimitRecovery } from "../../../contracts/limit-recovery.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
@@ -12,7 +13,7 @@
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
-	import { cancelContinuationRpc, continueSessionRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { formatSnoozeTime } from "../../utils/format.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -68,12 +69,12 @@
 	// Each action is one RPC on the session's own account. A refusal leaves the
 	// strip as it is and shows its message; success waits for the server's
 	// projection to change the strip.
-	async function run(call: Promise<void>, failure: string): Promise<void> {
+	async function run(call: Promise<unknown>, failure: string): Promise<void> {
 		busy = true;
 		try {
 			await call;
 		} catch (error) {
-			showToast(error instanceof Error && error.message ? error.message : failure, { variant: "error" });
+			toastFailure(failure)(error);
 		} finally {
 			busy = false;
 		}
@@ -88,8 +89,7 @@
 			return;
 		}
 		return run(
-			continueSessionRpc({
-				projectSlug,
+			rpc("ContinueSession", {
 				sessionId,
 				instanceId: currentAccountId,
 				expectedInstanceId: currentAccountId,
@@ -101,7 +101,7 @@
 	}
 
 	const cancelResume = () =>
-		run(cancelContinuationRpc({ projectSlug, sessionId, originId: getBrowserClientId() }), "Couldn't cancel the resume");
+		run(rpc("CancelContinuation", { sessionId, originId: getBrowserClientId() }), "Couldn't cancel the resume");
 </script>
 
 <!-- The strip's main action while limited, second to a scheduled resume. -->

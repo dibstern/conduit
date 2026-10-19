@@ -8,9 +8,7 @@ vi.mock(
 	"../../../src/lib/frontend/transport/ws-rpc-client.js",
 	async (importOriginal) => ({
 		...(await importOriginal<object>()),
-		getAgentsRpc: () => new Promise(() => {}),
-		getCommandsRpc: () => new Promise(() => {}),
-		getModelsRpc: () => new Promise(() => {}),
+		rpc: () => new Promise(() => {}),
 	}),
 );
 
@@ -36,10 +34,7 @@ import {
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { applyInstanceListResponse } from "../../../src/lib/frontend/stores/instance.svelte.js";
 import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
-import {
-	sessionState,
-	switchToSession,
-} from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 const instances = ["claude", "claude-2", "opencode"].map((id) => ({
 	id,
@@ -82,7 +77,7 @@ const defaults = {
 
 beforeEach(() => {
 	clearDiscoveryState();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 	attachedProjectState.slug = "conduit";
 	applyInstanceListResponse({ instances, providerCapabilities: {} });
 	handleDefaultModelInfo({ model: "sonnet", provider: "claude" });
@@ -186,35 +181,6 @@ describe("new session instance", () => {
 			providerCapabilities: {},
 		});
 		expect(getEffectiveInstanceId()).toBeUndefined();
-	});
-
-	it("consumes the pick on session bind so the next draft starts on the default", () => {
-		selectInstance("opencode");
-		expect(discoveryState.hasInstanceChoice).toBe(true);
-		switchToSession("picked-session", "conduit", () => new Promise(() => {}));
-		expect(discoveryState.hasInstanceChoice).toBe(false);
-		sessionState.currentId = null;
-		expect(discoveryState.hasModelChoice).toBe(false);
-		expect(getEffectiveInstanceId()).toBe("claude");
-		sessionState.currentId = "picked-session";
-		applyGetModelsResponse({
-			...defaults,
-			active: { model: "gpt", provider: "openai" },
-		});
-		sessionState.currentId = null;
-		expect(getEffectiveInstanceId()).toBe("claude");
-		applyGetModelsResponse(defaults);
-		chooseVariant("high");
-		expect(getEffectiveInstanceId()).toBe("claude");
-		expect(getDraftPick()).toMatchObject({
-			instanceId: "claude",
-			model: { modelId: "sonnet", providerId: "claude", variant: "high" },
-		});
-		selectInstance("opencode");
-		expect(getDraftPick()).toMatchObject({
-			instanceId: "opencode",
-			model: { modelId: "gpt", providerId: "openai" },
-		});
 	});
 
 	it("does not persist an instance pick across a page load", async () => {

@@ -13,12 +13,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	CreateSession,
-	ListDaemonSessions,
-	MarkSessionSeen,
-	SetSessionSettled,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { effectiveWorkingDirectory } from "../../../src/lib/session/session-workspace.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
@@ -75,17 +70,15 @@ describe("Worktree branch settlement through the built daemon", () => {
 			if (task.result?.errors?.length) {
 				evidence["daemonLogs"] = fixture.logTail.slice(-4_000);
 				evidence["currentSessions"] = (
-					await sendRpcRequest(
-						join(fixture.configDir, "relay.sock"),
-						new ListDaemonSessions({
-							projectSlug: "process-test",
-							scope: "process-test",
-						}),
-					)
+					await sendRpcRequest(join(fixture.configDir, "relay.sock"), {
+						_tag: "ListDaemonSessions",
+						projectSlug: "process-test",
+						scope: "process-test",
+					})
 				).sessions;
 			}
-			if (existsSync(fixture.projectStorePath())) {
-				const db = new Database(fixture.projectStorePath(), { readonly: true });
+			if (existsSync(fixture.daemonStorePath())) {
+				const db = new Database(fixture.daemonStorePath(), { readonly: true });
 				try {
 					if (task.result?.errors?.length)
 						evidence["settleFacts"] = db
@@ -95,7 +88,7 @@ describe("Worktree branch settlement through the built daemon", () => {
 							.all();
 					evidence["lifecycle"] = db
 						.prepare(
-							"SELECT session_id, type, data FROM events WHERE type IN ('session.workspace_changed', 'session.settled', 'session.unsettled', 'session.deleted', 'session.archived') ORDER BY sequence",
+							"SELECT session_id, type, data FROM events WHERE project_id = 'process-test' AND type IN ('session.workspace_changed', 'session.settled', 'session.unsettled', 'session.deleted', 'session.archived') ORDER BY sequence",
 						)
 						.all()
 						.map((row) => {
@@ -202,29 +195,26 @@ describe("Worktree branch settlement through the built daemon", () => {
 		const socket = join(fixture.configDir, "relay.sock");
 		const sessions = async () =>
 			(
-				await sendRpcRequest(
-					socket,
-					new ListDaemonSessions({
-						projectSlug: "process-test",
-						scope: "process-test",
-					}),
-				)
+				await sendRpcRequest(socket, {
+					_tag: "ListDaemonSessions",
+					projectSlug: "process-test",
+					scope: "process-test",
+				})
 			).sessions;
 		const create = async (
 			title: string,
 			options: { newWorktree?: boolean; worktreePath?: string } = {},
 		) => {
-			const { sessionId } = await sendRpcRequest(
-				socket,
-				new CreateSession({
-					permissionMode: "ask",
-					projectSlug: "process-test",
-					originId: "settlement-test",
-					providerId: "claude",
-					title,
-					...options,
-				}),
-			);
+			const { sessionId } = await sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				permissionMode: "ask",
+				projectSlug: "process-test",
+				originId: "settlement-test",
+				providerId: "claude",
+				model: { providerId: "claude", modelId: "sonnet" },
+				title,
+				...options,
+			});
 			names.set(sessionId, title);
 			return sessionId;
 		};
@@ -331,15 +321,12 @@ describe("Worktree branch settlement through the built daemon", () => {
 		commit(existing, "other.txt");
 		await browser.view(localId);
 		for (const sessionId of [ownedId, otherId])
-			await sendRpcRequest(
-				socket,
-				new MarkSessionSeen({
-					projectSlug: "process-test",
-					sessionId,
-					upTo: Date.now(),
-					originId: "settlement-test",
-				}),
-			);
+			await sendRpcRequest(socket, {
+				_tag: "MarkSessionSeen",
+				sessionId,
+				upTo: Date.now(),
+				originId: "settlement-test",
+			});
 		await browser.close();
 		await snapshot("beforeMerge");
 		git(seed, "fetch", fixture.projectDir, ownedBranch);
@@ -404,15 +391,12 @@ describe("Worktree branch settlement through the built daemon", () => {
 		expect(row(active, ownedId).settledAt).toBeUndefined();
 		expect(row(active, ownedId).workspace).toEqual(owned.workspace);
 		await resumed.view(localId);
-		await sendRpcRequest(
-			socket,
-			new MarkSessionSeen({
-				projectSlug: "process-test",
-				sessionId: ownedId,
-				upTo: Date.now(),
-				originId: "settlement-test",
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MarkSessionSeen",
+			sessionId: ownedId,
+			upTo: Date.now(),
+			originId: "settlement-test",
+		});
 		await resumed.close();
 		commit(seed, "unrelated-default-work.txt");
 		git(seed, "push", remote, "trunk");
@@ -447,15 +431,12 @@ describe("Worktree branch settlement through the built daemon", () => {
 		);
 		git(seed, "push", remote, "trunk");
 		git(fixture.projectDir, "fetch", "origin");
-		await sendRpcRequest(
-			socket,
-			new SetSessionSettled({
-				projectSlug: "process-test",
-				sessionId: otherId,
-				settled: true,
-				originId: "settlement-test",
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SetSessionSettled",
+			sessionId: otherId,
+			settled: true,
+			originId: "settlement-test",
+		});
 		expect(row(await sessions(), otherId).settledAt).toBeDefined();
 		await manual.send(
 			otherId,
@@ -463,15 +444,12 @@ describe("Worktree branch settlement through the built daemon", () => {
 			120_000,
 		);
 		await manual.view(localId);
-		await sendRpcRequest(
-			socket,
-			new MarkSessionSeen({
-				projectSlug: "process-test",
-				sessionId: otherId,
-				upTo: Date.now(),
-				originId: "settlement-test",
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MarkSessionSeen",
+			sessionId: otherId,
+			upTo: Date.now(),
+			originId: "settlement-test",
+		});
 		await manual.close();
 		await fixture.shutdown();
 		await fixture.restart({
@@ -488,7 +466,7 @@ describe("Worktree branch settlement through the built daemon", () => {
 		expect(
 			sessionQueries(fixture, otherId).map(({ options }) => options["cwd"]),
 		).toEqual([existing, existing]);
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			expect(
 				db

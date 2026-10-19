@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { publishAlert } from "../domain/relay/Services/alerts.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationSender } from "../server/push.js";
@@ -9,7 +9,7 @@ import { resolveNotifications } from "./notification-policy.js";
 import { sendPushForEventEffect } from "./sse-wiring.js";
 
 export const publishProviderRelayMessage = (
-	msg: RelayMessage,
+	msg: Extract<RelayMessage, { type: "done" }>,
 	deps: {
 		wsHandler: Pick<WebSocketHandlerShape, "getClientsForSession">;
 		pushManager?: Pick<PushNotificationSender, "sendToAll">;
@@ -18,8 +18,8 @@ export const publishProviderRelayMessage = (
 	},
 ) =>
 	Effect.gen(function* () {
-		const sessionId = "sessionId" in msg ? msg.sessionId : undefined;
-		if (msg.type !== "done" || !sessionId) return;
+		const sessionId = msg.sessionId;
+		if (!sessionId) return;
 		const sql = yield* SqlClient.SqlClient;
 		const rows = yield* sql<{
 			parent_id: string | null;

@@ -10,24 +10,27 @@
 // injected at the wire and the assertions are the request frames the client sent
 // and the envelopes the consumer saw.
 
-import { RpcClient, type RpcMessage } from "@effect/rpc";
-import { RpcClientError } from "@effect/rpc/RpcClientError";
 import { describe, it } from "@effect/vitest";
 import {
 	Cause,
 	Channel,
-	Chunk,
 	Deferred,
 	Effect,
 	Exit,
 	Fiber,
-	Layer,
 	Queue,
 	Ref,
 	Stream,
-	TestClock,
 } from "effect";
+import type { Rpc } from "effect/rpc";
+import { RpcClientDefect, RpcClientError } from "effect/rpc/RpcClientError";
+import { TestClock } from "effect/testing";
 import { beforeAll, expect } from "vitest";
+import {
+	type SubscribeSessionDetail,
+	type SubscribeShell,
+	WsRpcError,
+} from "../../../../src/lib/contracts/ws-rpc.js";
 import { resumeStream } from "../../../../src/lib/frontend/transport/resume.js";
 import {
 	makeWsRpcClientsLayer,
@@ -35,7 +38,7 @@ import {
 	type WsRpcConnect,
 	type WsRpcSockets,
 } from "../../../../src/lib/frontend/transport/shared-client.js";
-import { WsRpcGroup } from "../../../../src/lib/frontend/transport/ws-rpc.js";
+import { makeRpcStream, makeRpcWire } from "../../../helpers/rpc-wire.js";
 
 beforeAll(() => {
 	Object.defineProperty(globalThis, "location", {
@@ -46,7 +49,7 @@ beforeAll(() => {
 
 interface RequestFrame {
 	readonly tag: string;
-	readonly id: string;
+	readonly id: string | number;
 	readonly payload: unknown;
 }
 
@@ -109,179 +112,128 @@ const sequenceOf = (envelope: unknown): number | undefined =>
 
 const fakeTransport = () => {
 	const links: Array<FakeLink> = [];
-
-	const connect: WsRpcConnect = () =>
+	const connect: WsRpcConnect = (options) =>
 		Effect.gen(function* () {
 			const sent = yield* Queue.unbounded<RequestFrame>();
 			const rejected = yield* Queue.unbounded<void>();
-			const latest = yield* Ref.make<RequestFrame | undefined>(undefined);
 			const down = yield* Ref.make(false);
 			const count = yield* Ref.make(0);
-			const history: Array<{
-				readonly sequence: number;
-				readonly envelope: unknown;
-			}> = [];
-			const connectionScope = yield* Effect.scope;
-			const receiving: Array<Fiber.RuntimeFiber<void, never>> = [];
-			let write:
-				| ((data: RpcMessage.FromServerEncoded) => Effect.Effect<void>)
-				| undefined;
-
-			const protocol = RpcClient.Protocol.make((w) =>
-				Effect.sync(() => {
-					write = w;
-					return {
-						send: (request: RpcMessage.FromClientEncoded) =>
-							request._tag === "Request"
-								? Effect.flatMap(Ref.get(down), (isDown) =>
-										isDown
-											? Effect.zipRight(
-													Queue.offer(rejected, undefined),
+			const current = yield* Ref.make<
+				| Effect.Success<ReturnType<typeof makeRpcStream<unknown, WsRpcError>>>
+				| undefined
+			>(undefined);
+			const history: { sequence: number; envelope: unknown }[] = [];
+			const record = (envelope: unknown) => {
+				const sequence = sequenceOf(envelope);
+				if (sequence !== undefined) history.push({ sequence, envelope });
+			};
+			const subscription = (
+				tag: string,
+				payload: { resumeFromSequence?: number | undefined },
+			) =>
+				Stream.unwrap(
+					Effect.gen(function* () {
+						const served = yield* makeRpcStream<unknown, WsRpcError>();
+						yield* Ref.set(current, served);
+						yield* Ref.update(count, (n) => n + 1);
+						const frame = [...wire.requests]
+							.reverse()
+							.find((r) => r.tag === tag);
+						if (!frame)
+							return yield* Effect.die(
+								new Error("missing subscription request"),
+							);
+						yield* Queue.offer(sent, { ...frame, payload });
+						const resume = resumePointOf(payload);
+						for (const entry of history) {
+							if (resume === undefined || entry.sequence > resume)
+								yield* served.emit(entry.envelope);
+						}
+						if (resume !== undefined)
+							yield* served.emit({ _tag: "synchronized" });
+						return served.stream;
+					}),
+				);
+			const wire = makeRpcWire(
+				{
+					SubscribeShell: (p) =>
+						subscription("SubscribeShell", p) as Stream.Stream<
+							Rpc.SuccessChunk<typeof SubscribeShell>,
+							WsRpcError
+						>,
+					SubscribeSessionDetail: (p) =>
+						subscription("SubscribeSessionDetail", p) as Stream.Stream<
+							Rpc.SuccessChunk<typeof SubscribeSessionDetail>,
+							WsRpcError
+						>,
+				},
+				{
+					beforeSend: (frame) =>
+						frame._tag !== "Request"
+							? Effect.void
+							: Effect.flatMap(Ref.get(down), (isDown) =>
+									isDown
+										? Queue.offer(rejected, undefined).pipe(
+												Effect.andThen(
 													Effect.fail(
 														new RpcClientError({
-															reason: "Protocol",
-															message: "socket is down",
+															reason: new RpcClientDefect({
+																message: "socket is down",
+																cause: undefined,
+															}),
 														}),
 													),
-												)
-											: Effect.gen(function* () {
-													const frame: RequestFrame = {
-														tag: request.tag,
-														id: request.id,
-														payload: request.payload,
-													};
-													yield* Ref.set(latest, frame);
-													yield* Ref.update(count, (n) => n + 1);
-													yield* Queue.offer(sent, frame);
-													const resume = resumePointOf(request.payload);
-													const backlog = history.filter(
-														(entry) =>
-															resume === undefined || entry.sequence > resume,
-													);
-													for (const entry of backlog) {
-														yield* write?.({
-															_tag: "Chunk",
-															requestId: frame.id,
-															values: [entry.envelope],
-														}) ?? Effect.void;
-													}
-													// The server closes every replay with
-													// `synchronized`, an empty replay included
-													// (read-model-subscription.ts). A request without a
-													// cursor is a cold start, whose `snapshot` +
-													// `synchronized` the test scripts instead: the fake
-													// holds a history, not a read model, so it has no
-													// snapshot to serve.
-													if (resume !== undefined) {
-														yield* write?.({
-															_tag: "Chunk",
-															requestId: frame.id,
-															values: [{ _tag: "synchronized" }],
-														}) ?? Effect.void;
-													}
-												}),
-									)
-								: Effect.void,
-						supportsAck: false,
-						supportsTransferables: false,
-					};
-				}),
+												),
+											)
+										: Effect.void,
+								),
+				},
 			);
-
-			// Layer.build, not Effect.provide: the protocol forks its run loop into
-			// the layer's scope, which must be this connection's scope.
-			const client = yield* Layer.build(
-				Layer.effect(RpcClient.Protocol, protocol),
-			).pipe(
-				Effect.flatMap((ctx) =>
-					Effect.provide(RpcClient.make(WsRpcGroup), ctx),
-				),
-			);
-
-			const push = (frame: (id: string) => RpcMessage.FromServerEncoded) =>
-				Effect.flatMap(Ref.get(latest), (request) =>
-					request === undefined || write === undefined
-						? Effect.dieMessage("no request to answer")
-						: write(frame(request.id)),
+			const client = yield* wire.connect(options);
+			const push = (envelope: unknown) =>
+				Effect.flatMap(Ref.get(current), (served) =>
+					served
+						? served.emit(envelope)
+						: Effect.die(new Error("no request to answer")),
 				);
-
 			links.push({
 				takeRequest: Queue.take(sent),
 				requestCount: Ref.get(count),
 				takeRejection: Queue.take(rejected),
 				pendingRejections: Queue.size(rejected),
 				emit: (envelope) =>
-					Effect.suspend(() => {
-						const sequence = sequenceOf(envelope);
-						if (sequence !== undefined) {
-							history.push({ sequence, envelope });
-						}
-						return push((id) => ({
-							_tag: "Chunk",
-							requestId: id,
-							values: [envelope],
-						}));
-					}),
-				stage: (envelope) =>
-					Effect.sync(() => {
-						const sequence = sequenceOf(envelope);
-						if (sequence !== undefined) history.push({ sequence, envelope });
-					}),
+					Effect.sync(() => record(envelope)).pipe(
+						Effect.andThen(push(envelope)),
+					),
+				stage: (envelope) => Effect.sync(() => record(envelope)),
 				failRequest: (message) =>
-					push((id) => ({
-						_tag: "Exit",
-						requestId: id,
-						exit: {
-							_tag: "Failure",
-							cause: {
-								_tag: "Fail",
-								error: { _tag: "WsRpcError", message },
-							},
-						},
-					})),
-				drop: Effect.suspend(() =>
-					write === undefined
-						? Effect.dieMessage("protocol not running")
-						: write({
-								_tag: "ClientProtocolError",
-								error: new RpcClientError({
-									reason: "Protocol",
-									message: "Error in socket",
-								}),
-							}),
+					Effect.flatMap(Ref.get(current), (served) =>
+						served
+							? served.fail(new WsRpcError({ message }))
+							: Effect.die(new Error("no request to fail")),
+					),
+				drop: Effect.suspend(
+					() =>
+						wire.connections[0]?.drop ?? Effect.die(new Error("no connection")),
 				),
 				emitDetached: (envelopes) =>
-					Effect.gen(function* () {
-						for (const envelope of envelopes) {
-							const sequence = sequenceOf(envelope);
-							if (sequence !== undefined) history.push({ sequence, envelope });
-						}
-						receiving.push(
-							yield* Effect.forkIn(connectionScope)(
-								Effect.forEach(
-									envelopes,
-									(envelope) =>
-										push((id) => ({
-											_tag: "Chunk",
-											requestId: id,
-											values: [envelope],
-										})),
-									{ discard: true },
-								),
+					Effect.forEach(
+						envelopes,
+						(envelope) =>
+							Effect.sync(() => record(envelope)).pipe(
+								Effect.andThen(push(envelope)),
 							),
-						);
-					}),
-				tearDown: Effect.suspend(() =>
-					Effect.forEach(receiving.splice(0), Fiber.interrupt, {
-						discard: true,
-					}),
+						{ discard: true },
+					),
+				tearDown: Effect.suspend(
+					() =>
+						wire.connections[0]?.tearDown ??
+						Effect.die(new Error("no connection")),
 				),
 				setDown: (isDown) => Ref.set(down, isDown),
 			});
-
 			return client;
 		});
-
 	return { links, connect };
 };
 
@@ -300,10 +252,10 @@ const withSockets = <A, E>(
 				const sockets = yield* clients.forProject("alpha");
 				const [control, stream] = links;
 				if (control === undefined || stream === undefined) {
-					return yield* Effect.dieMessage("the pair did not open");
+					return yield* Effect.die(new Error("the pair did not open"));
 				}
 				return yield* use(sockets, { control, stream });
-			}).pipe(Effect.provide(makeWsRpcClientsLayer(connect))),
+			}).pipe(Effect.provide(makeWsRpcClientsLayer(connect), { local: true })),
 		);
 	});
 
@@ -331,7 +283,6 @@ describe("client-side resume at the shared client", () => {
 
 					const first = yield* links.stream.takeRequest;
 					expect(first.payload).toEqual({
-						projectSlug: "alpha",
 						sessionId: "s1",
 					});
 
@@ -352,7 +303,6 @@ describe("client-side resume at the shared client", () => {
 					// the cursor sits on 12, which 13 itself proved complete.
 					const reissued = yield* links.stream.takeRequest;
 					expect(reissued.payload).toEqual({
-						projectSlug: "alpha",
 						sessionId: "s1",
 						resumeFromSequence: 12,
 						resumeBase: { sequence: 11 },
@@ -414,7 +364,6 @@ describe("client-side resume at the shared client", () => {
 							// test is the one it really reached.
 							yield* links.stream.drop;
 							expect((yield* links.stream.takeRequest).payload).toEqual({
-								projectSlug: "alpha",
 								sessionId: "s1",
 								resumeFromSequence: point.resumeFrom,
 								resumeBase: { sequence: 11 },
@@ -464,7 +413,6 @@ describe("client-side resume at the shared client", () => {
 
 						const first = yield* links.stream.takeRequest;
 						expect(first.payload).toEqual({
-							projectSlug: "alpha",
 							sessionId: "s1",
 							resumeFromSequence: 7,
 						});
@@ -493,9 +441,7 @@ describe("client-side resume at the shared client", () => {
 					yield* links.control.takeRequest;
 					yield* links.control.drop;
 
-					expect((yield* links.control.takeRequest).payload).toEqual({
-						projectSlug: "alpha",
-					});
+					expect((yield* links.control.takeRequest).payload).toEqual({});
 
 					// No cursor means no replay to close, so this re-issue is a cold
 					// start and the answer is a fresh snapshot — scripted here, since
@@ -530,11 +476,16 @@ describe("client-side resume at the shared client", () => {
 					yield* links.stream.takeRequest;
 					yield* links.stream.failRequest("no such session");
 
-					const exit = yield* ended.await;
+					const exit = yield* Fiber.await(ended);
 					expect(Exit.isFailure(exit)).toBe(true);
 					expect(exit).toMatchObject({
 						cause: {
-							error: { _tag: "WsRpcError", message: "no such session" },
+							reasons: [
+								{
+									_tag: "Fail",
+									error: { _tag: "WsRpcError", message: "no such session" },
+								},
+							],
 						},
 					});
 					expect(yield* links.stream.requestCount).toBe(1);
@@ -568,9 +519,11 @@ describe("client-side resume at the shared client", () => {
 			expect(yield* Ref.get(issued)).toBe(1);
 			expect(Exit.isFailure(exit)).toBe(true);
 			if (Exit.isFailure(exit)) {
-				expect(Chunk.toReadonlyArray(Cause.defects(exit.cause))).toContain(
-					"the projector blew up",
-				);
+				expect(
+					exit.cause.reasons
+						.filter(Cause.isDieReason)
+						.map((reason) => reason.defect),
+				).toContain("the projector blew up");
 			}
 		}),
 	);
@@ -589,11 +542,13 @@ describe("client-side resume at the shared client", () => {
 							Ref.update(issued, (n) => n + 1),
 							Stream.fromChannel(
 								Channel.failCause(
-									Cause.sequential(
+									Cause.combine(
 										Cause.fail(
 											new RpcClientError({
-												reason: "Protocol",
-												message: "socket is down",
+												reason: new RpcClientDefect({
+													message: "socket is down",
+													cause: undefined,
+												}),
 											}),
 										),
 										Cause.die("the projector blew up"),
@@ -608,9 +563,11 @@ describe("client-side resume at the shared client", () => {
 			expect(yield* Ref.get(issued)).toBe(1);
 			expect(Exit.isFailure(exit)).toBe(true);
 			if (Exit.isFailure(exit)) {
-				expect(Chunk.toReadonlyArray(Cause.defects(exit.cause))).toContain(
-					"the projector blew up",
-				);
+				expect(
+					exit.cause.reasons
+						.filter(Cause.isDieReason)
+						.map((reason) => reason.defect),
+				).toContain("the projector blew up");
 			}
 		}),
 	);
@@ -641,7 +598,6 @@ describe("client-side resume at the shared client", () => {
 
 						yield* TestClock.adjust("10 millis");
 						expect((yield* links.stream.takeRequest).payload).toEqual({
-							projectSlug: "alpha",
 							sessionId: "s1",
 						});
 					}),
@@ -683,7 +639,6 @@ describe("client-side resume at the shared client", () => {
 					});
 					yield* links.control.drop;
 					expect((yield* links.control.takeRequest).payload).toEqual({
-						projectSlug: "alpha",
 						resumeFromSequence: 9,
 					});
 
@@ -721,7 +676,7 @@ describe("client-side resume at the shared client", () => {
 						Stream.runForEach(
 							sockets.subscriptions.sessionDetail({ sessionId: "s1" }),
 							(item) =>
-								Effect.zipRight(
+								Effect.andThen(
 									Queue.offer(received, item),
 									Deferred.await(release),
 								),
@@ -761,7 +716,7 @@ describe("client-side resume at the shared client", () => {
 		withSockets((sockets, links) =>
 			Effect.scoped(
 				Effect.gen(function* () {
-					const consumer = yield* Effect.fork(
+					const consumer = yield* Effect.forkChild(
 						Stream.runForEach(
 							sockets.subscriptions.sessionDetail({ sessionId: "s1" }),
 							() => Effect.void,
@@ -800,7 +755,7 @@ describe("client-side resume at the shared client", () => {
 					// A daemon, so that a wrong answer below fails on its assertion
 					// rather than wedging the test at scope close: an uninterruptible
 					// fiber that re-issues has nothing left to interrupt it with.
-					const consumer = yield* Effect.forkDaemon(
+					const consumer = yield* Effect.forkDetach(
 						Effect.scoped(
 							Effect.gen(function* () {
 								const pull = yield* Stream.toPull(
@@ -835,7 +790,7 @@ describe("client-side resume at the shared client", () => {
 
 					// Cancel while the consumer cannot take it, then kill the socket
 					// under it, so the two arrive at the handler together.
-					yield* Effect.fork(Fiber.interrupt(consumer));
+					yield* Effect.forkChild(Fiber.interrupt(consumer));
 					yield* Effect.sleep("20 millis");
 					yield* links.stream.tearDown;
 					yield* Deferred.succeed(release, undefined);

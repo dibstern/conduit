@@ -1,7 +1,12 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
-import type { Fragment } from "@effect/sql/Statement";
-import { Context, Data, Effect, Option, Schema } from "effect";
+import { Context, Data, Effect, Option, Ref, Schema } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
+import type { Fragment } from "effect/sql/Statement";
+import type { SessionScope } from "../../contracts/session-scope.js";
+import { SessionRollupProjects } from "./session-rollup-projects.js";
+
+export type { SessionScope } from "../../contracts/session-scope.js";
+
 import {
 	LimitRecoverySchema,
 	SessionResumeSchema,
@@ -65,10 +70,10 @@ type SessionProjection = Omit<SessionInfo, "projectSlug" | "accountId">;
 
 const isSessionPermissionMode = Schema.is(SessionPermissionModeSchema);
 const decodeGoalState = Schema.decodeUnknownSync(
-	Schema.parseJson(SessionGoalChangedPayloadSchema),
+	Schema.fromJsonString(SessionGoalChangedPayloadSchema),
 );
 const decodeTurnWaits = Schema.decodeUnknownSync(
-	Schema.parseJson(
+	Schema.fromJsonString(
 		Schema.Array(
 			Schema.Struct({
 				id: Schema.String,
@@ -135,12 +140,14 @@ export const sessionRowsToSessionInfoList = (
 		readonly now?: number;
 		readonly statuses?: Readonly<Record<string, { type: string }>>;
 		readonly parentMap?: ReadonlyMap<string, string>;
+		/** Contribution owners; the parent map still includes the whole family. */
+		readonly contributingSessionIds?: ReadonlySet<string> | undefined;
 		readonly sideThreadIds?: ReadonlySet<string>;
 		/** Unread descendants, stopping at each Side Thread's edge to its parent. */
 		readonly unreadSessionIds?: ReadonlySet<string>;
 		readonly pendingQuestionCounts?: ReadonlyMap<string, number>;
 		readonly pendingPermissionCounts?: ReadonlyMap<string, number>;
-		readonly hintDismissals?: ReadonlyMap<string, number>;
+		readonly hintDismissals?: ReadonlyMap<string, number> | undefined;
 		readonly backgroundOf?: (
 			sessionId: string,
 		) => SessionBackground | undefined;
@@ -175,16 +182,20 @@ export const sessionRowsToSessionInfoList = (
 		const rowStatuses = new Map(rows.map((row) => [row.id, row.status]));
 		const members = new Set([...rowStatuses.keys(), ...opts.parentMap.keys()]);
 		const backgroundChildren = new Set(
-			[...new Set([...members, ...opts.parentMap.values()])].flatMap(
-				(id) =>
-					opts
-						.backgroundOf?.(id)
-						?.tasks.flatMap((task) =>
-							task.childSessionId ? [task.childSessionId] : [],
-						) ?? [],
-			),
+			[...new Set([...members, ...opts.parentMap.values()])]
+				.filter((id) => opts.contributingSessionIds?.has(id) ?? true)
+				.flatMap(
+					(id) =>
+						opts
+							.backgroundOf?.(id)
+							?.tasks.flatMap((task) =>
+								task.childSessionId ? [task.childSessionId] : [],
+							) ?? [],
+				),
 		);
 		for (const id of members) {
+			if (opts.contributingSessionIds && !opts.contributingSessionIds.has(id))
+				continue;
 			let root = id;
 			let activityRoot: string | undefined;
 			const seen = new Set<string>();
@@ -251,6 +262,9 @@ export const sessionRowsToSessionInfoList = (
 					: "idle",
 			createdAt: row.created_at,
 			updatedAt: row.updated_at,
+			...(row.last_user_message_at == null
+				? {}
+				: { lastUserMessageAt: row.last_user_message_at }),
 			messageCount: 0,
 			...(row.workspace_hint == null ||
 			opts.hintDismissals?.get(row.id) === row.workspace_hint_sequence
@@ -260,7 +274,7 @@ export const sessionRowsToSessionInfoList = (
 				? {}
 				: {
 						workspace: Schema.decodeUnknownSync(
-							Schema.parseJson(SessionWorkspaceSchema),
+							Schema.fromJsonString(SessionWorkspaceSchema),
 						)(row.workspace),
 					}),
 			workspaceMismatch: row.claude_worktree_state
@@ -280,6 +294,7 @@ export const sessionRowsToSessionInfoList = (
 				? { contextWindow: row.context_window }
 				: {}),
 			...(parentID ? { parentID } : {}),
+			...(row.forked_from != null ? { forkedFrom: row.forked_from } : {}),
 			...(row.side_thread === 1 ? { sideThread: true } : {}),
 			...(row.fork_point_event ? { forkMessageId: row.fork_point_event } : {}),
 			...(row.fork_point_timestamp != null
@@ -303,17 +318,18 @@ export const sessionRowsToSessionInfoList = (
 				? { lastTurnEndInputId: row.last_turn_end_input_id }
 				: {}),
 			...(row.settled_at !== null ? { settledAt: row.settled_at } : {}),
+			...(row.archived_at != null ? { archivedAt: row.archived_at } : {}),
 			limitRecovery:
 				row.limit_recovery == null
 					? null
-					: Schema.decodeUnknownSync(Schema.parseJson(LimitRecoverySchema))(
-							row.limit_recovery,
-						),
+					: Schema.decodeUnknownSync(
+							Schema.fromJsonString(LimitRecoverySchema),
+						)(row.limit_recovery),
 			resumes:
 				row.resumes == null
 					? []
 					: Schema.decodeUnknownSync(
-							Schema.parseJson(Schema.Array(SessionResumeSchema)),
+							Schema.fromJsonString(Schema.Array(SessionResumeSchema)),
 						)(row.resumes),
 			...(row.settled_automatically === 1
 				? { settledAutomatically: true }
@@ -329,7 +345,7 @@ export const sessionRowsToSessionInfoList = (
 };
 
 const decodeSidebarRow = Schema.decodeUnknownSync(
-	Schema.parseJson(SidebarRowSchema),
+	Schema.fromJsonString(SidebarRowSchema),
 );
 
 /**
@@ -461,17 +477,19 @@ export interface ReadQueryEffect {
 		sessionId: string,
 	) => Effect.Effect<GoalDetails, ReadQueryEffectError | SqlError>;
 
-	readonly getAllSessionStatuses: () => Effect.Effect<
-		Record<string, string>,
-		ReadQueryEffectError | SqlError
-	>;
+	readonly getAllSessionStatuses: (
+		scope: SessionScope,
+	) => Effect.Effect<Record<string, string>, ReadQueryEffectError | SqlError>;
 
-	readonly getAllSessionStatusesWithProviders: () => Effect.Effect<
+	readonly getAllSessionStatusesWithProviders: (
+		scope: SessionScope,
+	) => Effect.Effect<
 		readonly Pick<SessionRow, "id" | "status" | "provider">[],
 		ReadQueryEffectError | SqlError
 	>;
 
 	readonly getSessionsForReconciliation: (
+		scope: SessionScope,
 		reportedIds: readonly string[],
 	) => Effect.Effect<
 		readonly Pick<SessionRow, "id" | "status" | "updated_at">[],
@@ -480,38 +498,56 @@ export interface ReadQueryEffect {
 
 	/** Busy children launched by a task while their parent has no turn in
 	 * flight, with the task id and the session whose Claude runtime lists it. */
-	readonly getStrandedChildren: () => Effect.Effect<
+	readonly getStrandedChildren: (
+		scope: SessionScope,
+	) => Effect.Effect<
 		readonly { id: string; task_id: string; owner_id: string }[],
 		ReadQueryEffectError | SqlError
 	>;
 
-	readonly listSessions: (opts?: {
-		roots?: boolean;
-		limit?: number;
-		titleQuery?: string;
-		before?: { updatedAt: number; id: string };
-	}) => Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError>;
+	readonly listSessions: (
+		scope: SessionScope,
+		opts?: {
+			roots?: boolean;
+			limit?: number;
+			titleQuery?: string;
+			excludeArchived?: boolean;
+			archivedOnly?: boolean;
+			orderColumn?: "updated_at" | "archived_at";
+			before?: { at: number; id: string };
+		},
+	) => Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError>;
 
-	readonly listSessionInfos: (opts?: {
-		roots?: boolean;
-		limit?: number;
-		titleQuery?: string;
-		before?: { updatedAt: number; id: string };
-		statuses?: Readonly<Record<string, { type: string }>>;
-		backgroundOf?: (sessionId: string) => SessionBackground | undefined;
-	}) => Effect.Effect<
+	readonly listSessionInfos: (
+		scope: SessionScope,
+		opts?: {
+			roots?: boolean;
+			limit?: number;
+			titleQuery?: string;
+			excludeArchived?: boolean;
+			archivedOnly?: boolean;
+			orderColumn?: "updated_at" | "archived_at";
+			before?: { at: number; id: string };
+			statuses?: Readonly<Record<string, { type: string }>>;
+			backgroundOf?: (sessionId: string) => SessionBackground | undefined;
+			hintDismissals?: ReadonlyMap<string, number>;
+		},
+	) => Effect.Effect<
 		readonly (SessionProjection & { readonly updatedAt: number })[],
 		ReadQueryEffectError | SqlError
 	>;
-	readonly listSessionGitRefreshTargets: (options: {
-		readonly sessionIds: readonly string[];
-		readonly all: boolean;
-	}) => Effect.Effect<
+	readonly listSessionGitRefreshTargets: (
+		scope: SessionScope,
+		options: {
+			readonly sessionIds: readonly string[];
+			readonly all: boolean;
+		},
+	) => Effect.Effect<
 		readonly Pick<SessionInfo, "id" | "workspace">[],
 		ReadQueryEffectError | SqlError
 	>;
 
-	readonly getSessionLineage: () => Effect.Effect<
+	readonly getSessionLineage: (scope: SessionScope) => Effect.Effect<
 		{
 			rows: readonly {
 				id: string;
@@ -524,7 +560,9 @@ export interface ReadQueryEffect {
 		ReadQueryEffectError | SqlError
 	>;
 
-	readonly countPendingApprovalsBySession: () => Effect.Effect<
+	readonly countPendingApprovalsBySession: (
+		scope: SessionScope,
+	) => Effect.Effect<
 		readonly PendingApprovalCountRow[],
 		ReadQueryEffectError | SqlError
 	>;
@@ -534,14 +572,19 @@ export interface ReadQueryEffect {
 	 * approval; a windowed read is every approval that moved inside it,
 	 * resolved ones included, because a resolution is a removal to announce.
 	 */
-	readonly readPendingApprovals: (range?: {
-		readonly after?: number;
-		readonly through?: number;
-	}) => Effect.Effect<
+	readonly readPendingApprovals: (
+		scope: SessionScope,
+		range?: {
+			readonly after?: number;
+			readonly through?: number;
+		},
+	) => Effect.Effect<
 		{ readonly rows: readonly PendingApprovalRow[]; readonly version: number },
 		ReadQueryEffectError | SqlError
 	>;
-	readonly listPendingClaudeQuestionTools?: () => Effect.Effect<
+	readonly listPendingClaudeQuestionTools: (
+		scope: SessionScope,
+	) => Effect.Effect<
 		readonly PendingClaudeQuestionToolRow[],
 		ReadQueryEffectError | SqlError
 	>;
@@ -593,23 +636,27 @@ export interface ReadQueryEffect {
 	 * those rows as seen will then discard that advance, taking its removals
 	 * with it. No later query can recover them (§8).
 	 */
-	readonly readSessionList: (range?: {
-		readonly after?: number;
-		readonly through?: number;
-		/**
-		 * Only the family (root and descendants) of this session. Without it,
-		 * the sidebar: one row per top-level session, its family rolled up.
-		 */
-		readonly familyOf?: string;
-		/** Bound a family base to this member's view; ignored for windows. */
-		readonly viewed?: string;
-		/** In-memory liveness the row cannot carry; see announceBackgroundWork. */
-		readonly backgroundOf?: (
-			sessionId: string,
-		) => SessionBackground | undefined;
-		/** Also list every sidebar row, for a resume checksum. */
-		readonly listing?: boolean;
-	}) => Effect.Effect<
+	readonly readSessionList: (
+		scope: SessionScope,
+		range?: {
+			readonly after?: number;
+			readonly through?: number;
+			/**
+			 * Only the family (root and descendants) of this session. Without it,
+			 * the sidebar: one row per top-level session, its family rolled up.
+			 */
+			readonly familyOf?: string;
+			/** Bound a family base to this member's view; ignored for windows. */
+			readonly viewed?: string;
+			readonly hintDismissals?: ReadonlyMap<string, number>;
+			/** In-memory liveness the row cannot carry; see announceBackgroundWork. */
+			readonly backgroundOf?: (
+				sessionId: string,
+			) => SessionBackground | undefined;
+			/** Also list every sidebar row, for a resume checksum. */
+			readonly listing?: boolean;
+		},
+	) => Effect.Effect<
 		{
 			readonly rows: readonly {
 				readonly item: SessionProjection;
@@ -755,14 +802,14 @@ export interface PendingInputRow {
 	readonly version: number;
 }
 
-const decodeInputRequest = Schema.decodeUnknown(
-	Schema.parseJson(InputRequestSchema),
+const decodeInputRequest = Schema.decodeUnknownEffect(
+	Schema.fromJsonString(InputRequestSchema),
 );
 
-export class ReadQueryEffectTag extends Context.Tag("ReadQueryEffect")<
+export class ReadQueryEffectTag extends Context.Service<
 	ReadQueryEffectTag,
 	ReadQueryEffect
->() {}
+>()("ReadQueryEffect") {}
 
 type MessageWithTurnModelRow = MessageRow & {
 	turn_cost: number | null;
@@ -892,6 +939,7 @@ function groupMessagesWithPartsAndTurnModels(
 
 export const makeReadQueryEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+	const projects = yield* SessionRollupProjects;
 	// The provider may reconcile streamed timestamps while a rewind is pending.
 	// Visibility follows the transcript's current (created_at, id) ordering.
 	const pendingRewindHides = (table: "messages" | "m" = "messages") => sql`
@@ -926,13 +974,18 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			ORDER BY created_at ASC, id ASC
 		) pa) AS turn_waits`;
 
-	// A part's stored tool result as text: a JSON string decoded, anything
+	const fullToolResult = sql`
+		CASE WHEN mp.result_event_seq IS NULL THEN mp.result
+			ELSE (SELECT e.data -> '$.result' FROM events e
+				WHERE e.sequence = mp.result_event_seq) END`;
+
+	// A part's full tool result as text: a JSON string decoded, anything
 	// else as stored. Nested so json_type never sees malformed JSON.
 	const toolOutput = sql`
-		CASE WHEN json_valid(mp.result)
-			THEN CASE WHEN json_type(mp.result) = 'text'
-				THEN json_extract(mp.result, '$') ELSE mp.result END
-			ELSE mp.result END`;
+		CASE WHEN json_valid(${fullToolResult})
+			THEN CASE WHEN json_type(${fullToolResult}) = 'text'
+				THEN json_extract(${fullToolResult}, '$') ELSE ${fullToolResult} END
+			ELSE ${fullToolResult} END`;
 
 	// Parts as the browser opens them, by the rule tool-wire-projection.ts
 	// owns: a tool output over the budget comes back as the JSON of its first
@@ -943,14 +996,16 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	const previewParts = (source: Fragment) => sql<MessagePartRow>`
 		SELECT id, message_id, type, text, tool_name, call_id, input, metadata,
 			duration, status, sort_order, created_at, updated_at, version,
-			CASE WHEN length(output) > ${PREVIEW_CODE_POINTS}
+			CASE WHEN result_event_seq IS NOT NULL THEN result
+				WHEN length(output) > ${PREVIEW_CODE_POINTS}
 				THEN json_quote(substr(output, 1, ${PREVIEW_CODE_POINTS}))
 				ELSE result END AS result,
-			CASE WHEN length(output) > ${PREVIEW_CODE_POINTS}
+			CASE WHEN result_event_seq IS NOT NULL THEN result_bytes
+				WHEN length(output) > ${PREVIEW_CODE_POINTS}
 				THEN length(CAST(output AS BLOB)) END AS result_bytes
 		FROM (
 			SELECT mp.*,
-				CASE WHEN mp.type = 'tool'
+				CASE WHEN mp.result_event_seq IS NULL AND mp.type = 'tool'
 					AND mp.tool_name NOT IN ${sql.in(NEVER_CUT_TOOL_NAMES)}
 					AND length(mp.result) > ${PREVIEW_CODE_POINTS}
 				THEN ${toolOutput} END AS output
@@ -1050,9 +1105,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
-	const getAllSessionStatusesWithProviders = () =>
+	const getAllSessionStatusesWithProviders = (scope: SessionScope) =>
 		sql<Pick<SessionRow, "id" | "status" | "provider">>`
-			SELECT id, status, provider FROM sessions`.pipe(
+			SELECT id, status, provider FROM sessions
+			WHERE project_id IN ${sql.in(scope.projectIds)}`.pipe(
 			Effect.mapError(
 				(cause) =>
 					new ReadQueryEffectError({
@@ -1062,13 +1118,12 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
-	const getAllSessionStatuses = (): Effect.Effect<
-		Record<string, string>,
-		ReadQueryEffectError | SqlError
-	> =>
+	const getAllSessionStatuses = (
+		scope: SessionScope,
+	): Effect.Effect<Record<string, string>, ReadQueryEffectError | SqlError> =>
 		Effect.gen(function* () {
 			const rows = yield* sql<{ id: string; status: string }>`
-				SELECT id, status FROM sessions`;
+				SELECT id, status FROM sessions WHERE project_id IN ${sql.in(scope.projectIds)}`;
 			const result: Record<string, string> = {};
 			for (const row of rows) {
 				result[row.id] = row.status;
@@ -1085,11 +1140,14 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
-	const getSessionsForReconciliation = (reportedIds: readonly string[]) =>
+	const getSessionsForReconciliation = (
+		scope: SessionScope,
+		reportedIds: readonly string[],
+	) =>
 		sql<Pick<SessionRow, "id" | "status" | "updated_at">>`
 			SELECT id, status, updated_at FROM sessions
-			WHERE status != 'idle'
-				OR id IN (SELECT value FROM json_each(${JSON.stringify(reportedIds)}))
+			WHERE project_id IN ${sql.in(scope.projectIds)} AND (status != 'idle'
+				OR id IN (SELECT value FROM json_each(${JSON.stringify(reportedIds)})))
 			ORDER BY updated_at DESC, id DESC`.pipe(
 			Effect.mapError(
 				(cause) =>
@@ -1103,7 +1161,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	// The link is found through the parent's own messages, which are indexed;
 	// CROSS JOIN pins that order, as the planner otherwise scans every part. SDK subagents share their
 	// parent's runtime, so the owner climbs through them; forks own theirs.
-	const getStrandedChildren = () =>
+	const getStrandedChildren = (scope: SessionScope) =>
 		sql<{ id: string; task_id: string; owner_id: string }>`
 			WITH RECURSIVE stranded AS (
 				SELECT c.id, c.parent_id AS owner_id,
@@ -1113,6 +1171,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				CROSS JOIN messages m
 				CROSS JOIN message_parts mp
 				WHERE c.status IN ('busy', 'retry')
+					AND c.project_id IN ${sql.in(scope.projectIds)}
+					AND parent.project_id IN ${sql.in(scope.projectIds)}
 					AND parent.id = c.parent_id AND parent.status = 'idle'
 					AND m.session_id = c.parent_id AND mp.message_id = m.id
 					AND json_valid(mp.metadata)
@@ -1153,14 +1213,27 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	// events into a guess. `pending_approvals` is read-only here: the approval
 	// projector owns those rows, and both question and permission requests land
 	// in it, so the counts cannot drift from what the app is actually blocked on.
-	const listSessions = (opts?: {
-		roots?: boolean;
-		limit?: number;
-		titleQuery?: string;
-		before?: { updatedAt: number; id: string };
-	}): Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError> =>
+	const listSessions = (
+		scope: SessionScope,
+		opts?: {
+			roots?: boolean;
+			limit?: number;
+			titleQuery?: string;
+			excludeArchived?: boolean;
+			archivedOnly?: boolean;
+			orderColumn?: "updated_at" | "archived_at";
+			before?: { at: number; id: string };
+		},
+	): Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError> =>
 		Effect.gen(function* () {
-			const predicates = [];
+			const predicates = [sql`project_id IN ${sql.in(scope.projectIds)}`];
+			// Archive state lives on the root and hides the whole family.
+			if (opts?.excludeArchived)
+				predicates.push(
+					sql`archived_at IS NULL AND NOT EXISTS (SELECT 1 FROM sessions AS archived_root WHERE archived_root.id = sessions.root_id AND archived_root.archived_at IS NOT NULL)`,
+				);
+			if (opts?.archivedOnly) predicates.push(sql`archived_at IS NOT NULL`);
+			const orderColumn = sql(opts?.orderColumn ?? "updated_at");
 			if (opts?.roots) predicates.push(sql`parent_id IS NULL`);
 			if (opts?.titleQuery !== undefined) {
 				const escapedQuery = opts.titleQuery.replace(/[\\%_]/g, "\\$&");
@@ -1170,7 +1243,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			}
 			if (opts?.before !== undefined) {
 				predicates.push(
-					sql`(updated_at < ${opts.before.updatedAt} OR (updated_at = ${opts.before.updatedAt} AND id < ${opts.before.id}))`,
+					sql`(${orderColumn} < ${opts.before.at} OR (${orderColumn} = ${opts.before.at} AND id < ${opts.before.id}))`,
 				);
 			}
 			const limit =
@@ -1182,7 +1255,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			return yield* sql<SessionRow>`
 				SELECT * FROM sessions
 				WHERE ${sql.and(predicates)}
-				ORDER BY updated_at DESC, id DESC
+				ORDER BY ${orderColumn} DESC, id DESC
 				${limit}`;
 		}).pipe(
 			Effect.mapError((e) =>
@@ -1195,7 +1268,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
-	const getSessionLineage = () =>
+	const getSessionLineage = (scope: SessionScope) =>
 		Effect.gen(function* () {
 			const rows = yield* sql<{
 				id: string;
@@ -1203,9 +1276,11 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				unread: number;
 				side_thread: number;
 			}>`
-				SELECT id, parent_id, unread, side_thread FROM sessions`;
+				SELECT id, parent_id, unread, side_thread FROM sessions
+				WHERE project_id IN ${sql.in(scope.projectIds)}`;
 			const counts = yield* sql<{ count: number }>`
-				SELECT COUNT(*) AS count FROM sessions`;
+				SELECT COUNT(*) AS count FROM sessions
+				WHERE project_id IN ${sql.in(scope.projectIds)}`;
 			return { rows, count: counts[0]?.count ?? 0 };
 		}).pipe(
 			Effect.mapError(
@@ -1215,7 +1290,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		);
 
 	const listSessionGitRefreshTargets: ReadQueryEffect["listSessionGitRefreshTargets"] =
-		({ sessionIds, all }) =>
+		(scope, { sessionIds, all }) =>
 			Effect.gen(function* () {
 				const requested = sql`id IN (SELECT value FROM json_each(${JSON.stringify(sessionIds)}))`;
 				const targets = all
@@ -1224,7 +1299,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					: requested;
 				const rows = yield* sql<Pick<SessionRow, "id" | "workspace">>`
 					SELECT id, workspace FROM sessions
-					WHERE ${targets}
+					WHERE project_id IN ${sql.in(scope.projectIds)} AND ${targets}
 					ORDER BY updated_at DESC, id DESC`;
 				return rows.map((row) => ({
 					id: row.id,
@@ -1232,7 +1307,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						? {}
 						: {
 								workspace: Schema.decodeUnknownSync(
-									Schema.parseJson(SessionWorkspaceSchema),
+									Schema.fromJsonString(SessionWorkspaceSchema),
 								)(row.workspace),
 							}),
 				}));
@@ -1246,7 +1321,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				),
 			);
 
-	const countPendingApprovalsBySession = (): Effect.Effect<
+	const countPendingApprovalsBySession = (
+		scope: SessionScope,
+		projectIds: readonly string[] = scope.projectIds,
+	): Effect.Effect<
 		readonly PendingApprovalCountRow[],
 		ReadQueryEffectError | SqlError
 	> =>
@@ -1255,6 +1333,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				SELECT session_id, type, COUNT(*) AS pending_count
 				FROM pending_approvals
 				WHERE status = 'pending'
+					AND session_id IN (SELECT id FROM sessions WHERE project_id IN ${sql.in(projectIds)})
 				GROUP BY session_id, type`;
 		}).pipe(
 			Effect.mapError((e) =>
@@ -1267,9 +1346,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
-	const listSessionInfos: ReadQueryEffect["listSessionInfos"] = (opts) =>
+	const listSessionInfos: ReadQueryEffect["listSessionInfos"] = (scope, opts) =>
 		Effect.gen(function* () {
-			const rows = yield* listSessions(opts);
+			const rows = yield* listSessions(scope, opts);
+			const projectIds = projects ? yield* Ref.get(projects) : scope.projectIds;
 			// Roll-ups (busy, unread, pending counts) only need the listed rows and
 			// their descendants. Reading lineage and status for every session made
 			// each page cost a full scan of the store, twice.
@@ -1280,14 +1360,15 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					status: string;
 					unread: number;
 					side_thread: number;
+					project_id: string | null;
 				}>`
 					WITH RECURSIVE family(id) AS (
 						SELECT value FROM json_each(${JSON.stringify(rows.map((row) => row.id))})
 						UNION
 						SELECT child.id FROM sessions child JOIN family ON child.parent_id = family.id
 					)
-					SELECT id, parent_id, status, unread, side_thread FROM sessions JOIN family USING (id)`,
-				countPendingApprovalsBySession(),
+					SELECT id, parent_id, status, unread, side_thread, project_id FROM sessions JOIN family USING (id)`,
+				countPendingApprovalsBySession(scope, projectIds),
 			]).pipe(
 				Effect.mapError((cause) =>
 					cause instanceof ReadQueryEffectError
@@ -1299,7 +1380,16 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				),
 			);
 			const pending = pendingApprovalCountsByType(approvals);
+			const registered = new Set(projectIds);
 			return sessionRowsToSessionInfoList(rows, {
+				contributingSessionIds: new Set(
+					family
+						.filter(
+							(row) =>
+								row.project_id !== null && registered.has(row.project_id),
+						)
+						.map(({ id }) => id),
+				),
 				sideThreadIds: new Set(
 					family.flatMap((row) => (row.side_thread === 1 ? [row.id] : [])),
 				),
@@ -1319,16 +1409,19 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				},
 				pendingQuestionCounts: pending.questions,
 				pendingPermissionCounts: pending.permissions,
-				...(hintDismissals && { hintDismissals }),
+				hintDismissals: opts?.hintDismissals ?? hintDismissals,
 				...(opts?.backgroundOf && {
 					backgroundOf: opts.backgroundOf,
 				}),
 			});
 		});
 
-	const listPendingClaudeQuestionTools = () =>
+	const listPendingClaudeQuestionTools = (scope: SessionScope) =>
 		sql
-			.unsafe<PendingClaudeQuestionToolRow>(pendingClaudeQuestionToolsQuery)
+			.unsafe<PendingClaudeQuestionToolRow>(
+				`${pendingClaudeQuestionToolsQuery} AND s.project_id IN (SELECT value FROM json_each(?))`,
+				[JSON.stringify(scope.projectIds)],
+			)
 			.pipe(
 				Effect.mapError(
 					(cause) =>
@@ -1383,7 +1476,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					WHERE session_id = ${sessionId}
 					ORDER BY created_at ASC, id ASC
 				)
-				SELECT mp.* FROM message_parts mp
+				SELECT mp.*, ${fullToolResult} AS result, NULL AS result_bytes
+				FROM message_parts mp
 				JOIN target_messages tm ON mp.message_id = tm.id
 				ORDER BY mp.message_id, mp.sort_order`;
 
@@ -1700,9 +1794,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							page.length === 0
 								? []
 								: yield* sql<MessagePartRow>`
-							SELECT * FROM message_parts
-							WHERE message_id IN ${sql.in(page.map((message) => message.id))}
-							ORDER BY message_id, sort_order`;
+							SELECT mp.*, ${fullToolResult} AS result, NULL AS result_bytes
+							FROM message_parts mp
+							WHERE mp.message_id IN ${sql.in(page.map((message) => message.id))}
+							ORDER BY mp.message_id, mp.sort_order`;
 						messages.push(
 							...groupMessagesWithPartsAndTurnModels(fullPage, parts),
 						);
@@ -1727,16 +1822,20 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				),
 			);
 
-	const readSessionList = (range?: {
-		readonly after?: number;
-		readonly through?: number;
-		readonly familyOf?: string;
-		readonly viewed?: string;
-		readonly backgroundOf?: (
-			sessionId: string,
-		) => SessionBackground | undefined;
-		readonly listing?: boolean;
-	}): Effect.Effect<
+	const readSessionList = (
+		scope: SessionScope,
+		range?: {
+			readonly after?: number;
+			readonly through?: number;
+			readonly familyOf?: string;
+			readonly viewed?: string;
+			readonly hintDismissals?: ReadonlyMap<string, number>;
+			readonly backgroundOf?: (
+				sessionId: string,
+			) => SessionBackground | undefined;
+			readonly listing?: boolean;
+		},
+	): Effect.Effect<
 		{
 			readonly rows: readonly {
 				readonly item: SessionProjection;
@@ -1777,6 +1876,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							FROM session_sidebar LEFT JOIN sessions
 								ON sessions.id = session_sidebar.session_id
 							WHERE session_sidebar.version > ${floor} AND session_sidebar.version <= ${ceiling}
+							AND session_sidebar.project_id IN ${sql.in(scope.projectIds)}
 							AND (row IS NOT NULL OR ${ranged ? 1 : 0})
 							ORDER BY last_activity DESC, session_id DESC`;
 						const removedSince = ranged
@@ -1826,8 +1926,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 										item: {
 											...sidebarItem(sidebar, range?.backgroundOf, busyMembers),
 											workspaceHint:
-												hintDismissals?.get(sidebar.session.id) ===
-												workspace_hint_sequence
+												(range?.hintDismissals ?? hintDismissals)?.get(
+													sidebar.session.id,
+												) === workspace_hint_sequence
 													? undefined
 													: sidebar.session.workspaceHint,
 										},
@@ -1853,7 +1954,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							...(listable && {
 								listing: (yield* sql<{ session_id: string; version: number }>`
 									SELECT session_id, version FROM session_sidebar
-									WHERE row IS NOT NULL`).map(
+										WHERE row IS NOT NULL AND project_id IN ${sql.in(scope.projectIds)}`).map(
 									({ session_id, version }) => [session_id, version] as const,
 								),
 							}),
@@ -1867,8 +1968,13 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					let rows = bounded
 						? []
 						: yield* sql.unsafe<SessionRow & { effective_version: number }>(
-								sessionFamilyWindowQuery,
-								[range.familyOf, floor, ceiling],
+								`SELECT * FROM (${sessionFamilyWindowQuery}) WHERE project_id IN (SELECT value FROM json_each(?))`,
+								[
+									range.familyOf,
+									floor,
+									ceiling,
+									JSON.stringify(scope.projectIds),
+								],
 							);
 					// A window no member moved in costs the window query alone. The
 					// roll-ups (busy, unread, pending counts) read only the family: a
@@ -1881,7 +1987,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						unread: number;
 						side_thread: number;
 						version: number;
-					}>(sessionFamilyMembersQuery, [range.familyOf]);
+					}>(
+						`${sessionFamilyMembersQuery} WHERE project_id IN (SELECT value FROM json_each(?))`,
+						[range.familyOf, JSON.stringify(scope.projectIds)],
+					);
 					const approvals = yield* sql<PendingApprovalCountRow>`
 						SELECT session_id, type, COUNT(*) AS pending_count
 						FROM pending_approvals
@@ -1957,7 +2066,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						),
 						pendingQuestionCounts: pending.questions,
 						pendingPermissionCounts: pending.permissions,
-						...(hintDismissals && { hintDismissals }),
+						hintDismissals: range?.hintDismissals ?? hintDismissals,
 						...(range?.backgroundOf && {
 							backgroundOf: range.backgroundOf,
 						}),
@@ -1989,6 +2098,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			);
 
 	const readPendingApprovals: ReadQueryEffect["readPendingApprovals"] = (
+		scope,
 		range,
 	) =>
 		sql
@@ -2003,11 +2113,13 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								SELECT id, session_id, type, status, tool_name, input, details, version
 								FROM pending_approvals
 								WHERE status = 'pending'
+									AND session_id IN (SELECT id FROM sessions WHERE project_id IN ${sql.in(scope.projectIds)})
 								ORDER BY created_at, id`
 							: yield* sql<PendingApprovalRow>`
 								SELECT id, session_id, type, status, tool_name, input, details, version
 								FROM pending_approvals
 								WHERE version > ${floor} AND version <= ${ceiling}
+									AND session_id IN (SELECT id FROM sessions WHERE project_id IN ${sql.in(scope.projectIds)})
 								ORDER BY version, created_at, id`;
 					return { rows, version };
 				}),
@@ -2213,6 +2325,18 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							WHERE session_id = ${sessionId} AND effect_type = 'send_turn'),
 						(SELECT MAX(requested_at) FROM turns WHERE session_id = ${sessionId}),
 						0))
+					OR EXISTS (SELECT 1 FROM events requeued WHERE session_id = ${sessionId}
+						AND type = 'input.requeued' AND json_extract(data, '$.reason') = 'failed'
+						AND sequence = (SELECT MIN(first.sequence) FROM events first
+							WHERE first.session_id = ${sessionId} AND first.type = 'input.requeued'
+							AND json_extract(first.data, '$.sentSequence') = json_extract(requeued.data, '$.sentSequence'))
+						AND json_extract(data, '$.sentSequence') = (SELECT MAX(sent.sequence) FROM events sent
+							WHERE sent.session_id = ${sessionId} AND sent.type = 'input.sent'
+							AND json_extract(sent.data, '$.inputId') = json_extract(requeued.data, '$.inputId'))
+						AND sequence > COALESCE((SELECT MAX(sequence) FROM events
+							WHERE session_id = ${sessionId} AND (type = 'input.sent'
+								OR (type = 'session.resume_cancelled'
+									AND json_extract(metadata, '$.source') = 'inbox-reset'))), 0))
 					OR json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL) AS paused,
 				EXISTS (SELECT 1 FROM pending_approvals
 					WHERE session_id = ${sessionId} AND status = 'pending') AS prompt_open
@@ -2326,7 +2450,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						result: string | null;
 						version: number;
 					}>`
-						SELECT mp.input, mp.result, messages.version
+						SELECT mp.input, ${fullToolResult} AS result, messages.version
 						FROM message_parts mp
 						JOIN messages ON messages.id = mp.message_id
 						WHERE messages.session_id = ${sessionId}

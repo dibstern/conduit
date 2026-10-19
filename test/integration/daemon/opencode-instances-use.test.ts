@@ -2,13 +2,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	AddInstance,
-	GetInstances,
-	SaveProject,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
@@ -53,7 +49,8 @@ describe("OpenCode Instances use", () => {
 	const requests = (browser: ProcessBrowser, id: string) =>
 		browser.frames.filter(
 			({ message }) =>
-				message["type"] === "permission_pending" && message["requestId"] === id,
+				message["type"] === "permission_pending" &&
+				message["requestId"] === harness?.promptIdForProviderRequest(id),
 		).length;
 
 	afterEach(async ({ task }) => {
@@ -82,7 +79,9 @@ describe("OpenCode Instances use", () => {
 	it("routes events and prompts through each session's selected instance", async () => {
 		const fixture = await start("routing");
 		const socket = join(fixture.configDir, "relay.sock");
-		const { instances } = await sendRpcRequest(socket, new GetInstances({}));
+		const { instances } = await sendRpcRequest(socket, {
+			_tag: "GetInstances",
+		});
 		const [instanceA, instanceB] = instances.filter(
 			({ driver }) => driver === "opencode",
 		);
@@ -101,10 +100,10 @@ describe("OpenCode Instances use", () => {
 		const sessionA = await a.createSession("Default A", "opencode", "opencode");
 		const directoryB = join(fixture.root, "project-b");
 		mkdirSync(directoryB, { recursive: true });
-		const { savedSlug: slugB } = await sendRpcRequest(
-			socket,
-			new SaveProject({ folders: [directoryB] }),
-		);
+		const { savedSlug: slugB } = await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			folders: [directoryB],
+		});
 		const b = await fixture.connect(undefined, undefined, slugB);
 		// Each session's first use spawns its selected instance.
 		const sessionB = await b.createSession("Named B", instanceB.id, "opencode");
@@ -168,8 +167,16 @@ describe("OpenCode Instances use", () => {
 			{ directory: directoryB, payload: permission("own-b", sessionB) },
 			instanceB.id,
 		);
-		await a.waitFor((message) => message["requestId"] === "own-a");
-		await b.waitFor((message) => message["requestId"] === "own-b");
+		await a.waitFor(
+			(message) =>
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+				"own-a",
+		);
+		await b.waitFor(
+			(message) =>
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+				"own-b",
+		);
 		const events = {
 			a: { own: requests(a, "own-a"), cross: requests(a, "cross-a") },
 			b: { own: requests(b, "own-b"), cross: requests(b, "cross-b") },
@@ -185,7 +192,9 @@ describe("OpenCode Instances use", () => {
 		const fixture = await start("rqbc-2-non-selected-instance");
 		evidence["ticket"] = "conduit-test-rqbc.2";
 		const socket = join(fixture.configDir, "relay.sock");
-		const { instances } = await sendRpcRequest(socket, new GetInstances({}));
+		const { instances } = await sendRpcRequest(socket, {
+			_tag: "GetInstances",
+		});
 		const instanceA = instances.find(
 			({ id, driver }) => driver === "opencode" && id === "opencode",
 		);
@@ -205,7 +214,7 @@ describe("OpenCode Instances use", () => {
 			(error) => error,
 		)?.instances?.find(({ id }) => id === instanceB.id)?.pid;
 		expect(pidB).toBeTypeOf("number");
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			expect(
 				db
@@ -242,15 +251,16 @@ describe("OpenCode Instances use", () => {
 		const delivered = await browser.waitFor(
 			(message) =>
 				message["type"] === "permission_pending" &&
-				message["requestId"] === "rqbc-2-live-on-b",
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+					"rqbc-2-live-on-b",
 		);
-		const recovered = new Database(fixture.projectStorePath(), {
+		const recovered = new Database(fixture.daemonStorePath(), {
 			readonly: true,
 		});
 		try {
 			const approval = recovered
 				.prepare(
-					"SELECT id, session_id, status FROM pending_approvals WHERE id = ?",
+					"SELECT id, session_id, status FROM pending_approvals WHERE provider_request_id = ?",
 				)
 				.get("rqbc-2-live-on-b");
 			evidence["recovered"] = {
@@ -262,7 +272,7 @@ describe("OpenCode Instances use", () => {
 				approval,
 			};
 			expect(approval).toEqual({
-				id: "rqbc-2-live-on-b",
+				id: fixture.promptIdForProviderRequest("rqbc-2-live-on-b"),
 				session_id: sessionB,
 				status: "pending",
 			});
@@ -281,7 +291,9 @@ describe("OpenCode Instances use", () => {
 		const fixture = await start("rqbc-2-non-selected-recovery");
 		evidence["ticket"] = "conduit-test-rqbc.2";
 		const socket = join(fixture.configDir, "relay.sock");
-		const { instances } = await sendRpcRequest(socket, new GetInstances({}));
+		const { instances } = await sendRpcRequest(socket, {
+			_tag: "GetInstances",
+		});
 		const instanceA = instances.find(
 			({ id, driver }) => driver === "opencode" && id === "opencode",
 		);
@@ -304,7 +316,7 @@ describe("OpenCode Instances use", () => {
 			instanceB.id,
 		);
 		await vi.waitFor(() => {
-			const db = new Database(fixture.projectStorePath(), { readonly: true });
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
 			try {
 				expect(
 					db.prepare("SELECT status FROM sessions WHERE id = ?").get(sessionB),
@@ -330,15 +342,15 @@ describe("OpenCode Instances use", () => {
 		});
 		await vi.waitFor(
 			() => {
-				const db = new Database(fixture.projectStorePath(), { readonly: true });
+				const db = new Database(fixture.daemonStorePath(), { readonly: true });
 				try {
 					const approval = db
 						.prepare(
-							"SELECT id, session_id, status FROM pending_approvals WHERE id = ?",
+							"SELECT id, session_id, status FROM pending_approvals WHERE provider_request_id = ?",
 						)
 						.get(id);
 					expect(approval).toEqual({
-						id,
+						id: fixture.promptIdForProviderRequest(id),
 						session_id: sessionB,
 						status: "pending",
 					});
@@ -359,7 +371,8 @@ describe("OpenCode Instances use", () => {
 		const browser = await fixture.connect();
 		evidence["delivered"] = await browser.waitFor(
 			(message) =>
-				message["type"] === "permission_pending" && message["requestId"] === id,
+				message["type"] === "permission_pending" &&
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) === id,
 		);
 	}, 90_000);
 
@@ -378,15 +391,13 @@ describe("OpenCode Instances use", () => {
 				);
 			});
 		});
-		const { instances } = await sendRpcRequest(
-			socket,
-			new AddInstance({
-				name: "Unreachable",
-				driver: "opencode",
-				managed: false,
-				url: `http://127.0.0.1:${closedPort}`,
-			}),
-		);
+		const { instances } = await sendRpcRequest(socket, {
+			_tag: "AddInstance",
+			name: "Unreachable",
+			driver: "opencode",
+			managed: false,
+			url: `http://127.0.0.1:${closedPort}`,
+		});
 		const unreachable = instances.find(({ name }) => name === "Unreachable");
 		if (!unreachable) throw new Error("Unreachable instance was not added");
 		const a = await fixture.connect();

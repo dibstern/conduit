@@ -9,16 +9,16 @@ import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js"
 
 import { Context, Duration, Effect, FiberMap, Layer, Schedule } from "effect";
 
-export class PollerManagerStateTag extends Context.Tag("PollerManagerState")<
+export class PollerManagerStateTag extends Context.Service<
 	PollerManagerStateTag,
 	FiberMap.FiberMap<string>
->() {}
+>()("PollerManagerState") {}
 
 export const makePollerManagerStateLive =
 	(): Layer.Layer<PollerManagerStateTag> =>
-		Layer.scoped(PollerManagerStateTag, FiberMap.make<string>());
+		Layer.effect(PollerManagerStateTag, FiberMap.make<string>());
 
-const pollSession = (sessionId: string, interval: Duration.DurationInput) =>
+const pollSession = (sessionId: string, interval: Duration.Input) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
 
@@ -26,7 +26,7 @@ const pollSession = (sessionId: string, interval: Duration.DurationInput) =>
 			try: () => api.session.messages(sessionId),
 			catch: (error) => error,
 		}).pipe(
-			Effect.catchAll((e) =>
+			Effect.catch((e) =>
 				Effect.logWarning(
 					`Poll error for session ${sessionId}`,
 					e as { toString(): string },
@@ -47,7 +47,7 @@ const pollSession = (sessionId: string, interval: Duration.DurationInput) =>
  */
 export const startPoller = (
 	sessionId: string,
-	interval: Duration.DurationInput = Duration.seconds(3),
+	interval: Duration.Input = Duration.seconds(3),
 ) =>
 	Effect.gen(function* () {
 		const fiberMap = yield* PollerManagerStateTag;

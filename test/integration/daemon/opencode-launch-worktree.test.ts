@@ -12,17 +12,10 @@ import {
 } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
-import {
-	ContinueSessionInMainFolder,
-	CreateSession,
-	ListDaemonSessions,
-	MoveSessionWorkspace,
-	RecreateSessionWorktree,
-	SaveProject,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -280,13 +273,11 @@ describe("Managed real OpenCode launch workspace execution", () => {
 		await fixture.restart();
 		const socket = join(fixture.configDir, "relay.sock");
 		if (folders.length > 1) {
-			await sendRpcRequest(
-				socket,
-				new SaveProject({
-					slug: "process-test",
-					folders,
-				}),
-			);
+			await sendRpcRequest(socket, {
+				_tag: "SaveProject",
+				slug: "process-test",
+				folders,
+			});
 		}
 		const browser = await fixture.connect();
 		// Cold plugin/model configuration can outlast the daemon's /path probe.
@@ -298,42 +289,43 @@ describe("Managed real OpenCode launch workspace execution", () => {
 		expect(
 			instances.find(({ id }) => id === "managed-test")?.capabilities,
 		).toMatchObject({ supportsWorktree: false, supportsNewWorktree: true });
-		const launch = new CreateSession({
-			permissionMode: "ask",
+		const launch = {
+			_tag: "CreateSession" as const,
+			permissionMode: "ask" as const,
 			projectSlug: "process-test",
 			originId: "cwd-test",
 			title: "Workspace probe",
 			instanceId: AccountIdSchema.make("managed-test"),
 			providerId: "opencode",
+			model: { providerId: "workspace-test", modelId: "cwd" },
 			...(createsWorktree ? { newWorktree: true } : { worktreePath: existing }),
-		});
+		};
 		evidence["projectFolder"] = fixture.projectDir;
 		if (!createsWorktree) {
 			await expect(sendRpcRequest(socket, launch)).rejects.toMatchObject({
 				_tag: "WorkspaceMoveError",
 				reason: "unsupported-provider",
 			});
-			const { sessions } = await sendRpcRequest(
-				socket,
-				new ListDaemonSessions({ projectSlug: "process-test" }),
-			);
+			const { sessions } = await sendRpcRequest(socket, {
+				_tag: "ListDaemonSessions",
+				projectSlug: "process-test",
+			});
 			expect(sessions.some(({ title }) => title === "Workspace probe")).toBe(
 				false,
 			);
 			evidence["rejection"] = "unsupported-provider";
 			evidence["worktreePath"] = existing;
 			if (mode === "secondary-existing") {
-				const local = await sendRpcRequest(
-					socket,
-					new CreateSession({
-						permissionMode: "ask",
-						projectSlug: "process-test",
-						originId: "cwd-test",
-						title: "Cross-repository probe",
-						instanceId: AccountIdSchema.make("managed-test"),
-						providerId: "opencode",
-					}),
-				);
+				const local = await sendRpcRequest(socket, {
+					_tag: "CreateSession",
+					permissionMode: "ask",
+					projectSlug: "process-test",
+					originId: "cwd-test",
+					title: "Cross-repository probe",
+					instanceId: AccountIdSchema.make("managed-test"),
+					providerId: "opencode",
+					model: { providerId: "workspace-test", modelId: "cwd" },
+				});
 				// Browser instance responses redact credentials; native probes use config.
 				const instance = Either.getOrThrowWith(
 					loadDaemonConfigResult(fixture.configDir),
@@ -372,10 +364,10 @@ describe("Managed real OpenCode launch workspace execution", () => {
 			return;
 		}
 		const { sessionId } = await sendRpcRequest(socket, launch);
-		const { sessions } = await sendRpcRequest(
-			socket,
-			new ListDaemonSessions({ projectSlug: "process-test" }),
-		);
+		const { sessions } = await sendRpcRequest(socket, {
+			_tag: "ListDaemonSessions",
+			projectSlug: "process-test",
+		});
 		const session = sessions.find(({ id }) => id === sessionId);
 		const worktree = session?.workspace?.worktrees[owner] ?? "";
 		if (!worktree) throw new Error("Launch did not record its workspace");
@@ -419,21 +411,18 @@ describe("Managed real OpenCode launch workspace execution", () => {
 		}
 		await observe(browser, "launch", worktree);
 		rmSync(worktree, { recursive: true, force: true });
-		const recreated = await sendRpcRequest(
-			socket,
-			new RecreateSessionWorktree({ projectSlug: "process-test", sessionId }),
-		);
+		const recreated = await sendRpcRequest(socket, {
+			_tag: "RecreateSessionWorktree",
+			sessionId,
+		});
 		expect(recreated.directory).toBe(worktree);
 		await observe(browser, "recreated", worktree);
 		await expect(
-			sendRpcRequest(
-				socket,
-				new MoveSessionWorkspace({
-					projectSlug: "process-test",
-					sessionId,
-					path: worktree,
-				}),
-			),
+			sendRpcRequest(socket, {
+				_tag: "MoveSessionWorkspace",
+				sessionId,
+				path: worktree,
+			}),
 		).rejects.toMatchObject({
 			_tag: "WorkspaceMoveError",
 			reason: "unsupported-provider",
@@ -446,13 +435,10 @@ describe("Managed real OpenCode launch workspace execution", () => {
 		const restarted = await fixture.connect();
 		await observe(restarted, "resumed", worktree);
 		rmSync(worktree, { recursive: true, force: true });
-		const recovered = await sendRpcRequest(
-			socket,
-			new ContinueSessionInMainFolder({
-				projectSlug: "process-test",
-				sessionId,
-			}),
-		);
+		const recovered = await sendRpcRequest(socket, {
+			_tag: "ContinueSessionInMainFolder",
+			sessionId,
+		});
 		expect(recovered.directory).toBe(fixture.projectDir);
 		await observe(restarted, "recovered", fixture.projectDir);
 		expect(calls.filter(({ tool }) => tool)).toHaveLength(4);

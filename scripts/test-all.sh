@@ -4,7 +4,8 @@
 #
 # Ordering is optimized: vitest suites run before the build since they don't
 # need build output. The build runs just before E2E tests that need dist/.
-# Heavy parallelism is left to the GitHub Actions workflow (npm-release.yml).
+# Suites run in order here; integration files run in parallel within their suite.
+# GitHub Actions (npm-release.yml) also runs suites in parallel jobs.
 
 set -uo pipefail
 

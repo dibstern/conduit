@@ -5,6 +5,7 @@ import {
 	isSessionBusy,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { applySessionChange, seedFamilySessions } from "./session-fixtures.js";
 
 beforeEach(() => clearSessionState());
@@ -15,11 +16,11 @@ it("reads family-only child rows and propagates busy to its parent", () => {
 		{ id: "root", title: "Root", status: "idle" },
 		{ id: "child", title: "Child", status: "busy", parentID: "root" },
 	]);
-	sessionState.currentId = "root";
+	openSessionForSetup("root", "project-a");
 
 	expect(isSessionBusy("child")).toBe(true);
 	expect(isSessionBusy("root")).toBe(true);
-	sessionState.currentId = "child";
+	openSessionForSetup("child", "project-a");
 	expect(sessionState.currentParentId).toBe("root");
 });
 
@@ -35,7 +36,7 @@ it("rolls a Side Thread's subagents into it without making its parent busy", () 
 		},
 		{ id: "agent", title: "Agent", status: "busy", parentID: "side" },
 	]);
-	sessionState.currentId = "side";
+	openSessionForSetup("side", "project-a");
 	expect(isSessionBusy("agent")).toBe(true);
 	expect(isSessionBusy("side")).toBe(true);
 	expect(isSessionBusy("root")).toBe(false);

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // Asserts the adapter generic preserves type narrowing; routes through
 // getOrCreateSessionSlot(currentId).
 
@@ -43,7 +44,7 @@ import {
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 const TEST_ID = "test-handler-sig";
 
@@ -51,7 +52,7 @@ beforeEach(() => {
 	sessionActivity.clear();
 	sessionMessages.clear();
 	_resetLRU();
-	sessionState.currentId = TEST_ID;
+	openSessionForSetup(TEST_ID, "project-a");
 });
 
 describe("getOrCreateSessionSlot", () => {
@@ -163,7 +164,7 @@ describe("LRU cap enforcement", () => {
 	});
 
 	it("never evicts the current session", () => {
-		sessionState.currentId = "session-0";
+		openSessionForSetup("session-0", "project-a");
 
 		// Create sessions 0..20 (21 total)
 		for (let i = 0; i < 21; i++) {

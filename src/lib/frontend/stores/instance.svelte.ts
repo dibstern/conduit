@@ -7,7 +7,11 @@
 // Components that need data while disconnected (SettingsPanel, ConnectOverlay)
 // should use `getCachedInstances()` or `getCachedInstanceById()`.
 
-import type { ProviderSessionCapabilities } from "../../contracts/provider-instance.js";
+import {
+	type BrowserDriverTraits,
+	getProviderDriver,
+	type ProviderSessionCapabilities,
+} from "../../contracts/provider-instance.js";
 import type {
 	DetectProxyResponse,
 	InstanceListResponse,
@@ -22,6 +26,7 @@ import { accountSnapshotChangedListeners } from "./ws-listeners.js";
 export const instanceState = $state({
 	instances: [] as OpenCodeInstance[],
 	loaded: false,
+	providerTraits: {} as Record<string, BrowserDriverTraits | undefined>,
 	providerCapabilities: {} as Record<
 		string,
 		ProviderSessionCapabilities | undefined
@@ -37,6 +42,7 @@ export const instanceState = $state({
  * and ConnectOverlay re-renders when the cache is updated.
  */
 let cachedInstances: OpenCodeInstance[] = $state([]);
+let instancesListed = false;
 
 let proxyDetection: { found: boolean; port: number } | null = $state(null);
 
@@ -106,7 +112,10 @@ export function applyScanNowResponse(response: ScanNowResponse): void {
 
 /** Apply a full instance list: the subscription's, or a mutation's reply. */
 export function applyInstanceListResponse(
-	response: Pick<InstanceListResponse, "instances" | "providerCapabilities">,
+	response: Pick<
+		InstanceListResponse,
+		"instances" | "providerCapabilities" | "providerTraits"
+	>,
 ): void {
 	const instances: OpenCodeInstance[] = response.instances.map((instance) => ({
 		id: instance.id,
@@ -122,6 +131,18 @@ export function applyInstanceListResponse(
 			: {}),
 		...(instance.usageEligible !== undefined
 			? { usageEligible: instance.usageEligible }
+			: {}),
+		...(instance.cursorUsageSource !== undefined
+			? { cursorUsageSource: instance.cursorUsageSource }
+			: {}),
+		...(instance.available !== undefined
+			? { available: instance.available }
+			: {}),
+		...(instance.unavailableReason !== undefined
+			? { unavailableReason: instance.unavailableReason }
+			: {}),
+		...(instance.unavailableCode !== undefined
+			? { unavailableCode: instance.unavailableCode }
 			: {}),
 		...(instance.capabilities != null
 			? { capabilities: instance.capabilities }
@@ -142,7 +163,11 @@ export function applyInstanceListResponse(
 	const routingKey = (list: readonly OpenCodeInstance[]) =>
 		list.map((i) => `${i.id}:${i.driver}:${i.isDefault}`).join("|");
 	const accountsChanged = routingKey(instances) !== routingKey(cachedInstances);
+	const firstList = !instancesListed;
+	instancesListed = true;
 	instanceState.instances = instances;
+	if (response.providerTraits || !instanceState.loaded)
+		instanceState.providerTraits = { ...response.providerTraits };
 	instanceState.loaded = true;
 	if (response.providerCapabilities) {
 		instanceState.providerCapabilities = { ...response.providerCapabilities };
@@ -150,7 +175,26 @@ export function applyInstanceListResponse(
 	// Keep a cached copy that survives disconnect
 	cachedInstances = [...instances];
 	if (accountsChanged)
-		for (const listener of accountSnapshotChangedListeners) listener();
+		for (const listener of accountSnapshotChangedListeners)
+			listener({ firstList });
+}
+
+/** Older servers omit traits; their known drivers use the shared contract defaults. */
+export function getDriverTraits(
+	driver: string | undefined,
+): BrowserDriverTraits | undefined {
+	return driver
+		? (instanceState.providerTraits[driver] ?? getProviderDriver(driver))
+		: undefined;
+}
+
+export function getInstanceTraits(
+	instanceId: string | null | undefined,
+): BrowserDriverTraits | undefined {
+	const instance =
+		getInstanceById(instanceId ?? "") ??
+		getCachedInstanceById(instanceId ?? "");
+	return instance ? getDriverTraits(instance.driver ?? "opencode") : undefined;
 }
 
 export function getInstanceById(id: string): OpenCodeInstance | undefined {

@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Exit, Scope } from "effect";
 import { onTestFinished } from "vitest";
-import {
+import type {
 	ClaudeProviderInstance,
-	type ClaudeProviderInstanceDeps,
+	ClaudeProviderInstanceDeps,
 } from "../../src/lib/provider/claude/claude-provider-instance.js";
 import {
 	makeClaudeProviderRuntime,
@@ -20,7 +20,7 @@ export function makeTestClaudeProviderInstance(
 ): ClaudeProviderInstance {
 	const scope = Effect.runSync(Scope.make());
 	const runtime = Effect.runSync(
-		Scope.extend(
+		Scope.provide(
 			makeClaudeProviderRuntime({
 				runnerFactory: makeClaudeSessionRunner,
 				// Never fall back to the developer's real ~/.config/conduit.
@@ -57,5 +57,6 @@ export function makeTestClaudeProviderInstance(
 			runner.buildUserMessage = build;
 		},
 	});
-	return new ClaudeProviderInstance(runtime);
+	Object.defineProperty(runtime, "runtime", { value: runtime });
+	return runtime;
 }

@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { SqlClient } from "@effect/sql";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionDetailEnvelopeSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import {
@@ -181,8 +181,12 @@ describe("OpenCode pending rewind through the relay", () => {
 		try {
 			const writes = () => {
 				const { version } = db
-					.prepare("SELECT version FROM sessions WHERE id = ?")
+					.prepare(
+						"SELECT MAX(p.version) AS version FROM message_parts p JOIN messages m ON m.id = p.message_id WHERE m.session_id = ?",
+					)
 					.get(sessionId) as { version: number };
+				// Status reconciliation can move the session row after the rewind.
+				// Count the transcript writes at their own version instead.
 				return {
 					version,
 					messages: (
@@ -201,17 +205,19 @@ describe("OpenCode pending rewind through the relay", () => {
 					).n,
 				};
 			};
+			let previousVersion = writes().version;
 			for (const cut of [190, 196, 180]) {
 				const messageId = messageIds[cut];
 				if (!messageId) throw new Error("Missing large transcript cut");
 				await client.rpcCall((rpc) =>
 					rpc.RewindSession({
-						projectSlug: "integration-test",
 						sessionId,
 						messageId,
 					}),
 				);
 				const projected = writes();
+				expect(projected.version).toBeGreaterThan(previousVersion);
+				previousVersion = projected.version;
 				evidence[`cut-${cut}`] = projected;
 				// At most the affected tail's headers and one 50-message page.
 				expect.soft(projected.messages).toBeLessThanOrEqual(70);
@@ -227,10 +233,9 @@ describe("OpenCode pending rewind through the relay", () => {
 					messageIds.slice(cut - visible.messages.length, cut),
 				);
 			}
-			await client.rpcCall((rpc) =>
-				rpc.UndoRewind({ projectSlug: "integration-test", sessionId }),
-			);
+			await client.rpcCall((rpc) => rpc.UndoRewind({ sessionId }));
 			const undone = writes();
+			expect(undone.version).toBeGreaterThan(previousVersion);
 			evidence["undo"] = undone;
 			expect.soft(undone.messages).toBeLessThanOrEqual(70);
 			expect.soft(undone.parts).toBe(50);
@@ -372,7 +377,6 @@ describe("OpenCode pending rewind through the relay", () => {
 		const rewind = () =>
 			client.rpcCall((rpc) =>
 				rpc.RewindSession({
-					projectSlug: "integration-test",
 					sessionId,
 					messageId: target,
 				}),
@@ -420,9 +424,7 @@ describe("OpenCode pending rewind through the relay", () => {
 			pending: target,
 		});
 
-		await second.rpcCall((rpc) =>
-			rpc.UndoRewind({ projectSlug: "integration-test", sessionId }),
-		);
+		await second.rpcCall((rpc) => rpc.UndoRewind({ sessionId }));
 		expect(
 			harness.mock.diagnostics.filter((entry) =>
 				entry.detail?.startsWith(`POST /session/${sessionId}/unrevert`),
@@ -497,9 +499,7 @@ describe("OpenCode pending rewind through the relay", () => {
 		for (const id of hiddenIds)
 			expect(history.messages.map((message) => message.id)).not.toContain(id);
 		await expect(
-			reopened.rpcCall((rpc) =>
-				rpc.UndoRewind({ projectSlug: "integration-test", sessionId }),
-			),
+			reopened.rpcCall((rpc) => rpc.UndoRewind({ sessionId })),
 		).rejects.toThrow();
 		evidence["committed"] = committed;
 		evidence["reload"] = history;
@@ -515,7 +515,6 @@ describe("OpenCode pending rewind through the relay", () => {
 		const rewind = () =>
 			client.rpcCall((rpc) =>
 				rpc.RewindSession({
-					projectSlug: "integration-test",
 					sessionId,
 					messageId: target,
 				}),
@@ -543,9 +542,7 @@ describe("OpenCode pending rewind through the relay", () => {
 			},
 		);
 		await expect(
-			client.rpcCall((rpc) =>
-				rpc.UndoRewind({ projectSlug: "integration-test", sessionId }),
-			),
+			client.rpcCall((rpc) => rpc.UndoRewind({ sessionId })),
 		).rejects.toThrow();
 		expect(persistedRewinds(harness, sessionId)).toEqual(pending);
 		const reloaded = await harness.connectWsClient();

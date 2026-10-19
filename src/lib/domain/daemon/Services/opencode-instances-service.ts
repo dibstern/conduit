@@ -1,10 +1,8 @@
 import {
-	Cause,
 	Context,
 	Data,
 	type Effect,
-	Option,
-	Runtime,
+	type Option,
 	type Scope,
 	type Stream,
 } from "effect";
@@ -17,10 +15,18 @@ export type OpenCodeInstanceEvent = {
 	readonly instanceId: string;
 	readonly health: ConnectionHealth;
 } & (
-	| { readonly _tag: "event"; readonly payload: unknown }
+	| {
+			readonly _tag: "event";
+			readonly payload: unknown;
+			readonly providerProcessId?: string;
+	  }
 	| { readonly _tag: "heartbeat" }
 	/** Successful transport connection, including reconnects with unchanged state. */
-	| { readonly _tag: "connected" }
+	| {
+			readonly _tag: "connected";
+			readonly providerProcessId?: string;
+			readonly managed?: boolean;
+	  }
 	/** Transport loss, including quiet managed instances with no lifecycle change. */
 	| { readonly _tag: "disconnected" }
 	| {
@@ -50,11 +56,7 @@ export class OpenCodeUnavailable extends Data.TaggedError(
 /** The background SDK boundary wraps this expected rejection in a fiber failure. */
 export const isOpenCodeNotRunningError = (error: unknown): boolean => {
 	const cause = error instanceof OpenCodeConnectionError ? error.cause : error;
-	const failure = Runtime.isFiberFailure(cause)
-		? Option.getOrUndefined(
-				Cause.failureOption(cause[Runtime.FiberFailureCauseId]),
-			)
-		: cause;
+	const failure = cause;
 	return (
 		failure instanceof OpenCodeUnavailable && failure.reason === "not-running"
 	);
@@ -66,6 +68,7 @@ export interface OpenCodeInstances {
 	 * for `directories` from every instance stream that `use` has opened. It
 	 * never keeps a stream open; the instance's demand does.
 	 * A directory callback keeps that same subscription current as workspaces change.
+	 * Acquiring the stream's pull registers the subscriber before returning.
 	 */
 	readonly events: (
 		directories: readonly string[] | (() => readonly string[]),
@@ -102,7 +105,7 @@ export interface OpenCodeInstances {
 	readonly stop: (instanceId: string) => Effect.Effect<void>;
 }
 
-export class OpenCodeInstancesTag extends Context.Tag("OpenCodeInstances")<
+export class OpenCodeInstancesTag extends Context.Service<
 	OpenCodeInstancesTag,
 	OpenCodeInstances
->() {}
+>()("OpenCodeInstances") {}

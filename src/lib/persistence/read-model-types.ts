@@ -5,6 +5,7 @@ import type { HistoryMessage } from "../shared-types.js";
 
 export interface SessionRow {
 	id: string;
+	project_id?: string | null;
 	version: number;
 	provider: string;
 	provider_sid: string | null;
@@ -13,11 +14,13 @@ export interface SessionRow {
 	status: string;
 	history_complete?: number;
 	parent_id: string | null;
+	forked_from?: string | null;
 	side_thread?: number;
 	fork_point_event: string | null;
 	fork_point_timestamp?: number | null;
 	fork_point_message_id?: string | null;
 	last_message_at: number | null;
+	last_user_message_at?: number | null;
 	last_turn_error_at: number | null;
 	permission_mode: string | null;
 	model_id?: string | null;
@@ -42,6 +45,9 @@ export interface SessionRow {
 	/** Generated: 1 while a root or fork has a turn end newer than seen. */
 	unread?: number;
 	settled_at: number | null;
+	archived_at?: number | null;
+	archived_automatically?: number;
+	unarchived_at?: number | null;
 	unsettled_at?: number | null;
 	auto_settle_disabled_at?: number | null;
 	settled_automatically?: number;
@@ -76,6 +82,9 @@ export interface PendingApprovalRow {
 
 export interface PendingClaudeQuestionToolRow {
 	id: string;
+	prompt_id?: string | null;
+	provider_process_id?: string | null;
+	provider_request_id?: string | null;
 	call_id: string | null;
 	message_id: string;
 	input: string | null;
@@ -130,7 +139,7 @@ export interface MessagePartRow {
 	updated_at: number;
 	version: PartVersion;
 	rest_payload?: string | null;
-	/** Set when a previewing read cut `result`: the whole output's UTF-8 size. */
+	/** Set when stored or read as a preview: the whole output's UTF-8 size. */
 	result_bytes?: number | null;
 }
 

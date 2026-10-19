@@ -1,6 +1,6 @@
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
@@ -19,7 +19,6 @@ describe("WsRpcServerLayer RenameSession", () => {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 
 			const result = yield* client.RenameSession({
-				projectSlug: "project-a",
 				sessionId: "root-1",
 				title: "Renamed Root",
 				originId: "browser-1",
@@ -36,6 +35,7 @@ describe("WsRpcServerLayer RenameSession", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ sessionManagerService })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -48,7 +48,6 @@ describe("WsRpcServerLayer RenameSession", () => {
 		return Effect.gen(function* () {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 			const result = yield* client.MarkSessionUnread({
-				projectSlug: "project-a",
 				sessionId: "root-1",
 				originId: "browser-1",
 			});
@@ -63,6 +62,7 @@ describe("WsRpcServerLayer RenameSession", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ sessionManagerService })),
 				),
+				{ local: true },
 			),
 		);
 	});

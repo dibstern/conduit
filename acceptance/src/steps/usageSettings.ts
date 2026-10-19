@@ -4,6 +4,7 @@ import type {
 	UsageLimitsSetting,
 	UsageReading,
 } from "../../../src/lib/contracts/limit-recovery.js";
+import { QuotaForAccounts } from "../../../src/lib/contracts/ws-rpc.js";
 import type { StepHandler } from "../runtime.js";
 import { seedUsageLimits } from "./providerInstances.js";
 import { mockInstances, requireRpcControl } from "./shared.js";
@@ -276,7 +277,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 					]
 				: [personal];
 			rpc.setUsageReadings(readings);
-			rpc.setResponse("QuotaForAccounts", readings);
+			rpc.setStubs({ QuotaForAccounts: () => readings });
 		},
 	},
 	{
@@ -328,7 +329,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 						: reading,
 			);
 			rpc.setUsageReadings(readings);
-			rpc.setResponse("QuotaForAccounts", readings);
+			rpc.setStubs({ QuotaForAccounts: () => readings });
 		},
 	},
 	{
@@ -608,7 +609,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 						: reading,
 			);
 			rpc.setUsageReadings(readings);
-			rpc.setResponse("QuotaForAccounts", readings);
+			rpc.setStubs({ QuotaForAccounts: () => readings });
 		},
 	},
 	{
@@ -647,12 +648,14 @@ export const usageSettingsHandlers: StepHandler[] = [
 		match: /^the quota check is published as the live Usage reading$/,
 		run: async ({ world }) => {
 			const rpc = requireRpcControl(world.page);
-			const handler = rpc.getResponseHandler("QuotaForAccounts");
+			const handler = rpc.stubs.QuotaForAccounts;
 			if (!handler) throw new Error("Missing seeded quota check");
-			const readings = (await handler(
-				{},
-				{ method: "QuotaForAccounts" },
-			)) as readonly UsageReading[];
+			const readings = await handler(
+				QuotaForAccounts.payloadSchema.make({
+					_tag: "QuotaForAccounts",
+					projectSlug: "myapp",
+				}),
+			);
 			rpc.setUsageReadings(readings);
 		},
 	},
@@ -682,7 +685,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert the five settings sections and computer grouping",
+		name: "assert the six settings sections and computer grouping",
 		match: /^the settings sections place Usage and Server under This computer$/,
 		run: async ({ world }) => {
 			const panel = world.page.locator("#settings-panel");
@@ -694,6 +697,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 				"settings-tab-general",
 				"settings-tab-models",
 				"settings-tab-claude",
+				"settings-tab-archived",
 				"settings-tab-usage",
 				"settings-tab-server",
 			]);
@@ -1231,30 +1235,33 @@ export const usageSettingsHandlers: StepHandler[] = [
 			/^the next Usage refresh publishes the (normal|warn5|warnWk|limit) reading$/,
 		run: ({ world, match }) => {
 			const rpc = requireRpcControl(world.page);
-			rpc.setHandler("QuotaForAccounts", () => {
-				const previous = snapshot(world.page);
-				const now = clockTimes.get(world.page) ?? Date.now();
-				const accountId = mockInstances
-					.get(world.page)
-					?.find(
-						(account) => account["driver"] === "claude" && account["isDefault"],
-					)?.["id"];
-				rpc.setUsageReadings(
-					previous.map((reading) =>
-						reading.accountId === accountId
-							? {
-									...accountReading(
-										reading.accountId,
-										reading.planLabel ?? "Claude Max",
-										usageValues[match[1] as keyof typeof usageValues],
-										now,
-									),
-									readAt: now,
-								}
-							: { ...reading, readAt: now },
-					),
-				);
-				return previous;
+			rpc.setStubs({
+				QuotaForAccounts: () => {
+					const previous = snapshot(world.page);
+					const now = clockTimes.get(world.page) ?? Date.now();
+					const accountId = mockInstances
+						.get(world.page)
+						?.find(
+							(account) =>
+								account["driver"] === "claude" && account["isDefault"],
+						)?.["id"];
+					rpc.setUsageReadings(
+						previous.map((reading) =>
+							reading.accountId === accountId
+								? {
+										...accountReading(
+											reading.accountId,
+											reading.planLabel ?? "Claude Max",
+											usageValues[match[1] as keyof typeof usageValues],
+											now,
+										),
+										readAt: now,
+									}
+								: { ...reading, readAt: now },
+						),
+					);
+					return previous;
+				},
 			});
 		},
 	},

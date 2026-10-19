@@ -17,7 +17,7 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -36,6 +36,7 @@ describe.skipIf(!RUN_EXPENSIVE)(
 	() => {
 		it(
 			"captures a forked Side Thread's first turn in Ask mode",
+			{ timeout: 300_000 },
 			async () => {
 				const fixturePath = join(
 					import.meta.dirname,
@@ -74,8 +75,7 @@ describe.skipIf(!RUN_EXPENSIVE)(
 						() =>
 							Effect.runPromise(
 								browser.rpc.StartSideThread({
-									projectSlug: "process-test",
-									parentSessionId: parentId,
+									sessionId: parentId,
 									title: QUESTION,
 									inputId,
 									text: QUESTION,
@@ -136,7 +136,7 @@ describe.skipIf(!RUN_EXPENSIVE)(
 							}
 						}
 						return JSON.stringify(message)
-							.replaceAll(homedir(), "/home/test")
+							.replaceAll(userInfo().homedir, "/home/test")
 							.replace(
 								/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,
 								"redacted@example.test",
@@ -159,7 +159,6 @@ describe.skipIf(!RUN_EXPENSIVE)(
 					}
 				}
 			},
-			{ timeout: 300_000 },
 		);
 	},
 );

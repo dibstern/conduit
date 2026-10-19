@@ -81,6 +81,7 @@ const makeReadQuery = (
 	provider: "claude" | "opencode",
 	title: string,
 ): ReadQueryEffect => ({
+	listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 	readToolDetails: vi.fn(() => Effect.succeed([])),
 	getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 	getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -188,7 +189,7 @@ describe("prompt title generation", () => {
 						providerId: "claude",
 					}),
 				);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -220,7 +221,7 @@ describe("prompt title generation", () => {
 						providerId: "opencode",
 					}),
 				);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -249,7 +250,7 @@ describe("prompt title generation", () => {
 						providerId: "opencode",
 					}),
 				);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 });

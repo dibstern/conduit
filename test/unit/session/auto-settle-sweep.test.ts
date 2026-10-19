@@ -1,17 +1,20 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Fiber, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, expect, vi } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
-	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
@@ -50,13 +53,14 @@ afterEach(() => vi.restoreAllMocks());
 describe("relay automatic settlement sweep", () => {
 	it.effect("waits for fresh git before settling recent merged work", () => {
 		const projectDir = "/auto-settle-git";
+		const now = Date.now();
 		const directories = new Map([
 			["merged", `${projectDir}/merged`],
 			["unmerged", `${projectDir}/unmerged`],
 		]);
 		const cached = new Map<string, SessionGit>([
 			[`${projectDir}/merged`, { merged: false }],
-			[`${projectDir}/unmerged`, { merged: true, mergedHead: "stale-head" }],
+			[`${projectDir}/unmerged`, { merged: true, mergedAt: now - 500 }],
 		]);
 		let release!: () => void;
 		const held = new Promise<void>((resolve) => {
@@ -72,22 +76,19 @@ describe("relay automatic settlement sweep", () => {
 				await held;
 				const git =
 					directory === directories.get("merged")
-						? { merged: true, mergedHead: "fresh-head" }
+						? { merged: true, mergedAt: now - 500 }
 						: { merged: false };
 				cached.set(directory, git);
 				return git;
 			});
-		const setSettled = vi.fn((_id: string, _head?: string) =>
-			Effect.succeed(true),
-		);
+		const setSettled = vi.fn((_id: string) => Effect.succeed(true));
 		return Effect.scoped(
 			Effect.gen(function* () {
-				const now = Date.now();
 				const sql = yield* SqlClient.SqlClient;
 				for (const [id, directory] of directories)
-					yield* sql`INSERT INTO sessions (id, provider, title, status, workspace, last_message_at, created_at, updated_at)
-						VALUES (${id}, 'claude', ${id}, 'idle', ${JSON.stringify({ cause: "user", origin: "existing", worktrees: { [projectDir]: directory } })}, ${now}, ${now}, ${now})`;
-				const settling = yield* Effect.fork(
+					yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, workspace, last_message_at, created_at, updated_at)
+						VALUES (${id}, 'test-project', 'claude', ${id}, 'idle', ${JSON.stringify({ cause: "user", origin: "existing", worktrees: { [projectDir]: directory } })}, ${now}, ${now - 1_000}, ${now})`;
+				const settling = yield* Effect.forkChild(
 					settleIdleSessions(
 						{
 							projectDir,
@@ -105,7 +106,7 @@ describe("relay automatic settlement sweep", () => {
 				expect(setSettled).not.toHaveBeenCalled();
 				release();
 				expect(yield* Fiber.join(settling)).toBe(1);
-				expect(setSettled.mock.calls).toEqual([["merged", "fresh-head"]]);
+				expect(setSettled.mock.calls).toEqual([["merged"]]);
 				expect(refresh.mock.calls.map(([directory]) => directory)).toContain(
 					directories.get("unmerged"),
 				);
@@ -120,32 +121,29 @@ describe("relay automatic settlement sweep", () => {
 		"settles only eligible rows once and clears the automatic marker on un-settle",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-auto-settle-"));
-			const configLayer = Layer.succeed(
-				ConfigTag,
+			const configLayer = Layer.succeed(ConfigTag)(
 				makeMockConfig({ configDir: dir, projectDir: dir }),
 			);
-			const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
+			const loggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
 			const openCodeApi = makeMockOpenCodeAPI();
 			const layer = Layer.provideMerge(
 				SessionManagerServiceLive,
 				Layer.mergeAll(
-					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					makeSessionManagerStateLive(),
-					Layer.succeed(OpenCodeAPITag, openCodeApi),
+					Layer.succeed(OpenCodeAPITag)(openCodeApi),
 					loggerLayer,
 					configLayer,
-					Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-					Layer.succeed(BackgroundLivenessTag, () => undefined),
+					Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+					Layer.effect(SessionActivityTag, makeSessionActivity),
 					RelayStatusSnapshotLive,
 					makeOverridesStateLive(),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: openCodeApi }),
 					),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(join(dir, "events.db"), "test-project"),
-					Layer.succeed(
-						OrchestrationEngineTag,
+					Layer.succeed(OrchestrationEngineTag)(
 						new OrchestrationEngine({ registry: new ProviderRegistry() }),
 					),
 				),
@@ -173,12 +171,6 @@ describe("relay automatic settlement sweep", () => {
 								id,
 								{ sessionId: id, messageId: `${id}-m1`, role: "assistant" },
 								{ createdAt: old },
-							),
-							canonicalEvent(
-								"session.read",
-								id,
-								{ sessionId: id },
-								{ createdAt: old + 1 },
 							),
 						])
 							yield* runner.projectEvent(yield* store.append(event));
@@ -224,12 +216,7 @@ describe("relay automatic settlement sweep", () => {
 					(yield* store.readAllBySession("woken"))
 						.filter((event) => event.type.startsWith("session."))
 						.map((event) => event.type),
-				).toEqual([
-					"session.created",
-					"session.read",
-					"session.snoozed",
-					"session.settled",
-				]);
+				).toEqual(["session.created", "session.snoozed", "session.settled"]);
 				expect(yield* settleIdleSessions(ports, 3 * DAY, now)).toBe(0);
 				yield* service.setSessionSettled("eligible", { settled: false });
 				expect(

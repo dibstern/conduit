@@ -8,9 +8,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import Database from "better-sqlite3";
-import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { ClaudeRunnerRegistration } from "../../../src/lib/provider/claude/claude-runner-registry.js";
+import type { RunnerRegistration } from "../../../src/lib/provider/runner/runner-registry.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -19,17 +18,21 @@ const RUN_EXPENSIVE = process.env["RUN_EXPENSIVE_E2E"] === "1";
 describe.skipIf(!RUN_EXPENSIVE)("Claude process runner E2E (real SDK)", () => {
 	it(
 		"completes a real turn in a child of the default build",
+		{ timeout: 150_000 },
 		async () => {
 			const evidence = {
 				ticket: "conduit-test-85kb.15",
 				at: new Date().toISOString(),
 				dist: resolve("dist"),
-				model: "claude-haiku-4-5",
+				// An id the live catalog lists. Bare "claude-haiku-4-5" never was:
+				// the CLI advertises the alias and, since 2.1.301, the dated id.
+				model: "haiku",
 				prompt: "Reply with exactly: hello world",
 				turnCompleted: false,
 				serverPid: null as number | null,
 				runnerPid: null as number | null,
 				sessionId: null as string | null,
+				sessionModel: null as string | null,
 				text: "",
 				runnerCursor: null as number | null,
 				timings: {
@@ -51,15 +54,6 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude process runner E2E (real SDK)", () => {
 				if (!server) throw new Error("Missing server PID proof");
 				evidence.serverPid = server.pid;
 				const browser = await harness.connect();
-				await Effect.runPromise(
-					browser.rpc
-						.SetDefaultModel({
-							projectSlug: "process-test",
-							provider: "claude",
-							model: evidence.model,
-						})
-						.pipe(Effect.timeout(15_000)),
-				);
 				const sessionOpenAt = process.hrtime.bigint();
 				const activeHarness = harness;
 				observer = setInterval(() => {
@@ -71,7 +65,15 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude process runner E2E (real SDK)", () => {
 							Number(process.hrtime.bigint() - sessionOpenAt) / 1e6;
 					}
 				}, 10);
-				const sessionId = await browser.createSession("Real SDK runner smoke");
+				// The pick is explicit: a creation request's model beats any saved
+				// default, and the harness otherwise asks for sonnet. Haiku offers no
+				// context-window choice, so none is sent.
+				const sessionId = await browser.createSession(
+					"Real SDK runner smoke",
+					undefined,
+					"claude",
+					{ modelId: evidence.model, contextWindow: "" },
+				);
 				evidence.sessionId = sessionId;
 				const cursor = browser.frames.length;
 				const sendAt = process.hrtime.bigint();
@@ -104,7 +106,9 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude process runner E2E (real SDK)", () => {
 				evidence.timings.completionObservedMs =
 					Number(turnEnd.at - sendAt) / 1e6;
 				evidence.text = response.chunks.join("");
-				expect(evidence.text.trim()).toBe("hello world");
+				// The reviewer's own Claude plugins load too and may decorate the
+				// reply (message-timestamps prefixes "[hh:mm:ss] "), so anchor the end.
+				expect(evidence.text.trim()).toMatch(/hello world$/);
 				expect(response.done["status"]).toBe("idle");
 				const runner = harness.marks.find(
 					(mark) =>
@@ -118,9 +122,9 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude process runner E2E (real SDK)", () => {
 				expect(evidence.timings.runnerSpawnMs).not.toBeNull();
 				const registration = JSON.parse(
 					readFileSync(`${runner.socketPath}.json`, "utf8"),
-				) as ClaudeRunnerRegistration;
+				) as RunnerRegistration;
 				expect(registration).toMatchObject({ sessionId, pid: runner.pid });
-				const db = new Database(harness.projectStorePath(), {
+				const db = new Database(harness.daemonStorePath(), {
 					readonly: true,
 				});
 				try {
@@ -130,6 +134,11 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude process runner E2E (real SDK)", () => {
 						)
 						.get(registration.runnerId) as { sequence: number } | undefined;
 					expect(checkpoint?.sequence).toBeGreaterThan(0);
+					const session = db
+						.prepare("SELECT model_id FROM sessions WHERE id = ?")
+						.get(sessionId) as { model_id: string | null } | undefined;
+					evidence.sessionModel = session?.model_id ?? null;
+					expect(evidence.sessionModel).toBe(evidence.model);
 					evidence.runnerCursor = checkpoint?.sequence ?? null;
 					await vi.waitFor(() => {
 						const command = db
@@ -158,6 +167,5 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude process runner E2E (real SDK)", () => {
 				}
 			}
 		},
-		{ timeout: 150_000 },
 	);
 });

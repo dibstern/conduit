@@ -15,9 +15,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Effect, Either, HashMap, Layer, Ref, Schema } from "effect";
+import { Effect, Result as Either, HashMap, Layer, Ref, Schema } from "effect";
+import { RpcTest } from "effect/rpc";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, vi } from "vitest";
 import { AccountChangeRejected } from "../../../src/lib/contracts/account.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
@@ -118,8 +118,8 @@ beforeAll(() => rmSync(artifact, { force: true }));
 
 const readSaved = () => {
 	const loaded = loadDaemonConfigResult(configDir);
-	if (Either.isLeft(loaded)) throw loaded.left;
-	return loaded.right;
+	if (Either.isFailure(loaded)) throw loaded.failure;
+	return loaded.success;
 };
 
 const makeLayer = (config = initial) =>
@@ -207,7 +207,7 @@ afterAll(() => {
 });
 
 describe("account mutations through daemon RPC", () => {
-	it.scoped("returns typed rejections and allows default removal", () =>
+	it.effect("returns typed rejections and allows default removal", () =>
 		Effect.gen(function* () {
 			const client = yield* makeClient;
 			const invalidAdds: ReadonlyArray<{
@@ -285,17 +285,17 @@ describe("account mutations through daemon RPC", () => {
 			];
 			const before = readFileSync(join(configDir, "daemon.json"), "utf8");
 			for (const { reason, ...request } of invalidAdds) {
-				const result = yield* Effect.either(client.AddInstance(request));
+				const result = yield* Effect.result(client.AddInstance(request));
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: {
+					_tag: "Failure",
+					failure: {
 						_tag: "AccountChangeRejected",
 						reason: expect.stringContaining(reason),
 					},
 				});
-				if (Either.isLeft(result)) {
+				if (Either.isFailure(result)) {
 					const rejection = Schema.decodeUnknownSync(AccountChangeRejected)(
-						result.left,
+						result.failure,
 					);
 					expect(rejection.reason.length).toBeGreaterThan(0);
 					expect(rejection.message).toBe(rejection.reason);
@@ -306,9 +306,9 @@ describe("account mutations through daemon RPC", () => {
 				client.UpdateInstance({ instanceId: "missing", configDir: "" }),
 				client.RemoveInstance({ instanceId: "missing" }),
 			]) {
-				expect(yield* Effect.either(mutation)).toMatchObject({
-					_tag: "Left",
-					left: {
+				expect(yield* Effect.result(mutation)).toMatchObject({
+					_tag: "Failure",
+					failure: {
 						_tag: "AccountChangeRejected",
 						id: "missing",
 						reason: expect.stringContaining("not found"),
@@ -317,15 +317,15 @@ describe("account mutations through daemon RPC", () => {
 			}
 			for (const instanceId of ["claude", "personal", "remote"]) {
 				expect(
-					yield* Effect.either(
+					yield* Effect.result(
 						client.UpdateInstance({
 							instanceId,
 							driver: instanceId === "remote" ? "claude" : "opencode",
 						}),
 					),
 				).toMatchObject({
-					_tag: "Left",
-					left: {
+					_tag: "Failure",
+					failure: {
 						_tag: "AccountChangeRejected",
 						id: instanceId,
 						reason: expect.stringContaining("type"),
@@ -352,7 +352,7 @@ describe("account mutations through daemon RPC", () => {
 		}).pipe(Effect.provide(makeLayer())),
 	);
 
-	it.scoped("saves every successful mutation before its reply", () =>
+	it.effect("saves every successful mutation before its reply", () =>
 		Effect.gen(function* () {
 			const client = yield* makeClient;
 			const added = yield* client.AddInstance({
@@ -401,7 +401,7 @@ describe("account mutations through daemon RPC", () => {
 		}).pipe(Effect.provide(makeLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"keeps cleared default and named Claude folders cleared after restart",
 		() =>
 			Effect.gen(function* () {
@@ -454,7 +454,7 @@ describe("account mutations through daemon RPC", () => {
 			}),
 	);
 
-	it.scoped(
+	it.effect(
 		"allocates distinct non-driver ids for simultaneous Claude and OpenCode names",
 		() =>
 			Effect.gen(function* () {
@@ -507,7 +507,7 @@ describe("account mutations through daemon RPC", () => {
 			),
 	);
 
-	it.scoped(
+	it.effect(
 		"preserves live account metadata across OpenCode edits and merges only debug from disk",
 		() =>
 			Effect.gen(function* () {
@@ -563,19 +563,19 @@ describe("account mutations through daemon RPC", () => {
 			}).pipe(Effect.provide(makeLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"reports a failed mutation save through the typed error and preserves the invalid file",
 		() =>
 			Effect.gen(function* () {
 				const client = yield* makeClient;
 				const invalid = "{invalid config kept for repair";
 				writeFileSync(join(configDir, "daemon.json"), invalid);
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					client.RenameInstance({ instanceId: "personal", name: "Renamed" }),
 				);
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: {
+					_tag: "Failure",
+					failure: {
 						_tag: "AccountChangeRejected",
 						id: "personal",
 						reason: expect.stringContaining("daemon.json"),
@@ -591,7 +591,7 @@ describe("account mutations through daemon RPC", () => {
 			}).pipe(Effect.provide(makeLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"preserves the selected OpenCode runtime when renaming its account",
 		() =>
 			Effect.gen(function* () {
@@ -656,7 +656,7 @@ describe("account mutations through daemon RPC", () => {
 			}).pipe(Effect.provide(makeLayer())),
 	);
 
-	it.scoped(
+	it.effect(
 		"retains the account and recovery record after a failed remove, then accepts a retry",
 		() =>
 			Effect.gen(function* () {
@@ -676,9 +676,9 @@ describe("account mutations through daemon RPC", () => {
 				});
 				vi.mocked(stopManagedOpenCode).mockResolvedValue(false);
 				const mutate = client.RemoveInstance({ instanceId: "remote" });
-				expect(yield* Effect.either(mutate)).toMatchObject({
-					_tag: "Left",
-					left: {
+				expect(yield* Effect.result(mutate)).toMatchObject({
+					_tag: "Failure",
+					failure: {
 						_tag: "AccountChangeRejected",
 						id: "remote",
 						reason: expect.stringContaining("ownership"),

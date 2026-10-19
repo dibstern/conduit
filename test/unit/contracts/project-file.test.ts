@@ -92,7 +92,7 @@ describe("project setup contracts", () => {
 		"worktree",
 		null,
 	])("retains sessionMode %j in SaveProject, including an explicit clear", (sessionMode) => {
-		const decoded = Schema.decodeUnknownSync(SaveProject)({
+		const decoded = Schema.decodeUnknownSync(SaveProject.payloadSchema)({
 			_tag: "SaveProject",
 			folders: ["/workspace/app"],
 			sessionMode,
@@ -116,7 +116,7 @@ describe("project setup contracts", () => {
 		"",
 		" \n ",
 	])("retains setupScript %j in SaveProject, including an explicit clear", (setupScript) => {
-		const decoded = Schema.decodeUnknownSync(SaveProject)({
+		const decoded = Schema.decodeUnknownSync(SaveProject.payloadSchema)({
 			_tag: "SaveProject",
 			folders: ["/workspace/app"],
 			setupScript,

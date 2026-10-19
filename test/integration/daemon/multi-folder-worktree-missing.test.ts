@@ -28,14 +28,7 @@ import { basename, join } from "node:path";
 import Database from "better-sqlite3";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	CreateSession,
-	ListDaemonSessions,
-	MoveSessionWorkspace,
-	RecreateSessionWorktree,
-	SaveProject,
-	SessionInfoSchema,
-} from "../../../src/lib/contracts/ws-rpc.js";
+import { SessionInfoSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
 	type ProcessBrowser,
@@ -65,7 +58,7 @@ function latestRow(
 	return browser.frames
 		.flatMap(({ message }) => {
 			if (message["type"] !== feed) return [];
-			const rows =
+			const rows: readonly unknown[] =
 				message["_tag"] === "snapshot" && Array.isArray(message["rows"])
 					? message["rows"]
 					: message["_tag"] === "upsert"
@@ -161,16 +154,17 @@ process.exit(result.status ?? 1);
 			runnerStartupTimeoutMs: 90_000,
 		});
 		const socket = join(fixture.configDir, "relay.sock");
-		await sendRpcRequest(
-			socket,
-			new SaveProject({ slug: "process-test", folders }),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders,
+		});
 		const sessions = async () =>
 			(
-				await sendRpcRequest(
-					socket,
-					new ListDaemonSessions({ scope: "process-test" }),
-				)
+				await sendRpcRequest(socket, {
+					_tag: "ListDaemonSessions",
+					scope: "process-test",
+				})
 			).sessions;
 		const row = async (id: string) => {
 			const session = (await sessions()).find((session) => session.id === id);
@@ -178,18 +172,16 @@ process.exit(result.status ?? 1);
 			return session;
 		};
 		const create = async (title: string, newWorktree = true) => {
-			const { sessionId } = await sendRpcRequest(
-				socket,
-				new CreateSession({
-					permissionMode: "ask",
-					model: { providerId: "claude", modelId: "sonnet" },
-					projectSlug: "process-test",
-					originId: "multi-folder-recovery-test",
-					providerId: "claude",
-					title,
-					...(newWorktree ? { newWorktree: true } : {}),
-				}),
-			);
+			const { sessionId } = await sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				permissionMode: "ask",
+				model: { providerId: "claude", modelId: "sonnet" },
+				projectSlug: "process-test",
+				originId: "multi-folder-recovery-test",
+				providerId: "claude",
+				title,
+				...(newWorktree ? { newWorktree: true } : {}),
+			});
 			names.set(sessionId, title);
 			const session = await row(sessionId);
 			for (const [folder, path] of Object.entries(
@@ -207,15 +199,12 @@ process.exit(result.status ?? 1);
 			return session;
 		};
 		const recreate = (sessionId: string) =>
-			sendRpcRequest(
-				socket,
-				new RecreateSessionWorktree({ projectSlug: "process-test", sessionId }),
-			);
+			sendRpcRequest(socket, { _tag: "RecreateSessionWorktree", sessionId });
 		return { fixture, socket, extra, row, create, recreate, failMarker };
 	}
 
 	function workspaceEvents(fixture: ProcessHarness, id: string) {
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			return db
 				.prepare(
@@ -229,10 +218,10 @@ process.exit(result.status ?? 1);
 
 	async function capture(phase: string, fixture: ProcessHarness) {
 		const sessions = (
-			await sendRpcRequest(
-				join(fixture.configDir, "relay.sock"),
-				new ListDaemonSessions({ scope: "process-test" }),
-			)
+			await sendRpcRequest(join(fixture.configDir, "relay.sock"), {
+				_tag: "ListDaemonSessions",
+				scope: "process-test",
+			})
 		).sessions;
 		evidence[phase] = {
 			sessions: sessions.map(
@@ -529,10 +518,11 @@ process.exit(result.status ?? 1);
 		);
 		git(fixture.projectDir, "push", "origin", "main");
 		folders = [app, api, extra];
-		await sendRpcRequest(
-			socket,
-			new SaveProject({ slug: "process-test", folders }),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders,
+		});
 		const session = await create("owner");
 		const mappings = session.workspace?.worktrees ?? {};
 		const root = git(mappings[app] ?? "", "rev-parse", "--show-toplevel");
@@ -568,14 +558,11 @@ process.exit(result.status ?? 1);
 		const owner = await create("owner");
 		const reader = await create("reader", false);
 		const path = owner.workspace?.worktrees[extra] ?? "";
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				projectSlug: "process-test",
-				sessionId: reader.id,
-				path,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId: reader.id,
+			path,
+		});
 		const readerWorkspace = (await row(reader.id)).workspace;
 		expect(readerWorkspace?.worktrees[extra]).toBe(path);
 		const events = workspaceEvents(fixture, owner.id);

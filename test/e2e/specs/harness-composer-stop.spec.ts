@@ -125,7 +125,6 @@ function recordStopAndRun(harness: ProcessHarness, testInfo: TestInfo) {
 
 function cancel(browser: ProcessBrowser, sessionId: string) {
 	return browser.rpc.CancelSession({
-		projectSlug: "process-test",
 		sessionId,
 		commandId: randomUUID(),
 	});
@@ -252,8 +251,7 @@ test("queued tray stays Paused until Resume and the next message uses the same q
 	const inputId = randomUUID();
 	expect(
 		await Effect.runPromise(
-			browser.rpc.input.submit({
-				projectSlug: "process-test",
+			browser.rpc["input.submit"]({
 				sessionId,
 				originId: browser.originId,
 				inputId,
@@ -585,8 +583,7 @@ test("correction: repeated cancel belongs to one input and Stop preserves the pe
 	const steer = "task-stop-foreground-correction-steer-monitor";
 	expect(
 		await Effect.runPromise(
-			browser.rpc.input.submit({
-				projectSlug: "process-test",
+			browser.rpc["input.submit"]({
 				sessionId,
 				originId: browser.originId,
 				inputId: randomUUID(),
@@ -641,8 +638,7 @@ test("correction: delayed cancel between a result and pending steer preserves th
 	const steer = "task-stop-follow-up-steer-boundary";
 	expect(
 		await Effect.runPromise(
-			browser.rpc.input.submit({
-				projectSlug: "process-test",
+			browser.rpc["input.submit"]({
 				sessionId,
 				originId: browser.originId,
 				inputId: randomUUID(),
@@ -712,7 +708,7 @@ test("correction: interrupt rejection reaches RPC and leaves the running tool in
 		.poll(() => toolStatus(browser, sessionId, "correction-foreground"))
 		.toBe("running");
 	const rejected = await Effect.runPromise(
-		Effect.either(cancel(browser, sessionId)),
+		Effect.result(cancel(browser, sessionId)),
 	);
 	const rejectionPath = testInfo.outputPath("interrupt-rejection.json");
 	writeFileSync(rejectionPath, JSON.stringify(rejected, null, 2));
@@ -731,7 +727,7 @@ test("correction: interrupt rejection reaches RPC and leaves the running tool in
 		path: historyAfterRejection,
 		contentType: "application/json",
 	});
-	expect(rejected._tag).toBe("Left");
+	expect(rejected._tag).toBe("Failure");
 	await expect
 		.poll(() => toolStatus(browser, sessionId, "correction-foreground"))
 		.toBe("running");

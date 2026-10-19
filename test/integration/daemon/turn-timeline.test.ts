@@ -33,7 +33,8 @@ afterEach(async () => {
 });
 
 it("records one admitted-to-socket timeline through the fake Claude process", async () => {
-	harness = await ProcessHarness.start();
+	harness = ProcessHarness.create();
+	await harness.restart({ startupTimeoutMs: 30_000 });
 	const browser = await harness.connect();
 	const sessionId = await browser.createSession("Turn timeline");
 	const prompt = "stream-parity";
@@ -73,7 +74,7 @@ it("records one admitted-to-socket timeline through the fake Claude process", as
 		["runner-ready", "prompt-delivered"].includes(entry.phase),
 	))
 		expect(phase.approximation).toBe("first-frame-received");
-	const db = new Database(harness.projectStorePath(), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		const admitted = db
 			.prepare(
@@ -102,15 +103,25 @@ it("records one admitted-to-socket timeline through the fake Claude process", as
 });
 
 it("leaves socket write missing when the browser leaves before assistant output", async () => {
-	harness = await ProcessHarness.start({ queryInitializationDelayMs: 500 });
+	harness = ProcessHarness.create({ restartProof: true });
+	writeFileSync(join(harness.root, "hold-next-initialization"), "hold");
+	await harness.restart({ startupTimeoutMs: 30_000 });
 	const browser = await harness.connect();
 	const sessionId = await browser.createSession("Unobserved turn timeline");
 	await browser.followSession(sessionId);
+	// Observe completion through the sidebar without opening a transcript socket.
+	const observer = await harness.connect(
+		undefined,
+		undefined,
+		"process-test",
+		false,
+	);
+	const cursor = observer.frames.length;
 	const inputId = randomUUID();
+	const submittedAt = performance.now();
 	expect(
 		await Effect.runPromise(
-			browser.rpc.input.submit({
-				projectSlug: "process-test",
+			browser.rpc["input.submit"]({
 				sessionId,
 				originId: "timeline-disconnect",
 				inputId,
@@ -119,14 +130,27 @@ it("leaves socket write missing when the browser leaves before assistant output"
 			}),
 		),
 	).toMatchObject({ ok: true });
+	const proofPath = join(harness.root, "sdk-proof.ndjson");
+	await vi.waitFor(
+		() => {
+			expect(
+				existsSync(proofPath) && readFileSync(proofPath, "utf8"),
+			).toContain('"kind":"initialization-held"');
+		},
+		{ timeout: 15_000 },
+	);
+	const initializationHeldAfterMs = performance.now() - submittedAt;
 	await browser.close();
-	const db = new Database(harness.projectStorePath(), { readonly: true });
+	writeFileSync(join(harness.root, "release-held-initialization"), "release");
+	await observer.waitForTurnEnd(sessionId, cursor);
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
+		// Turn publication precedes settling the command's durable receipt.
 		await vi.waitFor(
 			() => {
 				const completed = db
 					.prepare(
-						"SELECT COUNT(*) AS n FROM provider_command_outbox WHERE command_id = ? AND status = 'completed'",
+						"SELECT COUNT(*) AS n FROM provider_command_outbox WHERE project_key = 'process-test' AND command_id = ? AND status = 'completed'",
 					)
 					.get(inputId);
 				expect(completed).toEqual({ n: 1 });
@@ -151,6 +175,6 @@ it("leaves socket write missing when the browser leaves before assistant output"
 	mkdirSync("test-results", { recursive: true });
 	writeFileSync(
 		"test-results/8rdf-20-unobserved-turn-timeline.json",
-		JSON.stringify(records[0], null, 2),
+		JSON.stringify({ ...records[0], initializationHeldAfterMs }, null, 2),
 	);
 });

@@ -24,7 +24,7 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import {
 	getSubagentMessages,
@@ -63,7 +63,7 @@ type TranscriptRead = {
 
 const redact = (text: string): string =>
 	text
-		.replaceAll(homedir(), "/home/test")
+		.replaceAll(userInfo().homedir, "/home/test")
 		.replace(
 			/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,
 			"redacted@example.test",
@@ -199,6 +199,7 @@ describe.skipIf(!RUN_EXPENSIVE)(
 	() => {
 		it(
 			"captures concurrent background agents and shells, wake-ups and a Claude process restart",
+			{ timeout: 900_000 },
 			async () => {
 				const captureDir = mkdtempSync(
 					join(tmpdir(), "conduit-background-capture-"),
@@ -223,7 +224,6 @@ describe.skipIf(!RUN_EXPENSIVE)(
 					evidence["sessionId"] = sessionId;
 					await Effect.runPromise(
 						browser.rpc.SwitchPermissionMode({
-							projectSlug: "process-test",
 							sessionId,
 							mode: "full",
 						}),
@@ -348,11 +348,11 @@ describe.skipIf(!RUN_EXPENSIVE)(
 					}
 				}
 			},
-			{ timeout: 900_000 },
 		);
 
 		it(
 			"captures a foreground agent moved to the background mid-run",
+			{ timeout: 400_000 },
 			async () => {
 				const workspace = mkdtempSync(join(tmpdir(), "conduit-fg-capture-"));
 				const evidence: Record<string, unknown> = {
@@ -453,7 +453,6 @@ describe.skipIf(!RUN_EXPENSIVE)(
 					writeEvidence("foreground-agent-backgrounded", evidence);
 				}
 			},
-			{ timeout: 400_000 },
 		);
 	},
 );

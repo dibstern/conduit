@@ -2,12 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import SessionContextMenu from "../../../src/lib/frontend/components/session/SessionContextMenu.svelte";
 import { openSnoozePicker } from "../../../src/lib/frontend/stores/snooze-picker.svelte.js";
-import {
-	setSessionAutoSettleRpc,
-	setSessionPinnedRpc,
-	setSessionSettledRpc,
-	unsnoozeSessionRpc,
-} from "../../../src/lib/frontend/transport/ws-rpc-client.js";
+import { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 
 vi.mock(
@@ -34,10 +29,7 @@ vi.mock(
 		...(await importOriginal<
 			typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js")
 		>()),
-		setSessionAutoSettleRpc: vi.fn().mockResolvedValue(undefined),
-		setSessionPinnedRpc: vi.fn().mockResolvedValue(undefined),
-		setSessionSettledRpc: vi.fn().mockResolvedValue(undefined),
-		unsnoozeSessionRpc: vi.fn().mockResolvedValue(undefined),
+		rpc: vi.fn().mockResolvedValue(undefined),
 	}),
 );
 
@@ -115,31 +107,33 @@ describe("session triage menu", () => {
 	it("puts Settle and Pin above Rename, with a divider", async () => {
 		openMenu({ id: "a", title: "Alpha" });
 		await screen.findByTestId("session-ctx-rename");
-		const firstFour = [
+		const firstFive = [
 			...screen
 				.getByRole("menu")
 				.querySelectorAll('[role="menuitem"], [role="menuitemcheckbox"]'),
-		].slice(0, 4);
-		expect(firstFour.map((item) => item.getAttribute("data-testid"))).toEqual([
+		].slice(0, 5);
+		expect(firstFive.map((item) => item.getAttribute("data-testid"))).toEqual([
 			"session-ctx-settle",
+			"session-ctx-archive",
 			"session-ctx-auto-settle",
 			"session-ctx-snooze",
 			"session-ctx-pin",
 		]);
 		for (const [index, label] of [
 			"Settle",
+			"Archive",
 			"Auto-settle when idle",
 			"Snooze…",
 			"Pin to top",
 		].entries()) {
-			expect(firstFour[index]?.textContent).toContain(label);
+			expect(firstFive[index]?.textContent).toContain(label);
 		}
 		expect(screen.getAllByRole("separator").length).toBeGreaterThan(0);
 		expect(screen.getByTestId("session-ctx-rename")).toBeTruthy();
 		await fireEvent.click(screen.getByTestId("session-ctx-settle"));
-		expect(setSessionSettledRpc).toHaveBeenCalledWith(
+		expect(rpc).toHaveBeenCalledWith(
+			"SetSessionSettled",
 			expect.objectContaining({
-				projectSlug: "test",
 				sessionId: "a",
 				settled: true,
 			}),
@@ -153,9 +147,9 @@ describe("session triage menu", () => {
 		});
 		expect(checkbox.getAttribute("aria-checked")).toBe("true");
 		await fireEvent.click(checkbox);
-		expect(setSessionAutoSettleRpc).toHaveBeenCalledWith(
+		expect(rpc).toHaveBeenCalledWith(
+			"SetSessionAutoSettle",
 			expect.objectContaining({
-				projectSlug: "test",
 				sessionId: "a",
 				disabled: true,
 			}),
@@ -167,9 +161,9 @@ describe("session triage menu", () => {
 		});
 		expect(unchecked.getAttribute("aria-checked")).toBe("false");
 		await fireEvent.click(unchecked);
-		expect(setSessionAutoSettleRpc).toHaveBeenCalledWith(
+		expect(rpc).toHaveBeenCalledWith(
+			"SetSessionAutoSettle",
 			expect.objectContaining({
-				projectSlug: "test",
 				sessionId: "a",
 				disabled: false,
 			}),
@@ -219,17 +213,18 @@ describe("session triage menu", () => {
 		cleanup();
 		openMenu({ id: "a", title: "Alpha", snoozedAt: 1 });
 		await fireEvent.click(await screen.findByTestId("session-ctx-unsnooze"));
-		expect(unsnoozeSessionRpc).toHaveBeenCalledWith(
-			expect.objectContaining({ projectSlug: "test", sessionId: "a" }),
+		expect(rpc).toHaveBeenCalledWith(
+			"UnsnoozeSession",
+			expect.objectContaining({ sessionId: "a" }),
 		);
 	});
 
 	it("un-settles a settled session", async () => {
 		openMenu({ id: "a", title: "Alpha", settledAt: 0 });
 		await fireEvent.click(await screen.findByTestId("session-ctx-unsettle"));
-		expect(setSessionSettledRpc).toHaveBeenCalledWith(
+		expect(rpc).toHaveBeenCalledWith(
+			"SetSessionSettled",
 			expect.objectContaining({
-				projectSlug: "test",
 				sessionId: "a",
 				settled: false,
 			}),
@@ -239,9 +234,9 @@ describe("session triage menu", () => {
 	it("pins a session", async () => {
 		openMenu({ id: "a", title: "Alpha" });
 		await fireEvent.click(await screen.findByTestId("session-ctx-pin"));
-		expect(setSessionPinnedRpc).toHaveBeenCalledWith(
+		expect(rpc).toHaveBeenCalledWith(
+			"SetSessionPinned",
 			expect.objectContaining({
-				projectSlug: "test",
 				sessionId: "a",
 				pinned: true,
 			}),
@@ -258,11 +253,14 @@ describe("session triage menu", () => {
 		expect(settle.getAttribute("aria-disabled")).toBe("true");
 		expect(settle.textContent).toContain("Unpin to settle");
 		await fireEvent.click(settle);
-		expect(setSessionSettledRpc).not.toHaveBeenCalled();
+		expect(rpc).not.toHaveBeenCalledWith(
+			"SetSessionSettled",
+			expect.anything(),
+		);
 		await fireEvent.click(screen.getByTestId("session-ctx-unpin"));
-		expect(setSessionPinnedRpc).toHaveBeenCalledWith(
+		expect(rpc).toHaveBeenCalledWith(
+			"SetSessionPinned",
 			expect.objectContaining({
-				projectSlug: "test",
 				sessionId: "a",
 				pinned: false,
 			}),

@@ -17,7 +17,7 @@ Updated: 2026-05-15.
 
 ## Accepted Decisions
 
-- Finish the current migration on Effect 3.x. Effect v4 and `effect/unstable/*` are post-migration work.
+- Finish the current migration on Effect 3.x. Effect v4 and `effect/unstable/*` are post-migration work. (Superseded 2026-10-18: Effect 4 is now current; see conduit-test-16c8.)
 - Keep one production daemon owner. Do not add `--daemon-runtime=effect|legacy`.
 - Keep per-project relays as deployment, scope, routing, and lifecycle units.
 - Adopt command/event/projector/read-model inside each relay now, not later.

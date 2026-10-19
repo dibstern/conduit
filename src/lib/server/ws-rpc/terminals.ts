@@ -1,8 +1,10 @@
 import { Effect, Option } from "effect";
 import type { Account } from "../../contracts/account.js";
+import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { OpenCodeTerminalServiceTag } from "../../domain/relay/Services/terminal-service.js";
+import * as Failure from "../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../errors.js";
 import {
 	mapRpcFailure,
@@ -19,7 +21,7 @@ export const terminalsHandlers = {
 				projectSlug: request.projectSlug,
 				ptys,
 			};
-		}).pipe(Effect.catchAll(mapRpcFailure("ListPtys"))),
+		}).pipe(Effect.catch(mapRpcFailure("ListPtys"))),
 	CreatePty: (request) =>
 		Effect.gen(function* () {
 			const terminal = yield* OpenCodeTerminalServiceTag;
@@ -35,7 +37,9 @@ export const terminalsHandlers = {
 							accounts.resolve({ _tag: "Id", id: request.accountId }),
 						);
 			const account =
-				Option.isSome(selected) && selected.value.driver === "claude"
+				Option.isSome(selected) &&
+				PROVIDER_DRIVERS[selected.value.driver].accountKind ===
+					"config-directory"
 					? selected
 					: yield* accounts.defaultFor("claude");
 			yield* terminal.create(
@@ -45,7 +49,7 @@ export const terminalsHandlers = {
 			);
 			return { ok: true as const };
 		}).pipe(
-			Effect.mapError(
+			Failure.mapEffectFailures(
 				(error) =>
 					new WsRpcError({
 						message: `Failed to create terminal: ${formatErrorDetail(error)}`,
@@ -62,20 +66,20 @@ export const terminalsHandlers = {
 				request.cols ?? 80,
 			);
 			return { ok: true as const };
-		}).pipe(Effect.catchAll(mapRpcFailure("ResizePty"))),
+		}).pipe(Effect.catch(mapRpcFailure("ResizePty"))),
 	ClosePty: (request) =>
 		Effect.gen(function* () {
 			const terminal = yield* OpenCodeTerminalServiceTag;
 			yield* terminal.close(request.ptyId);
 			return { ok: true as const };
-		}).pipe(Effect.catchAll(mapRpcFailure("ClosePty"))),
+		}).pipe(Effect.catch(mapRpcFailure("ClosePty"))),
 	PtyInput: (request) =>
 		Effect.gen(function* () {
 			const terminal = yield* OpenCodeTerminalServiceTag;
 			yield* terminal.sendInput(request.ptyId, request.data);
 			return { ok: true as const };
 		}).pipe(
-			Effect.mapError(
+			Failure.mapEffectFailures(
 				() =>
 					new WsRpcError({
 						message:

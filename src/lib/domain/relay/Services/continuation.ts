@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { SqlClient } from "@effect/sql";
 import {
 	Clock,
 	Context,
@@ -10,6 +9,7 @@ import {
 	Ref,
 	Schema,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import type { AccountRef, ClaudeAccount } from "../../../contracts/account.js";
 import {
 	AccountUnavailable,
@@ -22,6 +22,7 @@ import {
 	SessionBusy,
 	StaleSwitch,
 } from "../../../contracts/limit-recovery.js";
+import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { loadDaemonConfigResult } from "../../../daemon/config-persistence.js";
 import { preWarmSession } from "../../../handlers/session-prewarm.js";
 import {
@@ -73,7 +74,7 @@ const previewContinuationForAccount = (
 		const recovery =
 			session.limit_recovery === null
 				? null
-				: Schema.decodeUnknownSync(Schema.parseJson(LimitRecoverySchema))(
+				: Schema.decodeUnknownSync(Schema.fromJsonString(LimitRecoverySchema))(
 						session.limit_recovery,
 					);
 		const contextWindow = session.context_window ?? "";
@@ -83,7 +84,9 @@ const previewContinuationForAccount = (
 			agent: yield* getAgent(sessionId),
 			modelContextWindow: contextWindow === "1m" ? 1000000 : undefined,
 			continuation:
-				account.id !== session.provider && !!recovery?.cutOffMessageId,
+				account.id !== session.provider && recovery?.cutOffMessageId
+					? { cutOffMessageId: recovery.cutOffMessageId }
+					: undefined,
 		});
 		const prepared = yield* prepare(sessionId, account.id);
 		return (
@@ -117,7 +120,11 @@ export const previewContinuation = (
 			accountRef._tag === "Id" && session.provider === accountRef.id
 				? account
 				: yield* directory.resolve({ _tag: "Id", id: session.provider });
-		if (account.driver !== "claude" || source.driver !== "claude")
+		if (
+			!PROVIDER_DRIVERS[account.driver].supportsNativeResume ||
+			!PROVIDER_DRIVERS[source.driver].supportsNativeResume ||
+			!("folder" in account)
+		)
 			return yield* new DriverMismatch({ sessionId, instanceId });
 		return yield* previewContinuationForAccount(session, account);
 	});
@@ -140,21 +147,23 @@ export interface Continuation {
 		| ContinuationError
 		| CommitAndSignalFailure
 		| ReadQueryEffectError
-		| Effect.Effect.Error<ReturnType<typeof previewContinuation>>
-		| Effect.Effect.Error<ReturnType<typeof applySessionCommand>>
-		| Effect.Effect.Error<ReturnType<typeof preWarmSession>>
-		| Effect.Effect.Error<
-				ReturnType<OrchestrationEngineTag["Type"]["dispatchEffect"]>
+		| Effect.Error<ReturnType<typeof previewContinuation>>
+		| Effect.Error<ReturnType<typeof applySessionCommand>>
+		| Effect.Error<ReturnType<typeof preWarmSession>>
+		| Effect.Error<
+				ReturnType<
+					Context.Service.Shape<typeof OrchestrationEngineTag>["dispatchEffect"]
+				>
 		  >
-		| Effect.Effect.Error<ReturnType<ProviderTurnService["sendTurn"]>>,
+		| Effect.Error<ReturnType<ProviderTurnService["sendTurn"]>>,
 		| ConfigTag
 		| Usage
 		| ProviderTurnServiceTag
 		| OverridesStateTag
 		| ReadQueryEffectTag
-		| Effect.Effect.Context<ReturnType<typeof previewContinuation>>
-		| Effect.Effect.Context<ReturnType<typeof applySessionCommand>>
-		| Effect.Effect.Context<ReturnType<typeof preWarmSession>>
+		| Effect.Services<ReturnType<typeof previewContinuation>>
+		| Effect.Services<ReturnType<typeof applySessionCommand>>
+		| Effect.Services<ReturnType<typeof preWarmSession>>
 	>;
 	/** The supplied projector joins runner intake's existing claimed transaction. */
 	readonly intakeLimit: (
@@ -176,14 +185,14 @@ export interface Continuation {
 	readonly runLimitPolicies: Effect.Effect<
 		never,
 		never,
-		Effect.Effect.Context<ReturnType<Continuation["requestContinuation"]>>
+		Effect.Services<ReturnType<Continuation["requestContinuation"]>>
 	>;
 }
 
-export class ContinuationTag extends Context.Tag("Continuation")<
+export class ContinuationTag extends Context.Service<
 	ContinuationTag,
 	Continuation
->() {}
+>()("Continuation") {}
 
 export const makeContinuation = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -191,7 +200,7 @@ export const makeContinuation = Effect.gen(function* () {
 	const commit = yield* makeCommitAndSignal;
 	const requesting = new Set<string>();
 	const decodeRecovery = Schema.decodeUnknownSync(
-		Schema.parseJson(LimitRecoverySchema),
+		Schema.fromJsonString(LimitRecoverySchema),
 	);
 	const sameSchedule = (
 		recovery: LimitRecovery | null,
@@ -274,7 +283,11 @@ export const makeContinuation = Effect.gen(function* () {
 							_tag: "Id",
 							id: initialSession.provider,
 						});
-			if (account.driver !== "claude" || source.driver !== "claude")
+			if (
+				!PROVIDER_DRIVERS[account.driver].supportsNativeResume ||
+				!PROVIDER_DRIVERS[source.driver].supportsNativeResume ||
+				!("folder" in account)
+			)
 				return yield* new DriverMismatch({
 					sessionId,
 					instanceId: options.instanceId,
@@ -544,7 +557,7 @@ export const makeContinuation = Effect.gen(function* () {
 									account: source,
 								});
 								yield* preWarmSession(sessionId, account).pipe(
-									Effect.catchAll((error) =>
+									Effect.catch((error) =>
 										Effect.flatMap(LoggerTag, (log) =>
 											Effect.sync(() =>
 												log.warn(
@@ -581,8 +594,10 @@ export const makeContinuation = Effect.gen(function* () {
 							// it exists. Actual resumes run in the completed relay context.
 							const inbox = yield* Effect.serviceOption(SessionInboxTag);
 							if (inbox._tag === "None")
-								return yield* Effect.dieMessage(
-									"Continuation admission requires the session inbox",
+								return yield* Effect.die(
+									new Error(
+										"Continuation admission requires the session inbox",
+									),
 								);
 							yield* inbox.value.withSession(
 								sessionId,
@@ -610,7 +625,7 @@ export const makeContinuation = Effect.gen(function* () {
 			const rows = yield* sql<{
 				id: string;
 				limit_recovery: string;
-			}>`SELECT id, limit_recovery FROM sessions WHERE json_extract(limit_recovery, '$.scheduledAt') <= ${currentTime} ORDER BY id`;
+			}>`SELECT id, limit_recovery FROM sessions WHERE project_id = ${store.projectId} AND json_extract(limit_recovery, '$.scheduledAt') <= ${currentTime} ORDER BY id`;
 			for (const row of rows) {
 				const recovery = decodeRecovery(row.limit_recovery);
 				const cancel = () => cancelContinuation(row.id, recovery);
@@ -629,7 +644,7 @@ export const makeContinuation = Effect.gen(function* () {
 						StaleSwitch: cancel,
 						SessionBusy: cancel,
 					}),
-					Effect.catchAll((error) =>
+					Effect.catch((error) =>
 						Effect.logError("Scheduled continuation failed", row.id, error),
 					),
 				);
@@ -641,7 +656,7 @@ export const makeContinuation = Effect.gen(function* () {
 			return (yield* Ref.get(configRef.value)).usageLimits;
 		const config = yield* ConfigTag;
 		return yield* Effect.suspend(() =>
-			loadDaemonConfigResult(config.configDir),
+			Effect.fromResult(loadDaemonConfigResult(config.configDir)),
 		).pipe(
 			Effect.map((loaded) => loaded.usageLimits),
 			Effect.catchTag("NotFound", () => Effect.succeed(undefined)),
@@ -719,7 +734,7 @@ export const makeContinuation = Effect.gen(function* () {
 		Effect.flatMap((sessionId) =>
 			Effect.gen(function* () {
 				const switched = yield* tryAutoSwitch(sessionId).pipe(
-					Effect.catchAllCause((cause) =>
+					Effect.catchCause((cause) =>
 						Effect.logWarning("Auto-switch refused", sessionId, cause).pipe(
 							Effect.as(false),
 						),
@@ -727,7 +742,7 @@ export const makeContinuation = Effect.gen(function* () {
 				);
 				if (!switched) yield* tryAutoResume(sessionId);
 			}).pipe(
-				Effect.catchAllCause((cause) =>
+				Effect.catchCause((cause) =>
 					Effect.logWarning("Usage limit policy refused", sessionId, cause),
 				),
 			),
@@ -745,9 +760,9 @@ export const makeContinuation = Effect.gen(function* () {
 				const recovery =
 					rows[0].limit_recovery === null
 						? null
-						: Schema.decodeUnknownSync(Schema.parseJson(LimitRecoverySchema))(
-								rows[0].limit_recovery,
-							);
+						: Schema.decodeUnknownSync(
+								Schema.fromJsonString(LimitRecoverySchema),
+							)(rows[0].limit_recovery);
 				const previous = yield* sql<{
 					cut_off: string;
 					sequence: number;

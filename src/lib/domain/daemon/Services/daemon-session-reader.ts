@@ -1,41 +1,44 @@
 import { statSync } from "node:fs";
-import { Reactivity } from "@effect/experimental";
-import { SqlClient } from "@effect/sql";
-import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { Cause, Data, Effect, Either, Exit, Layer } from "effect";
+import { Data, Effect, Exit, Layer, Option } from "effect";
+import { SqlClient } from "effect/sql";
+import * as Failure from "../../../effect/failure-classification.js";
 import {
 	type createSessionGitCache,
 	daemonSessionGitCache,
-	withCachedSessionGit,
 } from "../../../git/session-git.js";
+import type { PersistenceStore } from "../../../persistence/effect/live.js";
 import {
 	makeReadQueryEffect,
+	type ReadQueryEffect,
 	ReadQueryEffectTag,
+	type SessionScope,
 } from "../../../persistence/effect/read-query-effect.js";
-import { projectEventsDbPath } from "../../../persistence/project-storage.js";
-import { computeProjectGroups } from "../../../project-grouping.js";
-import { loadRelaySettings } from "../../../relay/relay-settings.js";
+import {
+	shouldArchiveIdleSession,
+	shouldDeleteArchivedSessionTree,
+} from "../../../session/auto-archive-policy.js";
+import { readPersistedAutoArchiveFacts } from "../../../session/auto-archive-sweep.js";
+import { readPersistedAutoDeleteFacts } from "../../../session/auto-delete-archived-sweep.js";
 import { shouldSettleIdleSession } from "../../../session/auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "../../../session/auto-settle-reader.js";
-import {
-	effectiveSessionFolders,
-	effectiveWorkingDirectory,
-} from "../../../session/session-workspace.js";
-import { getScopeGroupKey } from "../../../session-scope.js";
 import type {
-	DaemonSessionCursor,
+	ArchivedSessionQueryOptions,
+	ArchivedSessionQueryResult,
 	DaemonSessionQueryOptions,
 	DaemonSessionQueryResult,
 	SessionInfo,
 } from "../../../shared-types.js";
 import type { StoredProject } from "../../../types.js";
-import { withSessionWorktreeStatus } from "../../relay/Services/session-workspace.js";
 import type { AccountDirectory } from "./account-directory.js";
+import { DaemonStoreAvailability } from "./daemon-store-availability.js";
+import { projectReadDatabase } from "./project-read-database.js";
 import {
 	allProjects,
 	type ProjectRegistryTag,
 } from "./project-registry-service.js";
-import { resolveSessionAccountIds } from "./session-accounts.js";
+import type { SessionActivityTag } from "./session-activity.js";
+import { SessionDirectory } from "./session-directory.js";
+import { makeSessionRows } from "./session-rows.js";
 
 class DaemonSessionReadError extends Data.TaggedError(
 	"DaemonSessionReadError",
@@ -50,21 +53,18 @@ class DaemonSessionReadError extends Data.TaggedError(
 	}
 }
 
-const isMissingPathError = (cause: unknown): boolean =>
-	typeof cause === "object" &&
-	cause !== null &&
-	"code" in cause &&
-	cause.code === "ENOENT";
-
 interface ProjectSessionCandidate {
-	readonly sortKey: DaemonSessionCursor;
+	readonly sortKey: { readonly at: number; readonly id: string };
 	readonly session: SessionInfo;
 }
 
+type SessionReadOptions = NonNullable<
+	Parameters<ReadQueryEffect["listSessionInfos"]>[1]
+>;
+
 const readProjectSessions = (
 	project: Pick<StoredProject, "slug" | "folders">,
-	configDir: string,
-	options: DaemonSessionQueryOptions,
+	options: SessionReadOptions,
 	gitCache: ReturnType<typeof createSessionGitCache>,
 ) =>
 	Effect.gen(function* () {
@@ -82,125 +82,53 @@ const readProjectSessions = (
 				cause: `Project path is not a directory: ${projectDirectory}`,
 			});
 		}
-		const databasePath = projectEventsDbPath({ configDir, ...project });
-		const databaseStat = yield* Effect.either(
-			Effect.try({
-				try: () => statSync(databasePath),
-				catch: (cause) => cause,
-			}),
-		);
-		if (Either.isLeft(databaseStat)) {
-			if (isMissingPathError(databaseStat.left)) {
-				return [];
-			}
-			return yield* new DaemonSessionReadError({
-				projectSlug,
-				cause: databaseStat.left,
-			});
-		}
-
-		const sqliteLayer = SqliteNode.layer({
-			filename: databasePath,
-			readonly: true,
-			disableWAL: true,
-		}).pipe(Layer.provide(Reactivity.layer));
+		const database = yield* projectReadDatabase(project, {
+			prepare: true,
+		});
 		const readQueryLayer = Layer.effect(
 			ReadQueryEffectTag,
 			makeReadQueryEffect,
-		).pipe(Layer.provide(sqliteLayer));
+		).pipe(Layer.provideMerge(database));
 
 		const sessions = yield* Effect.gen(function* () {
-			const readQuery = yield* ReadQueryEffectTag;
-			return yield* readQuery.listSessionInfos({
-				...(options.roots !== undefined ? { roots: options.roots } : {}),
-				...(options.limit !== undefined ? { limit: options.limit } : {}),
-				...(options.search !== undefined ? { titleQuery: options.search } : {}),
-				...(options.cursor !== undefined ? { before: options.cursor } : {}),
+			const rows = yield* makeSessionRows({
+				slug: projectSlug,
+				folders: project.folders,
+				gitCache,
+				refreshGit: true,
 			});
+			return yield* rows.list(options);
 		}).pipe(Effect.provide(readQueryLayer));
-		const accountIds = yield* resolveSessionAccountIds(
-			sessions.map((session) => session.id),
-		).pipe(Effect.provide(sqliteLayer));
-		const directories = new Set(
-			sessions.flatMap((session) => [
-				effectiveWorkingDirectory(project.folders[0], session.workspace),
-				...effectiveSessionFolders(project.folders, session.workspace).map(
-					({ directory }) => directory,
-				),
-			]),
-		);
-		// Cold projects have no git-change signal to update browsers after this read.
-		yield* Effect.forEach(
-			[...directories].filter((directory) => gitCache.isStale(directory)),
-			(directory) =>
-				Effect.tryPromise({
-					try: () => gitCache.refresh(directory),
-					catch: (cause) => new DaemonSessionReadError({ projectSlug, cause }),
-				}),
-			{ concurrency: 4, discard: true },
-		);
-		return yield* Effect.forEach(sessions, (session) =>
-			withSessionWorktreeStatus(
-				withCachedSessionGit(
-					{
-						...session,
-						projectSlug,
-						accountId: accountIds.get(session.id) ?? null,
-					},
-					project.folders,
-					gitCache,
-				),
-				{
-					projectDir: projectDirectory,
-					slug: projectSlug,
-					extraFolders: project.folders.slice(1),
+		return sessions.map(
+			(session): ProjectSessionCandidate => ({
+				sortKey: {
+					at:
+						options.orderColumn === "archived_at"
+							? (session.archivedAt ?? 0)
+							: session.updatedAt,
+					id: session.id,
 				},
-			).pipe(
-				Effect.map(
-					(enriched): ProjectSessionCandidate => ({
-						sortKey: { updatedAt: session.updatedAt, id: session.id },
-						session: {
-							...enriched,
-							projectSlug,
-						},
-					}),
-				),
-			),
-		).pipe(Effect.provide(sqliteLayer));
+				session,
+			}),
+		);
 	});
 
 /** Check recovery work without acquiring the project's relay or starting providers. */
 export const hasProviderRecoveryCandidate = (
 	project: Pick<StoredProject, "slug" | "folders">,
-	configDir: string,
 	openCodeInstanceIds: readonly string[],
 ) =>
 	Effect.gen(function* () {
-		const databasePath = projectEventsDbPath({ configDir, ...project });
-		const databaseStat = yield* Effect.either(
-			Effect.try({
-				try: () => statSync(databasePath),
-				catch: (cause) => cause,
-			}),
-		);
-		if (Either.isLeft(databaseStat)) {
-			if (isMissingPathError(databaseStat.left)) return false;
-			return yield* Effect.fail(databaseStat.left);
-		}
-		const sqliteLayer = SqliteNode.layer({
-			filename: databasePath,
-			readonly: true,
-			disableWAL: true,
-		}).pipe(Layer.provide(Reactivity.layer));
+		const database = yield* projectReadDatabase(project);
 		return yield* Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const rows = yield* sql<{ needs_recovery: number }>`SELECT EXISTS (
 				SELECT 1 FROM provider_command_outbox
-				WHERE provider_id = 'claude' AND effect_type = 'send_turn' AND status = 'running'
+				WHERE project_key = ${project.slug} AND provider_id = 'claude' AND effect_type = 'send_turn' AND status = 'running'
 			) OR EXISTS (
 				SELECT 1 FROM sessions AS session
 				JOIN session_providers AS binding ON binding.session_id = session.id
-				WHERE binding.status = 'active'
+				WHERE session.project_id = ${project.slug} AND binding.status = 'active'
 				AND binding.provider IN ${sql.in(openCodeInstanceIds)}
 				AND (session.status IN ('busy', 'retry') OR EXISTS (
 					SELECT 1 FROM pending_approvals AS approval
@@ -208,112 +136,83 @@ export const hasProviderRecoveryCandidate = (
 				))
 			) AS needs_recovery`;
 			return rows[0]?.needs_recovery === 1;
-		}).pipe(Effect.provide(sqliteLayer));
+		}).pipe(Effect.provide(database));
 	});
 
 /** Count busy/retry sessions and admitted turns awaiting their first provider event. */
 export const countRunningProjectSessions = (
 	project: Pick<StoredProject, "slug" | "folders">,
-	configDir: string,
 ) =>
 	Effect.gen(function* () {
-		const databasePath = projectEventsDbPath({ configDir, ...project });
-		const databaseStat = yield* Effect.either(
-			Effect.try({
-				try: () => statSync(databasePath),
-				catch: (cause) => cause,
-			}),
-		);
-		if (Either.isLeft(databaseStat)) {
-			if (isMissingPathError(databaseStat.left)) return 0;
-			return yield* Effect.fail(databaseStat.left);
-		}
-		const sqliteLayer = SqliteNode.layer({
-			filename: databasePath,
-			readonly: true,
-			disableWAL: true,
-		}).pipe(Layer.provide(Reactivity.layer));
+		const database = yield* projectReadDatabase(project);
 		return yield* Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const rows = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM (
-				SELECT id FROM sessions WHERE status IN ('busy', 'retry')
+				SELECT id FROM sessions WHERE project_id = ${project.slug} AND status IN ('busy', 'retry')
 				UNION
 				SELECT session_id FROM provider_command_outbox
-				WHERE effect_type = 'send_turn' AND status IN ('pending', 'running')
+				WHERE project_key = ${project.slug} AND effect_type = 'send_turn' AND status IN ('pending', 'running')
 			)`;
 			return rows[0]?.count ?? 0;
-		}).pipe(Effect.provide(sqliteLayer));
+		}).pipe(Effect.provide(database));
 	});
 
-/** Use the same read-only SQLite path as the daemon-wide session list. */
+/** Probe without acquiring the project's relay. */
 export const hasColdAutoSettleCandidate = (
 	project: Pick<StoredProject, "slug" | "folders">,
-	configDir: string,
 	now: number,
 	idleWindowMs: number,
 ) =>
 	Effect.gen(function* () {
-		const databasePath = projectEventsDbPath({ configDir, ...project });
-		const databaseStat = yield* Effect.either(
-			// Keep the raw error: the shorthand form wraps it in UnknownException,
-			// hiding the ENOENT code that marks a project with no store yet.
-			Effect.try({
-				try: () => statSync(databasePath),
-				catch: (cause) => cause,
-			}),
-		);
-		if (Either.isLeft(databaseStat)) {
-			if (isMissingPathError(databaseStat.left)) return false;
-			return yield* Effect.fail(databaseStat.left);
-		}
-		const sqliteLayer = SqliteNode.layer({
-			filename: databasePath,
-			readonly: true,
-			disableWAL: true,
-		}).pipe(Layer.provide(Reactivity.layer));
+		const database = yield* projectReadDatabase(project);
 		const facts = yield* readPersistedAutoSettleFacts(
+			project.slug,
 			now,
 			undefined,
 			project.folders[0],
-		).pipe(Effect.provide(sqliteLayer));
+		).pipe(Effect.provide(database));
 		return [...facts.values()].some((item) =>
 			shouldSettleIdleSession(item, now, idleWindowMs),
 		);
 	});
 
-export const listDaemonSessions = (
-	configDir: string,
-	options: DaemonSessionQueryOptions = {},
-	gitCache: ReturnType<typeof createSessionGitCache> = daemonSessionGitCache,
-): Effect.Effect<
-	DaemonSessionQueryResult,
-	never,
-	ProjectRegistryTag | AccountDirectory
-> =>
+export const hasColdAutoArchiveCandidate = (
+	project: Pick<StoredProject, "slug" | "folders">,
+	now: number,
+	idleWindowMs: number,
+) =>
 	Effect.gen(function* () {
-		const registered = yield* allProjects;
-		const groupKey = getScopeGroupKey(options.scope);
-		const defaultMode =
-			loadRelaySettings(configDir).defaultGroupingMode ?? "repository";
-		const groups =
-			groupKey === null
-				? null
-				: computeProjectGroups(
-						registered.map((project) => ({
-							...project,
-							groupingMode: project.groupingMode ?? defaultMode,
-						})),
-					);
-		// Scope before querying or merging any project pages. The same pure
-		// function owns membership in the registry and in the frontend.
-		const projects = registered.filter(
-			(project) =>
-				(options.scope === undefined ||
-					(groupKey === null
-						? project.slug === options.scope
-						: groups?.[project.slug]?.key === groupKey)) &&
-				project.slug !== options.exclude,
+		const database = yield* projectReadDatabase(project);
+		const facts = yield* readPersistedAutoArchiveFacts(project.slug, now).pipe(
+			Effect.provide(database),
 		);
+		return [...facts.values()].some((item) =>
+			shouldArchiveIdleSession(item, now, idleWindowMs),
+		);
+	});
+
+export const hasColdAutoDeleteCandidate = (
+	project: Pick<StoredProject, "slug" | "folders">,
+	now: number,
+	windowMs: number,
+) =>
+	Effect.gen(function* () {
+		const database = yield* projectReadDatabase(project);
+		const trees = yield* readPersistedAutoDeleteFacts(project.slug).pipe(
+			Effect.provide(database),
+		);
+		return [...trees.values()].some(({ facts }) =>
+			shouldDeleteArchivedSessionTree(facts, now, windowMs),
+		);
+	});
+
+const listProjectSessions = (
+	projects: readonly Pick<StoredProject, "slug" | "folders">[],
+	options: SessionReadOptions,
+	gitCache: ReturnType<typeof createSessionGitCache>,
+) =>
+	Effect.gen(function* () {
+		const unavailable = yield* DaemonStoreAvailability;
 		const limit =
 			options.limit === undefined
 				? undefined
@@ -329,8 +228,19 @@ export const listDaemonSessions = (
 			projects,
 			(project) =>
 				Effect.gen(function* () {
+					const reason = unavailable.get(project.slug);
+					if (reason !== undefined) {
+						return {
+							sessions: [],
+							availability: {
+								projectSlug: project.slug,
+								available: false as const,
+								error: reason,
+							},
+						};
+					}
 					const exit = yield* Effect.exit(
-						readProjectSessions(project, configDir, projectOptions, gitCache),
+						readProjectSessions(project, projectOptions, gitCache),
 					);
 					if (Exit.isSuccess(exit)) {
 						return {
@@ -346,19 +256,18 @@ export const listDaemonSessions = (
 						availability: {
 							projectSlug: project.slug,
 							available: false as const,
-							error: String(Cause.squash(exit.cause)),
+							error: String(Failure.squashCause(exit.cause)),
 						},
 					};
 				}),
 			{ concurrency: 4 },
 		);
 
-		// Merge with the raw SQL sort key. SessionInfo.updatedAt may be a parsed
-		// string or absent, which would disagree with the integer keyset predicate.
+		// Use the same timestamp column for project keysets and the global merge.
 		const candidates = projectResults
 			.flatMap((result) => result.sessions)
 			.sort((a, b) => {
-				const timestampOrder = b.sortKey.updatedAt - a.sortKey.updatedAt;
+				const timestampOrder = b.sortKey.at - a.sortKey.at;
 				if (timestampOrder !== 0) return timestampOrder;
 				if (a.sortKey.id === b.sortKey.id) return 0;
 				return a.sortKey.id < b.sortKey.id ? 1 : -1;
@@ -376,42 +285,86 @@ export const listDaemonSessions = (
 			hasMore,
 			nextCursor,
 		};
+	});
+
+export const listDaemonSessions = (
+	options: DaemonSessionQueryOptions = {},
+	gitCache: ReturnType<typeof createSessionGitCache> = daemonSessionGitCache,
+): Effect.Effect<
+	DaemonSessionQueryResult,
+	never,
+	ProjectRegistryTag | AccountDirectory | SessionActivityTag | PersistenceStore
+> =>
+	Effect.gen(function* () {
+		const registered = yield* allProjects;
+		// Scope before querying or merging any project pages.
+		const projects = registered.filter(
+			(project) =>
+				(options.scope === undefined || project.slug === options.scope) &&
+				project.slug !== options.exclude,
+		);
+		const result = yield* listProjectSessions(
+			projects,
+			{
+				excludeArchived: options.includeArchived !== true,
+				...(options.roots !== undefined ? { roots: options.roots } : {}),
+				...(options.limit !== undefined ? { limit: options.limit } : {}),
+				...(options.search !== undefined ? { titleQuery: options.search } : {}),
+				...(options.cursor !== undefined
+					? { before: { at: options.cursor.updatedAt, id: options.cursor.id } }
+					: {}),
+			},
+			gitCache,
+		);
+		return {
+			...result,
+			nextCursor: result.nextCursor
+				? { updatedAt: result.nextCursor.at, id: result.nextCursor.id }
+				: null,
+		};
 	}).pipe(Effect.withSpan("daemonSessions.list"));
 
-export const resolveDaemonSession = (configDir: string, sessionId: string) =>
+export const listArchivedSessions = (
+	options: ArchivedSessionQueryOptions = {},
+	gitCache: ReturnType<typeof createSessionGitCache> = daemonSessionGitCache,
+): Effect.Effect<
+	ArchivedSessionQueryResult,
+	never,
+	ProjectRegistryTag | AccountDirectory | SessionActivityTag | PersistenceStore
+> =>
 	Effect.gen(function* () {
-		for (const project of yield* allProjects) {
-			const databasePath = projectEventsDbPath({ configDir, ...project });
-			const result = yield* Effect.exit(
-				Effect.gen(function* () {
-					yield* Effect.try(() => statSync(databasePath));
-					return yield* Effect.gen(function* () {
-						const readQuery = yield* ReadQueryEffectTag;
-						return yield* readQuery.getSession(sessionId);
-					}).pipe(
-						Effect.provide(
-							Layer.effect(ReadQueryEffectTag, makeReadQueryEffect).pipe(
-								Layer.provide(
-									SqliteNode.layer({
-										filename: databasePath,
-										readonly: true,
-										disableWAL: true,
-									}).pipe(Layer.provide(Reactivity.layer)),
-								),
-							),
-						),
-					);
-				}),
-			);
-			if (Exit.isSuccess(result) && result.value !== undefined) {
-				return project.slug;
-			}
-		}
-		return null;
+		const result = yield* listProjectSessions(
+			yield* allProjects,
+			{
+				roots: true,
+				archivedOnly: true,
+				orderColumn: "archived_at",
+				...(options.limit !== undefined ? { limit: options.limit } : {}),
+				...(options.cursor !== undefined
+					? { before: { at: options.cursor.archivedAt, id: options.cursor.id } }
+					: {}),
+			},
+			gitCache,
+		);
+		return {
+			...result,
+			nextCursor: result.nextCursor
+				? { archivedAt: result.nextCursor.at, id: result.nextCursor.id }
+				: null,
+		};
+	}).pipe(Effect.withSpan("daemonSessions.listArchived"));
+
+export const resolveDaemonSession = (sessionId: string) =>
+	Effect.gen(function* () {
+		const directory = yield* SessionDirectory;
+		return yield* directory
+			.projectOf(sessionId)
+			.pipe(Effect.map(Option.getOrNull));
 	}).pipe(Effect.withSpan("daemonSessions.resolve"));
 
 /** Active bindings take precedence after provider switches; legacy rows use the session id. */
 export const findOpenCodeSession = (
+	scope: SessionScope,
 	instanceId: string,
 	providerSessionId: string,
 ) =>
@@ -424,7 +377,8 @@ export const findOpenCodeSession = (
 				SELECT id FROM session_providers WHERE session_id = session.id AND status = 'active'
 				ORDER BY activated_at DESC, id DESC LIMIT 1
 			)
-			WHERE COALESCE(binding.provider, session.provider) = ${instanceId}
+			WHERE session.project_id IN ${sql.in(scope.projectIds)}
+			AND COALESCE(binding.provider, session.provider) = ${instanceId}
 			AND COALESCE(binding.provider_sid, session.provider_sid, session.id) = ${providerSessionId}
 			LIMIT 2`;
 		if (rows.length > 1)
@@ -436,40 +390,20 @@ export const findOpenCodeSession = (
 
 /** Resolve a provider id within its owning instance, including cold project stores. */
 export const resolveDaemonOpenCodeSession = (
-	configDir: string,
 	instanceId: string,
 	providerSessionId: string,
 ) =>
 	Effect.gen(function* () {
 		let match: { projectSlug: string; sessionId: string } | undefined;
 		for (const project of yield* allProjects) {
-			const filename = projectEventsDbPath({ configDir, ...project });
-			const exists = yield* Effect.try({
-				try: () => statSync(filename),
-				catch: (cause) => cause,
-			}).pipe(
-				Effect.catchAll((cause) =>
-					isMissingPathError(cause)
-						? Effect.succeed(null)
-						: Effect.fail(
-								new DaemonSessionReadError({
-									projectSlug: project.slug,
-									cause,
-								}),
-							),
-				),
-			);
-			if (exists === null) continue;
+			const database = yield* projectReadDatabase(project, {
+				prepare: true,
+			});
 			const sessionId = yield* findOpenCodeSession(
+				{ projectIds: [project.slug] },
 				instanceId,
 				providerSessionId,
-			).pipe(
-				Effect.provide(
-					SqliteNode.layer({ filename, readonly: true, disableWAL: true }).pipe(
-						Layer.provide(Reactivity.layer),
-					),
-				),
-			);
+			).pipe(Effect.provide(database));
 			if (sessionId !== undefined) {
 				if (match !== undefined)
 					return yield* Effect.fail(

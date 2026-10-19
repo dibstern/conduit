@@ -277,9 +277,14 @@ describe("SessionProjector", () => {
 			);
 			await project(
 				makeStored(
-					"session.forked",
+					"session.created",
 					"child",
-					{ sessionId: "child", parentId: "s1" },
+					{
+						sessionId: "child",
+						title: "Child",
+						provider: "opencode",
+						parentId: "s1",
+					},
 					4,
 					now + 12,
 				),

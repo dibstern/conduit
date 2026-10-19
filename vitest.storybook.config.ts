@@ -2,10 +2,14 @@ import { resolve } from "node:path";
 import { storybookTest } from "@storybook/addon-vitest/vitest-plugin";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import tailwindcss from "@tailwindcss/vite";
+import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
 	plugins: [svelte(), tailwindcss()],
+	// Pre-bundle lazily imported deps: discovering one mid-run reloads the
+	// browser and aborts the test files in flight.
+	optimizeDeps: { include: ["mermaid", "highlight.js"] },
 	test: {
 		projects: [
 			{
@@ -18,7 +22,7 @@ export default defineConfig({
 					browser: {
 						enabled: true,
 						headless: true,
-						provider: "playwright",
+						provider: playwright(),
 						instances: [{ browser: "chromium" }],
 					},
 					setupFiles: [resolve(__dirname, ".storybook/vitest.setup.ts")],

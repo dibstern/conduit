@@ -1,12 +1,13 @@
 import { Schema } from "effect";
+import type { SessionScope } from "./session-scope.js";
 
-const ReadModelCollectionSchema = Schema.Literal(
+const ReadModelCollectionSchema = Schema.Literals([
 	"messages",
 	"sessions",
 	"sidebar",
 	"approvals",
 	"inputs",
-);
+]);
 
 export type ReadModelCollection = typeof ReadModelCollectionSchema.Type;
 
@@ -40,9 +41,18 @@ export type ReadModelCollection = typeof ReadModelCollectionSchema.Type;
  */
 export const ReadModelAdvanceSchema = Schema.Struct({
 	version: Schema.Number,
+	projectIds: Schema.Array(Schema.String),
 	sessionIds: Schema.Array(Schema.String),
 	removedSessionIds: Schema.Array(Schema.String),
 	collections: Schema.Array(ReadModelCollectionSchema),
 });
 
 export type ReadModelAdvance = typeof ReadModelAdvanceSchema.Type;
+
+/** Session-free signals apply to the whole store. Versions remain store-wide. */
+export const advanceTouchesScope = (
+	advance: ReadModelAdvance,
+	scope: SessionScope,
+): boolean =>
+	(advance.sessionIds.length === 0 && advance.removedSessionIds.length === 0) ||
+	advance.projectIds.some((projectId) => scope.projectIds.includes(projectId));

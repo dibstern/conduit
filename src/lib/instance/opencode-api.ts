@@ -70,6 +70,8 @@ export interface OpenCodeAPIOptions {
 	sdk: OpencodeClient;
 	baseUrl: string;
 	authHeaders: Record<string, string>;
+	processIdentity?: string | undefined;
+	promptProcessId?: string | undefined;
 }
 
 /**
@@ -80,6 +82,8 @@ export interface OpenCodeAPIOptions {
  * private `sdk()` helper which handles error translation.
  */
 export class OpenCodeAPI {
+	readonly processIdentity: string;
+	readonly promptProcessId: string | undefined;
 	private readonly client: OpencodeClient;
 	private readonly _baseUrl: string;
 	private readonly _authHeaders: Record<string, string>;
@@ -96,6 +100,8 @@ export class OpenCodeAPI {
 	readonly event: EventNamespace;
 
 	constructor(options: OpenCodeAPIOptions) {
+		this.processIdentity = options.processIdentity ?? options.baseUrl;
+		this.promptProcessId = options.promptProcessId;
 		this.client = options.sdk;
 		this._baseUrl = options.baseUrl;
 		this._authHeaders = options.authHeaders;
@@ -756,11 +762,17 @@ class AppNamespace {
 		);
 	}
 
-	async path(): Promise<{ cwd: string }> {
+	async path(directory?: string): Promise<{ cwd: string }> {
 		const path = await this.api.sdk(
 			"app.path",
 			decodeOpenCodePathResponse,
-			() => this.api._sdk.path.get(),
+			() =>
+				directory === undefined
+					? this.api._sdk.path.get()
+					: this.api._sdk.path.get(
+							{ directory },
+							{ headers: { "x-opencode-directory": null } },
+						),
 		);
 		return { cwd: path.directory };
 	}

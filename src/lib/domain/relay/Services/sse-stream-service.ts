@@ -1,8 +1,18 @@
-import { SqlClient } from "@effect/sql";
-import { Context, Effect, Fiber, Layer, Schema, Stream } from "effect";
+import {
+	Context,
+	Effect,
+	Fiber,
+	Layer,
+	Schema,
+	Scope,
+	Semaphore,
+	Stream,
+} from "effect";
+import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import type { Logger } from "../../../logger.js";
+import { makeRetireReplacedProcessPrompts } from "../../../persistence/effect/retire-pending-prompts.js";
 import type {
 	SSEStreamCallbacks,
 	SSEStreamPort,
@@ -29,10 +39,10 @@ export interface RelayOpenCodeStream extends SSEStreamPort {
 	): Effect.Effect<void, never, R>;
 }
 
-export class SSEStreamTag extends Context.Tag("SSEStream")<
+export class SSEStreamTag extends Context.Service<
 	SSEStreamTag,
 	RelayOpenCodeStream
->() {}
+>()("SSEStream") {}
 
 const makeChannel = (log: Logger | undefined) => {
 	const callbacks: {
@@ -76,7 +86,7 @@ const makeChannel = (log: Logger | undefined) => {
 			switch (message._tag) {
 				case "event":
 					for (const callback of callbacks.event)
-						notify(() => callback(message.payload));
+						notify(() => callback(message.payload, message.providerProcessId));
 					break;
 				case "heartbeat":
 					for (const callback of callbacks.heartbeat) notify(callback);
@@ -100,19 +110,21 @@ export const SSEStreamLive: Layer.Layer<
 	SSEStreamTag,
 	never,
 	OpenCodeInstancesTag | ConfigTag
-> = Layer.scoped(
+> = Layer.effect(
 	SSEStreamTag,
 	Effect.gen(function* () {
 		const instances = yield* OpenCodeInstancesTag;
 		const config = yield* ConfigTag;
 		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		const retireReplacedPrompts = yield* makeRetireReplacedProcessPrompts;
+		const observedProcesses = new Map<string, string>();
 		const directories = new Set([
 			config.projectDir,
 			...(config.extraFolders ?? []),
 		]);
 		const log = config.log;
 		const scope = yield* Effect.scope;
-		const gate = yield* Effect.makeSemaphore(1);
+		const gate = yield* Semaphore.make(1);
 		// The relay view tags the selected instance with the default id.
 		const selectedId = MANAGED_OPENCODE_ACCOUNT_ID;
 		const main = makeChannel(log);
@@ -122,6 +134,36 @@ export const SSEStreamLive: Layer.Layer<
 			| undefined;
 		const route = (message: OpenCodeInstanceEvent) =>
 			Effect.gen(function* () {
+				if (
+					message._tag === "connected" &&
+					message.managed &&
+					message.providerProcessId &&
+					observedProcesses.get(message.instanceId) !==
+						message.providerProcessId
+				) {
+					const retired = yield* retireReplacedPrompts(
+						message.providerProcessId,
+						{
+							providerInstanceIds:
+								message.instanceId ===
+								(config.openCodeInstanceId ?? MANAGED_OPENCODE_ACCOUNT_ID)
+									? [message.instanceId, MANAGED_OPENCODE_ACCOUNT_ID]
+									: [message.instanceId],
+						},
+					).pipe(
+						Effect.tapError((error) =>
+							Effect.sync(() =>
+								log?.error("Failed to retire replaced OpenCode prompts", error),
+							),
+						),
+						Effect.option,
+					);
+					if (retired._tag === "Some")
+						observedProcesses.set(
+							message.instanceId,
+							message.providerProcessId,
+						);
+				}
 				if (message.instanceId === selectedId) return main.dispatch(message);
 				let channel = others.get(message.instanceId);
 				if (!channel) {
@@ -155,7 +197,7 @@ export const SSEStreamLive: Layer.Layer<
 				}
 				channel.dispatch(message);
 			});
-		let fiber: Fiber.RuntimeFiber<void> | undefined;
+		let fiber: Fiber.Fiber<void> | undefined;
 		const disconnectEffect = () =>
 			gate.withPermits(1)(
 				Effect.gen(function* () {
@@ -179,8 +221,9 @@ export const SSEStreamLive: Layer.Layer<
 						if (fiber) return;
 						if (sql._tag === "Some") {
 							const rows = yield* sql.value<{ workspace: string }>`
-								SELECT workspace FROM sessions WHERE workspace IS NOT NULL`.pipe(
-								Effect.catchAll((error) => {
+								SELECT workspace FROM sessions
+								WHERE project_id = ${config.slug} AND workspace IS NOT NULL`.pipe(
+								Effect.catch((error) => {
 									log?.warn(
 										"Failed to read OpenCode workspace directories",
 										error,
@@ -189,8 +232,8 @@ export const SSEStreamLive: Layer.Layer<
 								}),
 							);
 							for (const row of rows) {
-								const workspace = yield* Schema.decodeUnknown(
-									Schema.parseJson(SessionWorkspaceSchema),
+								const workspace = yield* Schema.decodeUnknownEffect(
+									Schema.fromJsonString(SessionWorkspaceSchema),
 								)(row.workspace).pipe(Effect.option);
 								if (workspace._tag === "None") continue;
 								for (const directory of Object.values(
@@ -199,12 +242,26 @@ export const SSEStreamLive: Layer.Layer<
 									directories.add(directory);
 							}
 						}
-						fiber = yield* Effect.forkIn(
-							Stream.runForEach(
-								instances.events(() => [...directories]),
-								route,
-							),
-							scope,
+						yield* Effect.uninterruptible(
+							Effect.gen(function* () {
+								const subscriptionScope = yield* Scope.fork(scope);
+								// Acquire registration before returning; callback setup is forked in Effect 4.
+								const pull = yield* Stream.toPull(
+									instances.events(() => [...directories]),
+								).pipe(Scope.provide(subscriptionScope));
+								fiber = yield* Effect.forkIn(
+									Stream.runForEach(
+										Stream.fromPull(Effect.succeed(pull)),
+										route,
+									).pipe(
+										Effect.onExit((exit) =>
+											Scope.close(subscriptionScope, exit),
+										),
+									),
+									scope,
+									{ uninterruptible: false },
+								);
+							}),
 						);
 					}),
 				),

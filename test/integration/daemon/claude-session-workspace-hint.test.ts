@@ -46,11 +46,11 @@ function shellRows(
 }
 
 function storedEvents(fixture: ProcessHarness) {
-	const db = new Database(fixture.projectStorePath(), { readonly: true });
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
 		return db
 			.prepare(
-				"SELECT type, data FROM events WHERE type IN ('session.workspace_hint_changed', 'session.workspace_changed', 'tool.started', 'tool.running', 'tool.completed', 'turn.completed', 'turn.error', 'turn.interrupted') ORDER BY sequence",
+				"SELECT type, data FROM events WHERE project_id = 'process-test' AND type IN ('session.workspace_hint_changed', 'session.workspace_changed', 'tool.started', 'tool.running', 'tool.completed', 'turn.completed', 'turn.error', 'turn.interrupted') ORDER BY sequence",
 			)
 			.all()
 			.map((row) => {
@@ -131,7 +131,7 @@ describe("Workspace hints through the built daemon and shell subscription", () =
 		if (!harness) return;
 		const fixture = harness;
 		try {
-			evidence["events"] = existsSync(fixture.projectStorePath())
+			evidence["events"] = existsSync(fixture.daemonStorePath())
 				? storedEvents(fixture)
 				: [];
 			evidence["errors"] =
@@ -202,7 +202,6 @@ describe("Workspace hints through the built daemon and shell subscription", () =
 		const dismissedAt = [browser.frames.length, anotherTab.frames.length];
 		await Effect.runPromise(
 			browser.rpc.DismissWorkspaceHint({
-				projectSlug: "process-test",
 				sessionId,
 				path: first,
 			}),
@@ -221,7 +220,7 @@ describe("Workspace hints through the built daemon and shell subscription", () =
 		);
 		await browser.send(sessionId, toolTurn(threePaths(first)));
 		expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBeUndefined();
-		await browser.send(sessionId, toolTurn([], { reads: threePaths(first) }));
+		await browser.send(sessionId, toolTurn(threePaths(main)));
 		expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBeUndefined();
 		await vi.waitFor(() =>
 			expect(
@@ -236,7 +235,6 @@ describe("Workspace hints through the built daemon and shell subscription", () =
 		);
 		await Effect.runPromise(
 			browser.rpc.DismissWorkspaceHint({
-				projectSlug: "process-test",
 				sessionId,
 				path: first,
 			}),
@@ -249,7 +247,6 @@ describe("Workspace hints through the built daemon and shell subscription", () =
 		const movedAt = browser.frames.length;
 		await Effect.runPromise(
 			browser.rpc.MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId,
 				path: second,
 			}),
@@ -314,7 +311,6 @@ exec '${realGit}' "$@"
 		const beforeDismiss = browser.frames.length;
 		await Effect.runPromise(
 			browser.rpc.DismissWorkspaceHint({
-				projectSlug: "process-test",
 				sessionId,
 				path: first,
 			}),
@@ -387,7 +383,6 @@ exec '${realGit}' "$@"
 		expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBeUndefined();
 		await Effect.runPromise(
 			browser.rpc.MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId,
 				path: second,
 			}),
@@ -464,8 +459,7 @@ exec '${realGit}' "$@"
 		);
 		await browser.followFamily(sessionId);
 		await Effect.runPromise(
-			browser.rpc.input.submit({
-				projectSlug: "process-test",
+			browser.rpc["input.submit"]({
 				sessionId,
 				originId: browser.originId,
 				inputId: randomUUID(),
@@ -483,7 +477,6 @@ exec '${realGit}' "$@"
 		expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBeUndefined();
 		await Effect.runPromise(
 			browser.rpc.CancelSession({
-				projectSlug: "process-test",
 				sessionId,
 				commandId: randomUUID(),
 			}),

@@ -1,7 +1,8 @@
 // Verifies Bug A: the relay sends the correct body format to OpenCode's
 // prompt_async endpoint. If this test passes, messages actually work.
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -10,17 +11,84 @@ import {
 describe("Integration: Send Message", () => {
 	let harness: RelayHarness;
 
-	beforeAll(async () => {
+	beforeEach(async () => {
 		harness = await createRelayHarness();
+		harness.mock.resetQueues();
 	}, 30_000);
 
-	afterAll(async () => {
+	afterEach(async () => {
 		if (harness) await harness.stop();
 	});
 
-	beforeEach(() => {
-		harness.mock.resetQueues();
-	});
+	it("reports handed off when sending to an idle session", async () => {
+		const client = await harness.connectWsClient();
+		await client.waitForInitialState();
+		const sessionId = client.getActiveSessionId();
+		if (!sessionId) throw new Error("Expected an active session");
+
+		const result = await client.rpcCall((rpc) =>
+			rpc["input.submit"]({
+				sessionId,
+				text: "Reply with just 'ok'",
+				inputId: randomUUID(),
+				delivery: "queue",
+			}),
+		);
+		try {
+			expect(result).toEqual({ ok: true, sessionId, handedOff: true });
+		} finally {
+			await client.waitForTurnEnd();
+			await client.close();
+		}
+	}, 15_000);
+
+	for (const delivery of ["queue", "steer"] as const) {
+		it(`reports ${delivery === "queue" ? "not handed off" : "a refusal without handedOff"} behind an open question`, async () => {
+			const client = await harness.connectWsClient();
+			await client.waitForInitialState();
+			const sessionId = client.getActiveSessionId();
+			if (!sessionId) throw new Error("Expected an active session");
+			const providerQuestionId = randomUUID();
+			harness.mock.emitTestEvent("question.asked", {
+				id: providerQuestionId,
+				sessionID: sessionId,
+				questions: [{ question: "Continue?", header: "Continue", options: [] }],
+			});
+			const question = await client.waitFor("question_pending", {
+				predicate: (message) => message["sessionId"] === sessionId,
+			});
+			const questionId = question["toolId"];
+			expect(questionId).toBeTypeOf("string");
+			expect(questionId).not.toBe(providerQuestionId);
+
+			const inputId = randomUUID();
+			const result = await client.rpcCall((rpc) =>
+				rpc["input.submit"]({ sessionId, text: "Continue", inputId, delivery }),
+			);
+			try {
+				expect(result).toEqual(
+					delivery === "queue"
+						? { ok: true, sessionId, handedOff: false }
+						: { ok: false, reason: "no_steering" },
+				);
+				if (delivery === "steer")
+					expect(result).not.toHaveProperty("handedOff");
+			} finally {
+				if (delivery === "queue")
+					await client.rpcCall((rpc) =>
+						rpc["input.cancel"]({ sessionId, inputId }),
+					);
+				harness.mock.emitTestEvent("question.rejected", {
+					requestID: providerQuestionId,
+					sessionID: sessionId,
+				});
+				await client.waitFor("approval_removed", {
+					predicate: (message) => message["id"] === questionId,
+				});
+				await client.close();
+			}
+		}, 15_000);
+	}
 
 	it("sends a message and receives processing status", async () => {
 		const client = await harness.connectWsClient();
@@ -47,8 +115,9 @@ describe("Integration: Send Message", () => {
 		await client.sendMessage("Reply with just the word 'pong'. Nothing else.");
 
 		const message = await client.waitForAssistantText();
-		expect(message.text).toBeTruthy();
-		expect(typeof message.text).toBe("string");
+		const text = message.parts?.find((part) => part.type === "text")?.text;
+		expect(text).toBeTruthy();
+		expect(typeof text).toBe("string");
 
 		const done = await client.waitForTurnEnd();
 		expect(done.status).toBe("idle");

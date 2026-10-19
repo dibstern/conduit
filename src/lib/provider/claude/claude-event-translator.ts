@@ -19,20 +19,18 @@
  *   turn.completed (result)
  *   workspace.changed (startup cwd, declared worktree results)
  *
- * All payloads match the EventPayloadMap interfaces.
+ * All payloads match the ProviderRuntimeEventPayloadMap types.
  */
 import { randomUUID } from "node:crypto";
 import { Clock, Effect } from "effect";
 import type {
 	ProviderRuntimeEvent,
+	ProviderRuntimeEventPayloadMap,
 	ProviderRuntimeEventType,
 } from "../../contracts/providers/provider-runtime-event.js";
 import type { SessionGoalChangedPayload } from "../../contracts/stored-event.js";
 import { createLogger, type Logger } from "../../logger.js";
-import type {
-	CanonicalToolInput,
-	EventPayloadMap,
-} from "../../persistence/events.js";
+import type { CanonicalToolInput } from "../../persistence/events.js";
 import { createEventId } from "../../persistence/events.js";
 import { isRecord } from "../../utils.js";
 import type { EventSinkError } from "../event-sink-errors.js";
@@ -62,6 +60,8 @@ import type {
 
 const PROVIDER = "claude" as const;
 const defaultLog = createLogger("claude-event-translator");
+// Keep hidden-thinking keepalives well inside the 2-minute processing timeout.
+const THINKING_KEEPALIVE_INTERVAL_MS = 30_000;
 
 // Events are provider ingress envelopes. The EventSink owns conversion to
 // durable domain events before append/projection.
@@ -69,7 +69,7 @@ const defaultLog = createLogger("claude-event-translator");
 function makeProviderRuntimeEvent<K extends ProviderRuntimeEventType>(
 	type: K,
 	sessionId: string,
-	data: EventPayloadMap[K],
+	data: ProviderRuntimeEventPayloadMap[K],
 	metadata?: Readonly<Record<string, unknown>>,
 ) {
 	return {
@@ -402,6 +402,10 @@ export class ClaudeEventTranslator {
 	// Who each block of assistant text is, and what of it has already been
 	// sent. Identity is positional, so no rewrite of the text can change it.
 	private readonly ledger = new AssistantTextLedger();
+	private readonly thinkingKeepaliveTimes = new WeakMap<
+		ClaudeSessionContext,
+		Map<number, number>
+	>();
 	private bufferedWrites: Effect.Effect<void, EventSinkError>[] | undefined;
 	private announcedMessageIds = new Set<string>();
 	// The SDK's last live set. firstSeenAt: the runner outlives server
@@ -469,7 +473,7 @@ export class ClaudeEventTranslator {
 		messageId: string,
 		emissions: readonly Emission[],
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			if (emissions.length === 0) return;
 			if (emissions.some((emission) => emission.kind !== "divergence")) {
 				yield* this.pushMessageCreated(ctx, messageId);
@@ -531,7 +535,7 @@ export class ClaudeEventTranslator {
 	private endTurn(
 		ctx: ClaudeSessionContext,
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			yield* this.push(
 				ctx,
 				makeProviderRuntimeEvent("session.status", ctx.sessionId, {
@@ -566,7 +570,7 @@ export class ClaudeEventTranslator {
 	private settleGoal(
 		ctx: ClaudeSessionContext,
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const tracker = ctx.goalTracker;
 			if (!tracker?.goal) return;
 			const sdkSessionId = ctx.resumeSessionId;
@@ -589,7 +593,7 @@ export class ClaudeEventTranslator {
 					}),
 				catch: (cause) => cause,
 			}).pipe(
-				Effect.catchAll((cause) =>
+				Effect.catch((cause) =>
 					Effect.sync(() => {
 						logger.debug("Unable to read Claude goal status", {
 							sessionId: ctx.sessionId,
@@ -624,7 +628,7 @@ export class ClaudeEventTranslator {
 		message: SDKMessage,
 		receivedAt?: number,
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			// Capture SDK session id for resume cursor on any message.
 			// All SDK message variants carry session_id (required or optional),
 			// but the union doesn't guarantee it statically — use an `in` guard.
@@ -672,7 +676,7 @@ export class ClaudeEventTranslator {
 		cause: unknown,
 	): Effect.Effect<void, EventSinkError> {
 		return this.collectWrites(() =>
-			Effect.gen(this, function* () {
+			Effect.gen({ self: this }, function* () {
 				const errorMsg = cause instanceof Error ? cause.message : String(cause);
 				yield* this.pushGoalChange(ctx, ctx.goalTracker?.pause(errorMsg));
 				yield* this.push(
@@ -693,7 +697,7 @@ export class ClaudeEventTranslator {
 		message: SDKSystemLike,
 		receivedAt?: number,
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			switch (message.subtype) {
 				case "status": {
 					// Carries the mode only when it changed, and several of the
@@ -943,7 +947,7 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		sdkMode: string | undefined,
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			if (sdkMode === undefined) return;
 			const mode = fromSdkPermissionMode(sdkMode);
 			// A mode outside the pinned SDK's set is left alone rather than
@@ -1021,7 +1025,7 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		message: SDKSystemLike & { subtype: "task_started" },
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			if (!message.tool_use_id) return;
 			const startedAt =
 				ctx.subagentTasks?.get(message.task_id)?.startedAt ??
@@ -1052,7 +1056,7 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		message: SDKSystemLike & { subtype: "task_notification" },
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			if (!message.tool_use_id) return;
 			const metadata = claudeTaskNotificationMetadata(message);
 			yield* this.pushTaskMetadata(ctx, message.tool_use_id, metadata);
@@ -1084,7 +1088,7 @@ export class ClaudeEventTranslator {
 		parentToolUseId: string,
 		metadata: Record<string, unknown>,
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const providerTaskId = metadata["providerTaskId"];
 			const subagentTasks = ctx.subagentTasks;
 			const task =
@@ -1231,7 +1235,7 @@ export class ClaudeEventTranslator {
 		parentToolUseId: string,
 		result: string | null,
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			// No in-flight tool means no tool.started was ever emitted for this
 			// id; completing it would leave an orphan downstream.
 			if (!this.findInFlightTool(parentToolUseId, ctx)) return;
@@ -1319,7 +1323,7 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		event: StreamEvent & { type: "message_start" },
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			// Capture the assistant message ID at the START of streaming so all
 			// content blocks (text, tool_use, thinking) share a single messageId.
 			// Without this, currentAssistantMessageId is empty during streaming
@@ -1358,8 +1362,9 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		event: StreamEvent & { type: "content_block_stop" },
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const index = event.index;
+			this.thinkingKeepaliveTimes.get(ctx)?.delete(index);
 			const tool = ctx.inFlightTools.get(index);
 			if (!tool) return;
 
@@ -1431,7 +1436,7 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		event: StreamEvent & { type: "content_block_start" },
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const index = event.index;
 			const block = event.content_block;
 
@@ -1449,6 +1454,12 @@ export class ClaudeEventTranslator {
 						partialInputJson: "",
 					};
 					ctx.inFlightTools.set(index, tool);
+					if (block.type === "thinking") {
+						const times =
+							this.thinkingKeepaliveTimes.get(ctx) ?? new Map<number, number>();
+						times.set(index, Date.now());
+						this.thinkingKeepaliveTimes.set(ctx, times);
+					}
 					const initial =
 						block.type === "thinking" ? block.thinking : block.text;
 					yield* this.emitLedger(ctx, messageId, [
@@ -1497,7 +1508,7 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		event: StreamEvent & { type: "content_block_delta" },
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const index = event.index;
 			const tool = ctx.inFlightTools.get(index);
 			const delta = event.delta;
@@ -1507,7 +1518,35 @@ export class ClaudeEventTranslator {
 				case "thinking_delta": {
 					const text =
 						delta.type === "text_delta" ? delta.text : delta.thinking;
-					if (text.length === 0) return;
+					if (text.length === 0) {
+						if (
+							delta.type !== "thinking_delta" ||
+							tool?.toolName !== "__thinking"
+						) {
+							return;
+						}
+						const partId = this.ledger.openThinkingPartId(index);
+						const times = this.thinkingKeepaliveTimes.get(ctx);
+						const lastKeepaliveAt = times?.get(index);
+						const now = Date.now();
+						if (
+							partId === undefined ||
+							lastKeepaliveAt === undefined ||
+							now - lastKeepaliveAt < THINKING_KEEPALIVE_INTERVAL_MS
+						) {
+							return;
+						}
+						times?.set(index, now);
+						yield* this.push(
+							ctx,
+							makeProviderRuntimeEvent("thinking.delta", ctx.sessionId, {
+								messageId: this.currentAssistantMessageId || tool.itemId,
+								partId,
+								text: "",
+							}),
+						);
+						return;
+					}
 
 					const type = delta.type === "text_delta" ? "text" : "thinking";
 					const partId = tool ? tool.itemId : this.nextPartId();
@@ -1561,7 +1600,7 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		message: SDKAssistantMessage,
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			ctx.lastAssistantUuid = message.uuid;
 
 			// Capture this request's usage (main chain only — subagent
@@ -1671,7 +1710,7 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		message: SDKUserMessage,
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const content = message.message.content;
 			if (!Array.isArray(content)) return;
 			const singleToolResult =
@@ -1771,7 +1810,7 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		result: SDKResultMessage,
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			if (
 				result.subtype === "success" &&
 				!result.is_error &&
@@ -1931,7 +1970,7 @@ export class ClaudeEventTranslator {
 	private flushPendingToolsMessage(
 		ctx: ClaudeSessionContext,
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			for (const [index, tool] of ctx.inFlightTools) {
 				if (!tool.pendingStart) continue;
 				tool.pendingStart = false;
@@ -1973,7 +2012,7 @@ export class ClaudeEventTranslator {
 	private collectWrites(
 		work: () => Effect.Effect<void, EventSinkError>,
 	): Effect.Effect<void, EventSinkError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const previousWrites = this.bufferedWrites;
 			const writes: Effect.Effect<void, EventSinkError>[] = [];
 			this.bufferedWrites = writes;

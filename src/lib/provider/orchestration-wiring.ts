@@ -5,9 +5,10 @@
 
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Context, Effect, Layer, Option, type Scope } from "effect";
+import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/account.js";
+import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
 import {
 	type DaemonConfigLoadError,
 	loadDaemonConfigResult,
@@ -32,6 +33,7 @@ import {
 	ClaudeDriver,
 	type ClaudeProviderInstanceDeps,
 } from "./claude/index.js";
+import { makeCursorProviderRuntime } from "./cursor/cursor-provider-runtime.js";
 import {
 	OpenCodeDriver,
 	OpenCodeProviderInstance,
@@ -123,10 +125,10 @@ interface OrchestrationComponents {
 	readonly openCodeInstance: OpenCodeProviderInstance;
 }
 
-class OrchestrationComponentsTag extends Context.Tag("OrchestrationComponents")<
+class OrchestrationComponentsTag extends Context.Service<
 	OrchestrationComponentsTag,
 	OrchestrationComponents
->() {}
+>()("OrchestrationComponents") {}
 
 const createOrchestrationComponentsEffect = (
 	options: OrchestrationLayerOptions,
@@ -172,7 +174,7 @@ const createOrchestrationComponentsEffect = (
 					),
 				),
 				Effect.flatMap((account) =>
-					account.driver === "opencode"
+					PROVIDER_DRIVERS[account.driver].runsOpenCodeServer
 						? instances.use(account.id)
 						: Effect.fail(
 								new Error("OpenCode session requires an OpenCode account"),
@@ -223,7 +225,7 @@ const createOrchestrationComponentsEffect = (
 			);
 			const directory = options.workspaceRoot ?? process.cwd();
 			const daemonConfig = yield* Effect.suspend(() =>
-				loadDaemonConfigResult(options.configDir),
+				Effect.fromResult(loadDaemonConfigResult(options.configDir)),
 			).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)));
 			const config = daemonConfig?.projects.find(
 				(project) => resolve(project.path) === resolve(directory),
@@ -259,6 +261,16 @@ const createOrchestrationComponentsEffect = (
 				: {}),
 		});
 		registry.registerInstance(claudeInstance);
+		registry.registerInstance(
+			yield* makeCursorProviderRuntime({
+				workspaceRoot: options.workspaceRoot ?? process.cwd(),
+				accounts: accountDirectory.snapshot,
+				...(options.configDir !== undefined
+					? { daemonConfigDir: options.configDir }
+					: {}),
+				persistUserMessage: persist.persistUserMessage,
+			}),
+		);
 		// Durable command receipts share the persistence SqlClient with the
 		// session binding read model. `now`/`generateId` are supplied at this wiring edge
 		// (wall clock + random) so core orchestration stays free of Date.now /
@@ -348,7 +360,7 @@ export const makeOrchestrationRuntimeLayer = (
 	| EventStoreEffectTag
 	| ProjectionRunnerEffectTag
 > => {
-	const componentsLayer = Layer.scoped(
+	const componentsLayer = Layer.effect(
 		OrchestrationComponentsTag,
 		Effect.gen(function* () {
 			const client = yield* OpenCodeAPITag;
@@ -402,8 +414,8 @@ export const getOrchestrationLayer = Effect.gen(function* () {
 	const registry = yield* ProviderRegistryTag;
 	const openCodeInstance = yield* registry.getInstanceEffect("opencode");
 	if (!(openCodeInstance instanceof OpenCodeProviderInstance)) {
-		return yield* Effect.dieMessage(
-			"opencode provider is not an OpenCodeProviderInstance",
+		return yield* Effect.die(
+			new Error("opencode provider is not an OpenCodeProviderInstance"),
 		);
 	}
 	return createOrchestrationView({ engine, registry, openCodeInstance });

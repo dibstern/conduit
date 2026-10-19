@@ -19,6 +19,7 @@
 
 import { existsSync } from "node:fs";
 import { Effect, HashMap, Layer, Option, Ref } from "effect";
+import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import type { AccountDirectory } from "../Services/account-directory.js";
 import {
 	commitDaemonRuntimeConfig,
@@ -58,7 +59,8 @@ export const prefetchSessionCounts: Effect.Effect<
 	const config = yield* Ref.get(configRef);
 	const registryState = yield* Ref.get(registryRef);
 	const openCodeInstances = (yield* getInstances).filter(
-		(instance) => instance.driver !== "claude",
+		(instance) =>
+			getProviderDriver(instance.driver ?? "opencode")?.runsOpenCodeServer,
 	);
 	if (openCodeInstances.length === 0) return 0;
 
@@ -85,7 +87,7 @@ export const prefetchSessionCounts: Effect.Effect<
 			return null;
 		}).pipe(
 			Effect.scoped,
-			Effect.catchAll(() => Effect.succeed(null)),
+			Effect.catch(() => Effect.succeed(null)),
 		);
 
 		if (count !== null && count > 0) {
@@ -108,7 +110,7 @@ export const prefetchSessionCounts: Effect.Effect<
 
 	return fetched;
 }).pipe(
-	Effect.catchAll((e) =>
+	Effect.catch((e) =>
 		Effect.logWarning("Session prefetch failed").pipe(
 			Effect.annotateLogs("error", String(e)),
 			Effect.as(0),
@@ -136,7 +138,7 @@ export const SessionPrefetchLive: Layer.Layer<
 	| ProjectRegistryTag
 	| AccountDirectory
 	| InstanceManagerStateTag
-> = Layer.scopedDiscard(
+> = Layer.effectDiscard(
 	Effect.gen(function* () {
 		yield* Effect.logInfo("Session prefetch layer initialized");
 

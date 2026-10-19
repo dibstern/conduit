@@ -10,8 +10,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Effect, Layer, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/sql";
 import type { ProviderRuntimeEvent } from "../../src/lib/contracts/providers/provider-runtime-event.js";
 import {
 	ProviderRuntimeIngestionLive,

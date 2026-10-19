@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Effect, Option, Schema } from "effect";
+import { SqlClient } from "effect/sql";
 import { SessionWorkspaceSchema } from "../contracts/session-workspace.js";
 import { daemonSessionGitCache } from "../git/session-git.js";
 import { deriveSessionSnooze } from "../persistence/effect/read-query-effect.js";
@@ -20,6 +20,7 @@ interface LatestTurnRow {
 }
 
 export const readPersistedAutoSettleFacts = (
+	projectId: string,
 	now: number,
 	sessionId?: string,
 	projectDir?: string,
@@ -27,7 +28,8 @@ export const readPersistedAutoSettleFacts = (
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const rows = yield* sql<SessionRow>`SELECT * FROM sessions
-			WHERE ${sessionId === undefined ? sql`parent_id IS NULL` : sql`id = ${sessionId}`}`;
+			WHERE project_id = ${projectId}
+				AND ${sessionId === undefined ? sql`parent_id IS NULL` : sql`id = ${sessionId}`}`;
 		if (rows.length === 0) return new Map<string, AutoSettleFacts>();
 		const ids = rows.map((row) => row.id);
 		const placeholders = ids.map(() => "?").join(",");
@@ -66,29 +68,12 @@ export const readPersistedAutoSettleFacts = (
 				userBySession.set(user.session_id, user.created_at);
 		}
 		const pendingIds = new Set(pending.map((item) => item.session_id));
-		// Keep the consumed head in the existing settlement event, so a message
-		// can wake a session without a restart/fetch settling that same work again.
-		const merges = yield* sql.unsafe<{
-			session_id: string;
-			merged_head: string;
-		}>(
-			`SELECT session_id, merged_head FROM (
-				SELECT session_id, json_extract(data, '$.mergedHead') AS merged_head,
-					ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY sequence DESC) AS rank
-				FROM events WHERE type = 'session.settled' AND json_type(data, '$.mergedHead') = 'text'
-					AND session_id IN (${placeholders})
-			) WHERE rank = 1`,
-			ids,
-		);
-		const settledHeadBySession = new Map(
-			merges.map((item) => [item.session_id, item.merged_head]),
-		);
 		const directoryBySession = new Map<string, string>();
 		if (projectDir !== undefined) {
 			for (const row of rows) {
 				if (row.workspace === null || row.settled_at !== null) continue;
 				const workspace = Schema.decodeUnknownOption(
-					Schema.parseJson(SessionWorkspaceSchema),
+					Schema.fromJsonString(SessionWorkspaceSchema),
 				)(row.workspace);
 				if (Option.isNone(workspace)) continue;
 				const directory = effectiveWorkingDirectory(
@@ -107,10 +92,9 @@ export const readPersistedAutoSettleFacts = (
 			rows.map((row) => [
 				row.id,
 				sessionRowToAutoSettleFacts(row, {
-					mergedHead: daemonSessionGitCache.peek(
+					mergedAt: daemonSessionGitCache.peek(
 						directoryBySession.get(row.id) ?? "",
-					)?.mergedHead,
-					settledMergedHead: settledHeadBySession.get(row.id),
+					)?.mergedAt,
 					latestTurn: turnBySession.get(row.id) ?? null,
 					latestUserMessageAt: userBySession.get(row.id) ?? null,
 					hasPendingApproval: pendingIds.has(row.id),

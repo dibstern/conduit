@@ -1,6 +1,6 @@
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
@@ -12,7 +12,6 @@ describe("WsRpcServerLayer SwitchAgent", () => {
 		Effect.gen(function* () {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 			yield* client.SwitchAgent({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				agentId: "plan",
 				originId: "browser-1",
@@ -25,6 +24,7 @@ describe("WsRpcServerLayer SwitchAgent", () => {
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(Layer.provideMerge(makeTestHandlerLayer())),
+				{ local: true },
 			),
 		),
 	);

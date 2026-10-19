@@ -1,4 +1,6 @@
 // test/unit/persistence/projectors-effect/message-projector.test.ts
+import { Effect } from "effect";
+import { Statement } from "effect/sql";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createToolMessage } from "../../../../src/lib/frontend/utils/tool-message-factory.js";
 import { launchRow } from "../../../../src/lib/frontend/utils/turns.js";
@@ -46,7 +48,7 @@ function makeStored<T extends StoredEvent["type"]>(
 		sessionId,
 		type,
 		data,
-		metadata: {},
+		metadata: type === "message.snapshot" ? { rawSource: "opencode.rest" } : {},
 		provider: "opencode",
 		createdAt,
 	} as StoredEvent;
@@ -90,9 +92,11 @@ describe("MessageProjector", () => {
 	let harness: EffectProjectionHarness;
 	let projector: EffectProjector;
 	let replayNextProjection: boolean;
+	let queries: string[];
 
 	beforeEach(async () => {
 		replayNextProjection = false;
+		queries = [];
 		const effectProjector = createAllEffectProjectors().find(
 			(candidate) => candidate.name === "message",
 		);
@@ -104,7 +108,12 @@ describe("MessageProjector", () => {
 					? { ...context, replaying: true }
 					: context;
 				replayNextProjection = false;
-				return effectProjector.project(event, effectiveContext);
+				return effectProjector.project(event, effectiveContext).pipe(
+					Effect.provideService(Statement.CurrentTransformer, (statement) => {
+						queries.push(statement.compile()[0].replace(/\s+/g, " ").trim());
+						return Effect.succeed(statement);
+					}),
+				);
 			},
 		};
 		harness = makeEffectProjectionHarness([projector]);
@@ -134,6 +143,531 @@ describe("MessageProjector", () => {
 	): Promise<T | undefined> {
 		return (await harness.query<T>(statement, params))[0];
 	}
+
+	it("does not reconstruct authorship or read accumulated text for assistant progress", async () => {
+		const created = makeStored("message.created", "s1", {
+			messageId: "assistant",
+			sessionId: "s1",
+			role: "assistant",
+		});
+		await project({ ...created, metadata: { synthetic: true } });
+		queries = [];
+		await project(
+			makeStored("text.delta", "s1", {
+				messageId: "assistant",
+				partId: "text",
+				text: "answer".repeat(10000),
+			}),
+		);
+		await project(
+			makeStored("thinking.start", "s1", {
+				messageId: "assistant",
+				partId: "thinking",
+			}),
+		);
+		await project(
+			makeStored("thinking.delta", "s1", {
+				messageId: "assistant",
+				partId: "thinking",
+				text: "reasoning",
+			}),
+		);
+		await project(
+			makeStored("tool.started", "s1", {
+				messageId: "assistant",
+				partId: "tool",
+				toolName: "read",
+				callId: "call",
+				input: { tool: "Read", filePath: "input.txt" },
+			}),
+		);
+		await project(
+			makeStored("tool.running", "s1", {
+				messageId: "assistant",
+				partId: "tool",
+				toolName: "read",
+				callId: "call",
+			}),
+		);
+		expect(
+			queries.filter((query) =>
+				/^SELECT .*\bis_human_sent\b.*\brest_payload\b/.test(query),
+			),
+		).toEqual([]);
+		expect(
+			queries.filter((query) =>
+				/^SELECT .*\btext\b.*FROM messages\b/.test(query),
+			),
+		).toEqual([]);
+		expect(
+			(
+				await queryOne<{ text: string }>(
+					"SELECT text FROM messages WHERE id = 'assistant'",
+				)
+			)?.text,
+		).toBe("answer".repeat(10000));
+		expect(
+			await queryOne(
+				"SELECT last_user_message_at FROM sessions WHERE id = 's1'",
+			),
+		).toEqual({ last_user_message_at: null });
+		await project(
+			makeStored("message.created", "s1", {
+				messageId: "assistant",
+				sessionId: "s1",
+				role: "user",
+			}),
+		);
+		expect(
+			await queryOne(
+				"SELECT is_human_sent FROM messages WHERE id = 'assistant'",
+			),
+		).toEqual({ is_human_sent: 0 });
+	});
+
+	it("restamps rewind visibility when a user header corrects the cut's clock", async () => {
+		for (const [messageId, createdAt] of [
+			["cut", 200],
+			["middle", 150],
+		] as const) {
+			await project(
+				makeStored(
+					"message.created",
+					"s1",
+					{ messageId, sessionId: "s1", role: "user", inputId: messageId },
+					1,
+					createdAt,
+				),
+			);
+			await project(
+				makeStored(
+					"text.delta",
+					"s1",
+					{ messageId, partId: `${messageId}-text`, text: "prompt" },
+					2,
+					createdAt,
+				),
+			);
+		}
+		await harness.query(
+			"UPDATE sessions SET pending_rewind_message_id = 'cut' WHERE id = 's1'",
+		);
+		const before = await queryOne<{ version: number }>(
+			"SELECT version FROM messages WHERE id = 'middle'",
+		);
+		const header = makeStored(
+			"message.created",
+			"s1",
+			{ messageId: "cut", sessionId: "s1", role: "user" },
+			3,
+			1000,
+		);
+		await project({ ...header, metadata: { providerCreatedAt: 100 } });
+		expect(
+			(
+				await queryOne<{ version: number }>(
+					"SELECT version FROM messages WHERE id = 'middle'",
+				)
+			)?.version,
+		).toBeGreaterThan(before?.version ?? 0);
+		const middlePart = await queryOne<{ version: number }>(
+			"SELECT version FROM message_parts WHERE id = 'middle-text'",
+		);
+		await project({
+			...header,
+			eventId: createEventId(),
+			metadata: { providerCreatedAt: 250 },
+		});
+		expect(
+			(
+				await queryOne<{ version: number }>(
+					"SELECT version FROM message_parts WHERE id = 'middle-text'",
+				)
+			)?.version,
+		).toBeGreaterThan(middlePart?.version ?? 0);
+	});
+
+	it("uses a late user header's provider clock and retracts a corrected clock", async () => {
+		await project(
+			makeStored(
+				"message.created",
+				"s1",
+				{
+					messageId: "other",
+					sessionId: "s1",
+					role: "user",
+					inputId: "other-input",
+				},
+				1,
+				150,
+			),
+		);
+		await project(
+			makeStored(
+				"text.delta",
+				"s1",
+				{
+					messageId: "late",
+					partId: "late-text",
+					text: "human prompt",
+				},
+				2,
+				900,
+			),
+		);
+		expect(
+			await queryOne(
+				"SELECT last_user_message_at FROM sessions WHERE id = 's1'",
+			),
+		).toEqual({ last_user_message_at: 150 });
+		for (const [providerCreatedAt, expectedClock] of [
+			[200, 200],
+			[100, 150],
+			[300, 300],
+		] as const) {
+			const header = makeStored(
+				"message.created",
+				"s1",
+				{ messageId: "late", sessionId: "s1", role: "user" },
+				3,
+				1000,
+			);
+			await project({ ...header, metadata: { providerCreatedAt } });
+			expect(
+				await queryOne(
+					"SELECT role, created_at, is_human_sent FROM messages WHERE id = 'late'",
+				),
+			).toEqual({
+				role: "user",
+				created_at: providerCreatedAt,
+				is_human_sent: 1,
+			});
+			expect(
+				await queryOne(
+					"SELECT last_user_message_at FROM sessions WHERE id = 's1'",
+				),
+			).toEqual({ last_user_message_at: expectedClock });
+		}
+	});
+
+	it("advances human recency monotonically and recomputes replacements and removals", async () => {
+		const clock = async () =>
+			(
+				await queryOne<{ last_user_message_at: number | null }>(
+					"SELECT last_user_message_at FROM sessions WHERE id = 's1'",
+				)
+			)?.last_user_message_at;
+		for (const [messageId, createdAt] of [
+			["new", 200],
+			["old", 100],
+		] as const) {
+			await project(
+				makeStored(
+					"message.created",
+					"s1",
+					{
+						messageId,
+						sessionId: "s1",
+						role: "user",
+						inputId: messageId,
+					},
+					1,
+					createdAt,
+				),
+			);
+			expect(await clock()).toBe(200);
+		}
+		await project(
+			makeStored("message.snapshot", "s1", {
+				messageId: "new",
+				digest: "older-provider-clock",
+				message: {
+					id: "new",
+					sessionID: "s1",
+					role: "user",
+					time: { created: 50 },
+					parts: [{ id: "new-text", type: "text", text: "prompt" }],
+				},
+			}),
+		);
+		expect(await clock()).toBe(100);
+		await project(makeStored("message.removed", "s1", { messageId: "old" }));
+		expect(await clock()).toBe(50);
+		await project(
+			makeStored("message.snapshot", "s1", {
+				messageId: "new",
+				digest: "role-replacement",
+				message: {
+					id: "new",
+					sessionID: "s1",
+					role: "assistant",
+					time: { created: 50 },
+					parts: [],
+				},
+			}),
+		);
+		expect(await clock()).toBeNull();
+	});
+
+	it("decides human authorship from the row and its own parts without stored events", async () => {
+		const created = makeStored(
+			"message.created",
+			"s1",
+			{
+				messageId: "synthetic",
+				sessionId: "s1",
+				role: "user",
+			},
+			1,
+			300,
+		);
+		await project({ ...created, metadata: { synthetic: true } });
+		await project(
+			makeStored(
+				"text.delta",
+				"s1",
+				{
+					messageId: "synthetic",
+					partId: "synthetic-text",
+					text: "injected context",
+				},
+				2,
+				301,
+			),
+		);
+		expect(
+			await queryOne(
+				"SELECT last_user_message_at FROM sessions WHERE id = 's1'",
+			),
+		).toEqual({ last_user_message_at: null });
+		expect(await harness.storedEvents("s1")).toEqual([]);
+		await project(
+			makeStored("message.snapshot", "s1", {
+				messageId: "synthetic",
+				digest: "snapshot-without-header-provenance",
+				message: {
+					id: "synthetic",
+					sessionID: "s1",
+					role: "user",
+					time: { created: 300 },
+					parts: [
+						{ id: "synthetic-text", type: "text", text: "injected context" },
+					],
+				},
+			}),
+		);
+		expect(
+			await queryOne(
+				"SELECT is_human_sent FROM messages WHERE id = 'synthetic'",
+			),
+		).toEqual({ is_human_sent: 0 });
+		await project(
+			makeStored("message.snapshot", "s1", {
+				messageId: "late-synthetic",
+				digest: "snapshot-before-header",
+				message: {
+					id: "late-synthetic",
+					sessionID: "s1",
+					role: "user",
+					time: { created: 400 },
+					parts: [{ id: "late-text", type: "text", text: "context" }],
+				},
+			}),
+		);
+		expect(
+			await queryOne(
+				"SELECT is_human_sent FROM messages WHERE id = 'late-synthetic'",
+			),
+		).toEqual({ is_human_sent: 1 });
+		await project({
+			...makeStored("message.created", "s1", {
+				messageId: "late-synthetic",
+				sessionId: "s1",
+				role: "user",
+			}),
+			metadata: { synthetic: true },
+		});
+		expect(
+			await queryOne(
+				"SELECT is_human_sent FROM messages WHERE id = 'late-synthetic'",
+			),
+		).toEqual({ is_human_sent: 0 });
+		await project(
+			makeStored("message.part.removed", "s1", {
+				messageId: "synthetic",
+				partId: "synthetic-text",
+			}),
+		);
+		await project(
+			makeStored(
+				"text.delta",
+				"s1",
+				{
+					messageId: "synthetic",
+					partId: "replacement",
+					text: "more context",
+				},
+				3,
+				302,
+			),
+		);
+		expect(
+			await queryOne(
+				"SELECT is_human_sent FROM messages WHERE id = 'synthetic'",
+			),
+		).toEqual({ is_human_sent: 0 });
+		await project(
+			makeStored("message.snapshot", "s1", {
+				messageId: "file-only",
+				digest: "file-only",
+				message: {
+					id: "file-only",
+					sessionID: "s1",
+					role: "user",
+					time: { created: 200 },
+					parts: [
+						{ id: "file-part", type: "file", url: "data:text/plain,prompt" },
+					],
+				},
+			}),
+		);
+		expect(
+			await queryOne(
+				"SELECT last_user_message_at FROM sessions WHERE id = 's1'",
+			),
+		).toEqual({ last_user_message_at: 200 });
+		await project(
+			makeStored("message.part.removed", "s1", {
+				messageId: "file-only",
+				partId: "file-part",
+			}),
+		);
+		expect(
+			await queryOne(
+				"SELECT last_user_message_at FROM sessions WHERE id = 's1'",
+			),
+		).toEqual({ last_user_message_at: null });
+	});
+
+	it("marks copied input ids as inherited before advancing recency", async () => {
+		const event = makeStored(
+			"message.created",
+			"s1",
+			{
+				messageId: "copied",
+				sessionId: "s1",
+				role: "user",
+				inputId: "source-input",
+			},
+			1,
+			100,
+		);
+		await project({ ...event, metadata: { inherited: true } });
+		expect(
+			await queryOne("SELECT is_inherited FROM messages WHERE id = 'copied'"),
+		).toEqual({ is_inherited: 1 });
+		expect(
+			await queryOne(
+				"SELECT last_user_message_at FROM sessions WHERE id = 's1'",
+			),
+		).toEqual({ last_user_message_at: null });
+	});
+
+	it("persists authorship as streamed parts arrive and replace their provenance", async () => {
+		const state = () =>
+			queryOne(
+				"SELECT is_human_sent, last_user_message_at FROM messages JOIN sessions ON sessions.id = messages.session_id WHERE messages.id = 'streamed'",
+			);
+		await project(
+			makeStored(
+				"message.created",
+				"s1",
+				{
+					messageId: "streamed",
+					sessionId: "s1",
+					role: "user",
+				},
+				1,
+				100,
+			),
+		);
+		expect(await state()).toEqual({
+			is_human_sent: 0,
+			last_user_message_at: null,
+		});
+		const part = makeStored(
+			"text.delta",
+			"s1",
+			{
+				messageId: "streamed",
+				partId: "streamed-text",
+				text: "prompt",
+			},
+			2,
+			101,
+		);
+		await project({ ...part, metadata: { synthetic: true } });
+		expect(await state()).toEqual({
+			is_human_sent: 0,
+			last_user_message_at: null,
+		});
+		await project(
+			makeStored(
+				"text.delta",
+				"s1",
+				{
+					messageId: "streamed",
+					partId: "human-text",
+					text: "human prompt",
+				},
+				3,
+				102,
+			),
+		);
+		expect(await state()).toEqual({
+			is_human_sent: 1,
+			last_user_message_at: 100,
+		});
+		await project(
+			makeStored(
+				"message.part.removed",
+				"s1",
+				{
+					messageId: "streamed",
+					partId: "human-text",
+				},
+				4,
+				103,
+			),
+		);
+		expect(await state()).toEqual({
+			is_human_sent: 0,
+			last_user_message_at: null,
+		});
+		await project(
+			makeStored("message.snapshot", "s1", {
+				messageId: "streamed",
+				digest: "ignored-only",
+				message: {
+					id: "streamed",
+					sessionID: "s1",
+					role: "user",
+					time: { created: 100 },
+					parts: [
+						{ id: "ignored", type: "text", text: "context", ignored: true },
+					],
+				},
+			}),
+		);
+		expect(await state()).toEqual({
+			is_human_sent: 0,
+			last_user_message_at: null,
+		});
+		const columns = await harness.query<{ name: string }>(
+			"PRAGMA table_info(messages)",
+		);
+		expect(columns.map(({ name }) => name)).not.toContain("is_synthetic");
+	});
 
 	it("has the correct name and handles list", async () => {
 		expect(projector.name).toBe("message");
@@ -225,7 +759,7 @@ describe("MessageProjector", () => {
 		).toEqual({ text: "keep", version: 1, rest_payload: null });
 	});
 
-	it("a recreated message supersedes its tombstone", async () => {
+	it("a recreated message preserves its tombstone at the removal version", async () => {
 		await project(makeStored("message.removed", "s1", { messageId: "m1" }));
 		await project(
 			makeStored(
@@ -236,18 +770,25 @@ describe("MessageProjector", () => {
 			),
 		);
 		expect(
-			await harness.query("SELECT id FROM messages WHERE id = 'm1'"),
-		).toEqual([{ id: "m1" }]);
+			await harness.query("SELECT id, version FROM messages WHERE id = 'm1'"),
+		).toEqual([{ id: "m1", version: 2 }]);
 		expect(
 			await harness.query(
-				"SELECT message_id FROM message_tombstones WHERE message_id = 'm1'",
+				"SELECT id, version FROM message_parts WHERE message_id = 'm1'",
 			),
-		).toEqual([]);
+		).toEqual([{ id: "p1", version: 2 }]);
+		expect(
+			await harness.query(
+				"SELECT message_id, version FROM message_tombstones WHERE message_id = 'm1'",
+			),
+		).toEqual([{ message_id: "m1", version: 1 }]);
 	});
 
-	it("a recreated part supersedes its tombstone, through a delta or a snapshot", async () => {
+	it("a recreated part preserves its tombstone at the removal version, through a delta or a snapshot", async () => {
 		const tombstones = () =>
-			harness.query("SELECT part_id FROM message_part_tombstones");
+			harness.query(
+				"SELECT part_id, version FROM message_part_tombstones ORDER BY part_id",
+			);
 		const snapshot = (parts: readonly string[], sequence: number) =>
 			project({
 				...makeStored(
@@ -282,7 +823,7 @@ describe("MessageProjector", () => {
 				2,
 			),
 		);
-		expect(await tombstones()).toEqual([{ part_id: "p1" }]);
+		expect(await tombstones()).toEqual([{ part_id: "p1", version: 2 }]);
 		await project(
 			makeStored(
 				"text.delta",
@@ -291,13 +832,28 @@ describe("MessageProjector", () => {
 				3,
 			),
 		);
-		expect(await tombstones()).toEqual([]);
+		expect(await tombstones()).toEqual([{ part_id: "p1", version: 2 }]);
+		expect(
+			await harness.query("SELECT id, version FROM message_parts"),
+		).toEqual([{ id: "p1", version: 3 }]);
 
 		await snapshot(["p1", "p2"], 4);
 		await snapshot(["p1"], 5);
-		expect(await tombstones()).toEqual([{ part_id: "p2" }]);
+		expect(await tombstones()).toEqual([
+			{ part_id: "p1", version: 2 },
+			{ part_id: "p2", version: 5 },
+		]);
 		await snapshot(["p1", "p2"], 6);
-		expect(await tombstones()).toEqual([]);
+		expect(await tombstones()).toEqual([
+			{ part_id: "p1", version: 2 },
+			{ part_id: "p2", version: 5 },
+		]);
+		expect(
+			await harness.query("SELECT id, version FROM message_parts ORDER BY id"),
+		).toEqual([
+			{ id: "p1", version: 6 },
+			{ id: "p2", version: 6 },
+		]);
 	});
 
 	it.each([

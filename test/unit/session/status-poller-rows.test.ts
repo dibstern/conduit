@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Effect, HashMap, Layer, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { StatusPollerLive } from "../../../src/lib/domain/relay/Layers/status-poller-layer.js";
@@ -29,9 +29,9 @@ const pollerLayer = (api: ReturnType<typeof makeMockOpenCodeAPI>) =>
 			Layer.mergeAll(
 				makePersistenceEffectLayer(":memory:", "test-project"),
 				PendingInteractionServiceLive,
-				Layer.succeed(ConfigTag, makeMockConfig()),
-				Layer.succeed(LoggerTag, makeMockLogger()),
-				Layer.succeed(OpenCodeAPITag, api),
+				Layer.succeed(ConfigTag)(makeMockConfig()),
+				Layer.succeed(LoggerTag)(makeMockLogger()),
+				Layer.succeed(OpenCodeAPITag)(api),
 				makePollerStateLive(),
 				makePollerPubSubLive(),
 				RelayStatusSnapshotLive,
@@ -44,10 +44,10 @@ const pollerLayer = (api: ReturnType<typeof makeMockOpenCodeAPI>) =>
 
 const insertParentAndBusyChild = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
-	yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-		VALUES ('parent', 'opencode', 'Parent', 'idle', 1, 1)`;
-	yield* sql`INSERT INTO sessions (id, provider, title, status, parent_id, created_at, updated_at)
-		VALUES ('child', 'opencode', 'Child', 'busy', 'parent', 2, 2)`;
+	yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, project_id)
+		VALUES ('parent', 'opencode', 'Parent', 'idle', 1, 1, 'test-project')`;
+	yield* sql`INSERT INTO sessions (id, provider, title, status, parent_id, created_at, updated_at, project_id)
+		VALUES ('child', 'opencode', 'Child', 'busy', 'parent', 2, 2, 'test-project')`;
 });
 
 it("returns readiness while initial git is blocked and completes it in the relay scope", async () => {
@@ -60,12 +60,14 @@ it("returns readiness while initial git is blocked and completes it in the relay
 	const runtime = ManagedRuntime.make(
 		pollerLayer(makeMockOpenCodeAPI()).pipe(
 			Layer.provide(
-				Layer.succeed(SessionGitServiceTag, {
+				Layer.succeed(SessionGitServiceTag)({
 					refresh: () =>
 						Effect.tryPromise(readGit).pipe(
-							Effect.tap(() => {
-								refreshed = true;
-							}),
+							Effect.tap(() =>
+								Effect.sync(() => {
+									refreshed = true;
+								}),
+							),
 						),
 				}),
 			),
@@ -96,12 +98,12 @@ it("interrupts the initial git refresh when the relay scope closes", async () =>
 	const runtime = ManagedRuntime.make(
 		pollerLayer(makeMockOpenCodeAPI()).pipe(
 			Layer.provide(
-				Layer.succeed(SessionGitServiceTag, {
+				Layer.succeed(SessionGitServiceTag)({
 					refresh: () =>
 						Effect.sync(() => {
 							reading = true;
 						}).pipe(
-							Effect.zipRight(Effect.never),
+							Effect.andThen(Effect.never),
 							Effect.onInterrupt(() =>
 								Effect.sync(() => {
 									interrupted = true;
@@ -147,9 +149,9 @@ it("keeps Claude status observation and exposes ownership separately", async () 
 		Effect.scoped(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-					VALUES ('opencode-1', 'opencode', 'OpenCode', 'busy', 1, 1),
-						('claude-1', 'claude', 'Claude', 'busy', 2, 2)`;
+				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, project_id)
+					VALUES ('opencode-1', 'opencode', 'OpenCode', 'busy', 1, 1, 'test-project'),
+						('claude-1', 'claude', 'Claude', 'busy', 2, 2, 'test-project')`;
 				const poller = yield* StatusPollerTag;
 				yield* poller.start();
 				expect(yield* poller.getCurrentStatuses()).toEqual({

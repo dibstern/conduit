@@ -20,17 +20,20 @@
 // Resume is a rebase for the same reason as the shell: the query can only
 // report rows that still exist.
 
-import { SqlClient } from "@effect/sql";
 import { Effect, Stream } from "effect";
-import { withCachedSessionGit } from "../../../git/session-git.js";
-import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import type { SqlClient } from "effect/sql";
+import { advanceTouchesScope } from "../../../contracts/read-model-advance.js";
+import {
+	ReadQueryEffectTag,
+	type SessionScope,
+} from "../../../persistence/effect/read-query-effect.js";
 import type { SessionInfo } from "../../../shared-types.js";
-import { AccountDirectory } from "../../daemon/Services/account-directory.js";
-import { resolveSessionAccountIds } from "../../daemon/Services/session-accounts.js";
+import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
+import type { SessionActivityTag } from "../../daemon/Services/session-activity.js";
+import { makeSessionRows } from "../../daemon/Services/session-rows.js";
 import { type Envelope, stream } from "./read-model-subscription.js";
-import { BackgroundLivenessTag, ConfigTag } from "./services.js";
+import { ConfigTag } from "./services.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
-import { withSessionWorktreeStatus } from "./session-workspace.js";
 import type { ShellSubscriptionError } from "./shell-subscription.js";
 
 export const subscribeSessionFamily = (options: {
@@ -41,7 +44,7 @@ export const subscribeSessionFamily = (options: {
 	ShellSubscriptionError,
 	| ReadQueryEffectTag
 	| SessionEventBusTag
-	| BackgroundLivenessTag
+	| SessionActivityTag
 	| ConfigTag
 	| AccountDirectory
 	| SqlClient.SqlClient
@@ -50,10 +53,12 @@ export const subscribeSessionFamily = (options: {
 		Effect.gen(function* () {
 			const readQuery = yield* ReadQueryEffectTag;
 			const bus = yield* SessionEventBusTag;
-			const backgroundOf = yield* BackgroundLivenessTag;
 			const config = yield* ConfigTag;
-			const sql = yield* SqlClient.SqlClient;
-			const accounts = yield* AccountDirectory;
+			const scope: SessionScope = { projectIds: [config.slug] };
+			const rows = yield* makeSessionRows({
+				slug: config.slug,
+				folders: [config.projectDir, ...(config.extraFolders ?? [])],
+			});
 			const anchor =
 				(yield* readQuery.getSessionFamilyRoot(options.sessionId)) ??
 				options.sessionId;
@@ -64,48 +69,16 @@ export const subscribeSessionFamily = (options: {
 					name: `session-family/${anchor}`,
 					collections: ["sessions"],
 					shareReads: true,
+					shareKey: `session-family/${config.slug}/${anchor}`,
 					read: (range) =>
-						readQuery
-							.readSessionList({
-								...range,
-								familyOf: anchor,
-								...(range === undefined ? { viewed: options.sessionId } : {}),
-								backgroundOf,
-							})
-							.pipe(
-								Effect.flatMap((list) =>
-									Effect.gen(function* () {
-										const accountIds = yield* resolveSessionAccountIds(
-											list.rows.map((row) => row.item.id),
-										).pipe(
-											Effect.provideService(SqlClient.SqlClient, sql),
-											Effect.provideService(AccountDirectory, accounts),
-										);
-										return yield* Effect.forEach(list.rows, (row) =>
-											Effect.gen(function* () {
-												return {
-													...row,
-													item: yield* withSessionWorktreeStatus(
-														withCachedSessionGit(
-															{
-																...row.item,
-																projectSlug: config.slug,
-																accountId: accountIds.get(row.item.id) ?? null,
-															},
-															[
-																config.projectDir,
-																...(config.extraFolders ?? []),
-															],
-														),
-														config,
-													),
-												};
-											}),
-										).pipe(Effect.map((rows) => ({ ...list, rows })));
-									}),
-								),
-							),
+						rows.read({
+							...range,
+							familyOf: anchor,
+							...(range === undefined ? { viewed: options.sessionId } : {}),
+						}),
 					route: (advance) => {
+						if (!advanceTouchesScope(advance, scope))
+							return { moved: false, removed: [] };
 						const removed = advance.removedSessionIds.filter((id) =>
 							held.delete(id),
 						);

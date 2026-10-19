@@ -4,11 +4,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	ListDaemonSessions,
-	SaveProject,
-	SubmitInput,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
 	effectMigrationEntries,
@@ -28,25 +24,25 @@ const tables = [
 ] as const;
 
 function provenance(fixture: ProcessHarness, slug: string) {
-	const db = new Database(fixture.projectStorePath(slug), { readonly: true });
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
 		return {
 			events: db
 				.prepare(`SELECT type, project_id, COUNT(*) AS count
-				FROM events GROUP BY type, project_id ORDER BY type, project_id`)
-				.all(),
+				FROM events WHERE project_id = ? GROUP BY type, project_id ORDER BY type, project_id`)
+				.all(slug),
 			receipts: db
 				.prepare(`SELECT command_type, status, project_key, COUNT(*) AS count
-				FROM command_receipts GROUP BY command_type, status, project_key
+				FROM command_receipts WHERE project_key = ? GROUP BY command_type, status, project_key
 				ORDER BY command_type, status, project_key`)
-				.all(),
+				.all(slug),
 			tables: tables.map((table) => ({
 				table,
 				column: table === "events" ? "project_id" : "project_key",
 				rows: db
 					.prepare(`SELECT ${table === "events" ? "project_id" : "project_key"} AS project, COUNT(*) AS count FROM ${table}
-					GROUP BY project ORDER BY project`)
-					.all() as Array<{
+					WHERE ${table === "events" ? "project_id" : "project_key"} = ? GROUP BY project ORDER BY project`)
+					.all(slug) as Array<{
 					project: string | null;
 					count: number;
 				}>,
@@ -58,12 +54,12 @@ function provenance(fixture: ProcessHarness, slug: string) {
 }
 
 function outbox(fixture: ProcessHarness, slug: string) {
-	const db = new Database(fixture.projectStorePath(slug), { readonly: true });
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
 		return db
 			.prepare(`SELECT command_id, status, attempt_count
-			FROM provider_command_outbox ORDER BY request_sequence`)
-			.all() as Array<{
+			FROM provider_command_outbox WHERE project_key = ? ORDER BY request_sequence`)
+			.all(slug) as Array<{
 			command_id: string;
 			status: string;
 			attempt_count: number;
@@ -75,7 +71,47 @@ function outbox(fixture: ProcessHarness, slug: string) {
 
 // Copy daemon-written history into the actual schema immediately before this
 // ticket. No DROP COLUMN simulation: the old migration registry creates it.
-async function stagePreProvenanceStore(filename: string) {
+async function stagePreProvenanceStore(
+	filename: string,
+	daemonFilename: string,
+	slug: string,
+) {
+	copyFileSync(daemonFilename, filename);
+	const scoped = new Database(filename);
+	try {
+		scoped.pragma("foreign_keys = OFF");
+		const names = scoped
+			.prepare(
+				"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+			)
+			.all() as Array<{ name: string }>;
+		for (const { name } of names) {
+			const columns = scoped.pragma(`table_info(${name})`) as Array<{
+				name: string;
+			}>;
+			const owner = columns.find(
+				({ name }) => name === "project_id" || name === "project_key",
+			);
+			if (owner)
+				scoped
+					.prepare(`DELETE FROM ${name} WHERE ${owner.name} IS NOT ?`)
+					.run(slug);
+		}
+		for (const { name } of names) {
+			const columns = scoped.pragma(`table_info(${name})`) as Array<{
+				name: string;
+			}>;
+			if (columns.some(({ name }) => name === "session_id"))
+				scoped.exec(
+					`DELETE FROM ${name} WHERE session_id NOT IN (SELECT id FROM sessions)`,
+				);
+		}
+		scoped.exec(
+			"DELETE FROM message_parts WHERE message_id NOT IN (SELECT id FROM messages)",
+		);
+	} finally {
+		scoped.close();
+	}
 	const source = `${filename}.before-provenance`;
 	copyFileSync(filename, source);
 	for (const suffix of ["", "-wal", "-shm"])
@@ -94,7 +130,9 @@ async function stagePreProvenanceStore(filename: string) {
 		const names = db
 			.prepare(`SELECT name FROM sqlite_master
 			WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-			AND name != 'effect_sql_migrations' ORDER BY name`)
+			AND name != 'effect_sql_migrations'
+			AND name IN (SELECT name FROM previous.sqlite_master WHERE type = 'table')
+			ORDER BY name`)
 			.all() as Array<{ name: string }>;
 		db.transaction(() => {
 			for (const { name } of names) {
@@ -162,12 +200,10 @@ describe("Project provenance through the built daemon", () => {
 		harness = await ProcessHarness.start();
 		const second = join(harness.root, "provenance-two");
 		mkdirSync(second);
-		await sendRpcRequest(
-			join(harness.configDir, "relay.sock"),
-			new SaveProject({
-				folders: [second],
-			}),
-		);
+		await sendRpcRequest(join(harness.configDir, "relay.sock"), {
+			_tag: "SaveProject",
+			folders: [second],
+		});
 		return harness;
 	}
 
@@ -192,17 +228,14 @@ describe("Project provenance through the built daemon", () => {
 			// Replay the identical command through RPC. Its durable receipt must
 			// suppress a second provider execution, including after the next turn.
 			const replay = () =>
-				sendRpcRequest(
-					join(fixture.configDir, "relay.sock"),
-					new SubmitInput({
-						projectSlug: slug,
-						sessionId,
-						originId: `provenance-${slug}`,
-						inputId: commandId ?? "missing-command",
-						delivery: "queue",
-						text: "stream-parity",
-					}),
-				);
+				sendRpcRequest(join(fixture.configDir, "relay.sock"), {
+					_tag: "input.submit",
+					sessionId,
+					originId: `provenance-${slug}`,
+					inputId: commandId ?? "missing-command",
+					delivery: "queue",
+					text: "stream-parity",
+				});
 			await replay();
 			const cursor = browser.frames.length;
 			const approvalsBefore = fixture.marks.filter(
@@ -288,7 +321,7 @@ describe("Project provenance through the built daemon", () => {
 			);
 			const { sessions } = await sendRpcRequest(
 				join(fixture.configDir, "relay.sock"),
-				new ListDaemonSessions({ projectSlug: slug, scope: slug }),
+				{ _tag: "ListDaemonSessions", projectSlug: slug, scope: slug },
 			);
 			histories.push({
 				slug,
@@ -299,9 +332,12 @@ describe("Project provenance through the built daemon", () => {
 		}
 		await fixture.terminate();
 		for (const slug of slugs) {
-			mkdirSync(dirname(fixture.projectStorePath(slug)), { recursive: true });
-			await stagePreProvenanceStore(fixture.projectStorePath(slug));
+			const legacy = fixture.legacyProjectStorePath(slug);
+			mkdirSync(dirname(legacy), { recursive: true });
+			await stagePreProvenanceStore(legacy, fixture.daemonStorePath(), slug);
 		}
+		for (const suffix of ["", "-wal", "-shm"])
+			rmSync(`${fixture.daemonStorePath()}${suffix}`, { force: true });
 		await fixture.restart();
 		const projects = [];
 		for (const before of histories) {
@@ -313,27 +349,36 @@ describe("Project provenance through the built daemon", () => {
 			expect(await browser.history(before.sessionId)).toEqual(before.history);
 			const { sessions } = await sendRpcRequest(
 				join(fixture.configDir, "relay.sock"),
-				new ListDaemonSessions({
+				{
+					_tag: "ListDaemonSessions",
 					projectSlug: before.slug,
 					scope: before.slug,
-				}),
+				},
 			);
 			expect(sessions).toEqual(before.sessions);
 			const manifest = provenance(fixture, before.slug);
 			for (const table of manifest.tables)
 				for (const row of table.rows)
 					expect(row.project, table.table).toBe(before.slug);
-			const db = new Database(fixture.projectStorePath(before.slug), {
+			const db = new Database(fixture.daemonStorePath(), {
 				readonly: true,
 			});
 			const old = new Database(
-				`${fixture.projectStorePath(before.slug)}.before-provenance`,
+				`${fixture.legacyProjectStorePath(before.slug)}.before-provenance`,
 				{ readonly: true },
 			);
 			try {
-				const events =
-					"SELECT sequence, event_id, session_id, stream_version, type, data, metadata, provider, created_at FROM events ORDER BY sequence";
-				expect(db.prepare(events).all()).toEqual(old.prepare(events).all());
+				const columns =
+					"event_id, session_id, stream_version, type, data, metadata, provider, created_at";
+				expect(
+					db
+						.prepare(
+							`SELECT ${columns} FROM events WHERE project_id = ? ORDER BY sequence`,
+						)
+						.all(before.slug),
+				).toEqual(
+					old.prepare(`SELECT ${columns} FROM events ORDER BY sequence`).all(),
+				);
 			} finally {
 				db.close();
 				old.close();

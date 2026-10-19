@@ -2,9 +2,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Option, PubSub } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { makePinoLoggerLive } from "../../../src/lib/domain/daemon/Layers/pino-logger-layer.js";
@@ -18,10 +18,13 @@ import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
 } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
-	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
@@ -120,14 +123,13 @@ function makeTestLayer(
 	});
 
 	const bridgeLayers = Layer.mergeAll(
-		Layer.succeed(
-			OpenCodeInstancesTag,
+		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: client }),
 		),
-		Layer.succeed(OpenCodeAPITag, services.client as any),
-		Layer.succeed(PollerManagerTag, services.pollerManager as any),
-		Layer.succeed(StatusPollerTag, services.statusPoller),
-		Layer.succeed(LoggerTag, services.log),
+		Layer.succeed(OpenCodeAPITag)(services.client as any),
+		Layer.succeed(PollerManagerTag)(services.pollerManager as any),
+		Layer.succeed(StatusPollerTag)(services.statusPoller),
+		Layer.succeed(LoggerTag)(services.log),
 		DaemonEventBusLive,
 	);
 
@@ -149,21 +151,20 @@ function makeServiceLifecycleLayers<ROut, E, RIn>(
 	});
 
 	const baseLayer = Layer.mergeAll(
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-		Layer.succeed(ConfigTag, makeMockConfig()),
-		Layer.succeed(BackgroundLivenessTag, () => undefined),
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+		Layer.succeed(ConfigTag)(makeMockConfig()),
+		Layer.effect(SessionActivityTag, makeSessionActivity),
 		makeOverridesStateLive(),
 		RelayStatusSnapshotLive,
-		Layer.succeed(OpenCodeInstancesTag, instances),
-		Layer.succeed(OpenCodeAPITag, api),
-		Layer.succeed(PollerManagerTag, services.pollerManager as any),
-		Layer.succeed(StatusPollerTag, services.statusPoller),
-		Layer.succeed(LoggerTag, services.log),
+		Layer.succeed(OpenCodeInstancesTag)(instances),
+		Layer.succeed(OpenCodeAPITag)(api),
+		Layer.succeed(PollerManagerTag)(services.pollerManager as any),
+		Layer.succeed(StatusPollerTag)(services.statusPoller),
+		Layer.succeed(LoggerTag)(services.log),
 		makeSessionManagerStateLive(),
 		DaemonEventBusLive,
 		persistenceLayer,
-		Layer.succeed(
-			OrchestrationEngineTag,
+		Layer.succeed(OrchestrationEngineTag)(
 			new OrchestrationEngine({ registry: new ProviderRegistry() }),
 		),
 	);
@@ -280,6 +281,7 @@ describe("SessionLifecycleWiringLive", () => {
 				const session = yield* service.createSession("OpenCode", {
 					account: {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},
@@ -323,7 +325,7 @@ describe("SessionLifecycleWiringLive", () => {
 			const cause = new Error("history unavailable");
 			services.client.session.messages.mockRejectedValue(cause);
 
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				handleSessionCreated("s-reject", {
 					translator: deps.translator as any,
 					client: services.client,
@@ -332,13 +334,15 @@ describe("SessionLifecycleWiringLive", () => {
 				}),
 			);
 
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expect(result.left).toBeInstanceOf(SessionLifecycleHistoryRebuildError);
-				expect(result.left._tag).toBe("SessionLifecycleHistoryRebuildError");
-				expect(result.left.sessionId).toBe("s-reject");
-				expect(result.left.operation).toBe("rebuildTranslatorFromHistory");
-				expect(result.left.cause).toBe(cause);
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
+				expect(result.failure).toBeInstanceOf(
+					SessionLifecycleHistoryRebuildError,
+				);
+				expect(result.failure._tag).toBe("SessionLifecycleHistoryRebuildError");
+				expect(result.failure.sessionId).toBe("s-reject");
+				expect(result.failure.operation).toBe("rebuildTranslatorFromHistory");
+				expect(result.failure.cause).toBe(cause);
 			}
 			expect(deps.translator.reset).toHaveBeenCalledWith("s-reject");
 			expect(deps.translator.rebuildStateFromHistory).not.toHaveBeenCalled();
@@ -377,6 +381,7 @@ describe("SessionLifecycleWiringLive", () => {
 				yield* service.createSession("Service Created", {
 					account: {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},

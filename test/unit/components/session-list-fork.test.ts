@@ -10,13 +10,10 @@ import {
 	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import {
-	forkSessionRpc,
-	viewSessionRpc,
-} from "../../../src/lib/frontend/transport/ws-rpc-client.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import {
 	clearSessionSearch,
-	seedDaemonSessions,
 	seedFamilySessions,
 	seedRootSessions,
 } from "../stores/session-fixtures.js";
@@ -27,10 +24,16 @@ vi.mock(
 		...(await importOriginal<
 			typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js")
 		>()),
-		forkSessionRpc: vi.fn(),
-		viewSessionRpc: vi.fn().mockResolvedValue(undefined),
-		getAgentsRpc: vi.fn().mockReturnValue(new Promise(() => undefined)),
-		getCommandsRpc: vi.fn().mockReturnValue(new Promise(() => undefined)),
+		// Keep catalog reads pending while the fork reply settles.
+		rpc: vi.fn((tag: string) =>
+			tag === "GetAgents" || tag === "GetCommands"
+				? new Promise(() => undefined)
+				: Promise.resolve({
+						projectSlug: "current-project",
+						sessionId: "fork",
+						forkedFrom: "other",
+					}),
+		),
 	}),
 );
 
@@ -52,10 +55,10 @@ describe("SessionList fork", () => {
 			{ id: "other", title: "Other work" },
 		]);
 		seedFamilySessions([...sessionState.rootSessions]);
-		seedDaemonSessions([]);
+
 		sessionState.searchQuery = "";
 		clearSessionSearch();
-		sessionState.currentId = "open";
+		openSessionForSetup("open", "current-project");
 		routerState.path = "/s/open";
 		routerState.search = "";
 	});
@@ -68,11 +71,6 @@ describe("SessionList fork", () => {
 	// Nothing else announces the fork, so the list must open it itself once
 	// ForkSession answers.
 	it("opens the fork of a session that is not the open one", async () => {
-		vi.mocked(forkSessionRpc).mockResolvedValue({
-			projectSlug: "current-project",
-			sessionId: "fork",
-			parentId: "other",
-		});
 		render(SessionList);
 		const row = screen.getByText("Other work").closest("a");
 		if (!row) throw new Error("Missing row");
@@ -80,16 +78,11 @@ describe("SessionList fork", () => {
 		await fireEvent.contextMenu(row);
 		await fireEvent.click(await screen.findByTestId("session-ctx-fork"));
 
-		expect(forkSessionRpc).toHaveBeenCalledWith(
+		expect(rpc).toHaveBeenCalledWith(
+			"ForkSession",
 			expect.objectContaining({ sessionId: "other" }),
 		);
 		await vi.waitFor(() => expect(sessionState.currentId).toBe("fork"));
 		expect(routerState.path).toContain("/s/fork");
-		expect(viewSessionRpc).toHaveBeenCalledWith(
-			expect.objectContaining({
-				projectSlug: "current-project",
-				sessionId: "fork",
-			}),
-		);
 	});
 });

@@ -46,7 +46,6 @@ describe("Provider wiring with Claude provider instance", () => {
 		// Create a minimal mock for opencode instance
 		const opencode = {
 			providerId: "opencode",
-			steering: false,
 			discoverEffect: () =>
 				Effect.succeed({
 					models: [],
@@ -155,7 +154,9 @@ describe("Provider wiring with Claude provider instance", () => {
 		engine.bindSession("sess-1", "claude");
 		engine.bindSession("sess-2", "opencode");
 
-		const bindings = Effect.runSync(engine.listBoundSessionsEffect());
+		const bindings = Effect.runSync(
+			engine.listBoundSessionsEffect({ projectIds: ["test-project"] }),
+		);
 		expect(bindings).toHaveLength(2);
 		expect(bindings.find((b) => b.sessionId === "sess-1")?.providerId).toBe(
 			"claude",

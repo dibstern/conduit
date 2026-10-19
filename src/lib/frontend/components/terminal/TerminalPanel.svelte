@@ -21,7 +21,8 @@
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { terminalAccountId } from "../layout/chrome-actions.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
-	import { closePtyRpc, createPtyRpc, resizePtyRpc } from "../../transport/ws-rpc-client.js";
+	import { failureLine } from "../../transport/rpc-errors.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import type { GetFileTreeResponse } from "../../transport/ws-rpc.js";
 	import Button from "../ui/Button.svelte";
 	import Menu from "../ui/Menu.svelte";
@@ -143,7 +144,7 @@
 	function handleFontSizeResize(size: { cols: number; rows: number }) {
 		const projectSlug = getCurrentSlug();
 		if (activeTabId && projectSlug) {
-			void resizePtyRpc({
+			void rpc("ResizePty", {
 				projectSlug,
 				ptyId: activeTabId,
 				originId: getBrowserClientId(),
@@ -158,21 +159,20 @@
 		const sessionId = getCurrentSessionId();
 		const accountId = terminalAccountId();
 		if (!projectSlug || !beginCreateTab()) return;
-		void createPtyRpc({
-			projectSlug,
+		void rpc("CreatePty", {
+			...(sessionId ? { sessionId } : { projectSlug }),
 			originId: getBrowserClientId(),
-			...(sessionId ? { sessionId } : {}),
 			...(accountId === undefined ? {} : { accountId }),
 			...(root === undefined ? {} : { root }),
-		}).catch(() => {
-			failCreateTab("Failed to create terminal");
+		}).catch((error) => {
+			failCreateTab(failureLine(error, "Failed to create terminal"));
 		});
 	}
 
 	function handleCloseTab(ptyId: string) {
 		const projectSlug = getCurrentSlug();
 		if (projectSlug) {
-			void closePtyRpc({ projectSlug, ptyId }).catch(() => undefined);
+			void rpc("ClosePty", { projectSlug, ptyId }).catch(() => undefined);
 		}
 		handlePtyRemove({ id: ptyId });
 	}

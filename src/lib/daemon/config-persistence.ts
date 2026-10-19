@@ -1,14 +1,18 @@
-// Handles persistent daemon config at ~/.conduit/daemon.json,
-// recent projects at ~/.conduit/recent.json, and crash info at
-// ~/.conduit/crash.json. Uses atomic writes (tmp + rename) for
-// daemon.json to prevent corruption.
-
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { chmod, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
-import { Data, Effect, Either, Schema } from "effect";
+import {
+	Data,
+	Effect,
+	Record,
+	Result,
+	Schema,
+	SchemaParser,
+	SchemaTransformation,
+	Struct,
+} from "effect";
 import {
 	type AccountsState,
 	accountsStateFromConfig,
@@ -16,6 +20,7 @@ import {
 	normalizeAccountConfig,
 	resolve as resolveAccount,
 } from "../account-directory.js";
+import { CursorUsageBindingSchema } from "../contracts/account.js";
 import {
 	AccountUnroutable,
 	UsageLimitsSettingSchema,
@@ -25,12 +30,16 @@ import { SessionModeSchema } from "../contracts/project-file.js";
 import { ProjectShellEnvConfigSchema } from "../contracts/project-shell-env.js";
 import {
 	AccountIdSchema,
+	getProviderDriver,
 	KnownProviderDriverKindSchema,
 	MANAGED_OPENCODE_ACCOUNT_ID,
 	migrateLegacyDefaultOpencodeInstanceId,
+	PROVIDER_DRIVERS,
 } from "../contracts/provider-instance.js";
 import {
 	DEFAULT_WORKTREE_CLEANUP,
+	ProjectWorktreeCleanupSchema,
+	type WorktreeCleanup,
 	WorktreeCleanupSchema,
 } from "../contracts/worktree.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
@@ -40,10 +49,7 @@ import {
 	type ClaudeLaunchConfig,
 	captureClaudeLaunchLogin,
 } from "../provider/claude/claude-sdk-env.js";
-import {
-	GroupingModeSchema,
-	RepositoryIdentitySchema,
-} from "../shared-types.js";
+import { RepositoryIdentitySchema } from "../shared-types.js";
 import type { RecentProject } from "../types.js";
 import { isRecord } from "../utils.js";
 import {
@@ -54,33 +60,53 @@ import {
 
 /** Days of inactivity before automatic settlement when no value is persisted. */
 export const DEFAULT_AUTO_SETTLE_AFTER_DAYS = 3;
+export const DEFAULT_AUTO_ARCHIVE_AFTER_DAYS = 30;
+export const DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS = 30;
 
-export const CURRENT_CONFIG_VERSION = 1;
+export const CURRENT_CONFIG_VERSION = 2;
+
+const LegacyWorktreeCleanupSchema = Schema.Struct({
+	onSettle: Schema.Literals(["off", "merged", "any"]).pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => "merged" as const)),
+	),
+	onDelete: WorktreeCleanupSchema.fields.onDelete,
+	afterInactiveDays: Schema.NullOr(
+		Schema.Number.pipe(
+			Schema.check(Schema.isInt()),
+			Schema.check(Schema.isBetween({ minimum: 1, maximum: 3650 })),
+		),
+	).pipe(Schema.withDecodingDefaultType(Effect.sync(() => null))),
+	whenMerged: Schema.Boolean.pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => false)),
+	),
+	noCommitsBeyondDefault: Schema.Boolean.pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => false)),
+	),
+	keepWhen: WorktreeCleanupSchema.fields.keepWhen,
+});
 
 const ProjectSchema = Schema.Struct({
 	path: Schema.String,
 	folders: Schema.NonEmptyArray(Schema.String),
-	repositoryIdentities: Schema.optionalWith(
-		Schema.Record({ key: Schema.String, value: RepositoryIdentitySchema }),
-		{ exact: true },
+	repositoryIdentities: Schema.optionalKey(
+		Schema.Record(Schema.String, RepositoryIdentitySchema),
 	),
 	slug: Schema.String,
-	title: Schema.optionalWith(Schema.String, { exact: true }),
-	addedAt: Schema.Number,
-	shellEnv: Schema.optionalWith(ProjectShellEnvConfigSchema, { exact: true }),
-	setupScript: Schema.optionalWith(Schema.String, { exact: true }),
-	sessionMode: Schema.optionalWith(SessionModeSchema, { exact: true }),
-	groupingMode: Schema.optionalWith(GroupingModeSchema, { exact: true }),
-	sessionCount: Schema.optionalWith(Schema.Number, { exact: true }),
+	title: Schema.optionalKey(Schema.String),
+	addedAt: Schema.optionalKey(Schema.Number),
+	lastUsed: Schema.optionalKey(Schema.Number),
+	shellEnv: Schema.optionalKey(ProjectShellEnvConfigSchema),
+	setupScript: Schema.optionalKey(Schema.String),
+	sessionMode: Schema.optionalKey(SessionModeSchema),
+	worktreeCleanup: Schema.optionalKey(ProjectWorktreeCleanupSchema),
+	sessionCount: Schema.optionalKey(Schema.Number),
 });
 
 /** A project as any daemon version wrote it; older ones have no `folders`, only `directory` or `path`. */
 const PersistedProjectSchema = Schema.Struct({
 	...ProjectSchema.fields,
-	directory: Schema.optionalWith(Schema.String, { exact: true }),
-	folders: Schema.optionalWith(Schema.NonEmptyArray(Schema.String), {
-		exact: true,
-	}),
+	directory: Schema.optionalKey(Schema.String),
+	folders: Schema.optionalKey(Schema.NonEmptyArray(Schema.String)),
 });
 export type PersistedProject = Omit<
 	DaemonConfig["projects"][number],
@@ -90,14 +116,14 @@ export type PersistedProject = Omit<
 	folders?: readonly string[];
 };
 
-export const DaemonProjectSchema = Schema.transform(
-	PersistedProjectSchema,
-	Schema.typeSchema(ProjectSchema),
-	{
-		strict: true,
-		decode: (project) => migrateProjectFolders(project),
-		encode: (project) => project,
-	},
+export const DaemonProjectSchema = PersistedProjectSchema.pipe(
+	Schema.decodeTo(
+		Schema.toType(ProjectSchema),
+		SchemaTransformation.transform({
+			decode: (project) => migrateProjectFolders(project),
+			encode: (project) => project,
+		}),
+	),
 );
 
 /** Resolve a project's folders, reading a legacy `directory` or `path` when `folders` is absent. Drops `directory`. */
@@ -122,77 +148,86 @@ export const migrateProjectFolders = <
 	};
 };
 
-const DaemonInstanceSchema = Schema.mutable(
-	Schema.Struct({
-		id: Schema.String,
-		name: Schema.String,
-		port: Schema.Number,
-		managed: Schema.Boolean,
-		pid: Schema.optionalWith(
-			Schema.Number.pipe(Schema.int(), Schema.positive()),
-			{ exact: true },
+const DaemonInstanceSchema = Schema.Struct({
+	id: Schema.String,
+	name: Schema.String,
+	port: Schema.Number,
+	managed: Schema.Boolean,
+	pid: Schema.optionalKey(
+		Schema.Number.pipe(
+			Schema.check(Schema.isInt()),
+			Schema.check(Schema.isGreaterThan(0)),
 		),
-		version: Schema.optionalWith(Schema.String, { exact: true }),
-		processIdentity: Schema.optionalWith(ManagedOpenCodeProcessIdentitySchema, {
-			exact: true,
-		}),
-		env: Schema.optionalWith(
-			Schema.mutable(
-				Schema.Record({ key: Schema.String, value: Schema.String }),
-			),
-			{ exact: true },
-		),
-		url: Schema.optionalWith(Schema.String, { exact: true }),
-		driver: Schema.optionalWith(KnownProviderDriverKindSchema, { exact: true }),
-		configDir: Schema.optionalWith(Schema.String, { exact: true }),
-	}),
-);
+	),
+	version: Schema.optionalKey(Schema.String),
+	processIdentity: Schema.optionalKey(ManagedOpenCodeProcessIdentitySchema),
+	env: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+	url: Schema.optionalKey(Schema.String),
+	driver: Schema.optionalKey(KnownProviderDriverKindSchema),
+	configDir: Schema.optionalKey(Schema.String),
+}).mapFields(Struct.map(Schema.mutableKey));
 
 const DaemonConfigFields = {
 	// Missing versions are legacy; never decode a newer version and discard its fields.
-	configVersion: Schema.optionalWith(
-		Schema.Number.pipe(Schema.int(), Schema.between(0, CURRENT_CONFIG_VERSION)),
-		{ exact: true },
+	configVersion: Schema.optionalKey(
+		Schema.Number.pipe(
+			Schema.check(Schema.isInt()),
+			Schema.check(
+				Schema.isBetween({ minimum: 0, maximum: CURRENT_CONFIG_VERSION }),
+			),
+		),
 	),
 	pid: Schema.Number,
 	port: Schema.Number,
 	pinHash: Schema.NullOr(Schema.String),
 	tls: Schema.Boolean,
-	tailscaleServe: Schema.optionalWith(Schema.Boolean, { exact: true }),
-	tailscaleServeCleanupPending: Schema.optionalWith(Schema.Boolean, {
-		exact: true,
-	}),
+	tailscaleServe: Schema.optionalKey(Schema.Boolean),
+	tailscaleServeCleanupPending: Schema.optionalKey(Schema.Boolean),
 	debug: Schema.Boolean,
 	keepAwake: Schema.Boolean,
-	autoSettleAfterDays: Schema.optionalWith(
-		Schema.NullOr(Schema.Number.pipe(Schema.int(), Schema.between(1, 90))),
-		{ exact: true },
-	),
-	worktreeCleanup: Schema.optionalWith(WorktreeCleanupSchema, { exact: true }),
-	usageLimits: Schema.optionalWith(UsageLimitsSettingSchema, { exact: true }),
-	keepAwakeCommand: Schema.optionalWith(Schema.String, { exact: true }),
-	keepAwakeArgs: Schema.optionalWith(
-		Schema.mutable(Schema.Array(Schema.String)),
-		{ exact: true },
-	),
-	newSessionProject: Schema.optionalWith(Schema.String, { exact: true }),
-	projects: Schema.mutable(Schema.Array(DaemonProjectSchema)),
-	instances: Schema.optionalWith(
-		Schema.mutable(Schema.Array(DaemonInstanceSchema)),
-		{ exact: true },
-	),
-	accountDefaults: Schema.optionalWith(
-		Schema.Struct({
-			claude: Schema.optionalWith(
-				Schema.suspend(() => AccountIdSchema),
-				{
-					exact: true,
-				},
+	autoSettleAfterDays: Schema.optionalKey(
+		Schema.NullOr(
+			Schema.Number.pipe(
+				Schema.check(Schema.isInt()),
+				Schema.check(Schema.isBetween({ minimum: 1, maximum: 90 })),
 			),
-		}),
-		{ exact: true },
+		),
 	),
-	deletedAccounts: Schema.optionalWith(
+	autoArchiveAfterDays: Schema.optionalKey(
+		Schema.NullOr(
+			Schema.Number.pipe(
+				Schema.check(Schema.isInt()),
+				Schema.check(Schema.isBetween({ minimum: 1, maximum: 90 })),
+			),
+		),
+	),
+	autoDeleteArchivedAfterDays: Schema.optionalKey(
+		Schema.NullOr(
+			Schema.Number.pipe(
+				Schema.check(Schema.isInt()),
+				Schema.check(Schema.isBetween({ minimum: 1, maximum: 90 })),
+			),
+		),
+	),
+	worktreeCleanup: Schema.optionalKey(WorktreeCleanupSchema),
+	usageLimits: Schema.optionalKey(UsageLimitsSettingSchema),
+	cursorUsageBinding: Schema.optionalKey(CursorUsageBindingSchema),
+	keepAwakeCommand: Schema.optionalKey(Schema.String),
+	keepAwakeArgs: Schema.optionalKey(
+		Schema.mutable(Schema.Array(Schema.String)),
+	),
+	newSessionProject: Schema.optionalKey(Schema.String),
+	projectOrder: Schema.optionalKey(Schema.Array(Schema.String)),
+	projects: Schema.mutable(Schema.Array(DaemonProjectSchema)),
+	instances: Schema.optionalKey(
+		Schema.mutable(Schema.Array(DaemonInstanceSchema)),
+	),
+	accountDefaults: Schema.optionalKey(
+		Schema.Struct(
+			Record.map(PROVIDER_DRIVERS, () => Schema.suspend(() => AccountIdSchema)),
+		).mapFields(Struct.map(Schema.optional)),
+	),
+	deletedAccounts: Schema.optionalKey(
 		Schema.mutable(
 			Schema.Array(
 				Schema.Struct({
@@ -201,33 +236,63 @@ const DaemonConfigFields = {
 				}),
 			),
 		),
-		{ exact: true },
 	),
 };
 
-const CurrentDaemonConfigSchema = Schema.mutable(
-	Schema.Struct(DaemonConfigFields),
-).annotations({ identifier: "DaemonConfig" });
+const CurrentDaemonConfigSchema = Schema.Struct(DaemonConfigFields)
+	.mapFields(Struct.map(Schema.mutableKey))
+	.annotate({ identifier: "DaemonConfig" });
 
-export type DaemonConfig = Schema.Schema.Type<typeof CurrentDaemonConfigSchema>;
+export type DaemonConfig = typeof CurrentDaemonConfigSchema.Type;
 
-export const DaemonConfigSchema = Schema.transform(
-	Schema.mutable(
-		Schema.Struct({
-			...DaemonConfigFields,
-			claudeConfigDir: Schema.optionalWith(Schema.String, { exact: true }),
-		}),
-	).annotations({ identifier: "PersistedDaemonConfig" }),
-	Schema.typeSchema(CurrentDaemonConfigSchema),
-	{
-		strict: true,
-		decode: ({ claudeConfigDir, ...config }): DaemonConfig =>
-			normalizeDaemonConfig(
-				migrateLegacyClaudeAccount(config, claudeConfigDir),
-			),
-		encode: (config) => config,
-	},
-).annotations({ identifier: "DaemonConfig" });
+export const DaemonConfigSchema = Schema.Struct({
+	...DaemonConfigFields,
+	worktreeCleanup: Schema.optionalKey(Schema.Unknown),
+	claudeConfigDir: Schema.optionalKey(Schema.String),
+})
+	.mapFields(Struct.map(Schema.mutableKey))
+	.annotate({ identifier: "PersistedDaemonConfig" })
+	.pipe(
+		Schema.decodeTo(
+			Schema.toType(CurrentDaemonConfigSchema),
+			SchemaTransformation.transformEffect({
+				decode: ({ claudeConfigDir, worktreeCleanup, ...config }) =>
+					Effect.gen(function* () {
+						const persistedCleanup = worktreeCleanup ?? {};
+						const cleanup: WorktreeCleanup =
+							config.configVersion === CURRENT_CONFIG_VERSION
+								? yield* SchemaParser.decodeUnknownEffect(
+										WorktreeCleanupSchema,
+									)(persistedCleanup)
+								: yield* SchemaParser.decodeUnknownEffect(
+										LegacyWorktreeCleanupSchema,
+									)(persistedCleanup).pipe(
+										Effect.map((old) => ({
+											onSettle:
+												old.onSettle === "merged" ||
+												old.onSettle === "any" ||
+												old.whenMerged ||
+												old.noCommitsBeyondDefault
+													? ("nothing-missing" as const)
+													: ("keep" as const),
+											settledAfterDays:
+												old.onSettle === "any" ? 0 : old.afterInactiveDays,
+											onDelete: old.onDelete,
+											keepWhen: old.keepWhen,
+										})),
+									);
+						return normalizeDaemonConfig(
+							migrateLegacyClaudeAccount(
+								{ ...config, worktreeCleanup: cleanup },
+								claudeConfigDir,
+							),
+						);
+					}),
+				encode: (config) => Effect.succeed(config),
+			}),
+		),
+	)
+	.annotate({ identifier: "DaemonConfig" });
 
 // Process recovery is disposable. A damaged recovery field must not invalidate
 // authentication, project registration, or any other daemon setting.
@@ -241,9 +306,13 @@ export const sanitizeRestartMetadata = (value: unknown): unknown => {
 			const version = instance["version"];
 			const identity = instance["processIdentity"];
 			const env = instance["env"];
+			const driver = instance["driver"];
 			const invalidAuth =
 				instance["managed"] === true &&
-				instance["driver"] !== "claude" &&
+				// Legacy sanitization includes missing and unrecognized driver values.
+				(getProviderDriver(typeof driver === "string" ? driver : undefined)
+					?.runsOpenCodeServer ??
+					true) &&
 				isRecord(env) &&
 				["OPENCODE_SERVER_PASSWORD", "OPENCODE_SERVER_USERNAME"].some(
 					(key) => Object.hasOwn(env, key) && typeof env[key] !== "string",
@@ -306,7 +375,8 @@ export function resolveOpenCodeInstanceUrl(
 		: undefined;
 	if (
 		configuredInstance === undefined ||
-		(configuredInstance.driver ?? "opencode") !== "opencode"
+		!getProviderDriver(configuredInstance.driver ?? "opencode")
+			?.runsOpenCodeServer
 	) {
 		return undefined;
 	}
@@ -331,16 +401,16 @@ export function resolveClaudeLaunchConfig(
 			? { _tag: "DriverDefault", driver: "claude" }
 			: { _tag: "Id", id: instanceId },
 	);
-	if (Either.isLeft(account)) throw account.left;
-	if (account.right.driver !== "claude")
-		throw new AccountUnroutable({ ref: { _tag: "Id", id: account.right.id } });
-	return {
-		folderSource:
-			account.right.configuredFolder === undefined
-				? "implicitDefault"
-				: "account",
-		configDir: account.right.folder,
-	};
+	if (Result.isFailure(account)) throw account.failure;
+	if (account.success.driver === "claude")
+		return {
+			folderSource:
+				account.success.configuredFolder === undefined
+					? "implicitDefault"
+					: "account",
+			configDir: account.success.folder,
+		};
+	throw new AccountUnroutable({ ref: { _tag: "Id", id: account.success.id } });
 }
 
 /** Default config for first-startup when no daemon.json exists. */
@@ -354,6 +424,8 @@ export function defaultDaemonConfig(): DaemonConfig {
 		debug: false,
 		keepAwake: false,
 		autoSettleAfterDays: DEFAULT_AUTO_SETTLE_AFTER_DAYS,
+		autoArchiveAfterDays: DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
+		autoDeleteArchivedAfterDays: DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS,
 		worktreeCleanup: DEFAULT_WORKTREE_CLEANUP,
 		projects: [],
 		instances: [
@@ -386,7 +458,7 @@ function safeUnlink(filePath: string): void {
 	}
 }
 
-/** Return the default config directory (~/.conduit) */
+/** Return the config dir (DEFAULT_CONFIG_DIR). */
 export function getConfigDir(): string {
 	return DEFAULT_CONFIG_DIR;
 }
@@ -449,22 +521,22 @@ export type DaemonConfigLoadError =
 /** Capture the migration decision from the same read that seeds startup. */
 function readDaemonConfigResult(
 	configDir?: string,
-): Either.Either<
+): Result.Result<
 	{ config: DaemonConfig; needsMigration: boolean },
 	DaemonConfigLoadError
 > {
 	const path = join(resolveDir(configDir), "daemon.json");
-	const data = Either.try({
+	const data = Result.try({
 		try: () => readFileSync(path, "utf-8"),
 		catch: (cause) =>
 			cause instanceof Error && "code" in cause && cause.code === "ENOENT"
 				? new DaemonConfigNotFound({ path, cause })
 				: new DaemonConfigUnreadable({ path, cause }),
 	});
-	if (Either.isLeft(data)) return Either.left(data.left);
-	return Either.try({
+	if (Result.isFailure(data)) return Result.fail(data.failure);
+	return Result.try({
 		try: () => {
-			const raw: unknown = sanitizeRestartMetadata(JSON.parse(data.right));
+			const raw: unknown = sanitizeRestartMetadata(JSON.parse(data.success));
 			const config = Schema.decodeUnknownSync(DaemonConfigSchema)(raw);
 			return {
 				config,
@@ -473,6 +545,9 @@ function readDaemonConfigResult(
 					(raw["configVersion"] !== CURRENT_CONFIG_VERSION ||
 						raw["claudeConfigDir"] !== undefined ||
 						raw["autoSettleAfterDays"] !== config.autoSettleAfterDays ||
+						raw["autoArchiveAfterDays"] !== config.autoArchiveAfterDays ||
+						raw["autoDeleteArchivedAfterDays"] !==
+							config.autoDeleteArchivedAfterDays ||
 						!isDeepStrictEqual(raw["instances"], config.instances) ||
 						!isDeepStrictEqual(
 							raw["accountDefaults"],
@@ -498,6 +573,14 @@ function normalizeDaemonConfig(decoded: DaemonConfig): DaemonConfig {
 			decoded.autoSettleAfterDays === undefined
 				? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 				: decoded.autoSettleAfterDays,
+		autoArchiveAfterDays:
+			decoded.autoArchiveAfterDays === undefined
+				? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS
+				: decoded.autoArchiveAfterDays,
+		autoDeleteArchivedAfterDays:
+			decoded.autoDeleteArchivedAfterDays === undefined
+				? DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS
+				: decoded.autoDeleteArchivedAfterDays,
 	};
 }
 
@@ -509,8 +592,8 @@ export function loadDaemonConfigStartupResult(configDir?: string) {
 /** Distinguish first startup from a file that must be preserved. */
 export function loadDaemonConfigResult(
 	configDir?: string,
-): Either.Either<DaemonConfig, DaemonConfigLoadError> {
-	return Either.map(
+): Result.Result<DaemonConfig, DaemonConfigLoadError> {
+	return Result.map(
 		loadDaemonConfigStartupResult(configDir),
 		({ config }) => config,
 	);
@@ -520,15 +603,15 @@ export function loadDaemonConfigResult(
 export function loadAccountsState(
 	configDir: string,
 	launchLogin: ClaudeConfigDir,
-): Either.Either<AccountsState, DaemonConfigLoadError> {
+): Result.Result<AccountsState, DaemonConfigLoadError> {
 	const loaded = loadDaemonConfigResult(configDir);
-	if (Either.isLeft(loaded))
-		return loaded.left._tag === "NotFound"
-			? Either.right(
+	if (Result.isFailure(loaded))
+		return loaded.failure._tag === "NotFound"
+			? Result.succeed(
 					accountsStateFromConfig(defaultDaemonConfig(), launchLogin),
 				)
-			: Either.left(loaded.left);
-	return Either.right(accountsStateFromConfig(loaded.right, launchLogin));
+			: Result.fail(loaded.failure);
+	return Result.succeed(accountsStateFromConfig(loaded.success, launchLogin));
 }
 
 /** Atomic write: write to a unique tmp file then rename to daemon.json. */

@@ -1,7 +1,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import {
 	Cause,
 	type Context,
@@ -9,14 +8,13 @@ import {
 	Effect,
 	Exit,
 	Fiber,
-	FiberId,
 	Layer,
 	ManagedRuntime,
 	Schedule,
 	Scope,
-	TestClock,
-	TestContext,
 } from "effect";
+import { SqlClient } from "effect/sql";
+import { TestClock, TestConsole } from "effect/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	makePendingInteractionServiceLive,
@@ -35,17 +33,11 @@ import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effe
 import { ProjectionRunnerEffectTag } from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
-import { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
 import {
 	type ClaudeProviderInstanceDeps,
 	makeClaudeProviderRuntime,
 	makeClaudeSessionRunner,
 } from "../../../../src/lib/provider/claude/claude-provider-runtime.js";
-import { makeClaudeRunnerReceiptStore } from "../../../../src/lib/provider/claude/claude-runner-receipts.js";
-import type {
-	ClaudeSessionCommand,
-	ClaudeSessionFailure,
-} from "../../../../src/lib/provider/claude/claude-session-runner.js";
 import type {
 	PermissionResult,
 	Options as SDKOptions,
@@ -54,6 +46,11 @@ import { ClaudeBoundaryError } from "../../../../src/lib/provider/event-sink-err
 import { OrchestrationEngine } from "../../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../../src/lib/provider/provider-registry.js";
 import { createRelayEventSink } from "../../../../src/lib/provider/relay-event-sink.js";
+import { makeRunnerReceiptStore } from "../../../../src/lib/provider/runner/runner-receipts.js";
+import type {
+	SessionCommand,
+	SessionFailure,
+} from "../../../../src/lib/provider/runner/session-runner.js";
 import type {
 	PermissionResponse,
 	TurnResult,
@@ -108,7 +105,7 @@ async function persistentInteractions(permissionTimeoutMs?: number) {
 			const pending = yield* PendingInteractionServiceTag;
 			const ingestion = yield* ProviderRuntimeIngestionTag;
 			const sql = yield* SqlClient.SqlClient;
-			yield* makeClaudeRunnerReceiptStore(sql);
+			yield* makeRunnerReceiptStore(sql);
 			yield* runner.recover();
 			const creation = yield* eventStore.append(
 				canonicalEvent(
@@ -150,24 +147,27 @@ function detachedRunnerFactory(
 ): typeof makeClaudeSessionRunner {
 	return () => {
 		function executeEffect(
-			command: Extract<ClaudeSessionCommand, { type: "send-turn" }>,
-		): Effect.Effect<TurnResult, ClaudeSessionFailure>;
+			command: Extract<SessionCommand, { type: "send-turn" }>,
+		): Effect.Effect<TurnResult, SessionFailure>;
 		function executeEffect(
-			command: Exclude<ClaudeSessionCommand, { type: "send-turn" }>,
-		): Effect.Effect<void, ClaudeSessionFailure>;
+			command: Exclude<SessionCommand, { type: "send-turn" }>,
+		): Effect.Effect<void, SessionFailure>;
 		function executeEffect(
-			command: ClaudeSessionCommand,
-		): Effect.Effect<TurnResult | undefined, ClaudeSessionFailure>;
+			command: SessionCommand,
+		): Effect.Effect<TurnResult | undefined, SessionFailure>;
 		function executeEffect(
-			command: ClaudeSessionCommand,
-		): Effect.Effect<TurnResult | undefined, ClaudeSessionFailure> {
+			command: SessionCommand,
+		): Effect.Effect<TurnResult | undefined, SessionFailure> {
 			return command.type === "send-turn"
 				? Deferred.succeed(started, command.sinkId).pipe(
 						Effect.andThen(Effect.never),
 					)
 				: Effect.succeed(undefined);
 		}
-		return Effect.succeed({ executeEffect });
+		return Effect.succeed({
+			executeEffect,
+			hasLiveProcessEffect: () => Effect.succeed(false),
+		});
 	};
 }
 
@@ -227,7 +227,7 @@ describe("Claude runner interaction transport", () => {
 						queryFactory: factory,
 						capabilitiesService,
 					});
-					const turn = yield* Effect.fork(
+					const turn = yield* Effect.forkChild(
 						runtime.sendTurnEffect(
 							makeBaseSendTurnInput({
 								eventSink: sink,
@@ -278,7 +278,7 @@ describe("Claude runner interaction transport", () => {
 						queryFactory: factory,
 						capabilitiesService,
 					});
-					const turn = yield* Effect.fork(
+					const turn = yield* Effect.forkChild(
 						runtime.sendTurnEffect(
 							makeBaseSendTurnInput({
 								eventSink: sink,
@@ -344,7 +344,7 @@ describe("Claude runner interaction transport", () => {
 						queryFactory: factory,
 						capabilitiesService,
 					});
-					const turn = yield* Effect.fork(
+					const turn = yield* Effect.forkChild(
 						runtime.sendTurnEffect(
 							makeBaseSendTurnInput({
 								eventSink: sink,
@@ -373,15 +373,17 @@ describe("Claude runner interaction transport", () => {
 
 // The approval reaching the browser is its pending_approvals row.
 const awaitPendingApproval = (
-	readQuery: Context.Tag.Service<typeof ReadQueryEffectTag>,
+	readQuery: Context.Service.Shape<typeof ReadQueryEffectTag>,
 ) =>
-	readQuery.countPendingApprovalsBySession().pipe(
-		Effect.repeat({
-			until: (rows) => rows.length > 0,
-			schedule: Schedule.spaced("10 millis"),
-		}),
-		Effect.timeout("5 seconds"),
-	);
+	readQuery
+		.countPendingApprovalsBySession({ projectIds: ["test-project"] })
+		.pipe(
+			Effect.repeat({
+				until: (rows) => rows.length > 0,
+				schedule: Schedule.spaced("10 millis"),
+			}),
+			Effect.timeout("5 seconds"),
+		);
 
 describe("Claude durable interaction resolution", () => {
 	const interactions = [
@@ -414,7 +416,7 @@ describe("Claude durable interaction resolution", () => {
 						queryFactory: factory,
 						capabilitiesService,
 					});
-					const turn = yield* Effect.fork(
+					const turn = yield* Effect.forkChild(
 						runtime.sendTurnEffect(
 							makeBaseSendTurnInput({
 								eventSink: f.sink,
@@ -423,7 +425,11 @@ describe("Claude durable interaction resolution", () => {
 						),
 					);
 					yield* awaitPendingApproval(f.readQuery);
-					expect(yield* f.readQuery.countPendingApprovalsBySession()).toEqual([
+					expect(
+						yield* f.readQuery.countPendingApprovalsBySession({
+							projectIds: ["test-project"],
+						}),
+					).toEqual([
 						{ session_id: "session-1", type: kind, pending_count: 1 },
 					]);
 					const requests = yield* kind === "permission"
@@ -446,9 +452,11 @@ describe("Claude durable interaction resolution", () => {
 								? { id: requestId, decision: "reject" }
 								: { id: requestId, answers: {} },
 					});
-					expect(yield* f.readQuery.countPendingApprovalsBySession()).toEqual(
-						[],
-					);
+					expect(
+						yield* f.readQuery.countPendingApprovalsBySession({
+							projectIds: ["test-project"],
+						}),
+					).toEqual([]);
 					expect(yield* f.pending.listPendingPermissions("session-1")).toEqual(
 						[],
 					);
@@ -480,18 +488,16 @@ describe("Claude durable interaction resolution", () => {
 						runnerFactory: detachedRunnerFactory(started),
 						workspaceRoot: "/tmp/ws",
 						capabilitiesService,
-					}).pipe(Scope.extend(relayScope));
+					}).pipe(Scope.provide(relayScope));
 					if (shutdownPath === "engine") {
 						const engine = new OrchestrationEngine({
-							registry: new ProviderRegistry([
-								new ClaudeProviderInstance(runtime),
-							]),
+							registry: new ProviderRegistry([runtime]),
 						});
 						yield* Effect.addFinalizer(() => engine.shutdownEffect()).pipe(
-							Scope.extend(relayScope),
+							Scope.provide(relayScope),
 						);
 					}
-					yield* Effect.fork(
+					yield* Effect.forkChild(
 						runtime.sendTurnEffect(
 							makeBaseSendTurnInput({
 								eventSink: f.sink,
@@ -543,7 +549,9 @@ describe("Claude durable interaction resolution", () => {
 		).toEqual([`${kind}.asked`]);
 		expect(
 			await f.persistence.runPromise(
-				f.readQuery.countPendingApprovalsBySession(),
+				f.readQuery.countPendingApprovalsBySession({
+					projectIds: ["test-project"],
+				}),
 			),
 		).toEqual([{ session_id: "session-1", type: kind, pending_count: 1 }]);
 	});
@@ -581,7 +589,7 @@ describe("Claude durable interaction resolution", () => {
 									Effect.map((waiter) => ({
 										awaitResponse: waiter.awaitResponse.pipe(
 											Effect.tap(() => Deferred.succeed(answerRead, undefined)),
-											Effect.zipLeft(Deferred.await(finalize)),
+											Effect.tap(() => Deferred.await(finalize)),
 										),
 									})),
 								),
@@ -591,14 +599,14 @@ describe("Claude durable interaction resolution", () => {
 									Effect.map((waiter) => ({
 										awaitAnswers: waiter.awaitAnswers.pipe(
 											Effect.tap(() => Deferred.succeed(answerRead, undefined)),
-											Effect.zipLeft(Deferred.await(finalize)),
+											Effect.tap(() => Deferred.await(finalize)),
 										),
 									})),
 								),
 							resolveQuestionRequest: f.pending.resolveQuestionRequest,
 						},
 					});
-					const request = yield* Effect.fork(
+					const request = yield* Effect.forkChild(
 						kind === "permission"
 							? sink
 									.requestPermission({
@@ -628,21 +636,38 @@ describe("Claude durable interaction resolution", () => {
 					yield* Deferred.succeed(finalize, undefined);
 					yield* Fiber.join(request);
 					const events = yield* f.eventStore.readAllBySession("session-1");
+					const asked = events.find(
+						(event) =>
+							event.type === "permission.asked" ||
+							event.type === "question.asked",
+					);
+					expect(asked?.data).toMatchObject({
+						id: expect.any(String),
+						providerRequestId: "request-1",
+					});
+					const conduitId = asked?.data.id;
+					expect(conduitId).not.toBe("request-1");
 					expect(events.at(-1)).toMatchObject({
 						type: `${kind}.resolved`,
 						data:
 							kind === "permission"
-								? { id: "request-1", decision: "always" }
-								: { id: "request-1", answers },
+								? {
+										id: conduitId,
+										providerRequestId: "request-1",
+										decision: "always",
+									}
+								: { id: conduitId, providerRequestId: "request-1", answers },
 					});
-					expect(yield* f.readQuery.countPendingApprovalsBySession()).toEqual(
-						[],
-					);
+					expect(
+						yield* f.readQuery.countPendingApprovalsBySession({
+							projectIds: ["test-project"],
+						}),
+					).toEqual([]);
 					if (kind === "permission") {
 						expect(
 							yield* f.sql<{
 								response_json: string;
-							}>`SELECT response_json FROM claude_runner_permission_replies WHERE session_id = 'session-1' AND request_id = 'request-1'`,
+							}>`SELECT response_json FROM claude_runner_permission_replies WHERE session_id = 'session-1' AND request_id = ${conduitId ?? ""}`,
 						).toEqual([{ response_json: JSON.stringify(permissionReply) }]);
 					}
 				}),
@@ -659,7 +684,7 @@ describe("Claude durable interaction resolution", () => {
 		await f.persistence.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
-					const request = yield* Effect.fork(
+					const request = yield* Effect.forkChild(
 						kind === "permission"
 							? f.sink
 									.requestPermission({
@@ -686,18 +711,38 @@ describe("Claude durable interaction resolution", () => {
 						"live failure",
 					);
 					expect(Exit.isFailure(yield* Fiber.await(request))).toBe(true);
-					expect(
-						(yield* f.eventStore.readAllBySession("session-1")).at(-1),
-					).toMatchObject({
+					const events = yield* f.eventStore.readAllBySession("session-1");
+					const asked = events.find(
+						(event) =>
+							event.type === "permission.asked" ||
+							event.type === "question.asked",
+					);
+					expect(asked?.data).toMatchObject({
+						id: expect.any(String),
+						providerRequestId: "request-1",
+					});
+					const conduitId = asked?.data.id;
+					expect(conduitId).not.toBe("request-1");
+					expect(events.at(-1)).toMatchObject({
 						type: `${kind}.resolved`,
 						data:
 							kind === "permission"
-								? { id: "request-1", decision: "reject" }
-								: { id: "request-1", answers: {} },
+								? {
+										id: conduitId,
+										providerRequestId: "request-1",
+										decision: "reject",
+									}
+								: {
+										id: conduitId,
+										providerRequestId: "request-1",
+										answers: {},
+									},
 					});
-					expect(yield* f.readQuery.countPendingApprovalsBySession()).toEqual(
-						[],
-					);
+					expect(
+						yield* f.readQuery.countPendingApprovalsBySession({
+							projectIds: ["test-project"],
+						}),
+					).toEqual([]);
 				}),
 			),
 		);
@@ -708,7 +753,7 @@ describe("Claude durable interaction resolution", () => {
 		await f.persistence.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
-					const request = yield* Effect.fork(
+					const request = yield* Effect.forkChild(
 						f.sink.requestPermission({
 							requestId: "request-1",
 							sessionId: "session-1",
@@ -721,15 +766,29 @@ describe("Claude durable interaction resolution", () => {
 					yield* awaitPendingApproval(f.readQuery);
 					expect(yield* f.pending.takeTimedOutPermissions()).toHaveLength(1);
 					expect(Exit.isFailure(yield* Fiber.await(request))).toBe(true);
-					expect(
-						(yield* f.eventStore.readAllBySession("session-1")).at(-1),
-					).toMatchObject({
-						type: "permission.resolved",
-						data: { id: "request-1", decision: "reject" },
-					});
-					expect(yield* f.readQuery.countPendingApprovalsBySession()).toEqual(
-						[],
+					const events = yield* f.eventStore.readAllBySession("session-1");
+					const asked = events.find(
+						(event) => event.type === "permission.asked",
 					);
+					expect(asked?.data).toMatchObject({
+						id: expect.any(String),
+						providerRequestId: "request-1",
+					});
+					const conduitId = asked?.data.id;
+					expect(conduitId).not.toBe("request-1");
+					expect(events.at(-1)).toMatchObject({
+						type: "permission.resolved",
+						data: {
+							id: conduitId,
+							providerRequestId: "request-1",
+							decision: "reject",
+						},
+					});
+					expect(
+						yield* f.readQuery.countPendingApprovalsBySession({
+							projectIds: ["test-project"],
+						}),
+					).toEqual([]);
 				}),
 			),
 		);
@@ -744,9 +803,7 @@ describe("Claude recovered runner processing timeout", () => {
 				Effect.gen(function* () {
 					const runtime = yield* makeClaudeProviderRuntime({
 						runnerFactory: (...args) =>
-							detachedRunnerFactory(Deferred.unsafeMake(FiberId.none))(
-								...args,
-							).pipe(
+							detachedRunnerFactory(Deferred.makeUnsafe())(...args).pipe(
 								Effect.map((runner) => ({
 									...runner,
 									recoverEffect: Effect.void,
@@ -755,7 +812,7 @@ describe("Claude recovered runner processing timeout", () => {
 						workspaceRoot: "/tmp/ws",
 						capabilitiesService,
 					});
-					yield* runtime.recoverEffect;
+					yield* runtime.recoverRunnerEffect;
 					// Answering a question re-arms the turn's timeout.
 					let timedOut = false;
 					yield* startProcessingTimeout("session-1", "2 minutes", () =>
@@ -782,13 +839,15 @@ describe("Claude recovered runner processing timeout", () => {
 							},
 							"session-1",
 						);
-						yield* Effect.yieldNow();
+						yield* Effect.yieldNow;
 					}
 					return timedOut;
 				}),
 			).pipe(
 				Effect.provide(makeOverridesStateLive()),
-				Effect.provide(TestContext.TestContext),
+				Effect.provide(Layer.mergeAll(TestConsole.layer, TestClock.layer()), {
+					local: true,
+				}),
 			),
 		);
 		expect(fired).toBe(false);

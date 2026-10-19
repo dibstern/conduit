@@ -1,6 +1,6 @@
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Option, Queue, Stream } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect } from "vitest";
 import {
 	type InputDraftEnvelope,
@@ -21,7 +21,7 @@ const open = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const q = yield* Queue.unbounded<InputDraftEnvelope>();
 			yield* Stream.runForEach(
-				client.SubscribeInputDraft({ projectSlug: "project", sessionId }),
+				client.SubscribeInputDraft({ sessionId }),
 				(envelope) => Queue.offer(q, envelope),
 			).pipe(Effect.forkScoped);
 			expect(yield* Queue.take(q)).toEqual({ _tag: "synchronized" });
@@ -31,7 +31,7 @@ const open = Effect.gen(function* () {
 });
 
 describe("SubscribeInputDraft", () => {
-	it.scoped("a draft typed in one tab reaches every tab on that session", () =>
+	it.effect("a draft typed in one tab reaches every tab on that session", () =>
 		Effect.gen(function* () {
 			const { client, subscribe } = yield* open;
 			const tabA = yield* subscribe("s1");
@@ -39,7 +39,6 @@ describe("SubscribeInputDraft", () => {
 			const elsewhere = yield* subscribe("s2");
 
 			yield* client.SyncInputDraft({
-				projectSlug: "project",
 				sessionId: "s1",
 				text: "half a thought",
 				originId: "tab-a",
@@ -52,29 +51,27 @@ describe("SubscribeInputDraft", () => {
 					from: "tab-a",
 				});
 			expect(Option.isNone(yield* Queue.poll(elsewhere))).toBe(true);
-		}).pipe(Effect.provide(makeLayer())),
+		}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 
-	it.scoped("a cleared draft reaches open tabs as empty text", () =>
+	it.effect("a cleared draft reaches open tabs as empty text", () =>
 		Effect.gen(function* () {
 			const { client, subscribe } = yield* open;
 			const q = yield* subscribe("s1");
 
 			yield* client.SyncInputDraft({
-				projectSlug: "project",
 				sessionId: "s1",
 				text: "",
 			});
 
 			expect(yield* Queue.take(q)).toEqual({ _tag: "draft", text: "" });
-		}).pipe(Effect.provide(makeLayer())),
+		}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 
-	it.scoped("opens live-only: an earlier draft is not replayed", () =>
+	it.effect("opens live-only: an earlier draft is not replayed", () =>
 		Effect.gen(function* () {
 			const { client, subscribe } = yield* open;
 			yield* client.SyncInputDraft({
-				projectSlug: "project",
 				sessionId: "s1",
 				text: "typed before the tab subscribed",
 			});
@@ -82,6 +79,6 @@ describe("SubscribeInputDraft", () => {
 			const q = yield* subscribe("s1");
 
 			expect(Option.isNone(yield* Queue.poll(q))).toBe(true);
-		}).pipe(Effect.provide(makeLayer())),
+		}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 });

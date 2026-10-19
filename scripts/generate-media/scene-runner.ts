@@ -4,6 +4,7 @@
 import { type ChildProcess, execSync, spawn } from "node:child_process";
 import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import {
 	type Browser,
 	type BrowserContext,
@@ -15,8 +16,6 @@ import {
 const PROJECT_ROOT = path.resolve(import.meta.dirname, "../..");
 const MEDIA_DIR = process.env["MEDIA_DIR"] || path.join(PROJECT_ROOT, "media");
 const DEBUG_DIR = path.join(MEDIA_DIR, "_debug");
-const PREVIEW_PORT = 4173;
-const PREVIEW_URL = `http://localhost:${PREVIEW_PORT}`;
 
 export interface SceneConfig {
 	name: string;
@@ -62,31 +61,6 @@ export function buildFrontend(): void {
 	execSync("pnpm build:frontend", { cwd: PROJECT_ROOT, stdio: "pipe" });
 }
 
-/** Kill any process listening on PREVIEW_PORT (orphan from a previous run). */
-function killStalePreview(): void {
-	try {
-		const out = execSync(`lsof -ti :${PREVIEW_PORT}`, { stdio: "pipe" })
-			.toString()
-			.trim();
-		if (out) {
-			for (const pid of out.split("\n")) {
-				try {
-					process.kill(Number(pid), "SIGTERM");
-				} catch {
-					/* already exited */
-				}
-			}
-			// Brief pause for the port to be released
-			execSync("sleep 0.5", { stdio: "pipe" });
-			console.log(
-				`  Killed stale process(es) on port ${PREVIEW_PORT}: ${out.replace(/\n/g, ", ")}`,
-			);
-		}
-	} catch {
-		/* No process on port — expected path */
-	}
-}
-
 /**
  * Kill a preview server process group.
  * The process is spawned with `detached: true`, making it a process group
@@ -104,12 +78,23 @@ export function killPreviewGroup(proc: ChildProcess): void {
 }
 
 /** Start vite preview and wait for it to be ready. */
-export async function startPreview(): Promise<ChildProcess> {
-	killStalePreview();
+export async function startPreview(): Promise<{
+	process: ChildProcess;
+	url: string;
+}> {
 	console.log("  Starting preview server...");
 	const proc = spawn(
 		"pnpm",
-		["exec", "vite", "preview", "--port", String(PREVIEW_PORT), "--strictPort"],
+		[
+			"exec",
+			"vite",
+			"preview",
+			"--host",
+			"127.0.0.1",
+			"--port",
+			"0",
+			"--strictPort",
+		],
 		{
 			cwd: PROJECT_ROOT,
 			stdio: "pipe",
@@ -118,42 +103,57 @@ export async function startPreview(): Promise<ChildProcess> {
 		},
 	);
 
-	await new Promise<void>((resolve, reject) => {
-		const timeout = setTimeout(
-			() => reject(new Error("Preview server timeout (15s)")),
-			15_000,
-		);
-		let stderrChunks = "";
-		proc.stdout?.on("data", (data: Buffer) => {
-			if (data.toString().includes(String(PREVIEW_PORT))) {
+	try {
+		const url = await new Promise<string>((resolve, reject) => {
+			let stdoutChunks = "";
+			let stderrChunks = "";
+			const timeout = setTimeout(
+				() =>
+					reject(
+						new Error(
+							`Preview server did not bind to a free loopback port within 15s: ${stderrChunks.trim() || "(no stderr)"}`,
+						),
+					),
+				15_000,
+			);
+			proc.stdout?.on("data", (data: Buffer) => {
+				stdoutChunks += stripVTControlCharacters(data.toString());
+				const previewUrl = stdoutChunks.match(
+					/http:\/\/127\.0\.0\.1:\d+(?=\/)/,
+				)?.[0];
+				if (previewUrl) {
+					clearTimeout(timeout);
+					resolve(previewUrl);
+				}
+			});
+			proc.stderr?.on("data", (data: Buffer) => {
+				stderrChunks += data.toString();
+			});
+			proc.once("error", (err) => {
 				clearTimeout(timeout);
-				resolve();
-			}
-		});
-		proc.stderr?.on("data", (data: Buffer) => {
-			stderrChunks += data.toString();
-		});
-		proc.on("error", (err) => {
-			clearTimeout(timeout);
-			reject(err);
-		});
-		proc.on("close", (code) => {
-			if (code !== 0) {
+				reject(new Error(`Failed to start preview server: ${err.message}`));
+			});
+			proc.once("close", (code, signal) => {
 				clearTimeout(timeout);
 				reject(
 					new Error(
-						`Preview server exited with code ${code}: ${stderrChunks.trim() || "(no stderr)"}`,
+						`Preview server exited before binding (code ${code}, signal ${signal}): ${stderrChunks.trim() || "(no stderr)"}`,
 					),
 				);
-			}
+			});
 		});
-	});
-
-	return proc;
+		return { process: proc, url };
+	} catch (err) {
+		killPreviewGroup(proc);
+		throw err;
+	}
 }
 
 /** Run all scenes sequentially with phase logging and debug collection. */
-export async function runScenes(scenes: SceneDefinition[]): Promise<void> {
+export async function runScenes(
+	scenes: SceneDefinition[],
+	previewUrl: string,
+): Promise<void> {
 	mkdirSync(MEDIA_DIR, { recursive: true });
 	mkdirSync(DEBUG_DIR, { recursive: true });
 
@@ -233,7 +233,7 @@ export async function runScenes(scenes: SceneDefinition[]): Promise<void> {
 			context,
 			page,
 			config,
-			previewUrl: PREVIEW_URL,
+			previewUrl,
 			mediaDir: MEDIA_DIR,
 			projectRoot: PROJECT_ROOT,
 			phase,
@@ -343,4 +343,4 @@ async function convertToGif(
 	} catch {}
 }
 
-export { PREVIEW_URL, MEDIA_DIR, DEBUG_DIR, PROJECT_ROOT };
+export { MEDIA_DIR, DEBUG_DIR, PROJECT_ROOT };

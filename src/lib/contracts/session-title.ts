@@ -28,7 +28,7 @@ export function placeholderTitleSql(expr: string): string {
 		OR ${normalized} LIKE '${PLACEHOLDER_TITLE_PREFIX}%')`;
 }
 
-export const SessionTitleModel = Schema.Union(
+export const SessionTitleModel = Schema.Union([
 	Schema.Struct({ harness: Schema.Literal("claude"), model: Schema.String }),
-);
+]);
 export type SessionTitleModel = typeof SessionTitleModel.Type;

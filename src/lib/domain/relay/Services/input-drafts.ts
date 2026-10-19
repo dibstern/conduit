@@ -15,10 +15,10 @@ interface InputDraftChange {
 	readonly from?: string;
 }
 
-export class InputDraftsTag extends Context.Tag("InputDrafts")<
+export class InputDraftsTag extends Context.Service<
 	InputDraftsTag,
 	PubSub.PubSub<InputDraftChange>
->() {}
+>()("InputDrafts") {}
 
 export const InputDraftsLive: Layer.Layer<InputDraftsTag> = Layer.effect(
 	InputDraftsTag,
@@ -31,11 +31,11 @@ export const publishInputDraft = (change: InputDraftChange) =>
 export const subscribeInputDraft = (
 	sessionId: string,
 ): Stream.Stream<InputDraftEnvelope, never, InputDraftsTag> =>
-	Stream.unwrapScoped(
+	Stream.unwrap(
 		Effect.map(Effect.flatMap(InputDraftsTag, PubSub.subscribe), (dequeue) =>
 			Stream.concat(
-				Stream.make<InputDraftEnvelope[]>({ _tag: "synchronized" }),
-				Stream.fromQueue(dequeue).pipe(
+				Stream.make<[InputDraftEnvelope]>({ _tag: "synchronized" }),
+				Stream.fromSubscription(dequeue).pipe(
 					Stream.filter((change) => change.sessionId === sessionId),
 					Stream.map(({ text, from }) => ({
 						_tag: "draft" as const,

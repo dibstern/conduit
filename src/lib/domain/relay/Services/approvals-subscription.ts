@@ -19,14 +19,17 @@
 // envelopes it is sent, so the read stays pure and every device shares one
 // window read (y7eo.15).
 
-import type { SqlError } from "@effect/sql/SqlError";
 import { Effect, Option, Schema, Stream } from "effect";
+import type { SqlError } from "effect/sql/SqlError";
+import { advanceTouchesScope } from "../../../contracts/read-model-advance.js";
 import {
 	type ReadQueryEffectError,
 	ReadQueryEffectTag,
+	type SessionScope,
 } from "../../../persistence/effect/read-query-effect.js";
 import type { PendingApprovalRow } from "../../../persistence/read-model-types.js";
 import { type Approval, ApprovalSchema } from "../../../shared-types.js";
+import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
 import { type Envelope, stream } from "./read-model-subscription.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 
@@ -111,12 +114,14 @@ export const subscribeApprovals = (
 ): Stream.Stream<
 	Envelope<Approval>,
 	ApprovalsSubscriptionError,
-	ReadQueryEffectTag | SessionEventBusTag
+	ReadQueryEffectTag | SessionEventBusTag | PersistenceProjectTag
 > =>
 	Stream.unwrap(
 		Effect.gen(function* () {
 			const readQuery = yield* ReadQueryEffectTag;
 			const bus = yield* SessionEventBusTag;
+			const { projectId } = yield* PersistenceProjectTag;
+			const scope: SessionScope = { projectIds: [projectId] };
 			// The pending approvals this subscriber holds, by owning session: the
 			// only way to name what a cascaded session delete took with it.
 			const announced = new Map<string, string>();
@@ -126,21 +131,27 @@ export const subscribeApprovals = (
 					name: "approvals",
 					collections: ["approvals"],
 					shareReads: true,
+					shareKey: `approvals/${projectId}`,
 					read: (range) =>
-						Effect.map(readQuery.readPendingApprovals(range), (answer) => {
-							const rows = [];
-							const removed = [];
-							for (const row of answer.rows) {
-								const item =
-									row.status === "pending" ? toApproval(row) : undefined;
-								if (item !== undefined)
-									rows.push({ item, version: row.version });
-								else if (range !== undefined)
-									removed.push({ id: row.id, version: row.version });
-							}
-							return { rows, removed, version: answer.version };
-						}),
+						Effect.map(
+							readQuery.readPendingApprovals(scope, range),
+							(answer) => {
+								const rows = [];
+								const removed = [];
+								for (const row of answer.rows) {
+									const item =
+										row.status === "pending" ? toApproval(row) : undefined;
+									if (item !== undefined)
+										rows.push({ item, version: row.version });
+									else if (range !== undefined)
+										removed.push({ id: row.id, version: row.version });
+								}
+								return { rows, removed, version: answer.version };
+							},
+						),
 					route: (advance) => {
+						if (!advanceTouchesScope(advance, scope))
+							return { moved: false, removed: [] };
 						const gone = new Set(advance.removedSessionIds);
 						const removed = [...announced]
 							.filter(([, sessionId]) => gone.has(sessionId))

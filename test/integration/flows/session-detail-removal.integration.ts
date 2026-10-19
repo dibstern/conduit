@@ -1,7 +1,7 @@
-import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
 import Database from "better-sqlite3";
 import { Effect, Stream } from "effect";
+import { RpcClient, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import { describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
@@ -9,13 +9,8 @@ import { createRelayHarness } from "../helpers/relay-harness.js";
 
 type Harness = Awaited<ReturnType<typeof createRelayHarness>>;
 
-/** The first `take` envelopes of a detail stream resumed from `cursor`. */
-const resume = async (
-	harness: Harness,
-	sessionId: string,
-	cursor: number,
-	take: number,
-) => {
+/** Replay through its synchronization boundary, including every removal. */
+const resume = async (harness: Harness, sessionId: string, cursor: number) => {
 	const previousWebSocket = globalThis.WebSocket;
 	Object.assign(globalThis, { WebSocket });
 	try {
@@ -24,13 +19,12 @@ const resume = async (
 				Effect.gen(function* () {
 					const rpc = yield* RpcClient.make(WsRpcGroup);
 					return yield* Stream.runCollect(
-						Stream.take(
+						Stream.takeUntil(
 							rpc.SubscribeSessionDetail({
-								projectSlug: "integration-test",
 								sessionId,
 								resumeFromSequence: cursor,
 							}),
-							take,
+							(envelope) => envelope._tag === "synchronized",
 						),
 					);
 				}).pipe(
@@ -47,12 +41,6 @@ const resume = async (
 	} finally {
 		Object.assign(globalThis, { WebSocket: previousWebSocket });
 	}
-};
-
-const waitUntil = async (done: () => boolean) => {
-	for (let attempt = 0; !done() && attempt < 200; attempt++)
-		await new Promise((resolve) => setTimeout(resolve, 10));
-	expect(done()).toBe(true);
 };
 
 describe("session detail removal over WebSocket", () => {
@@ -72,13 +60,11 @@ describe("session detail removal over WebSocket", () => {
 			});
 			const db = new Database(harness.eventsDbPath);
 			try {
-				const hasMessage = () =>
-					db
-						.prepare("SELECT 1 FROM messages WHERE id = ?")
-						.get("rewound-message") !== undefined;
-				for (let attempt = 0; !hasMessage() && attempt < 200; attempt++)
-					await new Promise((resolve) => setTimeout(resolve, 10));
-				expect(hasMessage()).toBe(true);
+				await client.subscribeSessionDetail(sessionId);
+				await client.waitForTranscriptMessage(
+					(message) => message.id === "rewound-message",
+					sessionId,
+				);
 				const cursor = db
 					.prepare("SELECT value FROM read_model_counter WHERE id = 1")
 					.get() as { value: number };
@@ -86,28 +72,45 @@ describe("session detail removal over WebSocket", () => {
 					sessionID: sessionId,
 					messageID: "rewound-message",
 				});
-				for (let attempt = 0; hasMessage() && attempt < 200; attempt++)
-					await new Promise((resolve) => setTimeout(resolve, 10));
-				expect(hasMessage()).toBe(false);
+				await client.waitFor("session_detail", {
+					predicate: (frame) =>
+						frame["sessionId"] === sessionId &&
+						frame["_tag"] === "remove" &&
+						frame["id"] === "rewound-message",
+				});
 				const removal = db
 					.prepare(
 						"SELECT version FROM message_tombstones WHERE message_id = ?",
 					)
 					.get("rewound-message") as { version: number };
 
-				expect(await resume(harness, sessionId, cursor.value, 3)).toEqual([
-					{
-						_tag: "remove",
-						id: "rewound-message",
-						sequence: removal.version,
-					},
-					{
-						_tag: "upsert",
-						item: { _tag: "rewind", messageId: null },
-						sequence: removal.version,
-					},
-					{ _tag: "synchronized" },
-				]);
+				// An unrelated commit can advance the replay's high-water mark.
+				await client.createSession("Unrelated activity");
+				const replay = await resume(harness, sessionId, cursor.value);
+				expect(replay).toHaveLength(3);
+				expect(replay).toEqual(
+					expect.arrayContaining([
+						{
+							_tag: "remove",
+							id: "rewound-message",
+							sequence: removal.version,
+						},
+						{
+							_tag: "upsert",
+							item: { _tag: "rewind", messageId: null },
+							sequence: expect.any(Number),
+						},
+						{ _tag: "synchronized" },
+					]),
+				);
+				const rewind = replay.find(
+					(envelope) =>
+						envelope._tag === "upsert" && envelope.item._tag === "rewind",
+				);
+				expect(
+					rewind && "sequence" in rewind && rewind.sequence,
+				).toBeGreaterThanOrEqual(removal.version);
+				expect(replay.at(-1)).toEqual({ _tag: "synchronized" });
 				const page = await client.loadMoreHistory(sessionId);
 				expect(page.messages.map((message) => message.id)).not.toContain(
 					"rewound-message",
@@ -148,11 +151,15 @@ describe("session detail removal over WebSocket", () => {
 				});
 			const db = new Database(harness.eventsDbPath);
 			try {
-				const hasPart = () =>
-					db
-						.prepare("SELECT 1 FROM message_parts WHERE id = ?")
-						.get("removed-part") !== undefined;
-				await waitUntil(hasPart);
+				await client.subscribeSessionDetail(sessionId);
+				await client.waitForTranscriptMessage(
+					(message) =>
+						message.id === messageId &&
+						["kept-part", "removed-part"].every((id) =>
+							message.parts?.some((part) => part.id === id),
+						),
+					sessionId,
+				);
 				const cursor = db
 					.prepare("SELECT value FROM read_model_counter WHERE id = 1")
 					.get() as { value: number };
@@ -161,7 +168,12 @@ describe("session detail removal over WebSocket", () => {
 					messageID: messageId,
 					partID: "removed-part",
 				});
-				await waitUntil(() => !hasPart());
+				await client.waitFor("session_detail", {
+					predicate: (frame) =>
+						frame["sessionId"] === sessionId &&
+						frame["_tag"] === "remove" &&
+						frame["id"] === JSON.stringify([messageId, "removed-part"]),
+				});
 				const removal = db
 					.prepare(
 						"SELECT version FROM message_part_tombstones WHERE part_id = ?",
@@ -170,26 +182,39 @@ describe("session detail removal over WebSocket", () => {
 
 				// Only what moved: the part's removal and its message's header, not
 				// the part that stayed, then the held rows every resume re-sends.
-				expect(await resume(harness, sessionId, cursor.value, 4)).toMatchObject(
-					[
+				const replay = await resume(harness, sessionId, cursor.value);
+				expect(replay).toHaveLength(4);
+				expect(replay).toEqual(
+					expect.arrayContaining([
 						{
 							_tag: "remove",
 							id: JSON.stringify([messageId, "removed-part"]),
 							sequence: removal.version,
 						},
-						{
+						expect.objectContaining({
 							_tag: "upsert",
-							item: { _tag: "message", message: { id: messageId } },
+							item: expect.objectContaining({
+								_tag: "message",
+								message: expect.objectContaining({ id: messageId }),
+							}),
 							sequence: removal.version,
-						},
+						}),
 						{
 							_tag: "upsert",
 							item: { _tag: "rewind", messageId: null },
-							sequence: removal.version,
+							sequence: expect.any(Number),
 						},
 						{ _tag: "synchronized" },
-					],
+					]),
 				);
+				const rewind = replay.find(
+					(envelope) =>
+						envelope._tag === "upsert" && envelope.item._tag === "rewind",
+				);
+				expect(
+					rewind && "sequence" in rewind && rewind.sequence,
+				).toBeGreaterThanOrEqual(removal.version);
+				expect(replay.at(-1)).toEqual({ _tag: "synchronized" });
 				const page = await client.loadMoreHistory(sessionId);
 				expect(
 					page.messages

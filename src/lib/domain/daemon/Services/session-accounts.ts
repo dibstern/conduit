@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import type { AccountId } from "../../../contracts/account.js";
 import { AccountDirectory } from "./account-directory.js";
 

@@ -1,6 +1,6 @@
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { RpcTest } from "effect/rpc";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
@@ -45,14 +45,13 @@ describe("WsRpcServerLayer ReloadProviderSession", () => {
 		return Effect.gen(function* () {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 			const result = yield* client.ReloadProviderSession({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				commandId: "cmd-reload-session",
 				originId: "browser-1",
 			});
 
 			expect(result).toEqual({
-				projectSlug: "project-a",
+				projectSlug: "test-project",
 				sessionId: "session-1",
 			});
 			expect(engine.dispatchEffect).toHaveBeenCalledWith({
@@ -78,6 +77,7 @@ describe("WsRpcServerLayer ReloadProviderSession", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});

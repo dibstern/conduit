@@ -3,7 +3,8 @@
 
 <script lang="ts">
 	import Button from "../ui/Button.svelte";
-	import { findSession, isSessionBusy, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { findSession, isSessionBusy, sessionState } from "../../stores/session.svelte.js";
+	import { selection } from "../../stores/selection.svelte.js";
 	import DitherGlyph from "../ui/DitherGlyph.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import { returnFromTask } from "../session/background-tasks.svelte.js";
@@ -34,7 +35,7 @@
 	function navigateBack() {
 		// A task opened from the pull-down or a launching row goes back there.
 		if (parentId && !returnFromTask()) {
-			switchToSession(parentId);
+			selection.open(parentId);
 		}
 	}
 

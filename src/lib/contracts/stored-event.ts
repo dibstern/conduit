@@ -1,18 +1,12 @@
-import { Schema } from "effect";
-import {
-	type ContinuationReason,
-	ContinuationReasonSchema,
-} from "./limit-recovery.js";
+import { Effect, Schema, type Types } from "effect";
+import { ContinuationReasonSchema } from "./limit-recovery.js";
 import {
 	SessionSetupFinishedPayloadSchema,
 	SessionSetupOutputPayloadSchema,
 	SessionSetupStartedPayloadSchema,
 } from "./project-setup.js";
-import type { ProviderWorkspaceChangedData } from "./providers/provider-runtime-event.js";
 import {
-	type SessionWorkspace,
 	SessionWorkspaceSchema,
-	type SessionWorktreeOwnership,
 	SessionWorktreeOwnershipSchema,
 } from "./session-workspace.js";
 
@@ -46,241 +40,44 @@ export type PermissionDecision = (typeof PERMISSION_DECISIONS)[number];
 export const MESSAGE_ROLES = ["user", "assistant"] as const;
 export type MessageRole = (typeof MESSAGE_ROLES)[number];
 
-export const CANONICAL_EVENT_TYPES = [
-	"message.created",
-	"message.removed",
-	"message.part.removed",
-	"message.snapshot",
-	"text.delta",
-	"thinking.start",
-	"thinking.delta",
-	"thinking.end",
-	"tool.started",
-	"tool.running",
-	"tool.completed",
-	"file.attached",
-	"tool.input_updated", // Retained for historical event compatibility — no longer emitted after Phase 2
-	"turn.completed",
-	"turn.error",
-	"turn.interrupted",
-	"turn.model_resolved",
-	"input.admitted",
-	"input.sent",
-	"input.cancelled",
-	"input.interrupt_requested",
-	"session.created",
-	"session.renamed",
-	"session.rewound",
-	"session.rewind_undone",
-	"session.rewind_committed",
-	"session.workspace_changed",
-	"session.workspace_hint_changed",
-	"session.workspace_started",
-	"session.setup_started",
-	"session.setup_output",
-	"session.setup_finished",
-	"session.read",
-	"session.unread",
-	"session.settled",
-	"session.unsettled",
-	"session.pinned",
-	"session.unpinned",
-	"session.snoozed",
-	"session.auto_settle_set",
-	"session.unsnoozed",
-	"session.deleted",
-	"session.forked",
-	"session.status",
-	"session.compaction",
-	"session.provider_changed",
-	"session.provider_cleanup_failed",
-	"session.permission_mode_changed",
-	"session.model_changed",
-	"session.variant_changed",
-	"session.context_window_changed",
-	"session.goal_changed",
-	"session.handoff_delivered",
-	"session.usage_limited",
-	"session.cut_off_dismissed",
-	"session.resumed",
-	"session.resume_scheduled",
-	"session.resume_cancelled",
-	"permission.asked",
-	"permission.resolved",
-	"question.asked",
-	"question.resolved",
-] as const;
+export type MessageCreatedPayload = PayloadOf<"message.created">;
 
-export type CanonicalEventType = (typeof CANONICAL_EVENT_TYPES)[number];
+export type MessageRemovedPayload = PayloadOf<"message.removed">;
 
-export interface MessageCreatedPayload {
-	readonly messageId: string;
-	readonly role: MessageRole;
-	readonly sessionId: string;
-	readonly parentID?: string;
-	readonly turnId?: string;
-	/** The browser send this user message was placed for. */
-	readonly inputId?: string;
-	/** Imported from the provider's own record rather than observed streaming
-	 *  (OpenCode history backfill, conduit-test-iea). */
-	readonly backfilled?: true;
-}
-
-export interface MessageRemovedPayload {
-	readonly messageId: string;
-}
-
-export interface MessagePartRemovedPayload {
-	readonly messageId: string;
-	readonly partId: string;
-}
+export type MessagePartRemovedPayload = PayloadOf<"message.part.removed">;
 
 /** A settled OpenCode REST message, including its ordered provider parts. */
-export interface MessageSnapshotPayload {
-	readonly messageId: string;
-	readonly digest: string;
-	readonly supersedesEventId?: string;
-	readonly message: {
-		readonly id: string;
-		readonly sessionID: string;
-		readonly role: string;
-		readonly parentID?: string;
-		readonly summary?: boolean;
-		readonly time?: { readonly created?: number; readonly completed?: number };
-		readonly cost?: number;
-		readonly tokens?: {
-			readonly input?: number;
-			readonly output?: number;
-			readonly cache?: { readonly read?: number; readonly write?: number };
-			readonly contextWindow?: number;
-		};
-		readonly finish?: string;
-		readonly error?: unknown;
-		readonly parts: readonly {
-			readonly id: string;
-			readonly type: string;
-			readonly [key: string]: unknown;
-		}[];
-		readonly [key: string]: unknown;
-	};
-}
+export type MessageSnapshotPayload = PayloadOf<"message.snapshot">;
 
-export interface TextDeltaPayload {
-	readonly messageId: string;
-	readonly partId: string;
-	readonly text: string;
-}
+export type TextDeltaPayload = PayloadOf<"text.delta">;
 
-export interface ThinkingStartPayload {
-	readonly messageId: string;
-	readonly partId: string;
-}
+export type ThinkingStartPayload = PayloadOf<"thinking.start">;
 
-export interface ThinkingDeltaPayload {
-	readonly messageId: string;
-	readonly partId: string;
-	readonly text: string;
-}
+export type ThinkingDeltaPayload = PayloadOf<"thinking.delta">;
 
-export interface ThinkingEndPayload {
-	readonly messageId: string;
-	readonly partId: string;
-}
+export type ThinkingEndPayload = PayloadOf<"thinking.end">;
 
-export type ToolStartedPayload = Schema.Schema.Type<
-	typeof ToolStartedPayloadSchema
->;
+export type ToolStartedPayload = PayloadOf<"tool.started">;
 
-export type ToolRunningPayload = Schema.Schema.Type<
-	typeof ToolRunningPayloadSchema
->;
+export type ToolRunningPayload = PayloadOf<"tool.running">;
 
-export type ToolCompletedPayload = Schema.Schema.Type<
-	typeof ToolCompletedPayloadSchema
->;
+export type ToolCompletedPayload = PayloadOf<"tool.completed">;
 
-export interface FileAttachedPayload {
-	readonly messageId: string;
-	readonly partId: string;
-	readonly mime: string;
-	readonly filename?: string;
-	readonly url: string;
-}
+export type FileAttachedPayload = PayloadOf<"file.attached">;
 
 // Provider-agnostic tool input shape. Each adapter's normalizeToolInput()
 // maps raw provider casing (snake_case, camelCase) into this canonical form.
 // Unknown tools collapse to { tool: "Unknown" } — never lost, always renderable.
 
-export type CanonicalToolInput =
-	| { tool: "Read"; filePath: string; offset?: number; limit?: number }
-	| {
-			tool: "Edit";
-			filePath: string;
-			oldString: string;
-			newString: string;
-			replaceAll?: boolean;
-	  }
-	| { tool: "Write"; filePath: string; content: string }
-	| { tool: "Patch"; patch: string; filePaths: readonly string[] }
-	| {
-			tool: "Bash";
-			command: string;
-			workingDirectory?: string;
-			description?: string;
-			timeoutMs?: number;
-	  }
-	| {
-			tool: "Grep";
-			pattern: string;
-			path?: string;
-			include?: string;
-			fileType?: string;
-	  }
-	| { tool: "Glob"; pattern: string; path?: string }
-	| { tool: "WebFetch"; url: string; prompt?: string }
-	| { tool: "WebSearch"; query: string }
-	| {
-			tool: "Task";
-			description: string;
-			prompt: string;
-			subagentType?: string;
-	  }
-	| { tool: "LSP"; operation: string; filePath?: string }
-	| { tool: "Skill"; name: string }
-	| { tool: "AskUserQuestion"; questions: unknown }
-	| { tool: "Unknown"; name: string; raw: Record<string, unknown> };
+export type CanonicalToolInput = Types.Mutable<
+	typeof CanonicalToolInputSchema.Type
+>;
 
-export interface TurnCompletedPayload {
-	readonly messageId: string;
-	/** Names the turn when no assistant message of its own answered it. */
-	readonly userMessageId?: string;
-	readonly cost?: number;
-	/** Claude's session running total; cost is its delta at persistence time. */
-	readonly providerCostTotalUsd?: number;
-	readonly providerSessionId?: string;
-	/** Input and cache tokens in the final main request, excluding output. */
-	readonly contextTokens?: number;
-	readonly tokens?: {
-		readonly input?: number;
-		readonly output?: number;
-		readonly cacheRead?: number;
-		readonly cacheWrite?: number;
-		readonly contextWindow?: number;
-	};
-	readonly duration?: number;
-}
+export type TurnCompletedPayload = PayloadOf<"turn.completed">;
 
-export interface TurnErrorPayload {
-	readonly messageId: string;
-	/** Durable turn owner when a process fails before or between messages. */
-	readonly userMessageId?: string;
-	readonly error: string;
-	readonly code?: string;
-}
+export type TurnErrorPayload = PayloadOf<"turn.error">;
 
-export interface TurnInterruptedPayload {
-	readonly messageId: string;
-}
+export type TurnInterruptedPayload = PayloadOf<"turn.interrupted">;
 
 export const INPUT_DELIVERIES = ["queue", "steer"] as const;
 export type InputDelivery = (typeof INPUT_DELIVERIES)[number];
@@ -297,129 +94,56 @@ export const STEER_BLOCKERS = [
 export type SteerBlocker = (typeof STEER_BLOCKERS)[number];
 
 /** The send request captured when an input is admitted; its handoff uses it. */
-export interface InputRequest {
-	readonly text: string;
-	readonly images?: readonly string[];
-	readonly model?: { readonly providerID: string; readonly modelID: string };
-	readonly agent?: string;
-	readonly variant?: string;
-	readonly contextWindow?: string;
-}
+export type InputRequest = typeof InputRequestSchema.Type;
 
-export interface InputAdmittedPayload {
-	readonly sessionId: string;
-	readonly inputId: string;
-	readonly delivery: InputDelivery;
-	readonly request: InputRequest;
-}
+export type InputAdmittedPayload = PayloadOf<"input.admitted">;
 
-export interface InputSentPayload {
-	readonly sessionId: string;
-	readonly inputId: string;
-	/** Handed into the running turn rather than starting one. */
-	readonly steer?: true;
-	/** The user workspace move whose directive was included in this handoff. */
-	readonly workspaceMoveSequence?: number;
-}
+export type InputSentPayload = PayloadOf<"input.sent">;
 
-export interface InputCancelledPayload {
-	readonly sessionId: string;
-	readonly inputId: string;
-}
+export type InputRequeuedPayload = PayloadOf<"input.requeued">;
 
-export interface InputInterruptRequestedPayload {
-	readonly sessionId: string;
-	readonly inputId: string;
-}
+export type InputCancelledPayload = PayloadOf<"input.cancelled">;
 
-export interface TurnModelResolvedPayload {
-	readonly requestedModel?: string;
-	readonly expectedModel?: string;
-	readonly actualModel: string;
-}
+export type InputInterruptRequestedPayload =
+	PayloadOf<"input.interrupt_requested">;
 
-export interface SessionCreatedPayload {
-	readonly sessionId: string;
-	readonly title: string;
-	readonly provider: string;
-	readonly parentId?: string;
-	readonly forkPointEvent?: string;
-	readonly forkPointTimestamp?: number;
-	readonly forkPointMessageId?: string;
-	readonly providerSessionId?: string;
-	readonly sideThread?: boolean;
-	readonly permissionMode?: SessionPermissionModeValue;
-}
+export type TurnModelResolvedPayload = PayloadOf<"turn.model_resolved">;
 
-export interface SessionReadPayload {
-	readonly sessionId: string;
-}
+export type SessionCreatedPayload = PayloadOf<"session.created">;
 
-export interface SessionUnreadPayload {
-	readonly sessionId: string;
-}
+export type SessionReadPayload = PayloadOf<"session.read">;
 
-export interface SessionSettledPayload {
-	readonly sessionId: string;
-	readonly automatic?: boolean;
-	readonly mergedHead?: string;
-}
+export type SessionUnreadPayload = PayloadOf<"session.unread">;
 
-export interface SessionAutoSettleSetPayload {
-	readonly sessionId: string;
-	readonly disabled: boolean;
-}
+export type SessionSettledPayload = PayloadOf<"session.settled">;
 
-export interface SessionUnsettledPayload {
-	readonly sessionId: string;
-}
+export type SessionAutoSettleSetPayload = PayloadOf<"session.auto_settle_set">;
 
-export interface SessionPinnedPayload {
-	readonly sessionId: string;
-}
+export type SessionUnsettledPayload = PayloadOf<"session.unsettled">;
+export type SessionArchivedPayload = PayloadOf<"session.archived">;
+export type SessionUnarchivedPayload = PayloadOf<"session.unarchived">;
 
-export interface SessionUnpinnedPayload {
-	readonly sessionId: string;
-}
+export type SessionPinnedPayload = PayloadOf<"session.pinned">;
 
-export interface SessionSnoozedPayload {
-	readonly sessionId: string;
-	readonly until: number | null;
-}
+export type SessionUnpinnedPayload = PayloadOf<"session.unpinned">;
 
-export interface SessionUnsnoozedPayload {
-	readonly sessionId: string;
-}
+export type SessionSnoozedPayload = PayloadOf<"session.snoozed">;
 
-export interface SessionRenamedPayload {
-	readonly sessionId: string;
-	readonly title: string;
-}
+export type SessionUnsnoozedPayload = PayloadOf<"session.unsnoozed">;
 
-export interface SessionWorkspaceChangedPayload
-	extends Omit<SessionWorkspace, "cause"> {
-	/** A branch rename updates ownership without moving the workspace. */
-	readonly cause: SessionWorkspace["cause"] | "branch-rename";
-	readonly sessionId: string;
-	/** Effective cwd after applying the mapping, including a reset to main. */
-	readonly path?: string;
-	/** Launch ownership, or its branch-name update. Forks never copy this metadata. */
-	readonly ownership?: readonly SessionWorktreeOwnership[];
-}
+export type SessionRenamedPayload = PayloadOf<"session.renamed">;
 
-export interface SessionWorkspaceHintChangedPayload {
-	readonly path: string | null;
-}
+export type SessionWorkspaceChangedPayload =
+	PayloadOf<"session.workspace_changed">;
+
+export type SessionWorkspaceHintChangedPayload =
+	PayloadOf<"session.workspace_hint_changed">;
 
 /** The runner's reported startup folder, independent of recorded workspace moves. */
-export interface SessionWorkspaceStartedPayload {
-	readonly sessionId: string;
-	readonly path: string;
-}
+export type SessionWorkspaceStartedPayload =
+	PayloadOf<"session.workspace_started">;
 
-export interface SessionDeletedPayload {
-	readonly sessionId: string;
-}
+export type SessionDeletedPayload = PayloadOf<"session.deleted">;
 
 /**
  * Lineage for a session that was forked from another.
@@ -433,246 +157,72 @@ export interface SessionDeletedPayload {
  * Legacy producers may include a display timestamp. Session subscriptions use
  * the durable parent and fork message IDs.
  */
-export interface SessionForkedPayload {
-	readonly sessionId: string;
-	readonly parentId: string;
-	readonly forkPointEvent?: string;
-	readonly forkPointTimestamp?: number;
-}
+export type SessionForkedPayload = PayloadOf<"session.forked">;
 
-export interface SessionStatusPayload {
-	readonly sessionId: string;
-	readonly status: SessionStatusValue;
-	readonly turnId?: string;
-	/** A retry's reason, for the shell row while the provider waits. */
-	readonly message?: string;
-}
+export type SessionStatusPayload = PayloadOf<"session.status">;
 
-export interface SessionCompactionPayload {
-	readonly sessionId: string;
-	readonly state: "started" | "completed" | "failed";
-	readonly detail: string;
-	readonly preTokens?: number;
-	readonly postTokens?: number;
-}
+export type SessionCompactionPayload = PayloadOf<"session.compaction">;
 
-export interface SessionProviderChangedPayload {
-	readonly sessionId: string;
-	readonly oldProvider: string;
-	readonly newProvider: string;
-	readonly reason?: ContinuationReason;
-}
+export type SessionProviderChangedPayload =
+	PayloadOf<"session.provider_changed">;
 
-export interface SessionDeletedPayload {
-	readonly sessionId: string;
-	/**
-	 * Descendant sessions deleted by the schema cascade, captured BEFORE the
-	 * tombstone persists (afterwards they can no longer be found by parent).
-	 * Optional: historical
-	 * tombstones lack it, and it is omitted when the session has no children.
-	 */
-	readonly childSessionIds?: readonly string[];
-}
+export type SessionProviderCleanupFailedPayload =
+	PayloadOf<"session.provider_cleanup_failed">;
 
-export interface SessionProviderCleanupFailedPayload {
-	readonly sessionId: string;
-	readonly provider: string;
-	readonly instanceId?: string;
-	readonly reason: string;
-}
-
-export interface SessionPermissionModeChangedPayload {
-	readonly sessionId: string;
-	readonly mode: SessionPermissionModeValue;
-}
+export type SessionPermissionModeChangedPayload =
+	PayloadOf<"session.permission_mode_changed">;
 
 /** The explicit model stored for the session. */
-export interface SessionModelChangedPayload {
-	readonly sessionId: string;
-	readonly modelId: string;
-	readonly providerId: string;
-}
+export type SessionModelChangedPayload = PayloadOf<"session.model_changed">;
 
 /** The session's effort variant; "" means the session follows the default. */
-export interface SessionVariantChangedPayload {
-	readonly sessionId: string;
-	readonly variant: string;
-}
+export type SessionVariantChangedPayload = PayloadOf<"session.variant_changed">;
 
 /** The session's context window; "" means the session follows the default. */
-export interface SessionContextWindowChangedPayload {
-	readonly sessionId: string;
-	readonly contextWindow: string;
-}
+export type SessionContextWindowChangedPayload =
+	PayloadOf<"session.context_window_changed">;
 
 const SessionGoalSchema = Schema.Struct({
 	condition: Schema.String,
-	iterations: Schema.NonNegativeInt,
+	iterations: Schema.Number.check(
+		Schema.isInt(),
+		Schema.isGreaterThanOrEqualTo(0),
+	),
 	setAt: Schema.Number,
 	tokensAtStart: Schema.Number,
 	lastReason: Schema.optional(Schema.String),
 });
 
-export const SessionGoalChangedPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	goal: Schema.NullOr(SessionGoalSchema),
-	ended: Schema.optional(Schema.Literal("met", "cleared")),
-	endedGoal: Schema.optional(SessionGoalSchema),
-	endedAt: Schema.optional(Schema.Number),
-	pausedReason: Schema.optional(Schema.String),
-});
-export type SessionGoalChangedPayload =
-	typeof SessionGoalChangedPayloadSchema.Type;
+export type SessionGoalChangedPayload = PayloadOf<"session.goal_changed">;
 
-export interface SessionHandoffDeliveredPayload {
-	readonly included: number;
-	readonly omitted: number;
-	readonly tokens: number;
-	readonly firstMessageIncluded?: boolean;
-	readonly instanceId?: string;
-}
+export type SessionHandoffDeliveredPayload =
+	PayloadOf<"session.handoff_delivered">;
 
-export interface SessionUsageLimitedPayload {
-	readonly instanceId: string;
-	readonly rateLimitType: string;
-	/** SDK reset time, in Unix seconds. */
-	readonly resetsAt?: number;
-	readonly cutOffMessageId: string;
-}
+export type SessionUsageLimitedPayload = PayloadOf<"session.usage_limited">;
 
-export interface SessionCutOffDismissedPayload {
-	readonly cutOffMessageId: string;
-}
+export type SessionCutOffDismissedPayload =
+	PayloadOf<"session.cut_off_dismissed">;
 
-export interface SessionResumedPayload {
-	readonly reason: ContinuationReason;
-	readonly instanceId: string;
-	/** The previous account, when the continuation switched accounts. */
-	readonly from?: string;
-}
+export type SessionResumedPayload = PayloadOf<"session.resumed">;
 
-export interface SessionResumeScheduledPayload {
-	readonly instanceId: string;
-	/** Unix seconds, matching the SDK's reset time. */
-	readonly at: number;
-}
+export type SessionResumeScheduledPayload =
+	PayloadOf<"session.resume_scheduled">;
 
-export type SessionResumeCancelledPayload = Record<string, never>;
+export type SessionResumeCancelledPayload =
+	PayloadOf<"session.resume_cancelled">;
 
 /**
  * Everything the approval card shows rides the asked event: the approvals
  * subscription serves the card from the pending_approvals row, which keeps
  * these as its `details` (ni8.9).
  */
-export interface PermissionAskedPayload {
-	readonly id: string;
-	readonly sessionId: string;
-	readonly toolName: string;
-	readonly input: unknown;
-	readonly toolUseId?: string;
-	readonly always?: readonly string[];
-	/** ProviderPermissionUpdate[]; decoded where it is shown. */
-	readonly permissionSuggestions?: readonly unknown[];
-	readonly permissionTitle?: string;
-	readonly permissionDisplayName?: string;
-	readonly permissionDescription?: string;
-	readonly permissionReason?: string;
-}
+export type PermissionAskedPayload = PayloadOf<"permission.asked">;
 
-export interface PermissionResolvedPayload {
-	readonly id: string;
-	readonly decision: PermissionDecision;
-	readonly resolvedBy?: "auto";
-}
+export type PermissionResolvedPayload = PayloadOf<"permission.resolved">;
 
-export interface QuestionAskedPayload {
-	readonly id: string;
-	readonly sessionId: string;
-	readonly questions: unknown;
-	readonly toolUseId?: string;
-	readonly providerId?: string;
-}
+export type QuestionAskedPayload = PayloadOf<"question.asked">;
 
-export interface QuestionResolvedPayload {
-	readonly id: string;
-	readonly answers: Record<string, unknown>;
-}
-
-/**
- * Map from event type to its payload shape.
- */
-export interface EventPayloadMap {
-	"workspace.changed": ProviderWorkspaceChangedData;
-	"message.created": MessageCreatedPayload;
-	"message.removed": MessageRemovedPayload;
-	"message.part.removed": MessagePartRemovedPayload;
-	"message.snapshot": MessageSnapshotPayload;
-	"text.delta": TextDeltaPayload;
-	"thinking.start": ThinkingStartPayload;
-	"thinking.delta": ThinkingDeltaPayload;
-	"thinking.end": ThinkingEndPayload;
-	"tool.started": ToolStartedPayload;
-	"tool.running": ToolRunningPayload;
-	"tool.completed": ToolCompletedPayload;
-	"file.attached": FileAttachedPayload;
-	"tool.input_updated": {
-		readonly messageId: string;
-		readonly partId: string;
-		readonly [key: string]: unknown;
-	};
-	"turn.completed": TurnCompletedPayload;
-	"turn.error": TurnErrorPayload;
-	"turn.interrupted": TurnInterruptedPayload;
-	"turn.model_resolved": TurnModelResolvedPayload;
-	"input.admitted": InputAdmittedPayload;
-	"input.sent": InputSentPayload;
-	"input.cancelled": InputCancelledPayload;
-	"input.interrupt_requested": InputInterruptRequestedPayload;
-	"session.created": SessionCreatedPayload;
-	"session.renamed": SessionRenamedPayload;
-	"session.rewound": {
-		readonly messageId: string;
-		readonly previousMessageId?: string | null;
-	};
-	"session.rewind_undone": { readonly previousMessageId?: string | null };
-	"session.rewind_committed": { readonly messageId: string };
-	"session.workspace_changed": SessionWorkspaceChangedPayload;
-	"session.workspace_hint_changed": SessionWorkspaceHintChangedPayload;
-	"session.workspace_started": SessionWorkspaceStartedPayload;
-	"session.setup_started": typeof SessionSetupStartedPayloadSchema.Type;
-	"session.setup_output": typeof SessionSetupOutputPayloadSchema.Type;
-	"session.setup_finished": typeof SessionSetupFinishedPayloadSchema.Type;
-	"session.read": SessionReadPayload;
-	"session.unread": SessionUnreadPayload;
-	"session.settled": SessionSettledPayload;
-	"session.unsettled": SessionUnsettledPayload;
-	"session.pinned": SessionPinnedPayload;
-	"session.unpinned": SessionUnpinnedPayload;
-	"session.snoozed": SessionSnoozedPayload;
-	"session.auto_settle_set": SessionAutoSettleSetPayload;
-	"session.unsnoozed": SessionUnsnoozedPayload;
-	"session.deleted": SessionDeletedPayload;
-	"session.forked": SessionForkedPayload;
-	"session.status": SessionStatusPayload;
-	"session.compaction": SessionCompactionPayload;
-	"session.provider_changed": SessionProviderChangedPayload;
-	"session.provider_cleanup_failed": SessionProviderCleanupFailedPayload;
-	"session.permission_mode_changed": SessionPermissionModeChangedPayload;
-	"session.model_changed": SessionModelChangedPayload;
-	"session.variant_changed": SessionVariantChangedPayload;
-	"session.context_window_changed": SessionContextWindowChangedPayload;
-	"session.goal_changed": SessionGoalChangedPayload;
-	"session.handoff_delivered": SessionHandoffDeliveredPayload;
-	"session.usage_limited": SessionUsageLimitedPayload;
-	"session.cut_off_dismissed": SessionCutOffDismissedPayload;
-	"session.resumed": SessionResumedPayload;
-	"session.resume_scheduled": SessionResumeScheduledPayload;
-	"session.resume_cancelled": SessionResumeCancelledPayload;
-	"permission.asked": PermissionAskedPayload;
-	"permission.resolved": PermissionResolvedPayload;
-	"question.asked": QuestionAskedPayload;
-	"question.resolved": QuestionResolvedPayload;
-}
+export type QuestionResolvedPayload = PayloadOf<"question.resolved">;
 
 export interface EventMetadata {
 	readonly commandId?: string;
@@ -693,6 +243,8 @@ export interface EventMetadata {
 		readonly parentProviderTaskId?: string;
 	};
 	readonly synthetic?: boolean;
+	readonly inherited?: boolean;
+	readonly providerCreatedAt?: number;
 	readonly source?: string;
 	readonly sseBatchId?: string;
 	readonly sseBatchSize?: number;
@@ -702,149 +254,67 @@ export interface EventMetadata {
 	readonly schemaVersion?: number;
 }
 
-export type CanonicalEvent = {
-	[K in CanonicalEventType]: {
-		readonly eventId: string;
-		readonly sessionId: string;
-		readonly type: K;
-		readonly data: EventPayloadMap[K];
-		readonly metadata: EventMetadata;
-		readonly provider: string;
-		readonly createdAt: number;
-	};
-}[CanonicalEventType];
-
-export type StoredEvent = CanonicalEvent & {
+export type StoredEvent = CanonicalEvent<CanonicalEventType> & {
 	readonly projectId: string;
 	readonly sequence: number;
 	readonly streamVersion: number;
 };
 
 export const EventMetadataSchema = Schema.Struct({
-	commandId: Schema.optionalWith(Schema.String, { exact: true }),
-	causationEventId: Schema.optionalWith(Schema.String, { exact: true }),
-	correlationId: Schema.optionalWith(Schema.String, { exact: true }),
-	adapterKey: Schema.optionalWith(Schema.String, { exact: true }),
-	providerTurnId: Schema.optionalWith(Schema.String, { exact: true }),
-	providerRuntimeEventId: Schema.optionalWith(Schema.String, { exact: true }),
-	rawSource: Schema.optionalWith(Schema.String, { exact: true }),
-	providerRefs: Schema.optionalWith(
+	commandId: Schema.optionalKey(Schema.String),
+	causationEventId: Schema.optionalKey(Schema.String),
+	correlationId: Schema.optionalKey(Schema.String),
+	adapterKey: Schema.optionalKey(Schema.String),
+	providerTurnId: Schema.optionalKey(Schema.String),
+	providerRuntimeEventId: Schema.optionalKey(Schema.String),
+	rawSource: Schema.optionalKey(Schema.String),
+	providerRefs: Schema.optionalKey(
 		Schema.Struct({
-			providerTurnId: Schema.optionalWith(Schema.String, { exact: true }),
-			providerItemId: Schema.optionalWith(Schema.String, { exact: true }),
-			providerMessageId: Schema.optionalWith(Schema.String, { exact: true }),
-			providerToolUseId: Schema.optionalWith(Schema.String, { exact: true }),
-			providerRequestId: Schema.optionalWith(Schema.String, { exact: true }),
-			providerSessionId: Schema.optionalWith(Schema.String, { exact: true }),
-			providerTaskId: Schema.optionalWith(Schema.String, { exact: true }),
-			parentProviderTaskId: Schema.optionalWith(Schema.String, {
-				exact: true,
-			}),
+			providerTurnId: Schema.optionalKey(Schema.String),
+			providerItemId: Schema.optionalKey(Schema.String),
+			providerMessageId: Schema.optionalKey(Schema.String),
+			providerToolUseId: Schema.optionalKey(Schema.String),
+			providerRequestId: Schema.optionalKey(Schema.String),
+			providerSessionId: Schema.optionalKey(Schema.String),
+			providerTaskId: Schema.optionalKey(Schema.String),
+			parentProviderTaskId: Schema.optionalKey(Schema.String),
 		}),
-		{ exact: true },
 	),
-	synthetic: Schema.optionalWith(Schema.Boolean, { exact: true }),
-	source: Schema.optionalWith(Schema.String, { exact: true }),
-	sseBatchId: Schema.optionalWith(Schema.String, { exact: true }),
-	sseBatchSize: Schema.optionalWith(Schema.Number, { exact: true }),
-	schemaVersion: Schema.optionalWith(Schema.Number, { exact: true }),
+	synthetic: Schema.optionalKey(Schema.Boolean),
+	inherited: Schema.optionalKey(Schema.Boolean),
+	providerCreatedAt: Schema.optionalKey(Schema.Number),
+	source: Schema.optionalKey(Schema.String),
+	sseBatchId: Schema.optionalKey(Schema.String),
+	sseBatchSize: Schema.optionalKey(Schema.Number),
+	schemaVersion: Schema.optionalKey(Schema.Number),
 });
 
-const MessageRoleSchema = Schema.Literal("user", "assistant");
-const SessionStatusSchema = Schema.Literal("idle", "busy", "retry", "error");
-const PermissionDecisionSchema = Schema.Literal("once", "always", "reject");
+const MessageRoleSchema = Schema.Literals(["user", "assistant"]);
+const SessionStatusSchema = Schema.Literals(["idle", "busy", "retry", "error"]);
+const PermissionDecisionSchema = Schema.Literals(["once", "always", "reject"]);
 
 const TokensSchema = Schema.Struct({
-	input: Schema.optionalWith(Schema.Number, { exact: true }),
-	output: Schema.optionalWith(Schema.Number, { exact: true }),
-	cacheRead: Schema.optionalWith(Schema.Number, { exact: true }),
-	cacheWrite: Schema.optionalWith(Schema.Number, { exact: true }),
-	contextWindow: Schema.optionalWith(Schema.Number, { exact: true }),
+	input: Schema.optionalKey(Schema.Number),
+	output: Schema.optionalKey(Schema.Number),
+	cacheRead: Schema.optionalKey(Schema.Number),
+	cacheWrite: Schema.optionalKey(Schema.Number),
+	/** Omission means capacity unknown; readers also treat legacy zero values as unknown. */
+	contextWindow: Schema.optionalKey(Schema.Number),
 });
 
-const MessageCreatedPayloadSchema = Schema.Struct({
-	messageId: Schema.String,
-	role: MessageRoleSchema,
-	sessionId: Schema.String,
-	parentID: Schema.optionalWith(Schema.String, { exact: true }),
-	turnId: Schema.optionalWith(Schema.String, { exact: true }),
-	inputId: Schema.optionalWith(Schema.String, { exact: true }),
-	backfilled: Schema.optionalWith(Schema.Literal(true), { exact: true }),
-});
-
-const MessageRemovedPayloadSchema = Schema.Struct({
-	messageId: Schema.String,
-});
-const MessagePartRemovedPayloadSchema = Schema.Struct({
-	messageId: Schema.String,
-	partId: Schema.String,
-});
-
-const MessageSnapshotPayloadSchema = Schema.Struct({
-	messageId: Schema.String,
-	digest: Schema.String,
-	supersedesEventId: Schema.optionalWith(Schema.String, { exact: true }),
-	message: Schema.Unknown.pipe(
-		Schema.filter(
-			(value) =>
-				typeof value === "object" &&
-				value !== null &&
-				"id" in value &&
-				typeof value.id === "string" &&
-				"sessionID" in value &&
-				typeof value.sessionID === "string" &&
-				"role" in value &&
-				(value.role === "user" || value.role === "assistant") &&
-				"parts" in value &&
-				Array.isArray(value.parts) &&
-				value.parts.every(
-					(part: unknown) =>
-						typeof part === "object" &&
-						part !== null &&
-						"id" in part &&
-						typeof part.id === "string" &&
-						"type" in part &&
-						typeof part.type === "string",
-				),
-		),
-	),
-});
-
-const TextDeltaPayloadSchema = Schema.Struct({
-	messageId: Schema.String,
-	partId: Schema.String,
-	text: Schema.String,
-});
-
-const ThinkingStartPayloadSchema = Schema.Struct({
-	messageId: Schema.String,
-	partId: Schema.String,
-});
-
-const ThinkingDeltaPayloadSchema = Schema.Struct({
-	messageId: Schema.String,
-	partId: Schema.String,
-	text: Schema.String,
-});
-
-const ThinkingEndPayloadSchema = Schema.Struct({
-	messageId: Schema.String,
-	partId: Schema.String,
-});
-
-const CanonicalToolInputSchema = Schema.Union(
+const CanonicalToolInputSchema = Schema.Union([
 	Schema.Struct({
 		tool: Schema.Literal("Read"),
 		filePath: Schema.String,
-		offset: Schema.optionalWith(Schema.Number, { exact: true }),
-		limit: Schema.optionalWith(Schema.Number, { exact: true }),
+		offset: Schema.optionalKey(Schema.Number),
+		limit: Schema.optionalKey(Schema.Number),
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("Edit"),
 		filePath: Schema.String,
 		oldString: Schema.String,
 		newString: Schema.String,
-		replaceAll: Schema.optionalWith(Schema.Boolean, { exact: true }),
+		replaceAll: Schema.optionalKey(Schema.Boolean),
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("Write"),
@@ -859,26 +329,26 @@ const CanonicalToolInputSchema = Schema.Union(
 	Schema.Struct({
 		tool: Schema.Literal("Bash"),
 		command: Schema.String,
-		workingDirectory: Schema.optionalWith(Schema.String, { exact: true }),
-		description: Schema.optionalWith(Schema.String, { exact: true }),
-		timeoutMs: Schema.optionalWith(Schema.Number, { exact: true }),
+		workingDirectory: Schema.optionalKey(Schema.String),
+		description: Schema.optionalKey(Schema.String),
+		timeoutMs: Schema.optionalKey(Schema.Number),
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("Grep"),
 		pattern: Schema.String,
-		path: Schema.optionalWith(Schema.String, { exact: true }),
-		include: Schema.optionalWith(Schema.String, { exact: true }),
-		fileType: Schema.optionalWith(Schema.String, { exact: true }),
+		path: Schema.optionalKey(Schema.String),
+		include: Schema.optionalKey(Schema.String),
+		fileType: Schema.optionalKey(Schema.String),
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("Glob"),
 		pattern: Schema.String,
-		path: Schema.optionalWith(Schema.String, { exact: true }),
+		path: Schema.optionalKey(Schema.String),
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("WebFetch"),
 		url: Schema.String,
-		prompt: Schema.optionalWith(Schema.String, { exact: true }),
+		prompt: Schema.optionalKey(Schema.String),
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("WebSearch"),
@@ -888,12 +358,12 @@ const CanonicalToolInputSchema = Schema.Union(
 		tool: Schema.Literal("Task"),
 		description: Schema.String,
 		prompt: Schema.String,
-		subagentType: Schema.optionalWith(Schema.String, { exact: true }),
+		subagentType: Schema.optionalKey(Schema.String),
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("LSP"),
 		operation: Schema.String,
-		filePath: Schema.optionalWith(Schema.String, { exact: true }),
+		filePath: Schema.optionalKey(Schema.String),
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("Skill"),
@@ -901,343 +371,43 @@ const CanonicalToolInputSchema = Schema.Union(
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("AskUserQuestion"),
-		questions: Schema.Unknown,
+		questions: Schema.Unknown.pipe(
+			Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+		),
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("Unknown"),
 		name: Schema.String,
-		raw: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+		raw: Schema.Record(Schema.String, Schema.Unknown),
 	}),
+]);
+
+const NonEmptyStringSchema = Schema.String.pipe(
+	Schema.check(Schema.isMinLength(1)),
 );
-
-const ToolStartedPayloadSchema = Schema.Struct({
-	messageId: Schema.String,
-	partId: Schema.String,
-	toolName: Schema.String,
-	callId: Schema.String,
-	input: CanonicalToolInputSchema,
-});
-
-const ToolRunningPayloadSchema = Schema.Struct({
-	messageId: Schema.String,
-	partId: Schema.String,
-	metadata: Schema.optionalWith(
-		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-		{ exact: true },
-	),
-	/** Refreshed tool input when the provider streamed args after tool.started. */
-	input: Schema.optionalWith(CanonicalToolInputSchema, { exact: true }),
-	/** Anchors the input refresh to the tool_start id in live clients; only set alongside input. */
-	callId: Schema.optionalWith(Schema.String, { exact: true }),
-	toolName: Schema.optionalWith(Schema.String, { exact: true }),
-});
-
-const ToolCompletedPayloadSchema = Schema.Struct({
-	messageId: Schema.String,
-	partId: Schema.String,
-	result: Schema.Unknown,
-	duration: Schema.Number,
-	metadata: Schema.optionalWith(
-		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-		{ exact: true },
-	),
-	/** Final tool input when the provider streamed args after tool.started. */
-	input: Schema.optionalWith(CanonicalToolInputSchema, { exact: true }),
-});
-
-const FileAttachedPayloadSchema = Schema.Struct({
-	messageId: Schema.String,
-	partId: Schema.String,
-	mime: Schema.String,
-	filename: Schema.optionalWith(Schema.String, { exact: true }),
-	url: Schema.String,
-});
-
-// Historical compat — open record with required messageId and partId
-const ToolInputUpdatedPayloadSchema = Schema.Struct({
-	messageId: Schema.String,
-	partId: Schema.String,
-}).pipe(
-	Schema.extend(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
-);
-
-const TurnCompletedPayloadSchema = Schema.Struct({
-	messageId: Schema.String,
-	userMessageId: Schema.optionalWith(Schema.String, { exact: true }),
-	cost: Schema.optionalWith(Schema.Number, { exact: true }),
-	providerCostTotalUsd: Schema.optionalWith(Schema.Number, { exact: true }),
-	providerSessionId: Schema.optionalWith(Schema.String, { exact: true }),
-	contextTokens: Schema.optionalWith(Schema.Number, { exact: true }),
-	tokens: Schema.optionalWith(TokensSchema, { exact: true }),
-	duration: Schema.optionalWith(Schema.Number, { exact: true }),
-});
-
-const TurnErrorPayloadSchema = Schema.Struct({
-	messageId: Schema.String,
-	userMessageId: Schema.optionalWith(Schema.String, { exact: true }),
-	error: Schema.String,
-	code: Schema.optionalWith(Schema.String, { exact: true }),
-});
-
-const TurnInterruptedPayloadSchema = Schema.Struct({
-	messageId: Schema.String,
-});
-
-const NonEmptyStringSchema = Schema.String.pipe(Schema.minLength(1));
-
-const TurnModelResolvedPayloadSchema = Schema.Struct({
-	requestedModel: Schema.optionalWith(NonEmptyStringSchema, { exact: true }),
-	expectedModel: Schema.optionalWith(NonEmptyStringSchema, { exact: true }),
-	actualModel: NonEmptyStringSchema,
-});
 
 export const InputRequestSchema = Schema.Struct({
 	text: Schema.String,
-	images: Schema.optionalWith(Schema.Array(Schema.String), { exact: true }),
-	model: Schema.optionalWith(
+	images: Schema.optionalKey(Schema.Array(Schema.String)),
+	model: Schema.optionalKey(
 		Schema.Struct({ providerID: Schema.String, modelID: Schema.String }),
-		{ exact: true },
 	),
-	agent: Schema.optionalWith(Schema.String, { exact: true }),
-	variant: Schema.optionalWith(Schema.String, { exact: true }),
-	contextWindow: Schema.optionalWith(Schema.String, { exact: true }),
+	agent: Schema.optionalKey(Schema.String),
+	variant: Schema.optionalKey(Schema.String),
+	contextWindow: Schema.optionalKey(Schema.String),
 });
 
-const InputAdmittedPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	inputId: Schema.String,
-	delivery: Schema.Literal(...INPUT_DELIVERIES),
-	request: InputRequestSchema,
-});
-
-const InputSentPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	inputId: Schema.String,
-	steer: Schema.optionalWith(Schema.Literal(true), { exact: true }),
-	workspaceMoveSequence: Schema.optionalWith(Schema.Number, { exact: true }),
-});
-
-const InputCancelledPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	inputId: Schema.String,
-});
-
-const InputInterruptRequestedPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	inputId: Schema.String,
-});
-
-const SessionCreatedPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	title: Schema.String,
-	provider: Schema.String,
-	parentId: Schema.optionalWith(Schema.String, { exact: true }),
-	forkPointEvent: Schema.optionalWith(Schema.String, { exact: true }),
-	forkPointTimestamp: Schema.optionalWith(Schema.Number, { exact: true }),
-	forkPointMessageId: Schema.optionalWith(Schema.String, { exact: true }),
-	providerSessionId: Schema.optionalWith(Schema.String, { exact: true }),
-	sideThread: Schema.optionalWith(Schema.Boolean, { exact: true }),
-	/** The input a Side Thread was started with, so a retried start finds it. */
-	startInputId: Schema.optionalWith(Schema.String, { exact: true }),
-	permissionMode: Schema.optionalWith(
-		Schema.Literal(...SESSION_PERMISSION_MODES),
-		{
-			exact: true,
-		},
-	),
-});
-
-const SessionRenamedPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	title: Schema.String,
-});
-
-export const SessionWorkspaceChangedPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	path: Schema.optional(Schema.String),
-	ownership: Schema.optional(Schema.Array(SessionWorktreeOwnershipSchema)),
-	...SessionWorkspaceSchema.fields,
-	cause: Schema.Union(
-		SessionWorkspaceSchema.fields.cause,
-		Schema.Literal("branch-rename"),
-	),
-});
-
-export const SessionWorkspaceHintChangedPayloadSchema = Schema.Struct({
-	path: Schema.NullOr(Schema.String),
-});
-
-const SessionWorkspaceStartedPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	path: Schema.String,
-});
-
-const SessionReadPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-});
-
-const SessionUnreadPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-});
-
-const SessionSettledPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	automatic: Schema.optional(Schema.Boolean),
-	mergedHead: Schema.optional(Schema.String),
-});
-
-const SessionAutoSettleSetPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	disabled: Schema.Boolean,
-});
-
-const SessionUnsettledPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-});
-
-const SessionPinnedPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-});
-
-const SessionUnpinnedPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-});
-
-const SessionSnoozedPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	until: Schema.NullOr(Schema.Number),
-});
-
-const SessionUnsnoozedPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-});
-
-const SessionForkedPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	parentId: Schema.String,
-	forkPointEvent: Schema.optionalWith(Schema.String, { exact: true }),
-	forkPointTimestamp: Schema.optionalWith(Schema.Number, { exact: true }),
-});
-
-const SessionStatusPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	status: SessionStatusSchema,
-	turnId: Schema.optionalWith(Schema.String, { exact: true }),
-	message: Schema.optionalWith(Schema.String, { exact: true }),
-});
-
-const SessionCompactionPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	state: Schema.Literal("started", "completed", "failed"),
-	detail: Schema.String,
-	preTokens: Schema.optionalWith(Schema.Number, { exact: true }),
-	postTokens: Schema.optionalWith(Schema.Number, { exact: true }),
-});
-
-const SessionProviderChangedPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	oldProvider: Schema.String,
-	newProvider: Schema.String,
-	reason: Schema.optionalWith(
-		Schema.suspend(() => ContinuationReasonSchema),
-		{ exact: true },
-	),
-});
-
-const SessionDeletedPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	childSessionIds: Schema.optionalWith(Schema.Array(Schema.String), {
-		exact: true,
-	}),
-});
-
-const SessionProviderCleanupFailedPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	provider: Schema.String,
-	instanceId: Schema.optionalWith(Schema.String, { exact: true }),
-	reason: Schema.String,
-});
-
-const SessionPermissionModeChangedPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	mode: Schema.Literal(...SESSION_PERMISSION_MODES),
-});
-
-const SessionModelChangedPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	modelId: Schema.String,
-	providerId: Schema.String,
-});
-
-const SessionVariantChangedPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	variant: Schema.String,
-});
-
-const SessionContextWindowChangedPayloadSchema = Schema.Struct({
-	sessionId: Schema.String,
-	contextWindow: Schema.String,
-});
-
-export const SessionHandoffDeliveredPayloadSchema = Schema.Struct({
-	included: Schema.NonNegativeInt,
-	omitted: Schema.NonNegativeInt,
-	tokens: Schema.NonNegativeInt,
-	firstMessageIncluded: Schema.optionalWith(Schema.Boolean, { exact: true }),
-	instanceId: Schema.optionalWith(Schema.String, { exact: true }),
-});
-
-export const SessionUsageLimitedPayloadSchema = Schema.Struct({
-	instanceId: Schema.String,
-	rateLimitType: Schema.String,
-	resetsAt: Schema.optionalWith(Schema.Number, { exact: true }),
-	cutOffMessageId: Schema.String,
-});
-
-const SessionCutOffDismissedPayloadSchema = Schema.Struct({
-	cutOffMessageId: Schema.String,
-});
-
-const SessionResumedPayloadSchema = Schema.Struct({
-	reason: Schema.suspend(() => ContinuationReasonSchema),
-	instanceId: Schema.String,
-	from: Schema.optionalWith(Schema.String, { exact: true }),
-});
-
-const SessionResumeScheduledPayloadSchema = Schema.Struct({
-	instanceId: Schema.String,
-	at: Schema.Number.pipe(Schema.finite()),
-});
-
-const SessionResumeCancelledPayloadSchema = Schema.Struct({});
-
-const optionalString = Schema.optionalWith(Schema.String, { exact: true });
+const optionalString = Schema.optionalKey(Schema.String);
 
 /** The optional card fields of a permission.asked payload (ni8.9). */
 export const PermissionAskedDetailsSchema = Schema.Struct({
 	toolUseId: optionalString,
-	always: Schema.optionalWith(Schema.Array(Schema.String), { exact: true }),
-	permissionSuggestions: Schema.optionalWith(Schema.Array(Schema.Unknown), {
-		exact: true,
-	}),
+	always: Schema.optionalKey(Schema.Array(Schema.String)),
+	permissionSuggestions: Schema.optionalKey(Schema.Array(Schema.Unknown)),
 	permissionTitle: optionalString,
 	permissionDisplayName: optionalString,
 	permissionDescription: optionalString,
 	permissionReason: optionalString,
-});
-
-const PermissionAskedPayloadSchema = Schema.Struct({
-	id: Schema.String,
-	sessionId: Schema.String,
-	toolName: Schema.String,
-	input: Schema.Unknown,
-	...PermissionAskedDetailsSchema.fields,
-});
-
-const PermissionResolvedPayloadSchema = Schema.Struct({
-	id: Schema.String,
-	decision: PermissionDecisionSchema,
-	resolvedBy: Schema.optionalWith(Schema.Literal("auto"), { exact: true }),
 });
 
 /** The optional card fields of a question.asked payload (ni8.9). */
@@ -1246,22 +416,604 @@ export const QuestionAskedDetailsSchema = Schema.Struct({
 	providerId: optionalString,
 });
 
-const QuestionAskedPayloadSchema = Schema.Struct({
-	id: Schema.String,
-	sessionId: Schema.String,
-	questions: Schema.Unknown,
-	...QuestionAskedDetailsSchema.fields,
-});
+// The snapshot decoder deliberately validates only identity, role and part
+// identity. Keep the richer provider data typed without tightening old stores.
+type SnapshotMessage = {
+	readonly id: string;
+	readonly sessionID: string;
+	readonly role: string;
+	readonly parentID?: string;
+	readonly summary?: boolean;
+	readonly time?: { readonly created?: number; readonly completed?: number };
+	readonly cost?: number;
+	readonly tokens?: {
+		readonly input?: number;
+		readonly output?: number;
+		readonly cache?: { readonly read?: number; readonly write?: number };
+		readonly contextWindow?: number;
+	};
+	readonly finish?: string;
+	readonly error?: unknown;
+	readonly parts: readonly {
+		readonly id: string;
+		readonly type: string;
+		readonly [key: string]: unknown;
+	}[];
+	readonly [key: string]: unknown;
+};
 
-const QuestionResolvedPayloadSchema = Schema.Struct({
-	id: Schema.String,
-	answers: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-});
+function live<S extends Schema.Top>(payload: S) {
+	return { status: "live", payload } as const;
+}
 
-function eventEnvelope<
-	T extends CanonicalEventType,
-	S extends Schema.Schema.Any,
->(type: T, dataSchema: S) {
+function retired<S extends Schema.Top>(reason: string, payload: S) {
+	return { status: "retired", reason, payload } as const;
+}
+
+export const CanonicalEvents = {
+	"message.created": live(
+		Schema.Struct({
+			messageId: Schema.String,
+			role: MessageRoleSchema,
+			sessionId: Schema.String,
+			parentID: Schema.optionalKey(Schema.String),
+			turnId: Schema.optionalKey(Schema.String),
+			/** The browser send this user message was placed for. */
+			inputId: Schema.optionalKey(Schema.String),
+			/** Imported from the provider's own record rather than observed streaming
+			 *  (OpenCode history backfill, conduit-test-iea). */
+			backfilled: Schema.optionalKey(Schema.Literal(true)),
+		}),
+	),
+	"message.removed": live(
+		Schema.Struct({
+			messageId: Schema.String,
+		}),
+	),
+	"message.part.removed": live(
+		Schema.Struct({
+			messageId: Schema.String,
+			partId: Schema.String,
+		}),
+	),
+	"message.snapshot": live(
+		Schema.Struct({
+			messageId: Schema.String,
+			digest: Schema.String,
+			supersedesEventId: Schema.optionalKey(Schema.String),
+			message: Schema.Unknown.pipe(
+				Schema.refine(
+					(value): value is SnapshotMessage =>
+						typeof value === "object" &&
+						value !== null &&
+						"id" in value &&
+						typeof value.id === "string" &&
+						"sessionID" in value &&
+						typeof value.sessionID === "string" &&
+						"role" in value &&
+						(value.role === "user" || value.role === "assistant") &&
+						"parts" in value &&
+						Array.isArray(value.parts) &&
+						value.parts.every(
+							(part: unknown) =>
+								typeof part === "object" &&
+								part !== null &&
+								"id" in part &&
+								typeof part.id === "string" &&
+								"type" in part &&
+								typeof part.type === "string",
+						),
+				),
+			),
+		}),
+	),
+	"text.delta": live(
+		Schema.Struct({
+			messageId: Schema.String,
+			partId: Schema.String,
+			text: Schema.String,
+		}),
+	),
+	"thinking.start": live(
+		Schema.Struct({
+			messageId: Schema.String,
+			partId: Schema.String,
+		}),
+	),
+	"thinking.delta": live(
+		Schema.Struct({
+			messageId: Schema.String,
+			partId: Schema.String,
+			text: Schema.String,
+		}),
+	),
+	"thinking.end": live(
+		Schema.Struct({
+			messageId: Schema.String,
+			partId: Schema.String,
+		}),
+	),
+	"tool.started": live(
+		Schema.Struct({
+			messageId: Schema.String,
+			partId: Schema.String,
+			toolName: Schema.String,
+			callId: Schema.String,
+			input: CanonicalToolInputSchema,
+		}),
+	),
+	"tool.running": live(
+		Schema.Struct({
+			messageId: Schema.String,
+			partId: Schema.String,
+			metadata: Schema.optionalKey(
+				Schema.Record(Schema.String, Schema.Unknown),
+			),
+			/** Refreshed tool input when the provider streamed args after tool.started. */
+			input: Schema.optionalKey(CanonicalToolInputSchema),
+			/** Anchors the input refresh to the tool_start id in live clients; only set alongside input. */
+			callId: Schema.optionalKey(Schema.String),
+			toolName: Schema.optionalKey(Schema.String),
+		}),
+	),
+	"tool.completed": live(
+		Schema.Struct({
+			messageId: Schema.String,
+			partId: Schema.String,
+			result: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
+			duration: Schema.Number,
+			metadata: Schema.optionalKey(
+				Schema.Record(Schema.String, Schema.Unknown),
+			),
+			/** Final tool input when the provider streamed args after tool.started. */
+			input: Schema.optionalKey(CanonicalToolInputSchema),
+		}),
+	),
+	"file.attached": live(
+		Schema.Struct({
+			messageId: Schema.String,
+			partId: Schema.String,
+			mime: Schema.String,
+			filename: Schema.optionalKey(Schema.String),
+			url: Schema.String,
+		}),
+	),
+	"tool.input_updated": retired(
+		"Tool input refreshes use tool.running and tool.completed",
+		Schema.Struct({
+			messageId: Schema.String,
+			partId: Schema.String,
+		}).pipe((schema) =>
+			Schema.StructWithRest(schema, [
+				Schema.Record(Schema.String, Schema.Unknown),
+			]),
+		),
+	),
+	"turn.completed": live(
+		Schema.Struct({
+			messageId: Schema.String,
+			/** Names the turn when no assistant message of its own answered it. */
+			userMessageId: Schema.optionalKey(Schema.String),
+			cost: Schema.optionalKey(Schema.Number),
+			/** Claude's session running total; cost is its delta at persistence time. */
+			providerCostTotalUsd: Schema.optionalKey(Schema.Number),
+			providerSessionId: Schema.optionalKey(Schema.String),
+			/** Input and cache tokens in the final main request, excluding output. */
+			contextTokens: Schema.optionalKey(Schema.Number),
+			tokens: Schema.optionalKey(TokensSchema),
+			duration: Schema.optionalKey(Schema.Number),
+		}),
+	),
+	"turn.error": live(
+		Schema.Struct({
+			messageId: Schema.String,
+			/** Durable turn owner when a process fails before or between messages. */
+			userMessageId: Schema.optionalKey(Schema.String),
+			error: Schema.String,
+			code: Schema.optionalKey(Schema.String),
+			retryable: Schema.optionalKey(Schema.Boolean),
+		}),
+	),
+	"turn.interrupted": live(
+		Schema.Struct({
+			messageId: Schema.String,
+		}),
+	),
+	"turn.model_resolved": live(
+		Schema.Struct({
+			messageId: Schema.optionalKey(Schema.String),
+			requestedModel: Schema.optionalKey(NonEmptyStringSchema),
+			expectedModel: Schema.optionalKey(NonEmptyStringSchema),
+			actualModel: NonEmptyStringSchema,
+		}),
+	),
+	"input.admitted": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			inputId: Schema.String,
+			delivery: Schema.Literals([...INPUT_DELIVERIES]),
+			request: InputRequestSchema,
+		}),
+	),
+	"input.sent": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			inputId: Schema.String,
+			/** Handed into the running turn rather than starting one. */
+			steer: Schema.optionalKey(Schema.Literal(true)),
+			/** The user workspace move whose directive was included in this handoff. */
+			workspaceMoveSequence: Schema.optionalKey(Schema.Number),
+		}),
+	),
+	"input.requeued": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			inputId: Schema.String,
+			sentSequence: Schema.Number,
+			reason: Schema.Literals(["declined", "failed"]),
+		}),
+	),
+	"input.cancelled": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			inputId: Schema.String,
+		}),
+	),
+	"input.interrupt_requested": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			inputId: Schema.String,
+		}),
+	),
+	"session.created": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			title: Schema.String,
+			provider: Schema.String,
+			parentId: Schema.optionalKey(Schema.String),
+			forkedFrom: Schema.optionalKey(Schema.String),
+			forkPointEvent: Schema.optionalKey(Schema.String),
+			forkPointTimestamp: Schema.optionalKey(Schema.Number),
+			forkPointMessageId: Schema.optionalKey(Schema.String),
+			providerSessionId: Schema.optionalKey(Schema.String),
+			sideThread: Schema.optionalKey(Schema.Boolean),
+			/** The input a Side Thread was started with, so a retried start finds it. */
+			startInputId: Schema.optionalKey(Schema.String),
+			permissionMode: Schema.optionalKey(
+				Schema.Literals([...SESSION_PERMISSION_MODES]),
+			),
+		}),
+	),
+	"session.renamed": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			title: Schema.String,
+		}),
+	),
+	"session.rewound": live(
+		Schema.Struct({
+			messageId: Schema.String,
+			previousMessageId: Schema.optionalKey(Schema.NullOr(Schema.String)),
+		}),
+	),
+	"session.rewind_undone": live(
+		Schema.Struct({
+			previousMessageId: Schema.optionalKey(Schema.NullOr(Schema.String)),
+		}),
+	),
+	"session.rewind_committed": live(Schema.Struct({ messageId: Schema.String })),
+	"session.workspace_changed": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			/** Effective cwd after applying the mapping, including a reset to main. */
+			path: Schema.optionalKey(Schema.String),
+			/** Launch ownership, or its branch-name update. Forks never copy this metadata. */
+			ownership: Schema.optionalKey(
+				Schema.Array(SessionWorktreeOwnershipSchema),
+			),
+			...SessionWorkspaceSchema.fields,
+			/** A branch rename updates ownership without moving the workspace. */
+			cause: Schema.Union([
+				SessionWorkspaceSchema.fields.cause,
+				Schema.Literal("branch-rename"),
+			]),
+		}),
+	),
+	"session.workspace_hint_changed": live(
+		Schema.Struct({
+			path: Schema.NullOr(Schema.String),
+		}),
+	),
+	"session.workspace_started": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			path: Schema.String,
+		}),
+	),
+	"session.setup_started": live(SessionSetupStartedPayloadSchema),
+	"session.setup_output": live(SessionSetupOutputPayloadSchema),
+	"session.setup_finished": live(SessionSetupFinishedPayloadSchema),
+	"session.read": retired(
+		"SessionAttention writes seen_version",
+		Schema.Struct({
+			sessionId: Schema.String,
+		}),
+	),
+	"session.unread": retired(
+		"SessionAttention writes seen_version",
+		Schema.Struct({
+			sessionId: Schema.String,
+		}),
+	),
+	"session.settled": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			automatic: Schema.optionalKey(Schema.Boolean),
+			mergedHead: Schema.optionalKey(Schema.String),
+		}),
+	),
+	"session.unsettled": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+		}),
+	),
+	"session.archived": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			automatic: Schema.Boolean,
+		}),
+	),
+	"session.unarchived": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			cause: Schema.Literals(["manual", "send"]),
+		}),
+	),
+	"session.pinned": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+		}),
+	),
+	"session.unpinned": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+		}),
+	),
+	"session.snoozed": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			until: Schema.NullOr(Schema.Number),
+		}),
+	),
+	"session.auto_settle_set": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			disabled: Schema.Boolean,
+		}),
+	),
+	"session.unsnoozed": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+		}),
+	),
+	"session.deleted": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			/**
+			 * Descendant sessions deleted by the schema cascade, captured BEFORE the
+			 * tombstone persists (afterwards they can no longer be found by parent).
+			 * Optional: historical
+			 * tombstones lack it, and it is omitted when the session has no children.
+			 */
+			childSessionIds: Schema.optionalKey(Schema.Array(Schema.String)),
+		}),
+	),
+	"session.forked": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			parentId: Schema.String,
+			forkPointEvent: Schema.optionalKey(Schema.String),
+			forkPointTimestamp: Schema.optionalKey(Schema.Number),
+		}),
+	),
+	"session.status": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			status: SessionStatusSchema,
+			turnId: Schema.optionalKey(Schema.String),
+			/** A retry's reason, for the shell row while the provider waits. */
+			message: Schema.optionalKey(Schema.String),
+		}),
+	),
+	"session.compaction": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			state: Schema.Literals(["started", "completed", "failed"]),
+			detail: Schema.String,
+			preTokens: Schema.optionalKey(Schema.Number),
+			postTokens: Schema.optionalKey(Schema.Number),
+		}),
+	),
+	"session.provider_changed": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			oldProvider: Schema.String,
+			newProvider: Schema.String,
+			reason: Schema.optionalKey(
+				Schema.suspend(() => ContinuationReasonSchema),
+			),
+		}),
+	),
+	"session.provider_cleanup_failed": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			provider: Schema.String,
+			instanceId: Schema.optionalKey(Schema.String),
+			reason: Schema.String,
+		}),
+	),
+	"session.permission_mode_changed": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			mode: Schema.Literals([...SESSION_PERMISSION_MODES]),
+		}),
+	),
+	"session.model_changed": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			modelId: Schema.String,
+			providerId: Schema.String,
+		}),
+	),
+	"session.variant_changed": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			variant: Schema.String,
+		}),
+	),
+	"session.context_window_changed": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			contextWindow: Schema.String,
+		}),
+	),
+	"session.goal_changed": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			goal: Schema.NullOr(SessionGoalSchema),
+			ended: Schema.optional(Schema.Literals(["met", "cleared"])),
+			endedGoal: Schema.optional(SessionGoalSchema),
+			endedAt: Schema.optional(Schema.Number),
+			pausedReason: Schema.optional(Schema.String),
+		}),
+	),
+	"session.handoff_delivered": live(
+		Schema.Struct({
+			included: Schema.Number.check(
+				Schema.isInt(),
+				Schema.isGreaterThanOrEqualTo(0),
+			),
+			omitted: Schema.Number.check(
+				Schema.isInt(),
+				Schema.isGreaterThanOrEqualTo(0),
+			),
+			tokens: Schema.Number.check(
+				Schema.isInt(),
+				Schema.isGreaterThanOrEqualTo(0),
+			),
+			firstMessageIncluded: Schema.optionalKey(Schema.Boolean),
+			instanceId: Schema.optionalKey(Schema.String),
+		}),
+	),
+	"session.usage_limited": live(
+		Schema.Struct({
+			instanceId: Schema.String,
+			rateLimitType: Schema.String,
+			/** SDK reset time, in Unix seconds. */
+			resetsAt: Schema.optionalKey(Schema.Number),
+			cutOffMessageId: Schema.String,
+		}),
+	),
+	"session.cut_off_dismissed": live(
+		Schema.Struct({
+			cutOffMessageId: Schema.String,
+		}),
+	),
+	"session.resumed": live(
+		Schema.Struct({
+			reason: Schema.suspend(() => ContinuationReasonSchema),
+			instanceId: Schema.String,
+			/** The previous account, when the continuation switched accounts. */
+			from: Schema.optionalKey(Schema.String),
+		}),
+	),
+	"session.resume_scheduled": live(
+		Schema.Struct({
+			instanceId: Schema.String,
+			/** Unix seconds, matching the SDK's reset time. */
+			at: Schema.Number.pipe(Schema.check(Schema.isFinite())),
+		}),
+	),
+	// Preserve the empty payload type while accepting historical extra fields.
+	"session.resume_cancelled": live(
+		Schema.Struct({}) as Schema.Codec<Record<string, never>>,
+	),
+	"permission.asked": live(
+		Schema.Struct({
+			id: Schema.String,
+			providerProcessId: Schema.optionalKey(Schema.String),
+			providerRequestId: Schema.optionalKey(Schema.String),
+			sessionId: Schema.String,
+			toolName: Schema.String,
+			input: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
+			...PermissionAskedDetailsSchema.fields,
+		}),
+	),
+	"permission.resolved": live(
+		Schema.Struct({
+			id: Schema.String,
+			providerProcessId: Schema.optionalKey(Schema.String),
+			providerRequestId: Schema.optionalKey(Schema.String),
+			decision: PermissionDecisionSchema,
+			resolvedBy: Schema.optionalKey(Schema.Literal("auto")),
+		}),
+	),
+	"question.asked": live(
+		Schema.Struct({
+			id: Schema.String,
+			providerProcessId: Schema.optionalKey(Schema.String),
+			providerRequestId: Schema.optionalKey(Schema.String),
+			sessionId: Schema.String,
+			questions: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
+			...QuestionAskedDetailsSchema.fields,
+		}),
+	),
+	"question.resolved": live(
+		Schema.Struct({
+			id: Schema.String,
+			providerProcessId: Schema.optionalKey(Schema.String),
+			providerRequestId: Schema.optionalKey(Schema.String),
+			answers: Schema.Record(Schema.String, Schema.Unknown),
+		}),
+	),
+} as const;
+
+export type CanonicalEventType = keyof typeof CanonicalEvents;
+export type LiveEventType = {
+	[K in CanonicalEventType]: (typeof CanonicalEvents)[K]["status"] extends "live"
+		? K
+		: never;
+}[CanonicalEventType];
+export type PayloadOf<T extends CanonicalEventType> = Schema.Schema.Type<
+	(typeof CanonicalEvents)[T]["payload"]
+>;
+export type EventPayloadMap = { [K in CanonicalEventType]: PayloadOf<K> };
+
+export const CANONICAL_EVENT_TYPES = Object.keys(
+	CanonicalEvents,
+) as readonly CanonicalEventType[];
+
+export const SessionGoalChangedPayloadSchema =
+	CanonicalEvents["session.goal_changed"].payload;
+export const SessionWorkspaceChangedPayloadSchema =
+	CanonicalEvents["session.workspace_changed"].payload;
+export const SessionWorkspaceHintChangedPayloadSchema =
+	CanonicalEvents["session.workspace_hint_changed"].payload;
+export const SessionHandoffDeliveredPayloadSchema =
+	CanonicalEvents["session.handoff_delivered"].payload;
+export const SessionUsageLimitedPayloadSchema =
+	CanonicalEvents["session.usage_limited"].payload;
+
+function eventEnvelope<T extends CanonicalEventType, S extends Schema.Top>(
+	type: T,
+	dataSchema: S,
+) {
 	return Schema.Struct({
 		eventId: Schema.String,
 		sessionId: Schema.String,
@@ -1273,329 +1025,38 @@ function eventEnvelope<
 	});
 }
 
-const MessageCreatedEventSchema = eventEnvelope(
-	"message.created",
-	MessageCreatedPayloadSchema,
-);
-const MessageRemovedEventSchema = eventEnvelope(
-	"message.removed",
-	MessageRemovedPayloadSchema,
-);
-const MessagePartRemovedEventSchema = eventEnvelope(
-	"message.part.removed",
-	MessagePartRemovedPayloadSchema,
-);
-const MessageSnapshotEventSchema = eventEnvelope(
-	"message.snapshot",
-	MessageSnapshotPayloadSchema,
-);
-const TextDeltaEventSchema = eventEnvelope(
-	"text.delta",
-	TextDeltaPayloadSchema,
-);
-const ThinkingStartEventSchema = eventEnvelope(
-	"thinking.start",
-	ThinkingStartPayloadSchema,
-);
-const ThinkingDeltaEventSchema = eventEnvelope(
-	"thinking.delta",
-	ThinkingDeltaPayloadSchema,
-);
-const ThinkingEndEventSchema = eventEnvelope(
-	"thinking.end",
-	ThinkingEndPayloadSchema,
-);
-const ToolStartedEventSchema = eventEnvelope(
-	"tool.started",
-	ToolStartedPayloadSchema,
-);
-const ToolRunningEventSchema = eventEnvelope(
-	"tool.running",
-	ToolRunningPayloadSchema,
-);
-const ToolCompletedEventSchema = eventEnvelope(
-	"tool.completed",
-	ToolCompletedPayloadSchema,
-);
-const FileAttachedEventSchema = eventEnvelope(
-	"file.attached",
-	FileAttachedPayloadSchema,
-);
-const ToolInputUpdatedEventSchema = eventEnvelope(
-	"tool.input_updated",
-	ToolInputUpdatedPayloadSchema,
-);
-const TurnCompletedEventSchema = eventEnvelope(
-	"turn.completed",
-	TurnCompletedPayloadSchema,
-);
-const TurnErrorEventSchema = eventEnvelope(
-	"turn.error",
-	TurnErrorPayloadSchema,
-);
-const TurnInterruptedEventSchema = eventEnvelope(
-	"turn.interrupted",
-	TurnInterruptedPayloadSchema,
-);
-const TurnModelResolvedEventSchema = eventEnvelope(
-	"turn.model_resolved",
-	TurnModelResolvedPayloadSchema,
-);
-const InputAdmittedEventSchema = eventEnvelope(
-	"input.admitted",
-	InputAdmittedPayloadSchema,
-);
-const InputSentEventSchema = eventEnvelope(
-	"input.sent",
-	InputSentPayloadSchema,
-);
-const InputCancelledEventSchema = eventEnvelope(
-	"input.cancelled",
-	InputCancelledPayloadSchema,
-);
-const InputInterruptRequestedEventSchema = eventEnvelope(
-	"input.interrupt_requested",
-	InputInterruptRequestedPayloadSchema,
-);
-const SessionCreatedEventSchema = eventEnvelope(
-	"session.created",
-	SessionCreatedPayloadSchema,
-);
-const SessionRenamedEventSchema = eventEnvelope(
-	"session.renamed",
-	SessionRenamedPayloadSchema,
-);
-const SessionWorkspaceChangedEventSchema = eventEnvelope(
-	"session.workspace_changed",
-	SessionWorkspaceChangedPayloadSchema,
-);
-const SessionWorkspaceHintChangedEventSchema = eventEnvelope(
-	"session.workspace_hint_changed",
-	SessionWorkspaceHintChangedPayloadSchema,
-);
-const SessionWorkspaceStartedEventSchema = eventEnvelope(
-	"session.workspace_started",
-	SessionWorkspaceStartedPayloadSchema,
-);
-const SessionSetupStartedEventSchema = eventEnvelope(
-	"session.setup_started",
-	SessionSetupStartedPayloadSchema,
-);
-const SessionSetupOutputEventSchema = eventEnvelope(
-	"session.setup_output",
-	SessionSetupOutputPayloadSchema,
-);
-const SessionSetupFinishedEventSchema = eventEnvelope(
-	"session.setup_finished",
-	SessionSetupFinishedPayloadSchema,
-);
-const SessionReadEventSchema = eventEnvelope(
-	"session.read",
-	SessionReadPayloadSchema,
-);
-const SessionUnreadEventSchema = eventEnvelope(
-	"session.unread",
-	SessionUnreadPayloadSchema,
-);
-const SessionSettledEventSchema = eventEnvelope(
-	"session.settled",
-	SessionSettledPayloadSchema,
-);
-const SessionUnsettledEventSchema = eventEnvelope(
-	"session.unsettled",
-	SessionUnsettledPayloadSchema,
-);
-const SessionPinnedEventSchema = eventEnvelope(
-	"session.pinned",
-	SessionPinnedPayloadSchema,
-);
-const SessionUnpinnedEventSchema = eventEnvelope(
-	"session.unpinned",
-	SessionUnpinnedPayloadSchema,
-);
-const SessionSnoozedEventSchema = eventEnvelope(
-	"session.snoozed",
-	SessionSnoozedPayloadSchema,
-);
-const SessionAutoSettleSetEventSchema = eventEnvelope(
-	"session.auto_settle_set",
-	SessionAutoSettleSetPayloadSchema,
-);
-const SessionUnsnoozedEventSchema = eventEnvelope(
-	"session.unsnoozed",
-	SessionUnsnoozedPayloadSchema,
-);
-const SessionDeletedEventSchema = eventEnvelope(
-	"session.deleted",
-	SessionDeletedPayloadSchema,
-);
-const SessionForkedEventSchema = eventEnvelope(
-	"session.forked",
-	SessionForkedPayloadSchema,
-);
-const SessionStatusEventSchema = eventEnvelope(
-	"session.status",
-	SessionStatusPayloadSchema,
-);
-const SessionCompactionEventSchema = eventEnvelope(
-	"session.compaction",
-	SessionCompactionPayloadSchema,
-);
-const SessionProviderChangedEventSchema = eventEnvelope(
-	"session.provider_changed",
-	SessionProviderChangedPayloadSchema,
-);
-const SessionProviderCleanupFailedEventSchema = eventEnvelope(
-	"session.provider_cleanup_failed",
-	SessionProviderCleanupFailedPayloadSchema,
-);
-const SessionPermissionModeChangedEventSchema = eventEnvelope(
-	"session.permission_mode_changed",
-	SessionPermissionModeChangedPayloadSchema,
-);
-const SessionModelChangedEventSchema = eventEnvelope(
-	"session.model_changed",
-	SessionModelChangedPayloadSchema,
-);
-const SessionVariantChangedEventSchema = eventEnvelope(
-	"session.variant_changed",
-	SessionVariantChangedPayloadSchema,
-);
-const SessionContextWindowChangedEventSchema = eventEnvelope(
-	"session.context_window_changed",
-	SessionContextWindowChangedPayloadSchema,
-);
-const SessionGoalChangedEventSchema = eventEnvelope(
-	"session.goal_changed",
-	SessionGoalChangedPayloadSchema,
-);
-const SessionHandoffDeliveredEventSchema = eventEnvelope(
-	"session.handoff_delivered",
-	SessionHandoffDeliveredPayloadSchema,
-);
-const SessionUsageLimitedEventSchema = eventEnvelope(
-	"session.usage_limited",
-	SessionUsageLimitedPayloadSchema,
-);
-const SessionCutOffDismissedEventSchema = eventEnvelope(
-	"session.cut_off_dismissed",
-	SessionCutOffDismissedPayloadSchema,
-);
-const SessionResumedEventSchema = eventEnvelope(
-	"session.resumed",
-	SessionResumedPayloadSchema,
-);
-const SessionResumeScheduledEventSchema = eventEnvelope(
-	"session.resume_scheduled",
-	SessionResumeScheduledPayloadSchema,
-);
-const SessionResumeCancelledEventSchema = eventEnvelope(
-	"session.resume_cancelled",
-	SessionResumeCancelledPayloadSchema,
-);
-const PermissionAskedEventSchema = eventEnvelope(
-	"permission.asked",
-	PermissionAskedPayloadSchema,
-);
-const PermissionResolvedEventSchema = eventEnvelope(
-	"permission.resolved",
-	PermissionResolvedPayloadSchema,
-);
-const QuestionAskedEventSchema = eventEnvelope(
-	"question.asked",
-	QuestionAskedPayloadSchema,
-);
-const QuestionResolvedEventSchema = eventEnvelope(
-	"question.resolved",
-	QuestionResolvedPayloadSchema,
-);
+// Newly produced events are live; stored history can still contain retired types.
+export type CanonicalEvent<T extends CanonicalEventType = LiveEventType> = {
+	[K in T]: {
+		readonly eventId: string;
+		readonly sessionId: string;
+		readonly type: K;
+		readonly data: PayloadOf<K>;
+		readonly metadata: EventMetadata;
+		readonly provider: string;
+		readonly createdAt: number;
+	};
+}[T];
 
-// Canonical Event Schema (Union of all canonical event types)
+// Array.map loses the correlation between each key and its payload schema.
+// The mapped type above restates the discriminated union of those envelopes.
+function canonicalEventSchema<
+	const Fields extends Readonly<Record<string, Schema.Codec<unknown>>>,
+>(fields: Fields) {
+	return Schema.Union(
+		CANONICAL_EVENT_TYPES.map((type) =>
+			eventEnvelope(type, CanonicalEvents[type].payload).pipe(
+				Schema.fieldsAssign(fields),
+			),
+		),
+	) as Schema.Codec<
+		CanonicalEvent<CanonicalEventType> & Schema.Struct.Type<Fields>
+	>;
+}
 
-export const CanonicalEventSchema = Schema.Union(
-	MessageCreatedEventSchema,
-	MessageRemovedEventSchema,
-	MessagePartRemovedEventSchema,
-	MessageSnapshotEventSchema,
-	TextDeltaEventSchema,
-	ThinkingStartEventSchema,
-	ThinkingDeltaEventSchema,
-	ThinkingEndEventSchema,
-	ToolStartedEventSchema,
-	ToolRunningEventSchema,
-	ToolCompletedEventSchema,
-	FileAttachedEventSchema,
-	ToolInputUpdatedEventSchema,
-	TurnCompletedEventSchema,
-	TurnErrorEventSchema,
-	TurnInterruptedEventSchema,
-	TurnModelResolvedEventSchema,
-	InputAdmittedEventSchema,
-	InputSentEventSchema,
-	InputCancelledEventSchema,
-	InputInterruptRequestedEventSchema,
-	SessionCreatedEventSchema,
-	SessionRenamedEventSchema,
-	eventEnvelope(
-		"session.rewound",
-		Schema.Struct({
-			messageId: Schema.String,
-			previousMessageId: Schema.optional(Schema.NullOr(Schema.String)),
-		}),
-	),
-	eventEnvelope(
-		"session.rewind_undone",
-		Schema.Struct({
-			previousMessageId: Schema.optional(Schema.NullOr(Schema.String)),
-		}),
-	),
-	eventEnvelope(
-		"session.rewind_committed",
-		Schema.Struct({ messageId: Schema.String }),
-	),
-	SessionWorkspaceChangedEventSchema,
-	SessionWorkspaceHintChangedEventSchema,
-	SessionWorkspaceStartedEventSchema,
-	SessionSetupStartedEventSchema,
-	SessionSetupOutputEventSchema,
-	SessionSetupFinishedEventSchema,
-	SessionReadEventSchema,
-	SessionUnreadEventSchema,
-	SessionSettledEventSchema,
-	SessionUnsettledEventSchema,
-	SessionPinnedEventSchema,
-	SessionUnpinnedEventSchema,
-	SessionSnoozedEventSchema,
-	SessionAutoSettleSetEventSchema,
-	SessionUnsnoozedEventSchema,
-	SessionDeletedEventSchema,
-	SessionForkedEventSchema,
-	SessionStatusEventSchema,
-	SessionCompactionEventSchema,
-	SessionProviderChangedEventSchema,
-	SessionProviderCleanupFailedEventSchema,
-	SessionPermissionModeChangedEventSchema,
-	SessionModelChangedEventSchema,
-	SessionVariantChangedEventSchema,
-	SessionContextWindowChangedEventSchema,
-	SessionGoalChangedEventSchema,
-	SessionHandoffDeliveredEventSchema,
-	SessionUsageLimitedEventSchema,
-	SessionCutOffDismissedEventSchema,
-	SessionResumedEventSchema,
-	SessionResumeScheduledEventSchema,
-	SessionResumeCancelledEventSchema,
-	PermissionAskedEventSchema,
-	PermissionResolvedEventSchema,
-	QuestionAskedEventSchema,
-	QuestionResolvedEventSchema,
-);
-
-export const StoredEventSchema = Schema.extend(
-	CanonicalEventSchema,
-	Schema.Struct({
-		projectId: Schema.NonEmptyString,
-		sequence: Schema.Number,
-		streamVersion: Schema.Number,
-	}),
-);
+export const CanonicalEventSchema = canonicalEventSchema({});
+export const StoredEventSchema = canonicalEventSchema({
+	projectId: Schema.NonEmptyString,
+	sequence: Schema.Number,
+	streamVersion: Schema.Number,
+});

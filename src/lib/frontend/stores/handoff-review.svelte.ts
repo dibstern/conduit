@@ -3,12 +3,12 @@ import type {
 	SessionResume,
 } from "../../contracts/limit-recovery.js";
 import { openSettings } from "../components/layout/chrome-actions.js";
-import { getContinuationHandoffRpc } from "../transport/ws-rpc-client.js";
+import { toastFailure } from "../transport/rpc-errors.js";
+import { rpc } from "../transport/ws-rpc-client.js";
 import type { SessionInfo } from "../types.js";
 import { limitWindowName } from "../utils/continuation.js";
 import { getBrowserClientId } from "./client-identity.js";
 import { getInstanceById } from "./instance.svelte.js";
-import { getCurrentSlug } from "./router.svelte.js";
 import { showToast } from "./ui.svelte.js";
 
 /** The read-only "What carried over?" review on screen, if any. `summary` is null when nothing has been handed over yet. */
@@ -18,13 +18,11 @@ export const handoffReview = $state<{
 
 /** Opens the read-only summary of what a switch carried over, from the transcript divider or the auto-switch toast. */
 export async function reviewHandoff(
-	projectSlug: string,
 	sessionId: string,
 	resume: SessionResume,
 ): Promise<void> {
 	try {
-		const response = await getContinuationHandoffRpc({
-			projectSlug,
+		const response = await rpc("GetContinuationHandoff", {
 			sessionId,
 			instanceId: resume.instanceId,
 			at: resume.at,
@@ -34,8 +32,8 @@ export async function reviewHandoff(
 			to: resume.instanceId,
 			summary: response.handoff,
 		};
-	} catch {
-		showToast("Couldn't load what carried over", { variant: "error" });
+	} catch (error) {
+		toastFailure("Couldn't load what carried over")(error);
 	}
 }
 
@@ -48,8 +46,7 @@ export function followSessionResumes(
 	row: SessionInfo,
 	previous: SessionInfo | undefined,
 ): void {
-	const projectSlug = getCurrentSlug();
-	if (!previous || !projectSlug) return;
+	if (!previous) return;
 	const name = (id: string) => getInstanceById(id)?.name ?? id;
 	for (const resume of (row.resumes ?? []).slice(
 		previous.resumes?.length ?? 0,
@@ -70,7 +67,7 @@ export function followSessionResumes(
 				{
 					kind: "primary",
 					label: "What carried over?",
-					run: () => void reviewHandoff(projectSlug, row.id, resume),
+					run: () => void reviewHandoff(row.id, resume),
 				},
 				{
 					kind: "dismiss",

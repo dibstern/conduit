@@ -9,6 +9,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DaemonSessionQueryServiceTag } from "../../../src/lib/domain/relay/Services/daemon-session-query-service.js";
+import { InstanceManagementServiceTag } from "../../../src/lib/domain/relay/Services/instance-management-service.js";
+import { ProjectManagementServiceTag } from "../../../src/lib/domain/relay/Services/project-management-service.js";
+import { ScanServiceTag } from "../../../src/lib/domain/relay/Services/scan-service.js";
 import {
 	getDefaultAgent,
 	getDefaultModel,
@@ -197,7 +201,7 @@ describe("createProjectRelay override-state defaults", () => {
 			log: createSilentLogger(),
 		});
 
-		await relay.setDefaultAgent("plan");
+		await Effect.runPromise(relay.setDefaultAgent("plan"));
 
 		const defaultAgent = await relay.effectRuntime.runtime.runPromise(
 			getDefaultAgent(),
@@ -227,6 +231,57 @@ describe("createProjectRelay override-state defaults", () => {
 		});
 
 		expect(relay.wsHandler).toBeDefined();
+		const unsupported = await relay.effectRuntime.runtime.runPromise(
+			Effect.gen(function* () {
+				const scan = yield* ScanServiceTag;
+				const sessions = yield* DaemonSessionQueryServiceTag;
+				const projects = yield* ProjectManagementServiceTag;
+				const instances = yield* InstanceManagementServiceTag;
+				return {
+					scan: yield* Effect.result(scan.scanNow()),
+					sessions: yield* Effect.result(sessions.list({ limit: 5 })),
+					projects: yield* projects.list(),
+					save: yield* Effect.result(
+						projects.save({ folders: ["/standalone"] }),
+					),
+					instances: yield* Effect.result(instances.list()),
+				};
+			}),
+		);
+		expect(unsupported).toMatchObject({
+			scan: {
+				_tag: "Failure",
+				failure: {
+					_tag: "ScanServiceNotAvailable",
+					message: "Port scanning not available",
+				},
+			},
+			sessions: {
+				_tag: "Failure",
+				failure: {
+					_tag: "DaemonSessionQueryNotSupported",
+					message:
+						"Cross-project session listing is not supported in this mode",
+				},
+			},
+			projects: [],
+			save: {
+				_tag: "Failure",
+				failure: {
+					_tag: "ProjectManagementNotSupported",
+					message: "Saving projects is not supported in this mode",
+				},
+			},
+			instances: {
+				_tag: "Failure",
+				failure: {
+					_tag: "InstanceManagementServiceError",
+					cause: expect.objectContaining({
+						message: "Instance management not available",
+					}),
+				},
+			},
+		});
 	});
 
 	it("rejects relay creation cancellation with a tagged error", async () => {

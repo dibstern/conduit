@@ -2,28 +2,28 @@ import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { join } from "node:path";
-import { CLAUDE_RUNNER_PROTOCOL_VERSION } from "../../src/lib/provider/claude/claude-runner-protocol.js";
+import { RUNNER_PROTOCOL_VERSION } from "../../src/lib/provider/runner/runner-protocol.js";
 import {
-	type ClaudeRunnerRegistration,
-	prepareClaudeRunnerDirectory,
-} from "../../src/lib/provider/claude/claude-runner-registry.js";
+	prepareRunnerDirectory,
+	type RunnerRegistration,
+} from "../../src/lib/provider/runner/runner-registry.js";
 import { isRecord } from "../../src/lib/utils.js";
 
 export function testRunnerAlive(pid: number): boolean {
 	try {
 		process.kill(pid, 0);
 		return true;
-	} catch {
-		return false;
+	} catch (cause) {
+		return isRecord(cause) && cause["code"] === "EPERM";
 	}
 }
 
 function registrations(
 	projectDir: string,
 	configDir: string,
-): ClaudeRunnerRegistration[] {
-	const directory = prepareClaudeRunnerDirectory(projectDir, configDir);
-	const entries: ClaudeRunnerRegistration[] = [];
+): RunnerRegistration[] {
+	const directory = prepareRunnerDirectory(projectDir, configDir);
+	const entries: RunnerRegistration[] = [];
 	for (const filename of readdirSync(directory)) {
 		if (!/^[0-9a-f]{12}\.json$/.test(filename)) continue;
 		const socketPath = join(directory, filename.slice(0, -5));
@@ -44,6 +44,9 @@ function registrations(
 			value["pid"] > 0
 		)
 			entries.push({
+				...(typeof value["driverKind"] === "string"
+					? { driverKind: value["driverKind"] }
+					: {}),
 				socketPath,
 				runnerId: value["runnerId"],
 				sessionId: value["sessionId"],
@@ -55,32 +58,50 @@ function registrations(
 }
 
 // Never signal a PID from a file until the process identifies itself on its socket.
-function requestShutdown(
+// A runner serves one client and hangs up on others until it has processed the
+// previous client's close, which a loaded machine can delay past cleanup.
+async function requestShutdown(
 	projectDir: string,
-	entry: ClaudeRunnerRegistration,
+	entry: RunnerRegistration,
 ): Promise<boolean> {
+	const deadline = Date.now() + 2000;
+	for (;;) {
+		const outcome = await attemptShutdown(projectDir, entry);
+		if (outcome !== "refused" || Date.now() >= deadline)
+			return outcome === true;
+		await new Promise<void>((done) => setTimeout(done, 25));
+	}
+}
+
+function attemptShutdown(
+	projectDir: string,
+	entry: RunnerRegistration,
+): Promise<boolean | "refused"> {
 	return new Promise((done) => {
 		const socket = createConnection(entry.socketPath);
 		let verified = false;
+		let heard = false;
 		let finished = false;
 		let buffered = "";
 		const commandId = randomUUID();
-		const finish = () => {
+		const finish = (refused = false) => {
 			if (finished) return;
 			finished = true;
 			clearTimeout(timer);
 			socket.destroy();
-			done(verified);
+			done(refused ? "refused" : verified);
 		};
-		const timer = setTimeout(finish, 2000);
-		socket.once("error", finish);
-		socket.once("close", finish);
+		const timer = setTimeout(() => finish(), 2000);
+		socket.once("error", () => finish());
+		// A hang-up before any reply means the runner is still busy with another client.
+		socket.once("close", () => finish(!heard));
 		socket.once("connect", () =>
 			socket.write(
-				`${JSON.stringify({ type: "hello", protocolVersion: CLAUDE_RUNNER_PROTOCOL_VERSION, buildId: entry.buildId, config: { workspaceRoot: projectDir } })}\n`,
+				`${JSON.stringify({ type: "hello", protocolVersion: RUNNER_PROTOCOL_VERSION, buildId: entry.buildId, driverKind: entry.driverKind, config: { workspaceRoot: projectDir } })}\n`,
 			),
 		);
 		socket.on("data", (chunk: Buffer) => {
+			heard = true;
 			buffered += chunk.toString();
 			let newline = buffered.indexOf("\n");
 			while (newline >= 0) {
@@ -95,7 +116,7 @@ function requestShutdown(
 				}
 				if (isRecord(message) && message["type"] === "hello") {
 					if (
-						message["protocolVersion"] !== CLAUDE_RUNNER_PROTOCOL_VERSION ||
+						message["protocolVersion"] !== RUNNER_PROTOCOL_VERSION ||
 						message["buildId"] !== entry.buildId ||
 						message["runnerId"] !== entry.runnerId ||
 						message["sessionId"] !== entry.sessionId ||

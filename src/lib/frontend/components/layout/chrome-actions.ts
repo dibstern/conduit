@@ -22,12 +22,14 @@ import {
 	togglePanel as toggleTerminalPanel,
 } from "../../stores/terminal.svelte.js";
 import { composerAccountId } from "../../stores/usage.svelte.js";
-import { createPtyRpc } from "../../transport/ws-rpc-client.js";
+import { failureLine } from "../../transport/rpc-errors.js";
+import { rpc } from "../../transport/ws-rpc-client.js";
 
 export type SettingsSection =
 	| "general"
 	| "models"
 	| "claude"
+	| "archived"
 	| "usage"
 	| "server";
 
@@ -121,13 +123,12 @@ export function toggleTerminal(): void {
 		const sessionId = getCurrentSessionId();
 		const accountId = terminalAccountId();
 		if (slug && beginCreateTab()) {
-			void createPtyRpc({
-				projectSlug: slug,
+			void rpc("CreatePty", {
+				...(sessionId ? { sessionId } : { projectSlug: slug }),
 				originId: getBrowserClientId(),
-				...(sessionId ? { sessionId } : {}),
 				...(accountId === undefined ? {} : { accountId }),
-			}).catch(() => {
-				failCreateTab("Failed to create terminal");
+			}).catch((error) => {
+				failCreateTab(failureLine(error, "Failed to create terminal"));
 			});
 		}
 	}

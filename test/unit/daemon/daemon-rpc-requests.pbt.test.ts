@@ -1,4 +1,4 @@
-import { Either, Schema } from "effect";
+import { Result as Either, Schema } from "effect";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { WsRpcRequest } from "../../../src/lib/contracts/ws-rpc.js";
@@ -11,7 +11,7 @@ import {
 } from "../../helpers/arbitraries.js";
 
 const options = { seed: 42, numRuns: 300, endOnFailure: true };
-const decode = Schema.decodeUnknownEither(WsRpcRequest);
+const decode = Schema.decodeUnknownResult(WsRpcRequest);
 
 describe("Daemon RPC request properties", () => {
 	it("roundtrips schema-encoded tagged requests", () => {
@@ -19,8 +19,8 @@ describe("Daemon RPC request properties", () => {
 			fc.property(validDaemonRpcRequest, (request) => {
 				const encoded = Schema.encodeSync(WsRpcRequest)(request);
 				const decoded = decode(JSON.parse(JSON.stringify(encoded)));
-				expect(Either.isRight(decoded)).toBe(true);
-				if (Either.isRight(decoded)) expect(decoded.right).toEqual(request);
+				expect(Either.isSuccess(decoded)).toBe(true);
+				if (Either.isSuccess(decoded)) expect(decoded.success).toEqual(request);
 			}),
 			options,
 		);
@@ -29,7 +29,7 @@ describe("Daemon RPC request properties", () => {
 	it("rejects unknown tags and invalid fields", () => {
 		fc.assert(
 			fc.property(invalidDaemonRpcRequest, (request) => {
-				expect(Either.isLeft(decode(request))).toBe(true);
+				expect(Either.isFailure(decode(request))).toBe(true);
 			}),
 			options,
 		);
@@ -84,9 +84,12 @@ describe("Daemon RPC request properties", () => {
 			_tag: "RestartWithConfig",
 			config: { tls: true, port: 2634 },
 		});
-		expect(Either.isRight(result)).toBe(true);
-		if (Either.isRight(result) && result.right._tag === "RestartWithConfig") {
-			expect(Object.hasOwn(result.right, "config")).toBe(false);
+		expect(Either.isSuccess(result)).toBe(true);
+		if (
+			Either.isSuccess(result) &&
+			result.success._tag === "RestartWithConfig"
+		) {
+			expect(Object.hasOwn(result.success, "config")).toBe(false);
 		}
 	});
 
@@ -96,7 +99,7 @@ describe("Daemon RPC request properties", () => {
 		{ _tag: "AddInstance", name: "work", managed: "yes", port: 4096 },
 		{ _tag: "AddInstance", name: "work", driver: 42 },
 	])("rejects invalid instance addition %#", (request) => {
-		expect(Either.isLeft(decode(request))).toBe(true);
+		expect(Either.isFailure(decode(request))).toBe(true);
 	});
 
 	it.each([
@@ -107,7 +110,7 @@ describe("Daemon RPC request properties", () => {
 		"UpdateInstance",
 	])("requires a non-empty id for %s", (_tag) => {
 		for (const instanceId of [undefined, ""]) {
-			expect(Either.isLeft(decode({ _tag, instanceId }))).toBe(true);
+			expect(Either.isFailure(decode({ _tag, instanceId }))).toBe(true);
 		}
 	});
 });

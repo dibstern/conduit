@@ -10,8 +10,8 @@ import type { Page } from "@playwright/test";
 import { Effect } from "effect";
 import type {
 	CanonicalEvent,
-	CanonicalEventType,
 	EventPayloadMap,
+	LiveEventType,
 } from "../../../src/lib/contracts/stored-event.js";
 import type { SessionDetailEnvelope } from "../../../src/lib/contracts/ws-rpc.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -40,7 +40,7 @@ const seed = (
 			const events: CanonicalEvent[] = [];
 			for (const [index, session] of sessions.entries()) {
 				const at = Date.UTC(2026, 9, 1) + index * 10_000;
-				const event = <T extends CanonicalEventType>(
+				const event = <T extends LiveEventType>(
 					type: T,
 					data: EventPayloadMap[T],
 					offset = 0,
@@ -79,7 +79,7 @@ const seed = (
 			}
 			yield* commit(events, { publish: false });
 		}).pipe(
-			Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+			Effect.provide(makePersistenceEffectLayer(filename, "process-test")),
 		),
 	);
 
@@ -187,7 +187,7 @@ test("one streamed part renders markdown once in a 292-text-part message", async
 }, testInfo) => {
 	test.setTimeout(120_000);
 	await harness.terminate();
-	await seed(harness.projectStorePath(), [
+	await seed(harness.daemonStorePath(), [
 		{ id: STREAM_SESSION, parts: TEXT_PARTS, textOnly: true },
 	]);
 	await harness.restart({ keepPort: true });
@@ -283,7 +283,7 @@ test("snapshot installation scales below 8x for 4x as many parts", async ({
 		textOnly: false,
 	}));
 	await harness.terminate();
-	await seed(harness.projectStorePath(), sessions);
+	await seed(harness.daemonStorePath(), sessions);
 	await harness.restart({ keepPort: true });
 	await page.addInitScript(() =>
 		Reflect.set(window, "__conduitMeasureTranscriptApply", true),

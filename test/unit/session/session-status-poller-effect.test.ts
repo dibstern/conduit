@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Ref } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import {
 	getCurrentStatuses,
@@ -50,10 +50,10 @@ describe("SessionStatusPoller Effect", () => {
 			return Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`
-				INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+				INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
 				VALUES
-					('session-idle', 'opencode', 'Idle Session', 'idle', 1, 1),
-					('session-busy', 'opencode', 'Busy Session', 'busy', 2, 2)`;
+					('session-idle', 'test-project', 'opencode', 'Idle Session', 'idle', 1, 1),
+					('session-busy', 'test-project', 'opencode', 'Busy Session', 'busy', 2, 2)`;
 
 				yield* poll({
 					getRawStatuses: () => readSessionStatusesFromEffect,

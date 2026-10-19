@@ -11,12 +11,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Fiber, Option } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	type ClaudeRunnerMessage,
-	ClaudeRunnerSocket,
-} from "../../../../src/lib/provider/claude/claude-runner-protocol.js";
-import { ClaudeRunnerSpool } from "../../../../src/lib/provider/claude/claude-runner-spool.js";
-import type { ClaudeSessionOutput } from "../../../../src/lib/provider/claude/claude-session-runner.js";
+import { ClaudeRunnerSocket } from "../../../../src/lib/provider/claude/claude-runner-protocol.js";
+import type { RunnerMessage } from "../../../../src/lib/provider/runner/runner-protocol.js";
+import { RunnerSpool } from "../../../../src/lib/provider/runner/runner-spool.js";
+import type { SessionOutput } from "../../../../src/lib/provider/runner/session-runner.js";
 
 const scheduling = vi.hoisted(() => ({ yieldDeferred: false }));
 vi.mock("effect", async (importOriginal) => {
@@ -29,7 +27,7 @@ vi.mock("effect", async (importOriginal) => {
 				effect.Deferred.make<A, E>().pipe(
 					effect.Effect.tap(() =>
 						scheduling.yieldDeferred
-							? effect.Effect.yieldNow()
+							? effect.Effect.yieldNow
 							: effect.Effect.void,
 					),
 				),
@@ -54,7 +52,7 @@ function fixture() {
 	const directory = mkdtempSync(join(tmpdir(), "conduit-spool-regression-"));
 	directories.push(directory);
 	const filename = join(directory, "runner.spool");
-	const spool = new ClaudeRunnerSpool(filename);
+	const spool = new RunnerSpool(filename);
 	const socket = new Socket();
 	sockets.push(socket);
 	const connection = new ClaudeRunnerSocket(
@@ -66,7 +64,7 @@ function fixture() {
 	return { spool, filename, connection };
 }
 
-function statusOutput(status: "idle" | "busy"): ClaudeSessionOutput {
+function statusOutput(status: "idle" | "busy"): SessionOutput {
 	return {
 		type: "event",
 		sinkId: "turn-1",
@@ -106,12 +104,16 @@ describe("Claude runner output spool", () => {
 			}),
 		);
 		try {
-			await Effect.runPromise(Effect.yieldNow());
+			await Effect.runPromise(Effect.yieldNow);
 			if (attached) spool.disconnect(connection);
-			await Effect.runPromise(Effect.yieldNow());
-			expect(Option.isNone(await Effect.runPromise(Fiber.poll(read)))).toBe(
-				true,
-			);
+			await Effect.runPromise(Effect.yieldNow);
+			expect(
+				Option.isNone(
+					await Effect.runPromise(
+						Effect.sync(() => Option.fromUndefinedOr(read.pollUnsafe())),
+					),
+				),
+			).toBe(true);
 			spool.attach(connection, 0);
 			const result = {
 				subagentTranscript: {
@@ -137,7 +139,7 @@ describe("Claude runner output spool", () => {
 		const persisted = readFileSync(filename, "utf8")
 			.trim()
 			.split("\n")
-			.map((line) => JSON.parse(line) as ClaudeRunnerMessage);
+			.map((line) => JSON.parse(line) as RunnerMessage);
 		expect(persisted).toMatchObject([
 			{
 				type: "output",
@@ -160,8 +162,14 @@ describe("Claude runner output spool", () => {
 		});
 		expect(readFileSync(filename).length).toBe(0);
 		const busy = Effect.runFork(spool.emit(statusOutput("busy")));
-		await Effect.runPromise(Effect.yieldNow());
-		expect(Option.isNone(await Effect.runPromise(Fiber.poll(busy)))).toBe(true);
+		await Effect.runPromise(Effect.yieldNow);
+		expect(
+			Option.isNone(
+				await Effect.runPromise(
+					Effect.sync(() => Option.fromUndefinedOr(busy.pollUnsafe())),
+				),
+			),
+		).toBe(true);
 		spool.reply({
 			type: "output-reply",
 			outputId: "2",
@@ -178,10 +186,14 @@ describe("Claude runner output spool", () => {
 			spool.emit({ type: "release-sink", sinkId: "turn-1" }),
 		);
 		const drain = Effect.runFork(spool.drainEffect());
-		await Effect.runPromise(Effect.yieldNow());
-		expect(Option.isNone(await Effect.runPromise(Fiber.poll(drain)))).toBe(
-			true,
-		);
+		await Effect.runPromise(Effect.yieldNow);
+		expect(
+			Option.isNone(
+				await Effect.runPromise(
+					Effect.sync(() => Option.fromUndefinedOr(drain.pollUnsafe())),
+				),
+			),
+		).toBe(true);
 		spool.reply({
 			type: "output-reply",
 			outputId: "1",
@@ -204,7 +216,7 @@ describe("Claude runner output spool", () => {
 		);
 		for (let index = 0; index < 20; index++) {
 			const drain = Effect.runFork(spool.drainEffect());
-			await Effect.runPromise(Effect.yieldNow());
+			await Effect.runPromise(Effect.yieldNow);
 			expect(Reflect.get(spool, "drainWaiters")).toHaveProperty("size", 1);
 			await Effect.runPromise(Fiber.interrupt(drain));
 			expect(Reflect.get(spool, "drainWaiters")).toHaveProperty("size", 0);
@@ -224,7 +236,7 @@ describe("Claude runner output spool", () => {
 	it("writes concurrent notification and release frames in sequence order", async () => {
 		scheduling.yieldDeferred = true;
 		const { spool, connection } = fixture();
-		const frames: ClaudeRunnerMessage[] = [];
+		const frames: RunnerMessage[] = [];
 		vi.mocked(connection.write).mockImplementation((message) => {
 			frames.push(message);
 			if (message.type === "output")

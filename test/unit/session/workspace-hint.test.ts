@@ -1,6 +1,6 @@
 // Failure modes: reads counted as writes; lifecycle events counted repeatedly;
 // stale inputs or the wrong turn folder used; ambiguous cd targets guessed;
-// split or too few writes; writes in the recorded folder ignored; unrelated
+// short trailing runs replacing hints; trailing home writes ignored; unrelated
 // repositories counted; aliases split one worktree; deleted paths lost;
 // committed dismissals undone by interruption; failed commits lose dismissals.
 import { execFileSync } from "node:child_process";
@@ -14,9 +14,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
-import { SqlError } from "@effect/sql/SqlError";
 import { Deferred, Effect, Fiber, Layer, Logger, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/sql";
+import { SqlError } from "effect/sql/SqlError";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -48,10 +48,10 @@ import {
 	sessionRowsToSessionInfoList,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import {
-	type CanonicalEventType,
 	type CanonicalToolInput,
 	canonicalEvent,
 	type EventPayloadMap,
+	type LiveEventType,
 	type StoredEvent,
 } from "../../../src/lib/persistence/events.js";
 import {
@@ -65,7 +65,7 @@ import {
 	makeMockOpenCodeAPI,
 } from "../../helpers/mock-factories.js";
 
-const stored = <K extends CanonicalEventType>(
+const stored = <K extends LiveEventType>(
 	type: K,
 	data: EventPayloadMap[K],
 	sequence: number,
@@ -333,10 +333,10 @@ describe("workspace hint resolution against real worktrees", () => {
 	let observe: (
 		paths: readonly string[],
 		recorded?: string,
-	) => Promise<string | null>;
+	) => Promise<string | null | undefined>;
 	let observeCandidates: (
 		candidates: readonly { path: string; recordedWorkspace: string }[],
-	) => Promise<string | null>;
+	) => Promise<string | null | undefined>;
 	let runWorkspaceTest: <A, E>(
 		test: Effect.Effect<
 			A,
@@ -417,19 +417,18 @@ describe("workspace hint resolution against real worktrees", () => {
 		initialize(folders.nestedRepo);
 		initialize(folders.otherRepo);
 		const dependencies = Layer.mergeAll(
-			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+			Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 			makePersistenceEffectLayer(join(root, "events.db"), "test-project").pipe(
 				Layer.provideMerge(SessionWorkspaceHintStateLive),
 			),
-			Layer.succeed(
-				ConfigTag,
+			Layer.succeed(ConfigTag)(
 				makeMockConfig({
 					projectDir: folders.main,
 					configDir: join(root, "config"),
 				}),
 			),
-			Layer.succeed(LoggerTag, makeMockLogger()),
-			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+			Layer.succeed(LoggerTag)(makeMockLogger()),
+			Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 		);
 		const runtime = ManagedRuntime.make(
 			SessionWorkspaceLive.pipe(Layer.provideMerge(dependencies)),
@@ -462,22 +461,34 @@ describe("workspace hint resolution against real worktrees", () => {
 		if (folders) rmSync(folders.root, { recursive: true, force: true });
 	});
 
-	it("split writes must never produce a hint", async () => {
+	it("a short trailing run gives no opinion", async () => {
 		expect(
 			await observe([...writes(folders.b), ...writes(folders.c, 1)]),
-		).toBeNull();
+		).toBeUndefined();
+	});
+
+	it("three trailing writes produce a hint after writes in another worktree", async () => {
+		expect(await observe([...writes(folders.c, 1), ...writes(folders.b)])).toBe(
+			folders.b,
+		);
 	});
 
 	it.each([
-		1, 2,
+		0, 1, 2,
 	])("fewer than three writes must not produce a hint: %s", async (count) => {
-		expect(await observe(writes(folders.b, count))).toBeNull();
+		expect(await observe(writes(folders.b, count))).toBeUndefined();
 	});
 
-	it("a write in the recorded workspace must cancel a hint", async () => {
+	it("a trailing home write clears a hint", async () => {
 		expect(
 			await observe([...writes(folders.b), ...writes(folders.main, 1)]),
 		).toBeNull();
+	});
+
+	it("three trailing writes produce a hint after creating a worktree from home", async () => {
+		expect(
+			await observe([...writes(folders.main, 1), ...writes(folders.b)]),
+		).toBe(folders.b);
 	});
 
 	it("a write in an unrelated nested repository inside the recorded workspace must cancel a hint", async () => {
@@ -547,7 +558,7 @@ describe("workspace hint resolution against real worktrees", () => {
 		expect(await observeCandidates(collected)).toBeNull();
 	});
 
-	it("a write in its own recorded workspace must cancel a hint across an agent declaration", async () => {
+	it("home and away writes at the same path form one run across an agent declaration", async () => {
 		const before = join(folders.main, "before.ts");
 		const events = [
 			...tools([{ tool: "Write", filePath: before, content: "b" }]),
@@ -576,7 +587,7 @@ describe("workspace hint resolution against real worktrees", () => {
 			...hintCandidates([before], folders.main),
 			...hintCandidates(writes(folders.main), folders.b),
 		]);
-		expect(await observeCandidates(collected)).toBeNull();
+		expect(await observeCandidates(collected)).toBe(folders.main);
 	});
 
 	it("paths outside the project's repository must neither count nor cancel a hint", async () => {
@@ -589,7 +600,7 @@ describe("workspace hint resolution against real worktrees", () => {
 		).toBe(folders.b);
 		expect(
 			await observe([...writes(folders.b, 2), ...writes(folders.otherRepo)]),
-		).toBeNull();
+		).toBeUndefined();
 	});
 
 	it("relative paths must use the recorded workspace instead of the process cwd", async () => {
@@ -657,7 +668,7 @@ describe("workspace hint resolution against real worktrees", () => {
 			],
 			folders.main,
 		);
-		expect(await observeCandidates(paths)).toBeNull();
+		expect(await observeCandidates(paths)).toBeUndefined();
 	});
 
 	it("three writes back to the main checkout must produce the reverse hint", async () => {
@@ -751,20 +762,20 @@ describe("workspace hint resolution against real worktrees", () => {
 					);
 					yield* Deferred.await(publishing);
 					// The SQL commit has succeeded, but its row notification is held.
-					yield* Fiber.interruptFork(dismissal);
+					yield* Effect.sync(() => dismissal.interruptUnsafe());
 					yield* Deferred.succeed(release, undefined);
 					yield* Fiber.await(dismissal);
 					expect(yield* read.getSession(sessionId)).toMatchObject({
 						workspace_hint: folders.b,
 					});
-					const shellRow = (yield* read.listSessionInfos()).find(
-						(row) => row.id === sessionId,
-					);
+					const shellRow = (yield* read.listSessionInfos({
+						projectIds: ["test-project"],
+					})).find((row) => row.id === sessionId);
 					expect(shellRow).toBeDefined();
 					expect(shellRow?.workspaceHint).toBeUndefined();
-					const familyRow = (yield* read.readSessionList()).rows.find(
-						(row) => row.item.id === sessionId,
-					);
+					const familyRow = (yield* read.readSessionList({
+						projectIds: ["test-project"],
+					})).rows.find((row) => row.item.id === sessionId);
 					expect(familyRow).toBeDefined();
 					expect(familyRow?.item.workspaceHint).toBeUndefined();
 				}),
@@ -793,8 +804,9 @@ describe("workspace hint resolution against real worktrees", () => {
 					]);
 					yield* dismissWorkspaceHint(sessionId, folders.b);
 					expect(
-						(yield* read.listSessionInfos()).find((row) => row.id === sessionId)
-							?.workspaceHint,
+						(yield* read.listSessionInfos({
+							projectIds: ["test-project"],
+						})).find((row) => row.id === sessionId)?.workspaceHint,
 					).toBeUndefined();
 					yield* sql`CREATE TABLE hint_guard_parent (id INTEGER PRIMARY KEY)`;
 					yield* sql`CREATE TABLE hint_guard_child (
@@ -820,13 +832,13 @@ describe("workspace hint resolution against real worktrees", () => {
 								),
 							),
 						).pipe(
-							Effect.catchAllDefect((defect) => {
+							Effect.catchDefect((defect) => {
 								if (!(defect instanceof SqlError)) return Effect.die(defect);
 								expect(bodyCompleted).toBe(true);
 								// Effect SQL makes COMMIT errors defects and leaves SQLite's
 								// transaction open. Close it and surface the real error to the
 								// reactor's normal error path without changing client identity.
-								return sql`ROLLBACK`.pipe(Effect.zipRight(Effect.fail(defect)));
+								return sql`ROLLBACK`.pipe(Effect.andThen(Effect.fail(defect)));
 							}),
 						);
 					};
@@ -875,29 +887,29 @@ describe("workspace hint resolution against real worktrees", () => {
 							yield* sql<{ count: number }>`
 								SELECT COUNT(*) AS count FROM hint_guard_child`,
 						).toEqual([{ count: 0 }]);
-						const shellRow = (yield* read.listSessionInfos()).find(
-							(row) => row.id === sessionId,
-						);
+						const shellRow = (yield* read.listSessionInfos({
+							projectIds: ["test-project"],
+						})).find((row) => row.id === sessionId);
 						expect(shellRow).toBeDefined();
 						expect(shellRow?.workspaceHint).toBeUndefined();
-						const familyRow = (yield* read.readSessionList()).rows.find(
-							(row) => row.item.id === sessionId,
-						);
+						const familyRow = (yield* read.readSessionList({
+							projectIds: ["test-project"],
+						})).rows.find((row) => row.item.id === sessionId);
 						expect(familyRow).toBeDefined();
 						expect(familyRow?.item.workspaceHint).toBeUndefined();
 					}).pipe(
 						Effect.provide(
-							Logger.replace(
-								Logger.defaultLogger,
+							Logger.layer([
+								Logger.tracerLogger,
 								Logger.make(({ message }) => {
 									if (
 										String(message).startsWith(
 											"Could not observe workspace hint",
 										)
 									)
-										Deferred.unsafeDone(failed, Effect.void);
+										Deferred.doneUnsafe(failed, Effect.void);
 								}),
-							),
+							]),
 						),
 						Effect.ensuring(
 							Effect.sync(() =>
@@ -927,10 +939,10 @@ describe("workspace hint resolution against real worktrees", () => {
 				expect(
 					yield* workspace
 						.move("s-opencode", folders.b, "user")
-						.pipe(Effect.either),
+						.pipe(Effect.result),
 				).toMatchObject({
-					_tag: "Left",
-					left: { reason: "unsupported-provider" },
+					_tag: "Failure",
+					failure: { reason: "unsupported-provider" },
 				});
 				yield* commit([
 					canonicalEvent("session.workspace_hint_changed", "s-opencode", {
@@ -940,18 +952,18 @@ describe("workspace hint resolution against real worktrees", () => {
 				expect(
 					yield* workspace
 						.move("s-opencode", folders.c, "user")
-						.pipe(Effect.either),
+						.pipe(Effect.result),
 				).toMatchObject({
-					_tag: "Left",
-					left: { reason: "unsupported-provider" },
+					_tag: "Failure",
+					failure: { reason: "unsupported-provider" },
 				});
 				expect(
 					yield* workspace
 						.resolve("s-opencode", folders.b, "launch")
-						.pipe(Effect.either),
+						.pipe(Effect.result),
 				).toMatchObject({
-					_tag: "Left",
-					left: { reason: "unsupported-provider" },
+					_tag: "Failure",
+					failure: { reason: "unsupported-provider" },
 				});
 				expect(yield* workspace.move("s-opencode", folders.b, "user")).toBe(
 					folders.b,

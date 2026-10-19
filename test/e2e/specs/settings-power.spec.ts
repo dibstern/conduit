@@ -2,13 +2,8 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { test as base, expect, type Page } from "@playwright/test";
-import { Either } from "effect";
-import {
-	GetStatus,
-	RemoveProject,
-	SetKeepAwake,
-	SetKeepAwakeCommand,
-} from "../../../src/lib/contracts/ws-rpc.js";
+import { Result as Either } from "effect";
+
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -23,13 +18,18 @@ const test = base.extend<{ harness: ProcessHarness }>({
 			});
 			try {
 				await harness.restart({ startupTimeoutMs: 60_000 });
-				await harness.requestRpc(new RemoveProject({ slug: "process-test" }));
+				await harness.requestRpc({
+					_tag: "RemoveProject",
+					slug: "process-test",
+				});
 				// The editor is available only while on. Seed a harmless command so
 				// the first UI edit works even without a platform power utility.
-				await harness.requestRpc(
-					new SetKeepAwakeCommand({ command: "sleep", args: ["900"] }),
-				);
-				await harness.requestRpc(new SetKeepAwake({ enabled: true }));
+				await harness.requestRpc({
+					_tag: "SetKeepAwakeCommand",
+					command: "sleep",
+					args: ["900"],
+				});
+				await harness.requestRpc({ _tag: "SetKeepAwake", enabled: true });
 				await use(harness);
 			} finally {
 				writeFileSync(testInfo.outputPath("daemon.log"), harness.logTail);
@@ -208,7 +208,7 @@ test("Power runs its command, shares the inline editor, persists edits and stops
 	await expect(displayedCommand).toBeHidden();
 	await expect(editor).toBeHidden();
 	await expect.poll(() => sleepChildren(daemonPid)).toEqual([]);
-	const status = await harness.requestRpc(new GetStatus({}));
+	const status = await harness.requestRpc({ _tag: "GetStatus" });
 	expect(status).toMatchObject({
 		keepAwake: false,
 		keepAwakeCommand: "sleep 601",
@@ -257,9 +257,11 @@ test("an argument containing spaces survives Edit and Save", async ({
 		"sleep",
 		"infinity",
 	];
-	await harness.requestRpc(
-		new SetKeepAwakeCommand({ command: "systemd-inhibit", args }),
-	);
+	await harness.requestRpc({
+		_tag: "SetKeepAwakeCommand",
+		command: "systemd-inhibit",
+		args,
+	});
 	await new AppPage(page).goto(harness.baseUrl);
 	await openServer(page);
 	await expect(page.getByTestId("server-power-command-value")).toHaveText(

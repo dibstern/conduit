@@ -159,9 +159,9 @@ async function pickOpenCodeModel(page: Page, picker: Locator) {
  *  replies name their request with `requestId`. */
 type RpcFrame = {
 	readonly _tag?: string;
-	readonly id?: string;
+	readonly id?: string | number;
 	readonly tag?: string;
-	readonly requestId?: string;
+	readonly requestId?: string | number;
 	readonly payload?: Readonly<Record<string, unknown>>;
 	readonly exit?: { readonly _tag: string; readonly value?: unknown };
 };
@@ -181,10 +181,13 @@ async function editRpc(
 			async (message: string | Buffer) => {
 				if (typeof message !== "string") return send(message);
 				const frame = JSON.parse(message) as RpcFrame;
-				if (frame._tag === "Request" && frame.id) requests.set(frame.id, frame);
+				if (frame._tag === "Request" && frame.id !== undefined)
+					requests.set(String(frame.id), frame);
 				const edited = await edit(
 					frame,
-					frame.requestId ? requests.get(frame.requestId) : undefined,
+					frame.requestId !== undefined
+						? requests.get(String(frame.requestId))
+						: undefined,
 				);
 				if (edited !== null) send(JSON.stringify(edited));
 			};
@@ -302,7 +305,7 @@ test("an OpenCode model runs at the effort conduit shows for it", async ({
 				}),
 			);
 			await Effect.runPromise(
-				browser.rpc.SwitchVariant({ projectSlug, sessionId, variant: "high" }),
+				browser.rpc.SwitchVariant({ sessionId, variant: "high" }),
 			);
 		},
 	);
@@ -316,7 +319,7 @@ test("an OpenCode model runs at the effort conduit shows for it", async ({
 	if (!setup) throw new Error("openDraft never ran its setup");
 	const sessionId = /\/s\/([^/?]+)/.exec(page.url())?.[1] ?? "";
 	const { variant } = await Effect.runPromise(
-		setup.browser.rpc.GetModels({ projectSlug: setup.projectSlug, sessionId }),
+		setup.browser.rpc.GetModels({ sessionId }),
 	);
 	expect
 		.soft(variant?.variant, "conduit shows the model's saved effort")
@@ -909,7 +912,6 @@ test.describe("effort", () => {
 		);
 		const stored = await Effect.runPromise(
 			setup.browser.rpc.GetModels({
-				projectSlug: setup.projectSlug,
 				sessionId,
 			}),
 		);

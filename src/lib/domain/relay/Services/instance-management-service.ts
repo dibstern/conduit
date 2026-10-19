@@ -1,10 +1,8 @@
 import { Context, Data, Effect, Layer } from "effect";
 import type { AddAccountInput } from "../../../contracts/account.js";
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
+import { WsRpcError } from "../../../contracts/ws-rpc.js";
 import type { OpenCodeInstance } from "../../../shared-types.js";
-import type { ProjectRelayConfig } from "../../../types.js";
-import { InstanceMgmtTag } from "../../daemon/Services/management-service.js";
-import { ConfigTag } from "./services.js";
 
 type InstanceOperation =
 	| "list"
@@ -77,160 +75,74 @@ export interface InstanceManagementService {
 	>;
 }
 
-export class InstanceManagementServiceTag extends Context.Tag(
-	"InstanceManagementService",
-)<InstanceManagementServiceTag, InstanceManagementService>() {}
-
-const toError =
-	(operation: InstanceOperation) =>
-	(cause: unknown): InstanceManagementServiceError =>
-		new InstanceManagementServiceError({ operation, cause });
-
-export const hasInstanceManagementConfig = (
-	config: ProjectRelayConfig,
-): config is ProjectRelayConfig & {
-	readonly getInstances: NonNullable<ProjectRelayConfig["getInstances"]>;
-	readonly addInstance: NonNullable<ProjectRelayConfig["addInstance"]>;
-	readonly removeInstance: NonNullable<ProjectRelayConfig["removeInstance"]>;
-	readonly startInstance: NonNullable<ProjectRelayConfig["startInstance"]>;
-	readonly stopInstance: NonNullable<ProjectRelayConfig["stopInstance"]>;
-	readonly updateInstance: NonNullable<ProjectRelayConfig["updateInstance"]>;
-	readonly persistConfig: NonNullable<ProjectRelayConfig["persistConfig"]>;
-} =>
-	config.getInstances != null &&
-	config.addInstance != null &&
-	config.removeInstance != null &&
-	config.startInstance != null &&
-	config.stopInstance != null &&
-	config.updateInstance != null &&
-	config.persistConfig != null;
-
-const makeInstanceManagementService = (
-	instanceMgmt: import("../../../handlers/types.js").InstanceManagementDeps,
-): InstanceManagementService => {
-	const list = () =>
-		Effect.tryPromise({
-			try: () => Promise.resolve(instanceMgmt.getInstances()),
-			catch: toError("list"),
-		});
-
-	const persist = (operation: InstanceOperation) =>
-		Effect.tryPromise({
-			try: () => Promise.resolve(instanceMgmt.persistConfig()),
-			catch: toError(operation),
-		});
-
-	const withPersistedList = (operation: InstanceOperation) =>
-		Effect.gen(function* () {
-			yield* persist(operation);
-			return yield* list();
-		});
-
-	return {
-		list,
-		add: (input) =>
-			Effect.gen(function* () {
-				yield* Effect.tryPromise({
-					try: () => Promise.resolve(instanceMgmt.addInstance(input)),
-					catch: toError("add"),
-				});
-				return yield* withPersistedList("add");
-			}),
-		remove: (instanceId) =>
-			Effect.gen(function* () {
-				yield* Effect.tryPromise({
-					try: () => Promise.resolve(instanceMgmt.removeInstance(instanceId)),
-					catch: toError("remove"),
-				});
-				return yield* withPersistedList("remove");
-			}),
-		start: (instanceId) =>
-			Effect.gen(function* () {
-				yield* Effect.tryPromise({
-					try: () => instanceMgmt.startInstance(instanceId),
-					catch: toError("start"),
-				});
-				return yield* list();
-			}),
-		stop: (instanceId) =>
-			Effect.gen(function* () {
-				yield* Effect.tryPromise({
-					try: () => Promise.resolve(instanceMgmt.stopInstance(instanceId)),
-					catch: toError("stop"),
-				});
-				return yield* list();
-			}),
-		update: (instanceId, input) =>
-			Effect.gen(function* () {
-				const updates: {
-					name?: string;
-					env?: Record<string, string>;
-					port?: number;
-					driver?: ProviderDriverKind;
-					configDir?: string;
-				} = {};
-				if (typeof input.name === "string") updates.name = input.name;
-				if (typeof input.port === "number") updates.port = input.port;
-				if (input.env !== undefined) updates.env = input.env;
-				if (input.driver !== undefined) updates.driver = input.driver;
-				if (input.configDir !== undefined) updates.configDir = input.configDir;
-
-				yield* Effect.tryPromise({
-					try: () =>
-						Promise.resolve(instanceMgmt.updateInstance(instanceId, updates)),
-					catch: toError("update"),
-				});
-				return yield* withPersistedList("update");
-			}),
-		rename: (instanceId, name) =>
-			Effect.gen(function* () {
-				yield* Effect.tryPromise({
-					try: () =>
-						Promise.resolve(
-							instanceMgmt.updateInstance(instanceId, {
-								name,
-							}),
-						),
-					catch: toError("rename"),
-				});
-				return yield* withPersistedList("rename");
-			}),
-	};
-};
-
-export const InstanceManagementServiceLive: Layer.Layer<
+export class InstanceManagementServiceTag extends Context.Service<
 	InstanceManagementServiceTag,
-	never,
-	InstanceMgmtTag
-> = Layer.effect(
-	InstanceManagementServiceTag,
-	Effect.gen(function* () {
-		const instanceMgmt = yield* InstanceMgmtTag;
-		return makeInstanceManagementService(instanceMgmt);
-	}),
-);
+	InstanceManagementService
+>()("InstanceManagementService") {}
 
-export const InstanceManagementServiceFromConfigLive: Layer.Layer<
-	InstanceManagementServiceTag,
-	never,
-	ConfigTag
-> = Layer.effect(
-	InstanceManagementServiceTag,
-	Effect.gen(function* () {
-		const config = yield* ConfigTag;
-		if (!hasInstanceManagementConfig(config)) {
-			return yield* Effect.dieMessage(
-				"InstanceManagementServiceFromConfigLive requires complete instance management callbacks",
-			);
-		}
-		return makeInstanceManagementService({
-			getInstances: config.getInstances,
-			addInstance: config.addInstance,
-			removeInstance: config.removeInstance,
-			startInstance: config.startInstance,
-			stopInstance: config.stopInstance,
-			updateInstance: config.updateInstance,
-			persistConfig: config.persistConfig,
-		});
-	}),
-);
+export const InstanceManagementServiceLive: Layer.Layer<InstanceManagementServiceTag> =
+	Layer.succeed(InstanceManagementServiceTag, {
+		list: () =>
+			Effect.fail(
+				new InstanceManagementServiceError({
+					operation: "list",
+					cause: new WsRpcError({
+						message: "Instance management not available",
+					}),
+				}),
+			),
+		add: () =>
+			Effect.fail(
+				new InstanceManagementServiceError({
+					operation: "add",
+					cause: new WsRpcError({
+						message: "Instance management not available",
+					}),
+				}),
+			),
+		remove: () =>
+			Effect.fail(
+				new InstanceManagementServiceError({
+					operation: "remove",
+					cause: new WsRpcError({
+						message: "Instance management not available",
+					}),
+				}),
+			),
+		start: () =>
+			Effect.fail(
+				new InstanceManagementServiceError({
+					operation: "start",
+					cause: new WsRpcError({
+						message: "Instance management not available",
+					}),
+				}),
+			),
+		stop: () =>
+			Effect.fail(
+				new InstanceManagementServiceError({
+					operation: "stop",
+					cause: new WsRpcError({
+						message: "Instance management not available",
+					}),
+				}),
+			),
+		update: () =>
+			Effect.fail(
+				new InstanceManagementServiceError({
+					operation: "update",
+					cause: new WsRpcError({
+						message: "Instance management not available",
+					}),
+				}),
+			),
+		rename: () =>
+			Effect.fail(
+				new InstanceManagementServiceError({
+					operation: "rename",
+					cause: new WsRpcError({
+						message: "Instance management not available",
+					}),
+				}),
+			),
+	});

@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Effect, Option } from "effect";
+import { SqlClient } from "effect/sql";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
@@ -40,11 +40,14 @@ export const resolveOrphanedClaudePermissions = Effect.gen(function* () {
 	const orphans = yield* sql.value<{ id: string; session_id: string }>`
 		SELECT pa.id, pa.session_id
 		FROM pending_approvals pa
-		WHERE pa.type = 'permission'
+		JOIN sessions s ON s.id = pa.session_id
+		WHERE s.project_id = ${eventStore.value.projectId}
+			AND pa.type = 'permission'
 			AND pa.status = 'pending'
 			AND EXISTS (
 				SELECT 1 FROM events e
 				WHERE e.session_id = pa.session_id
+					AND e.project_id = ${eventStore.value.projectId}
 					AND e.type = 'permission.asked'
 					AND e.provider = 'claude'
 					AND json_extract(e.data, '$.id') = pa.id

@@ -97,15 +97,14 @@ describe("PtyManagerLive", () => {
 					() => Effect.void,
 				);
 				const dependencyLayer = Layer.mergeAll(
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: makeApi() }),
 					),
-					Layer.succeed(WebSocketHandlerTag, wsHandler),
-					Layer.succeed(ConfigTag, makeMockConfig({ projectDir: "/project" })),
-					Layer.succeed(LoggerTag, makeMockLogger()),
-					Layer.succeed(LocalPtyServiceTag, localPty),
-					Layer.succeed(ConnectPtyUpstreamTag, connectPtyUpstream),
+					Layer.succeed(WebSocketHandlerTag)(wsHandler),
+					Layer.succeed(ConfigTag)(makeMockConfig({ projectDir: "/project" })),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
+					Layer.succeed(LocalPtyServiceTag)(localPty),
+					Layer.succeed(ConnectPtyUpstreamTag)(connectPtyUpstream),
 				);
 				const ptyRuntimeLayer = makePtyRuntimeLive().pipe(
 					Layer.provide(dependencyLayer),

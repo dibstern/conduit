@@ -2,21 +2,25 @@ import {
 	type Cause,
 	Data,
 	Effect,
-	Either,
 	Fiber,
 	FiberMap,
 	Option,
 	Ref,
+	Result,
 } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../account-directory.js";
 import type { AccountUnroutable } from "../contracts/limit-recovery.js";
-import type { KnownProviderDriverKind } from "../contracts/provider-instance.js";
+import {
+	getProviderDriver,
+	type KnownProviderDriverKind,
+	PROVIDER_DRIVERS,
+} from "../contracts/provider-instance.js";
 import type { GetModelsResponse } from "../contracts/ws-rpc.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import {
 	cloneContextWindowOptions,
 	loadModelCatalog,
-	publishClaudeModels,
+	publishDiscoveredModels,
 } from "../domain/relay/Services/model-catalog.js";
 import {
 	ProjectSettingsTag,
@@ -124,11 +128,11 @@ const shouldBindOpenCodeSessionOnModelSwitch = (sessionId: string) =>
 	Effect.gen(function* () {
 		const readQuery = yield* ReadQueryEffectTag;
 
-		const rowResult = yield* Effect.either(readQuery.getSession(sessionId));
-		if (rowResult._tag === "Left") return true;
+		const rowResult = yield* Effect.result(readQuery.getSession(sessionId));
+		if (rowResult._tag === "Failure") return true;
 
-		const row = rowResult.right;
-		return !row || row.provider === "opencode";
+		const row = rowResult.success;
+		return !row || getProviderDriver(row.provider)?.runsOpenCodeServer === true;
 	});
 
 // OpenCode's amazon-bedrock catalog lists each model once per inference-profile
@@ -214,7 +218,7 @@ export const getModelsResponse = (
 	} = {},
 ): Effect.Effect<
 	GetModelsResponse,
-	Cause.UnknownException | AccountUnroutable,
+	Cause.UnknownError | AccountUnroutable,
 	| LoggerTag
 	| ConfigTag
 	| OpenCodeModelServiceTag
@@ -238,7 +242,7 @@ export const getModelsResponse = (
 				: undefined);
 		const stored = activeId
 			? yield* (yield* ReadQueryEffectTag).getSession(activeId).pipe(
-					Effect.catchAll((error) =>
+					Effect.catch((error) =>
 						Effect.sync(() => {
 							log.warn(
 								`Could not read session pick: ${formatErrorDetail(error)}`,
@@ -269,9 +273,9 @@ export const getModelsResponse = (
 					: yield* directory.resolve({ _tag: "Id", id: activeProviderId });
 		const activeDriver = activeAccount?.driver;
 		const claudeAccount =
-			instanceDriver === "opencode"
+			getProviderDriver(instanceDriver)?.catalogSource === "server"
 				? undefined
-				: account?.driver === "claude"
+				: getProviderDriver(account?.driver)?.catalogSource === "discovery"
 					? account
 					: Option.getOrUndefined(yield* directory.defaultFor("claude"));
 		const { modelDiscovery } = yield* ProjectSettingsTag;
@@ -286,14 +290,15 @@ export const getModelsResponse = (
 						})
 						.pipe(
 							Effect.flatMap((capabilities) =>
-								publishClaudeModels(capabilities.models, claudeAccount.id),
+								publishDiscoveredModels(capabilities.models, claudeAccount),
 							),
-							Effect.catchAll((error) =>
-								Effect.sync(() =>
+							Effect.catch((error) =>
+								Effect.gen(function* () {
+									yield* publishDiscoveredModels([], claudeAccount);
 									log.warn(
-										`Claude provider discovery failed during model refresh: ${formatErrorDetail(error)}`,
-									),
-								),
+										`${claudeAccount.driver} provider discovery failed during model refresh: ${formatErrorDetail(error)}`,
+									);
+								}),
 							),
 							Effect.asVoid,
 							(effect) =>
@@ -303,18 +308,19 @@ export const getModelsResponse = (
 						);
 
 		const inventoryInstanceId =
-			(activeDriver === "opencode" ? activeAccount?.id : undefined) ??
-			instanceId;
+			(getProviderDriver(activeDriver)?.catalogSource === "server"
+				? activeAccount?.id
+				: undefined) ?? instanceId;
 		const providers: ProviderInfo[] = [];
 		let nativeDefaultModel: string | undefined;
 		if (
-			instanceDriver === "opencode" ||
+			getProviderDriver(instanceDriver)?.catalogSource === "server" ||
 			(instanceDriver === undefined &&
-				(activeDriver === "opencode" ||
+				(getProviderDriver(activeDriver)?.catalogSource === "server" ||
 					((yield* directory.defaultFor("opencode"))._tag === "Some" &&
 						(account === undefined || account.id === listedId))))
 		) {
-			const openCodeProviderResult = yield* Effect.either(
+			const openCodeProviderResult = yield* Effect.result(
 				modelService.listProviders({
 					...(input.requireCatalog ? { requireFresh: true } : {}),
 					...(inventoryInstanceId === undefined
@@ -322,11 +328,11 @@ export const getModelsResponse = (
 						: { instanceId: inventoryInstanceId }),
 				}),
 			);
-			if (openCodeProviderResult._tag === "Right") {
-				nativeDefaultModel = openCodeProviderResult.right.nativeDefaultModel;
+			if (openCodeProviderResult._tag === "Success") {
+				nativeDefaultModel = openCodeProviderResult.success.nativeDefaultModel;
 				yield* refreshHarnessDefaults;
 				const nativeDefault = parseDefaultModel(
-					openCodeProviderResult.right.nativeDefaultModel,
+					openCodeProviderResult.success.nativeDefaultModel,
 				);
 				const { globalSync } = yield* ProjectSettingsTag;
 				if (
@@ -360,9 +366,9 @@ export const getModelsResponse = (
 								});
 						}),
 					);
-				const connectedSet = new Set(openCodeProviderResult.right.connected);
+				const connectedSet = new Set(openCodeProviderResult.success.connected);
 				providers.push(
-					...openCodeProviderResult.right.providers
+					...openCodeProviderResult.success.providers
 						.map((p) => {
 							const providerId = p.id || p.name || "";
 							const models = (p.models ?? []).map((m) => ({
@@ -389,9 +395,9 @@ export const getModelsResponse = (
 				);
 			} else {
 				if (input.requireCatalog)
-					return yield* Effect.fail(openCodeProviderResult.left);
+					return yield* Effect.fail(openCodeProviderResult.failure);
 				log.warn(
-					`OpenCode provider discovery failed during model refresh: ${formatErrorDetail(openCodeProviderResult.left)}`,
+					`OpenCode provider discovery failed during model refresh: ${formatErrorDetail(openCodeProviderResult.failure)}`,
 				);
 			}
 		}
@@ -418,7 +424,10 @@ export const getModelsResponse = (
 			? (catalogues[`providerModels:${claudeAccount.id}`] ??
 				catalogues.providerModels)
 			: catalogues.providerModels;
-		if (selectedDriver === "claude" && !claudeCatalog) {
+		if (
+			PROVIDER_DRIVERS[selectedDriver].catalogSource === "discovery" &&
+			!claudeCatalog
+		) {
 			if (modelDiscoveryFiber !== undefined)
 				yield* Fiber.await(modelDiscoveryFiber);
 			catalogues = yield* Ref.get((yield* ProjectSettingsTag).live);
@@ -428,23 +437,19 @@ export const getModelsResponse = (
 				: catalogues.providerModels;
 		}
 		const catalog = catalogFromProviderList(
-			selectedDriver === "claude"
+			PROVIDER_DRIVERS[selectedDriver].catalogSource === "discovery"
 				? (claudeCatalog?.providers ?? [])
 				: providers,
 		);
 		const pick = activeId
-			? storedSessionPick(stored, harnessForModelProvider(selectedDriver))
+			? storedSessionPick(stored, selectedDriver)
 			: harnessDefaultPick(
-					harnessForModelProvider(selectedDriver),
+					selectedDriver,
 					loadRelaySettings(config.configDir),
 					nativeDefaultModel,
 				);
 		const catalogModel = pick
-			? findCatalogModel(
-					harnessForModelProvider(selectedDriver),
-					pick.model,
-					catalog,
-				)
+			? findCatalogModel(selectedDriver, pick.model, catalog)
 			: undefined;
 		const options = catalogModel
 			? offeredOptions(catalogModel)
@@ -452,7 +457,7 @@ export const getModelsResponse = (
 		const sessionCatalog =
 			activeId &&
 			(catalog.length > 0 ||
-				(selectedDriver === "claude"
+				(PROVIDER_DRIVERS[selectedDriver].catalogSource === "discovery"
 					? claudeCatalog !== undefined
 					: (yield* modelService.cachedProviders(inventoryInstanceId))._tag ===
 						"Some"))
@@ -462,29 +467,31 @@ export const getModelsResponse = (
 			? resolveTurnSettings(pick, activeId ? sessionCatalog : catalog)
 			: undefined;
 		const activeModel =
-			normalized && Either.isRight(normalized)
+			normalized && Result.isSuccess(normalized)
 				? {
-						providerID: normalized.right.model.providerId,
-						modelID: normalized.right.model.modelId,
+						providerID: normalized.success.model.providerId,
+						modelID: normalized.success.model.modelId,
 					}
 				: undefined;
 
 		// Send variant_info for the current model so clients get refreshed state
 		const currentVariant =
-			normalized && Either.isRight(normalized) ? normalized.right.effort : "";
+			normalized && Result.isSuccess(normalized)
+				? normalized.success.effort
+				: "";
 		const variantList = [...options.efforts];
 		let modelExecution: GetModelsResponse["modelExecution"];
 		if (activeId) {
 			const readQuery = yield* ReadQueryEffectTag;
-			const executionResult = yield* Effect.either(
+			const executionResult = yield* Effect.result(
 				readQuery.getLatestTurnModelExecution(activeId),
 			);
-			if (executionResult._tag === "Left") {
+			if (executionResult._tag === "Failure") {
 				log.warn(
-					`Failed to read latest model execution for session ${activeId}: ${formatErrorDetail(executionResult.left)}`,
+					`Failed to read latest model execution for session ${activeId}: ${formatErrorDetail(executionResult.failure)}`,
 				);
-			} else if (executionResult.right) {
-				const row = executionResult.right;
+			} else if (executionResult.success) {
+				const row = executionResult.success;
 				modelExecution = {
 					...(row.requested_model === null
 						? {}
@@ -526,8 +533,8 @@ export const getModelsResponse = (
 			},
 			contextWindow: {
 				contextWindow:
-					normalized && Either.isRight(normalized)
-						? normalized.right.contextWindow
+					normalized && Result.isSuccess(normalized)
+						? normalized.success.contextWindow
 						: "",
 				options: cloneContextWindowOptions(options.contextWindows) ?? [],
 			},
@@ -558,24 +565,26 @@ export interface SwitchModelInput {
  */
 export const applyLiveSessionSettings = (sessionId: string) =>
 	Effect.gen(function* () {
-		const registry = yield* ProviderRegistryTag;
-		const instance = registry.getInstance("claude");
-		if (!instance?.applyLiveSettingsEffect) return;
 		const row = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
-		if (!row?.model_id || row.model_provider !== "claude") return;
+		if (!row?.model_id || !row.model_provider) return;
+		const driver = harnessForModelProvider(row.model_provider);
+		if (PROVIDER_DRIVERS[driver].catalogSource !== "discovery") return;
+		const registry = yield* ProviderRegistryTag;
+		const instance = registry.getInstance(driver);
+		if (!instance?.applyLiveSettingsEffect) return;
 
-		const result = yield* Effect.either(
+		const result = yield* Effect.result(
 			instance.applyLiveSettingsEffect(sessionId, {
 				modelId: row.model_id,
 				contextWindow: row.context_window ?? "",
 				variant: row.variant ?? "",
 			}),
 		);
-		if (result._tag === "Left") {
+		if (result._tag === "Failure") {
 			const log = yield* LoggerTag;
 			log.warn(
 				`session=${sessionId} Live settings apply failed; next turn will re-sync`,
-				result.left,
+				result.failure,
 			);
 		}
 	});
@@ -606,27 +615,27 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 			},
 			catalog,
 		);
-		if (Either.isLeft(resolved)) return yield* resolved.left;
+		if (Result.isFailure(resolved)) return yield* resolved.failure;
 		const model = {
-			providerID: resolved.right.model.providerId,
-			modelID: resolved.right.model.modelId,
+			providerID: resolved.success.model.providerId,
+			modelID: resolved.success.model.modelId,
 		};
 		const { variant: validVariant, variants: availableVariants } =
 			yield* savedVariantFor(model, catalog);
 		const catalogModel = findCatalogModel(
 			harness,
-			resolved.right.model,
+			resolved.success.model,
 			catalog,
 		);
 		const currentContext = (yield* (yield* ReadQueryEffectTag).getSession(
 			sessionId,
 		))?.context_window;
 		const contextPick = resolveTurnSettings(
-			{ ...resolved.right, contextWindow: currentContext ?? "" },
+			{ ...resolved.success, contextWindow: currentContext ?? "" },
 			catalog,
 		);
-		const contextWindow = Either.isRight(contextPick)
-			? contextPick.right.contextWindow
+		const contextWindow = Result.isSuccess(contextPick)
+			? contextPick.success.contextWindow
 			: "";
 		yield* selectSessionModel(sessionId, model);
 		if (contextWindow !== currentContext) {
@@ -634,7 +643,7 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 		}
 		yield* selectSessionVariant(sessionId, validVariant);
 		const engine = yield* OrchestrationEngineTag;
-		if (account.driver === "claude") {
+		if (PROVIDER_DRIVERS[account.driver].usesLocalSessions) {
 			engine.bindSession(sessionId, account.id);
 		} else if (yield* shouldBindOpenCodeSessionOnModelSwitch(sessionId)) {
 			engine.bindSession(sessionId, account.id);
@@ -688,7 +697,7 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 			},
 			catalog,
 		);
-		if (Either.isLeft(resolved)) return yield* resolved.left;
+		if (Result.isFailure(resolved)) return yield* resolved.failure;
 
 		const modelSpec = `${provider}/${model}`;
 		const override = { providerID: provider, modelID: model };
@@ -696,7 +705,7 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 			{
 				defaultModel: modelSpec,
 				harnessDefaults: {
-					[harness]: { ...resolved.right.model, contextWindow: "" },
+					[harness]: { ...resolved.success.model, contextWindow: "" },
 				},
 			},
 			config.configDir,
@@ -706,11 +715,13 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 		// Mirror the default into OpenCode's project config, except Claude-harness
 		// ids: OpenCode can't resolve them, so every prompt sent without a model
 		// would fail with "Model not found".
-		if (harnessForModelProvider(provider) === "opencode") {
-			const updateResult = yield* Effect.either(
+		if (
+			PROVIDER_DRIVERS[harnessForModelProvider(provider)].runsOpenCodeServer
+		) {
+			const updateResult = yield* Effect.result(
 				modelService.persistDefaultModel(provider, model),
 			);
-			if (updateResult._tag === "Left") {
+			if (updateResult._tag === "Failure") {
 				log.warn("Failed to persist default model to OpenCode config");
 			}
 		}
@@ -754,8 +765,8 @@ export const setHarnessDefaultForRelay = (input: {
 			},
 			catalog,
 		);
-		if (Either.isLeft(resolved)) return yield* resolved.left;
-		const { model, effort, contextWindow } = resolved.right;
+		if (Result.isFailure(resolved)) return yield* resolved.failure;
+		const { model, effort, contextWindow } = resolved.success;
 		yield* saveRelaySettingsEffect(
 			{
 				harnessDefaults: { [input.harness]: { ...model, contextWindow } },
@@ -775,7 +786,7 @@ export interface SwitchVariantInput {
 
 export const switchVariantForSession = (
 	input: SwitchVariantInput,
-	modelCatalog?: readonly ModelInfo[],
+	catalogSource?: readonly ModelInfo[],
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
@@ -790,7 +801,7 @@ export const switchVariantForSession = (
 				: undefined;
 		const harness = harnessForModelProvider(activeModel?.providerID ?? "");
 		const catalog =
-			modelCatalog ??
+			catalogSource ??
 			(yield* loadModelCatalog(harness, row?.provider ?? harness));
 		const resolved = resolveTurnSettings(
 			{
@@ -804,8 +815,8 @@ export const switchVariantForSession = (
 			},
 			catalog,
 		);
-		if (Either.isLeft(resolved)) return yield* resolved.left;
-		yield* selectSessionVariant(sessionId, resolved.right.effort);
+		if (Result.isFailure(resolved)) return yield* resolved.failure;
+		yield* selectSessionVariant(sessionId, resolved.success.effort);
 		yield* applyLiveSessionSettings(sessionId);
 
 		// Persist variant preference

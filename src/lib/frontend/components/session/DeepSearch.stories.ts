@@ -3,7 +3,7 @@ import { expect, fireEvent, userEvent, waitFor, within } from "storybook/test";
 import type { ListDaemonSessionsResponse } from "../../../contracts/ws-rpc.js";
 import { projectState } from "../../stores/project.svelte.js";
 import { attachedProjectState } from "../../stores/router.svelte.js";
-import type { listDaemonSessionsRpc } from "../../transport/ws-rpc-client.js";
+import type { rpc } from "../../transport/ws-rpc-client.js";
 import DeepSearch from "./DeepSearch.svelte";
 
 const now = Date.now();
@@ -38,7 +38,7 @@ const sessions: ListDaemonSessionsResponse["sessions"] = [
 	},
 ];
 
-const search: typeof listDaemonSessionsRpc = async (input) => ({
+const search: typeof rpc<"ListDaemonSessions"> = async (_tag, input) => ({
 	sessions: sessions.filter(
 		(session) =>
 			!input.search ||

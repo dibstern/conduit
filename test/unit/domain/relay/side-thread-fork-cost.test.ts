@@ -1,0 +1,297 @@
+// Failure modes: one INSERT per copied event; one message stamp per event
+// instead of per message; copying tool.running heartbeats that a later event
+// for the same tool supersedes; dropping a heartbeat that carries metadata or
+// is the tool's last word; a cheaper copy projecting a different transcript.
+import { Effect } from "effect";
+import { SqlClient, Statement } from "effect/sql";
+import { expect, it } from "vitest";
+import { AccountIdSchema } from "../../../../src/lib/contracts/provider-instance.js";
+import { AccountDirectory } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
+import { OpenCodeInstancesTag } from "../../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	ConfigTag,
+	LoggerTag,
+	OrchestrationEngineTag,
+} from "../../../../src/lib/domain/relay/Services/services.js";
+import { forkSession } from "../../../../src/lib/domain/relay/Services/session-command.js";
+import { makeOverridesStateLive } from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
+import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
+import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
+import { ReadQueryEffectTag } from "../../../../src/lib/persistence/effect/read-query-effect.js";
+import {
+	type CanonicalEvent,
+	canonicalEvent,
+} from "../../../../src/lib/persistence/events.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
+import { claudeSdk } from "../../../helpers/fake-claude-process-sdk.js";
+import {
+	makeMockAccountDirectory,
+	makeMockConfig,
+	makeMockLogger,
+	makeOpenCodeInstancesStub,
+} from "../../../helpers/mock-factories.js";
+import { withDispatchEffect } from "../../../helpers/orchestration-engine-test-double.js";
+
+const TURNS = 4;
+const TOOLS = 40;
+let clock = 0;
+const at = () => ({ createdAt: ++clock });
+
+const turn = (n: number): CanonicalEvent[] => {
+	const user = `user-${n}`;
+	const reply = `reply-${n}`;
+	return [
+		canonicalEvent(
+			"message.created",
+			"parent",
+			{ sessionId: "parent", messageId: user, role: "user" },
+			at(),
+		),
+		canonicalEvent(
+			"text.delta",
+			"parent",
+			{ messageId: user, partId: `${user}:text`, text: `Ask ${n}` },
+			at(),
+		),
+		canonicalEvent(
+			"message.created",
+			"parent",
+			{ sessionId: "parent", messageId: reply, role: "assistant" },
+			at(),
+		),
+		...Array.from({ length: TOOLS }, (_, t) => {
+			const partId = `${reply}:tool-${t}`;
+			const heartbeat = () =>
+				canonicalEvent(
+					"tool.running",
+					"parent",
+					{ messageId: reply, partId },
+					at(),
+				);
+			return [
+				canonicalEvent(
+					"tool.started",
+					"parent",
+					{
+						messageId: reply,
+						partId,
+						toolName: "Bash",
+						callId: partId,
+						input: { tool: "Bash", command: `echo ${t}` },
+					},
+					at(),
+				),
+				heartbeat(),
+				// Progress the transcript shows: never superseded by the copy.
+				...(t % 10 === 0
+					? [
+							canonicalEvent(
+								"tool.running",
+								"parent",
+								{ messageId: reply, partId, metadata: { progress: t } },
+								at(),
+							),
+						]
+					: []),
+				heartbeat(),
+				heartbeat(),
+				// The last tool of the first turn never completes: its final
+				// heartbeat is the only thing saying it ran.
+				...(n === 0 && t === TOOLS - 1
+					? []
+					: [
+							canonicalEvent(
+								"tool.completed",
+								"parent",
+								{ messageId: reply, partId, result: `out ${t}`, duration: t },
+								at(),
+							),
+						]),
+			];
+		}).flat(),
+		canonicalEvent(
+			"text.delta",
+			"parent",
+			{ messageId: reply, partId: `${reply}:text`, text: `Done ${n}` },
+			at(),
+		),
+		canonicalEvent("turn.completed", "parent", { messageId: reply }, at()),
+	];
+};
+
+// Compare content independently of the copy's identity, counters and provenance.
+const transcript = (rows: readonly unknown[], sessionId: string) =>
+	JSON.parse(
+		JSON.stringify(rows)
+			.replaceAll(`_${sessionId}`, "")
+			.replaceAll(sessionId, "parent"),
+		(key, value) =>
+			key === "version" ||
+			key === "last_applied_seq" ||
+			key === "is_inherited" ||
+			key === "is_human_sent"
+				? undefined
+				: value,
+	);
+
+it("copies a long Side Thread history in bounded statements with the same transcript", async () => {
+	await Effect.runPromise(
+		Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
+			const read = yield* ReadQueryEffectTag;
+			const store = yield* EventStoreEffectTag;
+			yield* commit([
+				canonicalEvent("session.created", "parent", {
+					sessionId: "parent",
+					title: "Parent",
+					provider: "claude",
+				}),
+				canonicalEvent("session.model_changed", "parent", {
+					sessionId: "parent",
+					providerId: "claude",
+					modelId: "sonnet",
+				}),
+				canonicalEvent("session.variant_changed", "parent", {
+					sessionId: "parent",
+					variant: "high",
+				}),
+				canonicalEvent("session.context_window_changed", "parent", {
+					sessionId: "parent",
+					contextWindow: "200k",
+				}),
+				...Array.from({ length: TURNS }, (_, n) => turn(n)).flat(),
+			]);
+
+			const shapes = new Map<string, number>();
+			const child = yield* forkSession("parent", {
+				side: { title: "Side", inputId: "side-input" },
+			}).pipe(
+				Effect.provideService(Statement.CurrentTransformer, (statement) => {
+					const shape = statement
+						.compile()[0]
+						.replace(/\s+/g, " ")
+						.trim()
+						.slice(0, 40);
+					shapes.set(shape, (shapes.get(shape) ?? 0) + 1);
+					return Effect.succeed(statement);
+				}),
+			);
+			const count = (prefix: string) =>
+				[...shapes]
+					.filter(([shape]) => shape.startsWith(prefix))
+					.reduce((sum, [, n]) => sum + n, 0);
+
+			const copied = yield* store.readAllBySession(child.id);
+			const sql = yield* SqlClient.SqlClient;
+			for (const [sessionId, inherited, userHumanSent] of [
+				["parent", 0, 1],
+				[child.id, 1, 0],
+			] as const) {
+				expect(
+					yield* sql`SELECT role, is_inherited, is_human_sent, COUNT(*) AS count
+					FROM messages WHERE session_id = ${sessionId}
+					GROUP BY role, is_inherited, is_human_sent ORDER BY role`,
+				).toEqual([
+					{
+						role: "assistant",
+						is_inherited: inherited,
+						is_human_sent: 0,
+						count: TURNS,
+					},
+					{
+						role: "user",
+						is_inherited: inherited,
+						is_human_sent: userHumanSent,
+						count: TURNS,
+					},
+				]);
+			}
+			const heartbeats = copied.filter(
+				(event) => event.type === "tool.running",
+			);
+			const tool = (n: number, t: number) => ({
+				messageId: `reply-${n}_${child.id}`,
+				partId: `reply-${n}:tool-${t}_${child.id}`,
+			});
+			const progress = (n: number) =>
+				[0, 10, 20, 30].map((t) => ({
+					...tool(n, t),
+					metadata: { progress: t },
+				}));
+			expect
+				.soft(heartbeats.map((event) => event.data))
+				.toEqual([
+					...progress(0),
+					tool(0, TOOLS - 1),
+					...progress(1),
+					...progress(2),
+					...progress(3),
+				]);
+			// Appends are batched, not one statement per copied event.
+			expect.soft(count("INSERT INTO events")).toBeLessThanOrEqual(4);
+			// Each copied message is stamped once, not once per event naming it.
+			expect
+				.soft(count("UPDATE messages SET version"))
+				.toBeLessThanOrEqual(TURNS * 2);
+			expect
+				.soft(
+					transcript(
+						yield* read.getSessionMessagesWithParts(child.id),
+						child.id,
+					),
+				)
+				.toEqual(
+					transcript(
+						yield* read.getSessionMessagesWithParts("parent"),
+						child.id,
+					),
+				);
+		}).pipe(
+			Effect.provideService(
+				OrchestrationEngineTag,
+				withDispatchEffect({
+					dispatchEffect: () =>
+						Effect.succeed({
+							models: [
+								{
+									id: "sonnet",
+									name: "Sonnet",
+									providerId: "claude",
+									variants: { high: {} },
+									contextWindowOptions: [{ value: "200k", label: "200k" }],
+								},
+							],
+						}),
+				}),
+			),
+			Effect.provideService(
+				ConfigTag,
+				makeMockConfig({
+					projectDir: "/project",
+					configDir: "/unused-config",
+					claudeSdk,
+				}),
+			),
+			Effect.provideService(LoggerTag, makeMockLogger()),
+			Effect.provideService(
+				AccountDirectory,
+				makeMockAccountDirectory([
+					{
+						driver: "claude",
+						id: AccountIdSchema.make("claude"),
+						name: "Claude",
+						folder: configuredClaudeConfigDir("/unused-config"),
+						usageEligible: true,
+					},
+				]),
+			),
+			Effect.provideService(
+				OpenCodeInstancesTag,
+				makeOpenCodeInstancesStub({}),
+			),
+			Effect.provide(makeOverridesStateLive()),
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
+	);
+});

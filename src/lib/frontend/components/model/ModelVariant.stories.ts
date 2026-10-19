@@ -9,15 +9,30 @@ import {
 	handleModelList,
 	selectInstance,
 } from "../../stores/discovery.svelte.js";
-import { sessionState } from "../../stores/session.svelte.js";
+import { instanceState } from "../../stores/instance.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
+import type { OpenCodeInstance } from "../../types.js";
 import ModelVariant from "./ModelVariant.svelte";
 
 const onOpen = fn();
 const fourLevels = ["low", "medium", "high", "max"];
 const fiveLevels = ["low", "medium", "high", "xhigh", "max"];
+const claudeAccount = {
+	id: "claude",
+	name: "Claude",
+	driver: "claude",
+	isDefault: true,
+	port: 0,
+	managed: false,
+	status: "healthy",
+	restartCount: 0,
+	createdAt: 0,
+} satisfies OpenCodeInstance;
 
 function seed(variant = "", variants = fourLevels) {
+	// Without a session the draft resolves its model through the selected account.
+	instanceState.instances = [claudeAccount];
 	handleModelList({
 		providers: [
 			{
@@ -95,9 +110,10 @@ const meta = {
 	beforeEach: ({ parameters }) => {
 		const compact = sessionViewState.compact;
 		const composerWidth = sessionViewState.composerWidth;
+		const instances = instanceState.instances;
 		clearDiscoveryState();
 		// A draft changes local discovery state without a session or RPC connection.
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		onOpen.mockClear();
 		seed();
 		const width = Object.getOwnPropertyDescriptor(window, "innerWidth");
@@ -111,6 +127,7 @@ const meta = {
 			else Reflect.deleteProperty(window, "innerWidth");
 			window.dispatchEvent(new Event("resize"));
 			clearDiscoveryState();
+			instanceState.instances = instances;
 		};
 	},
 } satisfies Meta<typeof ModelVariant>;
@@ -194,7 +211,7 @@ export const PhoneTapCycle: Story = {
 		await assertMeter(button, 4, 0);
 		for (const [variant, label, filled] of [
 			["low", "LOW", 1],
-			["medium", "MED", 2],
+			["medium", "MEDIUM", 2],
 			["high", "HIGH", 3],
 			["max", "MAX", 4],
 			["low", "LOW", 1],
@@ -305,7 +322,7 @@ export const PhoneKeyboard: Story = {
 		const button = within(canvasElement).getByTestId("variant-badge");
 		button.focus();
 		await userEvent.keyboard("{Enter} ");
-		await waitFor(() => expect(button).toHaveTextContent("MED"));
+		await waitFor(() => expect(button).toHaveTextContent("MEDIUM"));
 		await expect(
 			within(canvasElement.ownerDocument.body).queryByTestId(
 				"variant-dropdown",

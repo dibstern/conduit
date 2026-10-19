@@ -1,7 +1,5 @@
 // Routes: /auth, /setup, / (session list), /new (draft session), /s/:sessionId.
 
-import { getScopeGroupKey } from "../../session-scope.js";
-
 export type Route =
 	| { page: "auth" }
 	| { page: "setup" }
@@ -29,7 +27,7 @@ function splitPath(path: string): { pathname: string; search: string } {
 	return { pathname, search: query ? `?${query}` : "" };
 }
 
-/** The sidebar's project or repository scope (`?p=<scope>`). Read and written through
+/** The sidebar's project scope (`?p=<scope>`). Read and written through
  *  stores/session-scope.ts; declared here because navigation has to carry it. */
 export const SCOPE_PARAM = "p";
 /** The project a draft (/new) will be created in; separate from the list scope. */
@@ -128,28 +126,36 @@ export function getCurrentRoute(): Route {
 /** Replace old bookmarks and unknown paths without adding a history entry. */
 export function normalizeRoute(): void {
 	const path = routerState.path;
+	const params = getCurrentSearchParams();
+	const retiredScope = params.get(SCOPE_PARAM)?.startsWith("/group/");
+	if (retiredScope) params.delete(SCOPE_PARAM);
+	const search = retiredScope
+		? params.size
+			? `?${params}`
+			: ""
+		: routerState.search;
 	const legacySession = path.match(/^\/p\/[^/]+\/s\/([^/]+)\/?$/);
 	if (legacySession) {
-		replaceRoute(`/s/${legacySession[1]}${routerState.search}`);
+		replaceRoute(`/s/${legacySession[1]}${search || "?"}`);
 		return;
 	}
 	const legacyProject = path.match(/^\/p\/([^/]+)\/?$/);
 	if (legacyProject?.[1]) {
-		const params = getCurrentSearchParams();
 		params.set(SCOPE_PARAM, legacyProject[1]);
 		replaceRoute(`/?${params}`);
 		return;
 	}
 	if (!/^\/(?:s\/[^/]+\/?|new\/?|auth\/?|setup\/?)?$/.test(path)) {
-		replaceRoute(`/${routerState.search}`);
+		replaceRoute(`/${search || "?"}`);
+	} else if (search !== routerState.search) {
+		replaceRoute(`${path}${search || "?"}`);
 	}
 }
 
 /** Use the daemon's attached project, or the route hint before the first attach. */
 export function getCurrentSlug(): string | null {
 	if (attachedProjectState.slug !== null) return attachedProjectState.slug;
-	const scope = getCurrentSearchParams().get(SCOPE_PARAM);
-	return getScopeGroupKey(scope) === null ? scope : null;
+	return getCurrentSearchParams().get(SCOPE_PARAM);
 }
 
 /** Get the current session ID from the URL (null if not present). */

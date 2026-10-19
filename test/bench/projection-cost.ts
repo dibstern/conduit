@@ -8,9 +8,9 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { arch, platform, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { Reactivity } from "@effect/experimental";
-import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import { Reactivity } from "effect/reactivity";
+import { SqlClient } from "effect/sql";
 import { PersistenceProjectTag } from "../../src/lib/domain/persistence/Services/persistence-service.js";
 import { makeCommitAndSignal } from "../../src/lib/persistence/effect/commit-and-signal.js";
 import {

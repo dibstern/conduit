@@ -103,7 +103,7 @@ function messageText(message: HistoryMessage) {
 }
 
 function persisted(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath(), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		return {
 			activeCommands: (
@@ -209,7 +209,6 @@ describe("Claude rewind through the detached runner and real relay", () => {
 		const rewind = () =>
 			Effect.runPromise(
 				browser.rpc.RewindSession({
-					projectSlug: "process-test",
 					sessionId,
 					messageId: target.id,
 				}),
@@ -236,9 +235,8 @@ describe("Claude rewind through the detached runner and real relay", () => {
 		evidence["pending"] = persisted(harness, sessionId);
 		const pendingBeforeContinue = persisted(harness, sessionId);
 		const continuation = await Effect.runPromise(
-			Effect.either(
+			Effect.result(
 				browser.rpc.ContinueSession({
-					projectSlug: "process-test",
 					sessionId,
 					instanceId: "claude",
 					expectedInstanceId: "claude",
@@ -246,17 +244,15 @@ describe("Claude rewind through the detached runner and real relay", () => {
 			),
 		);
 		expect(continuation).toMatchObject({
-			_tag: "Left",
-			left: { _tag: "SessionBusy" },
+			_tag: "Failure",
+			failure: { _tag: "SessionBusy" },
 		});
 		expect(pendingRewind(browser, sessionId)).toBe(target.id);
 		expect(persisted(harness, sessionId)).toEqual(pendingBeforeContinue);
 		expect(queries(harness)).toHaveLength(1);
 		evidence["continuationWhilePending"] = continuation;
 
-		await Effect.runPromise(
-			second.rpc.UndoRewind({ projectSlug: "process-test", sessionId }),
-		);
+		await Effect.runPromise(second.rpc.UndoRewind({ sessionId }));
 		await vi.waitFor(() => {
 			for (const tab of [browser, second, reloadedPending])
 				expect(detailState(tab, sessionId)).toEqual({
@@ -314,9 +310,7 @@ describe("Claude rewind through the detached runner and real relay", () => {
 			persisted(harness, sessionId).session.pending_rewind_message_id,
 		).toBeNull();
 		await expect(
-			Effect.runPromise(
-				reloaded.rpc.UndoRewind({ projectSlug: "process-test", sessionId }),
-			),
+			Effect.runPromise(reloaded.rpc.UndoRewind({ sessionId })),
 		).rejects.toThrow();
 		await vi.waitFor(() =>
 			expect(
@@ -363,16 +357,13 @@ describe("Claude rewind through the detached runner and real relay", () => {
 		const rewind = () =>
 			Effect.runPromise(
 				browser.rpc.RewindSession({
-					projectSlug: "process-test",
 					sessionId,
 					messageId: first.id,
 				}),
 			);
 		await rewind();
 		expect(await browser.history(sessionId)).toEqual([]);
-		await Effect.runPromise(
-			browser.rpc.UndoRewind({ projectSlug: "process-test", sessionId }),
-		);
+		await Effect.runPromise(browser.rpc.UndoRewind({ sessionId }));
 		expect((await browser.history(sessionId)).map(({ id }) => id)).toEqual(
 			before.map(({ id }) => id),
 		);
@@ -431,7 +422,6 @@ describe("Claude rewind through the detached runner and real relay", () => {
 		if (!nativeUser) throw new Error("Missing kept native user UUID");
 		await Effect.runPromise(
 			browser.rpc.RewindSession({
-				projectSlug: "process-test",
 				sessionId,
 				messageId: target.id,
 			}),
@@ -486,7 +476,6 @@ describe("Claude rewind through the detached runner and real relay", () => {
 		const original = await firstQueryMark(harness);
 		await Effect.runPromise(
 			browser.rpc.RewindSession({
-				projectSlug: "process-test",
 				sessionId,
 				messageId: target.id,
 			}),

@@ -1,14 +1,16 @@
 // @vitest-environment jsdom
-import { RpcClient, type RpcMessage } from "@effect/rpc";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Effect, ManagedRuntime, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SessionTodosEnvelope } from "../../../src/lib/contracts/ws-rpc.js";
+import type {
+	SessionTodosEnvelope,
+	WsRpcError,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	makeWsRpcClientsLayer,
 	type WsRpcClients,
-	type WsRpcConnect,
 } from "../../../src/lib/frontend/transport/shared-client.js";
-import { WsRpcGroup } from "../../../src/lib/frontend/transport/ws-rpc.js";
+import { makeRpcStream, makeRpcWire } from "../../helpers/rpc-wire.js";
+import type { StubTable } from "../../helpers/stub-ws-rpc.js";
 
 const runtimeMock = vi.hoisted(() => ({
 	getRuntime: vi.fn(),
@@ -22,62 +24,47 @@ import {
 } from "../../../src/lib/frontend/stores/todo.svelte.js";
 
 interface Request {
-	id: string;
+	id: string | number;
 	tag: string;
 	payload: unknown;
 	trafficClass: string;
 }
 
-// The real client over a fake wire: requests are captured per socket, and the
-// test plays the server by writing frames back on the socket a request used.
 function adapter() {
-	const requests: Request[] = [];
-	const interrupted: string[] = [];
-	const deliver = new Map<
+	const feeds = new Map<
 		string,
-		(frame: RpcMessage.FromServerEncoded) => Effect.Effect<void>
+		Effect.Success<
+			ReturnType<typeof makeRpcStream<SessionTodosEnvelope, WsRpcError>>
+		>
 	>();
-	const connect: WsRpcConnect = ({ trafficClass }) =>
-		Effect.gen(function* () {
-			const protocol = RpcClient.Protocol.make((write) =>
-				Effect.sync(() => {
-					deliver.set(trafficClass, write);
-					return {
-						send: (frame: RpcMessage.FromClientEncoded) =>
-							Effect.sync(() => {
-								if (frame._tag === "Request")
-									requests.push({
-										id: frame.id,
-										tag: frame.tag,
-										payload: frame.payload,
-										trafficClass,
-									});
-								if (frame._tag === "Interrupt")
-									interrupted.push(frame.requestId);
-							}),
-						supportsAck: false,
-						supportsTransferables: false,
-					};
-				}),
-			);
-			return yield* Layer.build(
-				Layer.effect(RpcClient.Protocol, protocol),
-			).pipe(
-				Effect.flatMap((context) =>
-					Effect.provide(RpcClient.make(WsRpcGroup), context),
+	const table: StubTable = {
+		SubscribeSessionTodos: ({ sessionId }) =>
+			Stream.unwrap(
+				makeRpcStream<SessionTodosEnvelope, WsRpcError>().pipe(
+					Effect.map((feed) => {
+						feeds.set(sessionId, feed);
+						return feed.stream;
+					}),
 				),
-			);
-		});
+			),
+	};
+	const wire = makeRpcWire(table);
 	return {
-		requests,
-		interrupted,
-		connect,
+		...wire,
 		async emit(request: Request, envelope: SessionTodosEnvelope) {
-			const write = deliver.get(request.trafficClass);
-			if (!write) throw new Error(`${request.trafficClass} has not opened`);
-			await Effect.runPromise(
-				write({ _tag: "Chunk", requestId: request.id, values: [envelope] }),
-			);
+			const payload = request.payload;
+			if (
+				typeof payload !== "object" ||
+				payload === null ||
+				!("sessionId" in payload)
+			)
+				throw new Error("missing session payload");
+			const feed = await vi.waitFor(() => {
+				const feed = feeds.get(String(payload.sessionId));
+				if (!feed) throw new Error("subscription not ready");
+				return feed;
+			});
+			await Effect.runPromise(feed.emit(envelope));
 		},
 	};
 }
@@ -119,7 +106,7 @@ describe("todo feed", () => {
 		const request = todosRequest(wire.requests, "A");
 		if (!request) throw new Error("missing request");
 		expect(request.trafficClass).toBe("control");
-		expect(request.payload).toEqual({ projectSlug: "project", sessionId: "A" });
+		expect(request.payload).toEqual({ sessionId: "A" });
 
 		await wire.emit(request, {
 			_tag: "snapshot",
@@ -173,6 +160,6 @@ describe("todo feed", () => {
 		viewTodos("project", "B");
 		expect(todoState.items).toEqual([]);
 		await settled(() => todosRequest(wire.requests, "B") !== undefined);
-		await settled(() => wire.interrupted.includes(a.id));
+		await settled(() => wire.interrupted.includes(String(a.id)));
 	});
 });

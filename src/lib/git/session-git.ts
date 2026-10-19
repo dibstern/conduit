@@ -84,10 +84,11 @@ const defaultRefs = async (directory: string): Promise<string[]> => {
 /** Local default refs only, sharing merge detection's candidates. Never fetch. */
 export async function hasNoCommitsBeyondDefault(
 	directory: string,
+	head: string,
 ): Promise<boolean> {
 	for (const ref of await defaultRefs(directory))
 		if (
-			(await git(directory, "merge-base", "--is-ancestor", "HEAD", ref)) !==
+			(await git(directory, "merge-base", "--is-ancestor", head, ref)) !==
 			undefined
 		)
 			return true;
@@ -96,6 +97,7 @@ export async function hasNoCommitsBeyondDefault(
 
 export async function readSessionGit(
 	directory: string,
+	previous?: SessionGit,
 ): Promise<SessionGit | undefined> {
 	try {
 		const dirs = await git(
@@ -215,10 +217,70 @@ export async function readSessionGit(
 				if (merged) break;
 			}
 		}
+		if (!merged) return { ...result, merged };
+		let mergedAt = previous?.mergedHead === tip ? previous.mergedAt : undefined;
+		if (mergedAt === undefined) {
+			for (const ref of containingDefaults) {
+				const ancestry = await git(
+					directory,
+					"log",
+					"--ancestry-path",
+					"--format=%H %ct %P",
+					`${tip}..${ref}`,
+				);
+				const descendants = new Set([tip]);
+				let refMergedAt: number | undefined;
+				for (const line of ancestry?.split("\n") ?? []) {
+					const [sha, committedAt, ...parents] = line.split(" ");
+					if (!sha || !committedAt) continue;
+					descendants.add(sha);
+					const time = Number(committedAt) * 1_000;
+					if (parents.slice(1).includes(tip) && Number.isFinite(time))
+						refMergedAt = Math.min(
+							refMergedAt ?? Number.POSITIVE_INFINITY,
+							time,
+						);
+				}
+				if (refMergedAt === undefined) {
+					const defaultReflog = await git(
+						directory,
+						"reflog",
+						"show",
+						"--date=unix",
+						"--format=%H %gd",
+						ref,
+					);
+					// Entries are newest first, so retain the oldest containing entry.
+					for (const line of defaultReflog?.split("\n") ?? []) {
+						const entry = line.match(/^([a-f0-9]+) .+@\{(\d+)\}$/);
+						if (entry?.[1] && descendants.has(entry[1]))
+							refMergedAt = Number(entry[2]) * 1_000;
+					}
+				}
+				if (refMergedAt === undefined) {
+					// An underestimate can miss an auto-settle, but cannot hide newer work.
+					const committedAt = await git(
+						directory,
+						"log",
+						"-1",
+						"--format=%ct",
+						tip,
+					);
+					if (committedAt && Number.isFinite(Number(committedAt)))
+						refMergedAt = Number(committedAt) * 1_000;
+				}
+				if (refMergedAt !== undefined)
+					mergedAt = Math.min(
+						mergedAt ?? Number.POSITIVE_INFINITY,
+						refMergedAt,
+					);
+			}
+		}
 		return {
 			...result,
 			merged,
-			...(merged ? { mergedHead: tip } : {}),
+			mergedHead: tip,
+			...(mergedAt !== undefined ? { mergedAt } : {}),
 		};
 	} catch {
 		return undefined;
@@ -229,7 +291,10 @@ export const SESSION_GIT_REFRESH_INTERVAL_MS =
 	DEFAULT_RECONCILIATION_INTERVAL_MS;
 
 export function createSessionGitCache(
-	read: (directory: string) => Promise<SessionGit | undefined> = readSessionGit,
+	read: (
+		directory: string,
+		previous?: SessionGit,
+	) => Promise<SessionGit | undefined> = readSessionGit,
 ) {
 	const entries = new Map<
 		string,
@@ -255,7 +320,7 @@ export function createSessionGitCache(
 			if (pending) return pending;
 			let reading: Promise<SessionGit | undefined>;
 			try {
-				reading = read(directory);
+				reading = read(directory, entries.get(directory)?.value);
 			} catch {
 				reading = Promise.resolve(undefined);
 			}

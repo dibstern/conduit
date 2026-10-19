@@ -12,44 +12,36 @@ test("files, mentions and new terminals follow a session move and navigation", a
 	const main = "/workspace/main";
 	const worktree = "/workspace/worktree";
 	const projects = [
-		{ slug: projectSlug, title: "Workspace project", folders: [main] },
+		{ slug: projectSlug, title: "Workspace project", folders: [main] as const },
 	];
 	let moved = false;
 	let terminalCount = 0;
 	const sessions = [
 		{
+			accountId: null,
 			id: "workspace-session",
 			title: "Workspace session",
-			status: "idle",
+			status: "idle" as const,
 			projectSlug,
 		},
-		{ id: "main-session", title: "Main session", status: "idle", projectSlug },
+		{
+			accountId: null,
+			id: "main-session",
+			title: "Main session",
+			status: "idle" as const,
+			projectSlug,
+		},
 	];
 	let rpc: RpcMockControl;
 	const folder = (sessionId: unknown) =>
 		moved && sessionId === "workspace-session" ? worktree : main;
 	rpc = await mockWsRpc(page, {
-		handlers: {
-			GetProjects: () => ({
-				projects,
-				current: projectSlug,
-			}),
-			GetAgents: () => ({
-				projectSlug,
-				agents: [],
-				providerScope: { id: "claude", name: "Claude" },
-				instanceId: "claude",
-			}),
-			ListDaemonSessions: () => ({
-				sessions,
-				availability: [],
-				hasMore: false,
-				nextCursor: null,
-			}),
-			GetFileTree: ({ sessionId }) => ({
+		stubs: {
+			GetFileTree: (scope) => ({
 				projectSlug,
 				entries: [
-					folder(sessionId) === worktree
+					folder("sessionId" in scope ? scope.sessionId : undefined) ===
+					worktree
 						? "worktree-only.txt"
 						: "main-only.txt",
 					"shared.txt",
@@ -57,7 +49,7 @@ test("files, mentions and new terminals follow a session move and navigation", a
 					"nested/child.txt",
 				],
 			}),
-			GetFileList: ({ sessionId, path = "." }) => ({
+			GetFileList: ({ path = ".", ...scope }) => ({
 				projectSlug,
 				path,
 				entries:
@@ -66,7 +58,9 @@ test("files, mentions and new terminals follow a session move and navigation", a
 						: [
 								{
 									name:
-										folder(sessionId) === worktree
+										folder(
+											"sessionId" in scope ? scope.sessionId : undefined,
+										) === worktree
 											? "worktree-only.txt"
 											: "main-only.txt",
 									type: "file",
@@ -75,12 +69,35 @@ test("files, mentions and new terminals follow a session move and navigation", a
 								{ name: "nested", type: "directory" },
 							],
 			}),
-			GetFileContent: ({ sessionId, path }) => ({
+			GetFileContent: ({ path, ...scope }) => ({
 				projectSlug,
 				path,
-				content: `${folder(sessionId) === worktree ? "worktree" : "main"} content`,
+				content: `${folder("sessionId" in scope ? scope.sessionId : undefined) === worktree ? "worktree" : "main"} content`,
 			}),
-			CreatePty: ({ sessionId }) => {
+			ListDaemonSessions: () => ({
+				sessions,
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
+			}),
+			GetModels: (input) => ({
+				defaultOpenCodeInstanceId: "opencode",
+				projectSlug: "projectSlug" in input ? input.projectSlug : projectSlug,
+				providers: [],
+			}),
+			GetAgents: () => ({
+				projectSlug,
+				agents: [],
+				providerScope: { id: "claude", name: "Claude" },
+				instanceId: "claude",
+			}),
+			GetProjects: () => ({
+				projects,
+				current: projectSlug,
+			}),
+			CreatePty: (payload) => {
+				const sessionId =
+					"sessionId" in payload ? payload.sessionId : undefined;
 				const id = `pty-${++terminalCount}`;
 				rpc.sendChunk("SubscribePtys", [
 					{

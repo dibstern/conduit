@@ -1,5 +1,6 @@
-import { SqlClient } from "@effect/sql";
 import { Data, Effect } from "effect";
+import { SqlClient } from "effect/sql";
+import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
@@ -85,7 +86,7 @@ export const rewindSessionToMessage = ({
 						message: `Rewind target ${messageId} not found in session ${sessionId}`,
 					});
 				if (row.pending_rewind_message_id === messageId) return;
-				if (account.driver === "opencode") {
+				if (PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
 					yield* Effect.scoped(
 						Effect.gen(function* () {
 							const instances =
@@ -138,7 +139,7 @@ export const undoSessionRewind = ({
 						sessionId,
 						message: "There is no pending rewind to undo",
 					});
-				if (account.driver === "opencode") {
+				if (PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
 					yield* Effect.scoped(
 						Effect.gen(function* () {
 							const instances =

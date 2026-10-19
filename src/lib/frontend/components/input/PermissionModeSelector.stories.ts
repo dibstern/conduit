@@ -13,6 +13,7 @@ import {
 } from "../../stores/discovery.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import type { SessionPermissionMode } from "../../types.js";
 import PermissionModeSelector from "./PermissionModeSelector.svelte";
 
@@ -125,13 +126,13 @@ const meta = {
 		const previousSession = sessionState.currentId;
 		const restoreViewport = viewport(1280);
 		clearDiscoveryState();
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		seedModel("claude");
 		setMode("ask");
 		return () => {
 			restoreViewport();
 			clearDiscoveryState();
-			sessionState.currentId = previousSession;
+			openSessionForSetup(previousSession);
 		};
 	},
 } satisfies Meta<typeof PermissionModeSelector>;

@@ -1,5 +1,6 @@
 import { Effect } from "effect";
-import type { AccountId } from "../../../contracts/provider-instance.js";
+import type { Account } from "../../../contracts/account.js";
+import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { formatErrorDetail } from "../../../errors.js";
 import {
 	type Harness,
@@ -41,11 +42,17 @@ export const cloneContextWindowOptions = (
 				},
 	);
 
-const claudeProviderFromCatalog = (
+const DISCOVERY_PROVIDER_NAMES: Partial<Record<Harness, string>> = {
+	claude: "Anthropic - claude",
+	cursor: "Cursor",
+};
+
+const providerFromCatalog = (
 	models: readonly ModelInfo[],
+	driver: Harness,
 ): ProviderInfo => ({
-	id: "claude",
-	name: "Anthropic - claude",
+	id: driver,
+	name: DISCOVERY_PROVIDER_NAMES[driver] ?? driver,
 	configured: true,
 	models: models
 		.map((model) => {
@@ -53,8 +60,9 @@ const claudeProviderFromCatalog = (
 			return {
 				id: model.id,
 				name: model.name,
-				provider: "claude",
+				provider: driver,
 				...(efforts.length > 0 ? { variants: [...efforts] } : {}),
+				...(model.parameters ? { parameters: model.parameters } : {}),
 				...(model.limit ? { limit: { ...model.limit } } : {}),
 				...(model.contextWindowOptions?.length
 					? {
@@ -75,17 +83,17 @@ const claudeProviderFromCatalog = (
 		),
 });
 
-export const publishClaudeModels = (
+export const publishDiscoveredModels = (
 	models: readonly ModelInfo[],
-	accountId: AccountId,
+	account: Pick<Account, "id" | "driver">,
 ) =>
 	Effect.gen(function* () {
 		const projectSettings = yield* Effect.serviceOption(ProjectSettingsTag);
 		if (projectSettings._tag === "None") return;
-		const provider = claudeProviderFromCatalog(models);
+		const provider = providerFromCatalog(models, account.driver);
 		yield* publishProjectSetting({
 			_tag: "providerModels",
-			accountId,
+			accountId: account.id,
 			providers: models.length > 0 ? [provider] : [],
 		}).pipe(Effect.provideService(ProjectSettingsTag, projectSettings.value));
 		yield* refreshHarnessDefaults;
@@ -105,40 +113,41 @@ export const loadModelCatalog = (
 				: { _tag: "Id", id: instanceId },
 		);
 		if (account.driver !== harness) return [] as ModelInfo[];
-		if (harness === "claude") {
+		if (PROVIDER_DRIVERS[harness].catalogSource === "discovery") {
 			const engine = yield* OrchestrationEngineTag;
 
-			const capsResult = yield* Effect.either(
+			const capsResult = yield* Effect.result(
 				engine.dispatchEffect({
 					type: "discover",
 					providerId: account.id,
 					account,
 				}),
 			);
-			if (capsResult._tag === "Left") {
+			if (capsResult._tag === "Failure") {
+				yield* publishDiscoveredModels([], account);
 				log.warn(
-					`Failed to fetch Claude model catalog: ${formatErrorDetail(capsResult.left)}`,
+					`Failed to fetch ${account.driver} model catalog: ${formatErrorDetail(capsResult.failure)}`,
 				);
 				return [] as ModelInfo[];
 			}
-			const models = capsResult.right.models;
-			yield* publishClaudeModels(models, account.id);
+			const models = capsResult.success.models;
+			yield* publishDiscoveredModels(models, account);
 			return models;
 		}
 
 		const modelService = yield* Effect.serviceOption(OpenCodeModelServiceTag);
 		if (modelService._tag === "None") return [] as ModelInfo[];
-		const provListResult = yield* Effect.either(
+		const provListResult = yield* Effect.result(
 			modelService.value.listProviders({ ...options, instanceId: account.id }),
 		);
-		if (provListResult._tag === "Left") {
+		if (provListResult._tag === "Failure") {
 			log.warn(
-				`Failed to fetch OpenCode model catalog: ${formatErrorDetail(provListResult.left)}`,
+				`Failed to fetch OpenCode model catalog: ${formatErrorDetail(provListResult.failure)}`,
 			);
 			return [] as ModelInfo[];
 		}
 		yield* refreshHarnessDefaults;
-		return provListResult.right.providers.flatMap((provider) =>
+		return provListResult.success.providers.flatMap((provider) =>
 			(provider.models ?? []).map((model) => ({
 				...model,
 				name: model.name || model.id,

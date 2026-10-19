@@ -1,6 +1,7 @@
-import { SqlClient } from "@effect/sql";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
+import { SqlClient } from "effect/sql";
 import type { Account } from "../../../contracts/account.js";
+import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
@@ -65,16 +66,16 @@ export const resolveServerSessionPick = (
 	source?: TurnPick,
 	defaultPick?: TurnPick,
 	catalog?: readonly ModelInfo[],
-): Either.Either<TurnSettings, PickRejection> => {
+): Result.Result<TurnSettings, PickRejection> => {
 	const pick = source ?? defaultPick;
-	if (!pick) return Either.left(new PickRequired());
+	if (!pick) return Result.fail(new PickRequired());
 	if (
 		pick.harness !== harness ||
 		harnessForModelProvider(pick.model.providerId) !== harness
 	)
-		return Either.left(new ModelNotInCatalog({ harness, ...pick.model }));
+		return Result.fail(new ModelNotInCatalog({ harness, ...pick.model }));
 	return catalog === undefined
-		? Either.right(pick)
+		? Result.succeed(pick)
 		: resolveTurnSettings(pick, catalog);
 };
 
@@ -110,8 +111,8 @@ export const loadServerSessionPick = (
 			),
 			catalog,
 		);
-		if (Either.isLeft(resolved)) return yield* resolved.left;
-		return resolved.right;
+		if (Result.isFailure(resolved)) return yield* resolved.failure;
+		return resolved.success;
 	});
 
 /** These join session.created in the creator's transaction. */
@@ -150,6 +151,7 @@ export const sessionPickEvents = (sessionId: string, pick: TurnSettings) => [
 export const backfillSessionPicks = () =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		const store = yield* EventStoreEffectTag;
 		const [repairState] = yield* sql<{ initialized: number }>`
 			SELECT initialized FROM session_pick_backfill_state WHERE singleton = 1`;
 		if (repairState?.initialized === 0) {
@@ -161,6 +163,8 @@ export const backfillSessionPicks = () =>
 					const [current] = yield* sql<{ initialized: number }>`
 					SELECT initialized FROM session_pick_backfill_state WHERE singleton = 1`;
 					if (current?.initialized === 1) return;
+					// The flag is daemon-wide, so queue every project's sessions:
+					// each relay drains only its own rows below.
 					yield* sql`INSERT OR IGNORE INTO session_pick_backfill (session_id)
 					SELECT id FROM sessions WHERE model_id IS NULL OR model_provider IS NULL
 						OR variant IS NULL OR context_window IS NULL`;
@@ -174,23 +178,23 @@ export const backfillSessionPicks = () =>
 			retry_reason: string;
 		}>`
 			SELECT s.id, s.provider, b.retry_reason FROM session_pick_backfill b
-			JOIN sessions s ON s.id = b.session_id`;
+			JOIN sessions s ON s.id = b.session_id
+			WHERE s.project_id = ${store.projectId}`;
 		if (missing.length === 0) return 0;
 		const read = yield* ReadQueryEffectTag;
-		const store = yield* EventStoreEffectTag;
 		const commit = yield* makeCommitAndSignal;
 		const accounts = yield* AccountDirectory;
 		let filled = 0;
 		for (const { id, provider, retry_reason } of missing) {
-			const resolved = yield* Effect.either(
+			const resolved = yield* Effect.result(
 				accounts.resolve({ _tag: "Id", id: provider }),
 			);
-			if (Either.isLeft(resolved)) {
+			if (Result.isFailure(resolved)) {
 				if (retry_reason !== "driver_unresolved")
 					yield* sql`UPDATE session_pick_backfill SET retry_reason = 'driver_unresolved' WHERE session_id = ${id}`;
 				continue;
 			}
-			const driver = resolved.right.driver;
+			const driver = resolved.success.driver;
 			const row = yield* read.getSession(id);
 			if (!row) continue;
 			if (storedSessionPick(row, driver)) {
@@ -217,15 +221,15 @@ export const backfillSessionPicks = () =>
 			FROM turns t
 			LEFT JOIN messages u ON u.id = t.user_message_id
 			LEFT JOIN messages a ON a.id = t.assistant_message_id
-			LEFT JOIN command_receipts r ON r.command_id = COALESCE(u.input_id, t.id) AND r.command_type = 'send_turn'
+			LEFT JOIN command_receipts r ON r.command_id = COALESCE(u.input_id, t.id) AND r.command_type = 'send_turn' AND r.project_key = ${store.projectId}
 			LEFT JOIN provider_command_outbox o ON o.request_sequence = COALESCE(r.side_effect_sequence, (
 				SELECT old.request_sequence FROM provider_command_outbox old
-				WHERE u.input_id IS NULL AND old.session_id = t.session_id AND old.effect_type = 'send_turn'
+				WHERE old.project_key = ${store.projectId} AND u.input_id IS NULL AND old.session_id = t.session_id AND old.effect_type = 'send_turn'
 					AND old.status IN ('running', 'completed', 'failed', 'retryable_failed') AND old.error_code IS NOT 'orphaned'
 					AND json_extract(old.payload_json, '$.prompt') = u.text
 					AND old.requested_at <= COALESCE(t.started_at, t.requested_at)
 				ORDER BY old.request_sequence DESC LIMIT 1
-			)) AND o.effect_type = 'send_turn' AND json_valid(o.payload_json)
+			)) AND o.project_key = ${store.projectId} AND o.effect_type = 'send_turn' AND json_valid(o.payload_json)
 			WHERE t.session_id = ${id}
 				AND (t.started_at IS NOT NULL OR t.assistant_message_id IS NOT NULL OR o.status IN ('running', 'completed'))
 			ORDER BY t.requested_at DESC, t.rowid DESC LIMIT 1`;
@@ -238,7 +242,8 @@ export const backfillSessionPicks = () =>
 			const modelId =
 				row.model_id ??
 				(turn?.model_id ||
-					(driver === "opencode" && separator > 0
+					(PROVIDER_DRIVERS[driver].modelIdFormat === "provider-qualified" &&
+					separator > 0
 						? historicalModel?.slice(separator + 1)
 						: historicalModel));
 			let pick: TurnPick | undefined;
@@ -247,8 +252,8 @@ export const backfillSessionPicks = () =>
 				const providerId =
 					row.model_provider ??
 					(turn?.model_provider ||
-						(driver === "claude"
-							? "claude"
+						(PROVIDER_DRIVERS[driver].modelIdFormat === "context-window-suffix"
+							? driver
 							: separator > 0
 								? historicalModel?.slice(0, separator)
 								: undefined));

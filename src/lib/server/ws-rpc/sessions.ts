@@ -1,12 +1,14 @@
-import { SqlClient } from "@effect/sql";
-import { Effect, Schema } from "effect";
-import { accountRefFromSelection } from "../../account-directory.js";
+import { Effect, Schema, Semaphore } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	AccountUnroutable,
 	type ContinuationError,
 	ContinuationErrorSchema,
 } from "../../contracts/limit-recovery.js";
-import { PROVIDER_SESSION_CAPABILITIES } from "../../contracts/provider-instance.js";
+import {
+	PROVIDER_DRIVERS,
+	PROVIDER_SESSION_CAPABILITIES,
+} from "../../contracts/provider-instance.js";
 import { WorkspaceMoveError } from "../../contracts/session-workspace.js";
 import { SessionHandoffDeliveredPayloadSchema } from "../../contracts/stored-event.js";
 import {
@@ -23,6 +25,10 @@ import {
 	previewContinuation,
 } from "../../domain/relay/Services/continuation.js";
 import { DaemonSessionQueryServiceTag } from "../../domain/relay/Services/daemon-session-query-service.js";
+import {
+	DraftPreWarmTag,
+	draftLaunchKey,
+} from "../../domain/relay/Services/draft-prewarm.js";
 import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import { forkSession } from "../../domain/relay/Services/session-command.js";
 import { SessionGitServiceTag } from "../../domain/relay/Services/session-git-service.js";
@@ -37,6 +43,7 @@ import {
 } from "../../domain/relay/Services/session-workspace.js";
 import { dismissWorkspaceHint } from "../../domain/relay/Services/session-workspace-hint.js";
 import { prepareSessionWorktreeDeletion } from "../../domain/relay/Services/session-worktree-deletion.js";
+import * as Failure from "../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../errors.js";
 import {
 	listLocalBranches,
@@ -58,6 +65,9 @@ import {
 	markSessionSeenForClient,
 	markSessionUnreadForClient,
 	renameSessionForClient,
+	resolveSessionCreation,
+	resolveSessionCreationAccount,
+	setSessionArchivedForClient,
 	setSessionAutoSettleForClient,
 	setSessionPinnedForClient,
 	setSessionSettledForClient,
@@ -65,34 +75,36 @@ import {
 	unsnoozeSessionForClient,
 	viewSessionForClient,
 } from "../../handlers/session.js";
+import {
+	preWarmDraft,
+	resolveDraftLaunchInput,
+} from "../../handlers/session-draft-prewarm.js";
 import { preWarmSession } from "../../handlers/session-prewarm.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import { isPickRejection, PickRequired } from "../../provider/turn-settings.js";
+import { saveRelaySettings } from "../../relay/relay-settings.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
-const sideThreadStarts = Effect.unsafeMakeSemaphore(1);
+const sideThreadStarts = Semaphore.makeUnsafe(1);
 
 export const sessionsHandlers = {
 	ListBranches: (_request) =>
 		Effect.flatMap(ConfigTag, (config) =>
 			listLocalBranches(config.projectDir),
-		).pipe(Effect.catchAll(mapRpcFailure("ListBranches"))),
+		).pipe(Effect.catch(mapRpcFailure("ListBranches"))),
 	ListWorktrees: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
 			const workspace = yield* SessionWorkspaceTag;
-			const directory =
-				request.sessionId === undefined
-					? undefined
-					: yield* workspace
-							.get(request.sessionId)
-							.pipe(
-								Effect.flatMap((path) =>
-									realWorkspacePath(path).pipe(
-										Effect.orElseSucceed(() => path),
-									),
-								),
-							);
+			const directory = !("sessionId" in request)
+				? undefined
+				: yield* workspace
+						.get(request.sessionId)
+						.pipe(
+							Effect.flatMap((path) =>
+								realWorkspacePath(path).pipe(Effect.orElseSucceed(() => path)),
+							),
+						);
 			return {
 				...(directory === undefined ? {} : { directory }),
 				worktrees: yield* listProjectWorktrees([
@@ -100,18 +112,27 @@ export const sessionsHandlers = {
 					...(config.extraFolders ?? []),
 				]),
 			};
-		}).pipe(Effect.catchAll(mapRpcFailure("ListWorktrees"))),
+		}).pipe(Effect.catch(mapRpcFailure("ListWorktrees"))),
 	InspectSessionWorktrees: (request) =>
 		Effect.gen(function* () {
 			const read = yield* ReadQueryEffectTag;
 			if (!(yield* read.getSession(request.sessionId)))
 				return yield* new WsRpcError({ message: "Session not found." });
 			const plan = yield* prepareSessionWorktreeDeletion(request.sessionId);
+			const config = yield* ConfigTag;
+			// The daemon read resolves an unreadable project to "off", which asks.
+			const rules = config.getWorktreeCleanup
+				? yield* config.getWorktreeCleanup()
+				: "off";
 			return {
 				worktrees: plan.worktrees,
 				removeWorktrees: plan.removeWorktrees,
+				onDelete:
+					rules !== "off" && rules.onDelete
+						? ("remove" as const)
+						: ("ask" as const),
 			};
-		}).pipe(Effect.catchAll(mapRpcFailure("InspectSessionWorktrees"))),
+		}).pipe(Effect.catch(mapRpcFailure("InspectSessionWorktrees"))),
 	RenameSessionBranch: (request) =>
 		Effect.gen(function* () {
 			const workspace = yield* SessionWorkspaceTag;
@@ -120,7 +141,7 @@ export const sessionsHandlers = {
 			if (git._tag === "Some") yield* git.value.refresh();
 			return { ok: true as const };
 		}).pipe(
-			Effect.catchAll(
+			Effect.catch(
 				(
 					error,
 				): Effect.Effect<never, WorktreeBranchRenameError | WsRpcError> =>
@@ -140,7 +161,7 @@ export const sessionsHandlers = {
 				),
 			};
 		}).pipe(
-			Effect.catchAll(
+			Effect.catch(
 				(error): Effect.Effect<never, WorkspaceMoveError | WsRpcError> =>
 					error instanceof WorkspaceMoveError
 						? Effect.fail(error)
@@ -149,7 +170,7 @@ export const sessionsHandlers = {
 		),
 	RecreateSessionWorktree: (request) =>
 		recreateSessionWorktrees(request.sessionId).pipe(
-			Effect.catchAll(
+			Effect.catch(
 				(error): Effect.Effect<never, WorktreeRecoveryError | WsRpcError> =>
 					error instanceof WorktreeRecoveryError
 						? Effect.fail(error)
@@ -166,7 +187,7 @@ export const sessionsHandlers = {
 					.pipe(Effect.map((directory) => ({ directory }))),
 			);
 		}).pipe(
-			Effect.catchAll(
+			Effect.catch(
 				(error): Effect.Effect<never, WorkspaceMoveError | WsRpcError> =>
 					error instanceof WorkspaceMoveError
 						? Effect.fail(error)
@@ -176,7 +197,7 @@ export const sessionsHandlers = {
 	DismissWorkspaceHint: (request) =>
 		dismissWorkspaceHint(request.sessionId, request.path).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll(mapRpcFailure("DismissWorkspaceHint")),
+			Effect.catch(mapRpcFailure("DismissWorkspaceHint")),
 		),
 	GetGoalDetails: (request) =>
 		Effect.gen(function* () {
@@ -191,24 +212,30 @@ export const sessionsHandlers = {
 				_tag: "Id",
 				id: session.provider,
 			});
-			if (account.driver !== "claude") {
+			if (!PROVIDER_DRIVERS[account.driver].supportsGoalState) {
 				return yield* new WsRpcError({
 					message: "Goal details are available only for Claude sessions",
 				});
 			}
 			return yield* read.getGoalDetails(request.sessionId);
-		}).pipe(Effect.catchAll(mapRpcFailure("GetGoalDetails"))),
+		}).pipe(Effect.catch(mapRpcFailure("GetGoalDetails"))),
 	PreWarmSession: (request) =>
 		preWarmSession(request.sessionId).pipe(
-			Effect.catchAll(mapRpcFailure("PreWarmSession")),
+			Effect.catch(mapRpcFailure("PreWarmSession")),
 		),
+	PreWarmDraft: preWarmDraft,
 	ResolveSession: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
 			const sessionManager = yield* SessionManagerServiceTag;
 			const exists = yield* sessionManager.sessionExists(request.sessionId);
-			return { projectSlug: exists ? config.slug : null };
-		}).pipe(Effect.catchAll(mapRpcFailure("ResolveSession"))),
+			if (!exists)
+				return yield* new WsRpcError({
+					message: `Unknown session: ${request.sessionId}`,
+					code: "unknown-session",
+				});
+			return { projectSlug: config.slug };
+		}).pipe(Effect.catch(mapRpcFailure("ResolveSession"))),
 	ListDaemonSessions: (request) =>
 		Effect.gen(function* () {
 			const daemonSessions = yield* DaemonSessionQueryServiceTag;
@@ -216,6 +243,9 @@ export const sessionsHandlers = {
 				...(request.limit !== undefined ? { limit: request.limit } : {}),
 				...(request.roots !== undefined ? { roots: request.roots } : {}),
 				...(request.search !== undefined ? { search: request.search } : {}),
+				...(request.includeArchived !== undefined
+					? { includeArchived: request.includeArchived }
+					: {}),
 				...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
 				...(request.scope !== undefined ? { scope: request.scope } : {}),
 				...(request.exclude !== undefined ? { exclude: request.exclude } : {}),
@@ -224,22 +254,32 @@ export const sessionsHandlers = {
 				projectSlug: request.projectSlug,
 				...result,
 			};
-		}).pipe(Effect.catchAll(mapRpcFailure("ListDaemonSessions"))),
+		}).pipe(Effect.catch(mapRpcFailure("ListDaemonSessions"))),
+	ListArchivedSessions: (request) =>
+		Effect.gen(function* () {
+			const daemonSessions = yield* DaemonSessionQueryServiceTag;
+			return yield* daemonSessions.listArchived({
+				...(request.limit !== undefined ? { limit: request.limit } : {}),
+				...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
+			});
+		}).pipe(Effect.catch(mapRpcFailure("ListArchivedSessions"))),
 	ReloadProviderSession: (request) =>
-		reloadProviderSessionForClient({
-			clientId: request.originId ?? "rpc",
-			sessionId: request.sessionId,
-			commandId: request.commandId,
-		}).pipe(
-			Effect.as({
-				projectSlug: request.projectSlug,
+		Effect.flatMap(ConfigTag, (config) =>
+			reloadProviderSessionForClient({
+				clientId: request.originId ?? "rpc",
 				sessionId: request.sessionId,
-			}),
-			Effect.catchAll((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: `ReloadProviderSession failed: ${String(error)}`,
-					}),
+				commandId: request.commandId,
+			}).pipe(
+				Effect.as({
+					projectSlug: config.slug,
+					sessionId: request.sessionId,
+				}),
+				Effect.catch((error) =>
+					Effect.fail(
+						new WsRpcError({
+							message: `ReloadProviderSession failed: ${String(error)}`,
+						}),
+					),
 				),
 			),
 		),
@@ -250,7 +290,7 @@ export const sessionsHandlers = {
 			title: request.title,
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({
 						message: `RenameSession failed: ${String(error)}`,
@@ -265,10 +305,24 @@ export const sessionsHandlers = {
 			settled: request.settled,
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.mapError(
+			Failure.mapEffectFailures(
 				(error) =>
 					new WsRpcError({
 						message: `SetSessionSettled failed: ${String(error.cause)}`,
+					}),
+			),
+		),
+	SetSessionArchived: (request) =>
+		setSessionArchivedForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+			archived: request.archived,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Failure.mapEffectFailures(
+				(error) =>
+					new WsRpcError({
+						message: `SetSessionArchived failed: ${String(error.cause)}`,
 					}),
 			),
 		),
@@ -279,7 +333,7 @@ export const sessionsHandlers = {
 			pinned: request.pinned,
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.mapError(
+			Failure.mapEffectFailures(
 				(error) =>
 					new WsRpcError({
 						message: `SetSessionPinned failed: ${String(error.cause)}`,
@@ -293,7 +347,7 @@ export const sessionsHandlers = {
 			disabled: request.disabled,
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll(mapRpcFailure("SetSessionAutoSettle")),
+			Effect.catch(mapRpcFailure("SetSessionAutoSettle")),
 		),
 	SnoozeSession: (request) =>
 		snoozeSessionForClient({
@@ -302,7 +356,7 @@ export const sessionsHandlers = {
 			until: request.until,
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.mapError(
+			Failure.mapEffectFailures(
 				(error) =>
 					new WsRpcError({
 						message: `SnoozeSession failed: ${String(error.cause)}`,
@@ -314,7 +368,7 @@ export const sessionsHandlers = {
 			continuation.dismissCutOff(request.sessionId),
 		).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll(mapRpcFailure("DismissCutOff")),
+			Effect.catch(mapRpcFailure("DismissCutOff")),
 		),
 	ContinueSession: (request) =>
 		Effect.gen(function* () {
@@ -330,7 +384,7 @@ export const sessionsHandlers = {
 			});
 			return { ok: true as const };
 		}).pipe(
-			Effect.catchAll(
+			Effect.catch(
 				(error): Effect.Effect<never, WsRpcError | ContinuationError> =>
 					Schema.is(ContinuationErrorSchema)(error)
 						? Effect.fail(error)
@@ -342,7 +396,7 @@ export const sessionsHandlers = {
 			continuation.cancelContinuation(request.sessionId),
 		).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll(mapRpcFailure("CancelContinuation")),
+			Effect.catch(mapRpcFailure("CancelContinuation")),
 		),
 	PreviewContinuation: (request) =>
 		previewContinuation(
@@ -350,7 +404,7 @@ export const sessionsHandlers = {
 			request.instanceId,
 			request.accountRef,
 		).pipe(
-			Effect.catchAll(
+			Effect.catch(
 				(error): Effect.Effect<never, WsRpcError | ContinuationError> =>
 					Schema.is(ContinuationErrorSchema)(error)
 						? Effect.fail(error)
@@ -359,7 +413,7 @@ export const sessionsHandlers = {
 		),
 	QuotaForAccounts: (_request) =>
 		Effect.flatMap(Usage, (usage) => usage.refresh()).pipe(
-			Effect.catchAll(mapRpcFailure("QuotaForAccounts")),
+			Effect.catch(mapRpcFailure("QuotaForAccounts")),
 		),
 	GetContinuationHandoff: (request) =>
 		Effect.gen(function* () {
@@ -384,8 +438,8 @@ export const sessionsHandlers = {
 				AND sequence < COALESCE((SELECT MIN(sequence) FROM events WHERE session_id = ${request.sessionId} AND type = 'session.resumed' AND sequence > (SELECT sequence FROM resume)), 9223372036854775807)
 				ORDER BY sequence ASC LIMIT 1`;
 			if (!row) return { handoff: null };
-			const data = yield* Schema.decodeUnknown(
-				Schema.parseJson(SessionHandoffDeliveredPayloadSchema),
+			const data = yield* Schema.decodeUnknownEffect(
+				Schema.fromJsonString(SessionHandoffDeliveredPayloadSchema),
 			)(row.data);
 			return {
 				handoff: {
@@ -396,14 +450,14 @@ export const sessionsHandlers = {
 					instanceId: request.instanceId,
 				},
 			};
-		}).pipe(Effect.catchAll(mapRpcFailure("GetContinuationHandoff"))),
+		}).pipe(Effect.catch(mapRpcFailure("GetContinuationHandoff"))),
 	UnsnoozeSession: (request) =>
 		unsnoozeSessionForClient({
 			clientId: request.originId ?? "rpc",
 			sessionId: request.sessionId,
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.mapError(
+			Failure.mapEffectFailures(
 				(error) =>
 					new WsRpcError({
 						message: `UnsnoozeSession failed: ${String(error.cause)}`,
@@ -416,7 +470,7 @@ export const sessionsHandlers = {
 			sessionId: request.sessionId,
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({
 						message: `MarkSessionUnread failed: ${String(error)}`,
@@ -431,7 +485,7 @@ export const sessionsHandlers = {
 			upTo: request.upTo,
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll(mapRpcFailure("MarkSessionSeen")),
+			Effect.catch(mapRpcFailure("MarkSessionSeen")),
 		),
 	MarkSessionRead: (request) =>
 		markSessionReadForClient({
@@ -439,7 +493,7 @@ export const sessionsHandlers = {
 			sessionId: request.sessionId,
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({
 						message: `MarkSessionRead failed: ${String(error)}`,
@@ -461,25 +515,50 @@ export const sessionsHandlers = {
 				return yield* new PickRequired();
 			const workspace = yield* SessionWorkspaceTag;
 			const path = request.worktreePath;
-			const account = yield* (yield* AccountDirectory).resolve(
-				request.accountRef ??
-					accountRefFromSelection({
-						instanceId: request.instanceId,
-						providerId: request.providerId,
-						model:
-							request.model === undefined
-								? undefined
-								: { providerID: request.model.providerId },
-					}),
-			);
+			const account = yield* resolveSessionCreationAccount(request);
+			const drafts = yield* Effect.serviceOption(DraftPreWarmTag);
+			const draftId = request.draftId;
+			const resolvedCreation =
+				draftId &&
+				!request.newWorktree &&
+				PROVIDER_DRIVERS[account.driver].supportsNativeResume
+					? yield* resolveSessionCreation({ ...request, account }).pipe(
+							Effect.onError(() =>
+								drafts._tag === "Some"
+									? drafts.value
+											.take(request.originId, draftId, undefined)
+											.pipe(Effect.asVoid)
+									: Effect.void,
+							),
+						)
+					: undefined;
+			const launchKey = resolvedCreation
+				? yield* resolveDraftLaunchInput(resolvedCreation, path).pipe(
+						Effect.map(draftLaunchKey),
+						Effect.catchCause((cause) =>
+							Effect.gen(function* () {
+								const log = yield* LoggerTag;
+								log.debug(`Draft launch comparison failed: ${String(cause)}`);
+								return undefined;
+							}),
+						),
+					)
+				: undefined;
+			// A mismatched or missing key discards the reservation instead of adopting it.
+			const takeReservation =
+				draftId && drafts._tag === "Some"
+					? drafts.value.take(request.originId, draftId, launchKey)
+					: Effect.succeed(undefined);
 			const options = {
 				clientId: request.originId,
 				account,
 				...(request.title != null ? { title: request.title } : {}),
 				...(request.model != null ? { model: request.model } : {}),
 				permissionMode: request.permissionMode,
+				...(resolvedCreation === undefined ? {} : { resolvedCreation }),
 			};
 			if (request.newWorktree) {
+				yield* takeReservation;
 				if (path !== undefined)
 					return yield* new WsRpcError({
 						message: "Choose either a new worktree or an existing worktree.",
@@ -530,10 +609,10 @@ export const sessionsHandlers = {
 										),
 								}),
 							).pipe(
-								Effect.catchAllCause((cause) =>
+								Effect.catchCause((cause) =>
 									worktrees
 										.rollback(created)
-										.pipe(Effect.zipRight(Effect.failCause(cause))),
+										.pipe(Effect.andThen(Effect.failCause(cause))),
 								),
 							);
 							const setup = yield* Effect.serviceOption(SessionSetupTag);
@@ -548,24 +627,64 @@ export const sessionsHandlers = {
 				);
 				return { projectSlug: request.projectSlug, sessionId: session.id };
 			}
-			const create = createSessionForClient({
-				...options,
-				...(path === undefined
-					? {}
-					: {
-							initializeWorkspace: (sessionId: string) =>
-								workspace.move(sessionId, path, "launch").pipe(Effect.asVoid),
-						}),
-			});
-			const session = yield* path === undefined
-				? create
-				: workspace.withLaunch(create);
+			// Taking a reservation and arming its rollback must not be split by interruption.
+			const session = yield* Effect.uninterruptibleMask((restore) =>
+				Effect.gen(function* () {
+					const reservedSessionId = yield* takeReservation;
+					const create = createSessionForClient({
+						...options,
+						...(reservedSessionId === undefined
+							? {}
+							: { sessionId: reservedSessionId }),
+						...(path === undefined
+							? {}
+							: {
+									initializeWorkspace: (sessionId: string) =>
+										workspace
+											.move(sessionId, path, "launch")
+											.pipe(Effect.asVoid),
+								}),
+					});
+					return yield* restore(
+						path === undefined ? create : workspace.withLaunch(create),
+					).pipe(
+						Effect.onError(() =>
+							reservedSessionId && drafts._tag === "Some"
+								? drafts.value.discardSession(reservedSessionId)
+								: Effect.void,
+						),
+					);
+				}),
+			);
 			return {
 				projectSlug: request.projectSlug,
 				sessionId: session.id,
 			};
 		}).pipe(
-			Effect.catchAll(
+			Effect.tap(() =>
+				Effect.gen(function* () {
+					if (
+						request.draftId === undefined ||
+						request.worktreePath !== undefined
+					)
+						return;
+					const config = yield* ConfigTag;
+					yield* Effect.try(() =>
+						saveRelaySettings(
+							{ lastSessionMode: request.newWorktree ? "worktree" : "local" },
+							config.configDir,
+						),
+					).pipe(
+						Effect.catch((cause) =>
+							Effect.gen(function* () {
+								const log = yield* LoggerTag;
+								log.warn("Failed to persist last session mode", { cause });
+							}),
+						),
+					);
+				}),
+			),
+			Effect.catch(
 				(
 					error,
 				): Effect.Effect<
@@ -594,7 +713,7 @@ export const sessionsHandlers = {
 			sessionId: request.sessionId,
 		}).pipe(
 			Effect.map(({ draft }) => ({ ok: true as const, draft })),
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({
 						message: `ViewSession failed: ${String(error)}`,
@@ -614,7 +733,7 @@ export const sessionsHandlers = {
 				ok: true as const,
 				...(worktreeWarnings.length > 0 ? { worktreeWarnings } : {}),
 			})),
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({
 						message: `DeleteSession failed: ${String(error)}`,
@@ -623,42 +742,44 @@ export const sessionsHandlers = {
 			),
 		),
 	ForkSession: (request) =>
-		forkSessionForClient({
-			clientId: request.originId,
-			...(request.sessionId != null ? { sessionId: request.sessionId } : {}),
-			...(request.messageId != null ? { messageId: request.messageId } : {}),
-		}).pipe(
-			Effect.flatMap((session) =>
-				session == null
-					? Effect.fail(
-							new WsRpcError({
-								message: "ForkSession failed: no active session",
-							}),
-						)
-					: Effect.succeed({
-							projectSlug: request.projectSlug,
-							sessionId: session.id,
-							parentId: session.parentId,
-							...(session.forkMessageId && {
-								forkMessageId: session.forkMessageId,
-							}),
-							...(session.forkPointTimestamp != null && {
-								forkPointTimestamp: session.forkPointTimestamp,
-							}),
-						}),
-			),
-			Effect.catchAll((error) =>
-				Effect.gen(function* () {
-					const log = yield* LoggerTag;
-					log.warn("ForkSession failed", { cause: error });
-					return yield* Effect.fail(
-						error instanceof WsRpcError || error instanceof AccountUnroutable
-							? error
-							: new WsRpcError({
-									message: `ForkSession failed: ${String(error)}`,
+		Effect.flatMap(ConfigTag, (config) =>
+			forkSessionForClient({
+				clientId: request.originId,
+				...("sessionId" in request ? { sessionId: request.sessionId } : {}),
+				...(request.messageId != null ? { messageId: request.messageId } : {}),
+			}).pipe(
+				Effect.flatMap((session) =>
+					session == null
+						? Effect.fail(
+								new WsRpcError({
+									message: "ForkSession failed: no active session",
 								}),
-					);
-				}),
+							)
+						: Effect.succeed({
+								projectSlug: config.slug,
+								sessionId: session.id,
+								forkedFrom: session.forkedFrom,
+								...(session.forkMessageId && {
+									forkMessageId: session.forkMessageId,
+								}),
+								...(session.forkPointTimestamp != null && {
+									forkPointTimestamp: session.forkPointTimestamp,
+								}),
+							}),
+				),
+				Effect.catch((error) =>
+					Effect.gen(function* () {
+						const log = yield* LoggerTag;
+						log.warn("ForkSession failed", { cause: error });
+						return yield* Effect.fail(
+							error instanceof WsRpcError || error instanceof AccountUnroutable
+								? error
+								: new WsRpcError({
+										message: `ForkSession failed: ${String(error)}`,
+									}),
+						);
+					}),
+				),
 			),
 		),
 	StartSideThread: (request) =>
@@ -674,7 +795,7 @@ export const sessionsHandlers = {
 						AND json_extract(data, '$.startInputId') = ${request.inputId}
 					LIMIT 1`;
 				if (started) return started.session_id;
-				const session = yield* forkSession(request.parentSessionId, {
+				const session = yield* forkSession(request.sessionId, {
 					side: { title: request.title, inputId: request.inputId },
 				});
 				// Refresh now rather than on the next projection burst: the side
@@ -690,7 +811,7 @@ export const sessionsHandlers = {
 				text: request.text,
 				commandId: request.inputId,
 				...(request.images ? { images: request.images } : {}),
-			}).pipe(Effect.catchAll(mapRpcFailure("StartSideThread")));
+			}).pipe(Effect.catch(mapRpcFailure("StartSideThread")));
 			return { sessionId };
 		}).pipe(
 			Effect.catchTag("SessionCommandError", (error) =>
@@ -698,7 +819,7 @@ export const sessionsHandlers = {
 					new WsRpcError({ message: error.message ?? String(error.cause) }),
 				),
 			),
-			Effect.catchAll(
+			Effect.catch(
 				(error): Effect.Effect<never, AccountUnroutable | WsRpcError> =>
 					error instanceof AccountUnroutable
 						? Effect.fail(error)
@@ -706,21 +827,23 @@ export const sessionsHandlers = {
 			),
 		),
 	LoadMoreHistory: (request) =>
-		loadMoreHistoryForSession({
-			sessionId: request.sessionId,
-			...(request.before ? { before: request.before } : {}),
-		}).pipe(
-			Effect.map((page) => ({
-				projectSlug: request.projectSlug,
-				sessionId: page.sessionId,
-				messages: page.messages,
-				hasMore: page.hasMore,
-			})),
-			Effect.catchAll((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: `LoadMoreHistory failed: ${String(error)}`,
-					}),
+		Effect.flatMap(ConfigTag, (config) =>
+			loadMoreHistoryForSession({
+				sessionId: request.sessionId,
+				...(request.before ? { before: request.before } : {}),
+			}).pipe(
+				Effect.map((page) => ({
+					projectSlug: config.slug,
+					sessionId: page.sessionId,
+					messages: page.messages,
+					hasMore: page.hasMore,
+				})),
+				Effect.catch((error) =>
+					Effect.fail(
+						new WsRpcError({
+							message: `LoadMoreHistory failed: ${String(error)}`,
+						}),
+					),
 				),
 			),
 		),
@@ -730,7 +853,7 @@ export const sessionsHandlers = {
 			sessionId: request.sessionId,
 		}).pipe(
 			Effect.as({ ok: true as const, sessionId: request.sessionId }),
-			Effect.catchAll(mapRpcFailure("UndoRewind")),
+			Effect.catch(mapRpcFailure("UndoRewind")),
 		),
 	RewindSession: (request) =>
 		rewindSessionToMessage({
@@ -743,7 +866,7 @@ export const sessionsHandlers = {
 				sessionId: request.sessionId,
 				messageId: request.messageId,
 			}),
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({
 						message: `RewindSession failed: ${String(error)}`,
@@ -755,8 +878,10 @@ export const sessionsHandlers = {
 	WsRpcHandlerMap,
 	| "GetGoalDetails"
 	| "PreWarmSession"
+	| "PreWarmDraft"
 	| "ResolveSession"
 	| "ListDaemonSessions"
+	| "ListArchivedSessions"
 	| "ReloadProviderSession"
 	| "RenameSession"
 	| "RenameSessionBranch"
@@ -768,6 +893,7 @@ export const sessionsHandlers = {
 	| "ContinueSessionInMainFolder"
 	| "DismissWorkspaceHint"
 	| "SetSessionSettled"
+	| "SetSessionArchived"
 	| "SetSessionPinned"
 	| "SetSessionAutoSettle"
 	| "SnoozeSession"

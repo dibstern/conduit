@@ -1,24 +1,19 @@
-// Verifies that Supervisor.track can monitor forked fiber exits and status.
+// Verifies that FiberSet can monitor explicitly forked fiber exits and status.
 // These are pure Effect tests — no daemon dependencies required.
 
 import { describe, it } from "@effect/vitest";
-import { Effect, Fiber, Supervisor } from "effect";
+import { Deferred, Effect, Fiber, FiberSet } from "effect";
 import { expect } from "vitest";
 
-describe("Supervisor.track diagnostics", () => {
+describe("FiberSet diagnostics", () => {
 	it.effect("tracks forked fiber exits", () =>
 		Effect.gen(function* () {
-			const sv = yield* Supervisor.track;
-			yield* Effect.supervised(
-				Effect.gen(function* () {
-					const f1 = yield* Effect.fork(Effect.succeed("ok"));
-					yield* Fiber.join(f1);
-					const f2 = yield* Effect.fork(Effect.fail("boom"));
-					yield* Fiber.join(f2).pipe(Effect.catchAll(() => Effect.void));
-				}),
-				sv,
-			);
-			const fibers = yield* sv.value;
+			const sv = yield* FiberSet.make();
+			const f1 = yield* FiberSet.run(sv, Effect.succeed("ok"));
+			yield* Fiber.join(f1);
+			const f2 = yield* FiberSet.run(sv, Effect.fail("boom"));
+			yield* Fiber.join(f2).pipe(Effect.catch(() => Effect.void));
+			const fibers = [...sv];
 			expect(fibers).toBeDefined();
 			expect(Array.isArray(fibers)).toBe(true);
 		}),
@@ -26,18 +21,16 @@ describe("Supervisor.track diagnostics", () => {
 
 	it.effect("supervisor captures fiber count", () =>
 		Effect.gen(function* () {
-			const sv = yield* Supervisor.track;
-			yield* Effect.supervised(
-				Effect.gen(function* () {
-					const fibers = Array.from({ length: 5 }, (_, i) =>
-						Effect.fork(Effect.succeed(i)),
-					);
-					yield* Effect.all(fibers);
-				}),
-				sv,
+			const sv = yield* FiberSet.make();
+			const release = yield* Deferred.make<void>();
+			const fibers = Array.from({ length: 5 }, (_, i) =>
+				FiberSet.run(sv, Deferred.await(release).pipe(Effect.as(i))),
 			);
-			const tracked = yield* sv.value;
+			const running = yield* Effect.all(fibers);
+			const tracked = [...sv];
 			expect(tracked.length).toBeGreaterThanOrEqual(5);
+			yield* Deferred.succeed(release, undefined);
+			yield* Effect.forEach(running, Fiber.join);
 		}),
 	);
 });

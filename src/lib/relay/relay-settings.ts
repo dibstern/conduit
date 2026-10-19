@@ -1,4 +1,4 @@
-// Load/save relay-specific settings from ~/.conduit/settings.jsonc.
+// Load/save settings.jsonc in the config dir (DEFAULT_CONFIG_DIR).
 // Separate from OpenCode's own config — the relay has its own settings file.
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -6,27 +6,31 @@ import { join } from "node:path";
 import { Schema } from "effect";
 import type { ClaudeSettingsOverrides } from "../contracts/claude-settings.js";
 import {
+	type DefaultSessionMode,
+	DefaultSessionModeSchema,
 	type SessionMode,
 	SessionModeSchema,
 } from "../contracts/project-file.js";
+import type { KnownProviderDriverKind } from "../contracts/provider-instance.js";
 import type { ModelOverride } from "../domain/relay/Services/session-overrides-state.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 import {
-	type GroupingMode,
-	GroupingModeSchema,
 	type SessionPermissionMode,
 	SessionPermissionModeSchema,
 } from "../shared-types.js";
 
 export interface RelaySettings {
 	defaultModel?: string;
-	harnessDefaults?: {
-		claude?: { providerId: string; modelId: string; contextWindow: string };
-		opencode?: { providerId: string; modelId: string; contextWindow: string };
-	};
+	harnessDefaults?: Partial<
+		Record<
+			KnownProviderDriverKind,
+			{ providerId: string; modelId: string; contextWindow: string }
+		>
+	>;
 	defaultPermissionMode?: SessionPermissionMode;
-	defaultSessionMode?: SessionMode;
-	defaultGroupingMode?: GroupingMode;
+	defaultSessionMode?: DefaultSessionMode;
+	/** The mode the last composer-created session started in, read when the default is "last". */
+	lastSessionMode?: SessionMode;
 	defaultVariants?: Record<string, string>;
 	/** Model keys ("<providerId>/<modelId>") hidden from the model dropdown. */
 	hiddenModels?: string[];
@@ -48,8 +52,8 @@ function stripComments(text: string): string {
 }
 
 const isSessionPermissionMode = Schema.is(SessionPermissionModeSchema);
+const isDefaultSessionMode = Schema.is(DefaultSessionModeSchema);
 const isSessionMode = Schema.is(SessionModeSchema);
-const isGroupingMode = Schema.is(GroupingModeSchema);
 
 /**
  * Load relay settings from the config directory.
@@ -59,12 +63,16 @@ export function loadRelaySettings(configDir?: string): RelaySettings {
 	try {
 		const dir = resolveDir(configDir);
 		const raw = readFileSync(join(dir, SETTINGS_FILE), "utf-8");
-		const settings = JSON.parse(stripComments(raw)) as RelaySettings;
+		const settings = JSON.parse(stripComments(raw)) as RelaySettings & {
+			/** Retired with Project Groups (ADR-0011); dropped on the next save. */
+			defaultGroupingMode?: unknown;
+		};
 		// The file is hand-editable. Drop unknown modes so consumers use their defaults.
 		const {
 			defaultPermissionMode,
 			defaultSessionMode,
-			defaultGroupingMode,
+			lastSessionMode,
+			defaultGroupingMode: _retired,
 			...rest
 		} = settings;
 		return {
@@ -74,9 +82,9 @@ export function loadRelaySettings(configDir?: string): RelaySettings {
 					defaultPermissionMode,
 				}),
 			...(defaultSessionMode !== undefined &&
-				isSessionMode(defaultSessionMode) && { defaultSessionMode }),
-			...(defaultGroupingMode !== undefined &&
-				isGroupingMode(defaultGroupingMode) && { defaultGroupingMode }),
+				isDefaultSessionMode(defaultSessionMode) && { defaultSessionMode }),
+			...(lastSessionMode !== undefined &&
+				isSessionMode(lastSessionMode) && { lastSessionMode }),
 		};
 	} catch {
 		return {};
@@ -114,8 +122,8 @@ export function saveRelaySettings(
 	if (settings.defaultSessionMode !== undefined) {
 		merged.defaultSessionMode = settings.defaultSessionMode;
 	}
-	if (settings.defaultGroupingMode !== undefined) {
-		merged.defaultGroupingMode = settings.defaultGroupingMode;
+	if (settings.lastSessionMode !== undefined) {
+		merged.lastSessionMode = settings.lastSessionMode;
 	}
 
 	// Merge defaultVariants map (shallow merge of entries)

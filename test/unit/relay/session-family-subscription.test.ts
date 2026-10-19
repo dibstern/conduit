@@ -5,11 +5,12 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Queue, Stream } from "effect";
 import { expect } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
-import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
 import {
-	BackgroundLivenessTag,
-	ConfigTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
+import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
+import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { subscribeSessionFamily } from "../../../src/lib/domain/relay/Services/session-family-subscription.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -33,7 +34,7 @@ import {
 
 const makeFamilyTestLayer = () => {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-family-sub-"));
-	const cleanup = Layer.scopedDiscard(
+	const cleanup = Layer.effectDiscard(
 		Effect.addFinalizer(() =>
 			Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 		),
@@ -46,9 +47,9 @@ const makeFamilyTestLayer = () => {
 			SessionEventBusLive,
 		),
 		SessionEventBusLive,
-		Layer.succeed(BackgroundLivenessTag, () => undefined),
-		Layer.succeed(ConfigTag, makeMockConfig({ slug: "test-project" })),
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+		Layer.effect(SessionActivityTag, makeSessionActivity),
+		Layer.succeed(ConfigTag)(makeMockConfig({ slug: "test-project" })),
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		cleanup,
 	);
 };
@@ -128,7 +129,7 @@ const seedTwoFamilies = commit([
 ]);
 
 describe("subscribeSessionFamily", () => {
-	it.scoped(
+	it.effect(
 		"serves the viewed member and its ancestors, and nothing outside its family",
 		() =>
 			Effect.gen(function* () {
@@ -152,10 +153,10 @@ describe("subscribeSessionFamily", () => {
 					snapshot.rows.find((row) => row.id === "grandchild")?.parentID,
 				).toBe("child");
 				expect(synchronized).toEqual({ _tag: "synchronized" });
-			}).pipe(Effect.provide(makeFamilyTestLayer())),
+			}).pipe(Effect.provide(makeFamilyTestLayer(), { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"a new child and a child's model change arrive as versioned upserts; other families stay silent",
 		() =>
 			Effect.gen(function* () {
@@ -173,7 +174,7 @@ describe("subscribeSessionFamily", () => {
 				expect(added).toMatchObject({ _tag: "upsert" });
 				if (added._tag !== "upsert") return;
 				expect(added.sequence).toBeGreaterThan(snapshot.sequence);
-				const batch = [added, ...(yield* Queue.takeAll(q))];
+				const batch = [added, ...(yield* Queue.clear(q))];
 				expect(upsertedIds(batch)).toContain("child-2");
 				expect(upsertedIds(batch)).not.toContain("other-child");
 
@@ -189,10 +190,10 @@ describe("subscribeSessionFamily", () => {
 						model: { model: "claude-opus", provider: "anthropic" },
 					},
 				});
-			}).pipe(Effect.provide(makeFamilyTestLayer())),
+			}).pipe(Effect.provide(makeFamilyTestLayer(), { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"a member's deletion is a remove; another family's deletion is silent",
 		() =>
 			Effect.gen(function* () {
@@ -204,10 +205,10 @@ describe("subscribeSessionFamily", () => {
 				yield* commit([deleted("grandchild")]);
 				const removed = yield* Queue.take(q);
 				expect(removed).toMatchObject({ _tag: "remove", id: "grandchild" });
-			}).pipe(Effect.provide(makeFamilyTestLayer())),
+			}).pipe(Effect.provide(makeFamilyTestLayer(), { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"follows the family after the member it was opened on is deleted",
 		() =>
 			Effect.gen(function* () {
@@ -225,10 +226,10 @@ describe("subscribeSessionFamily", () => {
 					_tag: "upsert",
 					item: { id: "root", title: "Renamed root" },
 				});
-			}).pipe(Effect.provide(makeFamilyTestLayer())),
+			}).pipe(Effect.provide(makeFamilyTestLayer(), { local: true })),
 	);
 
-	it.scoped("a resume is a fresh snapshot for the viewed member", () =>
+	it.effect("a resume is a fresh snapshot for the viewed member", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* seedTwoFamilies;
@@ -241,6 +242,6 @@ describe("subscribeSessionFamily", () => {
 				"root",
 			]);
 			expect(synchronized).toEqual({ _tag: "synchronized" });
-		}).pipe(Effect.provide(makeFamilyTestLayer())),
+		}).pipe(Effect.provide(makeFamilyTestLayer(), { local: true })),
 	);
 });

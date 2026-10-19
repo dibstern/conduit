@@ -15,10 +15,8 @@ import {
 	shouldAutoSubmit,
 } from "../../../src/lib/frontend/stores/permissions.svelte.js";
 import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
-import {
-	clearSessionState,
-	sessionState,
-} from "../../../src/lib/frontend/stores/session.svelte.js";
+import { clearSessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type {
 	AskUserQuestion,
 	PermissionId,
@@ -542,7 +540,7 @@ describe("pending prompts across a session switch", () => {
 			],
 		});
 		routerState.path = "/s/sess-2";
-		sessionState.currentId = "sess-2";
+		openSessionForSetup("sess-2", "project-a");
 		expect(
 			permissionsState.pendingPermissions.map(
 				(permission) => permission.requestId,

@@ -1,9 +1,9 @@
 import { describe, it } from "@effect/vitest";
-import { Effect, PubSub, Queue } from "effect";
+import { Effect, PubSub } from "effect";
 import { expect } from "vitest";
 
 describe("Effect PubSub replaces EventEmitter", () => {
-	it.scoped("publishes to multiple subscribers", () =>
+	it.effect("publishes to multiple subscribers", () =>
 		Effect.gen(function* () {
 			const pubsub = yield* PubSub.unbounded<{
 				_tag: string;
@@ -18,8 +18,8 @@ describe("Effect PubSub replaces EventEmitter", () => {
 				data: "session-1",
 			});
 
-			const msg1 = yield* Queue.take(sub1);
-			const msg2 = yield* Queue.take(sub2);
+			const msg1 = yield* PubSub.take(sub1);
+			const msg2 = yield* PubSub.take(sub2);
 
 			expect(msg1._tag).toBe("Created");
 			expect(msg2._tag).toBe("Created");
@@ -27,7 +27,7 @@ describe("Effect PubSub replaces EventEmitter", () => {
 		}),
 	);
 
-	it.scoped("subscriber receives only messages after subscription", () =>
+	it.effect("subscriber receives only messages after subscription", () =>
 		Effect.gen(function* () {
 			const pubsub = yield* PubSub.unbounded<string>();
 
@@ -39,12 +39,12 @@ describe("Effect PubSub replaces EventEmitter", () => {
 			// Publish after subscribing — SHOULD be received
 			yield* PubSub.publish(pubsub, "after");
 
-			const msg = yield* Queue.take(sub);
+			const msg = yield* PubSub.take(sub);
 			expect(msg).toBe("after");
 		}),
 	);
 
-	it.scoped("shutdown prevents further publishes", () =>
+	it.effect("shutdown prevents further publishes", () =>
 		Effect.gen(function* () {
 			const pubsub = yield* PubSub.unbounded<string>();
 			yield* PubSub.publish(pubsub, "hello");

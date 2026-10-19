@@ -1,7 +1,8 @@
 import { lstat } from "node:fs/promises";
 import { join, sep } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Context, Effect, Schema } from "effect";
+import { SqlClient } from "effect/sql";
+import type { Account } from "../../../contracts/account.js";
 import {
 	type SessionWorkspace as RecordedWorkspace,
 	SessionWorkspaceSchema,
@@ -28,6 +29,14 @@ import { SessionGitServiceTag } from "./session-git-service.js";
 import { readSessionWorktreeOwnership } from "./session-worktree-deletion.js";
 
 export interface SessionWorkspace {
+	/** Resolve an existing workspace before a draft has a persisted session. */
+	readonly preview: (
+		account: Account,
+		path: string,
+	) => Effect.Effect<
+		RecordedWorkspace,
+		WorkspaceMoveError | SessionCommandError
+	>;
 	readonly renameBranch: (
 		sessionId: string,
 		branchName: string,
@@ -94,10 +103,10 @@ export interface ResolvedWorkspaceTarget {
 	readonly ownership?: readonly SessionWorktreeOwnership[];
 }
 
-export class SessionWorkspaceTag extends Context.Tag("SessionWorkspace")<
+export class SessionWorkspaceTag extends Context.Service<
 	SessionWorkspaceTag,
 	SessionWorkspace
->() {}
+>()("SessionWorkspace") {}
 
 // Snapshot-only callers have no event store; Git registration remains sufficient
 // for them. Recovery uses only recorded ownership, never legacy branch inference.
@@ -135,8 +144,8 @@ export const recreateSessionWorktrees = (sessionId: string) =>
 				const state =
 					row?.workspace == null
 						? null
-						: yield* Schema.decodeUnknown(
-								Schema.parseJson(SessionWorkspaceSchema),
+						: yield* Schema.decodeUnknownEffect(
+								Schema.fromJsonString(SessionWorkspaceSchema),
 							)(row.workspace);
 				const directory = effectiveWorkingDirectory(config.projectDir, state);
 				const folders =
@@ -214,7 +223,7 @@ export const inspectSessionWorktree = (
 									recordedBranchForFolder(yield* ownership, folder, directory),
 								)
 								.pipe(
-									Effect.catchAll((error) =>
+									Effect.catch((error) =>
 										Effect.succeed({
 											path: directory,
 											canRecreate: false,

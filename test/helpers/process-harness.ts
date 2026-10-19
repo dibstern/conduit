@@ -17,24 +17,24 @@ import {
 import { createServer as createHttpServer, type Server } from "node:http";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
-import { homedir, userInfo } from "node:os";
+import { userInfo } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { Socket } from "@effect/platform";
-import { RpcClient, type RpcGroup, RpcSerialization } from "@effect/rpc";
+import Database from "better-sqlite3";
 import {
 	Cause,
 	Context,
 	Effect,
-	Either,
+	Result as Either,
 	Exit,
 	Fiber,
 	Layer,
 	ManagedRuntime,
-	ParseResult,
+	Schema,
 	Stream,
 } from "effect";
-import type { Request } from "effect/Request";
+import { RpcClient, type RpcGroup, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import WebSocket from "ws";
 import {
 	AccountIdSchema,
@@ -42,10 +42,7 @@ import {
 	type ProviderDriverKind,
 } from "../../src/lib/contracts/provider-instance.js";
 import {
-	GetInstances,
-	GetStatus,
 	type PtyEnvelope,
-	Shutdown,
 	WsRpcGroup,
 	type WsRpcRequest,
 } from "../../src/lib/contracts/ws-rpc.js";
@@ -88,13 +85,13 @@ export { responseChunks };
 
 const TIMEOUT_MS = 15_000;
 
-class BrowserRpc extends Context.Tag("ProcessHarnessBrowserRpc")<
+class BrowserRpc extends Context.Service<
 	BrowserRpc,
 	RpcClient.RpcClient<
 		RpcGroup.Rpcs<typeof WsRpcGroup>,
-		import("@effect/rpc/RpcClientError").RpcClientError
+		import("effect/rpc/RpcClientError").RpcClientError
 	>
->() {}
+>()("ProcessHarnessBrowserRpc") {}
 
 function browserRpcRuntime(
 	port: number,
@@ -104,7 +101,7 @@ function browserRpcRuntime(
 	const protocol = RpcClient.layerProtocolSocket().pipe(
 		Layer.provide(Socket.layerWebSocket(`ws://127.0.0.1:${port}/rpc`)),
 		Layer.provide(
-			Layer.succeed(Socket.WebSocketConstructor, (url) => {
+			Layer.succeed(Socket.WebSocketConstructor)((url) => {
 				const socket = new WebSocket(url);
 				socket.once("error", (error) => onDisconnect?.(error));
 				socket.once("close", () =>
@@ -114,15 +111,14 @@ function browserRpcRuntime(
 			}),
 		),
 		Layer.provide(
-			Layer.succeed(
-				RpcSerialization.RpcSerialization,
+			Layer.succeed(RpcSerialization.RpcSerialization)(
 				diagnostics?.serialization(`ws://127.0.0.1:${port}/rpc`) ??
 					RpcSerialization.json,
 			),
 		),
 	);
 	return ManagedRuntime.make(
-		Layer.scoped(BrowserRpc, RpcClient.make(WsRpcGroup)).pipe(
+		Layer.effect(BrowserRpc, RpcClient.make(WsRpcGroup)).pipe(
 			Layer.provide(protocol),
 		),
 	);
@@ -216,6 +212,7 @@ export class ProcessHarness {
 		private readonly holdRunnerAck = false,
 		private readonly holdRunnerOutput?:
 			| "permission-request"
+			| "question-request"
 			| "answer-permission"
 			| "send-turn",
 		private buildId?: string,
@@ -250,6 +247,7 @@ export class ProcessHarness {
 		managedOpenCodeId = "managed-test",
 		private readonly opencodeBorrowIdleTimeoutMs?: number,
 		private readonly opencodeInitiallyIdle = false,
+		private readonly draftPreWarmTtlMs?: number,
 	) {
 		this.root = realpathSync(mkdtempSync(rootPrefix));
 		this.rpcDiagnostics = new RpcDecodeDiagnostics(
@@ -287,7 +285,7 @@ export class ProcessHarness {
 		if (realSdk && process.platform === "darwin") {
 			mkdirSync(join(this.root, "home", "Library"));
 			symlinkSync(
-				join(homedir(), "Library", "Keychains"),
+				join(userInfo().homedir, "Library", "Keychains"),
 				join(this.root, "home", "Library", "Keychains"),
 			);
 		}
@@ -435,7 +433,7 @@ Object.assign(ClaudeDriver, { create: deps => {
   const projectGate = join(deps.workspaceRoot, ".conduit", "recovery-gated");
   const gate = existsSync(projectGate) ? projectGate : join(root, "capabilities-probe-gated");
   return waitForGate(gate, deps.workspaceRoot).pipe(
-    Effect.zipRight(create({ ...deps, capabilitiesService: { get: () => Effect.succeed(
+    Effect.andThen(create({ ...deps, capabilitiesService: { get: () => Effect.succeed(
       existsSync(join(root, "capabilities-probe-result.json"))
         ? JSON.parse(readFileSync(join(root, "capabilities-probe-result.json"), "utf8"))
         : { models: [], agents: [], commands: [] }
@@ -445,7 +443,7 @@ Object.assign(ClaudeDriver, { create: deps => {
       Object.assign(instance, { recoverEffect: () => {
         const failureGate = join(deps.workspaceRoot, ".conduit", "recovery-fail-after-adoption");
         return recover().pipe(
-          Effect.zipRight(waitForGate(failureGate, deps.workspaceRoot)),
+          Effect.andThen(waitForGate(failureGate, deps.workspaceRoot)),
           Effect.tap(() => Effect.sync(() => {
             if (!existsSync(failureGate)) return;
             writeFileSync(failureGate + "-failed", "original recovery completed before fixture failure");
@@ -471,7 +469,40 @@ Object.assign(ClaudeDriver, { create: deps => {
 		this.rememberManagedOpenCode();
 	}
 
-	projectStorePath(slug = "process-test"): string {
+	daemonStorePath(): string {
+		return join(this.configDir, "events.db");
+	}
+
+	promptIdForProviderRequest(providerRequestId: string): string | undefined {
+		const db = new Database(this.daemonStorePath(), { readonly: true });
+		try {
+			return db
+				.prepare<[string], { id: string }>(
+					"SELECT id FROM pending_approvals WHERE provider_request_id = ? ORDER BY created_at DESC LIMIT 1",
+				)
+				.get(providerRequestId)?.id;
+		} finally {
+			db.close();
+		}
+	}
+
+	providerRequestIdForPrompt(promptId: string): string | undefined {
+		const db = new Database(this.daemonStorePath(), { readonly: true });
+		try {
+			return (
+				db
+					.prepare<[string], { provider_request_id: string | null }>(
+						"SELECT provider_request_id FROM pending_approvals WHERE id = ?",
+					)
+					.get(promptId)?.provider_request_id ?? undefined
+			);
+		} finally {
+			db.close();
+		}
+	}
+
+	/** Offline source for startup-import fixtures, never a daemon runtime store. */
+	legacyProjectStorePath(slug = "process-test"): string {
 		return join(projectStorageDir(this.configDir, slug), "events.db");
 	}
 
@@ -492,6 +523,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			pauseOpenCodeSupervisor?: boolean;
 			runnerLifecycle?: ProcessHarness["runnerLifecycle"];
 			queryInitializationDelayMs?: number;
+			/** Keep draft reservation expiry observable without a ten-minute wait. */
+			draftPreWarmTtlMs?: number;
 			queryInitializationFailures?: number;
 			blockCapabilitiesProbe?: boolean;
 			capabilityModels?: readonly ModelInfo[];
@@ -506,6 +539,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			holdRunnerAck?: boolean;
 			holdRunnerOutput?:
 				| "permission-request"
+				| "question-request"
 				| "answer-permission"
 				| "send-turn";
 			buildId?: string;
@@ -557,6 +591,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			options.managedOpenCodeId,
 			options.opencodeBorrowIdleTimeoutMs,
 			options.opencodeInitiallyIdle,
+			options.draftPreWarmTtlMs,
 		);
 	}
 
@@ -599,10 +634,33 @@ Object.assign(ClaudeDriver, { create: deps => {
 					| "NODE_OPTIONS"
 					| "CONDUIT_SERVER_BUILD_ID"
 					| "CONDUIT_SLOW_RPC_MS"
+					| "CONDUIT_TEST_ADVANCE_BUS_CAPACITY"
+					| "CONDUIT_TEST_RPC_DEFECT"
 					| "CONDUIT_TRACE_ENABLED"
 					| "CONDUIT_TRACE_FILE"
 					| "CONDUIT_TRACE_MAX_BYTES"
-					| "CONDUIT_TRACE_SQL_MIN_MS"
+					| "CONDUIT_TRACE_MIN_MS"
+					| "CONDUIT_TRACE_SESSION"
+					| "CONDUIT_CURSOR_SDK_TRACE"
+					| "CONDUIT_CURSOR_SDK_CAPTURE"
+					| "CONDUIT_TEST_CURSOR_CLOSE_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_DISPOSE_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_AUTH_STATE"
+					| "CONDUIT_TEST_CURSOR_LOGIN_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_LOGIN_URL_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_LOGIN_TIMEOUT_MS"
+					| "CURSOR_API_KEY"
+					| "CURSOR_AUTH_TOKEN"
+					| "CONDUIT_TEST_CURSOR_DASHBOARD_URL"
+					| "CONDUIT_TEST_CURSOR_KEYCHAIN"
+					| "CONDUIT_TEST_CURSOR_CATALOG_TTL_MS"
+					| "CONDUIT_TEST_CURSOR_DELTA_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_WAIT_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_CANCEL_TERMINAL_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_CANCEL_NEVER_SETTLES"
+					| "CONDUIT_TEST_CURSOR_SEND_GATE"
+					| "CONDUIT_TEST_CURSOR_STREAM_GATE"
+					| "CONDUIT_CONTENTION_METRICS"
 					| "XPC_SERVICE_NAME"
 				>
 			>;
@@ -791,7 +849,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 								),
 							}),
 					CLAUDE_CONFIG_DIR: this.realSdk
-						? (process.env["CLAUDE_CONFIG_DIR"] ?? join(homedir(), ".claude"))
+						? (process.env["CONDUIT_TEST_REAL_CLAUDE_CONFIG_DIR"] ??
+							join(userInfo().homedir, ".claude"))
 						: join(this.root, "claude"),
 					OPENCODE_URL: this.defaultOpenCodeUrl,
 					...(this.opencodeRecording
@@ -804,7 +863,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 								USER: userInfo().username,
 								CLAUDE_SECURESTORAGE_CONFIG_DIR:
 									process.env["CLAUDE_SECURESTORAGE_CONFIG_DIR"] ??
-									process.env["CLAUDE_CONFIG_DIR"] ??
+									process.env["CONDUIT_TEST_REAL_CLAUDE_CONFIG_DIR"] ??
 									"",
 							}
 						: {}),
@@ -943,6 +1002,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 						options.queryInitializationDelayMs ??
 							this.queryInitializationDelayMs,
 					),
+					...(this.draftPreWarmTtlMs === undefined
+						? {}
+						: {
+								CONDUIT_TEST_DRAFT_PREWARM_TTL_MS: String(
+									this.draftPreWarmTtlMs,
+								),
+							}),
 					...(this.buildId ? { CONDUIT_TEST_BUILD_ID: this.buildId } : {}),
 					...(this.upgradeSinkProof
 						? { CONDUIT_TEST_UPGRADE_SINK_PROOF: "1" }
@@ -1062,8 +1128,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 				void (async () => {
 					while (!finished) {
 						try {
-							const status = await this.requestRpc(new GetStatus({}));
-							const instances = await this.requestRpc(new GetInstances({}));
+							const status = await this.requestRpc({ _tag: "GetStatus" });
+							const instances = await this.requestRpc({ _tag: "GetInstances" });
 							if (
 								child.pid &&
 								(options.exactCliArgs || status.port === this.port)
@@ -1392,7 +1458,11 @@ Object.assign(ClaudeDriver, { create: deps => {
 		await this.stop(signal, 10_000);
 	}
 
-	async runCli(args: string[]): Promise<{
+	async runCli(
+		args: string[],
+		/** A cold CLI start can exceed the default bound on a loaded machine. */
+		options: { timeoutMs?: number } = {},
+	): Promise<{
 		pid: number | undefined;
 		code: number | null;
 		signal: NodeJS.Signals | null;
@@ -1425,7 +1495,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			const timer = setTimeout(() => {
 				timedOut = true;
 				child.kill("SIGKILL");
-			}, TIMEOUT_MS);
+			}, options.timeoutMs ?? TIMEOUT_MS);
 			child.once("error", (cause) => {
 				clearTimeout(timer);
 				fail(cause);
@@ -1451,7 +1521,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 		let rpcFailure: unknown;
 		if (child.exitCode === null && child.signalCode === null) {
 			try {
-				await this.requestRpc(new Shutdown({}));
+				await this.requestRpc({ _tag: "Shutdown" });
 			} catch (cause) {
 				// A startup failure can remove IPC before its owned child exits.
 				rpcFailure = cause;
@@ -1561,24 +1631,22 @@ Object.assign(ClaudeDriver, { create: deps => {
 	}
 
 	/** Keep the original IPC error, and retain its undecoded payload for proof. */
-	async requestRpc<R extends WsRpcRequest>(
+	requestRpc<R extends WsRpcRequest>(
 		request: R,
-	): Promise<Request.Success<R>> {
+	): ReturnType<typeof sendRpcRequest<R>> {
 		const endpoint = join(this.configDir, "relay.sock");
-		try {
-			return await sendRpcRequest(endpoint, request);
-		} catch (error) {
-			if (ParseResult.isParseError(error)) {
+		return sendRpcRequest(endpoint, request).catch((error: unknown) => {
+			if (Schema.isSchemaError(error)) {
 				this.rpcDiagnostics.capture(
 					endpoint,
 					request._tag,
-					JSON.stringify("actual" in error.issue ? error.issue.actual : null) ??
+					JSON.stringify("input" in error.issue ? error.issue.input : null) ??
 						"null",
 					error,
 				);
 			}
 			throw error;
-		}
+		});
 	}
 
 	proof() {
@@ -1613,14 +1681,14 @@ Object.assign(ClaudeDriver, { create: deps => {
 
 	private rememberManagedOpenCode(): void {
 		const loaded = loadDaemonConfigResult(this.configDir);
-		if (loaded._tag === "Left") {
+		if (loaded._tag === "Failure") {
 			// Config-safety scenarios deliberately damage this file. Record the
 			// read failure and retain already authenticated process ownership.
-			if (loaded.left._tag !== "NotFound")
-				this.configReadErrors.add(loaded.left.message);
+			if (loaded.failure._tag !== "NotFound")
+				this.configReadErrors.add(loaded.failure.message);
 			return;
 		}
-		for (const instance of loaded.right.instances ?? []) {
+		for (const instance of loaded.success.instances ?? []) {
 			if (
 				instance.managed &&
 				instance.driver !== "claude" &&
@@ -1942,18 +2010,18 @@ export class ProcessBrowser {
 	>();
 	private closed = false;
 	private failure: Error | undefined;
-	private ptys: Fiber.RuntimeFiber<void, unknown> | undefined;
-	private approvals: Fiber.RuntimeFiber<void, unknown> | undefined;
-	private projectSettings: Fiber.RuntimeFiber<void, unknown> | undefined;
-	private sessions: Fiber.RuntimeFiber<void, unknown> | undefined;
+	private ptys: Fiber.Fiber<void, unknown> | undefined;
+	private approvals: Fiber.Fiber<void, unknown> | undefined;
+	private projectSettings: Fiber.Fiber<void, unknown> | undefined;
+	private sessions: Fiber.Fiber<void, unknown> | undefined;
 	private sessionsReady: Promise<void> | undefined;
 	private readonly details = new Map<string, Promise<void>>();
-	private readonly detailFibers = new Set<Fiber.RuntimeFiber<void, unknown>>();
+	private readonly detailFibers = new Set<Fiber.Fiber<void, unknown>>();
 	private readonly families = new Map<string, Promise<void>>();
-	private readonly familyFibers = new Set<Fiber.RuntimeFiber<void, unknown>>();
+	private readonly familyFibers = new Set<Fiber.Fiber<void, unknown>>();
 	private constructor(
 		private readonly runtime: ManagedRuntime.ManagedRuntime<BrowserRpc, never>,
-		readonly rpc: BrowserRpc["Type"],
+		readonly rpc: BrowserRpc["Service"],
 		originId: string,
 		private readonly projectSlug: string,
 		private readonly followRows: boolean,
@@ -2015,7 +2083,7 @@ export class ProcessBrowser {
 	private watch<A, E>(
 		stream: Stream.Stream<A, E>,
 		record: (envelope: A) => Effect.Effect<void, unknown>,
-	): Fiber.RuntimeFiber<void, unknown> {
+	): Fiber.Fiber<void, unknown> {
 		return this.runtime.runFork(
 			Stream.runForEach(stream, record).pipe(
 				Effect.onExit((exit) =>
@@ -2116,30 +2184,29 @@ export class ProcessBrowser {
 		if (this.sessionsReady) return this.sessionsReady;
 		this.sessionsReady = (async () => {
 			const cursor = this.frames.length;
-			this.sessions = this.watch(
-				this.rpc.SubscribeShell({ projectSlug: this.projectSlug }),
-				(envelope) =>
-					Effect.gen(this, function* () {
-						this.record({ type: "shell", ...envelope });
-						if (envelope._tag === "snapshot")
-							this.record({ type: "session_snapshot" });
-						const rows =
-							envelope._tag === "snapshot"
-								? envelope.rows
-								: envelope._tag === "upsert"
-									? [envelope.item]
-									: [];
-						for (const row of rows)
-							this.record({ ...row, type: "session_row" });
-						if (this.followRows)
-							yield* Effect.forEach(
-								rows,
-								(row) => Effect.promise(() => this.followSession(row.id)),
-								{ discard: true },
-							);
-						if (envelope._tag === "remove")
-							this.record({ type: "session_removed", id: envelope.id });
-					}),
+			this.sessions = this.watch(this.rpc.SubscribeShell({}), (envelope) =>
+				Effect.gen({ self: this }, function* () {
+					this.record({ type: "shell", ...envelope });
+					if (envelope._tag === "snapshot")
+						this.record({ type: "session_snapshot" });
+					const rows =
+						envelope._tag === "snapshot"
+							? envelope.rows
+							: envelope._tag === "upsert"
+								? [envelope.item]
+								: [];
+					for (const row of rows) this.record({ ...row, type: "session_row" });
+					// The feed spans every project; following another project's
+					// rows would tie this browser to that project's lifetime.
+					if (this.followRows)
+						yield* Effect.forEach(
+							rows.filter((row) => row.projectSlug === this.projectSlug),
+							(row) => Effect.promise(() => this.followSession(row.id)),
+							{ discard: true },
+						);
+					if (envelope._tag === "remove")
+						this.record({ type: "session_removed", id: envelope.id });
+				}),
 			);
 			await this.waitFor(
 				(message) =>
@@ -2160,7 +2227,6 @@ export class ProcessBrowser {
 				this.watch(
 					this.rpc
 						.SubscribeSessionDetail({
-							projectSlug: this.projectSlug,
 							sessionId,
 						})
 						.pipe(decodeSessionDetail),
@@ -2205,11 +2271,10 @@ export class ProcessBrowser {
 			this.familyFibers.add(
 				this.watch(
 					this.rpc.SubscribeSessionFamily({
-						projectSlug: this.projectSlug,
 						sessionId,
 					}),
 					(envelope) =>
-						Effect.gen(this, function* () {
+						Effect.gen({ self: this }, function* () {
 							this.record({ type: "family", familyOf: sessionId, ...envelope });
 							const rows =
 								envelope._tag === "snapshot"
@@ -2279,6 +2344,31 @@ export class ProcessBrowser {
 		);
 	}
 
+	async borrowDraftModels(instanceId: string): Promise<() => Promise<void>> {
+		const cursor = this.frames.length;
+		const fiber = this.runtime.runFork(
+			Stream.runForEach(
+				this.rpc.SubscribeDraftModels({
+					projectSlug: this.projectSlug,
+					instanceId,
+				}),
+				(response) =>
+					Effect.sync(() =>
+						this.record({ type: "draft_models", instanceId, ...response }),
+					),
+			),
+		);
+		await this.waitFor(
+			(message) =>
+				message["type"] === "draft_models" &&
+				message["instanceId"] === instanceId,
+			cursor,
+		);
+		return async () => {
+			await this.run(Fiber.interrupt(fiber));
+		};
+	}
+
 	async updateInstance(
 		instanceId: string,
 		updates: { driver?: "opencode" | "claude"; env?: Record<string, string> },
@@ -2304,25 +2394,65 @@ export class ProcessBrowser {
 		title?: string,
 		instanceId?: string,
 		providerId: ProviderDriverKind = "claude",
+		draft: {
+			draftId?: string;
+			modelProviderId?: string;
+			modelId?: string;
+			variant?: string;
+			contextWindow?: string;
+			permissionMode?: "ask" | "full";
+			worktreePath?: string;
+		} = {},
 	): Promise<string> {
 		const result = await this.run(
 			this.rpc.CreateSession({
-				permissionMode: "ask",
-				projectSlug: this.projectSlug,
-				providerId,
-				model: {
-					providerId: providerId === "opencode" ? "fake" : "claude",
-					modelId: providerId === "opencode" ? "fake-model" : "sonnet",
-					variant: "",
-					contextWindow: providerId === "opencode" ? "" : "200k",
-				},
-				...(instanceId ? { instanceId: AccountIdSchema.make(instanceId) } : {}),
+				...this.draftSessionPayload(providerId, instanceId, draft),
+				...(draft.draftId ? { draftId: draft.draftId } : {}),
 				...(title !== undefined ? { title } : {}),
-				originId: this.originId,
 			}),
 		);
 		await this.view(result.sessionId);
 		return result.sessionId;
+	}
+
+	async preWarmDraft(
+		draftId: string,
+		draft: Parameters<ProcessBrowser["createSession"]>[3] = {},
+		instanceId?: string,
+		providerId: ProviderDriverKind = "claude",
+	): Promise<void> {
+		await this.run(
+			this.rpc.PreWarmDraft({
+				...this.draftSessionPayload(providerId, instanceId, draft),
+				draftId,
+			}),
+		);
+	}
+
+	private draftSessionPayload(
+		providerId: ProviderDriverKind,
+		instanceId: string | undefined,
+		draft: NonNullable<Parameters<ProcessBrowser["createSession"]>[3]>,
+	) {
+		return {
+			permissionMode: draft.permissionMode ?? "ask",
+			projectSlug: this.projectSlug,
+			originId: this.originId,
+			providerId,
+			model: {
+				providerId:
+					draft.modelProviderId ??
+					(providerId === "opencode" ? "fake" : providerId),
+				modelId:
+					draft.modelId ??
+					(providerId === "opencode" ? "fake-model" : "sonnet"),
+				variant: draft.variant ?? "",
+				contextWindow:
+					draft.contextWindow ?? (providerId === "opencode" ? "" : "200k"),
+			},
+			...(instanceId ? { instanceId: AccountIdSchema.make(instanceId) } : {}),
+			...(draft.worktreePath ? { worktreePath: draft.worktreePath } : {}),
+		};
 	}
 
 	async createPty(): Promise<PtyInfo> {
@@ -2383,7 +2513,6 @@ export class ProcessBrowser {
 		await this.followSession(sessionId);
 		await this.run(
 			this.rpc.ViewSession({
-				projectSlug: this.projectSlug,
 				sessionId,
 				originId: this.originId,
 			}),
@@ -2396,10 +2525,7 @@ export class ProcessBrowser {
 		timeoutMs = TIMEOUT_MS,
 	): Promise<void> {
 		await this.followSession(sessionId);
-		await this.run(
-			this.rpc.PreWarmSession({ projectSlug: this.projectSlug, sessionId }),
-			timeoutMs,
-		);
+		await this.run(this.rpc.PreWarmSession({ sessionId }), timeoutMs);
 	}
 
 	async send(
@@ -2426,8 +2552,7 @@ export class ProcessBrowser {
 		}
 		const cursor = this.frames.length;
 		const result = await this.run(
-			this.rpc.input.submit({
-				projectSlug: this.projectSlug,
+			this.rpc["input.submit"]({
 				sessionId,
 				originId: this.originId,
 				inputId: randomUUID(),
@@ -2518,11 +2643,7 @@ export class ProcessBrowser {
 
 	async history(sessionId: string) {
 		await this.followSession(sessionId);
-		return (
-			await this.run(
-				this.rpc.LoadMoreHistory({ projectSlug: this.projectSlug, sessionId }),
-			)
-		).messages;
+		return (await this.run(this.rpc.LoadMoreHistory({ sessionId }))).messages;
 	}
 
 	async setAutoSettle(days: number | null): Promise<void> {
@@ -2539,7 +2660,6 @@ export class ProcessBrowser {
 		await this.followSession(sessionId);
 		await this.run(
 			this.rpc.DeleteSession({
-				projectSlug: this.projectSlug,
 				sessionId,
 				originId: this.originId,
 			}),
@@ -2550,7 +2670,6 @@ export class ProcessBrowser {
 		await this.followSession(sessionId);
 		await this.run(
 			this.rpc.SwitchAgent({
-				projectSlug: this.projectSlug,
 				sessionId,
 				agentId,
 				originId: this.originId,
@@ -2561,8 +2680,7 @@ export class ProcessBrowser {
 	/** The tray's Send now, and Resume on the oldest queued input. */
 	async sendNow(sessionId: string, inputId: string): Promise<void> {
 		const result = await this.run(
-			this.rpc.input.sendNow({
-				projectSlug: this.projectSlug,
+			this.rpc["input.sendNow"]({
 				sessionId,
 				originId: this.originId,
 				inputId,
@@ -2576,7 +2694,6 @@ export class ProcessBrowser {
 		await this.runtime.runPromise(
 			this.rpc
 				.ReloadProviderSession({
-					projectSlug: this.projectSlug,
 					sessionId,
 					originId: this.originId,
 					commandId: randomUUID(),

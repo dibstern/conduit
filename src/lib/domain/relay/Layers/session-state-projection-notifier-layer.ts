@@ -1,4 +1,5 @@
-import { Cause, Effect, Layer, Option, Ref, Scope } from "effect";
+import { type Cause, Effect, Layer, Option, Ref, Scope } from "effect";
+import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../../errors.js";
 import {
 	type SessionStateProjectionNotifier,
@@ -8,12 +9,14 @@ import { SessionGitServiceTag } from "../Services/session-git-service.js";
 import { SessionManagerServiceTag } from "../Services/session-manager-service.js";
 
 const logFailure = (operation: string, cause: Cause.Cause<unknown>) => {
-	if (Cause.isInterruptedOnly(cause)) return Effect.interrupt;
-	const failure = Cause.failureOption(cause);
+	if (Failure.isInterruptedOnly(cause)) return Effect.interrupt;
+	const failure = Failure.firstFailure(cause);
 	const detail = Option.isSome(failure)
 		? formatErrorDetail(failure.value)
-		: Cause.pretty(cause);
-	return Effect.logError(`${operation}: ${detail}\n${Cause.pretty(cause)}`);
+		: Failure.renderCause(cause);
+	return Effect.logError(
+		`${operation}: ${detail}\n${Failure.renderCause(cause)}`,
+	);
 };
 
 export const makeSessionStateProjectionNotifierLive = (
@@ -23,7 +26,7 @@ export const makeSessionStateProjectionNotifierLive = (
 	never,
 	SessionManagerServiceTag
 > =>
-	Layer.scoped(
+	Layer.effect(
 		SessionStateProjectionNotifierTag,
 		Effect.gen(function* () {
 			const scope = yield* Scope.Scope;
@@ -42,15 +45,15 @@ export const makeSessionStateProjectionNotifierLive = (
 				// that change would be dropped with nothing left to ever read it,
 				// which is the exact staleness this service exists to prevent. Paying
 				// for it with an occasional redundant read is a good trade.
-				Effect.zipRight(Ref.set(broadcastPending, false)),
+				Effect.andThen(Ref.set(broadcastPending, false)),
 				// Suspended so each refresh builds its own effect. The same effect
 				// value is forked repeatedly, and refreshSessionLineage happens to be
 				// lazy today; relying on that would make a future eager read here
 				// apply one frozen snapshot forever.
-				Effect.zipRight(
+				Effect.andThen(
 					Effect.suspend(() => sessionManagerService.refreshSessionLineage()),
 				),
-				Effect.catchAllCause((cause) =>
+				Effect.catchCause((cause) =>
 					logFailure("Failed to refresh session lineage", cause),
 				),
 				// Only reachable if the fiber is interrupted during the sleep, e.g. at
@@ -64,7 +67,9 @@ export const makeSessionStateProjectionNotifierLive = (
 				if (!alreadyPending) {
 					// Arming happens inside the uninterruptible commit, and a fork inherits
 					// that. Without this the scope-close interrupt waits out the sleep.
-					yield* Effect.forkIn(Effect.interruptible(refreshLineage), scope);
+					yield* Effect.forkIn(Effect.interruptible(refreshLineage), scope, {
+						uninterruptible: "inherit",
+					});
 				}
 			});
 
@@ -82,19 +87,20 @@ export const makeSessionStateProjectionNotifierLive = (
 										? sessionGit.value.refresh({ sessionId })
 										: Effect.tryPromise(() => refreshSessionGit())
 									).pipe(
-										Effect.catchAllCause((cause) =>
+										Effect.catchCause((cause) =>
 											logFailure("Failed to refresh session git state", cause),
 										),
-										Effect.zipRight(armBroadcast),
+										Effect.andThen(armBroadcast),
 									),
 								),
 								scope,
+								{ uninterruptible: "inherit" },
 							);
 						} else {
 							yield* armBroadcast;
 						}
 					}).pipe(
-						Effect.catchAllCause((cause) =>
+						Effect.catchCause((cause) =>
 							logFailure(
 								`Failed to handle projected session state for ${sessionId}`,
 								cause,

@@ -4,11 +4,12 @@
 // filesystem operations, stopped/missing services, and removing a unit before
 // its process has stopped. Invalid/unreadable config must retain its tagged
 // error and prevent config or unit writes; only a missing config may default.
+// Uninstall must await full shutdown before unloading; reinstall must preserve runtimes.
 // Every effect below uses an in-memory runner.
 
 import * as childProcess from "node:child_process";
 import { dirname } from "node:path";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseArgs, run } from "../../../src/bin/cli-core.js";
 import * as service from "../../../src/bin/cli-service.js";
@@ -25,6 +26,7 @@ import {
 	DaemonConfigInvalid,
 	DaemonConfigNotFound,
 	DaemonConfigUnreadable,
+	defaultDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
 import { getVersion } from "../../../src/lib/version.js";
 
@@ -71,7 +73,7 @@ function options(platform: NodeJS.Platform): ServiceOptions {
 function fakeRunner(platform: NodeJS.Platform) {
 	const files = new Map<string, string>([[cliEntry, "installed CLI"]]);
 	const events: string[] = [];
-	let storedConfig: ReturnType<ServiceRunner["loadConfig"]> = Either.left(
+	let storedConfig: ReturnType<ServiceRunner["loadConfig"]> = Either.fail(
 		new DaemonConfigNotFound({
 			path: `${configDir}/daemon.json`,
 			cause: "ENOENT",
@@ -103,7 +105,7 @@ function fakeRunner(platform: NodeJS.Platform) {
 		}),
 		loadConfig: vi.fn<ServiceRunner["loadConfig"]>(() => storedConfig),
 		saveConfig: vi.fn<ServiceRunner["saveConfig"]>(async (config, dir) => {
-			storedConfig = Either.right(config);
+			storedConfig = Either.succeed(config);
 			events.push(`save config ${dir}`);
 			files.set(`${dir}/daemon.json`, JSON.stringify(config));
 		}),
@@ -112,6 +114,7 @@ function fakeRunner(platform: NodeJS.Platform) {
 			files.delete(path);
 		}),
 		checkDaemon: vi.fn<ServiceRunner["checkDaemon"]>(async () => false),
+		stopDaemon: vi.fn<ServiceRunner["stopDaemon"]>(async () => {}),
 		isPortAvailable: vi.fn<ServiceRunner["isPortAvailable"]>(async () => true),
 	} satisfies ServiceRunner;
 	return { runner, files, events, config: options(platform) };
@@ -211,6 +214,7 @@ describe("service unit generation", () => {
 		);
 		expect(unit).toContain('ExecStart="/bin/zsh" -l -c "exec conduit serve"');
 		expect(unit).toContain("Restart=always");
+		expect(unit).toContain("KillMode=process");
 		expect(unit).toContain("WantedBy=default.target");
 		expect(unit).toContain(`WorkingDirectory=${cwd}`);
 		expect(unit).toContain(`Environment="CONDUIT_CONFIG_DIR=${configDir}"`);
@@ -345,7 +349,7 @@ describe.each([
 		const content = "{ damaged config";
 		files.set(path, content);
 		const error = new ErrorType({ path, cause: "fixture config failure" });
-		runner.loadConfig.mockReturnValue(Either.left(error));
+		runner.loadConfig.mockReturnValue(Either.fail(error));
 		await expect(runServiceCommand("install", config, runner)).rejects.toBe(
 			error,
 		);
@@ -433,6 +437,7 @@ describe.each([
 		const { runner, config } = fakeRunner(platform);
 		loaded(runner, platform);
 		await runServiceCommand("install", config, runner);
+		expect(runner.stopDaemon).not.toHaveBeenCalled();
 		expect(runner.exec).toHaveBeenCalledWith(
 			platform === "darwin" ? "launchctl" : "systemctl",
 			platform === "darwin"
@@ -524,11 +529,23 @@ describe.each([
 		expect(runner.writeFile).not.toHaveBeenCalled();
 	});
 
-	it("stops the service before removing its unit", async () => {
+	it("awaits full shutdown before unloading the service and removing its unit", async () => {
 		const { runner, config, files } = fakeRunner(platform);
 		files.set(config.paths.unitFile, generateServiceUnit(config));
 		loaded(runner, platform);
-		const output = await runServiceCommand("uninstall", config, runner);
+		let finishStop!: () => void;
+		const stopped = new Promise<void>((resolve) => {
+			finishStop = resolve;
+		});
+		runner.stopDaemon.mockReturnValueOnce(stopped);
+		const uninstall = runServiceCommand("uninstall", config, runner);
+		await vi.waitFor(() =>
+			expect(runner.stopDaemon).toHaveBeenCalledWith(configDir, 42),
+		);
+		expect(runner.exec.mock.calls).toHaveLength(1);
+		expect(runner.removeFile).not.toHaveBeenCalled();
+		finishStop();
+		const output = await uninstall;
 		expect(runner.exec.mock.calls).toEqual(
 			platform === "darwin"
 				? [
@@ -561,6 +578,13 @@ describe.each([
 		const { runner, files, config } = fakeRunner(platform);
 		files.set(config.paths.unitFile, generateServiceUnit(config));
 		loaded(runner, platform);
+		runner.stopDaemon.mockRejectedValueOnce(new Error("Shutdown failed"));
+		await expect(
+			runServiceCommand("uninstall", config, runner),
+		).rejects.toThrow("Shutdown failed");
+		expect(runner.exec.mock.calls).toHaveLength(1);
+		expect(runner.removeFile).not.toHaveBeenCalled();
+		expect(files.has(config.paths.unitFile)).toBe(true);
 		const execute = runner.exec.getMockImplementation();
 		runner.exec.mockImplementation(async (command, args) => {
 			if (args.includes("bootout") || args.includes("disable"))
@@ -579,6 +603,7 @@ describe.each([
 		const { runner, files, config } = fakeRunner(platform);
 		files.set(config.paths.unitFile, generateServiceUnit(config));
 		await runServiceCommand("uninstall", config, runner);
+		expect(runner.stopDaemon).not.toHaveBeenCalled();
 		expect(files.has(config.paths.unitFile)).toBe(false);
 		if (platform === "darwin") expect(runner.exec.mock.calls).toHaveLength(1);
 		else
@@ -593,6 +618,9 @@ describe.each([
 	it("can stop a loaded service whose unit file is already missing", async () => {
 		const { runner, config } = fakeRunner(platform);
 		loaded(runner, platform);
+		runner.loadConfig.mockReturnValue(
+			Either.succeed({ ...defaultDaemonConfig(), pid: 42 }),
+		);
 		if (platform === "linux") {
 			// Reload can leave a running process with LoadState=not-found.
 			// Older systemd refuses disable --now when the unit file is missing.
@@ -611,6 +639,7 @@ describe.each([
 				: ["--user", "stop", "conduit"],
 		);
 		expect(runner.removeFile).not.toHaveBeenCalled();
+		expect(runner.stopDaemon).toHaveBeenCalledWith(configDir, 42);
 	});
 
 	it("makes uninstall harmless when the service is absent", async () => {
@@ -656,7 +685,7 @@ describe.each([
 		expect(output).toContain("Running: no");
 	});
 
-	it("reads the installed log paths even when the current config directory differs", async () => {
+	it("uses the installed config and log paths when the current config directory differs", async () => {
 		const { runner, config, files } = fakeRunner(platform);
 		const installed = {
 			...config,
@@ -669,6 +698,9 @@ describe.each([
 		const output = await runServiceCommand("status", config, runner);
 		expect(output).toContain(installed.paths.stdout);
 		expect(output).toContain(installed.paths.stderr);
+		loaded(runner, platform);
+		await runServiceCommand("uninstall", config, runner);
+		expect(runner.stopDaemon).toHaveBeenCalledWith("/logs/work & 50%", 42);
 	});
 
 	it.each([

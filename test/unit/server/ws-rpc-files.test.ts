@@ -1,6 +1,6 @@
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
@@ -31,7 +31,7 @@ describe("WsRpcServerLayer file reads", () => {
 			});
 
 			expect(result).toEqual({
-				projectSlug: "project-a",
+				projectSlug: "test-project",
 				path: ".",
 				entries: [
 					{ name: "src", type: "directory" },
@@ -44,6 +44,7 @@ describe("WsRpcServerLayer file reads", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ api })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -63,7 +64,7 @@ describe("WsRpcServerLayer file reads", () => {
 			});
 
 			expect(result).toEqual({
-				projectSlug: "project-a",
+				projectSlug: "test-project",
 				path: "README.md",
 				content: "hello world",
 				binary: false,
@@ -74,6 +75,7 @@ describe("WsRpcServerLayer file reads", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ api })),
 				),
+				{ local: true },
 			),
 		);
 	});

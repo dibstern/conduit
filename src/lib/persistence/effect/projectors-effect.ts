@@ -1,25 +1,26 @@
 // Each projector's `project` method is an Effect program over @effect/sql SqlClient.
 
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Effect } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import type { ReadModelCollection } from "../../contracts/read-model-advance.js";
 import { persistedTurnState } from "../../contracts/turn-phase.js";
 import { CLAUDE_WORKTREE_EVENTS } from "../../session/claude-worktree-state.js";
 import { isRecord } from "../../utils.js";
-import type {
-	CanonicalEventType,
-	EventPayloadMap,
-	StoredEvent,
-} from "../events.js";
+import type { LiveEventType, StoredEvent } from "../events.js";
 import {
 	getSessionStatements,
+	isHumanSentMessage,
 	isSessionRemoval,
 	REMOVE_SESSION_SQL,
 	SESSION_HANDLED_TYPES,
 	SESSION_SUBTREE_SQL,
 } from "../projectors/session-handlers.js";
 import { PAGE_MESSAGES } from "../session-history-adapter.js";
+import {
+	NEVER_CUT_TOOL_NAMES,
+	PREVIEW_CODE_POINTS,
+} from "../tool-wire-projection.js";
 import { rerootSession } from "./sidebar-projection.js";
 
 export class ProjectionError extends Data.TaggedError("ProjectionError")<{
@@ -37,6 +38,12 @@ export interface ProjectionContext {
 	 */
 	readonly version: number;
 	readonly replaying?: boolean;
+	/**
+	 * Set by a batch: message stamps collect here and run once at the end. A
+	 * batch shares one version, so stamping a message per event repeats the same
+	 * write, and a forked history makes that tens of thousands of statements.
+	 */
+	readonly deferredMessageStamps?: Set<string>;
 }
 
 /**
@@ -97,7 +104,7 @@ export const mergeTouches = (
 
 export interface EffectProjector {
 	readonly name: string;
-	readonly handles: readonly CanonicalEventType[];
+	readonly handles: readonly LiveEventType[];
 	/**
 	 * Apply the event, then report what moved and what is gone. The projection
 	 * runner needs nothing from the caller to know either.
@@ -112,10 +119,29 @@ export interface EffectProjector {
 	>;
 }
 
-function isEventType<K extends CanonicalEventType>(
-	event: StoredEvent,
+export function defineProjector<
+	const Types extends readonly [LiveEventType, ...LiveEventType[]],
+>(
+	makeProjector: () => {
+		readonly name: string;
+		readonly handles: Types;
+		readonly project: (
+			event: Extract<StoredEvent, { type: NoInfer<Types[number]> }>,
+			ctx: ProjectionContext,
+		) => ReturnType<EffectProjector["project"]>;
+	},
+): () => Omit<EffectProjector, "handles"> & { readonly handles: Types } {
+	// The runner dispatches only events in handles. Erase the narrowed input at
+	// that boundary while retaining the literal list for the coverage check.
+	return makeProjector as () => Omit<EffectProjector, "handles"> & {
+		readonly handles: Types;
+	};
+}
+
+function isEventType<E extends StoredEvent, K extends E["type"]>(
+	event: E,
 	type: K,
-): event is StoredEvent & { type: K; data: EventPayloadMap[K] } {
+): event is Extract<E, { type: K }> {
 	return event.type === type;
 }
 
@@ -171,6 +197,28 @@ const stampSessions = (
 		};
 	});
 
+const HUMAN_USER_MESSAGE_SQL =
+	"messages.is_human_sent = 1 AND messages.role = 'user' AND messages.is_inherited = 0";
+
+function jsonRecord(value: string | null): Record<string, unknown> {
+	const parsed: unknown = value === null ? undefined : JSON.parse(value);
+	return isRecord(parsed) ? parsed : {};
+}
+
+const refreshLastUserMessageAt = (sessionId: string, version: number) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const [latest] = yield* sql<{ created_at: number | null }>`
+			SELECT MAX(messages.created_at) AS created_at FROM messages
+			WHERE messages.session_id = ${sessionId} AND ${sql.literal(HUMAN_USER_MESSAGE_SQL)}`;
+		return ids(
+			yield* sql<{ id: string }>`
+			UPDATE sessions SET last_user_message_at = ${latest?.created_at ?? null}, version = ${version}
+			WHERE id = ${sessionId} AND last_user_message_at IS NOT ${latest?.created_at ?? null}
+			RETURNING id`,
+		);
+	});
+
 // Takes the messages the handler reported writing, not the id in the event
 // header: a guard that declined and a conflict that was ignored both report
 // nothing, and a row nobody wrote must not be announced as changed.
@@ -179,22 +227,42 @@ const stampSessions = (
 // message is stored against the subagent session and that is the row a
 // subscriber must re-query. A part write stamps the part itself and also
 // advances the message that owns it, whose updated_at moved with it.
-const stampMessage = (
+export const stampMessage = (
 	messageIds: readonly string[],
-	version: number,
+	ctx: ProjectionContext,
 ): Effect.Effect<ProjectionTouch, SqlError, SqlClient.SqlClient> =>
 	Effect.gen(function* () {
+		if (ctx.deferredMessageStamps) {
+			for (const messageId of messageIds)
+				ctx.deferredMessageStamps.add(messageId);
+			return { stamped: [], removed: [], collections: [] };
+		}
+		const { version } = ctx;
 		const sql = yield* SqlClient.SqlClient;
 		const stamped: string[] = [];
 		const changedSessions: string[] = [];
 		for (const messageId of new Set(messageIds)) {
-			const rows = yield* sql<OwnedRow & { readonly created_at: number }>`
+			const rows = yield* sql<
+				OwnedRow & { readonly created_at: number; readonly human_sent: number }
+			>`
 				UPDATE messages SET version = ${version}
 				WHERE id = ${messageId}
-				RETURNING session_id, created_at`;
+				RETURNING session_id, created_at, (${sql.literal(HUMAN_USER_MESSAGE_SQL)}) AS human_sent`;
 			// The fork split uses the copy's stored clock, including when a
 			// snapshot replaces a streamed row with a provider timestamp.
 			for (const row of rows) {
+				if (row.human_sent) {
+					changedSessions.push(
+						...ids(
+							yield* sql<{ id: string }>`
+						UPDATE sessions SET last_user_message_at = MAX(COALESCE(last_user_message_at, ${row.created_at}), ${row.created_at}),
+							version = ${version}
+						WHERE id = ${row.session_id}
+						AND (last_user_message_at IS NULL OR last_user_message_at < ${row.created_at})
+						RETURNING id`,
+						),
+					);
+				}
 				changedSessions.push(
 					...ids(
 						yield* sql<{
@@ -306,10 +374,10 @@ function mergeMetadata(
 	}
 }
 
-export const makeSessionProjector = (): EffectProjector => ({
+export const makeSessionProjector = defineProjector(() => ({
 	name: "session",
 	handles: SESSION_HANDLED_TYPES,
-	project: (event: StoredEvent, ctx: ProjectionContext) =>
+	project: (event, ctx) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const written: string[] = [];
@@ -357,11 +425,24 @@ export const makeSessionProjector = (): EffectProjector => ({
 						SESSION_SUBTREE_SQL,
 						[stmt.removeSession],
 					);
+					// SET NULL preserves Forks of any Source in this subtree. Their
+					// lineage and sidebar rows still change under the same delete.
+					const forks = yield* sql<{ id: string }>`SELECT id FROM sessions
+						WHERE forked_from IN (SELECT value FROM json_each(${JSON.stringify(subtree.map((row) => row.id))}))`;
 					const roots = yield* sql<{ root_id: string | null }>`
 						SELECT root_id FROM sessions WHERE id = ${stmt.removeSession}`;
 					left.push(...roots.flatMap((row) => row.root_id ?? []));
+					// Retain each descendant's owner before the cascade removes it.
+					yield* sql`
+						INSERT INTO session_sidebar (session_id, project_id, version, last_activity, row)
+						SELECT id, project_id, ${ctx.version}, 0, NULL FROM sessions
+						WHERE id IN (SELECT value FROM json_each(${JSON.stringify(subtree.map((row) => row.id))}))
+						ON CONFLICT (session_id) DO UPDATE SET project_id = excluded.project_id`;
 					yield* sql.unsafe(REMOVE_SESSION_SQL, [stmt.removeSession]);
-					written.push(...subtree.map((row) => row.id));
+					written.push(
+						...subtree.map((row) => row.id),
+						...forks.map((row) => row.id),
+					);
 					continue;
 				}
 				const rows = yield* sql.unsafe<{ id: string }>(
@@ -372,7 +453,7 @@ export const makeSessionProjector = (): EffectProjector => ({
 			}
 			// Only these two write a parent.
 			if (event.type === "session.created" || event.type === "session.forked")
-				left.push(...(yield* rerootSession(event.data.sessionId)));
+				left.push(...(yield* rerootSession(event.data.sessionId, ctx.version)));
 			const touch = yield* stampSessions(written, ctx.version);
 			// A removed session, child or root, leaves a deleted tombstone.
 			return {
@@ -399,9 +480,9 @@ export const makeSessionProjector = (): EffectProjector => ({
 						}),
 			),
 		),
-});
+}));
 
-export const makeMessageProjector = (): EffectProjector => ({
+export const makeMessageProjector = defineProjector(() => ({
 	name: "message",
 	handles: [
 		"session.rewound",
@@ -426,8 +507,17 @@ export const makeMessageProjector = (): EffectProjector => ({
 		"session.setup_output",
 		"session.setup_finished",
 	],
-	project: (event: StoredEvent, ctx: ProjectionContext) =>
-		Effect.gen(function* () {
+	project: (event, ctx) => {
+		let replacesUserMessage = false;
+		let previousMessage:
+			| { created_at: number; is_human_sent: number }
+			| undefined;
+		let authorshipMessageId =
+			isEventType(event, "message.created") &&
+			(event.data.role === "user" || event.metadata.synthetic === true)
+				? event.data.messageId
+				: undefined;
+		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			if (isEventType(event, "session.setup_started")) {
 				const messageId = `setup-${event.sessionId}`;
@@ -518,25 +608,48 @@ export const makeMessageProjector = (): EffectProjector => ({
 			// messageId can name the previous answer, whose usage and time stay put.
 			if (isEventType(event, "turn.completed") && event.data.userMessageId)
 				return [];
-			if (
-				"messageId" in event.data &&
-				event.type !== "message.part.removed" &&
-				event.metadata.rawSource !== "opencode.rest"
-			) {
+			if ("messageId" in event.data && event.type !== "message.snapshot") {
 				const rows = yield* sql<{
 					rest_digest: string | null;
 					session_id: string;
+					role: string;
+					is_human_sent: number;
+					created_at: number;
 				}>`
-						SELECT rest_digest, session_id FROM messages WHERE id = ${event.data.messageId}`;
-				if (rows[0]?.rest_digest != null) {
+						SELECT rest_digest, session_id, role, is_human_sent, created_at FROM messages WHERE id = ${event.data.messageId}`;
+				previousMessage = rows[0];
+				if (rows[0]?.role === "user" || rows[0]?.is_human_sent === 1) {
+					switch (event.type) {
+						case "message.created":
+						case "message.part.removed":
+						case "text.delta":
+						case "file.attached":
+						case "thinking.start":
+						case "thinking.delta":
+						case "tool.started":
+						case "tool.running":
+						case "tool.completed":
+							authorshipMessageId = event.data.messageId;
+					}
+				}
+				if (
+					event.type !== "message.part.removed" &&
+					event.metadata.rawSource !== "opencode.rest" &&
+					rows[0]?.rest_digest != null
+				) {
 					yield* sql`UPDATE sessions SET history_complete = 0 WHERE id = ${rows[0].session_id}`;
-					// A late provider echo still tags the snapshot row with its send.
-					if (isEventType(event, "message.created") && event.data.inputId) {
+					// A late header can add send identity or synthetic provenance
+					// without replacing the snapshot's authoritative content.
+					if (
+						isEventType(event, "message.created") &&
+						(event.data.inputId || event.metadata.synthetic)
+					) {
 						return ids(
 							yield* sql<{
 								id: string;
-							}>`UPDATE messages SET input_id = ${event.data.inputId}
-								WHERE id = ${event.data.messageId} AND input_id IS NULL
+							}>`UPDATE messages SET input_id = COALESCE(input_id, ${event.data.inputId ?? null})
+								WHERE id = ${event.data.messageId}
+								AND ((input_id IS NULL AND ${event.data.inputId ?? null} IS NOT NULL) OR ${event.metadata.synthetic === true})
 								RETURNING id`,
 						);
 					}
@@ -554,32 +667,48 @@ export const makeMessageProjector = (): EffectProjector => ({
 					)
 					.map((part) => part["text"])
 					.join("");
-				// Only snapshots can change a stored message's ordering clock. Drive
+				// A snapshot can change a stored message's ordering clock. Drive
 				// the cut lookup from this message's primary key, never scan sessions
 				// on ordinary writes or restamp siblings when the clock is unchanged.
 				const existing = yield* sql<{
 					is_backfilled: number;
+					role: string;
 					created_at: number;
+					rest_payload: string | null;
 					rewind_session_id: string | null;
-				}>`SELECT m.is_backfilled, m.created_at, s.id AS rewind_session_id
+				}>`SELECT m.is_backfilled, m.role, m.created_at, m.rest_payload, s.id AS rewind_session_id
 					FROM messages m LEFT JOIN sessions s
 						ON s.id = m.session_id AND s.pending_rewind_message_id = m.id
 					WHERE m.id = ${message.id}`;
+				replacesUserMessage =
+					existing.length > 0 &&
+					(existing[0]?.role === "user" || message.role === "user");
+				if (message.role === "user" || existing[0]?.role === "user")
+					authorshipMessageId = message.id;
+				const previousPayload = jsonRecord(existing[0]?.rest_payload ?? null);
+				const synthetic =
+					event.metadata.synthetic ||
+					previousPayload["isSynthetic"] === true ||
+					previousPayload["isCompactSummary"] === true;
 				const written = yield* sql<{ id: string }>`
 					INSERT INTO messages
 					(id, session_id, role, text, cost, tokens_in, tokens_out,
 					 tokens_cache_read, tokens_cache_write, context_window, context_tokens,
 					 is_streaming, is_backfilled, created_at, updated_at,
-					 rest_digest, rest_event_id, rest_payload, finish, error)
+					 rest_digest, rest_event_id, rest_payload, finish, error, is_inherited)
 					VALUES (${message.id}, ${event.sessionId}, ${message.role}, ${text},
 					 ${message.cost ?? null}, ${message.tokens?.input ?? null},
 					 ${message.tokens?.output ?? null}, ${message.tokens?.cache?.read ?? null},
 					 ${message.tokens?.cache?.write ?? null}, ${message.tokens?.contextWindow ?? null},
 					 ${message.role === "assistant" && message.summary === true && message.time?.completed != null && message.error == null ? 0 : null},
 					 0, ${existing.length === 0 ? 1 : (existing[0]?.is_backfilled ?? 0)},
-					 ${created}, ${completed}, ${digest}, ${event.eventId}, ${encodeJson(message)},
+					 ${created}, ${completed}, ${digest}, ${event.eventId}, ${encodeJson(synthetic ? { ...message, isSynthetic: true } : message)},
 					 ${message.finish ?? null},
-					 ${message.error === undefined ? null : encodeJson(message.error)})
+					 ${message.error === undefined ? null : encodeJson(message.error)},
+					 ${event.metadata.inherited ? 1 : 0} OR EXISTS (
+						SELECT 1 FROM sessions s WHERE s.id = ${event.sessionId}
+						AND (${created}, ${message.id}) <= (s.fork_point_timestamp,
+							COALESCE(s.fork_point_message_id, s.fork_point_event, ''))))
 					ON CONFLICT (id) DO UPDATE SET
 					 role = excluded.role, text = excluded.text, cost = excluded.cost,
 					 tokens_in = excluded.tokens_in, tokens_out = excluded.tokens_out,
@@ -591,7 +720,8 @@ export const makeMessageProjector = (): EffectProjector => ({
 					 created_at = excluded.created_at, updated_at = excluded.updated_at,
 					 rest_digest = excluded.rest_digest, rest_event_id = excluded.rest_event_id,
 					 rest_payload = excluded.rest_payload,
-					 finish = excluded.finish, error = excluded.error
+					 finish = excluded.finish, error = excluded.error,
+					 is_inherited = MAX(messages.is_inherited, excluded.is_inherited)
 				RETURNING id`;
 				// A provider snapshot replaces provider parts, while Conduit's own
 				// compaction outcomes must survive reconciliation and reconnects.
@@ -630,7 +760,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 							: undefined;
 					yield* sql`
 						INSERT INTO message_parts
-						(id, message_id, type, text, tool_name, call_id, input, result,
+						(id, message_id, type, text, tool_name, call_id, input, result, result_event_seq, result_bytes,
 						 status, sort_order, created_at, updated_at, metadata, rest_payload, version)
 						VALUES (${part.id}, ${message.id}, ${part.type},
 						 ${typeof part["text"] === "string" ? part["text"] : ""},
@@ -638,6 +768,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 						 ${typeof part["callID"] === "string" ? part["callID"] : null},
 						 ${toolState && "input" in toolState ? encodeJson(toolState.input) : null},
 						 ${toolState && "output" in toolState ? encodeJson(toolState.output) : null},
+						 NULL, NULL,
 						 ${toolState && "status" in toolState && typeof toolState.status === "string" ? toolState.status : null},
 						 ${index}, ${start}, ${end},
 						 ${toolState && "metadata" in toolState ? encodeJson(toolState.metadata) : null},
@@ -657,6 +788,13 @@ export const makeMessageProjector = (): EffectProjector => ({
 			}
 
 			if (isEventType(event, "message.part.removed")) {
+				const [message] = yield* sql<{ rest_payload: string | null }>`
+					SELECT rest_payload FROM messages WHERE id = ${event.data.messageId}`;
+				// Invalidate the snapshot's parts but retain header provenance for
+				// later streamed parts; no second provenance column is needed.
+				const { parts: _parts, ...header } = jsonRecord(
+					message?.rest_payload ?? null,
+				);
 				const removed = yield* sql<{ id: string }>`DELETE FROM message_parts
 					WHERE id = ${event.data.partId} AND message_id = ${event.data.messageId}
 					RETURNING id`;
@@ -671,7 +809,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 					SET text = COALESCE((SELECT group_concat(text, '') FROM (
 						SELECT text FROM message_parts WHERE message_id = ${event.data.messageId}
 						AND type = 'text' ORDER BY sort_order
-					)), ''), rest_payload = NULL, rest_digest = NULL,
+					)), ''), rest_payload = ${Object.keys(header).length > 0 ? encodeJson(header) : null}, rest_digest = NULL,
 					updated_at = ${event.createdAt}
 					WHERE id = ${event.data.messageId} AND session_id = ${event.sessionId}
 					RETURNING id`,
@@ -684,17 +822,27 @@ export const makeMessageProjector = (): EffectProjector => ({
 				}
 				// A backfilled message is settled history: it never streams here.
 				const isBackfilled = event.data.backfilled ? 1 : 0;
+				const created = event.metadata.providerCreatedAt ?? event.createdAt;
+				if (
+					event.metadata.providerCreatedAt !== undefined &&
+					previousMessage?.is_human_sent === 1 &&
+					created < previousMessage.created_at
+				)
+					replacesUserMessage = true;
 				const isStreaming =
 					event.data.role === "assistant" && !isBackfilled ? 1 : 0;
 				// A live user message whose input was sent as a steer, landing while
 				// another turn is open, was read mid-turn; the turn projector closes
 				// that turn. A steer landing after the turn ended ran as its own.
 				const steers = event.data.role === "user" && !isBackfilled;
-				return ids(
-					yield* sql<{ id: string }>`
+				const written = yield* sql<{ id: string }>`
 						INSERT INTO messages
-						(id, session_id, role, text, is_streaming, is_backfilled, created_at, updated_at, parent_id, input_id, steered)
-						VALUES (${event.data.messageId}, ${event.data.sessionId}, ${event.data.role}, '', ${isStreaming}, ${isBackfilled}, ${event.createdAt}, ${event.createdAt}, ${event.data.parentID ?? null}, ${event.data.inputId ?? null},
+						(id, session_id, role, text, is_streaming, is_backfilled, created_at, updated_at, parent_id, input_id, is_inherited, steered)
+						VALUES (${event.data.messageId}, ${event.data.sessionId}, ${event.data.role}, '', ${isStreaming}, ${isBackfilled}, ${created}, ${event.createdAt}, ${event.data.parentID ?? null}, ${event.data.inputId ?? null},
+							${event.metadata.inherited ? 1 : 0} OR EXISTS (
+								SELECT 1 FROM sessions s WHERE s.id = ${event.data.sessionId}
+								AND (${created}, ${event.data.messageId}) <= (s.fork_point_timestamp,
+									COALESCE(s.fork_point_message_id, s.fork_point_event, ''))),
 							${steers ? 1 : 0}
 								AND EXISTS (SELECT 1 FROM pending_inputs
 									WHERE input_id = ${event.data.inputId ?? null}
@@ -705,12 +853,39 @@ export const makeMessageProjector = (): EffectProjector => ({
 									AND id != ${event.data.messageId}))
 						ON CONFLICT (id) DO UPDATE SET
 							role = excluded.role,
+							created_at = CASE WHEN ${event.metadata.providerCreatedAt !== undefined}
+								THEN excluded.created_at ELSE messages.created_at END,
 							is_streaming = CASE WHEN excluded.role = 'user' THEN 0 ELSE messages.is_streaming END,
-							input_id = COALESCE(messages.input_id, excluded.input_id)
+							input_id = COALESCE(messages.input_id, excluded.input_id),
+							is_inherited = MAX(messages.is_inherited, excluded.is_inherited)
 						WHERE messages.role <> excluded.role
+							OR ${event.metadata.synthetic === true}
+							OR messages.is_inherited < excluded.is_inherited
+							OR (${event.metadata.providerCreatedAt !== undefined} AND messages.created_at <> excluded.created_at)
 							OR (messages.input_id IS NULL AND excluded.input_id IS NOT NULL)
-						RETURNING id`,
-				);
+						RETURNING id`;
+				if (
+					!previousMessage ||
+					event.metadata.providerCreatedAt === undefined ||
+					previousMessage.created_at === created ||
+					written.length === 0
+				)
+					return ids(written);
+				const [rewind] = yield* sql<{ id: string }>`SELECT id FROM sessions
+					WHERE id = ${event.data.sessionId} AND pending_rewind_message_id = ${event.data.messageId}`;
+				if (!rewind) return ids(written);
+				return [
+					...ids(written),
+					...(yield* restampRewind(
+						rewind.id,
+						{
+							id: event.data.messageId,
+							created_at: previousMessage.created_at,
+						},
+						{ id: event.data.messageId, created_at: created },
+						ctx.version,
+					)),
+				];
 			}
 
 			if (isEventType(event, "text.delta")) {
@@ -733,12 +908,14 @@ export const makeMessageProjector = (): EffectProjector => ({
 					VALUES (${event.data.messageId}, ${event.sessionId}, 'assistant', '', 1, ${event.createdAt}, ${event.createdAt})`;
 
 				yield* sql`
-					INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at, version)
+					INSERT INTO message_parts (id, message_id, type, text, metadata, sort_order, created_at, updated_at, version)
 					VALUES (${event.data.partId}, ${event.data.messageId}, 'text', ${event.data.text},
+						${event.metadata.synthetic ? encodeJson({ synthetic: true }) : null},
 						COALESCE((SELECT MAX(sort_order) + 1 FROM message_parts WHERE message_id = ${event.data.messageId}), 0),
 						${event.createdAt}, ${event.createdAt}, ${ctx.version})
 					ON CONFLICT (id) DO UPDATE SET
 						text = message_parts.text || excluded.text,
+						metadata = COALESCE(excluded.metadata, message_parts.metadata),
 						updated_at = excluded.updated_at, version = excluded.version`;
 
 				return ids(
@@ -868,8 +1045,34 @@ export const makeMessageProjector = (): EffectProjector => ({
 
 			if (isEventType(event, "tool.completed")) {
 				const resultJson = encodeJson(event.data.result);
-				const rows = yield* sql<{ metadata: string | null }>`
-					SELECT metadata FROM message_parts WHERE id = ${event.data.partId}`;
+				const toolStatus =
+					typeof event.data.metadata?.["cursorToolType"] === "string" &&
+					event.data.metadata["isError"] === true
+						? "error"
+						: "completed";
+				const rows = yield* sql<{
+					metadata: string | null;
+					result: string;
+					result_bytes: number | null;
+				}>`
+					WITH completed AS (SELECT ${resultJson} AS result),
+					output AS (
+						SELECT result, CASE WHEN json_type(result) = 'text'
+							THEN json_extract(result, '$') ELSE result END AS output
+						FROM completed
+					)
+					SELECT mp.metadata,
+						CASE WHEN mp.type = 'tool'
+							AND mp.tool_name NOT IN ${sql.in(NEVER_CUT_TOOL_NAMES)}
+							AND length(output) > ${PREVIEW_CODE_POINTS}
+							THEN json_quote(substr(output, 1, ${PREVIEW_CODE_POINTS}))
+							ELSE output.result END AS result,
+						CASE WHEN mp.type = 'tool'
+							AND mp.tool_name NOT IN ${sql.in(NEVER_CUT_TOOL_NAMES)}
+							AND length(output) > ${PREVIEW_CODE_POINTS}
+							THEN length(CAST(output AS BLOB)) END AS result_bytes
+					FROM message_parts mp CROSS JOIN output
+					WHERE mp.id = ${event.data.partId}`;
 				const metadata = yield* mergeMetadata(
 					rows[0]?.metadata ?? null,
 					event.data.metadata,
@@ -878,7 +1081,10 @@ export const makeMessageProjector = (): EffectProjector => ({
 				);
 				yield* sql`
 					UPDATE message_parts
-					SET result = ${resultJson}, duration = ${event.data.duration}, status = 'completed', metadata = ${metadata}, updated_at = ${event.createdAt}, version = ${ctx.version},
+					SET result = ${rows[0]?.result ?? resultJson},
+						result_event_seq = ${rows[0]?.result_bytes == null ? null : event.sequence},
+						result_bytes = ${rows[0]?.result_bytes ?? null},
+						duration = ${event.data.duration}, status = ${toolStatus}, metadata = ${metadata}, updated_at = ${event.createdAt}, version = ${ctx.version},
 						input = COALESCE(${event.data.input === undefined ? null : encodeJson(event.data.input)}, input)
 					WHERE id = ${event.data.partId}
 						-- A completion without a result (the turn-end settle) only closes
@@ -1058,31 +1264,118 @@ export const makeMessageProjector = (): EffectProjector => ({
 						}),
 			),
 			Effect.flatMap((written) =>
-				isEventType(event, "message.removed")
-					? stampSessions([event.sessionId], ctx.version).pipe(
-							Effect.map((touch) => ({
-								...touch,
-								collections: [...touch.collections, "messages"] as const,
-							})),
-						)
-					: Effect.gen(function* () {
-							const sql = yield* SqlClient.SqlClient;
-							for (const messageId of new Set(written)) {
-								yield* sql`DELETE FROM message_tombstones WHERE message_id = ${messageId}`;
-								// Likewise a part written now, a snapshot's kept parts included.
-								// A bulk batch (a fork's copied history) stamps every part with
-								// one version, so SQLite's pick of the version index scans them all.
-								yield* sql`DELETE FROM message_part_tombstones WHERE part_id IN (
-									SELECT id FROM message_parts INDEXED BY idx_message_parts_message
-									WHERE message_id = ${messageId} AND version = ${ctx.version})`;
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					for (const messageId of new Set(written)) {
+						if (messageId !== authorshipMessageId) continue;
+						const [row] = yield* sql<{
+							role: string;
+							input_id: string | null;
+							is_inherited: number;
+							is_human_sent: number;
+							rest_payload: string | null;
+						}>`SELECT role, input_id, is_inherited, is_human_sent, rest_payload
+							FROM messages WHERE id = ${messageId}`;
+						if (!row) continue;
+						const snapshot = jsonRecord(row.rest_payload);
+						if (
+							isEventType(event, "message.created") &&
+							event.metadata.synthetic
+						) {
+							// A header-only synthetic fact must survive subsequent part events.
+							snapshot["isSynthetic"] = true;
+							yield* sql`UPDATE messages SET rest_payload = ${encodeJson(snapshot)} WHERE id = ${messageId}`;
+						}
+						if (row.role !== "user" && row.is_human_sent === 0) continue;
+						const storedParts =
+							row.role === "user"
+								? yield* sql<{
+										type: string;
+										metadata: string | null;
+										rest_payload: string | null;
+									}>`SELECT type, metadata, rest_payload FROM message_parts WHERE message_id = ${messageId}`
+								: [];
+						const parts = storedParts.map((part) => {
+							const raw = jsonRecord(part.rest_payload);
+							return {
+								type: part.type,
+								synthetic:
+									raw["synthetic"] === true ||
+									jsonRecord(part.metadata)["synthetic"] === true,
+								ignored: raw["ignored"],
+							};
+						});
+						// Old snapshots may have parts only in rest_payload.
+						const ownParts =
+							parts.length > 0
+								? parts
+								: Array.isArray(snapshot["parts"])
+									? snapshot["parts"]
+											.filter(isRecord)
+											.map((part) => ({ ...part, type: part["type"] }))
+									: [];
+						const [legacy] =
+							row.role === "user" &&
+							row.is_inherited === 0 &&
+							row.rest_payload === null &&
+							row.input_id === null &&
+							ownParts.length === 0
+								? yield* sql<{
+										text: string;
+									}>`SELECT text FROM messages WHERE id = ${messageId}`
+								: [];
+						const humanSent = isHumanSentMessage(
+							{
+								role: row.role,
+								inputId: row.input_id,
+								inherited: row.is_inherited === 1,
+								synthetic:
+									snapshot["isSynthetic"] === true ||
+									snapshot["isCompactSummary"] === true,
+								legacyText: legacy?.text ?? "",
+							},
+							ownParts,
+						);
+						if (row.is_human_sent === Number(humanSent)) continue;
+						replacesUserMessage ||= row.is_human_sent === 1;
+						yield* sql`UPDATE messages SET is_human_sent = ${Number(humanSent)} WHERE id = ${messageId}`;
+					}
+					const touch = isEventType(event, "message.removed")
+						? {
+								...(yield* stampSessions([event.sessionId], ctx.version)),
+								collections: ["sessions", "messages"] as const,
 							}
-							return yield* stampMessage(written, ctx.version);
-						}),
+						: yield* stampMessage(written, ctx);
+					if (
+						event.type !== "message.removed" &&
+						event.type !== "message.part.removed" &&
+						!replacesUserMessage
+					)
+						return touch;
+					const changed = yield* refreshLastUserMessageAt(
+						event.sessionId,
+						ctx.version,
+					);
+					if (changed.length === 0) return touch;
+					return {
+						...touch,
+						stamped: [...new Set([...touch.stamped, ...changed])],
+						collections: [
+							...new Set<ReadModelCollection>([
+								...touch.collections,
+								"sessions",
+								"sidebar",
+							]),
+						],
+						sidebar: [...new Set([...(touch.sidebar ?? []), ...changed])],
+					};
+				}),
 			),
-		),
-});
+		);
+	},
+}));
 
-export const makeTurnProjector = (): EffectProjector => ({
+export const makeTurnProjector = defineProjector(() => ({
 	name: "turn",
 	handles: [
 		"message.created",
@@ -1094,7 +1387,7 @@ export const makeTurnProjector = (): EffectProjector => ({
 		"turn.interrupted",
 		"turn.model_resolved",
 	],
-	project: (event: StoredEvent, ctx: ProjectionContext) =>
+	project: (event, ctx) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			if (
@@ -1410,32 +1703,34 @@ export const makeTurnProjector = (): EffectProjector => ({
 				return { sessions: owners(written), messages: ids(written) };
 			}
 
-			// Attributed to the newest open turn rather than by id, because the
-			// event carries no key that reaches a turns row: turns.id is the user
-			// message id, while the provider's turnId is a per-send uuid. This is
-			// exact only while a session has at most one turn in flight. The
-			// Claude translator is the sole emitter and its runtime serializes
-			// turn admission, so a turn's model_resolved always lands before the
-			// next turn's row exists. A second emitter, or concurrent turns,
-			// needs a real key first (tracked in conduit-test-7i3).
+			// Cursor reports its actual model at wait(), after the turn may have
+			// settled. Its assistant message identifies that turn exactly. Legacy
+			// Claude init events arrive before a reply and use the newest open turn.
 			if (isEventType(event, "turn.model_resolved")) {
+				const target = event.data.messageId
+					? sql`SELECT turn_id FROM messages
+						WHERE id = ${event.data.messageId} AND session_id = ${event.sessionId}`
+					: sql`SELECT id FROM turns
+						WHERE session_id = ${event.sessionId}
+							AND state IN ('pending', 'running')
+						ORDER BY requested_at DESC LIMIT 1`;
+				const written = yield* sql<OwnedRow & { id: string }>`
+					UPDATE turns
+					SET requested_model = ${event.data.requestedModel ?? null},
+						expected_model = ${event.data.expectedModel ?? null},
+						actual_model = ${event.data.actualModel}
+					WHERE session_id = ${event.sessionId} AND id = (${target})
+					RETURNING id, session_id`;
+				if (event.data.messageId && written.length) {
+					// Keyed resolution also associates its prompt with the resolved turn.
+					// The history adapter carries execution from that prompt to UserMessage.
+					yield* sql`UPDATE messages SET turn_id = id
+						WHERE session_id = ${event.sessionId}
+						AND id IN ${sql.in(written.map(({ id }) => id))}`;
+				}
 				return {
-					sessions: owners(
-						yield* sql<OwnedRow>`
-							UPDATE turns
-							SET requested_model = ${event.data.requestedModel ?? null},
-								expected_model = ${event.data.expectedModel ?? null},
-								actual_model = ${event.data.actualModel}
-							WHERE id = (
-								SELECT id FROM turns
-								WHERE session_id = ${event.sessionId}
-									AND state IN ('pending', 'running')
-								ORDER BY requested_at DESC
-								LIMIT 1
-							)
-							RETURNING session_id`,
-					),
-					messages: [],
+					sessions: owners(written),
+					messages: event.data.messageId ? ids(written) : [],
 				};
 			}
 			return { sessions: [], messages: [] };
@@ -1452,15 +1747,15 @@ export const makeTurnProjector = (): EffectProjector => ({
 			Effect.flatMap((written) =>
 				Effect.gen(function* () {
 					return mergeTouches([
-						yield* stampMessage(written.messages, ctx.version),
+						yield* stampMessage(written.messages, ctx),
 						yield* stampSessions(written.sessions, ctx.version),
 					]);
 				}),
 			),
 		),
-});
+}));
 
-export const makeApprovalProjector = (): EffectProjector => ({
+export const makeApprovalProjector = defineProjector(() => ({
 	name: "approval",
 	handles: [
 		"permission.asked",
@@ -1468,21 +1763,27 @@ export const makeApprovalProjector = (): EffectProjector => ({
 		"question.asked",
 		"question.resolved",
 	],
-	project: (event: StoredEvent, ctx: ProjectionContext) =>
+	project: (event, ctx) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 
-			// The resolve statements find their approval by id and never name a
-			// session, so only the row can say whose it was.
 			// `version` is what the approvals subscription windows on (ni8.9);
 			// `details` keeps the rest of the asked payload for the card.
 			if (isEventType(event, "permission.asked")) {
-				const { id, sessionId, toolName, input, ...details } = event.data;
+				const {
+					id,
+					sessionId,
+					toolName,
+					input,
+					providerProcessId,
+					providerRequestId,
+					...details
+				} = event.data;
 				return yield* sql<OwnedRow & { created_at: number }>`
 						INSERT INTO pending_approvals
-						(id, session_id, type, status, tool_name, input, details, version, created_at)
-						VALUES (${id}, ${sessionId}, 'permission', 'pending', ${toolName}, ${encodeJson(input)}, ${encodeJson(details)}, ${ctx.version}, ${event.createdAt})
-						ON CONFLICT (id) DO NOTHING
+						(id, session_id, type, status, tool_name, input, details, version, created_at, provider_process_id, provider_request_id)
+						VALUES (${id}, ${sessionId}, 'permission', 'pending', ${toolName}, ${encodeJson(input)}, ${encodeJson(details)}, ${ctx.version}, ${event.createdAt}, ${providerProcessId ?? null}, ${providerRequestId ?? null})
+						ON CONFLICT DO NOTHING
 						RETURNING session_id, created_at`;
 			}
 
@@ -1490,17 +1791,24 @@ export const makeApprovalProjector = (): EffectProjector => ({
 				return yield* sql<OwnedRow & { created_at: number }>`
 						UPDATE pending_approvals
 						SET status = 'resolved', decision = ${event.data.decision}, resolved_at = ${event.createdAt}, version = ${ctx.version}
-						WHERE id = ${event.data.id}
+						WHERE id = ${event.data.id} AND session_id = ${event.sessionId} AND type = 'permission'
 						RETURNING session_id, created_at`;
 			}
 
 			if (isEventType(event, "question.asked")) {
-				const { id, sessionId, questions, ...details } = event.data;
+				const {
+					id,
+					sessionId,
+					questions,
+					providerProcessId,
+					providerRequestId,
+					...details
+				} = event.data;
 				return yield* sql<OwnedRow & { created_at: number }>`
 						INSERT INTO pending_approvals
-						(id, session_id, type, status, input, details, version, created_at)
-						VALUES (${id}, ${sessionId}, 'question', 'pending', ${encodeJson(questions)}, ${encodeJson(details)}, ${ctx.version}, ${event.createdAt})
-						ON CONFLICT (id) DO NOTHING
+						(id, session_id, type, status, input, details, version, created_at, provider_process_id, provider_request_id)
+						VALUES (${id}, ${sessionId}, 'question', 'pending', ${encodeJson(questions)}, ${encodeJson(details)}, ${ctx.version}, ${event.createdAt}, ${providerProcessId ?? null}, ${providerRequestId ?? null})
+						ON CONFLICT DO NOTHING
 						RETURNING session_id, created_at`;
 			}
 
@@ -1509,7 +1817,7 @@ export const makeApprovalProjector = (): EffectProjector => ({
 				return yield* sql<OwnedRow & { created_at: number }>`
 						UPDATE pending_approvals
 						SET status = 'resolved', decision = ${answersJson}, resolved_at = ${event.createdAt}, version = ${ctx.version}
-						WHERE id = ${event.data.id}
+						WHERE id = ${event.data.id} AND session_id = ${event.sessionId} AND type = 'question'
 						RETURNING session_id, created_at`;
 			}
 			return [];
@@ -1539,7 +1847,7 @@ export const makeApprovalProjector = (): EffectProjector => ({
 					}
 					const sessions = yield* stampSessions(owners(written), ctx.version);
 					return mergeTouches([
-						yield* stampMessage(messageIds, ctx.version),
+						yield* stampMessage(messageIds, ctx),
 						// The pending counts roll up into the family's row.
 						{
 							...sessions,
@@ -1553,12 +1861,12 @@ export const makeApprovalProjector = (): EffectProjector => ({
 				}),
 			),
 		),
-});
+}));
 
-export const makeProviderProjector = (): EffectProjector => ({
+export const makeProviderProjector = defineProjector(() => ({
 	name: "provider",
 	handles: ["session.created", "session.provider_changed"],
-	project: (event: StoredEvent, ctx: ProjectionContext) =>
+	project: (event, ctx) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 
@@ -1597,21 +1905,22 @@ export const makeProviderProjector = (): EffectProjector => ({
 			),
 			Effect.flatMap((written) => stampSessions(written, ctx.version)),
 		),
-});
+}));
 
 // One row per input conduit is holding. Rows are never deleted: a row that
 // leaves the tray turns `removed` and takes the event's version, so catch-up
 // can report it gone. Its owning session moves with every write.
-export const makeInputProjector = (): EffectProjector => ({
+export const makeInputProjector = defineProjector(() => ({
 	name: "input",
 	handles: [
 		"input.admitted",
 		"input.sent",
+		"input.requeued",
 		"input.cancelled",
 		"input.interrupt_requested",
 		"message.created",
 	],
-	project: (event: StoredEvent, ctx: ProjectionContext) =>
+	project: (event, ctx) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 
@@ -1654,6 +1963,28 @@ export const makeInputProjector = (): EffectProjector => ({
 				);
 			}
 
+			if (isEventType(event, "input.requeued")) {
+				return owners(
+					yield* sql<OwnedRow>`
+						UPDATE pending_inputs SET state = 'queued', version = ${ctx.version},
+							admitted_at = (SELECT COALESCE(MIN(admitted_at), ${event.createdAt}) - 1
+								FROM pending_inputs WHERE session_id = ${event.sessionId}
+								AND state IN ('queued', 'steering'))
+						WHERE input_id = ${event.data.inputId} AND session_id = ${event.sessionId}
+							AND state = 'steering'
+							AND ${event.data.sentSequence} = (SELECT MAX(sequence) FROM events
+								WHERE session_id = ${event.sessionId} AND type = 'input.sent'
+								AND json_extract(data, '$.inputId') = ${event.data.inputId}
+								AND sequence < ${event.sequence})
+							AND (${ctx.replaying ? 1 : 0} = 1 OR NOT EXISTS (SELECT 1 FROM events
+								WHERE session_id = ${event.sessionId} AND type = 'input.sent'
+								AND json_extract(data, '$.inputId') = ${event.data.inputId}
+								AND sequence > ${event.data.sentSequence}))
+							AND NOT EXISTS (SELECT 1 FROM messages WHERE input_id = ${event.data.inputId})
+						RETURNING session_id`,
+				);
+			}
+
 			if (
 				isEventType(event, "message.created") &&
 				event.data.role === "user" &&
@@ -1687,40 +2018,41 @@ export const makeInputProjector = (): EffectProjector => ({
 						: touch.collections,
 			})),
 		),
-});
+}));
+
+// Session first for foreign keys. Keep factories so callers get fresh projectors.
+const PROJECTORS = [
+	makeSessionProjector,
+	makeMessageProjector,
+	makeTurnProjector,
+	makeProviderProjector,
+	makeApprovalProjector,
+	makeInputProjector,
+] as const;
+
+type HandledBy<P extends EffectProjector> = P["handles"][number];
+type Unhandled = Exclude<
+	LiveEventType,
+	HandledBy<ReturnType<(typeof PROJECTORS)[number]>>
+>;
+
+// Unlike {}, the empty case still rejects stale reason entries.
+export type UnprojectedReasons<T extends LiveEventType> = [T] extends [never]
+	? Readonly<Record<string, never>>
+	: { readonly [K in T]: string };
+
+// Every unhandled live event needs a reason; handled or retired entries are stale.
+export const UNPROJECTED: UnprojectedReasons<Unhandled> = {
+	"session.provider_cleanup_failed":
+		"Audit receipt for failed upstream cleanup; no materialized projection needed",
+	"session.handoff_delivered":
+		"Delivery receipt needs no materialized projection",
+};
 
 /**
- * Canonical event types that deliberately reach no projector.
- *
- * An unclaimed type is indistinguishable from a handled one at runtime: the
- * dispatch map simply finds nothing, and the cursor advances anyway. That is
- * how session.compaction stayed unprojected for three months behind a green
- * suite. Anything absent here and absent from every projector's `handles` is a
- * bug, and projector-coverage.test.ts fails on it.
- */
-export const UNPROJECTED_CANONICAL_EVENT_TYPES: readonly string[] = [
-	// Superseded by tool.started carrying the complete input; kept in the
-	// canonical vocabulary only so historical stores still decode.
-	"tool.input_updated",
-	"session.provider_cleanup_failed",
-	"session.handoff_delivered", // Delivery receipt needs no materialized projection.
-	// Retired read state (hk9m.7): SessionAttention writes seen_version instead.
-	// Kept so historical stores still decode.
-	"session.read",
-	"session.unread",
-];
-
-/**
- * Creates all 7 Effect-based projectors in the correct order.
+ * Creates all Effect-based projectors in the correct order.
  * Order matters for FK compliance: SessionProjector first.
  */
 export function createAllEffectProjectors(): EffectProjector[] {
-	return [
-		makeSessionProjector(),
-		makeMessageProjector(),
-		makeTurnProjector(),
-		makeProviderProjector(),
-		makeApprovalProjector(),
-		makeInputProjector(),
-	];
+	return PROJECTORS.map((makeProjector) => makeProjector());
 }

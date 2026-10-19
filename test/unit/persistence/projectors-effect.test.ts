@@ -7,10 +7,10 @@ import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Reactivity } from "@effect/experimental";
-import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { Effect, HashMap, Layer, Logger } from "effect";
+import { Effect, Layer, Logger, References } from "effect";
+import { Reactivity } from "effect/reactivity";
+import { SqlClient } from "effect/sql";
 import { describe, expect, it } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
@@ -18,6 +18,7 @@ import {
 	LoggerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
+import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import type { ChatMessage } from "../../../src/lib/frontend/types.js";
 import { splitAtForkPoint } from "../../../src/lib/frontend/utils/fork-split.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -357,7 +358,7 @@ function makeTestSqliteLayer() {
 	return SqliteNode.layer({ filename }).pipe(
 		Layer.provide(Reactivity.layer),
 		Layer.merge(
-			Layer.scopedDiscard(
+			Layer.effectDiscard(
 				Effect.addFinalizer(() =>
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 				),
@@ -545,8 +546,8 @@ function readSessionProjectionSnapshot(sessionId: string) {
 function seedSession(sessionId: string, createdAt: number = FIXED_TS) {
 	return Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
-		yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-			VALUES (${sessionId}, 'opencode', 'Test Session', 'idle', ${createdAt}, ${createdAt})`;
+		yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+			VALUES (${sessionId}, 'test-project', 'opencode', 'Test Session', 'idle', ${createdAt}, ${createdAt})`;
 	});
 }
 
@@ -608,16 +609,47 @@ describe("EventStoreEffect", () => {
 					},
 				} as unknown as CanonicalEvent;
 
-				const result = yield* Effect.either(store.append(event));
+				const result = yield* Effect.result(store.append(event));
 
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left") {
-					const error = result.left;
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure") {
+					const error = result.failure;
 					expect(error).toBeInstanceOf(EventStoreError);
 					if (error instanceof EventStoreError) {
 						expect(error.operation).toBe("validateCanonicalEvent");
 					}
 				}
+			}),
+		));
+
+	it("append rejects a missing required tool input through the full schema", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const event = {
+					...makeSessionCreated("s-missing-tool-input"),
+					type: "tool.started" as const,
+					data: {
+						messageId: "m1",
+						partId: "p1",
+						toolName: "Bash",
+						callId: "call1",
+					},
+				};
+
+				// @ts-expect-error Deliberately omit input to exercise append's schema check.
+				const result = yield* Effect.result(store.append(event));
+
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure") {
+					expect(result.failure).toBeInstanceOf(EventStoreError);
+					if (result.failure instanceof EventStoreError) {
+						expect(result.failure.operation).toBe("validateCanonicalEvent");
+						expect(String(result.failure.cause)).toContain('["input"]');
+					}
+				}
+				expect(yield* store.readBySession(event.sessionId)).toEqual([]);
+				expect(yield* store.getNextStreamVersion(event.sessionId)).toBe(0);
 			}),
 		));
 
@@ -745,11 +777,11 @@ describe("EventStoreEffect", () => {
 					data: "{not json",
 				});
 
-				const result = yield* Effect.either(store.readFromSequence(0));
+				const result = yield* Effect.result(store.readFromSequence(0));
 
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left") {
-					const error = result.left;
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure") {
+					const error = result.failure;
 					expect(error).toBeInstanceOf(EventStoreError);
 					if (error instanceof EventStoreError) {
 						expect(error.operation).toBe("decodeStoredEventRow");
@@ -773,11 +805,11 @@ describe("EventStoreEffect", () => {
 					metadata: "{not json",
 				});
 
-				const result = yield* Effect.either(store.readFromSequence(0));
+				const result = yield* Effect.result(store.readFromSequence(0));
 
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left") {
-					const error = result.left;
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure") {
+					const error = result.failure;
 					expect(error).toBeInstanceOf(EventStoreError);
 					if (error instanceof EventStoreError) {
 						expect(error.operation).toBe("decodeStoredEventRow");
@@ -799,11 +831,11 @@ describe("EventStoreEffect", () => {
 					}),
 				});
 
-				const result = yield* Effect.either(store.readFromSequence(0));
+				const result = yield* Effect.result(store.readFromSequence(0));
 
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left") {
-					const error = result.left;
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure") {
+					const error = result.failure;
 					expect(error).toBeInstanceOf(EventStoreError);
 					if (error instanceof EventStoreError) {
 						expect(error.operation).toBe("decodeStoredEventRow");
@@ -841,6 +873,88 @@ describe("EventStoreEffect", () => {
 				expect(results.length).toBe(2);
 				expect(results[0]?.sequence).toBe(1);
 				expect(results[1]?.sequence).toBe(2);
+			}),
+		));
+
+	it("appendBatch skips retried Claude child seeds and still appends picked events", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.recover();
+				yield* seedSession("parent");
+				yield* seedSession("child");
+				const seed = canonicalEvent(
+					"session.created",
+					"child",
+					{
+						sessionId: "child",
+						title: "Explore Agent",
+						provider: "claude",
+						parentId: "parent",
+					},
+					{ provider: "claude" },
+				);
+				const inserted = yield* store.appendBatch([seed, seed]);
+				expect(inserted).toHaveLength(1);
+				yield* runner.projectBatch(inserted);
+				const picks = sessionPickEvents("child", {
+					harness: "claude",
+					model: { providerId: "claude", modelId: "sonnet" },
+					effort: "high",
+					contextWindow: "1m",
+				});
+				const retried = yield* store.appendBatch([seed, ...picks]);
+				expect(retried.map((event) => event.type)).toEqual([
+					"session.model_changed",
+					"session.variant_changed",
+					"session.context_window_changed",
+				]);
+				expect(retried.map((event) => event.streamVersion)).toEqual([1, 2, 3]);
+				yield* runner.projectBatch(retried);
+				expect(yield* store.readBySession("child")).toHaveLength(4);
+				expect(yield* store.appendBatch([seed])).toEqual([]);
+				const sql = yield* SqlClient.SqlClient;
+				expect(
+					yield* sql`SELECT model_id, variant, context_window FROM sessions WHERE id = 'child'`,
+				).toEqual([
+					{ model_id: "sonnet", variant: "high", context_window: "1m" },
+				]);
+			}),
+		));
+
+	it("retried OpenCode seeds return the stored row for projection recovery", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.recover();
+				yield* seedSession("opencode-parent");
+				yield* seedSession("opencode-child");
+				const seed = canonicalEvent(
+					"session.created",
+					"opencode-child",
+					{
+						sessionId: "opencode-child",
+						title: "Recovered child",
+						provider: "opencode",
+						parentId: "opencode-parent",
+					},
+					{
+						eventId: "evt_opencode_session_created_opencode-child" as EventId,
+						provider: "opencode",
+					},
+				);
+				const stored = yield* store.append(seed);
+				const retried = yield* store.appendBatch([seed]);
+				expect(retried).toEqual([stored]);
+				expect(yield* store.append(seed)).toEqual(stored);
+				yield* runner.projectBatch(retried);
+				const sql = yield* SqlClient.SqlClient;
+				expect(
+					yield* sql`SELECT title, parent_id FROM sessions WHERE id = 'opencode-child'`,
+				).toEqual([{ title: "Recovered child", parent_id: "opencode-parent" }]);
+				expect(yield* store.readBySession("opencode-child")).toEqual([stored]);
 			}),
 		));
 
@@ -1120,10 +1234,10 @@ describe("EventStoreEffect", () => {
 					},
 				} as unknown as CanonicalEvent;
 
-				const batchResult = yield* Effect.either(
+				const batchResult = yield* Effect.result(
 					store.appendBatch([valid, invalid]),
 				);
-				expect(batchResult._tag).toBe("Left");
+				expect(batchResult._tag).toBe("Failure");
 
 				const stored = yield* store.append(
 					makeSessionCreated("s-batch-validation-rollback"),
@@ -1200,10 +1314,10 @@ describe("EventStoreEffect", () => {
 				yield* seedSession("s1");
 				const eventId = createEventId();
 				yield* store.append(makeSessionCreated("s1", { eventId }));
-				const duplicate = yield* Effect.either(
+				const duplicate = yield* Effect.result(
 					store.append({ ...makeTextDelta("s1", "m1", "x"), eventId }),
 				);
-				expect(duplicate._tag).toBe("Left");
+				expect(duplicate._tag).toBe("Failure");
 			}),
 		));
 
@@ -1222,14 +1336,14 @@ describe("EventStoreEffect", () => {
 
 				yield* seedSession("s2");
 				const shared = makeTextDelta("s2", "m2", "hello");
-				const failed = yield* Effect.either(
+				const failed = yield* Effect.result(
 					store.appendBatch([
 						makeSessionCreated("s2"),
 						shared,
 						{ ...makeTextDelta("s2", "m2", "world"), eventId: shared.eventId },
 					]),
 				);
-				expect(failed._tag).toBe("Left");
+				expect(failed._tag).toBe("Failure");
 				expect(
 					yield* sql`SELECT sequence FROM events WHERE session_id = 's2'`,
 				).toEqual([]);
@@ -1487,9 +1601,9 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 					messageId: row.id,
 					createdAt: row.created_at,
 				}));
-				const info = (yield* reads.listSessionInfos()).find(
-					({ id }) => id === "child",
-				);
+				const info = (yield* reads.listSessionInfos({
+					projectIds: ["test-project"],
+				})).find(({ id }) => id === "child");
 				expect(info?.forkPointTimestamp).toBe(copy?.created_at);
 				expect(
 					splitAtForkPoint(
@@ -1570,7 +1684,7 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 						sessionId: "child",
 						title: "Fork",
 						provider: "claude",
-						parentId: "parent",
+						forkedFrom: "parent",
 						forkPointEvent: "boundary",
 					}),
 				])
@@ -1580,7 +1694,9 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 					yield* store.append(makeSessionCreated("child")),
 				);
 				expect(
-					(yield* reads.listSessionInfos()).find(({ id }) => id === "child"),
+					(yield* reads.listSessionInfos({
+						projectIds: ["test-project"],
+					})).find(({ id }) => id === "child"),
 				).toMatchObject({
 					forkMessageId: "boundary",
 					forkPointTimestamp: 1000,
@@ -1605,9 +1721,9 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 					}),
 				])
 					yield* runner.projectEvent(yield* store.append(event));
-				const child = (yield* reads.listSessionInfos()).find(
-					({ id }) => id === "child",
-				);
+				const child = (yield* reads.listSessionInfos({
+					projectIds: ["test-project"],
+				})).find(({ id }) => id === "child");
 				const page = [
 					{
 						type: "user" as const,
@@ -1659,6 +1775,7 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 				yield* sql`
 					INSERT INTO sessions (
 						id,
+						project_id,
 						provider,
 						title,
 						status,
@@ -1667,6 +1784,7 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 					)
 					VALUES (
 						${"s-named"},
+						${"test-project"},
 						${"work-oc"},
 						${"Untitled"},
 						${"idle"},
@@ -2916,12 +3034,12 @@ describe("ProjectionRunnerEffect", () => {
 			annotations: Record<string, unknown>;
 		}> = [];
 		const logger = Logger.make<unknown, void>((options) => {
-			if (options.logLevel._tag !== "Error") return;
+			if (options.logLevel !== "Error") return;
 			errorLogs.push({
 				message: Array.isArray(options.message)
 					? options.message.map(String).join(" ")
 					: String(options.message),
-				annotations: Object.fromEntries(HashMap.toEntries(options.annotations)),
+				annotations: options.fiber.getRef(References.CurrentLogAnnotations),
 			});
 		});
 
@@ -2972,11 +3090,10 @@ describe("ProjectionRunnerEffect", () => {
 					partialProjectionWrites,
 					cursors,
 				};
-			}).pipe(Effect.provide(Logger.replace(Logger.defaultLogger, logger))),
+			}).pipe(Effect.provide(Logger.layer([Logger.tracerLogger, logger]))),
 		);
 
 		expect(result.recovery).toMatchObject({
-			projectId: "test-project",
 			startCursor: 0,
 			endCursor: 1,
 			totalReplayed: 4,
@@ -3064,7 +3181,7 @@ describe("ProjectionRunnerEffect", () => {
 					data: "{not json",
 				});
 
-				const firstRecovery = yield* Effect.either(runner.recover());
+				const firstRecovery = yield* Effect.result(runner.recover());
 				const failuresAfterFirst = yield* sql<{
 					count: number;
 				}>`SELECT COUNT(*) AS count FROM projection_failures`;
@@ -3085,26 +3202,27 @@ describe("ProjectionRunnerEffect", () => {
 				};
 			}).pipe(
 				Effect.provide(
-					Logger.replace(
-						Logger.defaultLogger,
+					Logger.layer([
+						Logger.tracerLogger,
 						Logger.make<unknown, void>(() => undefined),
-					),
+					]),
 				),
 			),
 		);
 
-		expect(result.firstRecovery._tag).toBe("Left");
-		if (result.firstRecovery._tag === "Left") {
-			expect(result.firstRecovery.left).toBeInstanceOf(ProjectionRunnerError);
-			if (result.firstRecovery.left instanceof ProjectionRunnerError) {
-				expect(result.firstRecovery.left.operation).toBe(
+		expect(result.firstRecovery._tag).toBe("Failure");
+		if (result.firstRecovery._tag === "Failure") {
+			expect(result.firstRecovery.failure).toBeInstanceOf(
+				ProjectionRunnerError,
+			);
+			if (result.firstRecovery.failure instanceof ProjectionRunnerError) {
+				expect(result.firstRecovery.failure.operation).toBe(
 					"decodeStoredEventRow",
 				);
 			}
 		}
 		expect(result.failuresAfterFirst).toEqual([{ count: 1 }]);
 		expect(result.secondRecovery).toMatchObject({
-			projectId: "test-project",
 			startCursor: 0,
 			endCursor: result.poisonEvent.sequence,
 			totalReplayed: 0,
@@ -3139,7 +3257,7 @@ describe("ProjectionRunnerEffect", () => {
 						SELECT RAISE(ABORT, 'simulated cursor persistence failure');
 					END`;
 
-				const failedRecovery = yield* Effect.either(runner.recover());
+				const failedRecovery = yield* Effect.result(runner.recover());
 				const durableFailuresAfterFailure = yield* sql<{
 					count: number;
 				}>`SELECT COUNT(*) AS count FROM projection_failures`;
@@ -3174,28 +3292,29 @@ describe("ProjectionRunnerEffect", () => {
 				};
 			}).pipe(
 				Effect.provide(
-					Logger.replace(
-						Logger.defaultLogger,
+					Logger.layer([
+						Logger.tracerLogger,
 						Logger.make<unknown, void>(() => undefined),
-					),
+					]),
 				),
 			),
 		);
 
 		expect(result.emptyRecovery.totalReplayed).toBe(0);
 		expect(result.recoveredBeforeFailure).toBe(true);
-		expect(result.failedRecovery._tag).toBe("Left");
-		if (result.failedRecovery._tag === "Left") {
-			expect(result.failedRecovery.left).toBeInstanceOf(ProjectionRunnerError);
-			if (result.failedRecovery.left instanceof ProjectionRunnerError) {
-				expect(result.failedRecovery.left.operation).toBe("recover");
+		expect(result.failedRecovery._tag).toBe("Failure");
+		if (result.failedRecovery._tag === "Failure") {
+			expect(result.failedRecovery.failure).toBeInstanceOf(
+				ProjectionRunnerError,
+			);
+			if (result.failedRecovery.failure instanceof ProjectionRunnerError) {
+				expect(result.failedRecovery.failure.operation).toBe("recover");
 			}
 		}
 		expect(result.durableFailuresAfterFailure).toEqual([{ count: 0 }]);
 		expect(result.messageCursorAfterFailure).toEqual([{ last_applied_seq: 0 }]);
 		expect(result.recoveredAfterFailure).toBe(false);
 		expect(result.retryRecovery).toMatchObject({
-			projectId: "test-project",
 			startCursor: 0,
 			endCursor: 1,
 			totalReplayed: 3,
@@ -3262,7 +3381,6 @@ describe("ProjectionRunnerEffect", () => {
 		);
 
 		expect(cold.recovery).toMatchObject({
-			projectId: "test-project",
 			startCursor: 0,
 			endCursor: 3,
 			totalReplayed: 7,
@@ -3419,7 +3537,6 @@ describe("ProjectionRunnerEffect", () => {
 				}>`SELECT projector_name, last_applied_seq FROM projector_cursors ORDER BY projector_name`;
 
 				expect(recovery).toMatchObject({
-					projectId: "test-project",
 					startCursor: 0,
 					endCursor: 4,
 					totalReplayed: 3,
@@ -3469,15 +3586,15 @@ describe("ProjectionRunnerEffect", () => {
 					makeSessionCreated("s-command-failure"),
 				);
 
-				const result = yield* Effect.either(runner.projectEvent(event));
+				const result = yield* Effect.result(runner.projectEvent(event));
 
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left") {
-					expect(result.left).toBeInstanceOf(ProjectionRunnerError);
-					if (result.left instanceof ProjectionRunnerError) {
-						expect(result.left.cause).toBeInstanceOf(ProjectionError);
-						if (result.left.cause instanceof ProjectionError) {
-							expect(result.left.cause.cause).toBe(rootCause);
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure") {
+					expect(result.failure).toBeInstanceOf(ProjectionRunnerError);
+					if (result.failure instanceof ProjectionRunnerError) {
+						expect(result.failure.cause).toBeInstanceOf(ProjectionError);
+						if (result.failure.cause instanceof ProjectionError) {
+							expect(result.failure.cause.cause).toBe(rootCause);
 						}
 					}
 				}
@@ -3534,7 +3651,6 @@ describe("ProjectionRunnerEffect", () => {
 				}>`SELECT projector_name, last_applied_seq FROM projector_cursors ORDER BY projector_name`;
 
 				expect(first).toMatchObject({
-					projectId: "test-project",
 					startCursor: 0,
 					endCursor: 501,
 					totalReplayed: 1002,
@@ -3554,7 +3670,6 @@ describe("ProjectionRunnerEffect", () => {
 					status: string;
 				}>`SELECT status FROM sessions WHERE id = 's-paged'`;
 				expect(second).toMatchObject({
-					projectId: "test-project",
 					startCursor: 501,
 					endCursor: 502,
 					totalReplayed: 2,
@@ -3571,14 +3686,14 @@ describe("ProjectionRunnerEffect", () => {
 				yield* seedSession("s1");
 				yield* sql`CREATE TRIGGER reject_rename BEFORE UPDATE OF title ON sessions BEGIN SELECT RAISE(ABORT, 'rename rejected'); END`;
 				let updates = 0;
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					commit([makeSessionRenamed("s1", "After")], {
 						afterCommit: Effect.sync(() => {
 							updates += 1;
 						}),
 					}),
 				);
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 				expect(updates).toBe(0);
 			}),
 		));
@@ -3607,27 +3722,27 @@ describe("ProjectionRunnerEffect", () => {
 				const readQuery = yield* makeReadQueryEffect;
 				yield* runner.markRecovered();
 				yield* seedSession("s1");
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					applySessionCommand({
 						type: "session.deleted",
 						data: { sessionId: "s1" },
 					}).pipe(
 						Effect.provide(
 							Layer.mergeAll(
-								Layer.succeed(ReadQueryEffectTag, readQuery),
-								Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-								Layer.succeed(ConfigTag, makeMockConfig()),
-								Layer.succeed(LoggerTag, makeMockLogger()),
-								Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+								Layer.succeed(ReadQueryEffectTag)(readQuery),
+								Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+								Layer.succeed(ConfigTag)(makeMockConfig()),
+								Layer.succeed(LoggerTag)(makeMockLogger()),
+								Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 							),
 						),
 					),
 				);
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left" && "operation" in result.left)
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure" && "operation" in result.failure)
 					// Append and project are one transaction now, so the failure is named
 					// for the commit that rolled back, not for a separate project step.
-					expect(result.left.operation).toBe("session.deleted.commit");
+					expect(result.failure.operation).toBe("session.deleted.commit");
 				expect(yield* store.readBySession("s1")).toEqual([]);
 				expect(yield* readQuery.getSession("s1")).toBeDefined();
 				expect(
@@ -3663,8 +3778,8 @@ describe("ProjectionRunnerEffect", () => {
 					makeSessionCreated("s-batch-before-recovery"),
 				);
 
-				const result = yield* Effect.either(runner.projectBatch([event]));
-				expect(result._tag).toBe("Left");
+				const result = yield* Effect.result(runner.projectBatch([event]));
+				expect(result._tag).toBe("Failure");
 			}),
 		));
 
@@ -3714,12 +3829,12 @@ describe("ProjectionRunnerEffect", () => {
 					data: "{not json",
 				});
 
-				const result = yield* Effect.either(runner.recover());
+				const result = yield* Effect.result(runner.recover());
 
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 				expect(yield* runner.isRecovered()).toBe(false);
-				if (result._tag === "Left") {
-					const error = result.left;
+				if (result._tag === "Failure") {
+					const error = result.failure;
 					expect(error).toBeInstanceOf(ProjectionRunnerError);
 					if (error instanceof ProjectionRunnerError) {
 						expect(error.operation).toBe("decodeStoredEventRow");
@@ -3740,17 +3855,69 @@ describe("ProjectionRunnerEffect", () => {
 					}),
 				});
 
-				const result = yield* Effect.either(runner.recover());
+				const result = yield* Effect.result(runner.recover());
 
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 				expect(yield* runner.isRecovered()).toBe(false);
-				if (result._tag === "Left") {
-					const error = result.left;
+				if (result._tag === "Failure") {
+					const error = result.failure;
 					expect(error).toBeInstanceOf(ProjectionRunnerError);
 					if (error instanceof ProjectionRunnerError) {
 						expect(error.operation).toBe("decodeStoredEventRow");
 					}
 				}
+			}),
+		));
+
+	it("a decode failure fails the read and recovery commits only the valid prefix", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				const cursors = yield* ProjectorCursorEffectTag;
+				const sessionId = "s-decode-prefix";
+				yield* seedSession(sessionId);
+				yield* store.append(makeSessionCreated(sessionId));
+				const prefix = yield* store.append(
+					canonicalEvent("session.renamed", sessionId, {
+						sessionId,
+						title: "Valid prefix",
+					}),
+				);
+				yield* insertRawEventRow({
+					sessionId,
+					streamVersion: 2,
+					data: JSON.stringify({ sessionId }),
+				});
+				yield* insertRawEventRow({
+					sessionId,
+					streamVersion: 3,
+					type: "session.renamed",
+					data: JSON.stringify({ sessionId, title: "After invalid row" }),
+				});
+
+				const read = yield* Effect.result(store.readBySession(sessionId));
+				expect(read._tag).toBe("Failure");
+				if (read._tag === "Failure") {
+					expect(read.failure).toBeInstanceOf(EventStoreError);
+					if (read.failure instanceof EventStoreError) {
+						expect(read.failure.operation).toBe("decodeStoredEventRow");
+					}
+				}
+				const recovery = yield* Effect.result(runner.recover());
+				expect(recovery._tag).toBe("Failure");
+				if (recovery._tag === "Failure") {
+					expect(recovery.failure).toBeInstanceOf(ProjectionRunnerError);
+					expect(recovery.failure.operation).toBe("decodeStoredEventRow");
+				}
+				expect(yield* runner.isRecovered()).toBe(false);
+				expect(
+					yield* sql`SELECT title FROM sessions WHERE id = ${sessionId}`,
+				).toEqual([{ title: "Valid prefix" }]);
+				expect((yield* cursors.get("session"))?.lastAppliedSeq).toBe(
+					prefix.sequence,
+				);
 			}),
 		));
 
@@ -3780,8 +3947,8 @@ describe("ProjectionRunnerEffect", () => {
 					}),
 				});
 
-				const result = yield* Effect.either(runner.recover());
-				expect(result._tag).toBe("Left");
+				const result = yield* Effect.result(runner.recover());
+				expect(result._tag).toBe("Failure");
 				expect(yield* runner.isRecovered()).toBe(false);
 
 				yield* runner.markRecovered();

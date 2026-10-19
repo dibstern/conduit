@@ -332,6 +332,48 @@ Examples:
   | baseline                      | threshold |
   | composer-icons-e1-long-narrow | 98        |
 
+Scenario Outline: a thin desktop composer drops checkout labels instead of covering send
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  And the desktop composer is <width> pixels wide
+  And the composer uses icons controls
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / main as branch
+  And the checkout has uncommitted changes, 14 ahead, 0 behind
+  Then the composer checkout labels are <labels>
+  And the icons checkout is a quiet shrinking control before send
+  And the composer region visually matches <baseline> at <threshold> percent
+  When I open the composer checkout menu
+  Then the composer checkout menu shows conduit and main in full
+
+Examples:
+  | width | labels                    | baseline                     | threshold |
+  | 520   | project, branch, upstream | composer-checkout-fit-full   | 98        |
+  | 450   | branch, upstream          | composer-checkout-fit-branch | 98        |
+  | 400   | none                      | composer-checkout-fit-icon   | 98        |
+
+Scenario Outline: a thin desktop composer folds harness and model into one short control
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  And the desktop composer is <width> pixels wide
+  And the composer uses icons controls
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / main as branch
+  And the checkout has uncommitted changes, 14 ahead, 0 behind
+  Then the icons model control reads S5 beside the harness logo
+  And the composer checkout labels are <labels>
+  And the icons checkout is a quiet shrinking control before send after the combined model control
+  And the composer region visually matches <baseline> at <threshold> percent
+  When the desktop composer sits at the window's left edge
+  And I tap the icons model control
+  Then the icons control opens the picker at Model
+  And the model picker stays inside the window
+
+Examples:
+  | width | labels                    | baseline           | threshold |
+  | 380   | project, branch, upstream | composer-thin-full | 98        |
+  | 256   | none                      | composer-thin-icon | 98        |
+
 Scenario Outline: E3 desktop draft keeps the split footer without a checkout
   Given the conduit app is served with the connected mockup
   And I start a new session
