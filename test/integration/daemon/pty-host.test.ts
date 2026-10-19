@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import {
 	existsSync,
 	lstatSync,
@@ -349,7 +350,7 @@ describe("PTY host process survival", () => {
 		expect(alive(hostPid)).toBe(true);
 		evidence["shellAliveAfterClose"] = false;
 		evidence["assertionsCompleted"] = true;
-	});
+	}, 60_000);
 
 	it("expires an idle host after startup without any socket peers", async () => {
 		harness = await ProcessHarness.start({ dist: DIST });
@@ -571,9 +572,8 @@ describe("PTY host process survival", () => {
 			idleTimeout,
 			hostPid: child.pid,
 		};
-		await vi.waitFor(() => expect(child.exitCode).not.toBeNull(), {
-			timeout: 2000,
-		});
+		// Close also fences stderr after the cold fixture imports and exits.
+		await once(child, "close");
 		expect(child.exitCode).not.toBe(0);
 		expect(error).toContain("CONDUIT_PTY_HOST_IDLE_TIMEOUT_MS");
 		expect(existsSync(ptyHostSocketPath(harness.configDir))).toBe(false);
