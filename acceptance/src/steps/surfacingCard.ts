@@ -274,6 +274,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 				...DEFAULT_MESSAGE_SURFACING_SETTINGS,
 				defaultLevel: level,
 				enabled: match[1] !== "inactive",
+				summariesEnabled: match[1] === "active",
 				active: match[1] === "active",
 				key: {
 					source:
@@ -1295,6 +1296,8 @@ export const surfacingCardHandlers: StepHandler[] = [
 							),
 						),
 				);
+				// r replies, which moves focus to the composer.
+				if (key === "r") await card(page).focus();
 				if (
 					(key === "+" || key === "−") &&
 					(await page.getByTestId("surfacing-mark-why").count()) > 0

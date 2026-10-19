@@ -3,9 +3,12 @@
      Resting on the turn prefetches tool details; a strip tap opens its log row. -->
 <script lang="ts">
 	import { onDestroy, tick, untrack } from "svelte";
+	import type { AskExplanation } from "../../../contracts/ask-explanation.js";
+	import SurfacingAskContext from "./SurfacingAskContext.svelte";
 	import { MediaQuery } from "svelte/reactivity";
 	import type { CategorySet } from "../../../contracts/category-set.js";
 	import type { MessageSurfacingStatus, MessageSurfacingPreferences } from "../../../contracts/message-surfacing.js";
+	import { numberTurnMessages } from "../../../turn-message-numbers.js";
 	import { TurnRecapState } from "../../stores/turn-recap.svelte.js";
 	import SurfacingSummary from "./SurfacingSummary.svelte";
 	import { messageSurfacing, sessionSurfaceLevel, setSessionSurfaceLevel, touchSurfaceSession, makeSurfaceDefault } from "../../stores/message-surfacing.svelte.js";
@@ -15,6 +18,7 @@
 	import { MARK_GLYPHS, SurfacingFeedback } from "../../stores/surfacing-feedback.svelte.js";
 	import SurfacingMarkActions from "./SurfacingMarkActions.svelte";
 	import SurfacingMarkWhy from "./SurfacingMarkWhy.svelte";
+	import { insertComposerReference, messageReplies, removeComposerReference, type ReplyReference } from "../input/composer-reference.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { reveal, revealedPart } from "../../stores/reveal.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
@@ -49,7 +53,7 @@
 	import TurnEconomics from "./TurnEconomics.svelte";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, hasRecap = false }: {
+	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false }: {
 		turn: Turn;
 		segment: Segment;
 		final: boolean;
@@ -61,6 +65,7 @@
 		model?: string | undefined;
 		providerId?: string | undefined;
 		onsummarize?: (() => void) | undefined;
+		onjump?: (() => void) | undefined;
 		numbered?: boolean;
 		latestTurn?: boolean;
 		newestSettledTurn?: boolean;
@@ -69,6 +74,7 @@
 		hasRecap?: boolean;
 		onSurfacingShortcut?: (key: string) => boolean | undefined;
 		onMessagesRead?: (partIds: readonly string[], read: boolean) => Promise<void>;
+		onReplyToAsk?: (reference: ReplyReference, text?: string) => void;
 	} = $props();
 
 	let expanded = $state(false);
@@ -98,9 +104,13 @@
 	const live = $derived(final && turn.live);
 	const showTicker = $derived(live && segment.reply.length === 0 && !segment.handBack);
 	const earlierCount = $derived(Math.max(0, segment.activity.length - ticker.length));
-	const previousMessages = $derived(turn.segments.slice(0, turn.segments.indexOf(segment)).reduce((count, item) => count + item.activity.filter((part) => part.type === "assistant").length + item.reply.length, 0));
+	const numberedMessages = $derived(numberTurnMessages(turn.segments.flatMap((block) => block.activity.flatMap((part) => part.type === "assistant" ? [part] : []))));
 	function messageNumber(index: number): number | undefined {
-		return numbered ? previousMessages + segment.activity.slice(0, index + 1).filter((part) => part.type === "assistant").length : undefined;
+		const part = segment.activity[index];
+		// A live message Jev has yet to number keeps its icon: a predicted number
+		// shifts if another message persists first, and citations would drift.
+		if (part?.type !== "assistant" || (surfacingActive && turn.live && part.surfacingOrdinal == null)) return undefined;
+		return numbered || surfacingActive || summariesOn ? numberedMessages.find(({ uuid }) => uuid === part.uuid)?.surfacingOrdinal : undefined;
 	}
 
 	$effect(() => {
@@ -124,7 +134,40 @@
 	const override = $derived(sessionSurfaceLevel(sessionId));
 	const level = $derived(override ?? surfacingConfig.status.defaultLevel);
 	const recap = new TurnRecapState();
-	const recapTurnId = $derived(turn.id);
+	let askExplanations = $state<Record<string, AskExplanation>>({});
+	let generatingAsk = $state<string | null>(null);
+	let askError = $state<{ uuid: string; message: string } | null>(null);
+	/** The Ask a citation left, offered back on the cited message's card. */
+	let askReturn = $state<{ ask: SurfacePin; cited: string } | null>(null);
+	const askIdentity = $derived(`${sessionId}/${turn.id}`);
+	$effect(() => {
+		void askIdentity;
+		askExplanations = {};
+		generatingAsk = null;
+		askError = null;
+		askReturn = null;
+	});
+	function setupFor(pin: SurfacePin): SurfacePart | null {
+		const parts = turn.segments.flatMap((block) => [...block.activity, ...block.reply]);
+		const index = parts.findIndex((part) => part.uuid === pin.part.uuid);
+		return parts.slice(0, Math.max(0, index)).reverse().find((part): part is SurfacePart => part.type === "assistant" && !!part.rawText.trim()) ?? null;
+	}
+	async function explainAsk(pin: SurfacePin) {
+		if (!sessionId || !pin.part.partId || generatingAsk || askExplanations[pin.part.uuid]) return;
+		const identity = askIdentity;
+		generatingAsk = pin.part.uuid;
+		askError = null;
+		try {
+			const explanation = await rpc("ExplainAsk", { sessionId, turnId: storeTurnId, partId: pin.part.partId });
+			if (identity === askIdentity) askExplanations = { ...askExplanations, [pin.part.uuid]: explanation };
+		} catch (error) {
+			if (identity === askIdentity) askError = { uuid: pin.part.uuid, message: error instanceof Error ? error.message : String(error) };
+		} finally {
+			if (identity === askIdentity) generatingAsk = null;
+		}
+	}
+	/** The event store keys a turn by its user message id; turn.id is that row's transcript uuid. */
+	const storeTurnId = $derived(turn.user?.messageId ?? turn.id);
 	// jsdom has no matchMedia; real browsers always do.
 	const phone = typeof matchMedia === "function" ? new MediaQuery("(max-width: 599px)") : { current: false };
 	let summaryOpen = $state<boolean | null>(null);
@@ -132,10 +175,11 @@
 	let summarySaving = $state(false);
 	let citedOrdinal = $state<number | null>(null);
 	const summarySettings = $derived(surfacingConfig.status.recap);
-	const summaryEnabled = $derived(surfacingActive && final && !!sessionId && summarySettings.model !== "off");
+	const summariesOn = $derived(surfacingConfig.status.summariesEnabled && summarySettings.model !== "off");
+	const summaryEnabled = $derived(summariesOn && final && !!sessionId);
 	const summaryLabel = $derived(recap.generating ? "✦ Summarising…" : recap.versions.length ? "✦ Summary" : "✦ Summarize");
 	$effect(() => {
-		const id = recapTurnId;
+		const id = storeTurnId;
 		const session = sessionId;
 		const active = summaryEnabled;
 		const watch = latestTurn;
@@ -144,7 +188,7 @@
 		return;
 	});
 	$effect(() => {
-		void recapTurnId;
+		void storeTurnId;
 		void sessionId;
 		summaryOpen = null;
 	});
@@ -163,7 +207,7 @@
 	}, pick, (uuid) => { const part = segment.activity.find((part) => part.uuid === uuid); return part?.type === "assistant" ? part : undefined; });
 	onDestroy(() => feedback.dispose());
 	const surface = $derived(surfaceTurn({
-		parts: segment.activity.map((part) => part.type === "assistant" ? feedback.annotate(part) : part), turnParts: turn.segments.flatMap((block) => block.activity.map((part) => part.type === "assistant" ? feedback.annotate(part) : part)),
+		parts: segment.activity.map((part) => part.type === "assistant" ? feedback.annotate(part) : part), turnParts: numberedMessages.map((part) => feedback.annotate(part)),
 		positions: stripLayout(segment, turn, final, now), categorySet: surfacingConfig.categorySet,
 		level, live, latestTurn, latestBlock: final, hasRecap: hasRecap || (summaryEnabled && recap.versions.length > 0 && !recap.error), citedOrdinal, picked, folded, start: turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0,
 	}));
@@ -239,7 +283,7 @@
 	function generateSummary(scope: "whole" | "new", sourceVersion?: number) {
 		if (!sessionId || !summaryEnabled) return;
 		summaryOpen = true;
-		void recap.generate(sessionId, turn.id, scope, sourceVersion);
+		void recap.generate(sessionId, storeTurnId, scope, sourceVersion);
 	}
 	async function updateSummarySettings(patch: Partial<MessageSurfacingPreferences["recap"]>) {
 		summarySaving = true;
@@ -251,8 +295,22 @@
 			summarySettingsError = error instanceof Error ? error.message : String(error);
 		} finally { summarySaving = false; }
 	}
-	function citeSummary(ordinal: number) {
+	async function citeSummary(ordinal: number) {
 		citedOrdinal = ordinal;
+		if (surfacingActive) return;
+		// Without Jev a citation opens the numbered step log at its line.
+		const target = numberedMessages.find((part) => part.surfacingOrdinal === ordinal);
+		if (!target) return;
+		const index = segment.activity.findIndex((part) => part.uuid === target.uuid);
+		if (index < 0) return void reveal({ sessionId, uuid: target.uuid });
+		await jumpTo(index);
+		panelEl?.querySelector<HTMLElement>(`[data-log-part="${CSS.escape(target.uuid)}"]`)?.focus({ preventScroll: true });
+	}
+	/** Without Jev, hovering a citation marks its step on the activity strip. */
+	function hoverCitation(ordinal: number | null) {
+		const uuid = numberedMessages.find((part) => part.surfacingOrdinal === ordinal)?.uuid;
+		const index = segment.activity.findIndex((part) => part.uuid === uuid);
+		hovered = index >= 0 ? index : null;
 	}
 	function selectLevel(next: SurfaceLevel) {
 		if (sessionId) setSessionSurfaceLevel(sessionId, next);
@@ -260,6 +318,17 @@
 		folded = false;
 	}
 	function followLatest() { picked = null; folded = false; }
+	const replies = $derived(messageReplies(sessionId));
+	// Reply toggles: a message already replied to in the draft takes its reference back out.
+	function messageReference(pin: Pick<SurfacePin, "label" | "glyph" | "time" | "part">, ordinal: number, excerpt?: string): ReplyReference {
+		return { kind: excerpt === undefined ? "message" : "excerpt", ordinal, category: pin.label, glyph: pin.glyph, time: pin.time, text: excerpt ?? pin.part.rawText };
+	}
+	function replyTo(pin: Pick<SurfacePin, "number" | "label" | "glyph" | "time" | "part">, excerpt?: string) {
+		if (!sessionId || pin.number === undefined) return;
+		const replied = excerpt === undefined ? replies.get(pin.number) : undefined;
+		if (replied !== undefined) removeComposerReference(sessionId, replied);
+		else insertComposerReference(messageReference(pin, pin.number, excerpt), sessionId);
+	}
 	function foldMessage() {
 		folded = true;
 		void tick().then(() => panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-scrub"]')?.focus({ preventScroll: true }));
@@ -276,6 +345,10 @@
 			event.stopPropagation();
 			// Native dialog cancel owns the phone sheet's dismissal.
 			if (!phone.current) { event.preventDefault(); summaryOpen = false; }
+			return;
+		}
+		if (!surfacingActive) {
+			if (event.key === "s" && summaryEnabled) { event.preventDefault(); toggleSummary(); }
 			return;
 		}
 		if (/^\d$/.test(event.key)) { event.preventDefault(); digits = (digits + event.key).slice(-8); return; }
@@ -298,6 +371,7 @@
 		} else if (key === "a") revealMessage(surface.openAsk);
 		else if (key === "u") revealMessage(surface.nextUnread?.part ?? null);
 		else if (key === "m" && surface.card?.read !== undefined) readMessage(surface.card, !surface.card.read);
+		else if (key === "r" && surface.card) replyTo(surface.card);
 		else if (key === "Escape") foldMessage();
 		digits = "";
 	}
@@ -366,6 +440,7 @@
 	async function jumpTo(i: number) {
 		const part = segment.activity[i];
 		if (!part) return;
+		onjump?.();
 		openTurn();
 		expanded = true;
 		focusUuid = part.uuid;
@@ -389,6 +464,20 @@
 	{@render surfacingRegions.cardFoot?.(pin)}
 	<SurfacingMarkActions {pin} {feedback} canSave={!!sessionId} />
 {/snippet}
+{#snippet askContext(pin: SurfacePin)}
+	{@render surfacingRegions.cardContext?.(pin)}
+	{#if pin.category === "ask" && !pin.pending}
+		<SurfacingAskContext setup={setupFor(pin)} view={surface} start={turn.user?.createdAt ?? 0}
+			explanation={askExplanations[pin.part.uuid]} generating={generatingAsk === pin.part.uuid}
+			error={askError?.uuid === pin.part.uuid ? askError.message : ""}
+			enabled={!!sessionId && !!pin.part.partId && summariesOn}
+			onexplain={() => { void explainAsk(pin); }} oncite={(part) => { askReturn = { ask: pin, cited: part.uuid }; revealMessage(part); }}
+			onReplyToAsk={(text) => { if (pin.number !== undefined) onReplyToAsk?.(messageReference(pin, pin.number), text); }} />
+	{:else if askReturn?.cited === pin.part.uuid && surface.openAsk?.uuid === askReturn.ask.part.uuid}
+		{@const ask = askReturn.ask}
+		<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="mt-[8px] h-[24px] rounded-full px-[9px] text-[12px] font-medium bg-status-ask/18 text-status-ask" data-testid="ask-back" onclick={() => { pick(ask); askReturn = null; }}>↩ Back to ? #{ask.part.surfacingOrdinal}</Button>
+	{/if}
+{/snippet}
 {#snippet markWhy(pin: SurfacePin)}
 	{@render surfacingRegions.why?.(pin)}
 	<SurfacingMarkWhy {pin} {feedback} categorySet={surfacingConfig.categorySet} />
@@ -399,23 +488,29 @@
 		<div role="status" class="mark-toast" data-testid="surfacing-mark-toast"><span>{feedback.toast.text}</span><Button variant="ghost" size="content" tone="inherit" class="rounded-full px-[10px] h-[24px] max-md:h-[32px] bg-inverse-text/12 font-semibold" data-testid="surfacing-toast-undo" disabled={feedback.saving} onclick={() => feedback.undo()}>Undo</Button></div>
 	{/if}
 	{#if feedback.error && !feedback.pending}<p role="alert" class="mt-[6px] text-[12px] text-error">{feedback.error}</p>{/if}
-	{#if summaryEnabled}
-		<Button variant="ghost" size="content" align="start" tone="inherit" touchTarget class="min-[600px]:hidden w-full min-h-[40px] gap-[8px] py-[8px] text-[13px]" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>
-			<span>{summaryLabel}</span>{#if recap.versions.length && summaryNew > 0}<span class="text-accent font-mono text-[12px]">{summaryNew} new</span>{/if}<Icon name="chevron-right" size={14} class="ml-auto text-text-muted" />
-		</Button>
-		<SurfacingSummary versions={recap.versions} selected={recap.current} open={summaryVisible} phone={phone.current} {live} {view}
-			start={turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0} settings={summarySettings} {level}
-			generating={recap.generating} error={recap.error} settingsError={summarySettingsError} saving={summarySaving}
-			onclose={() => summaryOpen = false} onversion={(version) => recap.selected = version} ongenerate={generateSummary} onretry={retrySummary}
-			onsettings={updateSummarySettings} oncite={citeSummary} onhover={(ordinal) => { citedOrdinal = ordinal; cite(view.numbers.find(({ number }) => number === ordinal)?.part.uuid ?? null); }} foot={summaryMarkRead} />
-	{/if}
+	{#if summaryEnabled}{@render summaryPanel(view, (ordinal) => { citedOrdinal = ordinal; cite(view.numbers.find(({ number }) => number === ordinal)?.part.uuid ?? null); })}{/if}
+{/snippet}
+
+<!-- Phones open the summary from its own row under the strip; wider screens use the head chip. -->
+{#snippet summaryPanel(view: ReturnType<typeof surfaceTurn>, onhover: (ordinal: number | null) => void)}
+	<Button variant="ghost" size="content" align="start" tone="inherit" touchTarget class="min-[600px]:hidden w-full min-h-[40px] gap-[8px] py-[8px] text-[13px]" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>
+		<span>{summaryLabel}</span>{#if recap.versions.length && summaryNew > 0}<span class="text-accent font-mono text-[12px]">{summaryNew} new</span>{/if}<Icon name="chevron-right" size={14} class="ml-auto text-text-muted" />
+	</Button>
+	<SurfacingSummary versions={recap.versions} selected={recap.current} open={summaryVisible} phone={phone.current} {live} {view}
+		plainCitations={!surfacingActive}
+		start={turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0} settings={summarySettings} {level}
+		generating={recap.generating} error={recap.error} settingsError={summarySettingsError} saving={summarySaving}
+		onclose={() => summaryOpen = false} onversion={(version) => recap.selected = version} ongenerate={generateSummary} onretry={retrySummary}
+		onsettings={updateSummarySettings} oncite={citeSummary} {replies}
+		onreply={(ordinal, excerpt) => { const cited = view.numbers.find(({ number }) => number === ordinal); if (cited) replyTo(cited, excerpt); }}
+		onquote={(excerpt) => { if (sessionId) insertComposerReference({ kind: "recap-excerpt", text: excerpt }, sessionId); }} {onhover} foot={surfacingActive ? summaryMarkRead : undefined} />
 {/snippet}
 
 {#snippet summaryMarkRead(view: ReturnType<typeof surfaceTurn>)}
 	{#if view.unreadPartIds.length}<Button variant="ghost" size="content" tone="secondary" touchTarget class="h-[24px] rounded-full bg-chip px-[10px] font-sans text-[12px] font-medium" disabled={readSaving} data-testid="surfacing-mark-read" onclick={() => { void writeRead(view.unreadPartIds, true); }}>✓ Mark {view.unreadPartIds.length} read</Button>{/if}
 {/snippet}
 
-<div bind:this={panelEl} data-turn-id={turn.id} data-minimised={minimised} role={surfacingActive ? "group" : undefined} aria-label={surfacingActive ? "Turn activity" : undefined} onkeydown={surfacingActive ? surfaceCommand : undefined} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
+<div bind:this={panelEl} data-turn-id={turn.id} data-minimised={minimised} role={surfacingActive || summaryEnabled ? "group" : undefined} aria-label={surfacingActive || summaryEnabled ? "Turn activity" : undefined} onkeydown={surfacingActive || summaryEnabled ? surfaceCommand : undefined} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
 	<AssistantHeader message={segment.reply[0]} {sessionId} {forkMessageId} {model} {providerId} createdAt={segment.reply.length > 0 ? undefined : segment.activity[0]?.createdAt} />
 	<div class="md:ml-[42px]">
 		<!-- The active turn is a keyboard navigation group; inactive turns add no tab stop. -->
@@ -448,11 +543,11 @@
 						<span>Click to {expanded ? "hide" : "show"} the step log</span>
 					</div>
 				</Tooltip>
-				{#if surfacingActive}
+				{#if surfacingActive || summaryEnabled}
 					<div class="surface-head-chips" data-surfacing-region="head-chips">
-						{#if surface.openAsk}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium bg-status-ask/18 text-status-ask" data-testid="surfacing-ask-chip" onclick={() => revealMessage(surface.openAsk)}>? #{surface.openAsk.surfacingOrdinal}</Button>{/if}
-						{#if surface.hasReadState}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium {surface.unreadCount ? 'bg-accent/18 text-accent' : 'bg-chip text-text-secondary'}" data-testid="surfacing-head-unread" onclick={() => revealMessage(surface.nextUnread?.part ?? null)}>{surface.unreadCount ? `${surface.unreadCount} unread` : "All read ✓"}</Button>{/if}
-						{@render surfacingRegions.headChips?.(surface)}
+						{#if surfacingActive && surface.openAsk}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium bg-status-ask/18 text-status-ask" data-testid="surfacing-ask-chip" onclick={() => revealMessage(surface.openAsk)}>? #{surface.openAsk.surfacingOrdinal}</Button>{/if}
+						{#if surfacingActive && surface.hasReadState}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium {surface.unreadCount ? 'bg-accent/18 text-accent' : 'bg-chip text-text-secondary'}" data-testid="surfacing-head-unread" onclick={() => revealMessage(surface.nextUnread?.part ?? null)}>{surface.unreadCount ? `${surface.unreadCount} unread` : "All read ✓"}</Button>{/if}
+						{#if surfacingActive}{@render surfacingRegions.headChips?.(surface)}{/if}
 						{#if summaryEnabled}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="{minimised ? '' : 'max-[599px]:hidden'} shrink-0 h-[24px] rounded-full px-[9px] text-[12px] bg-chip text-text-secondary" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>{#if minimised}<span class="max-[599px]:sr-only">{summaryLabel}</span><span class="min-[600px]:hidden" aria-hidden="true">✦</span>{:else}{summaryLabel}{/if}{#if recap.versions.length && summaryNew > 0}<span class="text-accent {minimised ? 'max-[599px]:hidden' : ''}">· {summaryNew} new</span>{/if}</Button>{/if}
 					</div>
 				{/if}
@@ -464,9 +559,10 @@
 					{#snippet strip()}<ActivityStrip {turn} {segment} {final} {now} {running} interactive={false} />{/snippet}
 				</MinimisedTurn>
 			{:else if surfacingActive}
-				<SurfacingCard view={surface} {live} {level} overridden={override !== undefined} regions={{ ...surfacingRegions, cardHead: markHead, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
+				<SurfacingCard view={surface} {live} {level} overridden={override !== undefined} regions={{ ...surfacingRegions, cardHead: markHead, cardContext: askContext, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
 					{readSaving} {readError} canAutoRead={autoReadAttempt !== readTarget} onread={readMessage} onautoread={(pin) => readMessage(pin, true)}
 					markReadInAxis={!summaryEnabled} onmarkread={() => { void writeRead(surface.unreadPartIds, true); }}
+					onreply={replyTo} replied={surface.card?.number !== undefined && replies.has(surface.card.number)}
 					startTime={surfaceTime((segment.activity[0]?.createdAt ?? turn.user?.createdAt ?? 0) - (turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0))}
 					endTime={surfaceTime(duration ?? 0)} onpick={pick} onlevel={selectLevel}
 					ondefault={async () => { if (sessionId) await makeSurfaceDefault(sessionId, level); }}
@@ -481,6 +577,7 @@
 				<ActivityStrip {turn} {segment} {final} {now} {running} active={hovered} emphasis={skillSteps}
 					onhover={(index) => { hovered = index; detailsOpen = index !== null; }} onjump={jumpTo} />
 			</div>
+			{#if summaryEnabled}{@render summaryPanel(surface, hoverCitation)}{/if}
 			{/if}
 			{#if onsummarize && !minimised}
 				<Button variant="ghost-accent" size="content" align="start" touchTarget class="md:hidden w-full gap-[8px] py-[8px] text-[13px]" onclick={onsummarize}>
@@ -497,8 +594,8 @@
 				{#each expanded ? segment.activity : ticker as part, index (part.uuid)}
 					{@const i = expanded ? index : earlierCount + index}
 					{@const latestLiveStep = live && i === segment.activity.length - 1}
-					<div data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
-						<ActivityRow {part} {liveTasks} {taskListedAt} live={latestLiveStep} duration={durations?.[i]} highlight={part.uuid === focusUuid} messageNumber={part.type === "assistant" ? surfacingActive ? part.surfacingOrdinal : messageNumber(i) : undefined} />
+					<div data-log-part={part.uuid} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
+						<ActivityRow {part} {liveTasks} {taskListedAt} live={latestLiveStep} duration={durations?.[i]} highlight={part.uuid === focusUuid} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} />
 						{#if surfacingActive && expanded && part.type === "assistant"}
 							{@const pin = surface.messages.find((message) => message.part.uuid === part.uuid)}
 							{#if pin}

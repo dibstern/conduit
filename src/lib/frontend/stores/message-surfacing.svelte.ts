@@ -42,6 +42,8 @@ export const messageSurfacing = $state<{
 }>({
 	status: {
 		...DEFAULT_MESSAGE_SURFACING_SETTINGS,
+		// Summaries stay off until the daemon says otherwise, like Jev.
+		summariesEnabled: false,
 		active: false,
 		key: { source: "none", rejected: false },
 	},
@@ -64,7 +66,11 @@ export async function loadMessageSurfacing(): Promise<void> {
 		if (status.active) void loadSurfacingFeedback();
 	} catch {
 		if (version === loadVersion)
-			messageSurfacing.status = { ...messageSurfacing.status, active: false };
+			messageSurfacing.status = {
+				...messageSurfacing.status,
+				active: false,
+				summariesEnabled: false,
+			};
 	}
 }
 

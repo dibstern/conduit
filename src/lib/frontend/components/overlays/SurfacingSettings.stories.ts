@@ -36,6 +36,7 @@ const meta = {
 			source:
 				name.startsWith("Valid") ||
 				name.startsWith("Active") ||
+				name.startsWith("Jev Off") ||
 				name.startsWith("Rejected")
 					? "stored"
 					: name.startsWith("Environment")
@@ -43,6 +44,10 @@ const meta = {
 						: "none",
 			rejected: name.startsWith("Rejected"),
 		});
+		if (name.startsWith("Jev Off") || name.startsWith("No Key Summaries"))
+			fixture.stubs.UpdateMessageSurfacing(
+				new UpdateMessageSurfacing({ summariesEnabled: true }),
+			);
 		const cleanup = [
 			connectedSocket(),
 			replyRpc("GetMessageSurfacing", fixture.stubs.GetMessageSurfacing),
@@ -83,7 +88,7 @@ const general: NonNullable<Story["play"]> = async ({ canvasElement }) => {
 	const body = within(canvasElement.ownerDocument.body);
 	await expect(await body.findByTestId("surfacing-key-state")).toBeVisible();
 	await expect(
-		body.getByRole("switch", { name: "Toggle message surfacing" }),
+		body.getByRole("switch", { name: "Jev categorisation & escalation" }),
 	).toHaveAttribute("aria-checked", "false");
 	await expect(body.getByTestId("surfacing-disclosure")).toBeVisible();
 	if (fixture.settings.key.source === "env")
@@ -92,6 +97,39 @@ const general: NonNullable<Story["play"]> = async ({ canvasElement }) => {
 
 export const General: Story = { play: general };
 export const GeneralLight: Story = { ...General, globals: { theme: "light" } };
+export const JevOffSummariesOn: Story = {
+	play: async (context) => {
+		await general(context);
+		const body = within(context.canvasElement.ownerDocument.body);
+		await expect(
+			body.getByRole("switch", { name: "Turn summaries" }),
+		).toHaveAttribute("aria-checked", "true");
+	},
+};
+export const JevOffSummariesOnLight: Story = {
+	...JevOffSummariesOn,
+	globals: { theme: "light" },
+};
+export const NoKeySummaries: Story = {
+	play: async (context) => {
+		await general(context);
+		const body = within(context.canvasElement.ownerDocument.body);
+		await expect(
+			body.getByRole("switch", { name: "Jev categorisation & escalation" }),
+		).toBeDisabled();
+		await expect(
+			body.getByRole("switch", { name: "Turn summaries" }),
+		).toBeEnabled();
+		await expect(
+			body.getByRole("switch", { name: "Turn summaries" }),
+		).toHaveAttribute("aria-checked", "true");
+		await expect(body.getByTestId("surfacing-add-key")).toBeVisible();
+	},
+};
+export const NoKeySummariesLight: Story = {
+	...NoKeySummaries,
+	globals: { theme: "light" },
+};
 export const ValidKey: Story = { play: general };
 export const ValidKeyLight: Story = {
 	...ValidKey,
@@ -102,7 +140,7 @@ export const Active: Story = {
 		await general(context);
 		const body = within(context.canvasElement.ownerDocument.body);
 		await userEvent.click(
-			body.getByRole("switch", { name: "Toggle message surfacing" }),
+			body.getByRole("switch", { name: "Jev categorisation & escalation" }),
 		);
 		await expect(body.getByText("● Active")).toBeVisible();
 		(
@@ -116,7 +154,7 @@ export const RejectedKey: Story = {
 		await general(context);
 		const body = within(context.canvasElement.ownerDocument.body);
 		await userEvent.click(
-			body.getByRole("switch", { name: "Toggle message surfacing" }),
+			body.getByRole("switch", { name: "Jev categorisation & escalation" }),
 		);
 		await expect(
 			body.getByText("Inactive until a valid key is set"),

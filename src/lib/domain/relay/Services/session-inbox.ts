@@ -4,7 +4,6 @@
 // from read models on every call, serialises per session and commits the
 // decision. No queue state lives in memory, so a restart has nothing to rebuild.
 
-import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import {
@@ -66,6 +65,10 @@ export interface InboxView {
 	readonly steering: boolean;
 	/** A turn is open, a handoff is in flight, or a prompt waits on the user. */
 	readonly busy: boolean;
+	/** A Stop's abort is in flight, including after its turn becomes terminal. */
+	readonly stopping?: boolean;
+	/** A continuation is moving the session to another account. */
+	readonly switching?: boolean;
 	/** A turn was stopped or failed since the latest handoff or reset release. */
 	readonly stoppedSinceHandoff: boolean;
 	/** A usage limit cut a request off, and it is neither answered nor dismissed. */
@@ -121,7 +124,7 @@ export type InboxDecision =
 			readonly handoff?: InboxInput;
 			/** The handoff joins the running turn. */
 			readonly steer?: true;
-			/** Interrupt after committing the events and releasing the session permit. */
+			/** Stop the running turn once the events are committed. */
 			readonly interrupt?: true;
 	  }
 	| {
@@ -232,6 +235,12 @@ export function decideInbox(
 			};
 			if (view.usageResetsAt !== undefined || view.scheduled)
 				return { _tag: "Accepted", events: [admitted] };
+			if (view.stopping)
+				return !view.interruptRequested
+					? interruptForInput(sessionId, { inputId, request }, [admitted])
+					: { _tag: "Accepted", events: [admitted] };
+			// The switch's continuation owns the next turn; a steer would join the old one.
+			if (view.switching) return { _tag: "Accepted", events: [admitted] };
 			if (!idle && command.delivery === "steer")
 				return steer(sessionId, view, { inputId, request }, [admitted]);
 			if (!idle) return { _tag: "Accepted", events: [admitted] };
@@ -263,11 +272,19 @@ export function decideInbox(
 				(queued) => queued.inputId === command.inputId,
 			);
 			if (!input) return ALREADY_STARTED;
+			// A stopping turn cannot take a steer. Reserve the next turn instead, so
+			// the Stop pause does not hold this input.
+			if (view.stopping)
+				return view.interruptRequested
+					? { _tag: "Accepted", events: [] }
+					: interruptForInput(sessionId, input, []);
 			// Like a queued command's Run now, an open prompt must be answered first.
 			if (!idle && command.interrupt)
 				return view.promptOpen
 					? { _tag: "Rejected", reason: "prompt_open" }
 					: interruptForInput(sessionId, input, []);
+			// It keeps its place and drains after the switch's continuation.
+			if (view.switching) return { _tag: "Accepted", events: [] };
 			// A busy session takes it as a steer; refused, it keeps its place.
 			if (!idle) return steer(sessionId, view, input, []);
 			// Paused or not, an idle session hands this input off.
@@ -520,6 +537,7 @@ export const SessionInboxLive = Layer.scoped(
 								.map((window) => Date.parse(window.resetsAt ?? "") / 1000)
 								.filter((at) => Number.isFinite(at) && at > now)
 						: [];
+				const fences = providerTurnService.turnFences(sessionId);
 				return {
 					provider: facts?.provider ?? undefined,
 					queued,
@@ -528,12 +546,16 @@ export const SessionInboxLive = Layer.scoped(
 					),
 					steering: rows.some((row) => row.state === "steering"),
 					busy:
+						fences.stopping ||
+						fences.switching ||
 						facts?.status === "busy" ||
 						facts?.status === "retry" ||
 						(facts?.open_prompts ?? 0) > 0 ||
 						lastTurn === "pending" ||
 						lastTurn === "running" ||
 						facts?.in_flight === 1,
+					stopping: fences.stopping,
+					switching: fences.switching,
 					stoppedSinceHandoff: facts?.stopped === 1,
 					limited: facts?.limited === 1,
 					usageResetsAt: resets.length > 0 ? Math.max(...resets) : undefined,
@@ -574,6 +596,23 @@ export const SessionInboxLive = Layer.scoped(
 				}),
 			);
 
+		// Reservations whose Stop this daemon already issued; drain re-aborts any
+		// other reservation it finds behind a running turn (one left by a restart).
+		const stopIssued = new Set<string>();
+		const stop = (sessionId: string, clientId: string, inputId: string) =>
+			Effect.sync(() => stopIssued.add(inputId)).pipe(
+				Effect.zipRight(
+					providerTurnService.beginStop({
+						clientId,
+						sessionId,
+						// The input id is reserved for its later send_turn receipt.
+						commandId: `inbox-stop:${inputId}`,
+					}),
+				),
+				// The worker settles and reports the abort; the inbox only starts it.
+				Effect.asVoid,
+			);
+
 		const commit = (
 			sessionId: string,
 			decision: InboxDecision,
@@ -588,9 +627,17 @@ export const SessionInboxLive = Layer.scoped(
 						...(provider ? { provider: provider.provider } : {}),
 					}),
 				);
+				for (const event of decision.events)
+					if (event.type === "input.sent" || event.type === "input.cancelled")
+						stopIssued.delete(event.data.inputId);
 				const { handoff } = decision;
 				if (!handoff) {
 					if (events.length > 0) yield* persist.persistEvents(events);
+					const reserved = decision.events.find(
+						(event) => event.type === "input.interrupt_requested",
+					);
+					if (decision.interrupt && reserved)
+						yield* stop(sessionId, delivery.clientId, reserved.data.inputId);
 					return;
 				}
 				const wasQueued = !decision.events.some(
@@ -654,30 +701,6 @@ export const SessionInboxLive = Layer.scoped(
 				);
 			});
 
-		const interrupt = (
-			target: Pick<SessionInboxTarget, "clientId" | "sessionId">,
-			decision: InboxDecision,
-		) =>
-			decision._tag === "Accepted" && decision.interrupt
-				? providerTurnService
-						.interruptTurn({
-							clientId: target.clientId,
-							sessionId: target.sessionId,
-							// The input id is reserved for its later send_turn receipt.
-							commandId: randomUUID(),
-						})
-						.pipe(
-							Effect.provideService(OverridesStateTag, overrides),
-							Effect.catchAllCause((cause) =>
-								Effect.sync(() =>
-									log.warn(
-										`session=${target.sessionId} inbox interrupt failed; input remains queued: ${cause}`,
-									),
-								),
-							),
-						)
-				: Effect.void;
-
 		// Input ids are unique across sessions. Only coalesce requests while the
 		// original Run now is active; ordinary Stop and steering keep their policy.
 		const runNowInFlight = new Set<string>();
@@ -697,15 +720,18 @@ export const SessionInboxLive = Layer.scoped(
 								inputId: target.inputId,
 								...(runNow ? { interrupt: true } : {}),
 							});
-							yield* commit(target.sessionId, decision, {
-								clientId: target.clientId,
-							});
+							yield* commit(
+								target.sessionId,
+								decision,
+								decision._tag === "Accepted" &&
+									decision.handoff &&
+									decision.handoff.inputId !== target.inputId
+									? DRAINED
+									: target,
+							);
 							return decision;
 						}),
 					).pipe(
-						// Run now uses the same bounded Stop fence as manual Stop/Send.
-						// Further abort hardening belongs to conduit-test-aoqb.18.
-						Effect.tap((decision) => interrupt(target, decision)),
 						Effect.map((decision) =>
 							decision._tag === "Rejected"
 								? decision.reason
@@ -754,6 +780,14 @@ export const SessionInboxLive = Layer.scoped(
 					const view = yield* readView(sessionId);
 					if (view.queued.length === 0) return;
 					yield* scheduleReset(sessionId, view);
+					const reserved = view.interruptRequested;
+					if (
+						reserved &&
+						view.busy &&
+						!view.stopping &&
+						!stopIssued.has(reserved.inputId)
+					)
+						yield* stop(sessionId, DRAINED.clientId, reserved.inputId);
 					yield* commit(
 						sessionId,
 						decideInbox(sessionId, view, { _tag: "Drain" }),
@@ -786,11 +820,13 @@ export const SessionInboxLive = Layer.scoped(
 				),
 			);
 
-		// Subscribe before the startup sweep so no advance falls between them. A
-		// dropped advance may have named any session, so it sweeps them all.
+		// Subscribe before the startup sweep so no advance or fence lift falls
+		// between them. A dropped advance may have named any session, so it
+		// sweeps them all.
 		// Nothing drains before start: a handoff before the providers are
 		// registered would fail and pause a queue for no reason.
 		const advances = yield* bus.subscribeAdvances();
+		const lifts = yield* providerTurnService.fenceLifts;
 		const ready = yield* Deferred.make<void>();
 		yield* Effect.forkScoped(
 			Deferred.await(ready).pipe(
@@ -803,14 +839,20 @@ export const SessionInboxLive = Layer.scoped(
 				),
 				Effect.zipRight(drainSessions()),
 				Effect.zipRight(
-					Stream.runForEach(advances, (advance) =>
-						advance.dropped
-							? drainSessions()
-							: advanceTouchesScope(advance, {
-										projectIds: [eventStore.projectId],
-									}) && advance.sessionIds.length > 0
-								? drainSessions(advance.sessionIds)
-								: Effect.void,
+					Stream.runForEach(
+						Stream.merge(
+							Stream.map(advances, (advance) =>
+								advance.dropped
+									? drainSessions()
+									: advanceTouchesScope(advance, {
+												projectIds: [eventStore.projectId],
+											}) && advance.sessionIds.length > 0
+										? drainSessions(advance.sessionIds)
+										: Effect.void,
+							),
+							Stream.map(lifts, (sessionId) => drainSessions([sessionId])),
+						),
+						(drain) => drain,
 					),
 				),
 			),
@@ -842,7 +884,6 @@ export const SessionInboxLive = Layer.scoped(
 						return decision;
 					}),
 				).pipe(
-					Effect.tap((decision) => interrupt(input, decision)),
 					Effect.map((decision) =>
 						decision._tag === "Rejected" &&
 						decision.reason !== "already_started"

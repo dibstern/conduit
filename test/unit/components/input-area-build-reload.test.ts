@@ -7,6 +7,7 @@ import {
 	getOrCreateSessionActivity,
 	handleInputSyncReceived,
 	inputSyncState,
+	insertInputDraft,
 	persistInputDraft,
 	phaseToIdle,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
@@ -106,6 +107,32 @@ describe("InputArea build reload recovery", () => {
 		attachedProjectState.slug = null;
 		seedDaemonSessions([]);
 		sessionStorage.clear();
+	});
+
+	// Draft insertion must preserve local text even during the remote-sync grace
+	// period, focus the composer, sync the new draft, and never submit a turn.
+	it.each([
+		"",
+		"My existing draft",
+	])("inserts an Ask reply into draft %j without sending", async (draft) => {
+		const { getByRole } = render(InputArea);
+		const textarea = getByRole("textbox", {
+			name: "Message",
+		}) as HTMLTextAreaElement;
+		await enterText(textarea, draft);
+		insertInputDraft("Re: Ask #2 — Keep the new look");
+		await tick();
+		const text = `${draft ? `${draft}\n\n` : ""}Re: Ask #2 — Keep the new look`;
+		expect(textarea.value).toBe(text);
+		expect(document.activeElement).toBe(textarea);
+		await vi.advanceTimersByTimeAsync(300);
+		expect(rpc).toHaveBeenCalledWith(
+			"SyncInputDraft",
+			expect.objectContaining({ sessionId, text }),
+		);
+		expect(
+			vi.mocked(rpc).mock.calls.some(([tag]) => tag === "input.submit"),
+		).toBe(false);
 	});
 
 	it("syncs a loaded foreign session draft by session id", async () => {

@@ -1,12 +1,14 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import { createRawSnippet, tick } from "svelte";
+import { encodeReference } from "../../../composer-references.js";
 import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
 import { setSessionSurfaceLevel } from "../../stores/message-surfacing.svelte.js";
 import type { AssistantMessage } from "../../types.js";
 import type { SurfaceTurn } from "../../utils/surface-turn.js";
 import type { ActivityPart, Segment, Turn } from "../../utils/turns.js";
+import { provideComposerDraft } from "../input/composer-reference.svelte.js";
 import TurnActivity from "./TurnActivity.svelte";
 
 const START = Date.now() - 900_000;
@@ -94,6 +96,7 @@ const turn: Turn = {
 const config = {
 	status: {
 		...DEFAULT_MESSAGE_SURFACING_SETTINGS,
+		summariesEnabled: true,
 		enabled: true,
 		active: true,
 		key: { source: "stored" as const, rejected: false },
@@ -535,6 +538,37 @@ export const Override: Story = {
 };
 export const OverrideLight: Story = {
 	...Override,
+	globals: { theme: "light" },
+};
+
+// The composer's draft already replies to the shown card, #7.
+const repliedDraft = `Check this ${encodeReference({ kind: "message", ordinal: 7, category: "Risk", glyph: "⚠", time: "00:12", text: descriptions[6][3] })} first`;
+let removedAt: number | undefined;
+/** The spec's `.on` pill: pressed while the draft replies to the card, and pressing it takes that reply out. */
+export const Replied: Story = {
+	beforeEach: () => {
+		removedAt = undefined;
+		return provideComposerDraft({
+			sessionId: () => "jev-story-session",
+			draft: () => repliedDraft,
+			insert: () => {},
+			remove: (start) => {
+				removedAt = start;
+			},
+		});
+	},
+	play: async ({ canvasElement }) => {
+		const reply = within(canvasElement).getByRole("button", {
+			name: /^Reply$/,
+		});
+		await expect(reply).toHaveAttribute("aria-pressed", "true");
+		await userEvent.click(reply);
+		await expect(removedAt).toBe("Check this ".length);
+		reply.blur();
+	},
+};
+export const RepliedLight: Story = {
+	...Replied,
 	globals: { theme: "light" },
 };
 

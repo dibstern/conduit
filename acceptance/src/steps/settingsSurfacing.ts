@@ -58,7 +58,7 @@ async function choose(
 			.click();
 	}
 	await expect(
-		page.getByRole("switch", { name: "Toggle message surfacing" }),
+		page.getByRole("switch", { name: "Turn summaries", exact: true }),
 	).toBeEnabled();
 }
 
@@ -188,7 +188,9 @@ export const settingsSurfacingHandlers: StepHandler[] = [
 		match: /^Surfacing is off with its disclosure visible$/,
 		run: async ({ world }) => {
 			await expect(
-				world.page.getByRole("switch", { name: "Toggle message surfacing" }),
+				world.page.getByRole("switch", {
+					name: "Jev categorisation & escalation",
+				}),
 			).toHaveAttribute("aria-checked", "false");
 			await expect(
 				world.page.getByTestId("surfacing-disclosure"),
@@ -201,12 +203,46 @@ export const settingsSurfacingHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "enable and change default level",
-		match: /^I enable Surfacing and choose Key as the default$/,
-		run: async ({ world }) => {
-			const toggle = world.page.getByRole("switch", {
-				name: "Toggle message surfacing",
+		name: "assert Jev key requirement",
+		match: /^Jev availability matches the (none|valid|invalid|env) key state$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			const toggle = page.getByRole("switch", {
+				name: "Jev categorisation & escalation",
+				exact: true,
 			});
+			if (match[1] === "none") {
+				await expect(toggle).toBeDisabled();
+				await expect(page.getByTestId("surfacing-add-key")).toHaveText(
+					"Add key",
+				);
+				await expect(page.getByTestId("surfacing-add-key")).toBeVisible();
+			} else await expect(toggle).toBeEnabled();
+			const summaries = page.getByRole("switch", {
+				name: "Turn summaries",
+				exact: true,
+			});
+			await expect(summaries).toBeEnabled();
+			await expect(summaries).toHaveAttribute("aria-checked", "true");
+		},
+	},
+	{
+		name: "enable and change default level",
+		match: /^I save a key if needed and enable Jev with Key as the default$/,
+		run: async ({ world }) => {
+			if (fixture(world.page).settings.key.source === "none") {
+				await world.page
+					.getByTestId("surfacing-key-input")
+					.fill("acceptance-only-fixture-key");
+				await world.page.getByTestId("surfacing-key-save").click();
+				await expect(world.page.getByTestId("surfacing-key-state")).toHaveText(
+					"Valid",
+				);
+			}
+			const toggle = world.page.getByRole("switch", {
+				name: "Jev categorisation & escalation",
+			});
+			await expect(toggle).toBeEnabled();
 			await toggle.click();
 			await expect(toggle).toHaveAttribute("aria-checked", "true");
 			await expect(toggle).toBeEnabled();
@@ -227,17 +263,29 @@ export const settingsSurfacingHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert persisted preferences",
-		match: /^Surfacing preferences are saved through the daemon$/,
-		run: async ({ world }) => {
+		match:
+			/^Surfacing preferences are saved through the daemon from the (none|valid|invalid|env) key state$/,
+		run: async ({ world, match }) => {
 			await expect
 				.poll(() => fixture(world.page).settings.defaultLevel)
 				.toBe("key");
 			expect(fixture(world.page).settings.enabled).toBe(true);
-			expect(
-				requireRpcControl(world.page)
-					.getRequests()
-					.filter((r) => r.tag === "UpdateMessageSurfacing").length,
-			).toBe(2);
+			const requests = requireRpcControl(world.page)
+				.getRequests()
+				.filter((request) => request.tag === "UpdateMessageSurfacing")
+				.map((request) => request.payload);
+			expect(requests).toEqual([
+				...(match[1] === "none"
+					? [
+							{
+								_tag: "UpdateMessageSurfacing",
+								apiKey: "acceptance-only-fixture-key",
+							},
+						]
+					: []),
+				{ _tag: "UpdateMessageSurfacing", enabled: true },
+				{ _tag: "UpdateMessageSurfacing", defaultLevel: "key" },
+			]);
 		},
 	},
 	{
@@ -246,7 +294,7 @@ export const settingsSurfacingHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const page = world.page;
 			const toggle = page.getByRole("switch", {
-				name: "Toggle message surfacing",
+				name: "Jev categorisation & escalation",
 			});
 			await expect(toggle).toBeEnabled();
 			await toggle.click();

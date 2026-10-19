@@ -188,6 +188,37 @@ describe("OrchestrationEngine dispatchEffect", () => {
 	);
 
 	it.effect(
+		"forwards the original input identity when interrupting a session",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedProjectedSessionBinding(sql, "session-1", "claude");
+				const registry = new ProviderRegistry();
+				const instance = makeStubInstance("claude");
+				registry.registerInstance(instance);
+				const engine = new OrchestrationEngine({
+					registry,
+					sessionBindingReadModel: new SqliteProviderSessionBindingReadModel(
+						sql,
+					),
+				});
+
+				yield* engine.dispatchEffect({
+					type: "interrupt_turn",
+					commandId: "cmd-bound-interrupt",
+					sessionId: "session-1",
+					turnIds: ["original-input"],
+				});
+
+				expect(instance.interruptTurnEffect).toHaveBeenCalledWith("session-1", [
+					"original-input",
+				]);
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
+	);
+
+	it.effect(
 		"returns typed provider lookup failures without consuming command idempotency",
 		() =>
 			Effect.gen(function* () {
