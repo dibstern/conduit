@@ -13,6 +13,7 @@ set -uo pipefail
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=8192}"
 
 failed=()
+stage_results=()
 
 run() {
   local label="$1"
@@ -22,12 +23,18 @@ run() {
   echo "▶ $label"
   echo "  $*"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  local started=$SECONDS
+  local result
   if "$@"; then
-    echo "✓ $label passed"
+    result="✓ $label passed"
   else
-    echo "✗ $label FAILED (exit $?)"
+    local rc=$?
+    result="✗ $label FAILED (exit $rc)"
     failed+=("$label")
   fi
+  local elapsed=$((SECONDS - started))
+  echo "$result (${elapsed}s)"
+  stage_results+=("$result (${elapsed}s)")
 }
 
 # --- Static analysis ---
@@ -71,6 +78,9 @@ run "Strict Darwin Storybook visual tests" env VISUAL_STRICT=1 pnpm exec playwri
 # --- Summary ---
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+for result in "${stage_results[@]}"; do
+  echo "  $result"
+done
 if [ ${#failed[@]} -eq 0 ]; then
   echo "✓ All steps passed"
   exit 0
