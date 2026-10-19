@@ -172,14 +172,15 @@ describe("Claude rewind through the detached runner and real relay", () => {
 		);
 		const browser = await harness.connect();
 		const sessionId = await browser.createSession("Claude pending rewind");
-		await browser.send(sessionId, "rewind-kept");
-		await browser.send(sessionId, "rewind-discarded");
-		await browser.send(sessionId, "rewind-later");
-		await vi.waitFor(() =>
-			expect(
-				persisted(harness as ProcessHarness, sessionId).activeCommands,
-			).toBe(0),
-		);
+		// Native cursors publish when the send command settles, after shell idle.
+		for (const prompt of ["rewind-kept", "rewind-discarded", "rewind-later"]) {
+			await browser.send(sessionId, prompt);
+			await vi.waitFor(() =>
+				expect(
+					persisted(harness as ProcessHarness, sessionId).activeCommands,
+				).toBe(0),
+			);
+		}
 		const before = await browser.history(sessionId);
 		const cut = before.findIndex(
 			(message) =>
@@ -402,13 +403,14 @@ describe("Claude rewind through the detached runner and real relay", () => {
 		);
 		const browser = await harness.connect();
 		const sessionId = await browser.createSession("Claude assistant rewind");
-		await browser.send(sessionId, "rewind-earlier");
-		await browser.send(sessionId, "rewind-assistant-cut");
-		await vi.waitFor(() =>
-			expect(
-				persisted(harness as ProcessHarness, sessionId).activeCommands,
-			).toBe(0),
-		);
+		for (const prompt of ["rewind-earlier", "rewind-assistant-cut"]) {
+			await browser.send(sessionId, prompt);
+			await vi.waitFor(() =>
+				expect(
+					persisted(harness as ProcessHarness, sessionId).activeCommands,
+				).toBe(0),
+			);
+		}
 		const before = await browser.history(sessionId);
 		const target = before
 			.filter((message) => message.role === "assistant")
@@ -458,13 +460,17 @@ describe("Claude rewind through the detached runner and real relay", () => {
 		);
 		const browser = await harness.connect();
 		const sessionId = await browser.createSession("Claude failed rewind turn");
-		await browser.send(sessionId, "rewind-kept-before-failure");
-		await browser.send(sessionId, "rewind-discarded-before-failure");
-		await vi.waitFor(() =>
-			expect(
-				persisted(harness as ProcessHarness, sessionId).activeCommands,
-			).toBe(0),
-		);
+		for (const prompt of [
+			"rewind-kept-before-failure",
+			"rewind-discarded-before-failure",
+		]) {
+			await browser.send(sessionId, prompt);
+			await vi.waitFor(() =>
+				expect(
+					persisted(harness as ProcessHarness, sessionId).activeCommands,
+				).toBe(0),
+			);
+		}
 		const before = await browser.history(sessionId);
 		const target = before.find(
 			(message) =>
@@ -481,6 +487,11 @@ describe("Claude rewind through the detached runner and real relay", () => {
 			}),
 		);
 		await browser.send(sessionId, "failure-rewind-commit");
+		await vi.waitFor(() =>
+			expect(
+				persisted(harness as ProcessHarness, sessionId).activeCommands,
+			).toBe(0),
+		);
 		const failed = persisted(harness, sessionId);
 		expect(failed.events.map(({ type }) => type)).toContain("turn.error");
 		expect(failed.session.pending_rewind_message_id).toBeNull();

@@ -966,7 +966,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				// queue; enqueueing would throw. Evict silently and create fresh.
 				log.info(`Evicting stopped session on sendTurn: ${sessionId}`);
 				yield* this.removeSessionEffect(sessionId);
-				return yield* this.createSessionAndSendTurnEffect(input);
+				return yield* this.createSessionAndSendTurnEffect(
+					input,
+					existingCtx.workspaceStartReported,
+				);
 			} else if (
 				existingCtx &&
 				!sameClaudeLogin(
@@ -1009,12 +1012,16 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				return yield* this.enqueueTurnEffect(existingCtx, input);
 			}
 
-			return yield* this.createSessionAndSendTurnEffect(input);
+			return yield* this.createSessionAndSendTurnEffect(
+				input,
+				existingCtx?.workspaceStartReported,
+			);
 		});
 	}
 
 	private createSessionAndSendTurnEffect(
 		input: ClaudeSendTurnInput,
+		workspaceStartReported = false,
 	): Effect.Effect<TurnResult, ClaudeAdapterError> {
 		return Effect.gen({ self: this }, function* () {
 			const { sessionId } = input;
@@ -1053,6 +1060,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				yield* addTurnWaiter(this.stateRef, sessionId, input.inputId, {
 					deferred,
 					started: false,
+					unplaced: input,
 				});
 				const expectedApiModelId = yield* expectedApiModelIdEffect(
 					this.deps.capabilitiesService,
@@ -1195,6 +1203,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					instanceId: input.instanceId ?? "claude",
 					nativeThread: launchInput.nativeThread,
 					workspaceRoot: input.workspaceRoot,
+					workspaceStartReported,
 					configDir: input.configDir,
 					goalTracker: new ClaudeGoalTracker(sessionId, input.goalState),
 					cumulativeTokens: input.cumulativeTokens ?? 0,
@@ -1696,7 +1705,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		return Effect.gen({ self: this }, function* () {
 			yield* FiberMap.remove(this.shutdownFibers, ctx.sessionId);
 			yield* this.disposeSessionEffect(ctx, reason);
-			return yield* this.createSessionAndSendTurnEffect(input);
+			return yield* this.createSessionAndSendTurnEffect(
+				input,
+				ctx.workspaceStartReported,
+			);
 		});
 	}
 
@@ -2005,7 +2017,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	private handleCommandLifecycleEffect(
 		ctx: ClaudeSessionContext,
 		message: ClaudeSDKCommandLifecycleMessage,
-	): Effect.Effect<void> {
+	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen({ self: this }, function* () {
 			if (message.state === "cancelled") {
 				yield* cancelTurnWaiterEffect(
@@ -2021,7 +2033,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				ctx.sessionId,
 				message.command_uuid,
 			);
-			if (!unplaced) return;
+			if (!unplaced || ctx.stopped) return;
 			// A steer becomes the current turn when it starts, on its own sink,
 			// and is in flight even when the turn before it already ended.
 			ctx.currentTurnId = message.command_uuid;
@@ -2044,6 +2056,22 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					),
 				),
 			);
+			if (ctx.stopped) return;
+			// Admission may have joined the prior turn before its result wrote idle.
+			// The SDK start places this input and makes its local work busy too.
+			yield* ctx.eventSink
+				.push(
+					claudeRuntimeEvent("session.status", ctx.sessionId, {
+						sessionId: ctx.sessionId,
+						status: "busy",
+					}),
+				)
+				.pipe(
+					Effect.mapError(
+						(cause) =>
+							new ClaudeBoundaryError({ operation: "startTurn", cause }),
+					),
+				);
 		}).pipe(
 			Effect.uninterruptible,
 			(ctx.messageOwnershipPermit ??= Semaphore.makeUnsafe(1)).withPermits(1),

@@ -259,6 +259,9 @@ export const makeClaudeRunnerLaunch = (
 				(JSON.parse(
 					JSON.stringify({
 						input: { ...launchInput, configDir },
+						...(snapshot?.workspaceDirectories
+							? { workspaceDirectories: snapshot.workspaceDirectories }
+							: {}),
 						...((frozenSnapshot?.claudeSettingsOverrides ?? launchSettings)
 							? {
 									claudeSettingsOverrides:
