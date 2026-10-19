@@ -8,7 +8,10 @@ import {
 import { join, resolve } from "node:path";
 import { Effect, Fiber, Schema, Stream } from "effect";
 import type { SessionInfo } from "../../../src/lib/contracts/ws-rpc.js";
-import { handoffMessagesLine } from "../../../src/lib/frontend/utils/continuation.js";
+import {
+	handoffMessagesLine,
+	usageForecastTime,
+} from "../../../src/lib/frontend/utils/continuation.js";
 import { formatSnoozeTime } from "../../../src/lib/frontend/utils/format.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import { openPickerRoot } from "../helpers/model-picker.js";
@@ -501,7 +504,7 @@ for (const dismiss of [false, true]) {
 				const cutOffTag = page.getByTestId("cut-off-tag");
 				await test.step("limited-session strip and cut-off tag", async () => {
 					const phone = testInfo.project.name === "mobile";
-					const resets = `Resets at ${formatSnoozeTime(1791370800 * 1000)}.`;
+					const resets = `Resets at ${usageForecastTime(1791370800 * 1000, Date.now())}.`;
 					await expect(strip.getByTestId("usage-limit-title")).toHaveText(
 						"Account 1 hit its weekly limit.",
 					);
@@ -1185,6 +1188,9 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 				const names = settings.getByTestId("usage-limit-account-name");
 				await expect(names.nth(0)).toHaveText("Account 2");
 				await expect(names.nth(1)).toHaveText("Account 3");
+				// Phones hide the drag handles until Edit order is pressed.
+				if (testInfo.project.name === "mobile")
+					await settings.getByTestId("usage-settings-reorder").click();
 				// Drag Account 3 above Account 2 with the mouse. The rows slide into the
 				// saved order as it loads, and hover's stability check can pass mid-slide,
 				// so wait for the slide to finish before measuring the handles. The quota
@@ -1583,7 +1589,7 @@ for (const scenario of [
 				.poll(() => latest()?.limitRecovery)
 				.toEqual({ ...limited, scheduledAt: at });
 			if (ui) {
-				const resetLabel = formatSnoozeTime(at * 1000);
+				const resetLabel = usageForecastTime(at * 1000, Date.now());
 				await expect(strip).toHaveAttribute("data-state", "waiting");
 				await expect(page.getByTestId("usage-limit-title")).toHaveText(
 					mobile
@@ -1956,7 +1962,7 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 			await expect
 				.poll(() => latest()?.limitRecovery)
 				.toEqual({ ...limited, scheduledAt: at, auto: true });
-			const resetLabel = formatSnoozeTime(at * 1000);
+			const resetLabel = usageForecastTime(at * 1000, Date.now());
 			await expect(strip).toHaveAttribute("data-state", "waiting");
 			await expect(page.getByTestId("usage-limit-title")).toHaveText(
 				mobile

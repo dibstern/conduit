@@ -13,13 +13,13 @@ type ProbeWindow = typeof window & {
 	__startupLoadErrors: string[];
 };
 
+// The shell feed carries the project list and the session rows.
 const startupLoads = [
-	"GetProjects",
+	"SubscribeShell",
 	"GetFileTree",
 	"GetAgents",
 	"GetModels",
 	"GetCommands",
-	"ListDaemonSessions",
 ];
 
 // Socket retry cap (1 s) + resume re-issue cap (1 s), with headroom. Timed to
@@ -105,12 +105,10 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 				const response = JSON.parse(line) as {
 					_tag: string;
 					requestId: string;
-					exit: { _tag: string };
 				};
 				// Any server Exit counts: the bug fails the call client-side before a
-				// frame is sent. This harness has no daemon, so ListDaemonSessions
-				// is answered with a typed "not supported" Failure.
-				if (response._tag !== "Exit") continue;
+				// frame is sent. A subscription answers with its first Chunk.
+				if (response._tag !== "Exit" && response._tag !== "Chunk") continue;
 				const tag = requests.get(response.requestId);
 				if (tag) answered.add(tag);
 				if (restarting && restartAnswered.size === startupLoads.length)

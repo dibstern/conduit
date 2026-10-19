@@ -3,6 +3,8 @@
 
 import { defineConfig } from "@playwright/test";
 
+const port = Number(process.env["ACCEPTANCE_PORT"] ?? 4173);
+
 export default defineConfig({
 	testDir: "./specs",
 	testMatch: "subagent-sessions.spec.ts",
@@ -23,7 +25,7 @@ export default defineConfig({
 	expect: { timeout: 10_000 },
 
 	use: {
-		baseURL: "http://localhost:4173",
+		baseURL: `http://localhost:${port}`,
 		trace: "on-first-retry",
 		screenshot: "only-on-failure",
 		video: "off",
@@ -40,9 +42,9 @@ export default defineConfig({
 	],
 
 	webServer: {
-		command: "pnpm exec vite preview --port 4173 --strictPort",
+		command: `pnpm exec vite preview --port ${port} --strictPort`,
 		cwd: "../../",
-		port: 4173,
+		port,
 		// Never reuse: a busy 4173 is usually another worktree's build, and reuse
 		// would test it silently. Busy port fails the run (conduit-test-g49a).
 		reuseExistingServer: false,

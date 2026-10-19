@@ -18,7 +18,6 @@ import { mockRelayWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
 type Page = import("@playwright/test").Page;
 
 const PROJECT_URL = "/s/sess-pm-001";
-const BASE = "http://localhost:4173";
 
 const existingSession = {
 	id: "sess-pm-001",
@@ -176,7 +175,7 @@ async function setup(
 		}),
 	});
 	const bound = initMessages !== unboundInit;
-	await page.goto(`${BASE}${bound ? PROJECT_URL : "/"}`);
+	await page.goto(bound ? PROJECT_URL : "/");
 	await page.locator("#input").waitFor({ state: "visible", timeout: 10_000 });
 	if (bound) {
 		await rpc.waitForRequest((request) => request.tag === "ViewSession");
@@ -335,7 +334,7 @@ test.describe("Permission mode with a bound session", () => {
 		await expect.poll(() => switchCalls(rpc).length).toBeGreaterThan(0);
 
 		// Full reload navigation (PWA-style revisit) — re-sync must keep "Full access".
-		await page.goto(`${BASE}/s/sess-pm-001`);
+		await page.goto("/s/sess-pm-001");
 		await page.locator("#input").waitFor({ state: "visible", timeout: 10_000 });
 		await expect(pill(page)).toHaveAccessibleName(
 			"Approvals: Full access. Open options",

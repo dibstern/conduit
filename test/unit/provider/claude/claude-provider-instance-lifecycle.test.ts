@@ -346,13 +346,14 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			);
 			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
-			await Effect.runPromise(
-				instance.interruptTurnEffect("sess-1", ["turn-1"]),
+			// The rejection fails the Stop, so the caller can report it.
+			const rejected = Effect.runPromise(
+				Effect.either(instance.interruptTurnEffect("sess-1", ["turn-1"])),
 			);
 			await Effect.runPromise(
 				Deferred.fail(ack, new Error("interrupt rejected")),
 			);
-			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			expect((await rejected)._tag).toBe("Left");
 			await Effect.runPromise(
 				instance.interruptTurnEffect("sess-1", ["turn-1"]),
 			);
@@ -376,8 +377,12 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			);
 			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
-			await Effect.runPromise(
-				instance.interruptTurnEffect("sess-1", ["turn-1"]),
+			// The older Stop awaits its acknowledgement without holding ownership.
+			const rejected = Effect.runPromise(
+				Effect.either(instance.interruptTurnEffect("sess-1", ["turn-1"])),
+			);
+			await vi.waitFor(() =>
+				expect(ctx.query.interrupt).toHaveBeenCalledOnce(),
 			);
 			ctx.currentTurnId = "replacement-input";
 			await Effect.runPromise(
@@ -386,7 +391,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			await Effect.runPromise(
 				Deferred.fail(ack, new Error("old interrupt rejected")),
 			);
-			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			expect((await rejected)._tag).toBe("Left");
 			await Effect.runPromise(
 				instance.interruptTurnEffect("sess-1", ["replacement-input"]),
 			);

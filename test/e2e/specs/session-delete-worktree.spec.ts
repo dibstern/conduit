@@ -111,7 +111,7 @@ async function setup(
 			}),
 			DeleteSession: ({ sessionId }) => {
 				sessions = sessions.filter(({ id }) => id !== sessionId);
-				rpc.setShellRows(options.foreign ? [] : sessions);
+				rpc.setShellRows(sessions);
 				return { ok: true, worktreeWarnings: options.warnings ?? [] };
 			},
 			GetModels: (input) => ({
@@ -138,12 +138,13 @@ async function setup(
 			{
 				type: "shell_snapshot",
 				roots: true,
-				sessions: options.foreign ? [] : sessions,
+				// The shell feed is daemon-wide: a foreign row is only scoped out.
+				sessions,
 			},
 		],
 		responses: new Map(),
 	});
-	rpc.setShellRows(options.foreign ? [] : sessions);
+	rpc.setShellRows(sessions);
 	controls.set(page, rpc);
 	await page.goto(`${baseUrl}/?p=e2e-replay`);
 	if (options.foreign)

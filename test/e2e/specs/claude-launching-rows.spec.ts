@@ -385,7 +385,9 @@ test.describe("Claude launching rows", () => {
 				const foreground = await recordWhen(steps, page, "foreground", {
 					[AGENT_F]: { state: null, meta: "" },
 				});
-				expect.soft(foreground[AGENT_F]?.label).toBe("");
+				// An ordinary step is labelled by its verb and subject alone: no
+				// launch status, time or nested count.
+				expect.soft(foreground[AGENT_F]?.label).toBe("Delegating agent F");
 
 				replayer.release();
 				await replayer.held();

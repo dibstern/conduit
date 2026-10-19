@@ -95,8 +95,10 @@ test("phone: scrolling the session sheet, then tapping an item, keeps chat text 
 			},
 		)
 		.toBeGreaterThan(0);
-	await sheet.getByRole("menuitem", { name: /^Mark (un)?read$/ }).tap();
+	// Pin keeps the chat on screen; Mark unread would send a phone back to the list.
+	await sheet.getByRole("menuitem", { name: "Pin to top" }).tap();
 	await expect(sheet).toHaveCount(0);
+	await expect(page.locator("#messages")).toBeVisible();
 
 	const evidence = {
 		bodyUserSelect: await page.evaluate(() => document.body.style.userSelect),
