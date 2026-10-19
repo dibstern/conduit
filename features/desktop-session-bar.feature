@@ -1,5 +1,9 @@
 Feature: Desktop merged session bar
 
+Scenario: Settle distinguishes keyboard focus from its resting capsule
+  Given the conduit app is served with the long-transcript mockup
+  Then the Settle segment shows a focus ring after tabbing and clears it after a pointer click
+
 Scenario Outline: The merged bar contains the global actions
   Given the conduit app is served with the long-transcript mockup
   Then the desktop session bar remains one row

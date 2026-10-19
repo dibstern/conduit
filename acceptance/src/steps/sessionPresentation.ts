@@ -69,6 +69,37 @@ export const sessionPresentationHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "verify Settle keyboard focus ring",
+		match:
+			/^the Settle segment shows a focus ring after tabbing and clears it after a pointer click$/,
+		run: async ({ world }) => {
+			const bar = world.page.getByTestId("session-bar");
+			const settle = world.page.getByTestId("session-bar-settle");
+			await expect(settle).toBeVisible();
+			await expect(settle).not.toBeFocused();
+			await expect(settle).toHaveCSS("box-shadow", "none");
+			await bar.click({ position: { x: 1, y: 1 } });
+			for (let tabs = 0; tabs < 20; tabs++) {
+				await world.page.keyboard.press("Tab");
+				if (await settle.evaluate((el) => el === document.activeElement)) break;
+			}
+			await expect(settle).toBeFocused();
+			await expect(settle.locator(":scope:focus-visible")).toHaveCount(1);
+			await expect(settle).not.toHaveCSS("box-shadow", "none");
+			const keyboardPath =
+				"acceptance/visual/artifacts/settle-keyboard-focus.png";
+			await bar.screenshot({ path: keyboardPath });
+			world.artifacts.push(keyboardPath);
+			await bar.click({ position: { x: 1, y: 1 } });
+			await expect(settle).not.toBeFocused();
+			await expect(settle).toHaveCSS("box-shadow", "none");
+			const pointerPath =
+				"acceptance/visual/artifacts/settle-pointer-focus.png";
+			await bar.screenshot({ path: pointerPath });
+			world.artifacts.push(pointerPath);
+		},
+	},
+	{
 		name: "set phone viewport",
 		match: /^the viewport is a phone$/,
 		run: async ({ world }) => {
