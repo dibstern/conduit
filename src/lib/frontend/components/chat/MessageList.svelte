@@ -688,20 +688,24 @@
 		</div>
 	{/each}
 
-	<!-- Scroll-to-bottom button -->
-	<Button
-		variant="ghost"
-		size="content"
-		layout="flow"
-		tone="inherit"
-		hoverFill="surface"
-		id={primary ? "scroll-btn" : `${messagesId}-scroll-btn`}
-		class="sticky bottom-3 left-1/2 -translate-x-1/2 bg-bg-alt border border-border rounded-full px-4 py-1.5 text-xs text-text-secondary z-5 font-sans {scrollCtrl.isDetached ? '' : 'hidden'}"
-		title="Scroll to bottom"
-		onclick={() => scrollCtrl.requestFollow()}
-	>
-		{scrollButtonText}
-	</Button>
+	<!-- Scroll-to-bottom button, on a zero-height sticky rail like the feed pill:
+	     in flow it added its height to the transcript, so hiding it on arrival
+	     at the bottom shrank the scroll range and bounced the content back. -->
+	<div class="sticky bottom-3 z-5 h-0 flex items-end justify-center">
+		<Button
+			variant="ghost"
+			size="content"
+			layout="flow"
+			tone="inherit"
+			hoverFill="surface"
+			id={primary ? "scroll-btn" : `${messagesId}-scroll-btn`}
+			class="bg-bg-alt border border-border rounded-full px-4 py-1.5 text-xs text-text-secondary font-sans {scrollCtrl.isDetached ? '' : 'hidden'}"
+			title="Scroll to bottom"
+			onclick={() => scrollCtrl.requestFollow()}
+		>
+			{scrollButtonText}
+		</Button>
+	</div>
 </div>
 
 <style>
