@@ -276,7 +276,8 @@ export interface ProjectRelayLayerInputs {
 	claudeRunnerFactory?: OrchestrationRuntimeLayerOptions["claudeRunnerFactory"];
 	testSendLimit?: number;
 	onBackgroundWorkChanged: (sessionId: string) => void;
-	getWsHandler: () => WebSocketHandlerShape;
+	/** Undefined until startup finishes; runner adoption publishes before then. */
+	getWsHandler: () => WebSocketHandlerShape | undefined;
 }
 
 /** Build the shared per-project Layer graph and its managed runtime. */
@@ -669,7 +670,7 @@ export function createProjectRelayLayers({
 				relayPublisher: {
 					publish: (msg) =>
 						publishProviderRelayMessage(msg, {
-							wsHandler: getWsHandler(),
+							wsHandler: getWsHandler() ?? { getClientsForSession: () => [] },
 							log,
 							slug: config.slug,
 							...(config.pushManager
@@ -818,7 +819,8 @@ export function createProjectRelayLayers({
 	);
 	// Polling must not restart an idle-stopped OpenCode.
 	const messagePollerManagerLayer = makeMessagePollerManagerLive({
-		hasViewers: (sid) => getWsHandler().getClientsForSession(sid).length > 0,
+		hasViewers: (sid) =>
+			(getWsHandler()?.getClientsForSession(sid).length ?? 0) > 0,
 	}).pipe(
 		Layer.provide(
 			Layer.mergeAll(

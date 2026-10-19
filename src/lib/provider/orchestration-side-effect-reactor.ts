@@ -537,7 +537,7 @@ export class ProviderSideEffectReactor {
 									agent: payload.agent,
 									userMessageId:
 										payload.continuation?.cutOffMessageId ?? payload.inputId,
-									continuation: payload.continuation !== undefined,
+									continuation: payload.continuation,
 									nativeResumeFallback: payload.nativeResumeFallback,
 									rewind: payload.rewind,
 									sessionForkSdk: this.options.claudeSessionForkSdk,

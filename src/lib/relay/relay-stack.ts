@@ -462,8 +462,8 @@ export async function createProjectRelay(
 		}
 	}
 
-	// Publisher and viewer callbacks in the Layer graph run after startup supplies the handler.
-	let wsHandler: WebSocketHandlerShape;
+	// Startup supplies the handler, but runner adoption can publish before it does.
+	let wsHandler: WebSocketHandlerShape | undefined;
 
 	const layers = createProjectRelayLayers({
 		config,
@@ -551,7 +551,8 @@ export async function createProjectRelay(
 			settleIdleSessions(
 				{
 					projectDir: config.projectDir,
-					hasViewer: (id) => wsHandler.getClientsForSession(id).length > 0,
+					hasViewer: (id) =>
+						startup.wsHandler.getClientsForSession(id).length > 0,
 					hasLiveBackgroundWork: startup.activity.background.hasLiveWork,
 					setSettled: (id) =>
 						startup.sessionManagerService.setSessionSettled(id, {
