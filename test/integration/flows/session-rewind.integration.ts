@@ -95,7 +95,8 @@ async function seedTurns(
 		providerId: "opencode",
 	});
 	const sessionId = String(created["id"]);
-	const createdAt = Date.now();
+	// Equal provider clocks must order by id regardless of ingestion timing.
+	const createdAt = Date.now() - 1000;
 	harness.mock.injectSSEEvents(
 		messageIds.flatMap((id, index) => [
 			{
