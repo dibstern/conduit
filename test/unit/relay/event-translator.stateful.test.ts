@@ -20,7 +20,7 @@
 //   - Reset empties everything
 
 import fc from "fast-check";
-import { assert, describe, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import {
 	createTranslator,
 	mapToolName,
@@ -77,20 +77,10 @@ class ReceiveToolPartCommand implements fc.Command<ModelState, RealState> {
 		// Model: part is now tracked
 		model.seenParts.set(this.partID, { type: "tool", status: "pending" });
 
-		// Real: should emit tool_start for new pending tool
-		if (result.ok && result.messages.length === 1) {
-			const first = result.messages[0];
-			assert.exists(first, "expected first message");
-			if (first.type === "tool_start") {
-				// Expected — new part emits tool_start
-				const expected = mapToolName(this.tool);
-				if ((first as { name: string }).name !== expected) {
-					throw new Error(
-						`tool_start name mismatch: expected "${expected}", got "${(first as { name: string }).name}"`,
-					);
-				}
-			}
-		}
+		expect(result).toMatchObject({
+			ok: true,
+			messages: [{ type: "tool_start", name: mapToolName(this.tool) }],
+		});
 
 		this.assertSizeMatch(model, real);
 	}
@@ -146,31 +136,13 @@ class UpdateToolStatusCommand implements fc.Command<ModelState, RealState> {
 		// Model: update status
 		model.seenParts.set(this.partID, { type: "tool", status: this.status });
 
-		// Real: should NOT emit tool_start (part already seen)
-		if (result.ok && result.messages.length === 1) {
-			const msg = result.messages[0];
-			assert.exists(msg, "expected message");
-			if (msg.type === "tool_start") {
-				throw new Error(
-					`Duplicate tool_start for already-seen part "${this.partID}"`,
-				);
-			}
-		}
-
-		// Verify correct event type for status
-		if (result.ok && result.messages.length === 1) {
-			const msg = result.messages[0];
-			assert.exists(msg, "expected message");
-			if (this.status === "completed" && msg.type !== "tool_result") {
-				throw new Error(
-					`Expected tool_result for completed status, got ${msg.type}`,
-				);
-			}
-			if (this.status === "error" && msg.type !== "tool_result") {
-				throw new Error(
-					`Expected tool_result for error status, got ${msg.type}`,
-				);
-			}
+		if (this.status === "completed" || this.status === "error") {
+			expect(result).toMatchObject({
+				ok: true,
+				messages: [{ type: "tool_result" }],
+			});
+		} else {
+			expect(result).toMatchObject({ ok: false });
 		}
 
 		// Size should still match
@@ -207,16 +179,10 @@ class ReceiveReasoningPartCommand implements fc.Command<ModelState, RealState> {
 
 		model.seenParts.set(this.partID, { type: "reasoning" });
 
-		// Should emit thinking_start for new reasoning part
-		if (result.ok && result.messages.length === 1) {
-			const msg = result.messages[0];
-			assert.exists(msg, "expected message");
-			if (msg.type !== "thinking_start") {
-				throw new Error(
-					`Expected thinking_start for new reasoning part, got ${msg.type}`,
-				);
-			}
-		}
+		expect(result).toMatchObject({
+			ok: true,
+			messages: [{ type: "thinking_start" }],
+		});
 
 		const realSize = real.translator.getSeenParts()?.size ?? 0;
 		if (realSize !== model.seenParts.size) {
@@ -435,7 +401,7 @@ const allCommands = fc.commands(
 );
 
 describe("Ticket 1.3 — Event Translator State Machine PBT", () => {
-	it("property: arbitrary command sequences maintain model/real seenParts consistency", () => {
+	it("property: arbitrary command sequences emit the expected lifecycle events", () => {
 		fc.assert(
 			fc.property(allCommands, (cmds) => {
 				const model: ModelState = {
