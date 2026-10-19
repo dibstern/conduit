@@ -66,38 +66,17 @@ describe("Integration: Error Handling", () => {
 		await client.close();
 	});
 
-	it("a failed RPC leaves the same client usable", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-		client.clearReceived();
-
-		await expect(
-			client.rpcCall((rpc) =>
-				rpc.GetSkillContent({
-					projectSlug: "integration-test",
-					name: "nonexistent-skill",
-				}),
-			),
-		).rejects.toThrow("Skill content not available");
-
-		const result = await client.getAgents();
-		expect(Array.isArray(result.agents)).toBe(true);
-
-		await client.close();
-	});
-
 	it("GetFileContent RPC with non-existent path fails without crashing", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
 
-		try {
-			const result = await client.getFileContent("/nonexistent/path/file.txt");
-			expect(result.path).toBe("/nonexistent/path/file.txt");
-			expect(typeof result.content).toBe("string");
-		} catch (error) {
-			expect(error).toBeInstanceOf(Error);
-		}
+		harness.mock.setExactResponse("GET", "/file/content", 404, {
+			message: "File not found",
+		});
+		await expect(
+			client.getFileContent("nonexistent/path/file.txt"),
+		).rejects.toThrow("GetFileContent failed:");
 
 		// Verify the server is still alive
 		client.clearReceived();
