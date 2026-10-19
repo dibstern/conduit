@@ -98,6 +98,14 @@ describe("Integration: Per-Tab Sessions", () => {
 		client1.clearReceived();
 		client2.clearReceived();
 		await client1.renameSession(sessionId, "Renamed for both tabs");
+		for (const client of [client1, client2]) {
+			await client.waitFor("family", {
+				predicate: (msg) =>
+					msg["_tag"] === "upsert" &&
+					(msg["item"] as { id?: string; title?: string }).id === sessionId &&
+					(msg["item"] as { title?: string }).title === "Renamed for both tabs",
+			});
+		}
 
 		const renamed = (s: { id: string; title?: string }) =>
 			s.id === sessionId && s.title === "Renamed for both tabs";

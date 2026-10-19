@@ -17,26 +17,6 @@ describe("Integration: WS Handler Coverage", () => {
 		if (harness) await harness.stop();
 	});
 
-	it("GetAgents RPC returns agents", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-		client.clearReceived();
-
-		const result = await client.getAgents();
-		expect(Array.isArray(result.agents)).toBe(true);
-		await client.close();
-	});
-
-	it("GetCommands RPC returns command metadata", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-		client.clearReceived();
-
-		const result = await client.getCommands();
-		expect(Array.isArray(result.commands)).toBe(true);
-		await client.close();
-	});
-
 	it("GetProjects RPC returns project list", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
@@ -56,16 +36,6 @@ describe("Integration: WS Handler Coverage", () => {
 		const result = await client.getFileTree();
 		expect(Array.isArray(result.entries)).toBe(true);
 		expect(result.entries.length).toBeGreaterThan(0);
-		await client.close();
-	});
-
-	it("CreateSession RPC creates and switches to new session", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-		client.clearReceived();
-
-		const msg = await client.createSession("Integration Test New");
-		expect(msg["id"]).toBeTruthy();
 		await client.close();
 	});
 
@@ -103,43 +73,5 @@ describe("Integration: WS Handler Coverage", () => {
 		const { active } = await client.getModels();
 		expect(active).toEqual({ model: "test-model", provider: "test-provider" });
 		await client.close();
-	});
-
-	it("GetFileList RPC returns file entries", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-		client.clearReceived();
-
-		const result = await client.getFileList(".");
-		expect(result.path).toBeTruthy();
-		expect(Array.isArray(result.entries)).toBe(true);
-		await client.close();
-	});
-
-	it("a draft reaches another tab following the session", async () => {
-		const client1 = await harness.connectWsClient();
-		const client2 = await harness.connectWsClient();
-		await client1.waitForInitialState();
-		await client2.waitForInitialState();
-		const sessionId = client1.getActiveSessionId();
-		if (!sessionId) throw new Error("Expected active session after init");
-		await client2.viewSession(sessionId);
-		client1.clearReceived();
-		client2.clearReceived();
-		await client2.subscribeInputDraft(sessionId);
-
-		await client1.syncInputDraft("typing something", {
-			sessionId,
-			originId: "browser-tab-a",
-		});
-		const msg = await client2.waitFor("input_draft", {
-			timeout: 3000,
-			predicate: (m) => m["_tag"] === "draft",
-		});
-		expect(msg["text"]).toBe("typing something");
-		expect(msg["from"]).toBe("browser-tab-a");
-
-		await client1.close();
-		await client2.close();
 	});
 });

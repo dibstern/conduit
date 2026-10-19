@@ -151,6 +151,7 @@ describe("Claude session process runner", () => {
 			(message) => message["type"] === "permission_pending",
 			cursor,
 		);
+		expect(request["toolName"]).toBe("Bash");
 		expect(request["toolInput"]).toEqual({
 			command: "printf harness-approved",
 		});

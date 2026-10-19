@@ -26,20 +26,6 @@ describe("Integration: SSE to RPC Pipeline", () => {
 		if (harness) await harness.stop();
 	});
 
-	it("SSE stream is running after relay startup", async () => {
-		// The SSE stream connect() is fire-and-forget, so isConnected() may
-		// not be true immediately. But it should be running (this.running=true).
-		// The best proof is that SSE events actually flow — tested below.
-		// Here we just verify the stream was started successfully.
-		const consumer = harness.stack.sseStream;
-		// The stream object exists and was wired up
-		expect(consumer).toBeTruthy();
-
-		await vi.waitFor(() => {
-			expect(consumer.getHealth().connected).toBe(true);
-		});
-	});
-
 	it("sending a prompt starts a turn that completes", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();

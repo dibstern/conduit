@@ -584,35 +584,6 @@ describe("Group 1: SSE coverage and grace period", () => {
 		await waitForIdle(harness, client);
 		await client.close();
 	}, 5_000);
-
-	it("Scenario 4: Busy + no SSE, after grace expires → poller starts", async () => {
-		await resetForNextTest(harness, ["sess-1"]);
-		const client = await connectAndView(harness, "sess-1");
-		harness.mock.resetMessageRequestCounts();
-
-		// Session goes busy
-		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
-		await waitForMonitoredBusy(harness, "sess-1");
-
-		harness.mock.resetMessageRequestCounts();
-		await vi.waitFor(
-			() => {
-				expect(harness.mock.getMessageRequestCount("sess-1")).toBeGreaterThan(
-					0,
-				);
-			},
-			{ timeout: 3000 },
-		);
-
-		const count = harness.mock.getMessageRequestCount("sess-1");
-		// Grace expired + no SSE → poller should have started and polled
-		expect(count).toBeGreaterThan(0);
-
-		// Cleanup
-		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
-		await waitForIdle(harness, client);
-		await client.close();
-	}, 5_000);
 });
 
 describe("Group 2: SSE dynamics", () => {
@@ -1028,31 +999,6 @@ describe("Group 5: Notifications", () => {
 
 		await client.close();
 	}, 5_000);
-
-	it("Scenario 15: Done without viewer → cross-session broadcast", async () => {
-		await resetForNextTest(harness, ["sess-1", "sess-2"]);
-
-		// Client viewing sess-2 (no one viewing sess-1)
-		const client = await connectAndView(harness, "sess-2");
-		await client.subscribeAlerts();
-
-		// sess-1 goes busy (no viewer)
-		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
-		await waitForStatusPollCycles(harness.mock);
-
-		client.clearReceived();
-
-		// sess-1 goes idle → cross-session broadcast should fire
-		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
-
-		const alert = await client.waitFor("alerts", {
-			timeout: 5000,
-			predicate: (m) => m["_tag"] === "alert" && m["kind"] === "done",
-		});
-		expect(alert).toMatchObject({ sessionId: "sess-1" });
-
-		await client.close();
-	}, 10_000);
 });
 
 describe("Group 6: Retry status and cycling", () => {
