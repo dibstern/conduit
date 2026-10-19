@@ -14,6 +14,23 @@ pnpm test:unit
 
 Start there unless the change crosses a boundary that unit tests cannot cover.
 
+## Pre-commit
+
+Lefthook runs every check in parallel: Biome on staged files, `pnpm lint:rules`,
+the three typechecks behind `pnpm check`, `pnpm build`, the `guards` project, and
+`vitest related --run {staged_files}`. Leaf-file commits take about 25 s; files
+imported widely (core domain, shared test helpers) pull in far more tests.
+
+`related` cannot see filesystem reads, so `forceRerunTriggers` in
+`vitest.config.ts` runs the whole unit suite when fixtures, SDK traces,
+baselines, the lockfile, tsconfigs, `test/setup.ts`, the theme CSS, or
+`scripts/build.mjs` change. Keep the `**/` prefixes: Vitest matches them against
+absolute paths. Full suites stay in `pnpm test:all` and CI.
+
+Time a hook run without committing:
+`pnpm exec lefthook run pre-commit --file <path>` (add `--command test` for the
+tests alone).
+
 ## When To Escalate
 
 ### Integration
