@@ -1,9 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+	afterAll,
+	afterEach,
+	beforeAll,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -14,27 +23,106 @@ import { ProcessHarness } from "../../helpers/process-harness.js";
 // survivor spawning twice across a restart, or outliving `conduit stop`.
 describe("Managed OpenCode stops when idle", () => {
 	const instanceId = MANAGED_OPENCODE_ACCOUNT_ID;
-	const graceMs = 3_000;
-	// Two grace periods, which is also more than two status poll intervals.
-	const pastGraceMs = 2 * graceMs + 1_000;
+	const graceMs = 1_000;
+	const pastGraceMs = 2 * graceMs + 100;
+	const serviceEnvironment = {
+		CONDUIT_SERVICE: "0",
+		CONDUIT_TEST_HEALTH_POLL_INTERVAL_MS: "100",
+		CONDUIT_TEST_OPENCODE_STATUS_POLL_INTERVAL_MS: "300",
+	};
+	let probePort = 0;
+	let probeId = "";
+	let lastProbeAt = 0;
+	const probe = createServer((request, response) => {
+		const path = request.url?.split("?")[0];
+		if (path === "/global/event") {
+			response.writeHead(200, { "Content-Type": "text/event-stream" });
+			response.write(
+				'data: {"directory":"global","payload":{"type":"server.connected","properties":{}}}\n\n',
+			);
+			return;
+		}
+		if (path === "/global/health")
+			response.once("finish", () => {
+				lastProbeAt = Date.now();
+			});
+		response.setHeader("Content-Type", "application/json");
+		response.end(
+			JSON.stringify(
+				path === "/path"
+					? {
+							state: process.cwd(),
+							config: process.cwd(),
+							worktree: process.cwd(),
+							directory: process.cwd(),
+						}
+					: ["/session", "/permission", "/question"].includes(path ?? "")
+						? []
+						: path === "/session/status"
+							? {}
+							: { healthy: true, version: "idle-stop-probe" },
+			),
+		);
+	});
+	beforeAll(async () => {
+		await new Promise<void>((done) => probe.listen(0, "127.0.0.1", done));
+		const address = probe.address();
+		if (!address || typeof address === "string")
+			throw new Error("No probe port");
+		probePort = address.port;
+	});
+	afterAll(async () => {
+		probe.closeAllConnections();
+		await new Promise<void>((done, fail) =>
+			probe.close((error) => (error ? fail(error) : done())),
+		);
+	});
 	let harness: ProcessHarness | undefined;
 	let scenario = "setup";
 	let evidence: Record<string, unknown> = {};
 
 	async function start(name: string) {
 		scenario = name;
+		probeId = "";
 		evidence = { ticket: "conduit-test-pa3r.8", at: new Date().toISOString() };
 		harness = ProcessHarness.create({
 			dist: resolve(process.env["CONDUIT_TEST_DIST"] ?? "dist"),
 			foregroundCli: true,
 			autoStartOpenCode: true,
 		});
-		await harness.restart({ opencodeIdleTimeoutMs: graceMs });
+		await harness.restart({
+			opencodeIdleTimeoutMs: graceMs,
+			serviceEnvironment,
+		});
 		return harness;
 	}
 
-	const sleep = (ms: number) =>
-		new Promise<void>((done) => setTimeout(done, ms));
+	async function waitForPolls(windowMs = pastGraceMs) {
+		if (!harness) throw new Error("No process fixture");
+		if (!probeId) {
+			const { addedInstanceId } = await harness.requestRpc({
+				_tag: "AddInstance",
+				name: "Poll progress probe",
+				driver: "opencode",
+				managed: false,
+				port: probePort,
+				url: `http://127.0.0.1:${probePort}`,
+			});
+			if (!addedInstanceId) throw new Error("No poll probe instance");
+			probeId = addedInstanceId;
+		}
+		// External instances need an explicit stop/start to arm health polling,
+		// including after a daemon restart that reloaded their healthy snapshot.
+		await harness.requestRpc({ _tag: "StopInstance", instanceId: probeId });
+		await harness.requestRpc({ _tag: "StartInstance", instanceId: probeId });
+		const after = Date.now() + windowMs;
+		// A real daemon health poll after the grace and fallback-poll deadlines
+		// proves its scheduler is still running even when the target is stopped.
+		await vi.waitFor(() => expect(lastProbeAt).toBeGreaterThanOrEqual(after), {
+			timeout: windowMs + 5000,
+			interval: 20,
+		});
+	}
 
 	/** Every fake OpenCode the daemon started: server, its child, and the supervisor. */
 	function spawned(fixture: ProcessHarness) {
@@ -134,7 +222,7 @@ describe("Managed OpenCode stops when idle", () => {
 		fixture: ProcessHarness,
 		browser: Awaited<ReturnType<ProcessHarness["connect"]>>,
 	) {
-		await sleep(pastGraceMs);
+		await waitForPolls();
 		const snapshot = {
 			spawned: spawned(fixture).length,
 			livePids: livePids(fixture).length,
@@ -188,7 +276,7 @@ describe("Managed OpenCode stops when idle", () => {
 		});
 
 		// The browser stays attached and sends nothing: polling must not restart it.
-		await sleep(pastGraceMs);
+		await waitForPolls();
 		const quiet = {
 			spawned: spawned(fixture).length,
 			livePids: livePids(fixture),
@@ -238,6 +326,7 @@ describe("Managed OpenCode stops when idle", () => {
 
 	it("message fallback polling does not extend the managed instance's idle grace", async () => {
 		scenario = "82tn7-idle-message-polling";
+		probeId = "";
 		evidence = { ticket: "conduit-test-82tn.7" };
 		harness = ProcessHarness.create({
 			managedOpenCode: true,
@@ -251,6 +340,7 @@ describe("Managed OpenCode stops when idle", () => {
 		await fixture.restart({
 			opencodeIdleTimeoutMs: pollingGraceMs,
 			startupTimeoutMs: 60_000,
+			serviceEnvironment,
 		});
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession(
@@ -324,7 +414,7 @@ describe("Managed OpenCode stops when idle", () => {
 			expect(backgroundRequests().every(({ method }) => method === "GET")).toBe(
 				true,
 			);
-			await sleep(2 * 750);
+			await waitForPolls(2 * 750);
 			stayedStopped =
 				spawned(fixture).length === 1 &&
 				livePids(fixture).length === 0 &&
@@ -438,15 +528,19 @@ describe("Managed OpenCode stops when idle", () => {
 		});
 		evidence["droppedBusy"] = await keptRunning(fixture, browser);
 		// Only the grace expiry's reconcile could have seen the busy session.
-		const statusReads = fixture
-			.opencodeRequests()
-			.filter(
-				({ method, url, at }) =>
-					method === "GET" &&
-					url.split("?")[0] === "/session/status" &&
-					at > busyAt + graceMs,
-			);
-		expect(statusReads.length).toBeGreaterThan(0);
+		const statusReads = () =>
+			fixture
+				.opencodeRequests()
+				.filter(
+					({ method, url, at }) =>
+						method === "GET" &&
+						url.split("?")[0] === "/session/status" &&
+						at > busyAt + graceMs,
+				);
+		await vi.waitFor(() => expect(statusReads().length).toBeGreaterThan(0), {
+			timeout: 5000,
+			interval: 20,
+		});
 
 		await fixture.dropOpenCodeEvents([
 			{ type: "session.status", status: "idle" },
@@ -507,8 +601,20 @@ describe("Managed OpenCode stops when idle", () => {
 			metadata: {},
 			always: [],
 		});
-		await fixture.restart({ skipBrowserProbe: true });
-		await sleep(pastGraceMs);
+		await fixture.restart({ skipBrowserProbe: true, serviceEnvironment });
+		await vi.waitFor(
+			() =>
+				expect(persistedRecovery(fixture, sessionId).pending).toEqual([
+					{
+						id: fixture.promptIdForProviderRequest(
+							"rqbc-2-survivor-permission",
+						),
+						type: "permission",
+					},
+				]),
+			{ timeout: 15_000, interval: 20 },
+		);
+		await waitForPolls();
 		evidence["unviewed"] = {
 			waitMs: pastGraceMs,
 			graceMs,
@@ -596,8 +702,8 @@ describe("Managed OpenCode stops when idle", () => {
 		await first.close();
 		await fixture.terminate();
 		const survivor = livePids(fixture);
-		await fixture.restart({ skipBrowserProbe: true });
-		await sleep(pastGraceMs);
+		await fixture.restart({ skipBrowserProbe: true, serviceEnvironment });
+		await waitForPolls();
 		evidence["unviewed"] = {
 			waitMs: pastGraceMs,
 			graceMs,

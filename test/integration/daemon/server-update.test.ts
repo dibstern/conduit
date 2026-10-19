@@ -7,12 +7,21 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
+import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Effect, Layer } from "effect";
 import { RpcClient, RpcSerialization } from "effect/rpc";
 import { Socket } from "effect/socket";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import {
+	afterAll,
+	afterEach,
+	beforeAll,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 import WebSocket from "ws";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
@@ -40,6 +49,44 @@ const EXPECTED_SCENARIOS = 10;
 describe("supervised server build updates", () => {
 	let harness: ProcessHarness | undefined;
 	let markerPath: string;
+	let probeUrl = "";
+	let healthChecks = 0;
+	const probe = createServer((request, response) => {
+		const path = request.url?.split("?")[0];
+		if (path === "/global/event") {
+			response.writeHead(200, { "Content-Type": "text/event-stream" });
+			response.write(
+				'data: {"directory":"global","payload":{"type":"server.connected","properties":{}}}\n\n',
+			);
+			return;
+		}
+		if (path === "/global/health")
+			response.once("finish", () => healthChecks++);
+		response.setHeader("Content-Type", "application/json");
+		response.end(
+			JSON.stringify(
+				path === "/path"
+					? {
+							state: process.cwd(),
+							config: process.cwd(),
+							worktree: process.cwd(),
+							directory: process.cwd(),
+						}
+					: ["/session", "/permission", "/question"].includes(path ?? "")
+						? []
+						: path === "/session/status"
+							? {}
+							: { healthy: true, version: "process-test" },
+			),
+		);
+	});
+	beforeAll(async () => {
+		await new Promise<void>((done) => probe.listen(0, "127.0.0.1", done));
+		const address = probe.address();
+		if (!address || typeof address === "string")
+			throw new Error("No probe port");
+		probeUrl = `http://127.0.0.1:${address.port}`;
+	});
 	const sockets = new Set<WebSocket>();
 	const scenarios: Array<Record<string, unknown>> = [];
 	const cleanup: Array<Record<string, unknown>> = [];
@@ -57,18 +104,50 @@ describe("supervised server build updates", () => {
 		markerPath = join(harness.root, "build-ready.json");
 		if (marker !== undefined) writeFileSync(markerPath, marker);
 		const serviceEnvironment = {
+			CONDUIT_TEST_BUILD_POLL_INTERVAL_MS: "50",
+			CONDUIT_TEST_HEALTH_POLL_INTERVAL_MS: "100",
 			CONDUIT_BUILD_READY_PATH: markerPath,
 			...(buildId !== undefined ? { CONDUIT_SERVER_BUILD_ID: buildId } : {}),
 			...(mode === "service" ? { CONDUIT_SERVICE: "1" } : {}),
 			...(mode === "service-disabled" ? { CONDUIT_SERVICE: "0" } : {}),
 			...(mode === "legacy" ? { XPC_SERVICE_NAME: "dev.conduit.server" } : {}),
 		};
-		await harness.restart({ serviceEnvironment });
+		await harness.restart({ serviceEnvironment, opencodeUrl: probeUrl });
+		const { addedInstanceId } = await harness.requestRpc({
+			_tag: "AddInstance",
+			name: "Build poll progress probe",
+			driver: "opencode",
+			managed: false,
+			url: probeUrl,
+			port: Number(new URL(probeUrl).port),
+		});
+		if (!addedInstanceId) throw new Error("No poll probe instance");
+		await harness.requestRpc({
+			_tag: "StopInstance",
+			instanceId: addedInstanceId,
+		});
+		await harness.requestRpc({
+			_tag: "StartInstance",
+			instanceId: addedInstanceId,
+		});
 		const generation = harness.generations[0];
 		if (!generation) throw new Error("Isolated server generation is missing");
 		expect(generation.port).not.toBe(2633);
 		expect(harness.configDir.startsWith(`${harness.root}/`)).toBe(true);
 		return { harness, generation, serviceEnvironment };
+	}
+
+	async function waitForPollOpportunity() {
+		// Two completed health requests span a full 100ms scheduler interval,
+		// giving the shorter 50ms build poll a chance to publish any transition.
+		const cursor = healthChecks;
+		await vi.waitFor(
+			() => expect(healthChecks).toBeGreaterThanOrEqual(cursor + 2),
+			{
+				timeout: 6500,
+				interval: 10,
+			},
+		);
 	}
 
 	/** Follow SubscribeServerStatus over /rpc as the page does, recording each
@@ -208,7 +287,11 @@ describe("supervised server build updates", () => {
 		}
 	});
 
-	afterAll(() => {
+	afterAll(async () => {
+		probe.closeAllConnections();
+		await new Promise<void>((done, fail) =>
+			probe.close((error) => (error ? fail(error) : done())),
+		);
 		mkdirSync("test-results", { recursive: true });
 		writeFileSync(
 			"test-results/ohdt-server-update.json",
@@ -352,7 +435,7 @@ describe("supervised server build updates", () => {
 		const initial = await initialStatus(browserStatus, false);
 		const cursor = browserStatus.frames.length;
 		writeFileSync(markerPath, JSON.stringify({ buildId: randomUUID() }));
-		await new Promise<void>((done) => setTimeout(done, 5500));
+		await waitForPollOpportunity();
 		expect(
 			browserStatus.frames
 				.slice(cursor)
@@ -389,7 +472,7 @@ describe("supervised server build updates", () => {
 		);
 		const browser = followStatus(generation.port);
 		const initial = await initialStatus(browser, false, "dev");
-		await new Promise<void>((done) => setTimeout(done, 5500));
+		await waitForPollOpportunity();
 		expect(
 			browser.frames.filter(
 				({ message }) =>

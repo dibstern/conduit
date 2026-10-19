@@ -40,7 +40,7 @@ const SUBAGENT_POLL_TIMEOUT_MS = 2000;
 
 type SubagentDeps = Pick<
 	ClaudeSessionRunnerDeps,
-	"subagentSdk" | "subagentPollTimeoutMs"
+	"subagentSdk" | "subagentPollTimeoutMs" | "subagentPollIntervalMs"
 >;
 
 type EnsureSubagentSession = (
@@ -483,7 +483,7 @@ export function startClaudeSubagentFeedEffect(
 		poller.fiber = yield* Effect.forkIn(
 			Effect.gen(function* () {
 				while (canPollSubagent(ctx, poller, {})) {
-					yield* Effect.sleep("500 millis");
+					yield* Effect.sleep(deps.subagentPollIntervalMs ?? 500);
 					yield* pollClaudeSubagentOnceEffect(
 						deps,
 						ctx,

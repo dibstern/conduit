@@ -44,9 +44,15 @@ describe("daemon shared OpenCode global stream", () => {
 			autoStartOpenCode: true,
 			managedOpenCode,
 		});
-		await harness.restart(
-			opencodeIdleTimeoutMs === undefined ? {} : { opencodeIdleTimeoutMs },
-		);
+		const serviceEnvironment = {
+			CONDUIT_SERVICE: "0",
+			CONDUIT_TEST_HEALTH_POLL_INTERVAL_MS: "100",
+			CONDUIT_TEST_OPENCODE_STATUS_POLL_INTERVAL_MS: "300",
+		};
+		await harness.restart({
+			...(opencodeIdleTimeoutMs === undefined ? {} : { opencodeIdleTimeoutMs }),
+			serviceEnvironment,
+		});
 		return harness;
 	}
 
@@ -629,7 +635,7 @@ describe("daemon shared OpenCode global stream", () => {
 		"permission",
 		"question",
 	] as const)("drops a removed directory's %s demand and lets the shared instance idle-stop", async (kind) => {
-		const graceMs = 3_000;
+		const graceMs = 1_000;
 		const fixture = await start(`directory-removal-${kind}`, false, graceMs);
 		evidence["ticket"] = "conduit-test-rqbc.2";
 		const a = await fixture.connect();
@@ -704,7 +710,19 @@ describe("daemon shared OpenCode global stream", () => {
 				}
 			});
 		// Each demand kind alone retains the process through two grace periods.
-		await new Promise<void>((done) => setTimeout(done, 2 * graceMs + 1_000));
+		const after = Date.now() + 2 * graceMs;
+		await vi.waitFor(
+			() =>
+				expect(
+					fixture
+						.opencodeRequests()
+						.some(
+							({ method, url, at }) =>
+								method === "GET" && url === "/global/health" && at >= after,
+						),
+				).toBe(true),
+			{ timeout: 2 * graceMs + 5000, interval: 20 },
+		);
 		evidence["beforeRemoval"] = { kind, pids: livePids() };
 		expect(livePids()).toHaveLength(3);
 		expect((await b.instanceStatus("opencode")).instance?.status).toBe(
