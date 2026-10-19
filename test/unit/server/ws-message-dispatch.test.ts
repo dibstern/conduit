@@ -57,9 +57,7 @@ beforeEach(() => {
 	_ta = testActivity();
 	tm = testMessages();
 	clearInstanceState();
-	inputSyncState.text = "";
-	inputSyncState.lastFrom = "";
-	inputSyncState.lastUpdated = 0;
+	inputSyncState.received = null;
 	showBannerMock.mockClear();
 	removeBannerMock.mockClear();
 	showToastMock.mockClear();
@@ -71,35 +69,44 @@ afterEach(() => {
 	_ta = testActivity();
 	tm = testMessages();
 	clearInstanceState();
-	inputSyncState.text = "";
-	inputSyncState.lastFrom = "";
-	inputSyncState.lastUpdated = 0;
+	inputSyncState.received = null;
 });
 
 describe("input draft follower", () => {
 	it("ignores draft echoes from this browser tab", () => {
-		inputSyncState.text = "before";
-		inputSyncState.lastUpdated = 10;
+		const before = {
+			_tag: "ServerTextReceived" as const,
+			sessionId: "s1",
+			text: "before",
+		};
+		inputSyncState.received = before;
 
-		applyInputDraft({
-			_tag: "draft",
-			text: "self echo",
-			from: getBrowserClientId(),
-		});
+		applyInputDraft(
+			{
+				_tag: "draft",
+				text: "self echo",
+				from: getBrowserClientId(),
+			},
+			"s1",
+		);
 
-		expect(inputSyncState.text).toBe("before");
-		expect(inputSyncState.lastUpdated).toBe(10);
+		expect(inputSyncState.received).toEqual(before);
 	});
 
 	it("applies drafts from another browser tab", () => {
-		applyInputDraft({
-			_tag: "draft",
-			text: "other tab draft",
-			from: "browser-tab-b",
-		});
+		applyInputDraft(
+			{
+				_tag: "draft",
+				text: "other tab draft",
+				from: "browser-tab-b",
+			},
+			"s1",
+		);
 
-		expect(inputSyncState.text).toBe("other tab draft");
-		expect(inputSyncState.lastFrom).toBe("browser-tab-b");
-		expect(inputSyncState.lastUpdated).toBeGreaterThan(0);
+		expect(inputSyncState.received).toEqual({
+			_tag: "ServerTextReceived",
+			sessionId: "s1",
+			text: "other tab draft",
+		});
 	});
 });

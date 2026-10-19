@@ -50,9 +50,8 @@ async function enterText(textarea: HTMLTextAreaElement, text: string) {
 	await fireEvent.input(textarea);
 }
 
-async function receiveDraft(text: string) {
-	vi.setSystemTime(Date.now() + 1);
-	handleInputSyncReceived({ text, from: "other-tab" });
+async function receiveDraft(text: string, initial = false) {
+	handleInputSyncReceived({ sessionId, text, initial });
 	await tick();
 }
 
@@ -89,12 +88,7 @@ describe("InputArea build reload recovery", () => {
 		attachedProjectState.slug = "test";
 		connectionState.status = "connected";
 		phaseToIdle(getOrCreateSessionActivity(sessionId));
-		Object.assign(inputSyncState, {
-			text: "",
-			lastFrom: "",
-			lastUpdated: 0,
-			reloadPending: false,
-		});
+		handleInputSyncReceived({ sessionId, initial: true });
 		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
 			callback(0);
 			return 0;
@@ -176,6 +170,11 @@ describe("InputArea build reload recovery", () => {
 	});
 
 	it("defers if an image is attached while the draft RPC is pending", async () => {
+		const { getByRole } = render(InputArea);
+		const textarea = getByRole("textbox", {
+			name: "Message",
+		}) as HTMLTextAreaElement;
+		await enterText(textarea, "draft before reload");
 		let finishSave: (() => void) | undefined;
 		vi.mocked(rpc).mockImplementationOnce(
 			() =>
@@ -183,8 +182,7 @@ describe("InputArea build reload recovery", () => {
 					finishSave = () => resolve({ ok: true });
 				}),
 		);
-		render(InputArea);
-		await tick();
+		await enterText(textarea, "latest draft before reload");
 		const preparation = persistInputDraft();
 		const deferred = expect(preparation).resolves.toBe(false);
 		await attachImage();
@@ -214,7 +212,7 @@ describe("InputArea build reload recovery", () => {
 		openSessionForSetup(sessionId, "test");
 		await tick();
 
-		await receiveDraft("newer draft from another tab");
+		await receiveDraft("newer draft from another tab", true);
 		expect(textarea.value).toBe("newer draft from another tab");
 	});
 
@@ -223,11 +221,12 @@ describe("InputArea build reload recovery", () => {
 			reloadDraftKey,
 			JSON.stringify([[sessionId, "saved before reload"]]),
 		);
+		inputSyncState.received = null;
 		const { getByRole } = render(InputArea);
 		const textarea = getByRole("textbox", {
 			name: "Message",
 		}) as HTMLTextAreaElement;
-		await receiveDraft("older server draft");
+		await receiveDraft("older server draft", true);
 		expect(textarea.value).toBe("saved before reload");
 		expect(sessionStorage.getItem(reloadDraftKey)).toBeNull();
 
@@ -235,19 +234,30 @@ describe("InputArea build reload recovery", () => {
 		await tick();
 		openSessionForSetup(sessionId, "test");
 		await tick();
-		await receiveDraft("newer draft from another tab");
+		await receiveDraft("newer draft from another tab", true);
 		expect(textarea.value).toBe("newer draft from another tab");
 	});
 
-	it("still protects a real local edit from an older incoming sync", async () => {
+	it("protects an unacknowledged edit until its sync succeeds", async () => {
 		const { getByRole } = render(InputArea);
 		const textarea = getByRole("textbox", {
 			name: "Message",
 		}) as HTMLTextAreaElement;
+		let finishSave: (() => void) | undefined;
+		vi.mocked(rpc).mockImplementationOnce(
+			() =>
+				new Promise<{ ok: true }>((resolve) => {
+					finishSave = () => resolve({ ok: true });
+				}),
+		);
 		await enterText(textarea, "just typed");
 		await receiveDraft("older server draft");
 		expect(textarea.value).toBe("just typed");
 		vi.setSystemTime(Date.now() + 1_001);
+		await receiveDraft("later remote edit");
+		expect(textarea.value).toBe("just typed");
+		finishSave?.();
+		await tick();
 		await receiveDraft("later remote edit");
 		expect(textarea.value).toBe("later remote edit");
 	});

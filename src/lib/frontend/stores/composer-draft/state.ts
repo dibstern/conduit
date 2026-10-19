@@ -1,29 +1,36 @@
-export interface DraftState {
+interface Draft {
 	text: string;
+	acked: string;
+}
+
+export interface DraftState extends Draft {
 	sessionId: string | null | undefined;
-	drafts: ReadonlyMap<string, string>;
-	reloadRestored: ReadonlySet<string>;
-	lastLocalEditAt: number;
-	lastSyncApplied: number;
+	drafts: ReadonlyMap<string, Draft>;
+	throttled: boolean;
+	pending: boolean;
+	snapshot: "waiting" | "overlapped" | "ready";
 }
 
 export type DraftEvent =
 	| { _tag: "TextChanged"; text: string }
-	| { _tag: "LocalEdited"; now: number }
+	| { _tag: "LocalEdited" }
 	| {
 			_tag: "ServerTextReceived";
-			text: string;
-			updatedAt: number;
-			now: number;
-			reloadPending: boolean;
+			sessionId: string;
+			text?: string;
+			initial?: boolean;
 	  }
+	| { _tag: "SubscriptionStarted"; sessionId: string }
+	| { _tag: "SyncSucceeded"; sessionId: string; text: string }
+	| { _tag: "SyncFailed" }
+	| { _tag: "Hidden" }
 	| {
 			_tag: "SessionSwitched";
 			sessionId: string | null;
 			newSessionText: string;
-			now: number;
 	  }
-	| { _tag: "SyncDue"; sessionId: string | null; serverOnly?: boolean }
+	| { _tag: "SyncDue" }
+	| { _tag: "Flush"; serverOnly?: boolean }
 	| { _tag: "Cleared"; sessionId: string | null }
 	| { _tag: "SendStarted"; sessionId: string | null; clear: boolean }
 	| {
@@ -70,11 +77,12 @@ export type DraftCommand =
 export function initialState(): DraftState {
 	return {
 		text: "",
+		acked: "",
 		sessionId: undefined,
 		drafts: new Map(),
-		reloadRestored: new Set(),
-		lastLocalEditAt: 0,
-		lastSyncApplied: 0,
+		throttled: false,
+		pending: false,
+		snapshot: "waiting",
 	};
 }
 
@@ -82,10 +90,17 @@ function clear(
 	state: DraftState,
 	sessionId: string | null,
 ): [DraftState, DraftCommand[]] {
-	const drafts = new Map(state.drafts);
-	if (sessionId) drafts.delete(sessionId);
 	return [
-		{ ...state, text: "", drafts },
+		{
+			...state,
+			text: "",
+			throttled: false,
+			pending: false,
+			snapshot:
+				state.snapshot === "waiting" && sessionId
+					? "overlapped"
+					: state.snapshot,
+		},
 		[
 			{ _tag: "CancelSync" },
 			...(sessionId
@@ -95,7 +110,12 @@ function clear(
 	];
 }
 
-/** Today's draft rules, including deliberately dropping syncs inside the 1 s grace window. */
+/**
+ * Failure rules: unknown snapshots do nothing; dirty text rejects server text;
+ * failed writes keep acked; late acknowledgements name their session and text;
+ * switching flushes the outgoing tail; send failures restore only an empty box.
+ * Reload backups deliberately retain the existing [sessionId, text][] format.
+ */
 export function step(
 	state: DraftState,
 	event: DraftEvent,
@@ -104,51 +124,134 @@ export function step(
 		case "TextChanged":
 			return [{ ...state, text: event.text }, []];
 		case "LocalEdited":
+			// New-session storage keeps its existing trailing debounce until ticket .5.
+			if (!state.sessionId)
+				return [state, [{ _tag: "ScheduleSync", delay: 300 }]];
+			if (state.snapshot !== "ready") return [{ ...state, pending: true }, []];
+			if (state.throttled) return [{ ...state, pending: true }, []];
 			return [
-				{ ...state, lastLocalEditAt: event.now },
-				[{ _tag: "ScheduleSync", delay: 300 }],
+				{ ...state, throttled: true, pending: false },
+				[
+					{ _tag: "SyncDraft", sessionId: state.sessionId, text: state.text },
+					{ _tag: "ScheduleSync", delay: 300 },
+				],
 			];
+		case "SubscriptionStarted":
+			return event.sessionId === state.sessionId
+				? [
+						{ ...state, snapshot: "waiting", throttled: false },
+						[{ _tag: "CancelSync" }],
+					]
+				: [state, []];
 		case "ServerTextReceived": {
-			if (event.updatedAt <= state.lastSyncApplied) return [state, []];
-			const next = { ...state, lastSyncApplied: event.updatedAt };
-			if (event.reloadPending || event.now - state.lastLocalEditAt < 1_000)
-				return [next, []];
-			return [{ ...next, text: event.text }, []];
+			if (event.sessionId !== state.sessionId) return [state, []];
+			const next =
+				!(event.initial && state.snapshot === "overlapped") &&
+				event.text !== undefined &&
+				(state.text === state.acked || state.text === "")
+					? { ...state, text: event.text, acked: event.text }
+					: state;
+			// Consume the initial read before resending offline edits. Otherwise a
+			// fast ack could make an older, delayed snapshot look safe to apply.
+			// A forced hide/send flush also supersedes an initial read already in flight.
+			return event.initial
+				? step(
+						{ ...next, snapshot: "ready" },
+						{ _tag: "Flush", serverOnly: true },
+					)
+				: [next, []];
 		}
+		case "SyncSucceeded": {
+			if (event.sessionId === state.sessionId)
+				return [{ ...state, acked: event.text }, []];
+			const draft = state.drafts.get(event.sessionId);
+			if (!draft) return [state, []];
+			const drafts = new Map(state.drafts);
+			drafts.set(event.sessionId, { ...draft, acked: event.text });
+			return [{ ...state, drafts }, []];
+		}
+		case "SyncFailed":
+			return [state, []];
 		case "SessionSwitched": {
 			if (event.sessionId === state.sessionId) return [state, []];
 			const drafts = new Map(state.drafts);
-			if (state.sessionId) drafts.set(state.sessionId, state.text);
-			const reloadRestored = new Set(state.reloadRestored);
-			const restored = reloadRestored.delete(event.sessionId ?? "");
+			if (state.sessionId)
+				drafts.set(state.sessionId, { text: state.text, acked: state.acked });
 			return [
 				{
 					...state,
 					drafts,
-					reloadRestored,
 					sessionId: event.sessionId,
-					text: event.sessionId
-						? (drafts.get(event.sessionId) ?? "")
-						: event.newSessionText,
-					lastLocalEditAt: restored ? event.now : 0,
+					...(event.sessionId
+						? (drafts.get(event.sessionId) ?? { text: "", acked: "" })
+						: { text: event.newSessionText, acked: "" }),
+					throttled: false,
+					pending: false,
+					snapshot: "waiting",
 				},
-				[{ _tag: "CancelSync" }],
+				[
+					{ _tag: "CancelSync" },
+					...(state.sessionId && state.text !== state.acked
+						? [
+								{
+									_tag: "SyncDraft" as const,
+									sessionId: state.sessionId,
+									text: state.text,
+								},
+							]
+						: []),
+				],
 			];
 		}
 		case "SyncDue":
+			if (!state.sessionId)
+				return [state, [{ _tag: "WriteNewSessionDraft", text: state.text }]];
+			if (state.snapshot !== "ready")
+				return [{ ...state, throttled: false }, []];
 			return [
-				state,
-				event.sessionId
+				{ ...state, throttled: state.pending, pending: false },
+				state.pending
 					? [
 							{
 								_tag: "SyncDraft",
-								sessionId: event.sessionId,
+								sessionId: state.sessionId,
 								text: state.text,
 							},
+							{ _tag: "ScheduleSync", delay: 300 },
 						]
-					: event.serverOnly
-						? []
-						: [{ _tag: "WriteNewSessionDraft", text: state.text }],
+					: [],
+			];
+		case "Hidden":
+		case "Flush":
+			if (!state.sessionId && event._tag === "Hidden") return [state, []];
+			return [
+				{
+					...state,
+					throttled: false,
+					pending: false,
+					snapshot:
+						state.snapshot === "waiting" &&
+						state.sessionId &&
+						state.text !== state.acked
+							? "overlapped"
+							: state.snapshot,
+				},
+				[
+					{ _tag: "CancelSync" },
+					...(state.sessionId
+						? state.text !== state.acked
+							? [
+									{
+										_tag: "SyncDraft" as const,
+										sessionId: state.sessionId,
+										text: state.text,
+									},
+								]
+							: []
+						: event._tag === "Flush" && event.serverOnly
+							? []
+							: [{ _tag: "WriteNewSessionDraft" as const, text: state.text }]),
+				],
 			];
 		case "Cleared":
 			return clear(state, event.sessionId);
@@ -158,16 +261,19 @@ export function step(
 			const sameScope = event.sentTo
 				? event.sessionId === event.sentTo
 				: !event.sessionId && event.sameProject;
-			return event.restore && sameScope && !state.text && !event.hasAttachments
-				? [{ ...state, text: event.text }, []]
-				: [state, []];
+			if (!event.restore || !sameScope || state.text || event.hasAttachments)
+				return [state, []];
+			const restored = { ...state, text: event.text };
+			return state.sessionId
+				? step(restored, { _tag: "LocalEdited" })
+				: [restored, []];
 		}
 		case "SendSucceeded": {
 			if (!event.steer) return [state, []];
 			if (event.sessionId === event.sentTo)
 				return event.clear ? clear(state, event.sessionId) : [state, []];
 			const drafts = new Map(state.drafts);
-			if (event.sentTo) drafts.delete(event.sentTo);
+			if (event.sentTo) drafts.set(event.sentTo, { text: "", acked: "" });
 			return [{ ...state, drafts }, []];
 		}
 		case "SessionCreated":
@@ -176,13 +282,27 @@ export function step(
 			const active = state.sessionId === event.parentSessionId;
 			const text = active
 				? state.text
-				: state.drafts.get(event.parentSessionId);
+				: state.drafts.get(event.parentSessionId)?.text;
 			if (text !== event.text || !event.attachmentsUnchanged)
 				return [state, []];
 			const drafts = new Map(state.drafts);
-			drafts.delete(event.parentSessionId);
+			drafts.set(event.parentSessionId, { text: "", acked: "" });
 			return [
-				{ ...state, drafts, text: active ? "" : state.text },
+				{
+					...state,
+					drafts,
+					...(active
+						? {
+								text: "",
+								throttled: false,
+								pending: false,
+								snapshot:
+									state.snapshot === "waiting"
+										? ("overlapped" as const)
+										: state.snapshot,
+							}
+						: {}),
+				},
 				[
 					...(active ? [{ _tag: "CancelSync" as const }] : []),
 					{ _tag: "SyncDraft", sessionId: event.parentSessionId, text: "" },
@@ -191,12 +311,9 @@ export function step(
 		}
 		case "ReloadRestored": {
 			const drafts = new Map(state.drafts);
-			const reloadRestored = new Set(state.reloadRestored);
-			for (const [id, text] of event.entries) {
-				drafts.set(id, text);
-				reloadRestored.add(id);
-			}
-			return [{ ...state, drafts, reloadRestored }, []];
+			for (const [id, text] of event.entries)
+				drafts.set(id, { text, acked: "" });
+			return [{ ...state, drafts }, []];
 		}
 		case "PersistBeforeReload": {
 			const commands: DraftCommand[] = event.sessionId
@@ -204,8 +321,14 @@ export function step(
 				: [{ _tag: "WriteNewSessionDraft", text: state.text }];
 			if (event.hasAttachments) return [state, commands];
 			const drafts = new Map(state.drafts);
-			drafts.set(event.sessionId ?? "", state.text);
-			commands.push({ _tag: "SaveReloadBackup", entries: [...drafts] });
+			drafts.set(event.sessionId ?? "", {
+				text: state.text,
+				acked: state.acked,
+			});
+			commands.push({
+				_tag: "SaveReloadBackup",
+				entries: [...drafts].map(([id, draft]) => [id, draft.text]),
+			});
 			return [{ ...state, drafts }, commands];
 		}
 		default:

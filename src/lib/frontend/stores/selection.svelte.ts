@@ -6,7 +6,6 @@ import { getIsConnected } from "../transport/connection-status.svelte.js";
 import { toastFailure } from "../transport/rpc-errors.js";
 import { WsRpcError } from "../transport/ws-rpc.js";
 import { rpc } from "../transport/ws-rpc-client.js";
-import { handleInputSyncReceived } from "./chat.svelte.js";
 import { getBrowserClientId } from "./client-identity.js";
 import {
 	applyGetFileTreeResponse,
@@ -324,30 +323,14 @@ export function watchSelection(): () => void {
 		);
 		$effect(() => {
 			const key = placedKey;
-			let viewing = true;
 			untrack(() => {
 				if (!key || shown.kind !== "placed") return;
 				const current = shown;
 				void rpc("ViewSession", {
 					sessionId: current.sessionId,
 					originId: getBrowserClientId(),
-				})
-					.then(({ draft }) => {
-						if (
-							alive &&
-							viewing &&
-							draft !== undefined &&
-							shown.kind === "placed" &&
-							shown.sessionId === current.sessionId &&
-							shown.project === current.project
-						)
-							handleInputSyncReceived({ text: draft });
-					})
-					.catch(toastFailure("Failed to open session"));
+				}).catch(toastFailure("Failed to open session"));
 			});
-			return () => {
-				viewing = false;
-			};
 		});
 		let feedKey: string | null | undefined;
 		const feedScopeKey = $derived(

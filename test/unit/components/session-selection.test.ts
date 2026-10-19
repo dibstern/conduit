@@ -35,7 +35,6 @@ vi.mock("../../../src/lib/frontend/utils/markdown.js", () => ({
 import {
 	currentChat,
 	getOrCreateSessionMessages,
-	inputSyncState,
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
@@ -870,19 +869,19 @@ describe("session selection at the browser RPC wire", () => {
 		expect(todoState.items).toEqual([]);
 		expect(currentChat().contextPercent).toBe(0);
 	});
-	it("sends one view after placement and never applies a late draft to another session", async () => {
+	it("sends one view after placement and keeps the current route when an earlier view completes", async () => {
 		attachedProjectState.slug = "A";
 		const pending = deferred<{ projectSlug: string | null }>();
-		const draft = deferred<{ ok: true; draft: string }>();
-		const secondVisit = deferred<{ ok: true; draft: string }>();
+		const draft = deferred<{ ok: true }>();
+		const secondVisit = deferred<{ ok: true }>();
 		let oldVisits = 0;
 		table.ResolveSession = () => pending.promise;
 		table.ViewSession = ({ sessionId }) => {
-			if (sessionId !== "view-old") return { ok: true, draft: "new draft" };
+			if (sessionId !== "view-old") return { ok: true };
 			oldVisits++;
 			if (oldVisits === 1) return draft.promise;
 			if (oldVisits === 2) return secondVisit.promise;
-			return { ok: true, draft: "returned draft" };
+			return { ok: true };
 		};
 		seedSessions([{ id: "view-new", title: "New", projectSlug: "A" }]);
 		start();
@@ -892,10 +891,14 @@ describe("session selection at the browser RPC wire", () => {
 		pending.resolve({ projectSlug: "A" });
 		await vi.waitFor(() => expect(calls("ViewSession")).toHaveLength(1));
 		module.selection.open("view-new");
-		await vi.waitFor(() => expect(inputSyncState.text).toBe("new draft"));
-		draft.resolve({ ok: true, draft: "old draft" });
+		await vi.waitFor(() => expect(calls("ViewSession")).toHaveLength(2));
+		draft.resolve({ ok: true });
 		await settle();
-		expect(inputSyncState.text).toBe("new draft");
+		expect(routerState.path).toBe("/s/view-new");
+		expect(module.selection.shown).toMatchObject({
+			kind: "placed",
+			sessionId: "view-new",
+		});
 		expect(
 			calls("ViewSession").filter(
 				(request) =>
@@ -907,10 +910,14 @@ describe("session selection at the browser RPC wire", () => {
 		module.selection.open("view-new");
 		await vi.waitFor(() => expect(calls("ViewSession")).toHaveLength(4));
 		module.selection.open("view-old");
-		await vi.waitFor(() => expect(inputSyncState.text).toBe("returned draft"));
-		secondVisit.resolve({ ok: true, draft: "left visit draft" });
+		await vi.waitFor(() => expect(calls("ViewSession")).toHaveLength(5));
+		secondVisit.resolve({ ok: true });
 		await settle();
-		expect(inputSyncState.text).toBe("returned draft");
+		expect(routerState.path).toBe("/s/view-old");
+		expect(module.selection.shown).toMatchObject({
+			kind: "placed",
+			sessionId: "view-old",
+		});
 		expect(
 			calls("ViewSession").filter(
 				(request) =>

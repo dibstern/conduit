@@ -659,7 +659,6 @@ export const CreateSessionResponseSchema = Schema.Struct({
 
 export const ViewSessionResponseSchema = Schema.Struct({
 	ok: Schema.Literal(true),
-	draft: Schema.optional(Schema.String),
 });
 
 const SteerRefusedSchema = Schema.Struct({
@@ -3369,7 +3368,11 @@ export const SubscribeAlerts = Rpc.make("SubscribeAlerts", {
 });
 
 const InputDraftEnvelopeSchema = Schema.Union([
-	Schema.Struct({ _tag: Schema.Literal("synchronized") }),
+	Schema.Struct({
+		_tag: Schema.Literal("synchronized"),
+		text: Schema.optional(Schema.String),
+		projectId: Schema.optional(Schema.String),
+	}),
 	Schema.TaggedStruct("draft", {
 		text: Schema.String,
 		/** The writer's SyncInputDraft originId; that tab drops its own echo. */
@@ -3379,9 +3382,8 @@ const InputDraftEnvelopeSchema = Schema.Union([
 export type InputDraftEnvelope = typeof InputDraftEnvelopeSchema.Type;
 
 /**
- * Live-only: a session's composer draft as other tabs type it. The draft at
- * session switch rides the ViewSession response, so resubscribing after a
- * reconnect never clobbers text typed while offline.
+ * Opens with the stored composer draft, then follows live changes. The browser
+ * merges snapshots with local edits, including text typed while disconnected.
  */
 export const SubscribeInputDraft = Rpc.make("SubscribeInputDraft", {
 	payload: { sessionId: NonEmptyString },

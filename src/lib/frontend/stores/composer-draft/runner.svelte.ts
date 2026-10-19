@@ -13,11 +13,15 @@ const NEW_SESSION_DRAFT_KEY = "conduit:new-session-draft";
 const RELOAD_DRAFT_KEY = "conduit-reload-drafts";
 
 export const inputSyncState = $state({
-	text: "",
-	lastFrom: "",
-	lastUpdated: 0,
-	reloadPending: false,
+	received: null as Extract<
+		DraftEvent,
+		{ _tag: "ServerTextReceived" | "SubscriptionStarted" }
+	> | null,
 });
+
+// An initial snapshot and buffered live changes can arrive in one browser task.
+// Keep every transition even when Svelte batches the reactive notification.
+const inputSyncEvents: DraftEvent[] = [];
 
 let persistInputDraftHook: (() => Promise<boolean>) | undefined;
 
@@ -36,12 +40,22 @@ export async function persistInputDraft(): Promise<boolean> {
 }
 
 export function handleInputSyncReceived(msg: {
+	sessionId: string;
 	text?: string | undefined;
-	from?: string | undefined;
+	initial?: boolean;
 }): void {
-	inputSyncState.text = msg.text ?? "";
-	inputSyncState.lastFrom = msg.from ?? "";
-	inputSyncState.lastUpdated = Date.now();
+	inputSyncState.received = {
+		_tag: "ServerTextReceived",
+		sessionId: msg.sessionId,
+		...(msg.text === undefined ? {} : { text: msg.text }),
+		...(msg.initial ? { initial: true } : {}),
+	};
+	inputSyncEvents.push(inputSyncState.received);
+}
+
+export function handleInputDraftStarted(sessionId: string): void {
+	inputSyncState.received = { _tag: "SubscriptionStarted", sessionId };
+	inputSyncEvents.push(inputSyncState.received);
 }
 
 export function createComposerDraft(options: {
@@ -69,15 +83,31 @@ export function createComposerDraft(options: {
 					cancelSync();
 					syncTimer = setTimeout(() => {
 						syncTimer = null;
-						dispatch({ _tag: "SyncDue", sessionId: options.sessionId() });
+						dispatch({ _tag: "SyncDue" });
 					}, command.delay);
 					break;
 				case "SyncDraft": {
+					if (connectionState.status !== "connected") {
+						dispatch({ _tag: "SyncFailed" });
+						break;
+					}
 					const sent = rpc("SyncInputDraft", {
 						sessionId: command.sessionId,
 						text: command.text,
 						originId: getBrowserClientId(),
-					}).then(() => undefined);
+					}).then(
+						() => {
+							dispatch({
+								_tag: "SyncSucceeded",
+								sessionId: command.sessionId,
+								text: command.text,
+							});
+						},
+						(error: unknown) => {
+							dispatch({ _tag: "SyncFailed" });
+							throw error;
+						},
+					);
 					void sent.catch(() => undefined);
 					pending.push(sent);
 					break;
@@ -139,20 +169,40 @@ export function createComposerDraft(options: {
 				_tag: "SessionSwitched",
 				sessionId,
 				newSessionText: sessionId ? "" : readNewSessionDraft(),
-				now: Date.now(),
 			}),
 		);
 	});
 
 	$effect(() => {
-		if (inputSyncState.lastUpdated <= state.lastSyncApplied) return;
-		dispatch({
-			_tag: "ServerTextReceived",
-			text: inputSyncState.text,
-			updatedAt: inputSyncState.lastUpdated,
-			reloadPending: inputSyncState.reloadPending,
-			now: Date.now(),
+		const received = inputSyncState.received;
+		untrack(() => {
+			const events = inputSyncEvents.splice(0);
+			if (received) for (const event of events) dispatch(event);
 		});
+	});
+
+	$effect(() => {
+		if (connectionState.status !== "connected")
+			untrack(() => {
+				if (state.sessionId)
+					dispatch({ _tag: "SubscriptionStarted", sessionId: state.sessionId });
+			});
+	});
+
+	$effect(() => {
+		const hidden = () => {
+			dispatch({ _tag: "Hidden" });
+		};
+		const visibilityChanged = () => {
+			if (document.visibilityState === "hidden") hidden();
+		};
+		window.addEventListener("pagehide", hidden);
+		document.addEventListener("visibilitychange", visibilityChanged);
+		return () => {
+			window.removeEventListener("pagehide", hidden);
+			document.removeEventListener("visibilitychange", visibilityChanged);
+			cancelSync();
+		};
 	});
 
 	$effect(() =>
@@ -167,8 +217,7 @@ export function createComposerDraft(options: {
 				if (connectionState.status === "connected") {
 					await Promise.all(
 						dispatch({
-							_tag: "SyncDue",
-							sessionId: savedSessionId,
+							_tag: "Flush",
 							serverOnly: true,
 						}).pending,
 					);
@@ -194,8 +243,10 @@ export function createComposerDraft(options: {
 		set text(value: string) {
 			dispatch({ _tag: "TextChanged", text: value });
 		},
-		edited() {
-			dispatch({ _tag: "LocalEdited", now: Date.now() });
+		edited(value?: string) {
+			// The input listener runs before Svelte updates bind:value.
+			if (value !== undefined) dispatch({ _tag: "TextChanged", text: value });
+			dispatch({ _tag: "LocalEdited" });
 		},
 		clear() {
 			dispatch({ _tag: "Cleared", sessionId: options.sessionId() });

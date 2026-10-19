@@ -496,11 +496,11 @@
 		);
 	}
 
-	function handleInput() {
+	function handleInput(event?: Event) {
 		if (textareaEl) {
 			cursorPos = textareaEl.selectionStart ?? 0;
 		}
-		composerDraft.edited();
+		composerDraft.edited(event?.currentTarget instanceof HTMLTextAreaElement ? event.currentTarget.value : undefined);
 		steerRefusal = null;
 		dismissedRefusal = turnControl.refusal;
 	}

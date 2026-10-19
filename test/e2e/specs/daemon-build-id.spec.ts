@@ -13,6 +13,7 @@ import {
 	expect,
 	type Page,
 	type TestInfo,
+	type WebSocketRoute,
 } from "@playwright/test";
 import WebSocket from "ws";
 import { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
@@ -77,7 +78,8 @@ function captureDraftCalls(page: Page) {
 		requestId?: string | number;
 		tag?: string;
 		payload?: { sessionId?: string; text?: string };
-		exit?: { _tag: string; value?: { draft?: string } };
+		exit?: { _tag: string };
+		values?: Array<{ _tag?: string; text?: string }>;
 	};
 	const calls: Array<{
 		socket: number;
@@ -95,7 +97,9 @@ function captureDraftCalls(page: Page) {
 			for (const frame of frames(payload)) {
 				if (
 					frame._tag !== "Request" ||
-					(frame.tag !== "SyncInputDraft" && frame.tag !== "ViewSession")
+					(frame.tag !== "SyncInputDraft" &&
+						frame.tag !== "ViewSession" &&
+						frame.tag !== "SubscribeInputDraft")
 				)
 					continue;
 				const call = {
@@ -258,7 +262,7 @@ test("mismatching builds reload once, preserve the latest composer draft, and re
 	const handshakes = captureBuildHandshakes(page);
 	await page.goto(`${buildDaemon.baseUrl}/?p=build-id-test`);
 	await page.locator(".connect-overlay").waitFor({ state: "detached" });
-	await page.locator("#new-session-btn:visible").click();
+	await startNewSession(page);
 	await expect(page).toHaveURL(/\/new\b/);
 	const input = page.locator("#input");
 	await expect(input).toBeVisible();
@@ -366,7 +370,7 @@ test("a session draft reaches a new device after restart and stays cleared after
 		"Draft persisted for a device that has never opened this session";
 	const completed = (
 		calls: ReturnType<typeof captureDraftCalls>,
-		tag: "SyncInputDraft" | "ViewSession",
+		tag: "SyncInputDraft" | "SubscribeInputDraft",
 		text: string,
 	) =>
 		calls.some(
@@ -374,17 +378,19 @@ test("a session draft reaches a new device after restart and stays cleared after
 				request.frame.tag === tag &&
 				request.frame.payload?.sessionId === sessionId &&
 				(tag !== "SyncInputDraft" || request.frame.payload?.text === text) &&
-				replies.some(
-					({ frame }) =>
-						frame._tag === "Exit" &&
-						frame.exit?._tag === "Success" &&
-						(tag !== "ViewSession" || frame.exit.value?.draft === text),
+				replies.some(({ frame }) =>
+					tag === "SyncInputDraft"
+						? frame._tag === "Exit" && frame.exit?._tag === "Success"
+						: frame._tag === "Chunk" &&
+							frame.values?.some(
+								(value) => value._tag === "synchronized" && value.text === text,
+							),
 				),
 		);
 	try {
 		await page.goto(`${buildDaemon.baseUrl}/?p=build-id-test`);
 		await page.locator(".connect-overlay").waitFor({ state: "detached" });
-		await page.locator("#new-session-btn:visible").click();
+		await startNewSession(page);
 		const inputA = page.locator("#input");
 		await inputA.fill("hello");
 		await page.locator("#send").click();
@@ -408,7 +414,9 @@ test("a session draft reaches a new device after restart and stays cleared after
 		pageB = await contextB.newPage();
 		callsB = captureDraftCalls(pageB);
 		await pageB.goto(sessionUrl);
-		await expect.poll(() => completed(callsB, "ViewSession", draft)).toBe(true);
+		await expect
+			.poll(() => completed(callsB, "SubscribeInputDraft", draft))
+			.toBe(true);
 		const inputB = pageB.locator("#input");
 		await expect(inputB).toHaveValue(draft);
 		await pageB.screenshot({
@@ -425,10 +433,14 @@ test("a session draft reaches a new device after restart and stays cleared after
 		await page.reload();
 		await pageB.reload();
 		await expect
-			.poll(() => completed(callsA.slice(beforeClearA), "ViewSession", ""))
+			.poll(() =>
+				completed(callsA.slice(beforeClearA), "SubscribeInputDraft", ""),
+			)
 			.toBe(true);
 		await expect
-			.poll(() => completed(callsB.slice(beforeClearB), "ViewSession", ""))
+			.poll(() =>
+				completed(callsB.slice(beforeClearB), "SubscribeInputDraft", ""),
+			)
 			.toBe(true);
 
 		await page.goto("about:blank");
@@ -439,10 +451,14 @@ test("a session draft reaches a new device after restart and stays cleared after
 		await page.goto(sessionUrl);
 		await pageB.goto(sessionUrl);
 		await expect
-			.poll(() => completed(callsA.slice(beforeRestartA), "ViewSession", ""))
+			.poll(() =>
+				completed(callsA.slice(beforeRestartA), "SubscribeInputDraft", ""),
+			)
 			.toBe(true);
 		await expect
-			.poll(() => completed(callsB.slice(beforeRestartB), "ViewSession", ""))
+			.poll(() =>
+				completed(callsB.slice(beforeRestartB), "SubscribeInputDraft", ""),
+			)
 			.toBe(true);
 		await expect(inputA).toHaveValue("");
 		await expect(inputB).toHaveValue("");
@@ -475,8 +491,7 @@ for (const sameBuild of [true, false]) {
 		page,
 		buildDaemon,
 	}, testInfo) => {
-		// A daemon that just restarted answers slowly. Hold ViewSession replies past
-		// the composer's 1s grace, so a stale server draft would land and show.
+		// Hold the initial draft read so it arrives after local typing and reload.
 		const frames = (m: string | Buffer) =>
 			[JSON.parse(String(m))].flat() as Array<{
 				tag?: string;
@@ -488,7 +503,7 @@ for (const sameBuild of [true, false]) {
 			const server = ws.connectToServer();
 			ws.onMessage((m) => {
 				for (const f of frames(m))
-					if (f.tag === "ViewSession") viewIds.add(String(f.id));
+					if (f.tag === "SubscribeInputDraft") viewIds.add(String(f.id));
 				server.send(m);
 			});
 			server.onMessage((m) => {
@@ -498,7 +513,7 @@ for (const sameBuild of [true, false]) {
 		});
 		await page.goto(`${buildDaemon.baseUrl}/?p=build-id-test`);
 		await page.locator(".connect-overlay").waitFor({ state: "detached" });
-		await page.locator("#new-session-btn:visible").click();
+		await startNewSession(page);
 		const input = page.locator("#input");
 		await input.fill("hello");
 		// Click, not Enter: Enter is a newline on mobile. Click also waits for
@@ -507,7 +522,7 @@ for (const sameBuild of [true, false]) {
 		await expect(page).toHaveURL(/\/s\/ses_/);
 		const draft = "Unsent draft on an existing session";
 		await input.fill(draft);
-		// Past the 300ms debounce, so the daemon holds the draft before it stops.
+		// Let the trailing throttle write reach the daemon before it stops.
 		await page.waitForTimeout(1_000);
 		await buildDaemon.restart(
 			sameBuild ? buildDaemon.buildId : `${buildDaemon.buildId}-B`,
@@ -542,3 +557,404 @@ for (const sameBuild of [true, false]) {
 		await expect(input).toHaveValue(draft);
 	});
 }
+
+async function startNewSession(page: Page) {
+	const button = page.locator("#new-session-btn:visible");
+	if (!(await button.isVisible()))
+		await page.getByRole("button", { name: "Sessions", exact: true }).click();
+	await button.click();
+	await expect(page).toHaveURL(/\/new\b/);
+}
+
+async function createDraftSession(page: Page, baseUrl: string) {
+	const calls = captureDraftCalls(page);
+	await page.goto(`${baseUrl}/?p=build-id-test`);
+	await page.locator(".connect-overlay").waitFor({ state: "detached" });
+	await startNewSession(page);
+	await page.locator("#input").fill("hello");
+	await page.locator("#send").click();
+	await expect(page).toHaveURL(/\/s\/ses_/);
+	await expect(page.locator("#input")).toHaveValue("");
+	const sessionId = new URL(page.url()).pathname.split("/").pop();
+	await expect
+		.poll(() =>
+			calls.some(
+				({ request, replies }) =>
+					request.frame.tag === "SubscribeInputDraft" &&
+					request.frame.payload?.sessionId === sessionId &&
+					replies.some(({ frame }) =>
+						frame.values?.some((value) => value._tag === "synchronized"),
+					),
+			),
+		)
+		.toBe(true);
+	return page.url();
+}
+
+function syncCompleted(
+	calls: ReturnType<typeof captureDraftCalls>,
+	text: string,
+) {
+	return calls.some(
+		({ request, replies }) =>
+			request.frame.tag === "SyncInputDraft" &&
+			request.frame.payload?.text === text &&
+			replies.some(
+				({ frame }) => frame._tag === "Exit" && frame.exit?._tag === "Success",
+			),
+	);
+}
+
+async function saveDraftEvidence(
+	testInfo: TestInfo,
+	pages: Page[],
+	evidence: object,
+) {
+	await Promise.allSettled(
+		pages.map((page, index) =>
+			page.screenshot({
+				path: testInfo.outputPath(`draft-device-${index}.png`),
+			}),
+		),
+	);
+	const path = testInfo.outputPath("draft-rpc-frames.json");
+	writeFileSync(path, JSON.stringify(evidence, null, 2));
+	await testInfo.attach("draft-rpc-frames", {
+		path,
+		contentType: "application/json",
+	});
+}
+
+// These drive the real browser/daemon wire. No component or machine internals.
+test("offline typing survives a cut WebSocket and a delayed stored draft", async ({
+	page,
+	browser,
+	buildDaemon,
+}, testInfo) => {
+	test.setTimeout(90_000);
+	let offline = false;
+	const sockets = new Map<WebSocketRoute, WebSocketRoute>();
+	const routed: Array<{ direction: string; at: number; data: string }> = [];
+	await page.routeWebSocket(/\/rpc$/, (ws) => {
+		if (offline) {
+			ws.close({ code: 1001 });
+			return;
+		}
+		const server = ws.connectToServer();
+		sockets.set(ws, server);
+		const draftIds = new Set<string>();
+		ws.onMessage((data) => {
+			routed.push({ direction: "sent", at: Date.now(), data: String(data) });
+			for (const frame of [JSON.parse(String(data))].flat() as Array<{
+				tag?: string;
+				id?: string;
+			}>)
+				if (frame.tag === "SubscribeInputDraft") draftIds.add(String(frame.id));
+			server.send(data);
+		});
+		server.onMessage((data) => {
+			routed.push({
+				direction: "received",
+				at: Date.now(),
+				data: String(data),
+			});
+			const snapshot = (
+				[JSON.parse(String(data))].flat() as Array<{
+					requestId?: string;
+					values?: Array<{ _tag: string }>;
+				}>
+			).some(
+				(frame) =>
+					draftIds.has(String(frame.requestId)) &&
+					frame.values?.some((value) => value._tag === "synchronized"),
+			);
+			setTimeout(() => ws.send(data), snapshot ? 1_200 : 0);
+		});
+	});
+	const calls = captureDraftCalls(page);
+	const contextB = await browser.newContext({
+		viewport: page.viewportSize(),
+		isMobile: testInfo.project.use.isMobile ?? false,
+		hasTouch: testInfo.project.use.hasTouch ?? false,
+	});
+	const pageB = await contextB.newPage();
+	const callsB = captureDraftCalls(pageB);
+	let sessionUrl = "";
+	const text = "Offline typing must survive every server answer";
+	try {
+		sessionUrl = await createDraftSession(page, buildDaemon.baseUrl);
+		await page.locator("#input").fill("older stored draft");
+		await expect
+			.poll(() => syncCompleted(calls, "older stored draft"))
+			.toBe(true);
+		offline = true;
+		for (const [client, server] of sockets) {
+			client.close({ code: 1001 });
+			server.close({ code: 1001 });
+		}
+		await expect(page.locator(".connect-overlay")).toBeVisible();
+		await page.locator("#input").fill(text);
+		await page.screenshot({ path: testInfo.outputPath("offline-typed.png") });
+		offline = false;
+		await page.locator(".connect-overlay").waitFor({ state: "detached" });
+		await expect.poll(() => syncCompleted(calls, text)).toBe(true);
+		await page.waitForTimeout(1_500);
+		await expect(page.locator("#input")).toHaveValue(text);
+		await pageB.goto(sessionUrl);
+		await expect(pageB.locator("#input")).toHaveValue(text);
+	} finally {
+		await saveDraftEvidence(testInfo, [page, pageB], {
+			sessionUrl,
+			text,
+			calls,
+			callsB,
+			routed,
+		});
+		await contextB.close();
+	}
+});
+
+declare global {
+	interface Window {
+		draftPerformance?: { longTasks: number[]; observer: PerformanceObserver };
+		draftPaints?: Array<{ at: number; path: string; text: string }>;
+	}
+}
+
+test("500 human-paced characters stay responsive within the 300 ms throttle budget", async ({
+	page,
+	buildDaemon,
+}, testInfo) => {
+	test.setTimeout(90_000);
+	const calls = captureDraftCalls(page);
+	let measurement: object = {};
+	try {
+		await createDraftSession(page, buildDaemon.baseUrl);
+		await page.waitForTimeout(1_000);
+		await page.evaluate(() => {
+			if (!PerformanceObserver.supportedEntryTypes.includes("longtask"))
+				throw new Error("longtask observer unavailable");
+			const longTasks: number[] = [];
+			const observer = new PerformanceObserver((list) => {
+				for (const task of list.getEntries()) longTasks.push(task.duration);
+			});
+			observer.observe({ type: "longtask" });
+			window.draftPerformance = { longTasks, observer };
+		});
+		const start = Date.now();
+		const before = calls.length;
+		const text = "A human keeps typing while the draft saves live. "
+			.repeat(11)
+			.slice(0, 500);
+		await page.locator("#input").pressSequentially(text, { delay: 100 });
+		const typedAt = Date.now();
+		await expect
+			.poll(() => syncCompleted(calls.slice(before), text))
+			.toBe(true);
+		const longTasks = await page.evaluate(() => {
+			window.draftPerformance?.observer.disconnect();
+			return window.draftPerformance?.longTasks ?? [];
+		});
+		const syncs = calls
+			.slice(before)
+			.filter((call) => call.request.frame.tag === "SyncInputDraft");
+		const budget = Math.floor((typedAt - start) / 300) + 2;
+		measurement = {
+			start,
+			typedAt,
+			characters: text.length,
+			delay: 100,
+			budget,
+			count: syncs.length,
+			longTasks,
+		};
+		await expect(page.locator("#input")).toHaveValue(text);
+		expect(syncs.length).toBeGreaterThan(2);
+		expect(syncs.length).toBeLessThanOrEqual(budget);
+		expect(syncs[0]?.request.at).toBeLessThan(start + 300);
+		expect(longTasks.filter((duration) => duration > 50)).toEqual([]);
+	} finally {
+		await saveDraftEvidence(testInfo, [page], { measurement, calls });
+	}
+});
+
+for (const event of ["visibilitychange", "pagehide"] as const) {
+	test(`${event} flushes the latest text mid-burst`, async ({
+		page,
+		buildDaemon,
+	}, testInfo) => {
+		const calls = captureDraftCalls(page);
+		let hiddenAt = 0;
+		const text = `Latest text flushed on ${event}`;
+		try {
+			await createDraftSession(page, buildDaemon.baseUrl);
+			// Both input events and hide happen in the same browser task, before the
+			// 300ms timer can fire. Chromium has no CDP command to hide a test tab.
+			await page.locator("#input").evaluate(
+				(node, { text, event }) => {
+					const input = node as HTMLTextAreaElement;
+					input.value = "leading";
+					input.dispatchEvent(new Event("input", { bubbles: true }));
+					input.value = text;
+					input.dispatchEvent(new Event("input", { bubbles: true }));
+					if (event === "visibilitychange") {
+						Object.defineProperty(document, "visibilityState", {
+							configurable: true,
+							value: "hidden",
+						});
+						document.dispatchEvent(new Event("visibilitychange"));
+					}
+					// A persisted pagehide is iOS backgrounding a PWA: the page lives on.
+					// On a real unload ChatLayout disposes the RPC runtime, so nothing
+					// async can be sent; the reload backup covers that case.
+					else
+						window.dispatchEvent(
+							new PageTransitionEvent("pagehide", { persisted: true }),
+						);
+				},
+				{ text, event },
+			);
+			hiddenAt = Date.now();
+			await expect.poll(() => syncCompleted(calls, text)).toBe(true);
+			const leading = calls.find(
+				(call) => call.request.frame.payload?.text === "leading",
+			);
+			const flushed = calls.find(
+				(call) => call.request.frame.payload?.text === text,
+			);
+			expect(leading).toBeDefined();
+			expect(flushed).toBeDefined();
+			expect(
+				(flushed?.request.at ?? Infinity) - (leading?.request.at ?? 0),
+			).toBeLessThan(300);
+			await page.reload();
+			await expect(page.locator("#input")).toHaveValue(text);
+		} finally {
+			await saveDraftEvidence(testInfo, [page], {
+				event,
+				hiddenAt,
+				text,
+				calls,
+			});
+		}
+	});
+}
+
+test("two tabs on the same session exchange drafts live", async ({
+	page,
+	context,
+	buildDaemon,
+}, testInfo) => {
+	const callsA = captureDraftCalls(page);
+	const pageB = await context.newPage();
+	const callsB = captureDraftCalls(pageB);
+	try {
+		const url = await createDraftSession(page, buildDaemon.baseUrl);
+		await pageB.goto(url);
+		await expect(pageB.locator("#input")).toBeVisible();
+		await page.locator("#input").fill("Typed in tab A");
+		await expect(pageB.locator("#input")).toHaveValue("Typed in tab A");
+		await page.screenshot({ path: testInfo.outputPath("live-from-A.png") });
+		await pageB.locator("#input").fill("Continued in tab B");
+		await expect(page.locator("#input")).toHaveValue("Continued in tab B");
+		await expect
+			.poll(() => syncCompleted(callsB, "Continued in tab B"))
+			.toBe(true);
+		await pageB.locator("#input").fill("");
+		await expect(page.locator("#input")).toHaveValue("");
+	} finally {
+		await saveDraftEvidence(testInfo, [page, pageB], { A: callsA, B: callsB });
+		await pageB.close();
+	}
+});
+
+test("switching sessions restores stored drafts and records each painted composer", async ({
+	page,
+	browser,
+	buildDaemon,
+}, testInfo) => {
+	test.setTimeout(90_000);
+	const callsA = captureDraftCalls(page);
+	const contextB = await browser.newContext({
+		viewport: page.viewportSize(),
+		isMobile: testInfo.project.use.isMobile ?? false,
+		hasTouch: testInfo.project.use.hasTouch ?? false,
+	});
+	const pageB = await contextB.newPage();
+	const callsB = captureDraftCalls(pageB);
+	let paints: NonNullable<Window["draftPaints"]> = [];
+	try {
+		const first = await createDraftSession(page, buildDaemon.baseUrl);
+		await page.locator("#input").fill("First stored draft");
+		await expect
+			.poll(() => syncCompleted(callsA, "First stored draft"))
+			.toBe(true);
+		await startNewSession(page);
+		await page.locator("#input").fill("hello again");
+		await page.locator("#send").click();
+		await expect(page).toHaveURL(/\/s\/ses_/);
+		const second = page.url();
+		expect(second).not.toBe(first);
+		await page.locator("#input").fill("Second stored draft");
+		await expect
+			.poll(() => syncCompleted(callsA, "Second stored draft"))
+			.toBe(true);
+		await pageB.goto(first);
+		await expect(pageB.locator("#input")).toHaveValue("First stored draft");
+		await pageB.screenshot({ path: testInfo.outputPath("switch-1-first.png") });
+		await pageB.evaluate(() => {
+			window.draftPaints = [];
+			const sample = () => {
+				const input = document.querySelector<HTMLTextAreaElement>("#input");
+				if (input && window.draftPaints)
+					window.draftPaints.push({
+						at: performance.now(),
+						path: location.pathname,
+						text: input.value,
+					});
+				requestAnimationFrame(sample);
+			};
+			requestAnimationFrame(sample);
+		});
+		const switchTo = async (url: string) => {
+			const id = new URL(url).pathname.split("/").pop();
+			if (!(await pageB.locator("#new-session-btn:visible").isVisible()))
+				await pageB
+					.getByRole("button", { name: "Sessions", exact: true })
+					.click();
+			await pageB
+				.locator(`#session-list [data-session-id="${id}"] .session-item-title`)
+				.click();
+			await expect(pageB).toHaveURL(url);
+		};
+		await switchTo(second);
+		await pageB.screenshot({
+			path: testInfo.outputPath("switch-2-arrival.png"),
+		});
+		await expect(pageB.locator("#input")).toHaveValue("Second stored draft");
+		await pageB.screenshot({
+			path: testInfo.outputPath("switch-3-stored.png"),
+		});
+		await switchTo(first);
+		await pageB.screenshot({
+			path: testInfo.outputPath("switch-4-cached.png"),
+		});
+		await expect(pageB.locator("#input")).toHaveValue("First stored draft");
+		paints = await pageB.evaluate(() => window.draftPaints ?? []);
+		// A session this device has seen keeps its draft through the switch. The
+		// first visit to an unseen one paints one empty frame until the
+		// subscription's stored text arrives (recorded on conduit-test-9ra5.3).
+		const firstPath = new URL(first).pathname;
+		expect(
+			paints.filter(({ path, text }) => path === firstPath && text === ""),
+		).toEqual([]);
+	} finally {
+		await saveDraftEvidence(testInfo, [page, pageB], {
+			A: callsA,
+			B: callsB,
+			paints,
+			emptyComposerFrames: paints.filter((frame) => frame.text === ""),
+		});
+		await contextB.close();
+	}
+});

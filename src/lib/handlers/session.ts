@@ -8,7 +8,6 @@ import {
 	DaemonEvent,
 	DaemonEventBusTag,
 } from "../domain/daemon/Services/daemon-pubsub.js";
-import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import { loadModelCatalog } from "../domain/relay/Services/model-catalog.js";
 import {
 	ProjectSettingsTag,
@@ -174,7 +173,7 @@ export const viewSessionForClient = ({
 		const log = yield* LoggerTag;
 
 		const id = sessionId;
-		if (!id) return { draft: "" };
+		if (!id) return;
 
 		yield* switchClientToSession(clientId, id);
 
@@ -183,8 +182,6 @@ export const viewSessionForClient = ({
 		// session.mark_seen instead (ADR-0004, Scope; conduit-test-hk9m.3).
 
 		log.info(`client=${clientId} Viewing: ${id}`);
-		const drafts = yield* InputDraftsTag;
-		return { draft: yield* drafts.read({ session: id }) };
 	});
 
 export const handleViewSession = (

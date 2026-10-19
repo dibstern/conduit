@@ -351,7 +351,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				originId: "browser-tab-a",
 			});
 
-			expect(result).toEqual({ ok: true, draft: "saved draft" });
+			expect(result).toEqual({ ok: true });
 			expect(wsHandler.setClientSession).toHaveBeenCalledWith(
 				"browser-tab-a",
 				"session-1",

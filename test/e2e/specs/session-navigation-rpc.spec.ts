@@ -1,4 +1,5 @@
 import { writeFile } from "node:fs/promises";
+import { Stream } from "effect";
 import {
 	type GetFileListResponse,
 	WsRpcError,
@@ -36,6 +37,14 @@ async function setup(
 	folders: string[] = ["/tmp/e2e-replay"],
 ) {
 	const rpc = await mockWsRpc(page, {
+		streams: {
+			SubscribeInputDraft: ({ sessionId }) => [
+				{
+					_tag: "synchronized",
+					text: sessionId === seed ? "Seed draft" : `Draft for ${sessionId}`,
+				},
+			],
+		},
 		stubs: {
 			GetModels: () => ({
 				projectSlug,
@@ -59,10 +68,7 @@ async function setup(
 				handedOff: true,
 			}),
 			ResolveSession: () => ({ projectSlug }),
-			ViewSession: ({ sessionId }) => ({
-				ok: true,
-				draft: sessionId === seed ? "Seed draft" : `Draft for ${sessionId}`,
-			}),
+			ViewSession: () => ({ ok: true }),
 			CreateSession: () => ({ projectSlug, sessionId: created }),
 			ForkSession: () => ({ projectSlug, sessionId: forked, forkedFrom: seed }),
 			DeleteSession: () => ({ ok: true }),
@@ -718,7 +724,11 @@ test("a draft's first send shows working before its session row arrives", async 
 			new Promise((resolve) => {
 				accept = resolve;
 			}),
-		ViewSession: () => ({ ok: true, draft: "" }),
+		SubscribeInputDraft: () =>
+			Stream.concat(
+				Stream.make({ _tag: "synchronized", text: "" }),
+				Stream.never,
+			),
 	});
 	await page.goto(`${harness.relayBaseUrl}/new?project=${projectSlug}`);
 	await page.locator("#input").fill("First draft send");

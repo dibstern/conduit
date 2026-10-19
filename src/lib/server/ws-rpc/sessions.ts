@@ -715,7 +715,7 @@ export const sessionsHandlers = {
 			clientId: request.originId,
 			sessionId: request.sessionId,
 		}).pipe(
-			Effect.map(({ draft }) => ({ ok: true as const, draft })),
+			Effect.as({ ok: true as const }),
 			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({

@@ -65,8 +65,7 @@ const isSessionStream = (tag: string): boolean =>
 	tag === "SubscribeInputDraft";
 
 /** Live-only feeds open synchronized, with nothing to replay. */
-const isLiveOnlyStream = (tag: string): boolean =>
-	tag === "SubscribeAlerts" || tag === "SubscribeInputDraft";
+const isLiveOnlyStream = (tag: string): boolean => tag === "SubscribeAlerts";
 
 export interface RpcMockOptions {
 	readonly stubs?: StubTable;
@@ -765,6 +764,8 @@ function initialStream(
 			return control.initialSessionTodosFrames(
 				String(payload["sessionId"] ?? ""),
 			);
+		case "SubscribeInputDraft":
+			return [{ _tag: "synchronized" }];
 		case "SubscribeSessionFamily":
 			return control.initialFamilyFrames();
 		case "SubscribeProjectSettings":

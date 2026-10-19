@@ -1,6 +1,4 @@
-// The viewed session's composer draft as other tabs type it, fed by its
-// SubscribeInputDraft stream. The draft at session switch rides the
-// ViewSession response; this carries only what changes after.
+// The viewed session's stored composer draft, followed by live changes.
 
 import { Effect, FiberHandle, Scope, Stream } from "effect";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
@@ -9,11 +7,19 @@ import { supervise } from "../transport/supervise.js";
 import type { InputDraftEnvelope } from "../transport/ws-rpc.js";
 import { handleInputSyncReceived } from "./chat.svelte.js";
 import { isOwnBrowserClientId } from "./client-identity.js";
+import { handleInputDraftStarted } from "./composer-draft/runner.svelte.js";
 
-export const applyInputDraft = (envelope: InputDraftEnvelope): void => {
+export const applyInputDraft = (
+	envelope: InputDraftEnvelope,
+	sessionId: string,
+): void => {
 	// The writing tab already shows its own text.
-	if (envelope._tag === "draft" && !isOwnBrowserClientId(envelope.from))
-		handleInputSyncReceived(envelope);
+	if (envelope._tag === "synchronized" || !isOwnBrowserClientId(envelope.from))
+		handleInputSyncReceived({
+			sessionId,
+			...envelope,
+			...(envelope._tag === "synchronized" ? { initial: true } : {}),
+		});
 };
 
 let viewed: { project: string; sessionId: string | null } | null = null;
@@ -51,14 +57,16 @@ export function viewInputDraft(
 							Effect.flatMap(clients.forProject(project), ({ subscriptions }) =>
 								Stream.runForEach(
 									supervise(
-										Stream.suspend(() =>
-											subscriptions.inputDraft({ sessionId }),
-										),
+										Stream.suspend(() => {
+											handleInputDraftStarted(sessionId);
+											return subscriptions.inputDraft({ sessionId });
+										}),
 										() => undefined,
 									),
 									(envelope) =>
 										Effect.sync(() => {
-											if (viewed === selection) applyInputDraft(envelope);
+											if (viewed === selection)
+												applyInputDraft(envelope, sessionId);
 										}),
 								),
 							),

@@ -1,5 +1,5 @@
-// Composer work in progress lives beside the event log. Subscriptions remain
-// live-only so reconnecting cannot overwrite text typed while offline.
+// Composer work in progress lives beside the event log. Each subscription
+// opens with the stored text, followed by live changes.
 import { Context, Effect, Layer, PubSub, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
@@ -42,13 +42,14 @@ export const makeInputDrafts: Effect.Effect<
 		readonly text: string;
 		readonly from?: string;
 	}>();
+	const read = (key: InputDraftKey) =>
+		sql<{ text: string }>`SELECT text FROM input_drafts
+			WHERE draft_key = ${keyOf(key)} AND kind = ${kindOf(key)}`.pipe(
+			Effect.map((rows) => rows[0]?.text),
+		);
 
 	return {
-		read: (key) =>
-			sql<{ text: string }>`SELECT text FROM input_drafts
-			WHERE draft_key = ${keyOf(key)} AND kind = ${kindOf(key)}`.pipe(
-				Effect.map((rows) => rows[0]?.text),
-			),
+		read,
 		write: (key, text, from) =>
 			Effect.gen(function* () {
 				if (Buffer.byteLength(text, "utf8") > 1024 * 1024) {
@@ -79,9 +80,21 @@ export const makeInputDrafts: Effect.Effect<
 			}),
 		subscribe: (key) =>
 			Stream.unwrap(
-				Effect.map(PubSub.subscribe(changes), (dequeue) =>
-					Stream.concat(
-						Stream.make<[InputDraftEnvelope]>({ _tag: "synchronized" }),
+				Effect.gen(function* () {
+					// Buffer writes made during the read so the snapshot has no gap.
+					const dequeue = yield* PubSub.subscribe(changes);
+					const text = yield* read(key).pipe(
+						Effect.catch((cause) =>
+							Effect.logError(
+								`Could not read input draft ${keyOf(key)}: ${cause}`,
+							).pipe(Effect.as(undefined)),
+						),
+					);
+					return Stream.concat(
+						Stream.make<[InputDraftEnvelope]>({
+							_tag: "synchronized",
+							...(text === undefined ? {} : { text }),
+						}),
 						Stream.fromSubscription(dequeue).pipe(
 							Stream.filter(
 								(change) =>
@@ -94,8 +107,8 @@ export const makeInputDrafts: Effect.Effect<
 								...(from !== undefined ? { from } : {}),
 							})),
 						),
-					),
-				),
+					);
+				}),
 			),
 		forget: (sessionId) =>
 			sql`DELETE FROM input_drafts WHERE draft_key = ${sessionId} AND kind = 'session'`.pipe(
