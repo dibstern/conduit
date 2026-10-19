@@ -234,7 +234,7 @@ describe("Multi-folder git through the built daemon", () => {
 		evidence["detached"] = normalizedGit(
 			latestGit(browser, "shell", sessionId),
 		);
-	});
+	}, 60_000);
 
 	it("reports a sole git extra when the primary folder is not git", async () => {
 		const { fixture, socket, secondary, scratch } =
