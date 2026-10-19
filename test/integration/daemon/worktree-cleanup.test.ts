@@ -95,14 +95,18 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 		});
 		harness = fixture;
-		git(fixture.projectDir, "init", "-b", "main");
-		writeFileSync(join(fixture.projectDir, "base.txt"), "committed base\n");
-		writeFileSync(
-			join(fixture.projectDir, ".gitignore"),
-			"ignored.txt\nnode_modules/\n",
-		);
-		git(fixture.projectDir, "add", "base.txt", ".gitignore");
-		commit(fixture.projectDir, "Initial commit");
+		// Settings-only cases never create a session or inspect a repository.
+		const settingsOnly = worktreeCleanup === null;
+		if (!settingsOnly) {
+			git(fixture.projectDir, "init", "-b", "main");
+			writeFileSync(join(fixture.projectDir, "base.txt"), "committed base\n");
+			writeFileSync(
+				join(fixture.projectDir, ".gitignore"),
+				"ignored.txt\nnode_modules/\n",
+			);
+			git(fixture.projectDir, "add", "base.txt", ".gitignore");
+			commit(fixture.projectDir, "Initial commit");
+		}
 		writeFileSync(
 			join(fixture.configDir, "daemon.json"),
 			JSON.stringify({
@@ -139,7 +143,10 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 						: { worktreeCleanup }),
 			}),
 		);
-		await fixture.restart({ startupTimeoutMs: 120_000 });
+		await fixture.restart({
+			startupTimeoutMs: 120_000,
+			skipBrowserProbe: settingsOnly,
+		});
 		const socket = join(fixture.configDir, "relay.sock");
 		const sessions = (projectSlug = "process-test") =>
 			sendRpcRequest(socket, {

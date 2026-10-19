@@ -53,7 +53,11 @@ describe("managed OpenCode survives server replacement", () => {
 	const startManaged = async (
 		options: Parameters<typeof ProcessHarness.start>[0] = {},
 	) => {
-		harness = await ProcessHarness.start({ managedOpenCode: true, ...options });
+		harness = await ProcessHarness.start({
+			managedOpenCode: true,
+			managedOpenCodeStopGraceMs: 100,
+			...options,
+		});
 		await firstUse();
 		return harness;
 	};
@@ -650,6 +654,7 @@ describe("managed OpenCode survives server replacement", () => {
 	it("retains fixture cleanup ownership when its supervisor cannot authenticate and retries", async () => {
 		harness = await ProcessHarness.start({
 			managedOpenCode: true,
+			managedOpenCodeStopGraceMs: 100,
 			pauseOpenCodeSupervisor: true,
 		});
 		await expect(firstUse()).rejects.toThrow();
@@ -1019,6 +1024,7 @@ process.kill(process.pid, "SIGKILL");`,
 	it("retries cleanup on explicit shutdown after failed startup control recovers", async () => {
 		harness = await ProcessHarness.start({
 			managedOpenCode: true,
+			managedOpenCodeStopGraceMs: 100,
 			pauseOpenCodeSupervisor: true,
 		});
 		await expect(firstUse()).rejects.toThrow();
