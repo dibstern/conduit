@@ -1659,14 +1659,14 @@ Object.assign(ClaudeDriver, { create: deps => {
 
 	private rememberManagedOpenCode(): void {
 		const loaded = loadDaemonConfigResult(this.configDir);
-		if (loaded._tag === "Left") {
-			// Config-safety scenarios deliberately damage this file. Record the
-			// read failure and retain already authenticated process ownership.
-			if (loaded.left._tag !== "NotFound")
-				this.configReadErrors.add(loaded.left.message);
-			return;
-		}
-		for (const instance of loaded.right.instances ?? []) {
+		// Config-safety scenarios deliberately damage this file. Record the read
+		// failure, retain already authenticated ownership, and still read the
+		// fixture ledger: its children need termination proof either way.
+		if (loaded._tag === "Left" && loaded.left._tag !== "NotFound")
+			this.configReadErrors.add(loaded.left.message);
+		const instances =
+			loaded._tag === "Right" ? (loaded.right.instances ?? []) : [];
+		for (const instance of instances) {
 			if (
 				instance.managed &&
 				instance.driver !== "claude" &&
@@ -1791,9 +1791,10 @@ Object.assign(ClaudeDriver, { create: deps => {
 					"release",
 				);
 			}
-			for (const project of Either.getOrThrowWith(
+			// A deliberately damaged config has no project gates to release;
+			// rememberManagedOpenCode records the read failure.
+			for (const project of Either.getOrUndefined(
 				loadDaemonConfigResult(this.configDir),
-				(error) => error,
 			)?.projects ?? []) {
 				if (!project.path.startsWith(`${this.root}/`)) continue;
 				for (const name of ["recovery-gated", "recovery-fail-after-adoption"]) {
@@ -2529,11 +2530,12 @@ export class ProcessBrowser {
 			knownMessages.set(owner, ids);
 		}
 		const cursor = this.frames.length;
+		const inputId = randomUUID();
 		const result = await this.run(
 			this.rpc.input.submit({
 				sessionId,
 				originId: this.originId,
-				inputId: randomUUID(),
+				inputId,
 				delivery,
 				text: prompt,
 			}),
@@ -2542,7 +2544,12 @@ export class ProcessBrowser {
 		// A queued submit is never refused; only a steer can be.
 		if (!result.ok) throw new Error(`submit refused: ${result.reason}`);
 		await this.followSession(result.sessionId);
-		const done = await this.waitForTurnEnd(result.sessionId, cursor, timeoutMs);
+		const done = await this.waitForTurnEnd(
+			result.sessionId,
+			cursor,
+			timeoutMs,
+			delivery === "queue" ? inputId : undefined,
+		);
 		// The detail source currently emits projected messages, not StoredEvents.
 		// A fresh typed history read fences the final text against shell completion.
 		const history = await this.history(result.sessionId);
@@ -2568,6 +2575,7 @@ export class ProcessBrowser {
 		sessionId: string,
 		cursor = 0,
 		timeoutMs = TIMEOUT_MS,
+		expectedInputId?: string,
 	): Promise<Record<string, unknown>> {
 		const endedBefore = Math.max(
 			-1,
@@ -2584,6 +2592,8 @@ export class ProcessBrowser {
 				message["type"] === "session_row" &&
 				message["id"] === sessionId &&
 				(message["status"] === "idle" || message["status"] === "error") &&
+				(expectedInputId === undefined ||
+					message["lastTurnEndInputId"] === expectedInputId) &&
 				Number(message["lastTurnEndVersion"] ?? -1) > endedBefore,
 			cursor,
 			timeoutMs,

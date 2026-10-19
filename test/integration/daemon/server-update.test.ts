@@ -462,7 +462,10 @@ describe("supervised server build updates", () => {
 						projectSlug: "process-test",
 						originId,
 					});
-					expect(attached).toEqual({ projectSlug: "process-test" });
+					expect(attached).toEqual({
+						projectSlug: "process-test",
+						sessionSlug: null,
+					});
 					return yield* client.RestartWithConfig({});
 				}),
 			).pipe(Effect.provide(protocol), Effect.timeout(10_000)),

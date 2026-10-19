@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect, Layer, Option, Queue, Stream } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { run } from "../../../src/bin/cli-core.js";
 import {
 	AddInstance,
@@ -38,9 +38,10 @@ import {
 	type RpcSubscriptionScopeTag,
 	type WsRpcServerLayer,
 } from "../../../src/lib/server/ws-rpc.js";
+import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
+	MOCK_OPENCODE_GPT4_CATALOG,
 	makeMockConfig,
-	makeMockOpenCodeAPI,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
@@ -48,7 +49,9 @@ describe("CLI and browser daemon RPC parity", () => {
 	it("sets model defaults over the Unix transport using the existing browser RPC", async () => {
 		const root = mkdtempSync(join(tmpdir(), "conduit-model-rpc-"));
 		const socketPath = join(root, "relay.sock");
-		const api = makeMockOpenCodeAPI();
+		const api = makeHandlerOpenCodeAPI({
+			provider: { list: vi.fn(async () => MOCK_OPENCODE_GPT4_CATALOG) },
+		});
 		try {
 			await Effect.runPromise(
 				Effect.scoped(
@@ -89,14 +92,29 @@ describe("CLI and browser daemon RPC parity", () => {
 							modelID: "gpt-4",
 						});
 						expect(loadRelaySettings(root).defaultModel).toBe("openai/gpt-4");
-						expect(yield* Queue.take(tab)).toMatchObject({
-							_tag: "upsert",
-							item: {
-								_tag: "defaultModel",
-								model: "gpt-4",
-								provider: "openai",
+						// Validating the pick loads the catalog, which republishes the
+						// harness defaults before the new default lands.
+						expect([...(yield* Queue.takeBetween(tab, 3, 3))]).toMatchObject([
+							{ _tag: "upsert", item: { _tag: "harnessDefaults" } },
+							{
+								_tag: "upsert",
+								item: {
+									_tag: "defaultModel",
+									model: "gpt-4",
+									provider: "openai",
+								},
 							},
-						});
+							{
+								_tag: "upsert",
+								item: {
+									_tag: "harnessDefaults",
+									opencode: {
+										status: "ok",
+										pick: { providerId: "openai", modelId: "gpt-4" },
+									},
+								},
+							},
+						]);
 						expect(api.config.update).toHaveBeenCalledWith({
 							model: "openai/gpt-4",
 						});
@@ -143,7 +161,8 @@ describe("CLI and browser daemon RPC parity", () => {
 			});
 			const status = await sendRpcRequest(socketPath, new GetStatus({}));
 			expect(status.port).toBeGreaterThan(0);
-			expect(status.clientCount).toBe(1);
+			// Only browser status feeds count; this CLI IPC request is not a client.
+			expect(status.clientCount).toBe(0);
 			expect(await sendRpcRequest(socketPath, new Shutdown({}))).toEqual({
 				ok: true,
 			});
@@ -230,9 +249,12 @@ describe("CLI and browser daemon RPC parity", () => {
 				expect(errors).toMatch(/^Failed to add instance:/);
 				expect(exits).toEqual([1]);
 			}
+			// Only the built-in Claude account; no invalid instance was registered.
 			expect(
-				(await sendRpcRequest(socketPath, new GetInstances({}))).instances,
-			).toEqual([]);
+				(await sendRpcRequest(socketPath, new GetInstances({}))).instances.map(
+					({ id }) => id,
+				),
+			).toEqual(["claude"]);
 			await expect(
 				sendRpcRequest(
 					socketPath,
@@ -286,14 +308,17 @@ describe("CLI and browser daemon RPC parity", () => {
 			}
 			await daemon.stop();
 			daemon = await startForegroundDaemon(options);
-			await expect
-				.poll(
-					async () =>
-						(
-							await sendRpcRequest(socketPath, new GetInstances({}))
-						).instances.find((instance) => instance.id === "healthy")?.status,
-				)
-				.toBe("healthy");
+			// Both persisted instances come back, unprobed: startup starts
+			// OpenCode on first use only.
+			expect(
+				(await sendRpcRequest(socketPath, new GetInstances({}))).instances
+					.filter((instance) => instance.driver === "opencode")
+					.map(({ id, status }) => ({ id, status }))
+					.sort((left, right) => left.id.localeCompare(right.id)),
+			).toEqual([
+				{ id: "healthy", status: "stopped" },
+				{ id: "unhealthy", status: "stopped" },
+			]);
 			let output = "";
 			let errors = "";
 			const exits: number[] = [];

@@ -11,6 +11,7 @@ import {
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
+import { findFreePort } from "../../../src/lib/daemon/daemon-utils.js";
 import {
 	type ProcessBrowser,
 	ProcessHarness,
@@ -83,12 +84,19 @@ describe("OpenCode Instances use", () => {
 		const fixture = await start("routing");
 		const socket = join(fixture.configDir, "relay.sock");
 		const { instances } = await sendRpcRequest(socket, new GetInstances({}));
-		const [instanceA, instanceB] = instances.filter(
-			({ driver }) => driver === "opencode",
+		const instanceA = instances.find(({ id }) => id === "managed-test");
+		const { addedInstanceId: instanceBId } = await sendRpcRequest(
+			socket,
+			new AddInstance({
+				name: "Other OpenCode",
+				driver: "opencode",
+				managed: true,
+				port: await findFreePort(0),
+			}),
 		);
-		if (!instanceA || !instanceB)
+		if (!instanceA || !instanceBId)
 			throw new Error("Expected two OpenCode instances");
-		// Session A uses the first OpenCode instance; session B selects the other.
+		// Concrete named accounts avoid the canonical id's default-instance alias.
 		const pidOf = (id: string) => {
 			const pid = Either.getOrThrowWith(
 				loadDaemonConfigResult(fixture.configDir),
@@ -98,7 +106,11 @@ describe("OpenCode Instances use", () => {
 			return pid;
 		};
 		const a = await fixture.connect();
-		const sessionA = await a.createSession("Default A", "opencode", "opencode");
+		const sessionA = await a.createSession(
+			"Default A",
+			instanceA.id,
+			"opencode",
+		);
 		const directoryB = join(fixture.root, "project-b");
 		mkdirSync(directoryB, { recursive: true });
 		const { savedSlug: slugB } = await sendRpcRequest(
@@ -107,14 +119,14 @@ describe("OpenCode Instances use", () => {
 		);
 		const b = await fixture.connect(undefined, undefined, slugB);
 		// Each session's first use spawns its selected instance.
-		const sessionB = await b.createSession("Named B", instanceB.id, "opencode");
+		const sessionB = await b.createSession("Named B", instanceBId, "opencode");
 		const pids = {
 			a: pidOf(instanceA.id),
-			b: pidOf(instanceB.id),
+			b: pidOf(instanceBId),
 		};
 		evidence["instances"] = {
 			a: { id: instanceA.id, pid: pids.a },
-			b: { id: instanceB.id, pid: pids.b },
+			b: { id: instanceBId, pid: pids.b },
 		};
 		evidence["sessions"] = { sessionA, sessionB };
 
@@ -158,7 +170,7 @@ describe("OpenCode Instances use", () => {
 				directory: fixture.projectDir,
 				payload: permission("cross-a", sessionA),
 			},
-			instanceB.id,
+			instanceBId,
 		);
 		await fixture.emitOpenCodeEvent(
 			{ directory: fixture.projectDir, payload: permission("own-a", sessionA) },
@@ -166,7 +178,7 @@ describe("OpenCode Instances use", () => {
 		);
 		await fixture.emitOpenCodeEvent(
 			{ directory: directoryB, payload: permission("own-b", sessionB) },
-			instanceB.id,
+			instanceBId,
 		);
 		await a.waitFor((message) => message["requestId"] === "own-a");
 		await b.waitFor((message) => message["requestId"] === "own-b");

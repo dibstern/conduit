@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	AddInstance,
 	GetInstances,
 	RemoveProject,
 	SaveProject,
@@ -11,6 +12,7 @@ import {
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
+import { findFreePort } from "../../../src/lib/daemon/daemon-utils.js";
 import {
 	type ProcessBrowser,
 	ProcessHarness,
@@ -191,13 +193,21 @@ describe("daemon shared OpenCode global stream", () => {
 		const { instances } = await sendRpcRequest(socket, new GetInstances({}));
 		const opencode = instances.filter(({ driver }) => driver === "opencode");
 		expect(opencode).toHaveLength(2);
-		const [defaultInstance, namedInstance] = opencode;
-		if (!defaultInstance || !namedInstance)
+		const defaultInstance = opencode.find(({ id }) => id === "managed-test");
+		const { addedInstanceId: namedId } = await sendRpcRequest(
+			socket,
+			new AddInstance({
+				name: "Other OpenCode",
+				driver: "opencode",
+				managed: true,
+				port: await findFreePort(0),
+			}),
+		);
+		if (!defaultInstance || !namedId)
 			throw new Error("Expected two OpenCode instances");
 		const defaultId = defaultInstance.id;
-		const namedId = namedInstance.id;
 		const a = await fixture.connect();
-		const sessionA = await a.createSession("Default A", "opencode", "opencode");
+		const sessionA = await a.createSession("Default A", defaultId, "opencode");
 		const directoryB = join(fixture.root, "project-b");
 		const slugB = await addProject(fixture, directoryB);
 		const b = await fixture.connect(undefined, undefined, slugB);
