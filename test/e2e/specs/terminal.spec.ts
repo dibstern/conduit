@@ -3,9 +3,76 @@
 
 import type { Page } from "@playwright/test";
 import { expect, test } from "../helpers/replay-fixture.js";
+import { finger, openPhoneTerminal } from "../helpers/terminal-keys.js";
 import { AppPage } from "../page-objects/app.page.js";
 
 test.use({ recording: "chat-simple" });
+
+test.describe("Phone terminal controls", () => {
+	test.use({
+		viewport: { width: 393, height: 852 },
+		hasTouch: true,
+		isMobile: true,
+	});
+
+	test("overflowing tabs keep panel controls visible and tabs reachable", async ({
+		page,
+		relayUrl,
+	}, testInfo) => {
+		await openPhoneTerminal(page, relayUrl);
+		const tabs = page.getByRole("tablist", { name: "Terminal sessions" });
+		const newTerminal = page.getByTitle("New terminal", { exact: true });
+		const decrease = page.getByRole("button", { name: "Decrease font size" });
+		const increase = page.getByRole("button", { name: "Increase font size" });
+		const close = page.getByRole("button", { name: "Close terminal panel" });
+		for (let count = 2; count <= 4; count++) {
+			await newTerminal.tap();
+			await expect(tabs.getByRole("tab")).toHaveCount(count);
+		}
+		const controls = [newTerminal, decrease, increase, close];
+		for (const control of controls)
+			await expect(control).toBeInViewport({ ratio: 1 });
+		await expect(tabs.getByRole("tab", { selected: true })).toBeInViewport({
+			ratio: 0.99,
+		});
+
+		// Only the tabs scroll. A finger must be able to expose the last one.
+		await tabs.evaluate((node) => {
+			node.scrollLeft = 0;
+		});
+		const touch = await finger(page, tabs, { x: 0.35, y: 0 });
+		await touch.moveTo(-120, 0);
+		await touch.lift();
+		await expect
+			.poll(() => tabs.evaluate((node) => node.scrollLeft))
+			.toBeGreaterThan(0);
+		// Chromium rounds the scroll limit to whole pixels, unlike tab widths.
+		await expect(tabs.getByRole("tab").last()).toBeInViewport({ ratio: 0.99 });
+		for (const control of controls)
+			await expect(control).toBeInViewport({ ratio: 1 });
+
+		// Arrow navigation reveals the focused tab; Delete closes it.
+		await tabs.getByRole("tab").first().focus();
+		await page.keyboard.press("ArrowLeft");
+		await expect(tabs.getByRole("tab").last()).toBeFocused();
+		await expect(tabs.getByRole("tab").last()).toBeInViewport({ ratio: 0.99 });
+		await page.keyboard.press("Delete");
+		await expect(tabs.getByRole("tab")).toHaveCount(3);
+		await increase.tap();
+		await expect(page.getByTestId("terminal-font-size")).toHaveText("14");
+		await decrease.tap();
+		await expect(page.getByTestId("terminal-font-size")).toHaveText("13");
+		await testInfo.attach(
+			"phone terminal after scroll and keyboard navigation",
+			{
+				body: await page.screenshot(),
+				contentType: "image/png",
+			},
+		);
+		await close.tap();
+		await expect(page.locator("#terminal-panel")).toBeHidden();
+	});
+});
 
 test.describe("Terminal Panel", () => {
 	test("phone terminal view fills the viewport width", async ({

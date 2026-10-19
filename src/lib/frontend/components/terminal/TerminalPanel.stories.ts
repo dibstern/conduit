@@ -53,6 +53,33 @@ const meta = {
 	beforeEach: () => {
 		resetTerminal();
 	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await canvasElement.ownerDocument.fonts.ready;
+		await waitFor(() => {
+			for (const control of [
+				canvas.queryByTitle("New terminal", { exact: true }),
+				canvas.getByRole("button", { name: "Decrease font size" }),
+				canvas.getByRole("button", { name: "Increase font size" }),
+				canvas.getByRole("button", { name: "Close terminal panel" }),
+				canvas.queryByRole("button", { name: /^Keys$/ }),
+				canvas.queryByRole("button", { name: "New terminal in folder" }),
+			]) {
+				if (!control) continue;
+				const bounds = control.getBoundingClientRect();
+				expect(bounds.left).toBeGreaterThanOrEqual(0);
+				expect(bounds.right).toBeLessThanOrEqual(window.innerWidth);
+			}
+			const active = canvas.queryByRole("tab", { selected: true });
+			if (active) {
+				const list = canvas.getByRole("tablist", { name: "Terminal sessions" });
+				const bounds = list.getBoundingClientRect();
+				const selected = active.getBoundingClientRect();
+				expect(selected.left).toBeGreaterThanOrEqual(bounds.left - 1);
+				expect(selected.right).toBeLessThanOrEqual(bounds.right + 1);
+			}
+		});
+	},
 } satisfies Meta<typeof TerminalPanelHost>;
 
 export default meta;
