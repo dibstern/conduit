@@ -971,13 +971,18 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			ORDER BY created_at ASC, id ASC
 		) pa) AS turn_waits`;
 
-	// A part's stored tool result as text: a JSON string decoded, anything
+	const fullToolResult = sql`
+		CASE WHEN mp.result_event_seq IS NULL THEN mp.result
+			ELSE (SELECT e.data -> '$.result' FROM events e
+				WHERE e.sequence = mp.result_event_seq) END`;
+
+	// A part's full tool result as text: a JSON string decoded, anything
 	// else as stored. Nested so json_type never sees malformed JSON.
 	const toolOutput = sql`
-		CASE WHEN json_valid(mp.result)
-			THEN CASE WHEN json_type(mp.result) = 'text'
-				THEN json_extract(mp.result, '$') ELSE mp.result END
-			ELSE mp.result END`;
+		CASE WHEN json_valid(${fullToolResult})
+			THEN CASE WHEN json_type(${fullToolResult}) = 'text'
+				THEN json_extract(${fullToolResult}, '$') ELSE ${fullToolResult} END
+			ELSE ${fullToolResult} END`;
 
 	// Parts as the browser opens them, by the rule tool-wire-projection.ts
 	// owns: a tool output over the budget comes back as the JSON of its first
@@ -988,14 +993,16 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	const previewParts = (source: Fragment) => sql<MessagePartRow>`
 		SELECT id, message_id, type, text, tool_name, call_id, input, metadata,
 			duration, status, sort_order, created_at, updated_at, version,
-			CASE WHEN length(output) > ${PREVIEW_CODE_POINTS}
+			CASE WHEN result_event_seq IS NOT NULL THEN result
+				WHEN length(output) > ${PREVIEW_CODE_POINTS}
 				THEN json_quote(substr(output, 1, ${PREVIEW_CODE_POINTS}))
 				ELSE result END AS result,
-			CASE WHEN length(output) > ${PREVIEW_CODE_POINTS}
+			CASE WHEN result_event_seq IS NOT NULL THEN result_bytes
+				WHEN length(output) > ${PREVIEW_CODE_POINTS}
 				THEN length(CAST(output AS BLOB)) END AS result_bytes
 		FROM (
 			SELECT mp.*,
-				CASE WHEN mp.type = 'tool'
+				CASE WHEN mp.result_event_seq IS NULL AND mp.type = 'tool'
 					AND mp.tool_name NOT IN ${sql.in(NEVER_CUT_TOOL_NAMES)}
 					AND length(mp.result) > ${PREVIEW_CODE_POINTS}
 				THEN ${toolOutput} END AS output
@@ -1466,7 +1473,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					WHERE session_id = ${sessionId}
 					ORDER BY created_at ASC, id ASC
 				)
-				SELECT mp.* FROM message_parts mp
+				SELECT mp.*, ${fullToolResult} AS result, NULL AS result_bytes
+				FROM message_parts mp
 				JOIN target_messages tm ON mp.message_id = tm.id
 				ORDER BY mp.message_id, mp.sort_order`;
 
@@ -1783,9 +1791,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							page.length === 0
 								? []
 								: yield* sql<MessagePartRow>`
-							SELECT * FROM message_parts
-							WHERE message_id IN ${sql.in(page.map((message) => message.id))}
-							ORDER BY message_id, sort_order`;
+							SELECT mp.*, ${fullToolResult} AS result, NULL AS result_bytes
+							FROM message_parts mp
+							WHERE mp.message_id IN ${sql.in(page.map((message) => message.id))}
+							ORDER BY mp.message_id, mp.sort_order`;
 						messages.push(
 							...groupMessagesWithPartsAndTurnModels(fullPage, parts),
 						);
@@ -2438,7 +2447,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						result: string | null;
 						version: number;
 					}>`
-						SELECT mp.input, mp.result, messages.version
+						SELECT mp.input, ${fullToolResult} AS result, messages.version
 						FROM message_parts mp
 						JOIN messages ON messages.id = mp.message_id
 						WHERE messages.session_id = ${sessionId}
