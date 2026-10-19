@@ -12,6 +12,7 @@
 	import { getDraftProject } from "../../stores/project.svelte.js";
 	import { projectState } from "../../stores/project-state.svelte.js";
 	import { findSession } from "../../stores/session.svelte.js";
+	import { PROJECT_TREE_ROWS, projectTreeState, setProjectTreeRows } from "../../stores/project-tree.svelte.js";
 	import { DEFAULT_WORKTREE_CLEANUP, type ProjectWorktreeCleanup, type WorktreeCleanup, type WorktreeCleanupReport } from "../../../contracts/worktree.js";
 	import Button from "../ui/Button.svelte";
 	import Disclosure from "../ui/Disclosure.svelte";
@@ -163,6 +164,24 @@
 				<option value="local">Local</option>
 				<option value="worktree">New worktree</option>
 				<option value="last">Last used</option>
+			</Select>
+		{/snippet}
+	</SettingsRow>
+	<SettingsRow
+		label="Sessions per project"
+		labelFor="settings-project-tree-rows"
+		description="Shown under each project when the list is grouped by project, before Show more. On this device only."
+	>
+		{#snippet control()}
+			<Select
+				id="settings-project-tree-rows"
+				data-testid="settings-project-tree-rows"
+				value={String(projectTreeState.rows)}
+				onchange={(event) => setProjectTreeRows(Number(event.currentTarget.value))}
+			>
+				{#each { length: PROJECT_TREE_ROWS.max - PROJECT_TREE_ROWS.min + 1 }, index}
+					<option value={String(PROJECT_TREE_ROWS.min + index)}>{PROJECT_TREE_ROWS.min + index}</option>
+				{/each}
 			</Select>
 		{/snippet}
 	</SettingsRow>
