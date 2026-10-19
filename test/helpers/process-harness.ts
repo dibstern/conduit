@@ -252,6 +252,7 @@ export class ProcessHarness {
 		private readonly opencodeBorrowIdleTimeoutMs?: number,
 		private readonly opencodeInitiallyIdle = false,
 		private readonly draftPreWarmTtlMs?: number,
+		private readonly managedOpenCodeStopGraceMs?: number,
 	) {
 		this.root = realpathSync(mkdtempSync(rootPrefix));
 		this.rpcDiagnostics = new RpcDecodeDiagnostics(
@@ -529,6 +530,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			queryInitializationDelayMs?: number;
 			/** Keep draft reservation expiry observable without a ten-minute wait. */
 			draftPreWarmTtlMs?: number;
+			/** Test-only SIGTERM grace for the fixture-owned managed process group. */
+			managedOpenCodeStopGraceMs?: number;
 			queryInitializationFailures?: number;
 			blockCapabilitiesProbe?: boolean;
 			capabilityModels?: readonly ModelInfo[];
@@ -596,6 +599,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			options.opencodeBorrowIdleTimeoutMs,
 			options.opencodeInitiallyIdle,
 			options.draftPreWarmTtlMs,
+			options.managedOpenCodeStopGraceMs,
 		);
 	}
 
@@ -880,6 +884,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 							}
 						: {}),
 					CONDUIT_TEST_CLAUDE_QUERY_MODULE: sdkModule,
+					...(this.managedOpenCodeStopGraceMs === undefined
+						? {}
+						: {
+								CONDUIT_TEST_OPENCODE_STOP_GRACE_MS: String(
+									this.managedOpenCodeStopGraceMs,
+								),
+							}),
 					...(options.setupTimeoutMs === undefined
 						? {}
 						: {
