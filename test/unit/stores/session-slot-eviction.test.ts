@@ -93,6 +93,7 @@ describe("Tier 2 LRU cap", () => {
 
 		// session-0 should still exist because it's the current session
 		expect(sessionMessages.has("session-0")).toBe(true);
+		expect(sessionMessages.has("session-1")).toBe(false);
 	});
 
 	it("touching a session moves it to the end of the LRU", () => {

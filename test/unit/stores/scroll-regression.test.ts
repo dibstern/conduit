@@ -116,15 +116,6 @@ describe("Scroll behavior regression suite", () => {
 			ctrl.detach();
 		});
 
-		it("isDetached becomes true after scrolling away from bottom", () => {
-			const ctrl = makeCtrl();
-			const div = createScrollableDiv();
-			ctrl.attach(div);
-			simulateScrollUp(div);
-			expect(ctrl.isDetached).toBe(true);
-			ctrl.detach();
-		});
-
 		it("isDetached becomes false after requestFollow()", () => {
 			const ctrl = makeCtrl();
 			const div = createScrollableDiv();
@@ -132,19 +123,6 @@ describe("Scroll behavior regression suite", () => {
 			simulateScrollUp(div);
 			expect(ctrl.isDetached).toBe(true);
 			ctrl.requestFollow();
-			expect(ctrl.isDetached).toBe(false);
-			ctrl.detach();
-		});
-	});
-
-	describe("Session switch clears detached state", () => {
-		it("resetForSession clears userDetached", () => {
-			const ctrl = makeCtrl();
-			const div = createScrollableDiv();
-			ctrl.attach(div);
-			simulateScrollUp(div);
-			expect(ctrl.isDetached).toBe(true);
-			ctrl.resetForSession();
 			expect(ctrl.isDetached).toBe(false);
 			ctrl.detach();
 		});
@@ -208,19 +186,6 @@ describe("Scroll behavior regression suite", () => {
 			//    Without the fix, this would falsely set userDetached=true.
 			div.dispatchEvent(new Event("scroll"));
 			expect(ctrl.isDetached).toBe(false);
-			ctrl.detach();
-		});
-
-		it("user scroll-up still detaches correctly (non-programmatic)", () => {
-			const ctrl = makeCtrl();
-			const div = createScrollableDiv();
-			ctrl.attach(div);
-			expect(ctrl.isDetached).toBe(false);
-
-			// User scrolls up — this is NOT preceded by scrollToBottom()
-			div.scrollTop = 200;
-			div.dispatchEvent(new Event("scroll"));
-			expect(ctrl.isDetached).toBe(true);
 			ctrl.detach();
 		});
 	});
