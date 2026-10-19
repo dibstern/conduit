@@ -38,6 +38,7 @@ describe("Schema Migration", () => {
 					[64, "prompt_provider_reference"],
 					[65, "tool_result_event_refs"],
 					[66, "project_tree_data"],
+					[67, "input_drafts"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -66,6 +67,7 @@ describe("Schema Migration", () => {
 				"command_receipts",
 				"daemon_store_imports",
 				"events",
+				"input_drafts",
 				"message_part_tombstones",
 				"message_parts",
 				"message_tombstones",
@@ -95,6 +97,24 @@ describe("Schema Migration", () => {
 				"tool_content",
 				"turns",
 			]);
+			const draftColumns = yield* sql<{
+				name: string;
+				type: string;
+				notnull: number;
+				dflt_value: string | null;
+				pk: number;
+			}>`PRAGMA table_info(input_drafts)`;
+			expect(draftColumns.map(({ name }) => name)).toEqual([
+				"draft_key",
+				"project_id",
+				"kind",
+				"text",
+				"updated_at",
+				"promoted_session_id",
+			]);
+			expect(
+				draftColumns.find(({ name }) => name === "promoted_session_id"),
+			).toMatchObject({ type: "TEXT", notnull: 0, dflt_value: null, pk: 0 });
 		}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
@@ -172,6 +192,11 @@ describe("Schema Migration", () => {
 				},
 				{ name: "idx_events_type", table: "events", unique: false },
 				{ name: "idx_events_unstamped", table: "events", unique: false },
+				{
+					name: "idx_input_drafts_project",
+					table: "input_drafts",
+					unique: false,
+				},
 				{
 					name: "idx_message_part_tombstones_session_version",
 					table: "message_part_tombstones",

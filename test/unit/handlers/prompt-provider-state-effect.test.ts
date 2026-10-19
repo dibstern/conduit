@@ -10,6 +10,7 @@ import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/accoun
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
+import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
@@ -165,6 +166,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
 					Layer.succeed(OrchestrationEngineTag)(engine),
 					persistence,
+					InputDraftsLive.pipe(Layer.provide(persistence)),
 					makeIngestionLayer(persistence),
 					makeOverridesStateLive(),
 				),
@@ -270,6 +272,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
 				Layer.succeed(OrchestrationEngineTag)(engine),
 				persistence,
+				InputDraftsLive.pipe(Layer.provide(persistence)),
 				makeIngestionLayer(persistence),
 				makeOverridesStateLive(),
 			),
@@ -380,6 +383,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
 					Layer.succeed(OrchestrationEngineTag)(engine),
 					persistence,
+					InputDraftsLive.pipe(Layer.provide(persistence)),
 					makeIngestionLayer(persistence),
 					makeOverridesStateLive(),
 				),
@@ -512,6 +516,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
 					Layer.succeed(OrchestrationEngineTag)(engine),
 					persistence,
+					InputDraftsLive.pipe(Layer.provide(persistence)),
 					makeIngestionLayer(persistence),
 					makeOverridesStateLive(),
 				),

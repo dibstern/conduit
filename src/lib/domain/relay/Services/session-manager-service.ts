@@ -41,6 +41,7 @@ import {
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
+import { SESSION_SUBTREE_SQL } from "../../../persistence/projectors/session-handlers.js";
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
 import { removeRunnerSessionSends } from "../../../provider/runner/runner-send-journal.js";
 import {
@@ -70,6 +71,7 @@ import {
 import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
+import { InputDraftsLive, InputDraftsTag } from "./input-drafts.js";
 import { RelayStatusSnapshotTag } from "./relay-status-snapshot.js";
 import {
 	ConfigTag,
@@ -336,6 +338,7 @@ export const deleteSession = (
 		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
 		const projectId = (yield* EventStoreEffectTag).projectId;
+		const sql = yield* SqlClient.SqlClient;
 
 		const sessions =
 			readQueryOption._tag === "Some"
@@ -553,6 +556,7 @@ export const deleteSession = (
 		};
 
 		let applied = beforeWrite === undefined;
+		const deleted = new Set([sessionId, ...childSessionIds]);
 		yield* applySessionCommand(
 			{
 				type: "session.deleted",
@@ -563,14 +567,20 @@ export const deleteSession = (
 			},
 			{
 				upstreamAdapter,
-				...(beforeWrite && {
-					beforeWrite: beforeWrite.pipe(
-						Effect.tap((allowed) =>
-							Effect.sync(() => {
-								applied = allowed;
-							}),
-						),
-					),
+				...((row !== undefined || beforeWrite !== undefined) && {
+					beforeWrite: Effect.gen(function* () {
+						applied = yield* beforeWrite ?? Effect.succeed(true);
+						if (applied) {
+							// Capture the actual cascade under the canonical transaction, since
+							// ingress may have added children after the earlier lineage snapshot.
+							const subtree = yield* sql.unsafe<{ id: string }>(
+								SESSION_SUBTREE_SQL,
+								[sessionId],
+							);
+							for (const row of subtree) deleted.add(row.id);
+						}
+						return applied;
+					}),
 				}),
 			},
 		).pipe(
@@ -584,7 +594,16 @@ export const deleteSession = (
 		// The delete took the whole lineage, so the cache must forget the whole
 		// lineage: an edge naming a session that no longer exists would put a
 		// deleted grandchild back under a live root on the next list.
-		const deleted = new Set([sessionId, ...childSessionIds]);
+		const drafts = yield* InputDraftsTag;
+		yield* Effect.forEach(deleted, (id) =>
+			drafts
+				.forget(id)
+				.pipe(
+					Effect.catch((cause) =>
+						Effect.logError(`Could not forget input draft ${id}: ${cause}`),
+					),
+				),
+		);
 		yield* Ref.update(stateRef, (s) => {
 			const lastMessageAt = HashMap.remove(s.lastMessageAt, sessionId);
 
@@ -894,6 +913,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const projectionRunner = yield* ProjectionRunnerEffectTag;
 		const sql = yield* SqlClient.SqlClient;
 		// The relay constructs the session manager before its status-poller layer.
+		const drafts = yield* InputDraftsTag;
 		const statusPollerOption = yield* Effect.serviceOption(StatusPollerTag);
 		const activity = yield* SessionActivityTag;
 		const snapshot = yield* RelayStatusSnapshotTag;
@@ -1211,6 +1231,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 									projectionRunner,
 								),
 								Effect.provideService(SqlClient.SqlClient, sql),
+								Effect.provideService(InputDraftsTag, drafts),
 								Effect.provideService(ConfigTag, config),
 								Effect.provideService(LoggerTag, log),
 								Effect.provideService(RelayStatusSnapshotTag, snapshot),
@@ -1415,4 +1436,4 @@ export const SessionManagerServiceLive: Layer.Layer<
 		};
 		return service;
 	}),
-);
+).pipe(Layer.provide(InputDraftsLive));

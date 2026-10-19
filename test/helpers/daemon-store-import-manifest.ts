@@ -1210,6 +1210,7 @@ export async function createProjectStoreFixture(
 				// These primary/legacy records have no current canonical event producer.
 				yield* sql`INSERT INTO tool_content VALUES (${`${id}_blob`}, ${id}, 'saved tool result', 1000)`;
 				yield* sql`INSERT INTO sent_alerts VALUES (${id}, 'turn-finished', ${assistant}, 1000, 'delivered', 'fixture-claim')`;
+				yield* sql`INSERT INTO input_drafts (draft_key, project_id, kind, text, updated_at) VALUES (${id}, ${projectId}, 'session', 'saved composer draft', 1000)`;
 				yield* sql`INSERT INTO session_pick_backfill VALUES (${id}, 'driver_unresolved')`;
 				yield* sql`INSERT INTO session_git_published VALUES (${`/fixture/${projectId}`}, '{"branch":"fixture"}')`;
 				yield* sql`INSERT INTO session_goal_checks VALUES (${`${id}_goal_check`}, ${id}, 'complete', 1000, 2, 'continue', 1000)`;

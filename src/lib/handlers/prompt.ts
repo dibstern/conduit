@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import type { InputDelivery, SteerBlocker } from "../contracts/stored-event.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
-import { publishInputDraft } from "../domain/relay/Services/input-drafts.js";
+import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
 import {
 	LoggerTag,
@@ -11,27 +11,10 @@ import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 
-// Stores the last draft per session so that a tab switching to it (e.g. on a
-// different device) reads the current draft in its ViewSession response.
-// A cleared draft stays as "": after a restart the map is empty, and a missing
-// entry must read as "unknown" so it cannot erase the draft a tab still holds.
-
-const sessionInputDrafts = new Map<string, string>();
-
 interface LegacyMessagePayload {
 	text: string;
 	images?: string[];
 	commandId?: string;
-}
-
-/** The stored input draft for a session, or undefined if this process never saw one. */
-export function getSessionInputDraft(sessionId: string): string | undefined {
-	return sessionInputDrafts.get(sessionId);
-}
-
-/** Clear the stored input draft for a session (e.g. after sending a message). */
-export function clearSessionInputDraft(sessionId: string): void {
-	sessionInputDrafts.set(sessionId, "");
 }
 
 export interface SendMessageToSessionInput {
@@ -142,8 +125,10 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 				sessionId: activeId,
 				refused: submitted.refused,
 			} satisfies SendMessageToSessionResult;
-		if (originalActiveId !== activeId) clearSessionInputDraft(originalActiveId);
-		clearSessionInputDraft(activeId);
+		const drafts = yield* InputDraftsTag;
+		if (originalActiveId !== activeId)
+			yield* drafts.write({ session: originalActiveId }, "");
+		yield* drafts.write({ session: activeId }, "");
 		return {
 			sessionId: activeId,
 			handedOff: submitted.handedOff,
@@ -202,8 +187,6 @@ export const syncInputDraftForSession = ({
 	from?: string;
 }) =>
 	Effect.gen(function* () {
-		// Store the draft so a tab switching to the session reads it
-		sessionInputDrafts.set(sessionId, text);
-
-		yield* publishInputDraft({ sessionId, text, ...(from ? { from } : {}) });
+		const drafts = yield* InputDraftsTag;
+		yield* drafts.write({ session: sessionId }, text, from);
 	});

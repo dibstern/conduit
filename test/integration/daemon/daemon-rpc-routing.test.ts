@@ -26,7 +26,7 @@ import {
 	WebSocketRelayRouterTag,
 	WebSocketRoutingLive,
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
-import { clearSessionInputDraft } from "../../../src/lib/handlers/prompt.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { daemonStorePath } from "../../../src/lib/persistence/project-storage.js";
 import { makeWsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handler.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
@@ -88,9 +88,6 @@ describe("daemon shared RPC routing", () => {
 					ReturnType<typeof makeMockWebSocketHandler>
 				>();
 				const startPolling = vi.fn();
-				yield* Effect.addFinalizer(() =>
-					Effect.sync(() => clearSessionInputDraft("session-b")),
-				);
 				const factory = (slug: string) =>
 					Effect.gen(function* () {
 						const wsHandler = makeMockWebSocketHandler();
@@ -105,6 +102,10 @@ describe("daemon shared RPC routing", () => {
 							Layer.mergeAll(
 								makeTestHandlerLayer({
 									config: makeMockConfig({ slug }),
+									persistenceLayer: makePersistenceEffectLayer(
+										daemonStorePath(root),
+										slug,
+									),
 									wsHandler,
 									pollerManager,
 								}),

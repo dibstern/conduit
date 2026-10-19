@@ -109,6 +109,7 @@ const copiedTables = [
 	"provider_state",
 	"tool_content",
 	"sent_alerts",
+	"input_drafts",
 	"projection_failures",
 	"session_git_published",
 	"session_pick_backfill",
@@ -546,11 +547,13 @@ function sessionIds(db: DatabaseSync, schema: string): string {
 			columns(db, schema, table)
 				.filter(
 					({ name }) =>
-						name === "session_id" || (table === "sessions" && name === "id"),
+						name === "session_id" ||
+						(table === "sessions" && name === "id") ||
+						(table === "input_drafts" && name === "draft_key"),
 				)
 				.map(
 					({ name }) =>
-						`SELECT ${quote(name)} AS id FROM ${schema}.${quote(table)}`,
+						`SELECT ${quote(name)} AS id FROM ${schema}.${quote(table)}${table === "input_drafts" ? " WHERE kind = 'session'" : ""}`,
 				),
 		)
 		.join(" UNION ");
@@ -599,6 +602,10 @@ function excludeSharedSessions(
 		};
 		for (const table of tables(db, "main")) {
 			const conditions = columns(db, "main", table).flatMap(({ name }) => {
+				if (table === "input_drafts" && name === "draft_key")
+					return [
+						"kind = 'session' AND draft_key IN (SELECT id FROM shared_sessions)",
+					];
 				const ids =
 					table === "sessions" && name === "id"
 						? "shared_sessions"
