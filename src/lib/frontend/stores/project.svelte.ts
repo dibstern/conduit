@@ -39,6 +39,7 @@ export function applyShellProjects(
 	const projects = toProjectInfoList(frame.projects);
 	projectState.projects = projects;
 	projectState.newSessionProject = frame.newSessionProject ?? null;
+	projectState.projectOrder = frame.projectOrder ?? [];
 
 	// Removing the attached project returns to the session list.
 	if (
@@ -93,6 +94,7 @@ const toProjectInfoList = (
 		slug: project.slug,
 		title: project.title,
 		folders: project.folders,
+		...(project.addedAt !== undefined ? { addedAt: project.addedAt } : {}),
 		...(project.setupScript !== undefined
 			? { setupScript: project.setupScript }
 			: {}),

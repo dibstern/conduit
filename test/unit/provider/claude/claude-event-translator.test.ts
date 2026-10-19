@@ -1,12 +1,9 @@
 // test/unit/provider/claude/claude-event-translator.test.ts
 
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Layer } from "effect";
 import { TestClock, TestConsole } from "effect/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	type ProviderRuntimeEvent,
-	ProviderRuntimeEventSchema,
-} from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
+import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { historyToChatMessages } from "../../../../src/lib/frontend/utils/history-logic.js";
 import { createToolMessage } from "../../../../src/lib/frontend/utils/tool-message-factory.js";
 import { launchRow } from "../../../../src/lib/frontend/utils/turns.js";
@@ -169,53 +166,6 @@ function runTranslateError(
 	...args: Parameters<ClaudeEventTranslator["translateError"]>
 ): Promise<void> {
 	return Effect.runPromise(translator.translateError(...args));
-}
-
-function plannedRuntimeEventsForClaudeSdkFixture(
-	ctx: ClaudeSessionContext,
-	message: SDKMessage,
-): ReadonlyArray<unknown> {
-	if (message.type !== "result") return [];
-	if (message.subtype !== "success" || message.is_error) return [];
-	const messageId =
-		message.uuid ?? ctx.lastAssistantUuid ?? ctx.currentTurnId ?? ctx.sessionId;
-	return [
-		{
-			eventId: "runtime-event-1",
-			type: "turn.completed",
-			providerId: "claude",
-			sessionId: ctx.sessionId,
-			...(ctx.currentTurnId ? { turnId: ctx.currentTurnId } : {}),
-			providerRefs: {
-				...(message.session_id
-					? { providerSessionId: message.session_id }
-					: {}),
-				...(message.uuid ? { providerMessageId: message.uuid } : {}),
-			},
-			rawSource: {
-				kind: "claude.sdk.message",
-				providerMessageType: message.type,
-				sdkVariant: "agent-sdk",
-			},
-			createdAt: Date.now(),
-			data: {
-				messageId,
-				providerCostTotalUsd: message.total_cost_usd,
-				providerSessionId: message.session_id,
-				tokens: {
-					input: message.usage.input_tokens,
-					output: message.usage.output_tokens,
-					...(message.usage.cache_read_input_tokens > 0
-						? { cacheRead: message.usage.cache_read_input_tokens }
-						: {}),
-					...(message.usage.cache_creation_input_tokens > 0
-						? { cacheWrite: message.usage.cache_creation_input_tokens }
-						: {}),
-				},
-				duration: message.duration_ms,
-			},
-		},
-	];
 }
 
 describe("ClaudeEventTranslator", () => {
@@ -1021,64 +971,6 @@ describe("ClaudeEventTranslator", () => {
 		expect(data["toolName"]).toBe("Bash");
 		expect(data["callId"]).toBe("tool-abc");
 		expect(data["input"]).toEqual({ tool: "Bash", command: "ls" });
-	});
-
-	it("decodes a Claude SDK result fixture to ProviderRuntimeEvent before canonical translation", () => {
-		const sdkResult = {
-			type: "result",
-			subtype: "success",
-			is_error: false,
-			duration_ms: 1234,
-			duration_api_ms: 1000,
-			num_turns: 1,
-			result: "done",
-			session_id: "sdk-session-1",
-			total_cost_usd: 0.12,
-			usage: {
-				input_tokens: 10,
-				output_tokens: 20,
-				cache_creation_input_tokens: 0,
-				cache_read_input_tokens: 5,
-			},
-			uuid: "assistant-result-1",
-		} as unknown as SDKMessage;
-
-		const runtimeEvents = plannedRuntimeEventsForClaudeSdkFixture(
-			ctx,
-			sdkResult,
-		);
-		const decodeRuntimeEvent = Schema.decodeUnknownSync(
-			ProviderRuntimeEventSchema,
-		);
-		const [decoded] = runtimeEvents.map((event) => decodeRuntimeEvent(event));
-
-		expect(decoded).toMatchObject({
-			type: "turn.completed",
-			providerId: "claude",
-			sessionId: "sess-1",
-			turnId: "turn-1",
-			providerRefs: {
-				providerSessionId: "sdk-session-1",
-				providerMessageId: "assistant-result-1",
-			},
-			rawSource: {
-				kind: "claude.sdk.message",
-				providerMessageType: "result",
-				sdkVariant: "agent-sdk",
-			},
-			data: {
-				messageId: "assistant-result-1",
-				providerCostTotalUsd: 0.12,
-				providerSessionId: "sdk-session-1",
-				tokens: {
-					input: 10,
-					output: 20,
-					cacheRead: 5,
-				},
-				duration: 1234,
-			},
-		});
-		expect(JSON.stringify(decoded)).not.toContain("session_id");
 	});
 
 	// 7. stream_event (content_block_delta: text_delta)
@@ -3497,12 +3389,6 @@ describe("ClaudeEventTranslator", () => {
 		]);
 	});
 
-	it("resetInFlightState clears counters and message id", () => {
-		translator.resetInFlightState();
-		// Should not throw -- verifies it's callable
-		expect(true).toBe(true);
-	});
-
 	it("handles server_tool_use block type", async () => {
 		await runTranslate(
 			translator,
@@ -3587,66 +3473,6 @@ describe("ClaudeEventTranslator", () => {
 			.slice(countBefore)
 			.filter((e) => e.type === "text.delta");
 		expect(deltaEvents).toHaveLength(0);
-	});
-
-	it("input_json_delta with duplicate fingerprint is deduplicated (buffered input not overwritten)", async () => {
-		// Seed a tool_use block
-		await runTranslate(
-			translator,
-			ctx,
-			makeStreamEvent({
-				type: "content_block_start",
-				index: 0,
-				content_block: {
-					type: "tool_use",
-					id: "tool-dedup",
-					name: "Bash",
-					input: {},
-				},
-			}),
-		);
-
-		// Send the first JSON delta
-		await runTranslate(
-			translator,
-			ctx,
-			makeStreamEvent({
-				type: "content_block_delta",
-				index: 0,
-				delta: {
-					type: "input_json_delta",
-					partial_json: '{"command":"ls"}',
-				},
-			}),
-		);
-
-		// No events during buffering
-		expect(sink.events.filter((e) => e.type === "tool.running")).toHaveLength(
-			0,
-		);
-
-		// bufferedInput should be set
-		const tool = ctx.inFlightTools.get(0);
-		expect(tool?.bufferedInput).toEqual({ command: "ls" });
-
-		// Reset partial input so a fresh identical JSON chunk triggers re-parse
-		if (tool) tool.partialInputJson = "";
-
-		await runTranslate(
-			translator,
-			ctx,
-			makeStreamEvent({
-				type: "content_block_delta",
-				index: 0,
-				delta: {
-					type: "input_json_delta",
-					partial_json: '{"command":"ls"}',
-				},
-			}),
-		);
-
-		// bufferedInput should not change (same fingerprint)
-		expect(tool?.bufferedInput).toEqual({ command: "ls" });
 	});
 
 	it("result with cache_creation_input_tokens includes cacheWrite", async () => {

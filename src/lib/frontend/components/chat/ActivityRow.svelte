@@ -206,8 +206,6 @@
 		{/if}
 	</div>
 {:else if part.type === "thinking"}
-	<!-- .thinking-* and .done are E2E hooks: the visual-mockup spec rewrites the
-	     verb and the duration through them to keep screenshots deterministic. -->
 	<div class="thinking-block thinking-item" class:done={part.done} data-part={part.uuid}>
 		<button type="button" class={rowClass} onclick={() => (expanded = !expanded)}>
 			<span class="shrink-0 {style.text} [&_.lucide]:w-3.5 [&_.lucide]:h-3.5">

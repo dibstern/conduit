@@ -17,14 +17,11 @@ permissions:
   id-token: write
 
 # ─── Parallelization Strategy ──────────────────────────────────────────────────
-# Split verification into 4 parallel jobs to cut wall-clock time ~45%:
+# scripts/test-all.sh owns the shared stage list. Release CI is the gate:
 #
-#   lint-and-build ──► e2e (needs dist/)
-#   vitest         ──► (independent, needs OpenCode for contract tests)
-#   storybook      ──► (independent, longest at ~5 min)
-#
-# Critical path: storybook job (~5 min) vs e2e job (~4 min).
-# Previously everything ran serially for ~10 min.
+#   lint-and-build ──► e2e (needs dist/), both on Ubuntu
+#   vitest, storybook run independently on Ubuntu
+#   visual runs independently on macOS for the strict Darwin baselines
 #
 # After all verification passes, the release job bumps the version, publishes,
 # and creates a GitHub release. Version is only bumped after full CI passes.
@@ -46,9 +43,7 @@ jobs:
           key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: ${{ runner.os }}-pnpm-
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check
-      - run: pnpm lint
-      - run: pnpm build
+      - run: bash scripts/test-all.sh static build
       - name: Build-output tests
         run: pnpm exec vitest run --config vitest.build.config.ts
       - name: Upload build artifacts
@@ -98,11 +93,9 @@ jobs:
         env:
           XDG_DATA_HOME: /tmp/opencode-ci-data
           XDG_CONFIG_HOME: /tmp/opencode-ci-config
-      - run: pnpm exec vitest run
-      - run: pnpm exec vitest run --config vitest.integration.config.ts
+      - run: bash scripts/test-all.sh vitest
         env:
           CONDUIT_INTEGRATION_WORKERS: 4
-      - run: pnpm exec vitest run --config vitest.contract.config.ts
 
   # ── Job 3: E2E Playwright tests ────────────────────────────────────────────
   # Needs dist/frontend/ from build. Daemon tests need OpenCode.
@@ -150,15 +143,10 @@ jobs:
         env:
           XDG_DATA_HOME: /tmp/opencode-ci-data
           XDG_CONFIG_HOME: /tmp/opencode-ci-config
-      - run: pnpm exec playwright test --config test/e2e/playwright-replay.config.ts
-      - run: pnpm exec playwright test --config test/e2e/playwright-daemon.config.ts
-      - run: pnpm exec playwright test --config test/e2e/playwright-multi-instance.config.ts
-      - run: pnpm exec playwright test --config test/e2e/playwright-subagent.config.ts
-      - run: pnpm exec playwright test --config test/e2e/playwright-visual.config.ts
+      - run: bash scripts/test-all.sh e2e
 
-  # ── Job 4: Storybook build + visual tests ──────────────────────────────────
+  # ── Job 4: Storybook build + interaction and a11y tests ────────────────────
   # Completely independent — no build or OpenCode needed.
-  # This is the slowest suite (~5 min) so running it in parallel is critical.
   storybook:
     runs-on: ubuntu-latest
     steps:
@@ -175,14 +163,33 @@ jobs:
           restore-keys: ${{ runner.os }}-pnpm-
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
+      - run: bash scripts/test-all.sh storybook
+
+  # ── Job 5: Strict Darwin Storybook visual tests ────────────────────────────
+  visual:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v4
+        with:
+          install: true
+          cache: true
+      - name: Cache pnpm store
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm storybook:build
-      - run: pnpm exec playwright test --config test/visual/playwright.config.ts
+      - run: bash scripts/test-all.sh visual
 
   # ── Release (after all verification passes) ────────────────────────────────
   # Bumps version, commits, tags, pushes, publishes to npm, creates GH release.
   # This only runs after every verification job succeeds.
   release:
-    needs: [lint-and-build, vitest, e2e, storybook]
+    needs: [lint-and-build, vitest, e2e, storybook, visual]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

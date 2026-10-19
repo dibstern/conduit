@@ -120,6 +120,21 @@
 	});
 	const topClearance = $derived(sessionViewState.compact && !phoneListScreen ? chromeHeight : 0);
 
+	// The transcript keeps clearance for the open bar while the bar is
+	// collapsed. The island floats over the transcript either way, so the only
+	// cost is a little extra room above the first message, and the bar
+	// toggling mid-swipe never changes the transcript's geometry: at the top,
+	// a shrinking padding can only be absorbed by moving the content under the
+	// finger, as scrollTop cannot go negative.
+	function measureChrome(chrome: HTMLElement) {
+		const observer = new ResizeObserver(() => {
+			const collapsed = chrome.querySelector('#session-bar[data-collapsed="true"]') !== null;
+			chromeHeight = collapsed ? Math.max(chromeHeight, chrome.offsetHeight) : chrome.offsetHeight;
+		});
+		observer.observe(chrome);
+		return () => observer.disconnect();
+	}
+
 	const layoutClass = $derived.by(() => {
 		let cls = "flex h-dvh";
 		if (uiState.sidebarCollapsed) cls += " sidebar-collapsed";
@@ -617,7 +632,7 @@
 		class:select-none={isResizing || isSidebarResizing || isPaneResizing}
 		style={vvHeight ? `height: ${vvHeight}px;` : ""}
 	>
-		<div id="session-chrome" bind:offsetHeight={chromeHeight}>
+		<div id="session-chrome" {@attach measureChrome}>
 			<!-- The list screen has its own bar in Sidebar; keep one session bar
 			     mounted across breakpoint changes so its state follows the viewport. -->
 			{#if !phoneListScreen}<SessionBar />{/if}

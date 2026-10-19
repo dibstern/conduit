@@ -435,5 +435,6 @@
 	"src/lib/frontend/components/ui/SettingsGroup.svelte :: min-h-[38px],pr-3,text-[12.5px]": "conduit-test-96d9 E: the collapsible header's height moves into Disclosure's new `group` density, the title drops to the mockup's 11.5px, and padding becomes literal 12px.",
 	"src/lib/frontend/components/ui/SettingsRow.svelte :: gap-3,gap-x-3": "conduit-test-96d9 A: settings rows use the mockup's literal 12px gaps (rem utilities render at 0.75x on the 12px root).",
 	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-border-chip,px-[7px],py-[2px],rounded-[8px],text-[10.5px]": "conduit-test-96d9 D: the `compact` segmented variant is deleted; its last users (Usage's warning and forecast switches) now wear `joined` like the rest of Settings.",
-	"src/lib/frontend/components/ui/field-styles.ts :: h-9,rounded-md": "conduit-test-96d9 G/H: bordered fields follow the mockup's `.inp`/`.sel`: 7px radius and min-height literal px sizes so consumer heights and touch targets win without a collision."
+	"src/lib/frontend/components/ui/field-styles.ts :: h-9,rounded-md": "conduit-test-96d9 G/H: bordered fields follow the mockup's `.inp`/`.sel`: 7px radius and min-height literal px sizes so consumer heights and touch targets win without a collision.",
+	"src/lib/frontend/components/chat/MessageList.svelte :: left-1/2,translate-x-1/2": "The jump-to-latest button moved onto a zero-height sticky rail (so showing or hiding it never changes the scroll range); the rail's justify-center now centres it, so the button's own left-1/2 -translate-x-1/2 centring is gone."
 }

@@ -73,7 +73,6 @@ import {
 	clearProcessingTimeout,
 	getPermissionMode,
 	makeProcessingTimeoutHooks,
-	type OverridesState,
 	OverridesStateTag,
 	PROCESSING_TIMEOUT_DURATION,
 	setPermissionMode,
@@ -297,14 +296,6 @@ export class ProviderTurnDispatchFibersTag extends Context.Service<
 	FiberMap.FiberMap<string, void, unknown>
 >()("ProviderTurnDispatchFibers") {}
 
-export class ProviderTurnTimeoutRuntimeTag extends Context.Service<
-	ProviderTurnTimeoutRuntimeTag,
-	{
-		readonly runtime: Context.Context<OverridesStateTag>;
-		readonly overridesRef: Ref.Ref<OverridesState>;
-	}
->()("ProviderTurnTimeoutRuntime") {}
-
 const loadClaudeHistoryMetadata = (sessionId: string) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
@@ -418,13 +409,14 @@ const failUnfinishedSend = (
 		yield* failTurn(input.sessionId, error, code, inputId);
 	});
 
-const makeEventSink = (sessionId: string, driver: ProviderDriverKind) =>
-	Effect.gen(function* () {
-		const pendingInteractionService = yield* PendingInteractionServiceTag;
-		const { runtime, overridesRef } = yield* ProviderTurnTimeoutRuntimeTag;
-		const persist = yield* ClaudeEventPersistEffectTag;
-		const ingestion = yield* ProviderRuntimeIngestionTag;
-		return createRelayEventSink({
+export const makeEventSinkFactory = Effect.gen(function* () {
+	const pendingInteractionService = yield* PendingInteractionServiceTag;
+	const runtime = yield* Effect.context<OverridesStateTag>();
+	const overridesRef = yield* OverridesStateTag;
+	const persist = yield* ClaudeEventPersistEffectTag;
+	const ingestion = yield* ProviderRuntimeIngestionTag;
+	return (sessionId: string, driver: string) =>
+		createRelayEventSink({
 			sessionId,
 			providerId: driver,
 			...makeProcessingTimeoutHooks(runtime, sessionId),
@@ -461,7 +453,7 @@ const makeEventSink = (sessionId: string, driver: ProviderDriverKind) =>
 					),
 			},
 		});
-	});
+});
 
 const TURN_END_TYPES = new Set([
 	"turn.completed",
@@ -684,7 +676,10 @@ const prepareEngineTurnInput = (
 		const providerState = yield* providerStateEffect.getState(
 			resolvedInput.sessionId,
 		);
-		const eventSink = yield* makeEventSink(resolvedInput.sessionId, driver);
+		const eventSink = (yield* makeEventSinkFactory)(
+			resolvedInput.sessionId,
+			driver,
+		);
 		const imageList =
 			resolvedInput.images && resolvedInput.images.length > 0
 				? Array.from(resolvedInput.images)

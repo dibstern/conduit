@@ -39,9 +39,10 @@
 		onreorder: (next: T[]) => void;
 		/** The row's content, after the handle. */
 		row: Snippet<[item: T, index: number]>;
-		/** Cards keep the handle beside their heading, with details underneath. */
+		/** Cards and trees keep the handle beside their heading, with details underneath. */
 		details?: Snippet<[item: T, index: number]>;
-		variant?: "rows" | "cards";
+		/** Trees are borderless: a group heading over its own rows. */
+		variant?: "rows" | "cards" | "tree";
 		/** Names the list for assistive tech. */
 		ariaLabel: string;
 		disabled?: boolean | undefined;
@@ -208,7 +209,7 @@
 <ul
 	bind:this={listEl}
 	aria-label={ariaLabel}
-	class="relative flex flex-col {variant === 'cards' ? 'gap-[8px]' : 'gap-[6px]'} {className}"
+	class="relative flex flex-col {variant === 'cards' ? 'gap-[8px]' : variant === 'rows' ? 'gap-[6px]' : ''} {className}"
 	{onfocusout}
 	{onpointermove}
 	onpointerup={(event) => onpointerend(event, true)}
@@ -220,10 +221,10 @@
 			animate:flip={{ duration: reducedMotion.current || (isLifted && lifted?.by === "pointer") ? 0 : 150 }}
 			data-testid="sortable-row"
 			data-lifted={isLifted || undefined}
-			class="min-h-[30px] border bg-bg text-[11.5px] text-text-secondary {variant === 'cards' ? 'rounded-[12px] px-[11px] py-[9px]' : 'rounded-[7px] p-[6px]'} {isLifted ? 'relative z-10 border-border shadow-modal' : variant === 'cards' ? 'border-border' : 'border-border-subtle'}"
+			class="{variant === 'tree' ? 'rounded-panel' : 'min-h-[30px] border bg-bg text-[11.5px] text-text-secondary'} {variant === 'cards' ? 'rounded-[12px] px-[11px] py-[9px]' : variant === 'rows' ? 'rounded-[7px] p-[6px]' : ''} {isLifted ? 'relative z-10 shadow-modal' : ''} {isLifted ? (variant === 'tree' ? 'bg-bg-surface' : 'border-border') : variant === 'cards' ? 'border-border' : variant === 'rows' ? 'border-border-subtle' : ''}"
 			style:transform={isLifted && lifted?.by === "pointer" ? `translateY(${offset}px)` : undefined}
 		>
-			<div class="flex min-w-0 items-center {variant === 'cards' ? 'gap-[7px]' : 'gap-[8px]'}">
+			<div class="flex min-w-0 items-center {variant === 'cards' ? 'gap-[7px]' : variant === 'rows' ? 'gap-[8px]' : ''}">
 			<button
 				type="button"
 				data-sortable-handle
@@ -232,7 +233,7 @@
 				aria-describedby="{id}-instructions"
 				aria-pressed={isLifted}
 				{disabled}
-				class="-my-[2px] shrink-0 cursor-grab touch-none select-none rounded-[4px] px-[2px] leading-none text-text-dimmer hover:text-text-secondary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text disabled:cursor-default disabled:opacity-50 {isLifted ? 'cursor-grabbing text-text-secondary' : ''}"
+				class="-my-[2px] shrink-0 cursor-grab touch-none select-none rounded-[4px] px-[2px] leading-none text-text-dimmer hover:text-text-secondary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text disabled:cursor-default disabled:opacity-50 {variant === 'tree' ? 'min-h-[44px] md:min-h-[28px] w-[24px] md:w-[11px]' : ''} {isLifted ? 'cursor-grabbing text-text-secondary' : ''}"
 				onkeydown={(event) => onkeydown(event, item)}
 				onpointerdown={(event) => onpointerdown(event, item)}
 				><span aria-hidden="true">{variant === "cards" ? "⠿" : "⋮⋮"}</span></button>

@@ -226,6 +226,8 @@ const relayOpenCodeInstances = (
 			instances.useIfRunning(target(instanceId), directory),
 		ifRunning: (instanceId, directory = scope) =>
 			instances.ifRunning(target(instanceId), directory),
+		isManagedStopped: (instanceId) =>
+			instances.isManagedStopped(target(instanceId)),
 		stop: (instanceId) => instances.stop(target(instanceId)),
 	};
 };

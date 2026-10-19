@@ -633,6 +633,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 				Pick<
 					NodeJS.ProcessEnv,
 					| "CONDUIT_SERVICE"
+					| "CONDUIT_OUTBOX_DRAIN_INTERVAL_MS"
 					| "CONDUIT_TAILSCALE_BIN"
 					| "CONDUIT_BUILD_READY_PATH"
 					| "NODE_OPTIONS"

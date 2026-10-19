@@ -24,11 +24,24 @@
 	import Button from "../ui/Button.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import SortableList from "../ui/SortableList.svelte";
+	import ProjectSquare from "./ProjectSquare.svelte";
+	import {
+		projectTreeState,
+		setProjectOrder,
+		toggleProjectCollapsed,
+		toggleProjectShowingAll,
+		type ProjectTreeNode,
+	} from "../../stores/project-tree.svelte.js";
 
-	let { arrangement, fullArrangement, drafts = [], isEmpty, emptyMessage, statusFilter, searching, filteredLength, snoozedShelfOpen, settledShelfOpen, pagerPending, unavailableProjectLabels, selectMode, selectedSessionIds, menuOpenId, renamingSessionId, getProjectLabel, getProjectAccent, oncontextmenu, ontoggleselection, onrenamestart, onrenameend }: {
+	let { arrangement, fullArrangement, drafts = [], tree, reorderable, isEmpty, emptyMessage, statusFilter, searching, filteredLength, snoozedShelfOpen, settledShelfOpen, pagerPending, unavailableProjectLabels, selectMode, selectedSessionIds, menuOpenId, renamingSessionId, getProjectLabel, getProjectAccent, oncontextmenu, ontoggleselection, onrenamestart, onrenameend }: {
 		arrangement: SessionProjection;
 		fullArrangement: SessionProjection;
 		drafts?: readonly DraftListItem[];
+		/** The project tree, when the list is grouped by project. */
+		tree: ProjectTreeNode[] | null;
+		/** The tree shows every project, so a drag can save the whole order. */
+		reorderable: boolean;
 		isEmpty: boolean;
 		emptyMessage: string;
 		statusFilter: SessionStatusFilter | null;
@@ -49,6 +62,8 @@
 		onrenamestart: (id: string) => void;
 		onrenameend: () => void;
 	} = $props();
+	/** Manual order drags projects by a handle in the header's left padding. */
+	const sortable = $derived(reorderable && projectTreeState.sort === "manual");
 	let heldSessionId = $state<string | null>(null);
 	let sentinelEl: HTMLElement | undefined = $state();
 	// Until the user scrolls, paging is background fill (a list kept short by a
@@ -83,7 +98,7 @@
 	     per section because the row is about to grow: the shelves and the
 	     per-row commands each land in their own ticket, and copies would mean one
 	     edit each with any divergence between them invisible. -->
-	{#snippet sessionRow(s: SessionInfo)}
+	{#snippet sessionRow(s: SessionInfo, underProject = false)}
 		{@const settled = s.pinnedAt == null && s.settledAt != null}
 		{@const snoozed = !settled && s.pinnedAt == null && isSessionSnoozed(s, sessionState.now)}
 		{@const primary = projectState.projects.find((project) => project.slug === s.projectSlug)?.folders[0]}
@@ -96,7 +111,7 @@
 			snoozedUntilText={snoozed ? formatSnoozeTime(s.snoozedUntil ?? null, sessionState.now) : undefined}
 			now={sessionState.now}
 			href={getSessionHref(s.id)}
-			projectLabel={getProjectLabel(s)}
+			projectLabel={underProject ? undefined : getProjectLabel(s)}
 			projectAccent={getProjectAccent(s)}
 			branch={primary && effectiveWorkingDirectory(primary, s.workspace) !== primary ? s.git?.branch : undefined}
 			active={s.id === sessionState.currentId}
@@ -118,6 +133,61 @@
 			onrenamestart={() => onrenamestart(s.id)}
 			{onrenameend}
 		/>
+	{/snippet}
+
+	<!-- A project's header: collapse toggle, then a new draft in that project. -->
+	{#snippet projectHeader(node: ProjectTreeNode)}
+		<div class="session-group-label group flex min-w-0 flex-1 items-center" data-testid="project-tree-header" data-project={node.slug}>
+			<Button
+				variant="ghost"
+				size="content"
+				layout="flow"
+				tone="inherit"
+				hoverFill="none"
+				class="flex min-w-0 flex-1 items-center gap-[7px] min-h-[44px] md:min-h-[30px] {sortable ? 'pl-0' : 'pl-[11px]'} pr-[7px] rounded-panel text-left text-text-secondary hover:text-text font-brand"
+				data-testid="project-tree-toggle"
+				aria-expanded={!node.collapsed}
+				aria-controls="project-tree-rows-{node.slug}"
+				onclick={() => { if (!searching && statusFilter === null) toggleProjectCollapsed(node.slug); }}
+			>
+				<Icon name={node.collapsed ? "chevron-right" : "chevron-down"} size={12} class="shrink-0 text-text-dimmer" />
+				<ProjectSquare label={node.title} accent={projectAccent(node.slug)} />
+				<span class="truncate text-base font-medium" data-testid="project-tree-title">{node.title}</span>
+				<span class="ml-auto pl-2 text-xs tabular-nums text-text-dimmer md:group-hover:hidden md:group-focus-within:hidden">{node.sessions.length}</span>
+			</Button>
+			<Button
+				variant="ghost"
+				size="content"
+				tone="muted"
+				hoverFill="alt"
+				iconOnly
+				icon="plus"
+				iconSize={14}
+				class="shrink-0 justify-center min-h-[44px] min-w-[44px] md:min-h-[24px] md:min-w-[24px] rounded-md md:hidden md:group-hover:inline-flex md:group-focus-within:inline-flex"
+				title="New session in {node.title}"
+				ariaLabel="New session in {node.title}"
+				data-testid="project-tree-new-session"
+				disabled={!node.available}
+				onclick={() => selection.openDraft(node.slug)}
+			/>
+		</div>
+	{/snippet}
+
+	{#snippet projectRows(node: ProjectTreeNode)}
+		<div id="project-tree-rows-{node.slug}" class="pl-[17px] pb-1" data-testid="project-tree-rows">
+			{#each node.shown as s (s.id)}{@render sessionRow(s, true)}{/each}
+			{#if node.empty && !node.collapsed}
+				<div class="py-1 pl-[36px] text-xs text-text-dimmer font-brand" data-testid="project-tree-empty">No sessions</div>
+			{/if}
+			{#if node.more}
+				<TextButton
+					tone="dimmer"
+					class="min-h-[44px] md:min-h-0 py-1 pl-[36px] text-xs font-brand"
+					data-testid="project-tree-more"
+					onclick={() => toggleProjectShowingAll(node.slug)}
+				>{node.more === "more" ? "Show more" : "Show less"}</TextButton>
+			{/if}
+		</div>
 	{/snippet}
 
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -144,7 +214,7 @@
 					</div>
 				{/each}
 			</div>
-		{:else if isEmpty && drafts.length === 0}
+		{:else if isEmpty && drafts.length === 0 && !tree?.length}
 			<div class="session-empty py-6 px-3.5 text-center text-xs text-text-dimmer font-brand" data-testid={statusFilter !== null && (!searching || filteredLength > 0) ? "session-filter-empty" : undefined}>
 				{emptyMessage}
 				{#if statusFilter !== null && (!searching || filteredLength > 0)}
@@ -152,14 +222,29 @@
 				{/if}
 			</div>
 		{:else}
-			{#each arrangement.sections as section (section.key)}
+			{#if tree && sortable}
+				<SortableList
+					variant="tree"
+					items={tree}
+					key={(node) => node.slug}
+					label={(node) => node.title}
+					ariaLabel="Projects"
+					onreorder={(next) => setProjectOrder(next.map((node) => node.slug))}
+					row={projectHeader}
+					details={projectRows}
+				/>
+			{:else if tree}
+				{#each tree as node (node.slug)}{@render projectHeader(node)}{@render projectRows(node)}{/each}
+			{:else}
+				{#each arrangement.sections as section (section.key)}
 					<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand">
 						<span>{section.label}</span>{" "}<span class="ml-auto font-medium">{fullArrangement.sections.find((group) => group.key === section.key)?.sessions.length ?? section.sessions.length}</span>
 					</div>
 					{#each section.sessions as s (s.id)}
 						{@render sessionRow(s)}
 					{/each}
-			{/each}
+				{/each}
+			{/if}
 			{#if arrangement.snoozed.length > 0}
 				<TextButton
 					tone="dimmer"

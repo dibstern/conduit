@@ -2,7 +2,7 @@
 
 import type { SDKControlInterruptResponse } from "@anthropic-ai/claude-agent-sdk";
 import type { Effect } from "effect";
-import { describe, expect, expectTypeOf, it } from "vitest";
+import { describe, expectTypeOf, it } from "vitest";
 import type { EffectPromptQueueClosed } from "../../../../src/lib/provider/claude/effect-prompt-queue.js";
 import type {
 	ClaudeResumeCursor,
@@ -12,8 +12,6 @@ import type {
 	PromptQueueController,
 	Query,
 	SDKMessage,
-	SDKUserMessage,
-	ToolInFlight,
 } from "../../../../src/lib/provider/claude/types.js";
 
 describe("Claude provider instance types", () => {
@@ -34,7 +32,6 @@ describe("Claude provider instance types", () => {
 			turnCount: 3,
 		};
 		expectTypeOf(cursor).toMatchTypeOf<ClaudeResumeCursor>();
-		expect(cursor.turnCount).toBe(3);
 	});
 
 	it("PendingApproval carries resolve and reject", () => {
@@ -69,18 +66,6 @@ describe("Claude provider instance types", () => {
 		expectTypeOf<ClaudeSessionContext>().toHaveProperty("stopped");
 	});
 
-	it("ToolInFlight tracks streaming tool_use blocks", () => {
-		const tool: ToolInFlight = {
-			itemId: "tool-1",
-			toolName: "Bash",
-			title: "Command run",
-			input: { command: "ls" },
-			partialInputJson: "",
-		};
-		expect(tool.toolName).toBe("Bash");
-		expect(tool.itemId).toBe("tool-1");
-	});
-
 	it("PromptQueueController has enqueue and close", () => {
 		expectTypeOf<PromptQueueController>().toHaveProperty("enqueue");
 		expectTypeOf<PromptQueueController>().toHaveProperty("close");
@@ -90,17 +75,5 @@ describe("Claude provider instance types", () => {
 		expectTypeOf<PromptQueueController["close"]>().returns.toEqualTypeOf<
 			Effect.Effect<void>
 		>();
-	});
-
-	it("SDKUserMessage has the expected shape", () => {
-		const msg = {
-			type: "user" as const,
-			message: {
-				role: "user" as const,
-				content: [{ type: "text", text: "Hello" }],
-			},
-			parent_tool_use_id: null,
-		} satisfies SDKUserMessage;
-		expect(msg.type).toBe("user");
 	});
 });

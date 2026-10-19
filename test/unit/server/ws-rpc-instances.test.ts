@@ -3,8 +3,23 @@ import { Effect, Layer } from "effect";
 import { RpcTest } from "effect/rpc";
 import { afterEach, expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
+import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import {
+	addInstance,
+	getInstances,
+	makeInstanceManagerStateLive,
+	persistConfig,
+	updateInstance,
+} from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import {
+	InstanceManagementServiceError,
+	InstanceManagementServiceTag,
+} from "../../../src/lib/domain/relay/Services/instance-management-service.js";
 import { ScanServiceTag } from "../../../src/lib/domain/relay/Services/scan-service.js";
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
+import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import type { OpenCodeInstance } from "../../../src/lib/shared-types.js";
 import {
@@ -38,6 +53,71 @@ const makeInstanceMgmt = (
 	persistConfig: vi.fn(),
 	...overrides,
 });
+
+const metadataLayer = () => {
+	const flushConfig = vi.fn();
+	const state = Layer.mergeAll(
+		makeInstanceManagerStateLive(
+			undefined,
+			[{ ...instance, driver: "claude", configDir: "/profiles/original" }],
+			{
+				launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
+			},
+		),
+		DaemonEventBusLive,
+		Layer.succeed(ConfigPersistenceTag)({
+			requestSave: Effect.void,
+			flush: Effect.sync(flushConfig),
+		}),
+	);
+	const service = Layer.effect(
+		InstanceManagementServiceTag,
+		Effect.gen(function* () {
+			const context = yield* Effect.context<Layer.Success<typeof state>>();
+			const list = getInstances.pipe(Effect.provide(context));
+			const update = (
+				id: string,
+				input: Parameters<typeof updateInstance>[1],
+			) =>
+				updateInstance(id, input).pipe(
+					Effect.andThen(persistConfig),
+					Effect.andThen(getInstances),
+					Effect.provide(context),
+					Effect.mapError(
+						(cause) =>
+							new InstanceManagementServiceError({
+								operation: "update",
+								cause,
+							}),
+					),
+				);
+			return {
+				list: () => list,
+				add: (input) =>
+					addInstance(input).pipe(
+						Effect.andThen(persistConfig),
+						Effect.andThen(getInstances),
+						Effect.provide(context),
+						Effect.mapError(
+							(cause) =>
+								new InstanceManagementServiceError({ operation: "add", cause }),
+						),
+					),
+				update,
+				rename: (id, name) => update(id, { name }),
+				start: () => Effect.die("Unexpected process start"),
+				stop: () => Effect.die("Unexpected process stop"),
+				remove: () => Effect.die("Unexpected removal"),
+			};
+		}),
+	).pipe(Layer.provideMerge(state));
+	return {
+		flushConfig,
+		layer: WsRpcServerLayer.pipe(
+			Layer.provideMerge(Layer.merge(makeTestHandlerLayer(), service)),
+		),
+	};
+};
 
 afterEach(() => {
 	vi.unstubAllGlobals();
@@ -108,43 +188,33 @@ describe("WsRpcServerLayer instance management", () => {
 	});
 
 	it.effect("delegates the rename to the account directory", () => {
-		const wsHandler = makeMockWebSocketHandler();
-		const updateInstance = vi.fn(() => instance);
-		const persistConfig = vi.fn();
-		const instanceMgmt = makeInstanceMgmt({ updateInstance, persistConfig });
-
+		const { layer, flushConfig } = metadataLayer();
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
+			const directory = yield* AccountDirectory;
 			const response = yield* client.RenameInstance({
 				projectSlug: "proj-1",
 				instanceId: "inst-1",
 				name: "  Primary  ",
 			});
-
-			expect(updateInstance).toHaveBeenCalledWith("inst-1", {
-				name: "  Primary  ",
-			});
-			expect(persistConfig).toHaveBeenCalled();
-			expect(response.instances).toEqual([instance]);
-		}).pipe(
-			Effect.scoped,
-			Effect.provide(
-				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ instanceMgmt, wsHandler })),
-				),
-				{ local: true },
-			),
-		);
+			expect(response.instances).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({ id: "inst-1", name: "Primary" }),
+				]),
+			);
+			expect(
+				(yield* directory.list).find((account) => account.id === "inst-1")
+					?.name,
+			).toBe("Primary");
+			expect(flushConfig).toHaveBeenCalled();
+		}).pipe(Effect.scoped, Effect.provide(layer, { local: true }));
 	});
 
 	it.effect("adds an unmanaged OpenCode instance with driver + url", () => {
-		const wsHandler = makeMockWebSocketHandler();
-		const addInstance = vi.fn(() => instance);
-		const persistConfig = vi.fn();
-		const instanceMgmt = makeInstanceMgmt({ addInstance, persistConfig });
-
+		const { layer, flushConfig } = metadataLayer();
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
+			const directory = yield* AccountDirectory;
 			const response = yield* client.AddInstance({
 				projectSlug: "proj-1",
 				name: "Staging OC",
@@ -152,93 +222,87 @@ describe("WsRpcServerLayer instance management", () => {
 				managed: false,
 				url: "http://127.0.0.1:4099",
 			});
-
-			expect(addInstance).toHaveBeenCalledWith(
-				expect.objectContaining({
-					name: "Staging OC",
-					driver: "opencode",
-					url: "http://127.0.0.1:4099",
-					managed: false,
-				}),
+			expect(response.instances).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "Staging OC",
+						driver: "opencode",
+						managed: false,
+						url: "http://127.0.0.1:4099",
+					}),
+				]),
 			);
-			expect(persistConfig).toHaveBeenCalled();
-			expect(response.instances).toEqual([instance]);
-		}).pipe(
-			Effect.scoped,
-			Effect.provide(
-				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ instanceMgmt, wsHandler })),
+			expect(
+				(yield* directory.list).find(
+					(account) => account.name === "Staging OC",
 				),
-				{ local: true },
-			),
-		);
+			).toMatchObject({
+				driver: "opencode",
+				managed: false,
+				url: "http://127.0.0.1:4099",
+			});
+			expect(flushConfig).toHaveBeenCalled();
+		}).pipe(Effect.scoped, Effect.provide(layer, { local: true }));
 	});
 
 	it.effect("adds a Claude instance as a config-only record", () => {
-		const wsHandler = makeMockWebSocketHandler();
-		const addInstance = vi.fn(() => instance);
-		const instanceMgmt = makeInstanceMgmt({ addInstance });
-
+		const { layer, flushConfig } = metadataLayer();
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
-			yield* client.AddInstance({
+			const directory = yield* AccountDirectory;
+			const response = yield* client.AddInstance({
 				projectSlug: "proj-1",
 				name: "Work Claude",
 				driver: "claude",
 				managed: false,
 				configDir: "/profiles/work",
 			});
-
-			// Claude instances persist driver + configDir with no server url.
-			expect(addInstance).toHaveBeenCalledWith(
-				expect.objectContaining({
-					name: "Work Claude",
-					driver: "claude",
-					configDir: "/profiles/work",
-					managed: false,
-				}),
+			const added = response.instances.find(
+				(item) => item.name === "Work Claude",
 			);
-		}).pipe(
-			Effect.scoped,
-			Effect.provide(
-				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ instanceMgmt, wsHandler })),
+			expect(added).toMatchObject({
+				driver: "claude",
+				configDir: "/profiles/work",
+				managed: false,
+			});
+			expect(added?.url).toBeUndefined();
+			expect(
+				(yield* directory.list).find(
+					(account) => account.name === "Work Claude",
 				),
-				{ local: true },
-			),
-		);
+			).toMatchObject({ driver: "claude", configuredFolder: "/profiles/work" });
+			expect(flushConfig).toHaveBeenCalled();
+		}).pipe(Effect.scoped, Effect.provide(layer, { local: true }));
 	});
 
 	it.effect("updates an instance name + configDir", () => {
-		const wsHandler = makeMockWebSocketHandler();
-		const updateInstance = vi.fn(() => instance);
-		const persistConfig = vi.fn();
-		const instanceMgmt = makeInstanceMgmt({ updateInstance, persistConfig });
-
+		const { layer, flushConfig } = metadataLayer();
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
+			const directory = yield* AccountDirectory;
 			const response = yield* client.UpdateInstance({
 				projectSlug: "proj-1",
 				instanceId: "inst-1",
 				name: "Renamed",
 				configDir: "/profiles/personal",
 			});
-
-			expect(updateInstance).toHaveBeenCalledWith("inst-1", {
+			expect(response.instances).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						id: "inst-1",
+						name: "Renamed",
+						configDir: "/profiles/personal",
+					}),
+				]),
+			);
+			expect(
+				(yield* directory.list).find((account) => account.id === "inst-1"),
+			).toMatchObject({
 				name: "Renamed",
-				configDir: "/profiles/personal",
+				configuredFolder: "/profiles/personal",
 			});
-			expect(persistConfig).toHaveBeenCalled();
-			expect(response.instances).toEqual([instance]);
-		}).pipe(
-			Effect.scoped,
-			Effect.provide(
-				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ instanceMgmt, wsHandler })),
-				),
-				{ local: true },
-			),
-		);
+			expect(flushConfig).toHaveBeenCalled();
+		}).pipe(Effect.scoped, Effect.provide(layer, { local: true }));
 	});
 
 	it.effect("returns scan results through RPC", () => {

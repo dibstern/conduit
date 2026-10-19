@@ -15,6 +15,7 @@ export default defineConfig({
 		"daemon-*.spec.ts",
 		// playwright-harness.config.ts: isolated daemon processes with recorded providers.
 		"harness-*.spec.ts",
+		"usage-footer-meter.spec.ts",
 		"settings-server-status.spec.ts",
 		"settings-server-logs.spec.ts",
 		"settings-pin.spec.ts",
@@ -24,19 +25,13 @@ export default defineConfig({
 		"settings-access.spec.ts",
 		// playwright-live.config.ts: an ephemeral OpenCode instance.
 		"live-smoke.spec.ts",
-		// playwright-multi-instance.config.ts: Vite preview with a mocked WebSocket.
+		// playwright-preview.config.ts: Vite preview with a mocked WebSocket.
 		"multi-instance.spec.ts",
-		// playwright-notification-nav.config.ts: Vite preview with a mocked WebSocket.
 		"notification-session-nav.spec.ts",
-		// playwright-notification-indicators.config.ts: Vite preview with a mocked WebSocket.
 		"notification-indicators.spec.ts",
-		// playwright-project-scope.config.ts: Vite preview with a mocked WebSocket.
 		"project-scope.spec.ts",
-		// playwright-question-flow.config.ts: Vite preview with a mocked WebSocket.
 		"question-flow.spec.ts",
-		// playwright-subagent.config.ts: Vite preview with a mocked WebSocket.
 		"subagent-sessions.spec.ts",
-		// playwright-variant.config.ts: Vite preview with a mocked WebSocket.
 		"variant-selector.spec.ts",
 		"context-window-selector.spec.ts",
 		"permission-mode-selector.spec.ts",
@@ -44,8 +39,6 @@ export default defineConfig({
 		"composer-large-paste.spec.ts",
 		"todo-overlay-feed.spec.ts",
 		"composer-agent-list-race.spec.ts",
-		// playwright-visual.config.ts: visual snapshot suite.
-		"visual-mockup.spec.ts",
 		"composer-layout.spec.ts",
 	],
 	fullyParallel: true,

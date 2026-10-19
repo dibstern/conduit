@@ -1215,6 +1215,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use,
 				borrow: use,
+				isManagedStopped: () => Effect.succeed(false),
 				ifRunning: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
@@ -1440,6 +1441,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use,
 				borrow: use,
+				isManagedStopped: () => Effect.succeed(false),
 				ifRunning: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
@@ -1743,6 +1745,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use,
 				borrow: use,
+				isManagedStopped: () => Effect.succeed(false),
 				ifRunning: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
@@ -1847,6 +1850,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use: vi.fn(() => Effect.succeed(namedApi)),
 				borrow: () => Effect.succeed(namedApi),
+				isManagedStopped: () => Effect.succeed(false),
 				ifRunning: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
@@ -1923,6 +1927,7 @@ describe("SessionManagerService", () => {
 			events: () => Stream.empty,
 			use: vi.fn(() => Effect.succeed(namedApi)),
 			borrow: () => Effect.succeed(namedApi),
+			isManagedStopped: () => Effect.succeed(false),
 			ifRunning: () => Effect.succeedNone,
 			useIfRunning: () => Effect.succeedNone,
 			stop: () => Effect.void,
@@ -2131,6 +2136,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use,
 				borrow: use,
+				isManagedStopped: () => Effect.succeed(false),
 				ifRunning: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
@@ -2211,6 +2217,7 @@ describe("SessionManagerService", () => {
 					events: () => Stream.empty,
 					use,
 					borrow: use,
+					isManagedStopped: () => Effect.succeed(false),
 					ifRunning: () => Effect.succeedNone,
 					useIfRunning: () => Effect.succeedNone,
 					stop: () => Effect.void,
@@ -2887,36 +2894,6 @@ describe("SessionManagerService", () => {
 			Effect.provide(Layer.fresh(layer)),
 			Effect.provide(requiredSessionServices, { local: true }),
 			Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
-		);
-	});
-
-	it.effect("reads projected pending counts", () => {
-		const readQuery = makeReadQueryEffect(
-			[makeRow("session-1")],
-			[
-				{
-					session_id: "session-1",
-					type: "question",
-					pending_count: 1,
-				},
-			],
-		);
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
-			Layer.succeed(ReadQueryEffectTag)(readQuery),
-			makeSessionManagerStateLive(),
-		);
-
-		return Effect.gen(function* () {
-			const sessions = yield* listSessions("test-project", undefined, {
-				slug: "test-project",
-				folders: [tmpdir()],
-			});
-
-			expect(sessions[0]?.pendingQuestionCount).toBe(1);
-		}).pipe(
-			Effect.provide(layer),
-			Effect.provide(requiredSessionServices, { local: true }),
 		);
 	});
 

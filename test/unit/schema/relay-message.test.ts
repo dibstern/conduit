@@ -63,13 +63,4 @@ describe("RelayMessage Schema", () => {
 			),
 		).toBe(true);
 	});
-
-	it("RelayMessage type is compatible with existing code", () => {
-		const msg: typeof RelayMessageSchema.Type = {
-			type: "delta",
-			sessionId: "s1",
-			text: "hello",
-		};
-		expect(msg.type).toBe("delta");
-	});
 });

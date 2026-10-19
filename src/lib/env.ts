@@ -136,6 +136,13 @@ export const ENV = {
 		1,
 		2_147_483_647,
 	),
+	/** Outbox polling matches the initial one-second provider retry backoff. */
+	outboxDrainIntervalMs: parseBoundedInteger(
+		process.env["CONDUIT_OUTBOX_DRAIN_INTERVAL_MS"],
+		1000,
+		1,
+		2_147_483_647,
+	),
 	/** Daemon-internal setup deadline; integration fixtures use a short timeout. */
 	worktreeSetupTimeoutMs: parseBoundedInteger(
 		process.env["CONDUIT_WORKTREE_SETUP_TIMEOUT_MS"],

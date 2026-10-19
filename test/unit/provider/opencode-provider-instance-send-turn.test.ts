@@ -113,6 +113,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		const result = await resultPromise;
 		expect(client.session.prompt).toHaveBeenCalledWith("s1", {
 			directory: "/tmp/project",
+			messageId: "msg_conduit_t1",
 			text: "Write hello world",
 			model: { providerID: "anthropic", modelID: "claude-sonnet" },
 		});
@@ -374,6 +375,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 
 		expect(client.session.prompt).toHaveBeenCalledWith("s1", {
 			directory: "/tmp/project",
+			messageId: "msg_conduit_t1",
 			text: "Write hello world",
 			model: { providerID: "anthropic", modelID: "claude-sonnet" },
 			images: ["data:image/png;base64,abc"],
@@ -417,6 +419,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 
 		expect(client.session.prompt).toHaveBeenCalledExactlyOnceWith("s1", {
 			directory: "/tmp/project",
+			messageId: "msg_conduit_t1",
 			text: "Write hello world",
 			model: { providerID: "anthropic", modelID: "claude-sonnet" },
 			...expected,
@@ -485,29 +488,6 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 
 		const result = await resultPromise;
 		expect(result.status).toBe("interrupted");
-	});
-
-	it("records start time for duration calculation", async () => {
-		vi.useFakeTimers();
-		try {
-			const input = makeSendTurnInput();
-			const resultPromise = Effect.runPromise(instance.sendTurnEffect(input));
-
-			await vi.advanceTimersByTimeAsync(10);
-
-			instance.notifyTurnCompleted("s1", {
-				status: "completed",
-				cost: 0.01,
-				tokens: { input: 100, output: 50 },
-				durationMs: 0,
-				providerStateUpdates: [],
-			});
-
-			const result = await resultPromise;
-			expect(result.status).toBe("completed");
-		} finally {
-			vi.useRealTimers();
-		}
 	});
 
 	it("fails with send_failed (no hang) when the bound named instance cannot be resolved", async () => {

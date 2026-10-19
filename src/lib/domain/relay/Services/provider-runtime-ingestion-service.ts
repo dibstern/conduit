@@ -96,6 +96,8 @@ export interface ProviderRuntimeIngestion {
 			readonly sessionPicks?: ReadonlyMap<string, TurnSettings>;
 			readonly publishToBus?: boolean;
 			readonly publishToRelay?: boolean;
+			/** Runs inside the append transaction, before any projection. */
+			readonly beforeProject?: Effect.Effect<void, SqlError>;
 			readonly beforeCommit?: Effect.Effect<void, SqlError>;
 			readonly afterCommit?: Effect.Effect<void>;
 		},
@@ -164,6 +166,7 @@ export const makeProviderRuntimeIngestionLive = (
 					readonly sessionPicks?: ReadonlyMap<string, TurnSettings>;
 					readonly publishToBus?: boolean;
 					readonly publishToRelay?: boolean;
+					readonly beforeProject?: Effect.Effect<void, SqlError>;
 					readonly beforeCommit?: Effect.Effect<void, SqlError>;
 					readonly afterCommit?: Effect.Effect<void>;
 					readonly onPrompt?: (id: string) => Effect.Effect<void>;
@@ -392,6 +395,7 @@ export const makeProviderRuntimeIngestionLive = (
 								.write(
 									(project, stamp) =>
 										Effect.gen(function* () {
+											yield* ingestOptions.beforeProject ?? Effect.void;
 											// Claim inside the append transaction, before event IDs or
 											// projections are written. Replayed and fenced frames are no-ops.
 											if (context && (receipt || context.attachmentId))

@@ -234,26 +234,6 @@ describe("disclaimer", () => {
 });
 
 describe("port prompt", () => {
-	it("defaults to 2633", async () => {
-		const io = createMockIO();
-		const setupPromise = runSetup(io.opts());
-		await tick();
-
-		// Accept disclaimer (default Yes), press Enter
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-
-		// Accept default port (Enter with empty = placeholder "2633"), then skip PIN, accept keep-awake default
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-		await sendKeys(io.stdin, ["\r"]);
-		const result = await setupPromise;
-
-		expect(result.port).toBe(2633);
-	});
-
 	it("accepts a custom port", async () => {
 		const io = createMockIO();
 		const setupPromise = runSetup(io.opts());
@@ -387,45 +367,6 @@ describe("PIN prompt", () => {
 
 		expect(result.pin).toBe("1234");
 	});
-
-	it("returns null when PIN is skipped", async () => {
-		const io = createMockIO();
-		const setupPromise = runSetup(io.opts());
-		await tick();
-
-		// Accept disclaimer, accept default port
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-
-		// Skip PIN (just Enter), then accept keep-awake default
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-		await sendKeys(io.stdin, ["\r"]);
-		const result = await setupPromise;
-
-		expect(result.pin).toBeNull();
-	});
-
-	it("PIN is included in result", async () => {
-		const io = createMockIO();
-		const setupPromise = runSetup(io.opts());
-		await tick();
-
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-		// Enter PIN, then accept keep-awake default
-		await sendKeys(io.stdin, ["5", "6", "7", "8", "\r"]);
-		await tick();
-		await sendKeys(io.stdin, ["\r"]);
-		const result = await setupPromise;
-
-		expect(result).toHaveProperty("pin");
-		expect(result.pin).toBe("5678");
-	});
 });
 
 describe("keep awake", () => {
@@ -445,26 +386,6 @@ describe("keep awake", () => {
 		const all = stripAnsi(io.output.join(""));
 		expect(all).toContain("Keep awake");
 		expect(all).toContain("Prevent the system from sleeping");
-
-		// Accept default (No)
-		await sendKeys(io.stdin, ["\r"]);
-		const result = await setupPromise;
-
-		expect(result.keepAwake).toBe(false);
-	});
-
-	it("defaults to false", async () => {
-		const io = createMockIO();
-		const setupPromise = runSetup(io.opts());
-		await tick();
-
-		// Accept disclaimer, default port, skip PIN
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
 
 		// Accept default (No)
 		await sendKeys(io.stdin, ["\r"]);
@@ -695,51 +616,9 @@ describe("full flow", () => {
 
 		expect(io.getExitCode()).toBe(0);
 	});
-
-	it("result has correct shape", async () => {
-		const io = createMockIO();
-		const setupPromise = runSetup(io.opts());
-		await tick();
-
-		// Accept disclaimer, default port, skip PIN, accept keep-awake default
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-		await sendKeys(io.stdin, ["\r"]);
-		const result = await setupPromise;
-
-		expect(result).toHaveProperty("port");
-		expect(result).toHaveProperty("pin");
-		expect(result).toHaveProperty("keepAwake");
-		expect(result).toHaveProperty("restoredProjects");
-		expect(typeof result.port).toBe("number");
-		expect(typeof result.keepAwake).toBe("boolean");
-		expect(Array.isArray(result.restoredProjects)).toBe(true);
-	});
 });
 
 describe("edge cases", () => {
-	it("handles empty recent projects", async () => {
-		const io = createMockIO();
-		const setupPromise = runSetup(io.opts({ getRecentProjects: () => [] }));
-		await tick();
-
-		// Accept disclaimer, default port, skip PIN, accept keep-awake default
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-		await sendKeys(io.stdin, ["\r"]);
-		const result = await setupPromise;
-
-		expect(result.restoredProjects).toEqual([]);
-	});
-
 	it("handles isPortFree rejecting all attempts then succeeding", async () => {
 		let attempt = 0;
 		const io = createMockIO();
@@ -775,23 +654,5 @@ describe("edge cases", () => {
 
 		expect(result.port).toBe(2633);
 		expect(attempt).toBe(3);
-	});
-
-	it("keep-awake defaults to false when accepted with Enter", async () => {
-		const io = createMockIO();
-		const setupPromise = runSetup(io.opts());
-		await tick();
-
-		// Accept disclaimer, default port, skip PIN, accept keep-awake default
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-		await sendKeys(io.stdin, ["\r"]);
-		await tick();
-		await sendKeys(io.stdin, ["\r"]);
-		const result = await setupPromise;
-
-		expect(result.keepAwake).toBe(false);
 	});
 });

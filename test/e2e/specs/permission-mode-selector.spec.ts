@@ -18,7 +18,7 @@ import { mockRelayWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
 type Page = import("@playwright/test").Page;
 
 const PROJECT_URL = "/s/sess-pm-001";
-const BASE = "http://localhost:4173";
+const BASE = `http://localhost:${process.env["ACCEPTANCE_PORT"] ?? 4173}`;
 
 const existingSession = {
 	id: "sess-pm-001",

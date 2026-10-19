@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest";
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
-import { Cause, Effect, Fiber, Layer, Option } from "effect";
+import { Cause, Deferred, Effect, Fiber, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 
@@ -237,6 +237,7 @@ describe("file tree time limits", () => {
 	for (const stalledCall of ["list", "read"] as const) {
 		it.effect(`aborts the SDK ${stalledCall} HTTP request on timeout`, () => {
 			const signals: AbortSignal[] = [];
+			const requestStarted = Deferred.makeUnsafe<void>();
 			const aborted = vi.fn();
 			const log = makeMockLogger();
 			const baseUrl = "http://opencode.test";
@@ -252,6 +253,7 @@ describe("file tree time limits", () => {
 					}
 					signals.push(request.signal);
 					request.signal.addEventListener("abort", aborted, { once: true });
+					Deferred.doneUnsafe(requestStarted, Effect.void);
 					return new Promise<Response>(() => {});
 				},
 			});
@@ -262,6 +264,7 @@ describe("file tree time limits", () => {
 			});
 			return Effect.gen(function* () {
 				const fiber = yield* Effect.forkScoped(getFileTreeEntries());
+				yield* Deferred.await(requestStarted);
 				yield* TestClock.adjust(
 					stalledCall === "list" ? "4999 millis" : "14999 millis",
 				);

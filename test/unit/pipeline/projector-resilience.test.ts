@@ -1266,6 +1266,11 @@ describe("MessageProjector resilience", () => {
 				.map((m) => m.type);
 			// Expect: thinking → tool → thinking → assistant
 			expect(types).toEqual(["thinking", "tool", "thinking", "assistant"]);
+			expect(
+				chat
+					.filter((m): m is ThinkingMessage => m.type === "thinking")
+					.map((m) => m.text),
+			).toEqual(["pre-tool reasoning", "post-tool reasoning"]);
 		});
 	});
 

@@ -845,66 +845,6 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 		expect(msgCount).toBeGreaterThan(5);
 	});
 
-	test("infinite scroll prepends older messages without scroll jump", async ({
-		page,
-		relayUrl,
-	}) => {
-		// Create a session with 60 turns. With 50-message paging,
-		// only the newest page renders initially; older rows load through RPC.
-		const initMessages = createInitMessages(60);
-
-		const _wsMock = await mockRelayWebSocket(page, {
-			initMessages,
-			responses: new Map(),
-		});
-
-		await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
-		await page.locator("#connect-overlay").waitFor({
-			state: "hidden",
-			timeout: 15_000,
-		});
-		await waitForInitialMessages(page);
-
-		// Count initial messages
-		const initialCount = await page.evaluate(() => {
-			return document.querySelectorAll(".msg-container").length;
-		});
-
-		// Scroll up far enough to trigger HistoryLoader's IntersectionObserver
-		await scrollUpIncrementally(page, 3000);
-		const scrollBefore = await getScrollTop(page);
-
-		// Negative observation window: the test accepts either a prepend or no load at
-		// all, and nothing signals "no more history", so give HistoryLoader
-		// time to fire before sampling.
-		await page.waitForTimeout(2000);
-		await waitForStableScroll(page);
-
-		// Check if more messages were loaded
-		const afterCount = await page.evaluate(() => {
-			return document.querySelectorAll(".msg-container").length;
-		});
-
-		// If buffer had messages, count should increase.
-		// If not (all already loaded), this is still a valid test —
-		// the scroll position should remain stable regardless.
-		const scrollAfter = await getScrollTop(page);
-
-		if (afterCount > initialCount) {
-			// Messages were prepended — scroll position should be approximately
-			// preserved (not jumped to 0 or to bottom).
-			// The prepend adds height above, so scrollTop should increase by
-			// approximately the added height. We check that the user's viewport
-			// position is roughly preserved (within 50px).
-			const drift = Math.abs(scrollAfter - scrollBefore);
-			expect(drift).toBeLessThan(200);
-		} else {
-			// No prepend occurred — scroll position should be stable
-			const drift = Math.abs(scrollAfter - scrollBefore);
-			expect(drift).toBeLessThan(MAX_DRIFT_PX);
-		}
-	});
-
 	test("empty session shows content when first message streams in", async ({
 		page,
 		relayUrl,
@@ -1127,10 +1067,14 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 		expect(initialCount).toBeLessThan(100);
 		expect(initialCount).toBeGreaterThan(20);
 
-		// Scroll to the very top to trigger HistoryLoader
-		await page.evaluate(() => {
+		// Sample the existing anchor before the history RPC can prepend rows.
+		const anchorBefore = await page.evaluate(() => {
 			const el = document.getElementById("messages");
-			if (el) el.scrollTop = 0;
+			const anchor = el?.querySelector(".msg-user[data-uuid]");
+			const uuid = anchor?.getAttribute("data-uuid");
+			if (!el || !anchor || !uuid) throw new Error("Missing history anchor");
+			el.scrollTop = 0;
+			return { uuid, top: anchor.getBoundingClientRect().top };
 		});
 		await expect
 			.poll(
@@ -1146,6 +1090,11 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 		});
 
 		expect(afterCount).toBeGreaterThan(initialCount);
+		await waitForStableScroll(page);
+		const anchorAfter = await page
+			.locator(`.msg-user[data-uuid="${anchorBefore.uuid}"]`)
+			.evaluate((el) => el.getBoundingClientRect().top);
+		expect(Math.abs(anchorAfter - anchorBefore.top)).toBeLessThan(200);
 	});
 
 	test("a first page shorter than the pane keeps loading older pages", async ({
