@@ -30,3 +30,27 @@ export function shouldArchiveIdleSession(
 		facts.lastActivityAt < now - idleWindowMs
 	);
 }
+
+export interface AutoDeleteArchivedFacts {
+	readonly rootArchivedAt: number | null;
+	readonly pinned: boolean;
+	readonly hasPendingWork: boolean;
+	readonly hasLiveBackgroundWork: boolean;
+	readonly hasSurvivingFork: boolean;
+}
+
+export function shouldDeleteArchivedSessionTree(
+	facts: AutoDeleteArchivedFacts,
+	now: number,
+	windowMs: number | null,
+): boolean {
+	return (
+		windowMs !== null &&
+		facts.rootArchivedAt !== null &&
+		facts.rootArchivedAt <= now - windowMs &&
+		!facts.pinned &&
+		!facts.hasPendingWork &&
+		!facts.hasLiveBackgroundWork &&
+		!facts.hasSurvivingFork
+	);
+}

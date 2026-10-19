@@ -15,7 +15,7 @@
 	import { DEFAULT_WORKTREE_CLEANUP, type ProjectWorktreeCleanup, type WorktreeCleanup, type WorktreeCleanupReport } from "../../../contracts/worktree.js";
 	import Button from "../ui/Button.svelte";
 	import Disclosure from "../ui/Disclosure.svelte";
-	let state = $state({ autoSettleDays: 3 as number | null, autoSettleSaving: false, autoArchiveDays: 30 as number | null, autoArchiveSaving: false, sessionModeSaving: false, cleanupGlobal: DEFAULT_WORKTREE_CLEANUP as WorktreeCleanup, cleanupOverride: null as ProjectWorktreeCleanup | null, cleanupScope: "global" as "global" | "project", cleanupLoaded: true, cleanupSaving: false, cleanupOpen: false, cleanupDetailsOpen: false, cleanupRun: { status: "idle" } as { status: "idle" | "running" | "failed" } | { status: "done"; report: WorktreeCleanupReport } });
+	let state = $state({ autoSettleDays: 3 as number | null, autoSettleSaving: false, autoArchiveDays: 30 as number | null, autoArchiveSaving: false, autoDeleteDays: 30 as number | null, autoDeleteSaving: false, sessionModeSaving: false, cleanupGlobal: DEFAULT_WORKTREE_CLEANUP as WorktreeCleanup, cleanupOverride: null as ProjectWorktreeCleanup | null, cleanupScope: "global" as "global" | "project", cleanupLoaded: true, cleanupSaving: false, cleanupOpen: false, cleanupDetailsOpen: false, cleanupRun: { status: "idle" } as { status: "idle" | "running" | "failed" } | { status: "done"; report: WorktreeCleanupReport } });
 	const cleanupProjectSlug = $derived.by(() => {
 		const route = getCurrentRoute();
 		return route.page === "chat" && route.draft ? getDraftProject() : getCurrentSlug();
@@ -94,6 +94,13 @@
 		const route = getCurrentRoute();
 		if (route.page === "chat" && route.sessionId && !getCurrentSlug()) return;
 		let current = true;
+		void rpc("GetAutoDeleteArchivedSetting", {})
+			.then(({ autoDeleteArchivedAfterDays: days }) => {
+				if (current && !state.autoDeleteSaving) state.autoDeleteDays = days;
+			})
+			.catch((error) => {
+				if (current) toastFailure("Couldn't load archived retention setting")(error);
+			});
 		void rpc("GetAutoArchiveSetting", {})
 			.then(({ autoArchiveAfterDays: days }) => {
 				if (current && !state.autoArchiveSaving) state.autoArchiveDays = days;
@@ -211,6 +218,35 @@
 						.then(({ autoArchiveAfterDays: days }) => { state.autoArchiveDays = days; })
 						.catch(toastFailure("Couldn't save auto-archive setting"))
 						.finally(() => { state.autoArchiveSaving = false; });
+				}}
+			>
+				<option value="1">1 day</option>
+				<option value="2">2 days</option>
+				<option value="3">3 days</option>
+				<option value="7">1 week</option>
+				<option value="14">2 weeks</option>
+				<option value="30">30 days</option>
+				<option value="90">90 days</option>
+				<option value="never">Never</option>
+			</Select>
+		{/snippet}
+	</SettingsRow>
+	<SettingsRow
+		label="Delete archived sessions"
+		labelFor="settings-auto-delete-select"
+		description="Permanently deletes them and their history after this long in the archive."
+	>
+		{#snippet control()}
+			<Select id="settings-auto-delete-select" data-testid="settings-auto-delete-select"
+				value={state.autoDeleteDays === null ? "never" : String(state.autoDeleteDays)}
+				disabled={state.autoDeleteSaving}
+				onchange={(event) => {
+					const value = event.currentTarget.value;
+					state.autoDeleteSaving = true;
+					void rpc("SetAutoDeleteArchivedSetting", { autoDeleteArchivedAfterDays: value === "never" ? null : Number(value) })
+						.then(({ autoDeleteArchivedAfterDays: days }) => { state.autoDeleteDays = days; })
+						.catch(toastFailure("Couldn't save archived retention setting"))
+						.finally(() => { state.autoDeleteSaving = false; });
 				}}
 			>
 				<option value="1">1 day</option>

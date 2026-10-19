@@ -54,6 +54,10 @@ export interface Relay {
 		idleWindowMs: number,
 		now: number,
 	) => Effect.Effect<number, Error | SqlError | SessionManagerError>;
+	deleteArchivedSessions?: (
+		windowMs: number,
+		now: number,
+	) => Effect.Effect<number, Error | SqlError | SessionManagerError>;
 	slug: string;
 	rpcWsHandler: Pick<RpcWebSocketHandlerShape, "context">;
 	getStatusSnapshot?: () => RelayStatusSnapshot;

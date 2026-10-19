@@ -236,6 +236,8 @@ export type DaemonRpcName =
 	| "SetDefault"
 	| "GetAutoSettleSetting"
 	| "SetAutoSettleSetting"
+	| "GetAutoDeleteArchivedSetting"
+	| "SetAutoDeleteArchivedSetting"
 	| "GetWorktreeCleanupSetting"
 	| "SetWorktreeCleanupSetting"
 	| "CleanUpWorktreesNow"
