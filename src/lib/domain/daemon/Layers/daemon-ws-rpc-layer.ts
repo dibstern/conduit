@@ -725,6 +725,10 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				run(wsRpcHandlers.GetAutoSettleSetting(request)),
 			SetAutoSettleSetting: (request) =>
 				run(wsRpcHandlers.SetAutoSettleSetting(request)),
+			GetAutoDeleteArchivedSetting: (request) =>
+				run(wsRpcHandlers.GetAutoDeleteArchivedSetting(request)),
+			SetAutoDeleteArchivedSetting: (request) =>
+				run(wsRpcHandlers.SetAutoDeleteArchivedSetting(request)),
 			GetWorktreeCleanupSetting: (request) =>
 				run(wsRpcHandlers.GetWorktreeCleanupSetting(request)),
 			SetWorktreeCleanupSetting: (request) =>

@@ -12,6 +12,7 @@
 import { randomUUID } from "node:crypto";
 import { type Cause, Data, Effect } from "effect";
 import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import type { Account } from "../../../contracts/account.js";
 import {
 	type KnownProviderDriverKind,
@@ -148,6 +149,8 @@ export interface ApplySessionCommandOptions {
 	readonly source?: AutoTitleSource;
 	/** Join a caller's canonical commit, without publishing before that commit. */
 	readonly project?: CommitAndSignalProject;
+	/** A standalone commit may decline before append, under its write permit and transaction. */
+	readonly beforeWrite?: Effect.Effect<boolean, SqlError>;
 	/**
 	 * Override the provider adapter while retaining the canonical
 	 * append/project/sync pipeline. SessionManager uses this to fold its richer
@@ -283,6 +286,8 @@ export const applySessionCommand = (
 			command.type === "session.created"
 				? command.data.provider
 				: row?.provider;
+		if (appendProvider === undefined && options.beforeWrite !== undefined)
+			return;
 
 		if (appendProvider !== undefined) {
 			const events = [
@@ -295,10 +300,19 @@ export const applySessionCommand = (
 					? sessionPickEvents(sessionId, options.pick)
 					: []),
 			];
+			let applied = true;
 			yield* (
-				options.project
-					? Effect.flatMap(eventStore.appendBatch(events), options.project)
-					: commitAndSignal(events)
+				options.beforeWrite !== undefined
+					? commitAndSignal.write((project) =>
+							Effect.gen(function* () {
+								applied = yield* options.beforeWrite ?? Effect.succeed(true);
+								if (applied)
+									yield* project(yield* eventStore.appendBatch(events));
+							}),
+						)
+					: options.project
+						? Effect.flatMap(eventStore.appendBatch(events), options.project)
+						: commitAndSignal(events)
 			).pipe(
 				Effect.mapError(
 					(cause) =>
@@ -308,6 +322,7 @@ export const applySessionCommand = (
 						}),
 				),
 			);
+			if (!applied) return;
 		}
 
 		// ADR-0004: the local write is authoritative. A rejected rename must

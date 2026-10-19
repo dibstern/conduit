@@ -802,6 +802,7 @@ async function createEffectHarness(
 			establishOpenCodeSession: unused,
 			createSession: unused,
 			deleteSession: unused,
+			deleteArchivedSessions: unused,
 			renameSession: unused,
 			markSessionRead: unused,
 			markSessionUnread: unused,
