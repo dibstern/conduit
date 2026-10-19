@@ -115,8 +115,10 @@ describe("Integration: Send Message", () => {
 		await client.sendMessage("Reply with just the word 'pong'. Nothing else.");
 
 		const message = await client.waitForAssistantText();
-		expect(message.text).toBeTruthy();
-		expect(typeof message.text).toBe("string");
+		// Live updates carry the text on its part, not the message header.
+		const text = message.parts?.find((part) => part.type === "text")?.text;
+		expect(text).toBeTruthy();
+		expect(typeof text).toBe("string");
 
 		const done = await client.waitForTurnEnd();
 		expect(done.status).toBe("idle");

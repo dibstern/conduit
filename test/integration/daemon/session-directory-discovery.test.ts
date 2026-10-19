@@ -183,7 +183,10 @@ describe("Session directory discovery through the built daemon", () => {
 				socket,
 				sessionId
 					? new GetCommandsForSession({ sessionId })
-					: new GetCommands({ projectSlug: "process-test" }),
+					: new GetCommands({
+							projectSlug: "process-test",
+							instanceId: "claude",
+						}),
 			);
 			const { resolved } = await sendRpcRequest(
 				socket,
