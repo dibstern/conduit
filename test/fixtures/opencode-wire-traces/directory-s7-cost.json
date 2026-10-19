@@ -1,0 +1,354 @@
+{
+	"name": "directory-s7-cost",
+	"recordedAt": "1970-01-01T00:00:00.000Z",
+	"opencodeVersion": "1.18.34",
+	"interactions": [
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<ROOT>%2Fcost-1",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<ROOT>%2Fcost-1",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<ROOT>%2Fcost-2",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<ROOT>%2Fcost-2",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<ROOT>%2Fcost-3",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<ROOT>%2Fcost-3",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<ROOT>%2Fcost-4",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<ROOT>%2Fcost-4",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<ROOT>%2Fcost-5",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<ROOT>%2Fcost-5",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<ROOT>%2Fcost-6",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<ROOT>%2Fcost-6",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<ROOT>%2Fcost-7",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<ROOT>%2Fcost-7",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<ROOT>%2Fcost-8",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<ROOT>%2Fcost-8",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<ROOT>%2Fcost-9",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<ROOT>%2Fcost-9",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<ROOT>%2Fcost-10",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<ROOT>%2Fcost-10",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<A>",
+			"status": 200,
+			"responseBody": {
+				"id": "project_1",
+				"worktree": "<A>",
+				"vcs": "git",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<B>",
+			"status": 200,
+			"responseBody": {
+				"id": "project_2",
+				"worktree": "<B>",
+				"vcs": "git",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/project/current?directory=<C>",
+			"status": 200,
+			"responseBody": {
+				"id": "global",
+				"worktree": "/",
+				"time": {
+					"created": 0,
+					"updated": 0
+				},
+				"sandboxes": []
+			}
+		}
+	]
+}
