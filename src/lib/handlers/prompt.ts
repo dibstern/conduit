@@ -127,8 +127,8 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			} satisfies SendMessageToSessionResult;
 		const drafts = yield* InputDraftsTag;
 		if (originalActiveId !== activeId)
-			yield* drafts.write({ session: originalActiveId }, "");
-		yield* drafts.write({ session: activeId }, "");
+			yield* drafts.clearSent(originalActiveId, text);
+		yield* drafts.clearSent(activeId, text);
 		return {
 			sessionId: activeId,
 			handedOff: submitted.handedOff,

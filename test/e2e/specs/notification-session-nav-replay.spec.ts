@@ -56,6 +56,11 @@ test.describe("Notification → session navigation (replay)", () => {
 			const parent = "notification-parent";
 			const target = "notification-target";
 			const rpc = await mockWsRpc(page, {
+				streams: {
+					SubscribeInputDraft: ({ sessionId }) => [
+						{ _tag: "synchronized", text: `Shown ${String(sessionId)}` },
+					],
+				},
 				stubs: {
 					AttachProject: (payload) => ({
 						projectSlug:
@@ -65,10 +70,6 @@ test.describe("Notification → session navigation (replay)", () => {
 						sessionSlug: "sessionId" in payload ? "e2e-replay" : null,
 					}),
 					ResolveSession: () => ({ projectSlug: project }),
-					ViewSession: ({ sessionId }) => ({
-						ok: true,
-						draft: `Shown ${sessionId}`,
-					}),
 				},
 			});
 			await mockRelayWebSocket(page, {
@@ -163,11 +164,10 @@ test.describe("Notification → session navigation (replay)", () => {
 			});
 		});
 		const rpc = await mockWsRpc(page, {
-			stubs: {
-				ViewSession: ({ sessionId }) => ({
-					ok: true,
-					draft: `Shown ${sessionId}`,
-				}),
+			streams: {
+				SubscribeInputDraft: ({ sessionId }) => [
+					{ _tag: "synchronized", text: `Shown ${String(sessionId)}` },
+				],
 			},
 		});
 		await mockRelayWebSocket(page, {

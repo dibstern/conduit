@@ -18,6 +18,8 @@ export interface InputDrafts {
 		text: string,
 		from?: string,
 	) => Effect.Effect<void>;
+	/** Empty a session draft only if it still holds the text that was sent. */
+	readonly clearSent: (sessionId: string, sent: string) => Effect.Effect<void>;
 	readonly subscribe: (key: InputDraftKey) => Stream.Stream<InputDraftEnvelope>;
 	readonly forget: (sessionId: string) => Effect.Effect<void, SqlError>;
 }
@@ -78,6 +80,24 @@ export const makeInputDrafts: Effect.Effect<
 					...(from !== undefined ? { from } : {}),
 				});
 			}),
+		// A send's clear can land after the user has typed and synced the next
+		// message; an unconditional write would erase it.
+		clearSent: (sessionId, sent) =>
+			sql<{
+				draft_key: string;
+			}>`UPDATE input_drafts SET text = '', updated_at = ${Date.now()}
+				WHERE draft_key = ${sessionId} AND kind = 'session' AND text = ${sent}
+				RETURNING draft_key`.pipe(
+				Effect.flatMap((rows) =>
+					rows.length > 0
+						? PubSub.publish(changes, { key: { session: sessionId }, text: "" })
+						: Effect.void,
+				),
+				Effect.asVoid,
+				Effect.catch((cause) =>
+					Effect.logError(`Could not clear input draft ${sessionId}: ${cause}`),
+				),
+			),
 		subscribe: (key) =>
 			Stream.unwrap(
 				Effect.gen(function* () {

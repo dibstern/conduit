@@ -1038,6 +1038,9 @@ for (const changed of ["unchanged", "text", "images"] as const) {
 					started = resolve;
 				}),
 			ViewSession: () => ({ ok: true }),
+			// No stored draft; the mock does not persist the parent's cleared draft.
+			SubscribeInputDraft: () =>
+				Stream.concat(Stream.make({ _tag: "synchronized" }), Stream.never),
 		});
 		await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
 		await expect(page.locator("#input")).toBeVisible();

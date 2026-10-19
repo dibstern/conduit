@@ -104,10 +104,6 @@ async function setup(page: Page) {
 					commands: [{ name: `${catalogName(scope).toLowerCase()}-command` }],
 				});
 			},
-			ViewSession: ({ sessionId }) => ({
-				ok: true,
-				draft: `Prompt for ${sessionId}`,
-			}),
 			ResolveSession: () => ({ projectSlug: "e2e-replay" }),
 			ListDaemonSessions: () => ({
 				sessions,
@@ -122,6 +118,9 @@ async function setup(page: Page) {
 			}),
 		},
 		streams: {
+			SubscribeInputDraft: ({ sessionId }) => [
+				{ _tag: "synchronized", text: `Prompt for ${String(sessionId)}` },
+			],
 			SubscribeProjectSettings: (params) => {
 				const modelId = `${catalogName(String(params["projectSlug"])).toLowerCase()}-model`;
 				return [
