@@ -62,7 +62,11 @@ export const ServerBuildUpdateLive = Layer.effectDiscard(
 
 		yield* check;
 		yield* check.pipe(
-			Effect.delay("5 seconds"),
+			Effect.delay(
+				process.env["NODE_ENV"] === "test"
+					? Number(process.env["CONDUIT_TEST_BUILD_POLL_INTERVAL_MS"] ?? 5000)
+					: 5000,
+			),
 			Effect.forever,
 			Effect.forkScoped,
 		);

@@ -3,7 +3,7 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
 import {
 	afterEach,
 	beforeEach,
@@ -978,11 +978,30 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			listSubagents: vi.fn(async () => [sdkSubagentId]),
 			getSubagentMessages: vi.fn(async () => []),
 		};
-		queryFactorySpy = vi.fn(() => createMockQuery([taskToolUse, taskStarted]));
+		let pollFiber: Fiber.Fiber<void, never> | undefined;
+		queryFactorySpy = vi.fn(() =>
+			createQueryFromGenerator(
+				(async function* () {
+					yield taskToolUse;
+					yield taskStarted;
+					pollFiber = getClaudeRuntimeSessionForTest(
+						instance,
+						"parent-no-result",
+					)?.subagentPollers?.get(sdkSubagentId)?.fiber;
+				})(),
+			),
+		);
+		const finalized = vi.fn();
 		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 			subagentSdk,
+			subagentPollIntervalMs: 10,
+			runnerFactory: (deps, emit) =>
+				makeClaudeSessionRunner(
+					{ ...deps, onSubagentFinalizationComplete: finalized },
+					emit,
+				),
 		});
 
 		const result = await Effect.runPromise(
@@ -1001,8 +1020,17 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			expect(subagentSdk.getSubagentMessages).toHaveBeenCalled(),
 		);
 		const reads = vi.mocked(subagentSdk.getSubagentMessages).mock.calls.length;
-		// End performs a final read, then no periodic feed survives the stream.
-		await delay(650);
+		// Finalization completes the final read and removes every periodic feed.
+		await vi.waitFor(() => expect(finalized).toHaveBeenCalled());
+		if (!pollFiber) throw new Error("No periodic subagent poll fiber started");
+		// Await actual termination so a leaked fiber cannot hide behind map removal.
+		await Effect.runPromise(
+			Fiber.await(pollFiber).pipe(Effect.timeout("100 millis")),
+		);
+		expect(
+			getClaudeRuntimeSessionForTest(instance, "parent-no-result")
+				?.subagentPollers?.size,
+		).toBe(0);
 		expect(subagentSdk.getSubagentMessages).toHaveBeenCalledTimes(reads);
 
 		await Effect.runPromise(instance.shutdownEffect());
@@ -1012,7 +1040,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		"parent result",
 		"Stop",
 		"stream-end",
-	] as const)("completes %s before hung reads and bounds all end finalization to two seconds", async (ending) => {
+	] as const)("completes %s before hung reads and bounds all end finalization to the configured deadline", async (ending) => {
 		const parentClaudeSessionId = "sdk-parent-final-poll-timeout";
 		const sdkSubagentId = "task-final-poll-timeout";
 		const taskToolUse: SDKPartialAssistantMessage = {
@@ -1111,6 +1139,8 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			workspaceRoot: workspace,
 			queryFactory: () => query,
 			subagentSdk,
+			subagentPollIntervalMs: 10,
+			subagentPollTimeoutMs: 100,
 			onBackgroundTask,
 			runnerFactory: (deps, emit) =>
 				makeClaudeSessionRunner(
@@ -1136,12 +1166,16 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				),
 			),
 		);
+		let settledTurn: Awaited<typeof turnPromise> | undefined;
+		void turnPromise.then((result) => {
+			settledTurn = result;
+		});
 
 		try {
 			await tasksStarted;
 			await vi.waitFor(
 				() => expect(subagentSdk.getSubagentMessages).toHaveBeenCalledTimes(3),
-				{ timeout: 1200 },
+				{ timeout: 100, interval: 5 },
 			);
 			const ctx = getClaudeRuntimeSessionForTest(
 				instance,
@@ -1162,13 +1196,14 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				ending === "Stop"
 					? Effect.runPromise(instance.interruptTurnEffect(ctx.sessionId))
 					: Promise.resolve(releaseStream());
-			const turnResult = await Promise.race([
-				turnPromise,
-				delay(150).then(() => "timeout" as const),
-			]);
-			expect(turnResult).not.toBe("timeout");
-			if (turnResult === "timeout")
-				throw new Error("Turn cleanup waited for a transcript");
+			const turnResult = await vi.waitFor(
+				() => {
+					if (!settledTurn)
+						throw new Error("Turn cleanup waited for a transcript");
+					return settledTurn;
+				},
+				{ timeout: 50, interval: 5 },
+			);
 			if (ending === "stream-end") expect(turnResult._tag).toBe("Failure");
 			else {
 				expect(turnResult._tag).toBe("Success");
@@ -1177,12 +1212,14 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 						ending === "Stop" ? "interrupted" : "completed",
 					);
 			}
-			expect(
-				await Promise.race([
-					stop.then(() => "done"),
-					delay(150).then(() => "timeout"),
-				]),
-			).toBe("done");
+			let stopCompleted = false;
+			void stop.then(() => {
+				stopCompleted = true;
+			});
+			await vi.waitFor(() => expect(stopCompleted).toBe(true), {
+				timeout: 50,
+				interval: 5,
+			});
 			if (ending === "Stop") {
 				expect(denyApproval).toHaveBeenCalledWith("reject");
 				expect(query.interrupt).toHaveBeenCalledOnce();
@@ -1193,29 +1230,33 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 						.mock.calls.some(([event]) => event.type === "turn.interrupted"),
 				).toBe(true);
 			}
-			await vi.waitFor(() => {
-				expect(onBackgroundTask).toHaveBeenCalledWith({
-					sessionId: ctx.sessionId,
-					kind: "session-ended",
-				});
-				expect(runner?.hasPendingSubagentFinalizers?.(ctx.sessionId)).toBe(
-					true,
-				);
-			});
+			await vi.waitFor(
+				() => {
+					expect(onBackgroundTask).toHaveBeenCalledWith({
+						sessionId: ctx.sessionId,
+						kind: "session-ended",
+					});
+					expect(runner?.hasPendingSubagentFinalizers?.(ctx.sessionId)).toBe(
+						true,
+					);
+				},
+				{ interval: 5 },
+			);
 			await vi.waitFor(
 				() =>
 					expect(runner?.hasPendingSubagentFinalizers?.(ctx.sessionId)).toBe(
 						false,
 					),
-				{ timeout: 2600 },
+				{ timeout: 200, interval: 5 },
 			);
-			expect(performance.now() - startedAt).toBeLessThan(2600);
+			expect(performance.now() - startedAt).toBeLessThan(200);
 			expect(finalized).toHaveBeenCalled();
 			expect(ctx.subagentPollers?.size).toBe(0);
 			// Completing abandoned SDK promises cannot resurrect a feed or emit history.
 			const emitted = vi.mocked(sink.push).mock.calls.length;
+			expect(finishPolls.length).toBeGreaterThan(0);
 			await releasePendingPolls();
-			await delay(550);
+			expect(finishPolls).toHaveLength(0);
 			expect(vi.mocked(sink.push).mock.calls).toHaveLength(emitted);
 		} finally {
 			releaseStream();

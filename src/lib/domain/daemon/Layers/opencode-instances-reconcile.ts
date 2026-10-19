@@ -131,31 +131,40 @@ export const createOpenCodeReconciler = (options: {
 
 	const schedule = () => {
 		if (timer || !client || busy.size === 0) return;
-		timer = setTimeout(() => {
-			timer = undefined;
-			const current = client;
-			if (!current) return;
-			const sent = statusOrder;
-			void Promise.all(
-				[...busy.keys()].map((directory) => {
-					const generation = generations.get(directory);
-					return current.session.statuses(directory).then(
-						(statuses) => {
-							if (
-								client === current &&
-								generations.get(directory) === generation
-							)
-								correct(directory, statuses, sent);
-						},
-						(error: unknown) =>
-							options.log.debug("OpenCode status poll failed", {
-								directory,
-								error,
-							}),
-					);
-				}),
-			).finally(schedule);
-		}, options.pollIntervalMs ?? STATUS_POLL_INTERVAL_MS);
+		timer = setTimeout(
+			() => {
+				timer = undefined;
+				const current = client;
+				if (!current) return;
+				const sent = statusOrder;
+				void Promise.all(
+					[...busy.keys()].map((directory) => {
+						const generation = generations.get(directory);
+						return current.session.statuses(directory).then(
+							(statuses) => {
+								if (
+									client === current &&
+									generations.get(directory) === generation
+								)
+									correct(directory, statuses, sent);
+							},
+							(error: unknown) =>
+								options.log.debug("OpenCode status poll failed", {
+									directory,
+									error,
+								}),
+						);
+					}),
+				).finally(schedule);
+			},
+			options.pollIntervalMs ??
+				(process.env["NODE_ENV"] === "test"
+					? Number(
+							process.env["CONDUIT_TEST_OPENCODE_STATUS_POLL_INTERVAL_MS"] ??
+								STATUS_POLL_INTERVAL_MS,
+						)
+					: STATUS_POLL_INTERVAL_MS),
+		);
 		timer.unref?.();
 	};
 
