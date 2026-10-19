@@ -788,6 +788,11 @@ function copyProject(
 				"last_applied_seq",
 				offsets.event,
 			);
+		if (table === "message_parts")
+			expressions["result_event_seq"] = eventNumber(
+				"result_event_seq",
+				offsets.event,
+			);
 		if (table === "command_receipts") {
 			for (const field of ["accepted_sequence", "side_effect_sequence"])
 				expressions[field] = eventNumber(field, offsets.outbox);

@@ -26,6 +26,7 @@ import {
 	MissingWorktreeError,
 	WorktreeRecoveryError,
 } from "../../../contracts/worktree.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail, RelayError } from "../../../errors.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
@@ -433,10 +434,10 @@ const makeEventSink = (sessionId: string, driver: ProviderDriverKind) =>
 				),
 			persist,
 			ingestion: {
-				ingest: (event) =>
+				ingest: (event, onPrompt) =>
 					Effect.contextWith((caller: Context.Context<never>) =>
 						ingestion
-							.ingest(event)
+							.ingest(event, onPrompt)
 							.pipe(Effect.provide(Context.merge(runtime, caller))),
 					),
 			},
@@ -776,6 +777,8 @@ const dispatchEngineTurn = (
 		const driver = account.driver;
 		const orchestrationEngine = yield* OrchestrationEngineTag;
 		const dispatchFibers = yield* ProviderTurnDispatchFibersTag;
+		const config = yield* ConfigTag;
+		const readQuery = yield* ReadQueryEffectTag;
 		const previousProviderId =
 			yield* orchestrationEngine.getProviderForSessionEffect(
 				resolvedInput.sessionId,
@@ -883,6 +886,25 @@ const dispatchEngineTurn = (
 			),
 			Effect.onInterrupt(() => restorePreviousBinding),
 			Effect.ensuring(Deferred.succeed(accepted, undefined)),
+			// The turn's outbox row is terminal here, so cleanup can now stop a
+			// settled session's agent. Adopted runners wait for the hourly run.
+			Effect.ensuring(
+				Effect.gen(function* () {
+					if (
+						config.requestWorktreeCleanup &&
+						(yield* readQuery.getSession(resolvedInput.sessionId))
+							?.settled_at != null
+					)
+						yield* config.requestWorktreeCleanup();
+				}).pipe(
+					Effect.catchCause((cause) =>
+						Effect.logWarning("Could not request cleanup after turn", {
+							sessionId: resolvedInput.sessionId,
+							cause: Failure.renderCause(cause),
+						}),
+					),
+				),
+			),
 		);
 		// A requeued input keeps its id, but its next handoff must not reuse
 		// the failed dispatch fiber while that fiber is still unwinding.

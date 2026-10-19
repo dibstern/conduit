@@ -14,7 +14,6 @@ export interface AutoSettleSweepPorts<SettleError> {
 	readonly hasLiveBackgroundWork: (sessionId: string) => boolean;
 	readonly setSettled: (
 		sessionId: string,
-		mergedHead?: string,
 	) => Effect.Effect<boolean, SettleError>;
 }
 
@@ -58,7 +57,7 @@ export const settleIdleSessions = <SettleError>(
 				ports.projectDir,
 			)).get(sessionId);
 			if (facts === undefined || !decide(sessionId, facts)) continue;
-			if (yield* ports.setSettled(sessionId, facts.mergedHead)) settled++;
+			if (yield* ports.setSettled(sessionId)) settled++;
 		}
 		return settled;
 	});

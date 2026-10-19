@@ -14,6 +14,13 @@ run_lefthook_pre_commit() {
     return 0
   fi
 
+  # Run the gate on mise.toml's pinned toolchain. A shell with a stale Node on
+  # PATH otherwise fails it misleadingly: pnpm only warns about the engine, and
+  # Node 24's node:sqlite serves stale SELECT * columns after a migration.
+  if command -v mise >/dev/null 2>&1; then
+    eval "$(mise env -s bash)"
+  fi
+
   if [ -n "$LEFTHOOK_BIN" ]; then
     "$LEFTHOOK_BIN" run pre-commit "$@"
   elif command -v lefthook >/dev/null 2>&1; then

@@ -164,7 +164,10 @@ function detachedRunnerFactory(
 					)
 				: Effect.succeed(undefined);
 		}
-		return Effect.succeed({ executeEffect });
+		return Effect.succeed({
+			executeEffect,
+			hasLiveProcessEffect: () => Effect.succeed(false),
+		});
 	};
 }
 
@@ -633,12 +636,27 @@ describe("Claude durable interaction resolution", () => {
 					yield* Deferred.succeed(finalize, undefined);
 					yield* Fiber.join(request);
 					const events = yield* f.eventStore.readAllBySession("session-1");
+					const asked = events.find(
+						(event) =>
+							event.type === "permission.asked" ||
+							event.type === "question.asked",
+					);
+					expect(asked?.data).toMatchObject({
+						id: expect.any(String),
+						providerRequestId: "request-1",
+					});
+					const conduitId = asked?.data.id;
+					expect(conduitId).not.toBe("request-1");
 					expect(events.at(-1)).toMatchObject({
 						type: `${kind}.resolved`,
 						data:
 							kind === "permission"
-								? { id: "request-1", decision: "always" }
-								: { id: "request-1", answers },
+								? {
+										id: conduitId,
+										providerRequestId: "request-1",
+										decision: "always",
+									}
+								: { id: conduitId, providerRequestId: "request-1", answers },
 					});
 					expect(
 						yield* f.readQuery.countPendingApprovalsBySession({
@@ -649,7 +667,7 @@ describe("Claude durable interaction resolution", () => {
 						expect(
 							yield* f.sql<{
 								response_json: string;
-							}>`SELECT response_json FROM claude_runner_permission_replies WHERE session_id = 'session-1' AND request_id = 'request-1'`,
+							}>`SELECT response_json FROM claude_runner_permission_replies WHERE session_id = 'session-1' AND request_id = ${conduitId ?? ""}`,
 						).toEqual([{ response_json: JSON.stringify(permissionReply) }]);
 					}
 				}),
@@ -693,14 +711,32 @@ describe("Claude durable interaction resolution", () => {
 						"live failure",
 					);
 					expect(Exit.isFailure(yield* Fiber.await(request))).toBe(true);
-					expect(
-						(yield* f.eventStore.readAllBySession("session-1")).at(-1),
-					).toMatchObject({
+					const events = yield* f.eventStore.readAllBySession("session-1");
+					const asked = events.find(
+						(event) =>
+							event.type === "permission.asked" ||
+							event.type === "question.asked",
+					);
+					expect(asked?.data).toMatchObject({
+						id: expect.any(String),
+						providerRequestId: "request-1",
+					});
+					const conduitId = asked?.data.id;
+					expect(conduitId).not.toBe("request-1");
+					expect(events.at(-1)).toMatchObject({
 						type: `${kind}.resolved`,
 						data:
 							kind === "permission"
-								? { id: "request-1", decision: "reject" }
-								: { id: "request-1", answers: {} },
+								? {
+										id: conduitId,
+										providerRequestId: "request-1",
+										decision: "reject",
+									}
+								: {
+										id: conduitId,
+										providerRequestId: "request-1",
+										answers: {},
+									},
 					});
 					expect(
 						yield* f.readQuery.countPendingApprovalsBySession({
@@ -730,11 +766,23 @@ describe("Claude durable interaction resolution", () => {
 					yield* awaitPendingApproval(f.readQuery);
 					expect(yield* f.pending.takeTimedOutPermissions()).toHaveLength(1);
 					expect(Exit.isFailure(yield* Fiber.await(request))).toBe(true);
-					expect(
-						(yield* f.eventStore.readAllBySession("session-1")).at(-1),
-					).toMatchObject({
+					const events = yield* f.eventStore.readAllBySession("session-1");
+					const asked = events.find(
+						(event) => event.type === "permission.asked",
+					);
+					expect(asked?.data).toMatchObject({
+						id: expect.any(String),
+						providerRequestId: "request-1",
+					});
+					const conduitId = asked?.data.id;
+					expect(conduitId).not.toBe("request-1");
+					expect(events.at(-1)).toMatchObject({
 						type: "permission.resolved",
-						data: { id: "request-1", decision: "reject" },
+						data: {
+							id: conduitId,
+							providerRequestId: "request-1",
+							decision: "reject",
+						},
 					});
 					expect(
 						yield* f.readQuery.countPendingApprovalsBySession({

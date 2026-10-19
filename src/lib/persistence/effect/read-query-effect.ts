@@ -1,8 +1,9 @@
-import { Context, Data, Effect, Option, Schema } from "effect";
+import { Context, Data, Effect, Option, Ref, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { Fragment } from "effect/sql/Statement";
 import type { SessionScope } from "../../contracts/session-scope.js";
+import { SessionRollupProjects } from "./session-rollup-projects.js";
 
 export type { SessionScope } from "../../contracts/session-scope.js";
 
@@ -139,6 +140,8 @@ export const sessionRowsToSessionInfoList = (
 		readonly now?: number;
 		readonly statuses?: Readonly<Record<string, { type: string }>>;
 		readonly parentMap?: ReadonlyMap<string, string>;
+		/** Contribution owners; the parent map still includes the whole family. */
+		readonly contributingSessionIds?: ReadonlySet<string> | undefined;
 		readonly sideThreadIds?: ReadonlySet<string>;
 		/** Unread descendants, stopping at each Side Thread's edge to its parent. */
 		readonly unreadSessionIds?: ReadonlySet<string>;
@@ -179,16 +182,20 @@ export const sessionRowsToSessionInfoList = (
 		const rowStatuses = new Map(rows.map((row) => [row.id, row.status]));
 		const members = new Set([...rowStatuses.keys(), ...opts.parentMap.keys()]);
 		const backgroundChildren = new Set(
-			[...new Set([...members, ...opts.parentMap.values()])].flatMap(
-				(id) =>
-					opts
-						.backgroundOf?.(id)
-						?.tasks.flatMap((task) =>
-							task.childSessionId ? [task.childSessionId] : [],
-						) ?? [],
-			),
+			[...new Set([...members, ...opts.parentMap.values()])]
+				.filter((id) => opts.contributingSessionIds?.has(id) ?? true)
+				.flatMap(
+					(id) =>
+						opts
+							.backgroundOf?.(id)
+							?.tasks.flatMap((task) =>
+								task.childSessionId ? [task.childSessionId] : [],
+							) ?? [],
+				),
 		);
 		for (const id of members) {
+			if (opts.contributingSessionIds && !opts.contributingSessionIds.has(id))
+				continue;
 			let root = id;
 			let activityRoot: string | undefined;
 			const seen = new Set<string>();
@@ -929,6 +936,7 @@ function groupMessagesWithPartsAndTurnModels(
 
 export const makeReadQueryEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+	const projects = yield* SessionRollupProjects;
 	// The provider may reconcile streamed timestamps while a rewind is pending.
 	// Visibility follows the transcript's current (created_at, id) ordering.
 	const pendingRewindHides = (table: "messages" | "m" = "messages") => sql`
@@ -963,13 +971,18 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			ORDER BY created_at ASC, id ASC
 		) pa) AS turn_waits`;
 
-	// A part's stored tool result as text: a JSON string decoded, anything
+	const fullToolResult = sql`
+		CASE WHEN mp.result_event_seq IS NULL THEN mp.result
+			ELSE (SELECT e.data -> '$.result' FROM events e
+				WHERE e.sequence = mp.result_event_seq) END`;
+
+	// A part's full tool result as text: a JSON string decoded, anything
 	// else as stored. Nested so json_type never sees malformed JSON.
 	const toolOutput = sql`
-		CASE WHEN json_valid(mp.result)
-			THEN CASE WHEN json_type(mp.result) = 'text'
-				THEN json_extract(mp.result, '$') ELSE mp.result END
-			ELSE mp.result END`;
+		CASE WHEN json_valid(${fullToolResult})
+			THEN CASE WHEN json_type(${fullToolResult}) = 'text'
+				THEN json_extract(${fullToolResult}, '$') ELSE ${fullToolResult} END
+			ELSE ${fullToolResult} END`;
 
 	// Parts as the browser opens them, by the rule tool-wire-projection.ts
 	// owns: a tool output over the budget comes back as the JSON of its first
@@ -980,14 +993,16 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	const previewParts = (source: Fragment) => sql<MessagePartRow>`
 		SELECT id, message_id, type, text, tool_name, call_id, input, metadata,
 			duration, status, sort_order, created_at, updated_at, version,
-			CASE WHEN length(output) > ${PREVIEW_CODE_POINTS}
+			CASE WHEN result_event_seq IS NOT NULL THEN result
+				WHEN length(output) > ${PREVIEW_CODE_POINTS}
 				THEN json_quote(substr(output, 1, ${PREVIEW_CODE_POINTS}))
 				ELSE result END AS result,
-			CASE WHEN length(output) > ${PREVIEW_CODE_POINTS}
+			CASE WHEN result_event_seq IS NOT NULL THEN result_bytes
+				WHEN length(output) > ${PREVIEW_CODE_POINTS}
 				THEN length(CAST(output AS BLOB)) END AS result_bytes
 		FROM (
 			SELECT mp.*,
-				CASE WHEN mp.type = 'tool'
+				CASE WHEN mp.result_event_seq IS NULL AND mp.type = 'tool'
 					AND mp.tool_name NOT IN ${sql.in(NEVER_CUT_TOOL_NAMES)}
 					AND length(mp.result) > ${PREVIEW_CODE_POINTS}
 				THEN ${toolOutput} END AS output
@@ -1305,6 +1320,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 
 	const countPendingApprovalsBySession = (
 		scope: SessionScope,
+		projectIds: readonly string[] = scope.projectIds,
 	): Effect.Effect<
 		readonly PendingApprovalCountRow[],
 		ReadQueryEffectError | SqlError
@@ -1314,7 +1330,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				SELECT session_id, type, COUNT(*) AS pending_count
 				FROM pending_approvals
 				WHERE status = 'pending'
-					AND session_id IN (SELECT id FROM sessions WHERE project_id IN ${sql.in(scope.projectIds)})
+					AND session_id IN (SELECT id FROM sessions WHERE project_id IN ${sql.in(projectIds)})
 				GROUP BY session_id, type`;
 		}).pipe(
 			Effect.mapError((e) =>
@@ -1330,6 +1346,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	const listSessionInfos: ReadQueryEffect["listSessionInfos"] = (scope, opts) =>
 		Effect.gen(function* () {
 			const rows = yield* listSessions(scope, opts);
+			const projectIds = projects ? yield* Ref.get(projects) : scope.projectIds;
 			// Roll-ups (busy, unread, pending counts) only need the listed rows and
 			// their descendants. Reading lineage and status for every session made
 			// each page cost a full scan of the store, twice.
@@ -1340,15 +1357,15 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					status: string;
 					unread: number;
 					side_thread: number;
+					project_id: string | null;
 				}>`
 					WITH RECURSIVE family(id) AS (
 						SELECT value FROM json_each(${JSON.stringify(rows.map((row) => row.id))})
 						UNION
 						SELECT child.id FROM sessions child JOIN family ON child.parent_id = family.id
-						WHERE child.project_id IN ${sql.in(scope.projectIds)}
 					)
-					SELECT id, parent_id, status, unread, side_thread FROM sessions JOIN family USING (id)`,
-				countPendingApprovalsBySession(scope),
+					SELECT id, parent_id, status, unread, side_thread, project_id FROM sessions JOIN family USING (id)`,
+				countPendingApprovalsBySession(scope, projectIds),
 			]).pipe(
 				Effect.mapError((cause) =>
 					cause instanceof ReadQueryEffectError
@@ -1360,7 +1377,16 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				),
 			);
 			const pending = pendingApprovalCountsByType(approvals);
+			const registered = new Set(projectIds);
 			return sessionRowsToSessionInfoList(rows, {
+				contributingSessionIds: new Set(
+					family
+						.filter(
+							(row) =>
+								row.project_id !== null && registered.has(row.project_id),
+						)
+						.map(({ id }) => id),
+				),
 				sideThreadIds: new Set(
 					family.flatMap((row) => (row.side_thread === 1 ? [row.id] : [])),
 				),
@@ -1447,7 +1473,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					WHERE session_id = ${sessionId}
 					ORDER BY created_at ASC, id ASC
 				)
-				SELECT mp.* FROM message_parts mp
+				SELECT mp.*, ${fullToolResult} AS result, NULL AS result_bytes
+				FROM message_parts mp
 				JOIN target_messages tm ON mp.message_id = tm.id
 				ORDER BY mp.message_id, mp.sort_order`;
 
@@ -1764,9 +1791,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							page.length === 0
 								? []
 								: yield* sql<MessagePartRow>`
-							SELECT * FROM message_parts
-							WHERE message_id IN ${sql.in(page.map((message) => message.id))}
-							ORDER BY message_id, sort_order`;
+							SELECT mp.*, ${fullToolResult} AS result, NULL AS result_bytes
+							FROM message_parts mp
+							WHERE mp.message_id IN ${sql.in(page.map((message) => message.id))}
+							ORDER BY mp.message_id, mp.sort_order`;
 						messages.push(
 							...groupMessagesWithPartsAndTurnModels(fullPage, parts),
 						);
@@ -2419,7 +2447,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						result: string | null;
 						version: number;
 					}>`
-						SELECT mp.input, mp.result, messages.version
+						SELECT mp.input, ${fullToolResult} AS result, messages.version
 						FROM message_parts mp
 						JOIN messages ON messages.id = mp.message_id
 						WHERE messages.session_id = ${sessionId}

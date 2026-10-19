@@ -37,6 +37,9 @@ export class InProcessSessionRunner implements SessionRunner {
 		private readonly sinks: RunnerSinkBindings,
 		private readonly scope: Scope.Scope,
 	) {}
+	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
+		return Effect.sync(() => this.sessions.has(sessionId));
+	}
 	hasPendingSubagentFinalizers(sessionId: string): boolean {
 		return this.payload.hasPendingSubagentFinalizers?.(sessionId) ?? false;
 	}
@@ -144,11 +147,13 @@ export class InProcessSessionRunner implements SessionRunner {
 					this.sessions.add(command.sessionId);
 					return yield* this.payload.preWarm?.(command) ?? Effect.void;
 				case "shutdown":
-					if (this.payload.shutdown) return yield* this.payload.shutdown();
-					yield* Effect.forEach(
-						this.sessions,
-						(id) => this.payload.endSession(id),
-						{ discard: true },
+					yield* (
+						this.payload.shutdown?.() ??
+						Effect.forEach(this.sessions, (id) => this.payload.endSession(id), {
+							discard: true,
+						})
+					).pipe(
+						Effect.ensuring(this.sinks.flushAllEffect().pipe(Effect.orDie)),
 					);
 					this.sessions.clear();
 					return;

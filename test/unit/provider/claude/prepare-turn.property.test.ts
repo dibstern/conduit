@@ -175,8 +175,9 @@ it("catches up whole undelivered messages and turn errors without repeating deli
 							configDir: configuredClaudeConfigDir(
 								"/accounts/changed-personal",
 							),
-							continuation,
-							...(!continuation ? { userMessageId: "current" } : {}),
+							...(continuation
+								? { continuation: { cutOffMessageId: "cut-off" } }
+								: { userMessageId: "current" }),
 						};
 						const prepare = yield* makePrepareTurn(options);
 						const prepared = yield* prepare(
@@ -404,6 +405,97 @@ it("retries only startup-rejected native conversations once, preserving other re
 	);
 });
 
+// Claude finds a transcript only from its own folder or a live sibling
+// worktree, so a move away from a since-removed worktree cannot resume.
+it("falls back to a fresh handoff when a workspace move strands the same-account receipt", async () => {
+	await Effect.runPromise(
+		Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
+			const state = yield* ProviderStateEffectTag;
+			yield* commit([
+				canonicalEvent("session.created", "s1", {
+					sessionId: "s1",
+					title: "Moved",
+					provider: "work",
+				}),
+				canonicalEvent("message.created", "s1", {
+					sessionId: "s1",
+					messageId: "first",
+					role: "user",
+				}),
+				canonicalEvent("text.delta", "s1", {
+					messageId: "first",
+					partId: "first:text",
+					text: "Delivered original request",
+				}),
+			]);
+			yield* state.saveUpdates("s1", [
+				{
+					key: "nativeThread:work",
+					value: JSON.stringify({
+						resumeSessionId: "native-work",
+						configDir: "/accounts/work",
+						firstSequence: 0,
+						deliveredThrough: 3,
+					}),
+				},
+			]);
+			yield* commit([
+				canonicalEvent("session.workspace_changed", "s1", {
+					sessionId: "s1",
+					cause: "user",
+					path: "/repo",
+					worktrees: {},
+					origin: "existing",
+				}),
+			]);
+			const calls: { resumeSessionId?: string; prompt: string }[] = [];
+			const result = yield* sendPreparedClaudeTurn({
+				sessionId: "s1",
+				instanceId: "work",
+				userText: "Current request",
+				options: {
+					folderSource: "account",
+					configDir: configuredClaudeConfigDir("/accounts/work"),
+				},
+				send: (prepared, fallback) =>
+					Effect.sync((): TurnResult => {
+						calls.push(prepared);
+						if (fallback)
+							return {
+								status: "completed",
+								cost: 0,
+								tokens: { input: 0, output: 0 },
+								durationMs: 0,
+								providerStateUpdates: [],
+							};
+						// The runtime flags a rejection only when the turn can fall back.
+						return {
+							status: "error",
+							...(prepared.handoff ? { nativeResumeRejected: true } : {}),
+							cost: 0,
+							tokens: { input: 0, output: 0 },
+							durationMs: 0,
+							error: {
+								code: "provider_error",
+								message: "No conversation found with session ID: native-work",
+							},
+							providerStateUpdates: [],
+						};
+					}),
+			});
+			expect(result?.status).toBe("completed");
+			expect(calls.map((call) => call.resumeSessionId)).toEqual([
+				"native-work",
+				undefined,
+			]);
+			expect(calls[1]?.prompt).toContain("Delivered original request");
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
+	);
+});
+
 it("prepends a hidden still-open note only until Dismiss or a reply, on fresh and resumed turns", async () => {
 	await fc.assert(
 		fc.asyncProperty(
@@ -482,12 +574,24 @@ it("prepends a hidden still-open note only until Dismiss or a reply, on fresh an
 							userMessageId: "current",
 						});
 						const plan = yield* prepare("s1", "personal", text);
+						const continuation = yield* makePrepareTurn({
+							folderSource: "account",
+							configDir: configuredClaudeConfigDir("/accounts/work"),
+							continuation: { cutOffMessageId: "cut-off" },
+						});
+						if (cutOff.includes("dismissed")) {
+							const refused = yield* Effect.flip(continuation("s1", "work"));
+							expect(refused._tag).toBe("ContinuationNotReady");
+							expect(refused.message).toBe(
+								"The cut-off request was dismissed.",
+							);
+						} else {
+							// A reply clears the note but must not refuse the continuation
+							// itself: a restart replays it after its own reply arrived.
+							const switched = yield* continuation("s1", "work");
+							expect(switched.prompt.endsWith("Earlier request")).toBe(true);
+						}
 						if (cutOff === "open") {
-							const continuation = yield* makePrepareTurn({
-								folderSource: "account",
-								configDir: configuredClaudeConfigDir("/accounts/work"),
-								continuation: true,
-							});
 							const switched = yield* continuation("s1", "work");
 							expect(switched.resumeSessionId).toBeUndefined();
 							expect(switched.prompt).toContain("[Conduit still-open note]");

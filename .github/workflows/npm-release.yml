@@ -100,6 +100,8 @@ jobs:
           XDG_CONFIG_HOME: /tmp/opencode-ci-config
       - run: pnpm exec vitest run
       - run: pnpm exec vitest run --config vitest.integration.config.ts
+        env:
+          CONDUIT_INTEGRATION_WORKERS: 4
       - run: pnpm exec vitest run --config vitest.contract.config.ts
 
   # ── Job 3: E2E Playwright tests ────────────────────────────────────────────

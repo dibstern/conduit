@@ -372,6 +372,12 @@ export class BackgroundLivenessTag extends Context.Service<
 	(sessionId: string) => SessionBackground | undefined
 >()("BackgroundLiveness") {}
 
+/** Runner process ownership, independent of turn and background activity. */
+export class AgentLivenessTag extends Context.Service<
+	AgentLivenessTag,
+	(sessionId: string) => Effect.Effect<boolean>
+>()("AgentLiveness") {}
+
 /** A Claude runtime's live task ids; see makeSessionBackgroundLiveness. */
 export class LiveTaskListTag extends Context.Service<
 	LiveTaskListTag,

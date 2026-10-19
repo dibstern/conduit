@@ -305,6 +305,10 @@ export interface ProjectRelay {
 		idleWindowMs: number,
 		now: number,
 	): Effect.Effect<number, SqlError | SessionManagerError>;
+	deleteArchivedSessions(
+		windowMs: number,
+		now: number,
+	): Effect.Effect<number, SqlError | SessionManagerError>;
 	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
 	sseStream: SSEStreamPort;
@@ -373,6 +377,7 @@ export interface RelayStackConfig {
 }
 
 export interface RelayStack {
+	deleteArchivedSessions: ProjectRelay["deleteArchivedSessions"];
 	archiveIdleSessions: ProjectRelay["archiveIdleSessions"];
 	settleIdleSessions: ProjectRelay["settleIdleSessions"];
 	server: EffectRelayServer;
@@ -462,8 +467,8 @@ export async function createProjectRelay(
 		}
 	}
 
-	// Publisher and viewer callbacks in the Layer graph run after startup supplies the handler.
-	let wsHandler: WebSocketHandlerShape;
+	// Startup supplies the handler, but runner adoption can publish before it does.
+	let wsHandler: WebSocketHandlerShape | undefined;
 
 	const layers = createProjectRelayLayers({
 		config,
@@ -551,13 +556,13 @@ export async function createProjectRelay(
 			settleIdleSessions(
 				{
 					projectDir: config.projectDir,
-					hasViewer: (id) => wsHandler.getClientsForSession(id).length > 0,
+					hasViewer: (id) =>
+						startup.wsHandler.getClientsForSession(id).length > 0,
 					hasLiveBackgroundWork: startup.activity.background.hasLiveWork,
-					setSettled: (id, mergedHead) =>
+					setSettled: (id) =>
 						startup.sessionManagerService.setSessionSettled(id, {
 							settled: true,
 							automatic: true,
-							...(mergedHead !== undefined ? { mergedHead } : {}),
 						}),
 				},
 				idleWindowMs,
@@ -569,6 +574,8 @@ export async function createProjectRelay(
 					startup.persistenceProject,
 				),
 			),
+		deleteArchivedSessions: (windowMs, now) =>
+			startup.sessionManagerService.deleteArchivedSessions(windowMs, now),
 		archiveIdleSessions: (idleWindowMs, now) =>
 			archiveIdleSessions(
 				{
@@ -964,6 +971,7 @@ export async function createRelayStack(
 		server,
 		effectRuntime: relay.effectRuntime,
 		archiveIdleSessions: relay.archiveIdleSessions,
+		deleteArchivedSessions: relay.deleteArchivedSessions,
 		settleIdleSessions: relay.settleIdleSessions,
 		wsHandler: relay.wsHandler,
 		rpcWsHandler: relay.rpcWsHandler,

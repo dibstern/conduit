@@ -36,7 +36,12 @@ import {
 	Semaphore,
 	Stream,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
+import {
+	DEFAULT_WORKTREE_CLEANUP,
+	resolveWorktreeCleanup,
+} from "../../../contracts/worktree.js";
 import {
 	ProjectSaveRejected,
 	type ResolveSessionModeResponse,
@@ -50,6 +55,10 @@ import {
 	withCachedProjectGit,
 } from "../../../git/session-git.js";
 import { normalizeProjectTitle } from "../../../handlers/settings.js";
+import { PersistenceStore } from "../../../persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
+import { SessionRollupProjects } from "../../../persistence/effect/session-rollup-projects.js";
+import { refreshSidebar } from "../../../persistence/effect/sidebar-projection.js";
 import { chooseProjectSlug } from "../../../persistence/project-storage.js";
 import {
 	checkFolders,
@@ -59,11 +68,13 @@ import {
 import { stopRegisteredRunners } from "../../../provider/runner/process-session-runner.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { StoredProject } from "../../../types.js";
+import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { isConduitWorktreePath } from "../Layers/worktree-layer.js";
 import {
 	ConfigPersistenceTag,
 	requestConfigSave,
 } from "./config-persistence-service.js";
+import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 import { countRunningProjectSessions } from "./daemon-session-reader.js";
 import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
@@ -71,6 +82,61 @@ import { DaemonStoreAvailability } from "./daemon-store-availability.js";
 import { RelayCacheTag } from "./relay-cache.js";
 
 const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
+
+/** Registration changes affect roots owned by other projects too. */
+const refreshProjectRollups = (changedSlugs: readonly string[]) =>
+	Effect.gen(function* () {
+		const store = yield* Effect.serviceOption(PersistenceStore);
+		if (Option.isNone(store)) return;
+		const projects = Context.get(store.value, SessionRollupProjects);
+		if (projects === undefined) return;
+		const sql = Context.get(store.value, SqlClient.SqlClient);
+		const runner = Context.get(store.value, ProjectionRunnerEffectTag);
+		const unavailable = yield* DaemonStoreAvailability;
+		const ref = yield* ProjectRegistryTag;
+		const { advance } = yield* sql
+			.withTransaction(
+				Effect.gen(function* () {
+					const registered = [...HashMap.keys(yield* Ref.get(ref))].filter(
+						(slug) => !unavailable.has(slug),
+					);
+					const roots = yield* sql<{ id: string; project_id: string }>`
+				SELECT DISTINCT root.id, root.project_id FROM sessions member
+				JOIN sessions root ON root.id = member.root_id
+				WHERE member.project_id IN ${sql.in(changedSlugs)}`;
+					if (roots.length === 0) return { registered, advance: undefined };
+					const version = yield* runner.nextVersion.pipe(
+						Effect.provideService(SqlClient.SqlClient, sql),
+					);
+					const sessionIds = roots.map(({ id }) => id);
+					yield* refreshSidebar(sessionIds, version, registered).pipe(
+						Effect.provideService(SqlClient.SqlClient, sql),
+					);
+					return {
+						registered,
+						advance: {
+							version,
+							sessionIds,
+							projectIds: [
+								...new Set(roots.map(({ project_id }) => project_id)),
+							],
+						},
+					};
+				}),
+			)
+			.pipe(
+				Effect.tap(({ registered }) => Ref.set(projects, registered)),
+				Effect.orDie,
+				Effect.uninterruptible,
+			);
+		const bus = yield* Effect.serviceOption(SessionEventBusTag);
+		if (advance && Option.isSome(bus))
+			yield* bus.value.publishAdvance({
+				...advance,
+				removedSessionIds: [],
+				collections: ["sidebar"],
+			});
+	});
 
 const formatRelayFailure = (cause: unknown): string =>
 	cause instanceof Error ? cause.message : String(cause);
@@ -134,6 +200,9 @@ const toStoredProject = (project: DaemonProject): StoredProject => ({
 	}),
 	...(project.sessionMode !== undefined && {
 		sessionMode: project.sessionMode,
+	}),
+	...(project.worktreeCleanup !== undefined && {
+		worktreeCleanup: project.worktreeCleanup,
 	}),
 	...(project.repositoryIdentities !== undefined && {
 		repositoryIdentities: project.repositoryIdentities,
@@ -206,6 +275,17 @@ export const getProject = (slug: string) =>
 		Effect.annotateLogs("slug", slug),
 		Effect.withSpan("projectRegistry.getProject"),
 	);
+
+/** Read current global rules and the project's current daemon-only override. */
+export const getEffectiveWorktreeCleanup = (slug: string) =>
+	Effect.gen(function* () {
+		const project = yield* getProject(slug);
+		const config = yield* Ref.get(yield* DaemonConfigRefTag);
+		return resolveWorktreeCleanup(
+			config.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP,
+			project.worktreeCleanup,
+		);
+	});
 
 /** Resolve each draft from the primary folder's current file and persisted defaults. */
 export const resolveSessionMode = (slug: string) =>
@@ -385,22 +465,31 @@ export const addWithoutRelay = (
 	Effect.gen(function* () {
 		const ref = yield* ProjectRegistryTag;
 		const bus = yield* DaemonEventBusTag;
+		const entry: ProjectRegistering = { _tag: "Registering", project };
 
 		// Atomic check-and-set via Ref.modify
 		const alreadyExists = yield* Ref.modify(ref, (state) => {
 			if (HashMap.has(state, project.slug)) {
 				return [true, state] as const;
 			}
-			const entry: ProjectRegistering = {
-				_tag: "Registering",
-				project,
-			};
 			return [false, HashMap.set(state, project.slug, entry)] as const;
 		});
 
 		if (alreadyExists) {
 			return yield* new ProjectAlreadyExists({ slug: project.slug });
 		}
+		yield* refreshProjectRollups([project.slug]).pipe(
+			Effect.onError(() =>
+				Ref.update(ref, (state) =>
+					Option.exists(
+						HashMap.get(state, project.slug),
+						(current) => current === entry,
+					)
+						? HashMap.remove(state, project.slug)
+						: state,
+				),
+			),
+		);
 
 		if (!options?.silent) {
 			yield* PubSub.publish(
@@ -412,6 +501,7 @@ export const addWithoutRelay = (
 		yield* requestConfigSave;
 		yield* Effect.logInfo("Project registered");
 	}).pipe(
+		Effect.uninterruptible,
 		Effect.annotateLogs("slug", project.slug),
 		Effect.withSpan("projectRegistry.addWithoutRelay", {
 			attributes: { slug: project.slug },
@@ -531,6 +621,7 @@ export const remove = (slug: string) =>
 						removed.value.project.folders[0],
 						state.configDir,
 					);
+					yield* refreshProjectRollups([slug]);
 				}).pipe(
 					Effect.onError(() =>
 						// Failed removal must remain reachable by retries and a full stop.
@@ -575,6 +666,7 @@ export const updateProject = (
 			| "repositoryIdentities"
 			| "setupScript"
 			| "sessionMode"
+			| "worktreeCleanup"
 		>
 	>,
 ) =>
@@ -699,6 +791,7 @@ export const removeAll = Effect.gen(function* () {
 
 	// Clear all entries atomically
 	yield* Ref.set(ref, HashMap.empty());
+	yield* refreshProjectRollups(allSlugs);
 
 	// Invalidate all relays and publish removal events
 	yield* Effect.forEach(

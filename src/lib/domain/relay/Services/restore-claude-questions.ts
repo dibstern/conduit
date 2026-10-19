@@ -31,7 +31,13 @@ export const restoreClaudeQuestionsFromStore = Effect.gen(function* () {
 			)
 				continue;
 			questions.push({
-				requestId: row.call_id ?? row.id,
+				requestId: row.prompt_id ?? row.call_id ?? row.id,
+				...(row.provider_process_id
+					? { providerProcessId: row.provider_process_id }
+					: {}),
+				...(row.provider_request_id
+					? { providerRequestId: row.provider_request_id }
+					: {}),
 				sessionId: row.session_id,
 				toolCallId: row.call_id ?? row.id,
 				partId: row.id,

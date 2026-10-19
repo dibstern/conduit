@@ -38,7 +38,7 @@ describe("Effect domain organization guard", () => {
 			...tsFiles(join(REPO_ROOT, "src")),
 			...tsFiles(join(REPO_ROOT, "test")),
 		].filter((file) => {
-			if (file === "test/unit/effect/domain-organization-guard.test.ts") {
+			if (file === "test/unit/effect/domain-organization-guard.guard.test.ts") {
 				return false;
 			}
 			return readFileSync(join(REPO_ROOT, file), "utf8").includes(

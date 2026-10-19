@@ -13,8 +13,12 @@ import {
 	ReadQueryEffectTag,
 	type SessionScope,
 } from "../../../persistence/effect/read-query-effect.js";
-import { shouldArchiveIdleSession } from "../../../session/auto-archive-policy.js";
+import {
+	shouldArchiveIdleSession,
+	shouldDeleteArchivedSessionTree,
+} from "../../../session/auto-archive-policy.js";
 import { readPersistedAutoArchiveFacts } from "../../../session/auto-archive-sweep.js";
+import { readPersistedAutoDeleteFacts } from "../../../session/auto-delete-archived-sweep.js";
 import { shouldSettleIdleSession } from "../../../session/auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "../../../session/auto-settle-reader.js";
 import type {
@@ -194,6 +198,21 @@ export const hasColdAutoArchiveCandidate = (
 		);
 		return [...facts.values()].some((item) =>
 			shouldArchiveIdleSession(item, now, idleWindowMs),
+		);
+	});
+
+export const hasColdAutoDeleteCandidate = (
+	project: Pick<StoredProject, "slug" | "folders">,
+	now: number,
+	windowMs: number,
+) =>
+	Effect.gen(function* () {
+		const database = yield* projectReadDatabase(project);
+		const trees = yield* readPersistedAutoDeleteFacts(project.slug).pipe(
+			Effect.provide(database),
+		);
+		return [...trees.values()].some(({ facts }) =>
+			shouldDeleteArchivedSessionTree(facts, now, windowMs),
 		);
 	});
 

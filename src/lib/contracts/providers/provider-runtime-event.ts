@@ -102,6 +102,7 @@ const PROVIDER_RUNTIME_PROVIDER_REF_KEYS = [
 	"providerTurnId",
 	"providerToolUseId",
 	"providerRequestId",
+	"providerProcessId",
 	"providerTaskId",
 	"parentProviderTaskId",
 ] as const;
@@ -119,6 +120,7 @@ const ProviderRuntimeProviderRefsStruct = Schema.Struct({
 	providerTurnId: Schema.optional(NonBlankString),
 	providerToolUseId: Schema.optional(NonBlankString),
 	providerRequestId: Schema.optional(NonBlankString),
+	providerProcessId: Schema.optional(NonBlankString),
 	providerTaskId: Schema.optional(NonBlankString),
 	parentProviderTaskId: Schema.optional(NonBlankString),
 });

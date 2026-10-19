@@ -30,6 +30,7 @@ import { openCodeAuth } from "../../../instance/managed-opencode-process.js";
 import { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import { createSdkClient } from "../../../instance/sdk-factory.js";
 import { createLogger, type Logger } from "../../../logger.js";
+import { openCodePromptProcessId } from "../../../provider/opencode-process-identity.js";
 import { SSEStream } from "../../../relay/sse-stream.js";
 import type {
 	ConnectionHealth,
@@ -124,12 +125,14 @@ type OpenCodeProcessControl<Start, Stop> = {
 const endpointKey = (endpoint: OpenCodeEndpoint | undefined) =>
 	JSON.stringify([
 		endpoint?.url,
+		endpoint?.processIdentity,
 		endpoint?.auth?.username,
 		endpoint?.auth?.password,
 	]);
 
 type InstanceStream = {
 	identity: string;
+	readonly promptProcessId: string;
 	readonly key: string;
 	readonly managed: boolean;
 	readonly source: SSEStream;
@@ -301,6 +304,8 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				directory: string,
 				payload: OpenCodePayload,
 			) => {
+				const stream = streams.get(instanceId);
+				if (!stream || stream.source !== source) return false;
 				let delivered = false;
 				for (const subscriber of subscribers) {
 					if (!subscriber.directories().has(directory)) continue;
@@ -308,6 +313,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						_tag: "event",
 						instanceId,
 						payload,
+						providerProcessId: stream.promptProcessId,
 						health: source.getHealth(),
 					});
 					delivered = true;
@@ -347,6 +353,12 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					});
 					const stream: InstanceStream = {
 						identity: randomUUID(),
+						// External OpenCode exposes no process token. Its endpoint keeps
+						// reconnects stable, but cannot distinguish a remote restart.
+						promptProcessId: openCodePromptProcessId(
+							instanceId,
+							endpoint?.processIdentity ?? endpoint?.url ?? instanceId,
+						),
 						key,
 						managed: endpoint?.managed === true,
 						source,
@@ -393,6 +405,8 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						broadcast({
 							_tag: "connected",
 							instanceId,
+							providerProcessId: stream.promptProcessId,
+							managed: stream.managed,
 							health: source.getHealth(),
 						});
 						if (stream.reconcileClient)
@@ -663,6 +677,10 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					processIdentity:
 						endpoint.processIdentity ??
 						streams.get(endpoint.instanceId ?? instanceId)?.identity,
+					promptProcessId: openCodePromptProcessId(
+						endpoint.instanceId ?? instanceId,
+						endpoint.processIdentity ?? endpoint.url,
+					),
 				});
 			};
 
@@ -1065,11 +1083,24 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 											subscriber.send({
 												_tag: "connected",
 												instanceId: subscribedId,
+												providerProcessId: stream.promptProcessId,
+												managed: stream.managed,
 												health: stream.source.getHealth(),
 											});
 										// Recover every already-open instance, including sessions
 										// bound to a non-selected instance. This stays passive.
 										for (const [runningId, running] of streams) {
+											if (
+												runningId !== subscribedId &&
+												running.source.isConnected()
+											)
+												subscriber.send({
+													_tag: "connected",
+													instanceId: runningId,
+													providerProcessId: running.promptProcessId,
+													managed: running.managed,
+													health: running.source.getHealth(),
+												});
 											// A late subscriber gets its own replay; others never see it.
 											if (
 												running.source.isConnected() &&
@@ -1083,6 +1114,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 															_tag: "event",
 															instanceId: runningId,
 															payload,
+															providerProcessId: running.promptProcessId,
 															health: running.source.getHealth(),
 														}),
 												);

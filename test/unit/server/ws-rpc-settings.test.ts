@@ -101,6 +101,43 @@ describe("settings RPC config persistence", () => {
 				)?.autoSettleAfterDays,
 			).toBeNull();
 
+			expect(
+				yield* settingsHandlers
+					.GetAutoDeleteArchivedSetting({
+						_tag: "GetAutoDeleteArchivedSetting",
+					})
+					.pipe(Effect.provide(context)),
+			).toEqual({ autoDeleteArchivedAfterDays: 30 });
+			for (const days of [7, null]) {
+				expect(
+					yield* settingsHandlers
+						.SetAutoDeleteArchivedSetting({
+							_tag: "SetAutoDeleteArchivedSetting",
+							autoDeleteArchivedAfterDays: days,
+						})
+						.pipe(Effect.provide(context)),
+				).toEqual({ autoDeleteArchivedAfterDays: days });
+				expect((yield* Ref.get(configRef)).autoDeleteArchivedAfterDays).toBe(
+					days,
+				);
+				expect(
+					Either.getOrThrowWith(
+						loadDaemonConfigResult(configDir),
+						(error) => error,
+					).autoDeleteArchivedAfterDays,
+				).toBe(days);
+			}
+			for (const days of [0, 1.5, 91]) {
+				const result = yield* Effect.result(
+					settingsHandlers
+						.SetAutoDeleteArchivedSetting({
+							_tag: "SetAutoDeleteArchivedSetting",
+							autoDeleteArchivedAfterDays: days,
+						})
+						.pipe(Effect.provide(context)),
+				);
+				expect(result._tag).toBe("Failure");
+			}
 			const persistence = Context.get(context, ConfigPersistenceTag);
 			yield* persistence.requestSave;
 			yield* persistence.flush;
@@ -112,6 +149,7 @@ describe("settings RPC config persistence", () => {
 			).toMatchObject({
 				usageLimits,
 				autoSettleAfterDays: null,
+				autoDeleteArchivedAfterDays: null,
 			});
 			// A stale disk value must not change what runtime readers observe.
 			yield* Effect.tryPromise(() =>
@@ -127,6 +165,13 @@ describe("settings RPC config persistence", () => {
 					.GetAutoSettleSetting({ _tag: "GetAutoSettleSetting" })
 					.pipe(Effect.provide(context)),
 			).toEqual({ autoSettleAfterDays: null });
+			expect(
+				yield* settingsHandlers
+					.GetAutoDeleteArchivedSetting({
+						_tag: "GetAutoDeleteArchivedSetting",
+					})
+					.pipe(Effect.provide(context)),
+			).toEqual({ autoDeleteArchivedAfterDays: null });
 		}),
 	);
 });

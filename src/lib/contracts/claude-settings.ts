@@ -12,7 +12,7 @@ import { Schema } from "effect";
  * `satisfies readonly (keyof Settings)[]` accepts any string whatsoever and
  * would assert nothing here. `autoMode` in particular is absent from the
  * published types and exists only in the CLI bundle. The list is pinned by
- * test instead — see test/unit/provider/claude/claude-sdk-settings.test.ts.
+ * test instead — see test/unit/provider/claude/claude-sdk-settings.guard.test.ts.
  */
 export const CLAUDE_TRUST_TIERED_SETTINGS_KEYS: readonly string[] = [
 	"permissions",

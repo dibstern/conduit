@@ -114,6 +114,8 @@ describe("Bound project provenance", () => {
 			"0061_sessions_lineage",
 			"0062_legacy_forks",
 			"0063_sessions_archived",
+			"0064_prompt_provider_reference",
+			"0065_tool_result_event_refs",
 		]);
 	});
 

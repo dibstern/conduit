@@ -60,6 +60,7 @@ import type {
 } from "../../../src/lib/domain/relay/Services/services.js";
 // Batch 2 imports
 import {
+	AgentLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceLive,
@@ -1438,6 +1439,7 @@ function makeSessionLifecycleLayer(options?: {
 			providers: [{ id: "openai", name: "OpenAI", models: [{ id: "gpt-4", name: "GPT-4" }] }],
 		}));
 	return Layer.mergeAll(
+		Layer.succeed(AgentLivenessTag)(() => Effect.succeed(false)),
 		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		openCodeModelLayer(client),
 		Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [{ id: "sonnet", name: "Sonnet", providerId: "claude" }] })) })),
@@ -1822,6 +1824,7 @@ describe("handlePermissionResponse", () => {
 						"session-1",
 						"perm-1",
 						"once",
+						undefined,
 					);
 				})),
 			);
@@ -1872,6 +1875,7 @@ describe("handlePermissionResponse", () => {
 						"permission-session",
 						"perm-cross-session",
 						"once",
+						undefined,
 					);
 				})),
 			);
@@ -3352,7 +3356,10 @@ describe("handleMessage", () => {
 					// DB). cev.3 makes the seam mandatory, so the Claude event sink needs
 					// it present to avoid the failing guard sink.
 					Layer.succeed(ProviderRuntimeIngestionTag)({
-						ingest: () => Effect.succeed(0),
+						ingest: (_event, onPrompt) =>
+							(onPrompt ? onPrompt("conduit-service-1") : Effect.void).pipe(
+								Effect.as(0),
+							),
 						ingestBatch: () => Effect.succeed(0),
 						drain: () => Effect.void,
 					}),
@@ -3387,11 +3394,11 @@ describe("handleMessage", () => {
 					yield* pendingInteractions.listPendingQuestions("session-1");
 				expect(pendingQuestions).toEqual([
 					expect.objectContaining({
-						requestId: "que-service-1",
+						requestId: "conduit-service-1",
 						sessionId: "session-1",
 					}),
 				]);
-				yield* pendingInteractions.resolveQuestionRequest("que-service-1", {
+				yield* pendingInteractions.resolveQuestionRequest("conduit-service-1", {
 					"0": "Yes",
 				});
 				yield* Effect.tryPromise(() => questionPromise ?? Promise.resolve({}));

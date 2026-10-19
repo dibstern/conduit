@@ -84,7 +84,9 @@ const previewContinuationForAccount = (
 			agent: yield* getAgent(sessionId),
 			modelContextWindow: contextWindow === "1m" ? 1000000 : undefined,
 			continuation:
-				account.id !== session.provider && !!recovery?.cutOffMessageId,
+				account.id !== session.provider && recovery?.cutOffMessageId
+					? { cutOffMessageId: recovery.cutOffMessageId }
+					: undefined,
 		});
 		const prepared = yield* prepare(sessionId, account.id);
 		return (
