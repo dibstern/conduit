@@ -108,7 +108,6 @@
 	// bits-ui 2.18.1 DropdownMenuTrigger opens on touch pointerup, then its
 	// onclick toggles again when the synthetic click arrives with detail=0.
 	function triggerProps(props: Record<string, unknown>): Record<string, unknown> {
-		if (presentation !== "sheet") return props;
 		const onPointerDown = props["onpointerdown"] as ((event: PointerEvent) => void) | undefined;
 		const onPointerUp = props["onpointerup"] as ((event: PointerEvent) => void) | undefined;
 		const onKeyDown = props["onkeydown"] as ((event: KeyboardEvent) => void) | undefined;

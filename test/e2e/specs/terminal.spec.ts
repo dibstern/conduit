@@ -2,7 +2,11 @@
 // The replay fixture mocks OpenCode, but terminal tabs run the worker's shell.
 
 import type { Page } from "@playwright/test";
-import { expect, test } from "../helpers/replay-fixture.js";
+import {
+	answerSubscribeInstances,
+	expect,
+	test,
+} from "../helpers/replay-fixture.js";
 import { finger, openPhoneTerminal } from "../helpers/terminal-keys.js";
 import { AppPage } from "../page-objects/app.page.js";
 
@@ -13,6 +17,69 @@ test.describe("Phone terminal controls", () => {
 		viewport: { width: 393, height: 852 },
 		hasTouch: true,
 		isMobile: true,
+	});
+
+	// The picker must open on touch, create in the selected root, and attach a PTY.
+	test("folder picker taps open a working terminal", async ({
+		page,
+		relayUrl,
+		relayInstances,
+	}, testInfo) => {
+		const root = process.cwd();
+		// Supply multi-folder metadata while keeping terminal RPCs and shells real.
+		await page.routeWebSocket(/\/rpc$/, (ws) => {
+			const server = ws.connectToServer();
+			const answerInstances = answerSubscribeInstances(ws, relayInstances);
+			ws.onMessage((data) => {
+				if (answerInstances(data)) return;
+				const frame: { _tag?: string; tag?: string; id?: string } =
+					typeof data === "string" ? JSON.parse(data) : {};
+				if (frame._tag === "Request" && frame.tag === "GetFileTree") {
+					ws.send(
+						JSON.stringify({
+							_tag: "Exit",
+							requestId: frame.id,
+							exit: {
+								_tag: "Success",
+								value: {
+									projectSlug: "e2e-replay",
+									entries: [],
+									roots: [
+										{ root, label: "project" },
+										{ root: `${root}/test`, label: "test" },
+									],
+								},
+							},
+						}),
+					);
+				} else server.send(data);
+			});
+			server.onMessage((data) => ws.send(data));
+		});
+		await openPhoneTerminal(page, relayUrl);
+		const picker = page.getByTestId("new-terminal-folder-picker");
+		await picker.tap();
+		await expect(picker).toHaveAttribute("aria-expanded", "true");
+		await page.getByRole("menuitem", { name: "project", exact: true }).tap();
+		await expect(page.getByRole("tab", { selected: true })).toContainText(
+			"Terminal 2",
+		);
+		await expect(
+			page.locator("#terminal-panel .xterm-helper-textarea").last(),
+		).toBeFocused();
+		await page.keyboard.type("printf '\\nQDEB_%s\\n' ready");
+		await page.keyboard.press("Enter");
+		await expect(
+			page.locator("#terminal-panel .xterm-rows").last(),
+		).toContainText("QDEB_ready");
+		const screenshot = testInfo.outputPath(
+			"phone-terminal-after-folder-tap.png",
+		);
+		await page.screenshot({ path: screenshot });
+		await testInfo.attach("phone terminal after folder tap", {
+			path: screenshot,
+			contentType: "image/png",
+		});
 	});
 
 	test("overflowing tabs keep panel controls visible and tabs reachable", async ({
