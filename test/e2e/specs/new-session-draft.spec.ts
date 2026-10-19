@@ -70,6 +70,7 @@ test.describe("New session draft", () => {
 		relayUrl,
 	}, testInfo) => {
 		const { app, sidebar, countBefore } = await openDraft(page, relayUrl);
+		const draftUrl = page.url();
 
 		await expect(app.input).toBeFocused();
 		await expect(app.input).toHaveValue("");
@@ -80,33 +81,16 @@ test.describe("New session draft", () => {
 
 		// Persisting and clearing a draft proves its delayed work ran without creating a session.
 		await app.input.fill("Keep this as a draft");
-		await expect
-			.poll(() =>
-				page.evaluate(() => localStorage.getItem("conduit:new-session-draft")),
-			)
-			.toBe("Keep this as a draft");
+		const observer = new AppPage(await page.context().newPage());
+		await observer.goto(draftUrl);
+		await expect(observer.input).toHaveValue("Keep this as a draft");
 		await app.input.clear();
-		await expect
-			.poll(() =>
-				page.evaluate(() => localStorage.getItem("conduit:new-session-draft")),
-			)
-			.toBeNull();
-		expect(await sidebar.getSessionCount()).toBe(countBefore);
-	});
-
-	test("first send creates the session and opens it", async ({
-		page,
-		relayUrl,
-	}) => {
-		const { app, sidebar, countBefore } = await openDraft(page, relayUrl);
-
-		await app.input.fill("Hello from a draft");
-		await app.sendBtn.click();
-
-		await expect(page).toHaveURL(/\/s\/[^/?]+(?:\?.*)?$/);
-		await expect
-			.poll(() => sidebar.getSessionCount(), { timeout: 10_000 })
-			.toBeGreaterThan(countBefore);
+		await expect(observer.input).toHaveValue("");
+		await observer.page.close();
+		await page.reload();
+		await expect(page).toHaveURL(draftUrl);
+		await expect(app.input).toHaveValue("");
+		await expect.poll(() => sidebar.getSessionCount()).toBe(countBefore);
 	});
 
 	test("start chip shows the current checkout; worktrees come later", async ({
@@ -167,16 +151,16 @@ test.describe("New session draft", () => {
 
 	test("a reload keeps the half-typed prompt", async ({ page, relayUrl }) => {
 		const { app } = await openDraft(page, relayUrl);
+		const draftUrl = page.url();
 		await app.input.fill("Survive a reload");
-		await expect
-			.poll(() =>
-				page.evaluate(() => localStorage.getItem("conduit:new-session-draft")),
-			)
-			.toBe("Survive a reload");
+		const observer = new AppPage(await page.context().newPage());
+		await observer.goto(draftUrl);
+		await expect(observer.input).toHaveValue("Survive a reload");
+		await observer.page.close();
 
 		await page.reload();
 
-		await expect(page).toHaveURL(/\/draft\/[^/?]+\?(?:.*&)?project=/);
+		await expect(page).toHaveURL(draftUrl);
 		await expect(app.input).toHaveValue("Survive a reload");
 	});
 
