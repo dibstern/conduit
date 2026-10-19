@@ -29,7 +29,8 @@ export const inputSyncState = $state({
 				| "ServerTextReceived"
 				| "SubscriptionStarted"
 				| "Promoted"
-				| "Retired";
+				| "Retired"
+				| "Discarded";
 		}
 	> | null,
 });
@@ -93,6 +94,12 @@ export function handleDraftRetired(
 	};
 	inputSyncEvents.push(inputSyncState.received);
 }
+/** Explicit sidebar discard also clears pending local edits for this key. */
+export function handleDraftDiscarded(key: InputDraftKey): void {
+	inputSyncState.received = { _tag: "Discarded", key };
+	inputSyncEvents.push(inputSyncState.received);
+}
+
 export function createComposerDraft(options: {
 	key: () => InputDraftKey | null;
 	projectSlug: () => string | null;

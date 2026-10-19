@@ -68,6 +68,7 @@ export type DraftEvent =
 	| { _tag: "SyncDue" }
 	| { _tag: "Flush" }
 	| { _tag: "Cleared" }
+	| { _tag: "Discarded"; key: InputDraftKey }
 	| { _tag: "SendStarted"; clear: boolean }
 	| {
 			_tag: "SendFailed";
@@ -443,6 +444,28 @@ export function step(
 			];
 		case "Cleared":
 			return clear(state);
+		case "Discarded": {
+			const discardedId = draftKeyId(event.key);
+			const drafts = new Map(state.drafts);
+			const reloadBases = new Map(state.reloadBases);
+			drafts.delete(discardedId);
+			reloadBases.delete(discardedId);
+			if (discardedId !== id) return [{ ...state, drafts, reloadBases }, []];
+			return [
+				{
+					...state,
+					drafts,
+					reloadBases,
+					text: "",
+					acked: "",
+					pending: false,
+					throttled: false,
+					snapshot:
+						state.snapshot === "waiting" ? "overlapped" : state.snapshot,
+				},
+				[{ _tag: "CancelSync" }],
+			];
+		}
 		case "SendStarted": {
 			if (!state.key || !("draft" in state.key) || !id)
 				return event.clear ? clear(state) : [state, []];

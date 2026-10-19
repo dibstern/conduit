@@ -115,6 +115,7 @@ function captureDraftCalls(page: Page) {
 					frame._tag !== "Request" ||
 					(frame.tag !== "SyncInputDraft" &&
 						frame.tag !== "CreateSession" &&
+						frame.tag !== "SubscribeDrafts" &&
 						frame.tag !== "ViewSession" &&
 						frame.tag !== "SubscribeInputDraft")
 				)
@@ -695,6 +696,366 @@ async function readDaemonSessionIds(baseUrl: string): Promise<string[]> {
 		}
 	}
 }
+
+function receivedDraftLists(calls: ReturnType<typeof captureDraftCalls>) {
+	type Row = {
+		draftId: string;
+		projectSlug: string;
+		firstLine: string;
+		updatedAt: number;
+	};
+	return calls
+		.filter(({ request }) => request.frame.tag === "SubscribeDrafts")
+		.flatMap(({ replies }) =>
+			replies.flatMap(({ at, frame }) =>
+				frame._tag !== "Chunk"
+					? []
+					: (frame.values ?? []).flatMap((value) =>
+							Array.isArray(value) ? [{ at, drafts: value as Row[] }] : [],
+						),
+			),
+		);
+}
+
+async function showDraftSidebar(page: Page) {
+	const list = page.locator("#session-list");
+	const sessions = page.getByRole("button", { name: "Sessions", exact: true });
+	await expect
+		.poll(async () => (await list.isVisible()) || (await sessions.isVisible()))
+		.toBe(true);
+	if (!(await list.isVisible())) await sessions.click();
+	await expect(list).toBeVisible();
+}
+
+const draftSidebarRow = (page: Page, draftId: string) =>
+	page.locator(`[data-testid="draft-row"][data-draft-id="${draftId}"]`);
+
+test("scenario 2 restores a sidebar draft after restart and removes it on both devices after send", async ({
+	page,
+	browser,
+	buildDaemon,
+}, testInfo) => {
+	const callsA = captureDraftCalls(page);
+	const contextB = await browser.newContext({
+		viewport: page.viewportSize(),
+		isMobile: testInfo.project.use.isMobile ?? false,
+		hasTouch: testInfo.project.use.hasTouch ?? false,
+	});
+	const pageB = await contextB.newPage();
+	const callsB = captureDraftCalls(pageB);
+	const text = "A durable sidebar draft to send from device B";
+	let draftUrl = "";
+	let sessionPath = "";
+	try {
+		await page.goto(`${buildDaemon.baseUrl}/new?project=build-id-test`);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
+		draftUrl = page.url();
+		const draftId = new URL(draftUrl).pathname.split("/").pop() ?? "";
+		await page.locator("#input").fill(text);
+		await expect.poll(() => syncCompleted(callsA, text)).toBe(true);
+		await page.screenshot({
+			path: testInfo.outputPath("sidebar-draft-written-A.png"),
+		});
+		await buildDaemon.restart(buildDaemon.buildId);
+		await page.locator(".connect-overlay").waitFor({ state: "detached" });
+		await expect(page.locator("#input")).toHaveValue(text);
+		await pageB.goto(`${buildDaemon.baseUrl}/?p=build-id-other`);
+		await showDraftSidebar(pageB);
+		const rowB = draftSidebarRow(pageB, draftId);
+		await expect
+			.poll(() =>
+				receivedDraftLists(callsB).some(({ drafts }) =>
+					drafts.some(
+						(draft) =>
+							draft.draftId === draftId &&
+							draft.projectSlug === "build-id-test" &&
+							draft.firstLine === text,
+					),
+				),
+			)
+			.toBe(true);
+		await expect(rowB).toHaveCount(0);
+		await pageB.screenshot({
+			path: testInfo.outputPath("sidebar-draft-other-project-filtered-B.png"),
+		});
+		await pageB.goto(`${buildDaemon.baseUrl}/`);
+		await showDraftSidebar(pageB);
+		await expect(rowB).toContainText(text);
+		await pageB.screenshot({
+			path: testInfo.outputPath("sidebar-draft-after-restart-B.png"),
+		});
+		await rowB.getByRole("link").click();
+		await expect
+			.poll(() => new URL(pageB.url()).pathname)
+			.toBe(new URL(draftUrl).pathname);
+		expect(new URL(pageB.url()).searchParams.get("project")).toBe(
+			"build-id-test",
+		);
+		await expect(pageB.locator("#input")).toHaveValue(text);
+		await pageB.screenshot({
+			path: testInfo.outputPath("sidebar-draft-opened-B.png"),
+		});
+		await pageB.locator("#send").click();
+		await expect(pageB).toHaveURL(/\/s\/ses_/);
+		sessionPath = new URL(pageB.url()).pathname;
+		await expect.poll(() => new URL(page.url()).pathname).toBe(sessionPath);
+		await page.screenshot({
+			path: testInfo.outputPath("sidebar-promotion-followed-A.png"),
+		});
+		for (const tab of [page, pageB]) {
+			await showDraftSidebar(tab);
+			await expect(draftSidebarRow(tab, draftId)).toHaveCount(0);
+		}
+		for (const calls of [callsA, callsB])
+			await expect
+				.poll(() => {
+					const latest = receivedDraftLists(calls).at(-1);
+					return (
+						latest !== undefined &&
+						!latest.drafts.some((draft) => draft.draftId === draftId)
+					);
+				})
+				.toBe(true);
+	} finally {
+		await saveDraftEvidence(testInfo, [page, pageB], {
+			draftUrl,
+			sessionPath,
+			text,
+			A: callsA,
+			B: callsB,
+		});
+		await contextB.close();
+	}
+});
+
+test("scenario 5 discarding a sidebar draft removes its row on the other device", async ({
+	page,
+	browser,
+	buildDaemon,
+}, testInfo) => {
+	const text = "Discard this draft from every device";
+	const dirtyText = `${text} unsent tail`;
+	let droppedLeading = false;
+	const routed: Array<{
+		direction: string;
+		at: number;
+		data: string;
+		dropped?: boolean;
+	}> = [];
+	await page.routeWebSocket(/\/rpc$/, (ws) => {
+		const server = ws.connectToServer();
+		ws.onMessage((data) => {
+			const frames = [JSON.parse(String(data))].flat() as Array<{
+				tag?: string;
+				payload?: { text?: string };
+			}>;
+			for (const frame of frames) {
+				const dropped =
+					!droppedLeading &&
+					frame.tag === "SyncInputDraft" &&
+					frame.payload?.text === `${text} `;
+				if (dropped) droppedLeading = true;
+				routed.push({
+					direction: "sent",
+					at: Date.now(),
+					data: JSON.stringify(frame),
+					dropped,
+				});
+				if (!dropped) server.send(JSON.stringify(frame));
+			}
+		});
+		server.onMessage((data) => {
+			routed.push({
+				direction: "received",
+				at: Date.now(),
+				data: String(data),
+			});
+			ws.send(data);
+		});
+	});
+	const callsA = captureDraftCalls(page);
+	const contextB = await browser.newContext({
+		viewport: page.viewportSize(),
+		isMobile: testInfo.project.use.isMobile ?? false,
+		hasTouch: testInfo.project.use.hasTouch ?? false,
+	});
+	const pageB = await contextB.newPage();
+	const callsB = captureDraftCalls(pageB);
+	let draftUrl = "";
+	let activeComposer = false;
+	try {
+		await page.goto(`${buildDaemon.baseUrl}/new?project=build-id-test`);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
+		draftUrl = page.url();
+		const draftId = new URL(draftUrl).pathname.split("/").pop() ?? "";
+		await page.locator("#input").fill(text);
+		await expect.poll(() => syncCompleted(callsA, text)).toBe(true);
+		await showDraftSidebar(page);
+		await pageB.goto(`${buildDaemon.baseUrl}/?p=build-id-test`);
+		await showDraftSidebar(pageB);
+		await expect(draftSidebarRow(page, draftId)).toContainText(text);
+		await expect(draftSidebarRow(pageB, draftId)).toContainText(text);
+		await page.screenshot({
+			path: testInfo.outputPath("sidebar-before-discard-A.png"),
+		});
+		await pageB.screenshot({
+			path: testInfo.outputPath("sidebar-before-discard-B.png"),
+		});
+		activeComposer = await page.locator("#input").isVisible();
+		if (activeComposer) {
+			// One browser task keeps the dirty burst and discard inside the throttle
+			// window. Dropping its leading write leaves the previous text acknowledged.
+			await page.evaluate(
+				({ text, dirtyText, draftId }) => {
+					const input = document.querySelector<HTMLTextAreaElement>("#input");
+					const discard = document.querySelector<HTMLButtonElement>(
+						`[data-testid="draft-row"][data-draft-id="${draftId}"] [data-testid="draft-row-discard"]`,
+					);
+					if (!input || !discard)
+						throw new Error("Missing active draft composer or discard action");
+					for (const value of [`${text} `, dirtyText]) {
+						input.value = value;
+						input.dispatchEvent(
+							new InputEvent("input", {
+								bubbles: true,
+								inputType: "insertText",
+							}),
+						);
+					}
+					discard.click();
+				},
+				{ text, dirtyText, draftId },
+			);
+			await expect.poll(() => droppedLeading).toBe(true);
+		} else {
+			// The phone list unmounts the composer, so it has no active trailing timer.
+			await draftSidebarRow(page, draftId)
+				.getByTestId("draft-row-discard")
+				.click();
+		}
+		await expect
+			.poll(() =>
+				callsA.some(
+					({ request, replies }) =>
+						request.frame.tag === "SyncInputDraft" &&
+						request.frame.payload?.key?.draft === draftId &&
+						request.frame.payload?.text === "" &&
+						replies.some(({ frame }) => frame.exit?._tag === "Success"),
+				),
+			)
+			.toBe(true);
+		// Cover the 300 ms trailing write and the next one-second list window.
+		await page.waitForTimeout(1_500);
+		for (const tab of [page, pageB]) {
+			await expect(tab.locator("#session-list")).toBeVisible();
+			await expect(draftSidebarRow(tab, draftId)).toHaveCount(0);
+		}
+		await expect
+			.poll(() => {
+				const latest = receivedDraftLists(callsB).at(-1);
+				return (
+					latest !== undefined &&
+					!latest.drafts.some((draft) => draft.draftId === draftId)
+				);
+			})
+			.toBe(true);
+		if (activeComposer) {
+			await expect(page.locator("#input")).toHaveValue("");
+			expect(
+				callsA.some(
+					({ request }) =>
+						request.frame.tag === "SyncInputDraft" &&
+						request.frame.payload?.text === dirtyText,
+				),
+			).toBe(false);
+		}
+	} finally {
+		await saveDraftEvidence(testInfo, [page, pageB], {
+			draftUrl,
+			text,
+			dirtyText,
+			activeComposer,
+			droppedLeading,
+			routed,
+			A: callsA,
+			B: callsB,
+		});
+		await contextB.close();
+	}
+});
+
+test("human-paced typing publishes sidebar draft lists about once a second with the final text", async ({
+	page,
+	browser,
+	buildDaemon,
+}, testInfo) => {
+	const callsA = captureDraftCalls(page);
+	const contextB = await browser.newContext({
+		viewport: page.viewportSize(),
+		isMobile: testInfo.project.use.isMobile ?? false,
+		hasTouch: testInfo.project.use.hasTouch ?? false,
+	});
+	const pageB = await contextB.newPage();
+	const callsB = captureDraftCalls(pageB);
+	const text = "Human-paced draft list updates!".slice(0, 30);
+	let measurement: object = {};
+	let draftUrl = "";
+	try {
+		await page.goto(`${buildDaemon.baseUrl}/new?project=build-id-test`);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
+		draftUrl = page.url();
+		const draftId = new URL(draftUrl).pathname.split("/").pop() ?? "";
+		await pageB.goto(`${buildDaemon.baseUrl}/?p=build-id-test`);
+		await showDraftSidebar(pageB);
+		await expect
+			.poll(() => receivedDraftLists(callsB).length)
+			.toBeGreaterThan(0);
+		const before = receivedDraftLists(callsB).length;
+		const startedAt = Date.now();
+		await page.locator("#input").pressSequentially(text, { delay: 100 });
+		const typedAt = Date.now();
+		await expect.poll(() => syncCompleted(callsA, text)).toBe(true);
+		await expect
+			.poll(
+				() =>
+					receivedDraftLists(callsB)
+						.at(-1)
+						?.drafts.find((draft) => draft.draftId === draftId)?.firstLine,
+			)
+			.toBe(text);
+		const updates = receivedDraftLists(callsB).slice(before);
+		const budget = Math.ceil((typedAt - startedAt) / 1_000) + 1;
+		measurement = {
+			startedAt,
+			typedAt,
+			characters: text.length,
+			delay: 100,
+			budget,
+			count: updates.length,
+			updates,
+		};
+		expect(text).toHaveLength(30);
+		expect(updates.length).toBeGreaterThanOrEqual(2);
+		expect(updates.length).toBeLessThanOrEqual(budget);
+		expect(updates.some(({ at }) => at < typedAt)).toBe(true);
+		await expect(draftSidebarRow(pageB, draftId)).toContainText(text);
+		await page.screenshot({
+			path: testInfo.outputPath("sidebar-paced-typing-A.png"),
+		});
+		await pageB.screenshot({
+			path: testInfo.outputPath("sidebar-paced-final-B.png"),
+		});
+	} finally {
+		await saveDraftEvidence(testInfo, [page, pageB], {
+			draftUrl,
+			text,
+			measurement,
+			A: callsA,
+			B: callsB,
+		});
+		await contextB.close();
+	}
+});
 
 test("sending a shared draft moves the matching device to the created session", async ({
 	page,

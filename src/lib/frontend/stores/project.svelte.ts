@@ -11,6 +11,7 @@ import type {
 } from "../transport/ws-rpc.js";
 import { rpc } from "../transport/ws-rpc-client.js";
 import type { ProjectInfo } from "../types.js";
+import { draftList } from "./draft-list.svelte.js";
 import { applyInstanceListResponse } from "./instance.svelte.js";
 import { projectState } from "./project-state.svelte.js";
 import {
@@ -149,6 +150,9 @@ export function followDaemonLists(on: boolean): void {
 						Effect.all(
 							[
 								follow(subscriptions.instances, applyInstanceListResponse),
+								follow(subscriptions.drafts, (rows) => {
+									draftList.rows = rows;
+								}),
 								Stream.runForEach(
 									supervise(
 										Stream.suspend(subscriptions.usage),

@@ -3417,6 +3417,22 @@ export const SubscribeInputDraft = Rpc.make("SubscribeInputDraft", {
 	stream: true,
 });
 
+export const DraftListItemSchema = Schema.Struct({
+	draftId: NonEmptyString,
+	projectSlug: NonEmptyString,
+	firstLine: Schema.String,
+	updatedAt: Schema.Number,
+});
+export type DraftListItem = typeof DraftListItemSchema.Type;
+
+/** The daemon's full non-empty draft list, initially and once per change batch. */
+export const SubscribeDrafts = Rpc.make("SubscribeDrafts", {
+	payload: {},
+	success: Schema.Array(DraftListItemSchema),
+	error: WsRpcError,
+	stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
 	SubscribeShell,
 	SubscribeSessionDetail,
@@ -3428,6 +3444,7 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribeDraftModels,
 	SubscribeAlerts,
 	SubscribeInputDraft,
+	SubscribeDrafts,
 	SubscribeInstances,
 	SubscribeUsage,
 	SubscribeServerStatus,

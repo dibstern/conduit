@@ -192,6 +192,8 @@ const makeSubscriptions = (
 				key: options.key,
 			}),
 		),
+	/** All unsent new-session drafts, replaced in full on each frame. */
+	drafts: () => resumeStream(() => sockets.control("SubscribeDrafts", {})),
 	/**
 	 * The daemon's instance list and usage. Both ride the control socket.
 	 */

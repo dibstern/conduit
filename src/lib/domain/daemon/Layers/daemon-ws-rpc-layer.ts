@@ -331,6 +331,15 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			);
 
 		return {
+			SubscribeDrafts: () =>
+				drafts.listDrafts().pipe(
+					Stream.mapError(
+						(error) =>
+							new WsRpcError({
+								message: `Could not list drafts: ${error.message}`,
+							}),
+					),
+				),
 			SubscribeInputDraft: (request) =>
 				Stream.unwrap(
 					Effect.gen(function* () {

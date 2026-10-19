@@ -25,6 +25,7 @@
 		routerState,
 	} from "../../stores/router.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
+	import { draftList } from "../../stores/draft-list.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
@@ -136,6 +137,7 @@
 	});
 
 	const scope = $derived(getSessionScope());
+	const drafts = $derived(draftList.rows.filter((draft) => scope === null || draft.projectSlug === scope));
 	const scopeLabel = $derived(getSessionScopeLabel(scope));
 	const emptyMessage = $derived.by(() => {
 		if (searching && filtered.length === 0) return "No matching sessions";
@@ -495,7 +497,7 @@
 			Pick sessions to act on, then choose an action below.
 		</div>
 	{/if}
-	<SessionListRows {arrangement} {fullArrangement} {isEmpty} {emptyMessage} {statusFilter} {searching} filteredLength={filtered.length} {snoozedShelfOpen} {settledShelfOpen} {pagerPending} {unavailableProjectLabels} {selectMode} {selectedSessionIds} menuOpenId={ctxMenuSession?.id} {renamingSessionId} {getProjectLabel} {getProjectAccent} oncontextmenu={handleContextMenu} ontoggleselection={handleToggleSelection} onrenamestart={handleCtxRename} onrenameend={handleRenameEnd} />
+	<SessionListRows {arrangement} {fullArrangement} {drafts} {isEmpty} {emptyMessage} {statusFilter} {searching} filteredLength={filtered.length} {snoozedShelfOpen} {settledShelfOpen} {pagerPending} {unavailableProjectLabels} {selectMode} {selectedSessionIds} menuOpenId={ctxMenuSession?.id} {renamingSessionId} {getProjectLabel} {getProjectAccent} oncontextmenu={handleContextMenu} ontoggleselection={handleToggleSelection} onrenamestart={handleCtxRename} onrenameend={handleRenameEnd} />
 	{#if selectMode}
 		<SessionListBulkBar settleCount={settleEligible.length} snoozeCount={snoozeEligible.length} pinCount={pinEligible.length} {selectionCount} {unpinSelected} {bulkPending} onsettle={() => { void handleBulkChange("settle"); }} onsnooze={handleOpenBulkSnooze} onpin={() => { void handleBulkChange("pin"); }} ondelete={handleBulkDelete} />
 	{/if}

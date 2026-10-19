@@ -831,6 +831,8 @@ function initialStream(
 			);
 		case "SubscribeInputDraft":
 			return control.initialInputDraftFrames(payload["key"] as DraftKey);
+		case "SubscribeDrafts":
+			return [[]];
 		case "SubscribeSessionFamily":
 			return control.initialFamilyFrames();
 		case "SubscribeProjectSettings":

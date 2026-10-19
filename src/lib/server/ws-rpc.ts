@@ -13,6 +13,7 @@ import {
 import { Rpc, type RpcGroup, RpcSchema } from "effect/rpc";
 import type { UsageReading } from "../contracts/limit-recovery.js";
 import {
+	type DraftListItem,
 	type InputDraftEnvelope,
 	type OpenCodeInstance,
 	type ServerStatus,
@@ -143,6 +144,8 @@ const streamHandlers = {
 		Stream.unwrap(
 			Effect.map(InputDraftsTag, (drafts) => drafts.subscribe(request.key)),
 		),
+	SubscribeDrafts: () =>
+		Stream.unwrap(Effect.map(InputDraftsTag, (drafts) => drafts.listDrafts())),
 	...daemonOnlyStreamHandlers,
 } satisfies {
 	[K in WsRpcs as Rpc.IsStream<K, K["_tag"]> extends never
@@ -304,6 +307,10 @@ export type DaemonRpcHandlers = {
 	readonly SubscribeInputDraft?: (
 		request: Rpc.Payload<Rpc.ExtractTag<WsRpcs, "SubscribeInputDraft">>,
 	) => Stream.Stream<InputDraftEnvelope, WsRpcError>;
+	readonly SubscribeDrafts?: () => Stream.Stream<
+		readonly DraftListItem[],
+		WsRpcError
+	>;
 	/** Told after a session is created in `projectSlug`. */
 	readonly sessionCreated: (projectSlug: string) => Effect.Effect<void>;
 };
@@ -529,7 +536,9 @@ export const makeRoutedWsRpcServerLayer = <
 								return routeStream<unknown, unknown, StreamHandlerContext>(
 									request,
 									() => handler(request),
-									name === "SubscribeShell" || name === "SubscribeInputDraft"
+									name === "SubscribeShell" ||
+										name === "SubscribeInputDraft" ||
+										name === "SubscribeDrafts"
 										? defaultProjectSlug
 										: undefined,
 								);

@@ -1,12 +1,13 @@
 <script lang="ts">
-	import type { SessionInfo } from "../../types.js";
+	import type { DraftListItem, SessionInfo } from "../../types.js";
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import type { SessionProjection } from "../../stores/session.svelte.js";
 	import { isSessionSnoozed, isSessionWoken, sessionState } from "../../stores/session.svelte.js";
 	import { selection } from "../../stores/selection.svelte.js";
-	import { getSessionHref } from "../../stores/router.svelte.js";
+	import { getCurrentRoute, getDraftHref, getSessionHref, navigate } from "../../stores/router.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
+	import { handleDraftDiscarded } from "../../stores/composer-draft/runner.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { touch } from "../../utils/attention.js";
@@ -17,14 +18,17 @@
 	import { openSnoozePicker } from "../../stores/snooze-picker.svelte.js";
 	import { sessionCommandActions } from "./session-commands.js";
 	import SessionItem from "./SessionItem.svelte";
+	import DraftItem from "./DraftItem.svelte";
+	import { projectDisplayName, projectAccent } from "./session-list-project.js";
 	import SessionPager from "./SessionPager.svelte";
 	import Button from "../ui/Button.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import Icon from "../ui/Icon.svelte";
 
-	let { arrangement, fullArrangement, isEmpty, emptyMessage, statusFilter, searching, filteredLength, snoozedShelfOpen, settledShelfOpen, pagerPending, unavailableProjectLabels, selectMode, selectedSessionIds, menuOpenId, renamingSessionId, getProjectLabel, getProjectAccent, oncontextmenu, ontoggleselection, onrenamestart, onrenameend }: {
+	let { arrangement, fullArrangement, drafts = [], isEmpty, emptyMessage, statusFilter, searching, filteredLength, snoozedShelfOpen, settledShelfOpen, pagerPending, unavailableProjectLabels, selectMode, selectedSessionIds, menuOpenId, renamingSessionId, getProjectLabel, getProjectAccent, oncontextmenu, ontoggleselection, onrenamestart, onrenameend }: {
 		arrangement: SessionProjection;
 		fullArrangement: SessionProjection;
+		drafts?: readonly DraftListItem[];
 		isEmpty: boolean;
 		emptyMessage: string;
 		statusFilter: SessionStatusFilter | null;
@@ -50,6 +54,13 @@
 	// Until the user scrolls, paging is background fill (a list kept short by a
 	// collapsed shelf pages to the end on load) and nobody is waiting for it.
 	let scrolled = $state(false);
+	const route = $derived(getCurrentRoute());
+
+	function discardDraft(draft: DraftListItem) {
+		handleDraftDiscarded({ draft: draft.draftId });
+		void rpc("SyncInputDraft", { key: { draft: draft.draftId }, text: "", projectSlug: draft.projectSlug })
+			.catch(toastFailure("Couldn't discard draft"));
+	}
 
 	function handleSwitchSession(session: SessionInfo) {
 		touch(session, "sidebar-pick");
@@ -111,7 +122,17 @@
 
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 	<div id="session-list-scroller" class="flex-1 overflow-y-auto px-2 py-0.5" role="region" aria-label="Sessions" tabindex="0" onscroll={(event) => { heldSessionId = null; scrolled = event.currentTarget.scrollTop > 0; }}>
-		{#if isEmpty && !sessionState.settled}
+		{#if arrangement.pinned.length > 0}
+			<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand"><span>Pinned</span>{" "}<span class="ml-auto font-medium">{fullArrangement.pinned.length}</span></div>
+			{#each arrangement.pinned as s (s.id)}{@render sessionRow(s)}{/each}
+		{/if}
+		{#if drafts.length > 0}
+			<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand"><span>Drafts</span>{" "}<span class="ml-auto font-medium">{drafts.length}</span></div>
+			{#each drafts as draft (draft.draftId)}
+				<DraftItem {draft} href={getDraftHref(draft.draftId, draft.projectSlug)} projectLabel={projectDisplayName(draft.projectSlug)} projectAccent={projectAccent(draft.projectSlug)} now={sessionState.now} active={route.page === "chat" && route.draftId === draft.draftId} onopen={() => navigate(getDraftHref(draft.draftId, draft.projectSlug))} ondiscard={() => discardDraft(draft)} />
+			{/each}
+		{/if}
+		{#if isEmpty && drafts.length === 0 && !sessionState.settled}
 			<!-- First load: session-shaped rows breathe in a top-to-bottom wave. -->
 			<div class="flex flex-col gap-px pt-1" aria-hidden="true" data-testid="session-list-skeleton">
 				{#each [[78, 52], [64, 40], [86, 58], [58, 34], [72, 48], [66, 55], [80, 38], [60, 46]] as [title, context], i}
@@ -123,7 +144,7 @@
 					</div>
 				{/each}
 			</div>
-		{:else if isEmpty}
+		{:else if isEmpty && drafts.length === 0}
 			<div class="session-empty py-6 px-3.5 text-center text-xs text-text-dimmer font-brand" data-testid={statusFilter !== null && (!searching || filteredLength > 0) ? "session-filter-empty" : undefined}>
 				{emptyMessage}
 				{#if statusFilter !== null && (!searching || filteredLength > 0)}
@@ -131,10 +152,6 @@
 				{/if}
 			</div>
 		{:else}
-			{#if arrangement.pinned.length > 0}
-				<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand"><span>Pinned</span>{" "}<span class="ml-auto font-medium">{fullArrangement.pinned.length}</span></div>
-				{#each arrangement.pinned as s (s.id)}{@render sessionRow(s)}{/each}
-			{/if}
 			{#each arrangement.sections as section (section.key)}
 					<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand">
 						<span>{section.label}</span>{" "}<span class="ml-auto font-medium">{fullArrangement.sections.find((group) => group.key === section.key)?.sessions.length ?? section.sessions.length}</span>

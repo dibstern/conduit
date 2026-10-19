@@ -197,6 +197,12 @@ export function getSessionHref(sessionId: string): string {
 	return `/s/${sessionId}`;
 }
 
+export function getDraftHref(draftId: string, projectSlug: string): string {
+	const params = getCurrentSearchParams();
+	params.set(DRAFT_PROJECT_PARAM, projectSlug);
+	return `/draft/${encodeURIComponent(draftId)}?${params}`;
+}
+
 /** Whether this history entry was pushed from the app's session-list route. */
 export function previousHistoryEntryIsSessionList(): boolean {
 	if (typeof window === "undefined") return false;
