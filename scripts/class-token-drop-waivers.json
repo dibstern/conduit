@@ -1,4 +1,9 @@
 {
+	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: gap-1.5,px-[10px],py-[6px],rounded-[9px],text-[11.5px],text-status-red": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "variant=\"task-stop-all\"",
+		"reason": "conduit-test-aoqb.22: Stop all keeps its appearance in Button's task-stop-all recipe."
+	},
 	"src/lib/frontend/components/ui/Tile.svelte :: text-text-dimmer": "conduit-test-aoqb.4: the tile sub-line lifts to text-muted; text-dimmer on the chip fill measured 2.52:1 over the dark popover, below even the quiet tier's 3:1.",
 	"src/lib/frontend/components/ui/button-recipes.ts :: bg-error/22": "conduit-test-aoqb.4: danger-soft's tint drops to bg-error/12, the lightest that keeps its error label at 4.5:1 on a dark popover and in the light theme (theme-contrast.test.ts).",
 	"src/lib/frontend/components/ui/button-recipes.ts :: hover:bg-error/30": "conduit-test-aoqb.4: danger-soft's hover tint drops to bg-error/20 to stay one step above the lowered /12 rest tint.",

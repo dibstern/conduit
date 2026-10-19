@@ -19,6 +19,7 @@ export type ButtonVariant =
 	| "primary"
 	| "inverse"
 	| "secondary"
+	| "task-stop-all"
 	| "ghost"
 	| "ghost-accent"
 	| "danger"
@@ -306,6 +307,12 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 	secondary: {
 		chrome: "border border-border bg-bg-alt",
 		tone: TONE_CLASSES.secondary,
+		hoverFill: "hover:border-text-muted",
+	},
+	"task-stop-all": {
+		chrome:
+			"border border-border bg-bg-alt gap-1.5 rounded-[9px] px-[10px] py-[6px] text-[11.5px]",
+		tone: "text-status-red",
 		hoverFill: "hover:border-text-muted",
 	},
 	ghost: {
