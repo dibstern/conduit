@@ -301,10 +301,16 @@ export const getModelsResponse = (
 								}),
 							),
 							Effect.asVoid,
+							// Join a discovery already in flight: onlyIfMissing alone hands
+							// back an interrupted fiber, so awaiting it would not wait.
 							(effect) =>
-								FiberMap.run(modelDiscovery, claudeAccount.id, effect, {
-									onlyIfMissing: true,
-								}),
+								FiberMap.get(modelDiscovery, claudeAccount.id).pipe(
+									Effect.orElse(() =>
+										FiberMap.run(modelDiscovery, claudeAccount.id, effect, {
+											onlyIfMissing: true,
+										}),
+									),
+								),
 						);
 
 		const inventoryInstanceId =

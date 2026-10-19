@@ -988,13 +988,6 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					}),
 				);
 			}
-			const expectedApiModelId = yield* expectedApiModelIdEffect(
-				this.deps.capabilitiesService,
-				input.model?.modelId,
-				input.contextWindow,
-				input.workspaceRoot,
-				input.agent,
-			);
 			yield* markStreamLive(this.stateRef, sessionId);
 
 			const deferred = yield* Deferred.make<TurnResult, Error>();
@@ -1010,6 +1003,15 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			let promptQueue: PromptQueueController | undefined;
 			let activeQuery: Query | undefined;
 			const setup = Effect.gen(this, function* () {
+				// The capability lookup is async: the lock above must already hold,
+				// or a concurrent send sees no session and starts a second query.
+				const expectedApiModelId = yield* expectedApiModelIdEffect(
+					this.deps.capabilitiesService,
+					input.model?.modelId,
+					input.contextWindow,
+					input.workspaceRoot,
+					input.agent,
+				);
 				const userMessage = yield* Effect.try({
 					try: () => validateUserMessage(this.buildUserMessage(input)),
 					catch: (cause) =>
@@ -2125,14 +2127,19 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				// A queued lifecycle start can change the active admission while Stop
 				// waits for message ownership. Select its candidate under that permit.
 				const boundTurnId = bound ? ctx?.currentTurnId : undefined;
-				if (
-					bound &&
-					(!ctx ||
+				if (bound) {
+					if (!ctx) {
+						// A bound send still in setup has no context yet: discarding the
+						// warm query it awaits is what stops it.
+						const waiters = yield* pendingTurnWaiters(this.stateRef, sessionId);
+						if (!turnIds.some((turnId) => waiters.has(turnId))) return;
+					} else if (
 						!boundTurnId ||
 						!turnIds.includes(boundTurnId) ||
-						!(yield* isCurrentSession(this.stateRef, ctx)))
-				)
-					return;
+						!(yield* isCurrentSession(this.stateRef, ctx))
+					)
+						return;
+				}
 				yield* FiberMap.remove(this.shutdownFibers, sessionId);
 				yield* this.warmedQueries.discardEffect(sessionId);
 				if (!ctx) return;

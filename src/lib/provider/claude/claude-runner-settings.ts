@@ -275,6 +275,7 @@ export async function replayClaudeRunnerFileSettings(
 		throw new ClaudeRuntimeError({
 			message:
 				"Original Claude file settings could not be captured; retaining the old runner",
+			code: CLAUDE_SETTINGS_REPLAY_DEFERRED,
 		});
 	// A later query generation can already carry the complete replay in its
 	// flag settings. Re-merging inherited hook arrays would duplicate them.
