@@ -100,9 +100,20 @@ Every Playwright config captures a trace on first retry and a screenshot on fail
 pnpm exec playwright show-trace test-results/<test-dir>/trace.zip
 ```
 
-None of them record video, deliberately. Traces already cover what video showed, and `recordVideo` needs the ffmpeg Playwright downloads for itself — a binary only a full `playwright install` fetches, and one whose published macOS build will not run on macOS 26. When it is missing every test fails at `browserContext.newPage`; when it is present but unusable every test instead burns its full timeout in `Tearing down "context"`. Either way all six Playwright legs go red for reasons unrelated to the code under test. Leave `video` off (conduit-test-tj4q).
+None of them record video, deliberately. Traces already cover what video showed, and `recordVideo` needs Playwright's own ffmpeg binary, downloaded with `playwright install ffmpeg`. Some macOS 26 machines reject its code signature. When it is missing every test fails at `browserContext.newPage`; when it is present but unusable every test instead burns its full timeout in `Tearing down "context"`. Either way all six Playwright legs go red for reasons unrelated to the code under test. Leave `video` off (conduit-test-tj4q).
 
-The one place that genuinely needs that binary is the media scene runner, which records a WebM to convert to a GIF. Its test checks both ffmpeg binaries by running them, so it skips honestly on a machine that cannot do it.
+The media scene runner records a WebM to convert to a GIF. Its test runs only in
+the opt-in media lane, outside `pnpm test:integration`:
+
+```bash
+pnpm exec playwright install ffmpeg
+pnpm test:media
+```
+
+`test/media/media-generation.test.ts` runs `pnpm generate:media setup`, which
+rebuilds `dist/frontend` and starts its own preview on a free loopback port.
+It checks both ffmpeg binaries by running them and skips if either cannot run.
+The runner stops only the preview process group it spawned.
 
 ### iOS Safari (Simulator)
 
@@ -240,10 +251,20 @@ pnpm test:storybook-visual
 
 ## Effect Migration Guardrails
 
+Static source guards live in `*.guard.test.ts` files and run in the `guards`
+project. Run them on every pre-commit check: `vitest related` cannot track files
+these tests read as text. Select related behavioral tests from the `unit`,
+`unit-sqlite`, and `components` projects separately.
+
+```bash
+pnpm exec vitest run --project guards
+pnpm exec vitest related --run --project unit --project unit-sqlite --project components <changed-files>
+```
+
 Run the static guardrail suite when touching Effect ownership, daemon/relay composition, provider adapters, persistence, or transport boundaries:
 
 ```bash
-pnpm exec vitest run test/unit/effect/runtime-boundary-grep.test.ts
+pnpm exec vitest run test/unit/effect/runtime-boundary-grep.guard.test.ts
 ```
 
 Final guardrail expectations as of 2026-05-15:

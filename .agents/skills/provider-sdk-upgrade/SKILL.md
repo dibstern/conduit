@@ -14,7 +14,7 @@ Conduit's **Provider Contract** (`src/lib/contracts/providers/*`) hand-describes
 | `opencode` | `@opencode-ai/sdk` (exact, `package.json`); `.opencode-version`, always the same version | the `opencode` server on PATH |
 | `cursor` | `@cursor/sdk` and its five `@cursor/sdk-<platform>` helpers (exact, `optionalDependencies` in `package.json`); no transitive overrides | the SDK's local Node runtime, driven by the detached session runner |
 
-`test/unit/contracts/providers/sdk-version-lock.test.ts` asserts every pin.
+`test/unit/contracts/providers/sdk-version-lock.guard.test.ts` asserts every pin.
 
 `scripts/upgrade.mjs` does every mechanical step and prints the next command; your job is the judgment between them. Work in a worktree, with a bead claimed per the repo's `CLAUDE.md`. Run from the worktree root:
 

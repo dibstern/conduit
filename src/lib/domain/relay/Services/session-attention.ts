@@ -17,7 +17,7 @@ import { announceSidebar } from "../../../persistence/effect/sidebar-projection.
  * shows a dot until the next pick, and its first real turn end is unread
  * either way.
  *
- * test/unit/persistence/seen-version-writer-grep.test.ts keeps every other
+ * test/unit/persistence/seen-version-writer-grep.guard.test.ts keeps every other
  * file from writing the column.
  */
 
