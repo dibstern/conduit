@@ -77,8 +77,15 @@ describe("Provider wiring with Claude provider instance", () => {
 
 	it("OrchestrationEngine dispatches discover to Claude provider instance", async () => {
 		const registry = new ProviderRegistry();
+		const models = [
+			{ id: "wiring-model", name: "Wiring model", providerId: "claude" },
+		];
+		const getCapabilities = vi.fn(() =>
+			Effect.succeed({ models, commands: [], agents: [] }),
+		);
 		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
+			capabilitiesService: { get: getCapabilities },
 		});
 		registry.registerInstance(instance);
 
@@ -90,7 +97,8 @@ describe("Provider wiring with Claude provider instance", () => {
 			}),
 		);
 
-		expect(caps.models.length).toBeGreaterThan(0);
+		expect(getCapabilities).toHaveBeenCalledWith(workspace);
+		expect(caps.models).toEqual(models);
 		expect(caps.supportsTools).toBe(true);
 		expect(caps.supportsFork).toBe(true);
 	});
