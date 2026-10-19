@@ -1204,6 +1204,17 @@ export function makeTestHandlerLayer(
 			),
 		),
 	);
+	const sessionWorkspaceLayer = SessionWorkspaceLive.pipe(
+		Layer.provide(
+			Layer.mergeAll(
+				openCodeApiLayer,
+				configLayer,
+				loggerLayer,
+				providerTurnPersistenceLayer,
+				accountDirectoryLayer,
+			),
+		),
+	);
 	const sessionManagerServiceLayer = opts?.sessionManagerService
 		? Layer.succeed(SessionManagerServiceTag)(opts.sessionManagerService)
 		: SessionManagerServiceLive.pipe(
@@ -1211,6 +1222,7 @@ export function makeTestHandlerLayer(
 					Layer.mergeAll(
 						openCodeApiLayer,
 						makeSessionManagerStateLive(),
+						sessionWorkspaceLayer,
 						activityLayer,
 						Layer.succeed(LoggerTag)(log),
 						Layer.succeed(StatusPollerTag)(statusPoller),
@@ -1236,6 +1248,8 @@ export function makeTestHandlerLayer(
 		Layer.provide(
 			Layer.mergeAll(
 				openCodeApiLayer,
+				openCodeInstancesLayer,
+				sessionWorkspaceLayer,
 				openCodeModelServiceLayer,
 				wsHandlerLayer,
 				loggerLayer,
@@ -1257,16 +1271,7 @@ export function makeTestHandlerLayer(
 		openCodeApiLayer,
 		activityLayer,
 		backgroundLayer,
-		SessionWorkspaceLive.pipe(
-			Layer.provide(
-				Layer.mergeAll(
-					openCodeApiLayer,
-					configLayer,
-					loggerLayer,
-					providerTurnPersistenceLayer,
-				),
-			),
-		),
+		sessionWorkspaceLayer,
 		openCodeInstancesLayer,
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,

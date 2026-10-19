@@ -2,7 +2,9 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
@@ -25,7 +27,9 @@ import {
 	handleQuestionReject,
 } from "../../../src/lib/handlers/permissions.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockAccountDirectory,
@@ -33,6 +37,7 @@ import {
 	makeMockConfig,
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
+	makeOpenCodeInstancesStub,
 	NoopProviderRuntimeIngestionLive,
 	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
@@ -64,10 +69,13 @@ describe("permission/question processing timeouts through Effect state", () => {
 				"test-project",
 			);
 			const layer = Layer.provideMerge(
-				ProviderTurnServiceLive,
+				Layer.provideMerge(ProviderTurnServiceLive, SessionWorkspaceLive),
 				Layer.mergeAll(
 					AlertsLive,
 					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(OpenCodeInstancesTag)(
+						makeOpenCodeInstancesStub({ opencode: client }),
+					),
 					Layer.succeed(WebSocketHandlerTag)(makeWsHandler()),
 					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					Layer.succeed(ConfigTag)(makeMockConfig()),
@@ -86,6 +94,14 @@ describe("permission/question processing timeouts through Effect state", () => {
 			);
 
 			return Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				yield* commit([
+					canonicalEvent("session.created", "session-1", {
+						sessionId: "session-1",
+						title: "Question session",
+						provider: "opencode",
+					}),
+				]);
 				yield* handleAskUserResponse("client-1", {
 					toolId: "que-1",
 					answers: { "0": "Yes" },
@@ -107,6 +123,9 @@ describe("permission/question processing timeouts through Effect state", () => {
 			});
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(OpenCodeInstancesTag)(
+					makeOpenCodeInstancesStub({ opencode: client }),
+				),
 				Layer.succeed(WebSocketHandlerTag)(makeWsHandler()),
 				Layer.succeed(LoggerTag)(createSilentLogger()),
 				Layer.succeed(SessionManagerServiceTag)(

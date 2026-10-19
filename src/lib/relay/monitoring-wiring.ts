@@ -147,8 +147,16 @@ export interface MonitoringWiringResult {
 
 export type EffectMonitoringWiringDeps = Omit<
 	MonitoringWiringDeps,
-	"sessionService" | "processingTimeouts" | "statusPoller" | "resolveAccount"
->;
+	| "sessionService"
+	| "processingTimeouts"
+	| "statusPoller"
+	| "resolveAccount"
+	| "client"
+> & {
+	readonly readMessages: (
+		sessionId: string,
+	) => Effect.Effect<Message[], unknown>;
+};
 
 export type EffectMonitoringWiringResult = Omit<
 	MonitoringWiringResult,
@@ -279,7 +287,7 @@ const processAndApplyDoneEffect = (
 			// The provider can know the completed assistant message before its
 			// terminal event reaches this relay. Resolve that identity off the tick.
 			yield* Effect.forkDetach(
-				Effect.tryPromise(() => deps.client.session.messages(sessionId)).pipe(
+				deps.readMessages(sessionId).pipe(
 					Effect.flatMap((messages) => {
 						const lastMessage = messages.at(-1);
 						if (lastMessage?.role !== "assistant") return Effect.void;
@@ -329,10 +337,7 @@ const executeMonitoringEffectsEffect = (
 					// the effects that follow it (other sessions' stops and dones).
 					yield* Effect.forkDetach(
 						Effect.gen(function* () {
-							const messages = yield* Effect.tryPromise({
-								try: () => deps.client.session.messages(sessionId),
-								catch: (error) => error,
-							}).pipe(
+							const messages = yield* deps.readMessages(sessionId).pipe(
 								Effect.catch((err) =>
 									Effect.sync(() => {
 										if (isOpenCodeNotRunningError(err)) return;
