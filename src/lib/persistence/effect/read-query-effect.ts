@@ -255,6 +255,9 @@ export const sessionRowsToSessionInfoList = (
 					: "idle",
 			createdAt: row.created_at,
 			updatedAt: row.updated_at,
+			...(row.last_user_message_at == null
+				? {}
+				: { lastUserMessageAt: row.last_user_message_at }),
 			messageCount: 0,
 			...(row.workspace_hint == null ||
 			opts.hintDismissals?.get(row.id) === row.workspace_hint_sequence

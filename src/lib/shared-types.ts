@@ -310,6 +310,8 @@ export const SessionInfoSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	createdAt: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
 	updatedAt: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
+	/** Latest human-authored message in this session alone, in epoch milliseconds. */
+	lastUserMessageAt: Schema.optional(Schema.Number),
 	messageCount: Schema.optional(Schema.Number),
 	processing: Schema.optional(Schema.Boolean),
 	goalState: Schema.optional(SessionGoalChangedPayloadSchema),
@@ -570,6 +572,7 @@ export type RepositoryIdentity = typeof RepositoryIdentitySchema.Type;
 export interface ProjectInfo {
 	slug: string;
 	title: string;
+	addedAt?: number;
 	/** folders[0] is the main folder, where sessions run. */
 	folders: readonly [string, ...string[]];
 	setupScript?: string | undefined;

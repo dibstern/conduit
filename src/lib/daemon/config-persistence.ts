@@ -69,7 +69,8 @@ const ProjectSchema = Schema.Struct({
 	),
 	slug: Schema.String,
 	title: Schema.optionalKey(Schema.String),
-	addedAt: Schema.Number,
+	addedAt: Schema.optionalKey(Schema.Number),
+	lastUsed: Schema.optionalKey(Schema.Number),
 	shellEnv: Schema.optionalKey(ProjectShellEnvConfigSchema),
 	setupScript: Schema.optionalKey(Schema.String),
 	sessionMode: Schema.optionalKey(SessionModeSchema),
@@ -183,6 +184,7 @@ const DaemonConfigFields = {
 		Schema.mutable(Schema.Array(Schema.String)),
 	),
 	newSessionProject: Schema.optionalKey(Schema.String),
+	projectOrder: Schema.optionalKey(Schema.Array(Schema.String)),
 	projects: Schema.mutable(Schema.Array(DaemonProjectSchema)),
 	instances: Schema.optionalKey(
 		Schema.mutable(Schema.Array(DaemonInstanceSchema)),

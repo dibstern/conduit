@@ -115,6 +115,7 @@ export interface StoredProject {
 	>;
 	readonly title: string;
 	readonly lastUsed?: number;
+	readonly addedAt?: number;
 	readonly shellEnv?: import("./contracts/project-shell-env.js").ProjectShellEnvConfig;
 	readonly setupScript?: string | undefined;
 	readonly sessionMode?:

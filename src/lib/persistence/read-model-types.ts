@@ -20,6 +20,7 @@ export interface SessionRow {
 	fork_point_timestamp?: number | null;
 	fork_point_message_id?: string | null;
 	last_message_at: number | null;
+	last_user_message_at?: number | null;
 	last_turn_error_at: number | null;
 	permission_mode: string | null;
 	model_id?: string | null;

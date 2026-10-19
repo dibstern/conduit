@@ -359,7 +359,7 @@ function copyForkHistory(
 			sessionId: input.newSessionId,
 			type: event.type,
 			data,
-			metadata: event.metadata,
+			metadata: { ...event.metadata, inherited: true },
 			provider: event.provider,
 			createdAt: event.createdAt,
 		} as CanonicalEvent);

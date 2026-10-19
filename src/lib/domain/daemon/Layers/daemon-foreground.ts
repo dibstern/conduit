@@ -171,6 +171,9 @@ const buildInitialRuntimeConfig = (
 		...(persisted?.newSessionProject !== undefined && {
 			newSessionProject: persisted.newSessionProject,
 		}),
+		...(persisted?.projectOrder !== undefined && {
+			projectOrder: persisted.projectOrder,
+		}),
 		startTime: Date.now(),
 		persistedSessionCounts: persistedSessionCounts(persisted),
 	});
