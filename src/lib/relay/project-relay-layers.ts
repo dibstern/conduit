@@ -717,6 +717,7 @@ export function createProjectRelayLayers({
 				Layer.sync(InstanceManagementServiceTag, () => service),
 		},
 	);
+	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
 	const providerOrchestrationDeps = Layer.mergeAll(
 		daemonConfigLayer,
 		openCodeApiLayer,
@@ -724,6 +725,7 @@ export function createProjectRelayLayers({
 		// The engine commits input.sent through commit-and-signal, which
 		// announces on the same bus as the relay's subscribers.
 		sessionEventBusLayer,
+		pendingInteractionServiceLayer,
 		providerRuntimeIngestionLayer,
 		openCodeInstancesLayer,
 		instanceManagementLayer,
@@ -766,6 +768,8 @@ export function createProjectRelayLayers({
 				openCodeInstancesLayer,
 				configLayer,
 				persistenceEffectLayer,
+				sessionEventBusLayer,
+				pendingInteractionServiceLayer,
 			),
 		),
 	);
@@ -846,7 +850,6 @@ export function createProjectRelayLayers({
 			),
 		),
 	);
-	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
 	const toolContentServiceLayer = ToolContentServiceLive.pipe(
 		Layer.provideMerge(persistenceEffectLayer),
 	);

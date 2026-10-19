@@ -528,7 +528,7 @@ describe("ProviderTurnService", () => {
 				);
 				const result = yield* Effect.result(sink.push(event));
 				expect(result._tag).toBe("Success");
-				expect(ingestion.ingest).toHaveBeenCalledWith(event);
+				expect(ingestion.ingest).toHaveBeenCalledWith(event, undefined);
 			}),
 	);
 
@@ -728,6 +728,7 @@ describe("ProviderTurnService", () => {
 						type: "text.delta",
 						sessionId: "session-1",
 					}),
+					undefined,
 				);
 			}).pipe(Effect.provide(layer));
 		},

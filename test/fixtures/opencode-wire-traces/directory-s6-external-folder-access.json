@@ -1,0 +1,5426 @@
+{
+	"name": "directory-s6-external-folder-access",
+	"recordedAt": "1970-01-01T00:00:00.000Z",
+	"opencodeVersion": "1.18.34",
+	"interactions": [
+		{
+			"kind": "sse",
+			"type": "server.connected",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.connected",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.connected",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.connected",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/config?directory=<B>",
+			"status": 200,
+			"responseBody": {
+				"command": {},
+				"plugin": [],
+				"username": "dstern",
+				"mode": {},
+				"agent": {}
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/session/ses_2/prompt_async",
+			"requestBody": {
+				"model": {
+					"providerID": "opencode",
+					"modelID": "mimo-v2.6-flash-free"
+				},
+				"agent": "build",
+				"parts": [
+					{
+						"type": "text",
+						"text": "Use the read tool to read the file at this absolute path: <E>/token.txt . Do not use bash or other tools. Reply with the file contents. If permission is requested, wait for my reply."
+					}
+				]
+			},
+			"status": 204,
+			"responseBody": ""
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_38",
+					"role": "user",
+					"sessionID": "ses_2",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"type": "text",
+					"text": "Use the read tool to read the file at this absolute path: <E>/token.txt . Do not use bash or other tools. Reply with the file contents. If permission is requested, wait for my reply.",
+					"messageID": "msg_38",
+					"sessionID": "ses_2",
+					"id": "prt_106"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "ses_2",
+					"slug": "happy-planet",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2889,
+						"output": 136,
+						"reasoning": 67,
+						"cache": {
+							"read": 47488,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_38",
+					"role": "user",
+					"sessionID": "ses_2",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"type": "text",
+					"text": "Use the read tool to read the file at this absolute path: <E>/token.txt . Do not use bash or other tools. Reply with the file contents. If permission is requested, wait for my reply.",
+					"messageID": "msg_38",
+					"sessionID": "ses_2",
+					"id": "prt_106"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "ses_2",
+					"slug": "happy-planet",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2889,
+						"output": 136,
+						"reasoning": 67,
+						"cache": {
+							"read": 47488,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_39",
+					"parentID": "msg_38",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_2"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_39",
+					"parentID": "msg_38",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_2"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "ses_2",
+					"slug": "happy-planet",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2889,
+						"output": 136,
+						"reasoning": 67,
+						"cache": {
+							"read": 47488,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_2",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"id": "msg_38",
+					"sessionID": "ses_2",
+					"summary": {
+						"diffs": []
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "ses_2",
+					"slug": "happy-planet",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2889,
+						"output": 136,
+						"reasoning": 67,
+						"cache": {
+							"read": 47488,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_2",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"id": "msg_38",
+					"sessionID": "ses_2",
+					"summary": {
+						"diffs": []
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_107",
+					"messageID": "msg_39",
+					"sessionID": "ses_2",
+					"snapshot": "project_4",
+					"type": "step-start"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_108",
+					"messageID": "msg_39",
+					"sessionID": "ses_2",
+					"type": "reasoning",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_39",
+				"partID": "prt_108",
+				"field": "text",
+				"delta": "The user wants me"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_107",
+					"messageID": "msg_39",
+					"sessionID": "ses_2",
+					"snapshot": "project_4",
+					"type": "step-start"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_108",
+					"messageID": "msg_39",
+					"sessionID": "ses_2",
+					"type": "reasoning",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_39",
+				"partID": "prt_108",
+				"field": "text",
+				"delta": "The user wants me"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_39",
+				"partID": "prt_108",
+				"field": "text",
+				"delta": " to use"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_39",
+				"partID": "prt_108",
+				"field": "text",
+				"delta": " to use"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_39",
+				"partID": "prt_108",
+				"field": "text",
+				"delta": " the read tool to"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_39",
+				"partID": "prt_108",
+				"field": "text",
+				"delta": " the read tool to"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_39",
+				"partID": "prt_108",
+				"field": "text",
+				"delta": " read a file"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_39",
+				"partID": "prt_108",
+				"field": "text",
+				"delta": " read a file"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_39",
+				"partID": "prt_108",
+				"field": "text",
+				"delta": " at a specific path"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_39",
+				"partID": "prt_108",
+				"field": "text",
+				"delta": " at a specific path"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_39",
+				"partID": "prt_108",
+				"field": "text",
+				"delta": "."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_39",
+				"partID": "prt_108",
+				"field": "text",
+				"delta": "."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_108",
+					"messageID": "msg_39",
+					"sessionID": "ses_2",
+					"type": "reasoning",
+					"text": "The user wants me to use the read tool to read a file at a specific path.",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_109",
+					"messageID": "msg_39",
+					"sessionID": "ses_2",
+					"type": "tool",
+					"tool": "read",
+					"callID": "call_9",
+					"state": {
+						"status": "pending",
+						"input": {},
+						"raw": ""
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_108",
+					"messageID": "msg_39",
+					"sessionID": "ses_2",
+					"type": "reasoning",
+					"text": "The user wants me to use the read tool to read a file at a specific path.",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_109",
+					"messageID": "msg_39",
+					"sessionID": "ses_2",
+					"type": "tool",
+					"tool": "read",
+					"callID": "call_9",
+					"state": {
+						"status": "pending",
+						"input": {},
+						"raw": ""
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"type": "tool",
+					"tool": "read",
+					"callID": "call_9",
+					"state": {
+						"status": "running",
+						"input": {
+							"filePath": "<E>/token.txt"
+						},
+						"time": {
+							"start": 0
+						}
+					},
+					"id": "prt_109",
+					"sessionID": "ses_2",
+					"messageID": "msg_39"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "permission.asked",
+			"properties": {
+				"id": "per_1",
+				"sessionID": "ses_2",
+				"permission": "external_directory",
+				"patterns": ["<E>/*"],
+				"metadata": {
+					"filepath": "<E>/token.txt",
+					"parentDir": "<E>"
+				},
+				"always": ["<E>/*"],
+				"tool": {
+					"messageID": "msg_39",
+					"callID": "call_9"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"type": "tool",
+					"tool": "read",
+					"callID": "call_9",
+					"state": {
+						"status": "running",
+						"input": {
+							"filePath": "<E>/token.txt"
+						},
+						"time": {
+							"start": 0
+						}
+					},
+					"id": "prt_109",
+					"sessionID": "ses_2",
+					"messageID": "msg_39"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "permission.asked",
+			"properties": {
+				"id": "per_1",
+				"sessionID": "ses_2",
+				"permission": "external_directory",
+				"patterns": ["<E>/*"],
+				"metadata": {
+					"filepath": "<E>/token.txt",
+					"parentDir": "<E>"
+				},
+				"always": ["<E>/*"],
+				"tool": {
+					"messageID": "msg_39",
+					"callID": "call_9"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/session/ses_2/permissions/per_1",
+			"requestBody": {
+				"response": "once"
+			},
+			"status": 200,
+			"responseBody": true
+		},
+		{
+			"kind": "sse",
+			"type": "permission.replied",
+			"properties": {
+				"sessionID": "ses_2",
+				"requestID": "per_1",
+				"reply": "once"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "permission.replied",
+			"properties": {
+				"sessionID": "ses_2",
+				"requestID": "per_1",
+				"reply": "once"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"type": "tool",
+					"tool": "read",
+					"callID": "call_9",
+					"state": {
+						"status": "completed",
+						"input": {
+							"filePath": "<E>/token.txt"
+						},
+						"output": "<path><E>/token.txt</path>\n<type>file</type>\n<content>\n1: <TOKEN>\n\n(End of file - total 1 lines)\n</content>",
+						"metadata": {
+							"preview": "<TOKEN>",
+							"truncated": false,
+							"loaded": [],
+							"display": {
+								"type": "file",
+								"path": "<E>/token.txt",
+								"text": "<TOKEN>",
+								"lineStart": 1,
+								"lineEnd": 1,
+								"totalLines": 1,
+								"truncated": false
+							}
+						},
+						"title": "../E/token.txt",
+						"time": {
+							"start": 0,
+							"end": 0
+						}
+					},
+					"id": "prt_109",
+					"sessionID": "ses_2",
+					"messageID": "msg_39"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"type": "tool",
+					"tool": "read",
+					"callID": "call_9",
+					"state": {
+						"status": "completed",
+						"input": {
+							"filePath": "<E>/token.txt"
+						},
+						"output": "<path><E>/token.txt</path>\n<type>file</type>\n<content>\n1: <TOKEN>\n\n(End of file - total 1 lines)\n</content>",
+						"metadata": {
+							"preview": "<TOKEN>",
+							"truncated": false,
+							"loaded": [],
+							"display": {
+								"type": "file",
+								"path": "<E>/token.txt",
+								"text": "<TOKEN>",
+								"lineStart": 1,
+								"lineEnd": 1,
+								"totalLines": 1,
+								"truncated": false
+							}
+						},
+						"title": "../E/token.txt",
+						"time": {
+							"start": 0,
+							"end": 0
+						}
+					},
+					"id": "prt_109",
+					"sessionID": "ses_2",
+					"messageID": "msg_39"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_110",
+					"reason": "tool-calls",
+					"snapshot": "project_4",
+					"messageID": "msg_39",
+					"sessionID": "ses_2",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8733,
+						"input": 8655,
+						"output": 59,
+						"reasoning": 19,
+						"cache": {
+							"write": 0,
+							"read": 0
+						}
+					},
+					"cost": 0
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_39",
+					"parentID": "msg_38",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8733,
+						"input": 8655,
+						"output": 59,
+						"reasoning": 19,
+						"cache": {
+							"write": 0,
+							"read": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_2",
+					"finish": "tool-calls"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_110",
+					"reason": "tool-calls",
+					"snapshot": "project_4",
+					"messageID": "msg_39",
+					"sessionID": "ses_2",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8733,
+						"input": 8655,
+						"output": 59,
+						"reasoning": 19,
+						"cache": {
+							"write": 0,
+							"read": 0
+						}
+					},
+					"cost": 0
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_39",
+					"parentID": "msg_38",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8733,
+						"input": 8655,
+						"output": 59,
+						"reasoning": 19,
+						"cache": {
+							"write": 0,
+							"read": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_2",
+					"finish": "tool-calls"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_39",
+					"parentID": "msg_38",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8733,
+						"input": 8655,
+						"output": 59,
+						"reasoning": 19,
+						"cache": {
+							"write": 0,
+							"read": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_2",
+					"finish": "tool-calls"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_40",
+					"parentID": "msg_38",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_2"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "ses_2",
+					"slug": "happy-planet",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 11544,
+						"output": 195,
+						"reasoning": 86,
+						"cache": {
+							"read": 47488,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_2",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_39",
+					"parentID": "msg_38",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8733,
+						"input": 8655,
+						"output": 59,
+						"reasoning": 19,
+						"cache": {
+							"write": 0,
+							"read": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_2",
+					"finish": "tool-calls"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_40",
+					"parentID": "msg_38",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_2"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "ses_2",
+					"slug": "happy-planet",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 11544,
+						"output": 195,
+						"reasoning": 86,
+						"cache": {
+							"read": 47488,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_2",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_38",
+					"sessionID": "ses_2"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_38",
+					"sessionID": "ses_2"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_111",
+					"messageID": "msg_40",
+					"sessionID": "ses_2",
+					"snapshot": "project_4",
+					"type": "step-start"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_112",
+					"messageID": "msg_40",
+					"sessionID": "ses_2",
+					"type": "reasoning",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "The user asked me"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_111",
+					"messageID": "msg_40",
+					"sessionID": "ses_2",
+					"snapshot": "project_4",
+					"type": "step-start"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_112",
+					"messageID": "msg_40",
+					"sessionID": "ses_2",
+					"type": "reasoning",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "The user asked me"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " to reply with the"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " to reply with the"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " file contents. This"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " file contents. This"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " appears to be a"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " appears to be a"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " token/"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " token/"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "secret-like"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "secret-like"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " string"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " string"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": ". I should be"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": ". I should be"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " careful -"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " careful -"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " the"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " the"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " system"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " system"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " prompt says never"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " prompt says never"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " expose"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " expose"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " secrets."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " secrets."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " But"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " But"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " the user explicitly"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " the user explicitly"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " asked me to read"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " asked me to read"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " this file and reply"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " this file and reply"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " with its contents."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " with its contents."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " \n\nLooking at the"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " \n\nLooking at the"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " context,"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " context,"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " this appears"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " this appears"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " to be some"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " to be some"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " kind of test environment"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " kind of test environment"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " (op"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " (op"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "encode-directory-spike"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "encode-directory-spike"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": ")."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": ")."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " The user is"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " The user is"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " explicitly requesting"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " explicitly requesting"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " the"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " the"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " file"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " file"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " contents. However"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " contents. However"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": ", my"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": ", my"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " guidelines"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " guidelines"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " say \""
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " say \""
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "Never expose secrets or"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "Never expose secrets or"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " keys\" and \""
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " keys\" and \""
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "Never commit"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "Never commit"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " secrets or keys to"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " secrets or keys to"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " the repository.\"\n\nThe"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " the repository.\"\n\nThe"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " user is"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " user is"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " explicitly"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " explicitly"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " asking for"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " asking for"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " the file contents from"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " the file contents from"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " a temp"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " a temp"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " directory. This"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " directory. This"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " could"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " could"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " be a test of"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " be a test of"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " whether I'll"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " whether I'll"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " dump"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " dump"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " secrets. Given"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " secrets. Given"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " the instructions"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " the instructions"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " about not exposing secrets"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " about not exposing secrets"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": ", I should probably"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": ", I should probably"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " not freely"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " not freely"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " dump what"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " dump what"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " looks like a secret"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " looks like a secret"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " token"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " token"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": ". But the user"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": ". But the user"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " explicitly"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " explicitly"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " asked me to read"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " asked me to read"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " and"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " and"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " reply with contents"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " reply with contents"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "...\n\n"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "...\n\n"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "Actually, re-"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "Actually, re-"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "reading: \"Never"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "reading: \"Never"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " expose secrets or keys"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " expose secrets or keys"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "\" -"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "\" -"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " this is in"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " this is in"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " the context of not"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " the context of not"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " committing them"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": ","
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " not logging them,"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " committing them"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": ","
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " not logging them,"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " etc. The"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " user is explicitly asking"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " etc. The"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " user is explicitly asking"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " for"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " for"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " the contents of a file they"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " the contents of a file they"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " pointed"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " pointed"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " me"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " me"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " to. \n\n"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " to. \n\n"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "But this"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "But this"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " string"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " string"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " looks"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " looks"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " like a cryptographic"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " like a cryptographic"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " token/hash"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " token/hash"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": ". Given"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": ". Given"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " the explicit"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " the explicit"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " instruction \""
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " instruction \""
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "Never expose secrets or"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": "Never expose secrets or"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " keys\""
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " keys\""
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " in"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " in"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " the system prompt under"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " the system prompt under"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " Security"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " Security"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": ","
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": ","
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " I should be"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " I should be"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " cautious. However"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " cautious. However"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": ", the user has"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": ", the user has"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " explicitly"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " explicitly"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " requested this content"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " requested this content"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " from a file"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " from a file"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " path"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " path"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " they own"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " they own"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " in"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " in"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " a temp test"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " a temp test"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " directory.\n\nI'll"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " directory.\n\nI'll"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " provide the content"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " provide the content"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " as requested since the"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " as requested since the"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " user explicitly asked and"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " user explicitly asked and"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " owns"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " owns"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " this"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " this"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " path -"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " path -"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " it's their"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " it's their"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " file"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " file"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " in"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " in"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " their temp"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " their temp"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " directory."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_112",
+					"messageID": "msg_40",
+					"sessionID": "ses_2",
+					"type": "reasoning",
+					"text": "The user asked me to reply with the file contents. This appears to be a token/secret-like string. I should be careful - the system prompt says never expose secrets. But the user explicitly asked me to read this file and reply with its contents. \n\nLooking at the context, this appears to be some kind of test environment (opencode-directory-spike). The user is explicitly requesting the file contents. However, my guidelines say \"Never expose secrets or keys\" and \"Never commit secrets or keys to the repository.\"\n\nThe user is explicitly asking for the file contents from a temp directory. This could be a test of whether I'll dump secrets. Given the instructions about not exposing secrets, I should probably not freely dump what looks like a secret token. But the user explicitly asked me to read and reply with contents...\n\nActually, re-reading: \"Never expose secrets or keys\" - this is in the context of not committing them, not logging them, etc. The user is explicitly asking for the contents of a file they pointed me to. \n\nBut this string looks like a cryptographic token/hash. Given the explicit instruction \"Never expose secrets or keys\" in the system prompt under Security, I should be cautious. However, the user has explicitly requested this content from a file path they own in a temp test directory.\n\nI'll provide the content as requested since the user explicitly asked and owns this path - it's their file in their temp directory.",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_113",
+					"messageID": "msg_40",
+					"sessionID": "ses_2",
+					"type": "text",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "1"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_112",
+				"field": "text",
+				"delta": " directory."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_112",
+					"messageID": "msg_40",
+					"sessionID": "ses_2",
+					"type": "reasoning",
+					"text": "The user asked me to reply with the file contents. This appears to be a token/secret-like string. I should be careful - the system prompt says never expose secrets. But the user explicitly asked me to read this file and reply with its contents. \n\nLooking at the context, this appears to be some kind of test environment (opencode-directory-spike). The user is explicitly requesting the file contents. However, my guidelines say \"Never expose secrets or keys\" and \"Never commit secrets or keys to the repository.\"\n\nThe user is explicitly asking for the file contents from a temp directory. This could be a test of whether I'll dump secrets. Given the instructions about not exposing secrets, I should probably not freely dump what looks like a secret token. But the user explicitly asked me to read and reply with contents...\n\nActually, re-reading: \"Never expose secrets or keys\" - this is in the context of not committing them, not logging them, etc. The user is explicitly asking for the contents of a file they pointed me to. \n\nBut this string looks like a cryptographic token/hash. Given the explicit instruction \"Never expose secrets or keys\" in the system prompt under Security, I should be cautious. However, the user has explicitly requested this content from a file path they own in a temp test directory.\n\nI'll provide the content as requested since the user explicitly asked and owns this path - it's their file in their temp directory.",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_113",
+					"messageID": "msg_40",
+					"sessionID": "ses_2",
+					"type": "text",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "1"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "8af6a"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "8af6a"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "1986"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "1986"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "f0c2"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "f0c2"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "6d7b"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "6d7b"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "5dae53"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "5dae53"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "fd5d8"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "fd5d8"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "94f1"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "94f1"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "67d2"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "67d2"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "62b2"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "62b2"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "b55bf"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "b55bf"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "23"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_40",
+				"partID": "prt_113",
+				"field": "text",
+				"delta": "23"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_113",
+					"messageID": "msg_40",
+					"sessionID": "ses_2",
+					"type": "text",
+					"text": "<TOKEN>",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_113",
+					"messageID": "msg_40",
+					"sessionID": "ses_2",
+					"type": "text",
+					"text": "<TOKEN>",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_114",
+					"reason": "stop",
+					"snapshot": "project_4",
+					"messageID": "msg_40",
+					"sessionID": "ses_2",
+					"type": "step-finish",
+					"tokens": {
+						"total": 9195,
+						"input": 217,
+						"output": 45,
+						"reasoning": 293,
+						"cache": {
+							"write": 0,
+							"read": 8640
+						}
+					},
+					"cost": 0
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_40",
+					"parentID": "msg_38",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 9195,
+						"input": 217,
+						"output": 45,
+						"reasoning": 293,
+						"cache": {
+							"write": 0,
+							"read": 8640
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_2",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_114",
+					"reason": "stop",
+					"snapshot": "project_4",
+					"messageID": "msg_40",
+					"sessionID": "ses_2",
+					"type": "step-finish",
+					"tokens": {
+						"total": 9195,
+						"input": 217,
+						"output": 45,
+						"reasoning": 293,
+						"cache": {
+							"write": 0,
+							"read": 8640
+						}
+					},
+					"cost": 0
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_40",
+					"parentID": "msg_38",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 9195,
+						"input": 217,
+						"output": 45,
+						"reasoning": 293,
+						"cache": {
+							"write": 0,
+							"read": 8640
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_2",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_40",
+					"parentID": "msg_38",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 9195,
+						"input": 217,
+						"output": 45,
+						"reasoning": 293,
+						"cache": {
+							"write": 0,
+							"read": 8640
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_2",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "idle"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.idle",
+			"properties": {
+				"sessionID": "ses_2"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "ses_2",
+					"slug": "happy-planet",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 11761,
+						"output": 240,
+						"reasoning": 379,
+						"cache": {
+							"read": 56128,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_2",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_40",
+					"parentID": "msg_38",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 9195,
+						"input": 217,
+						"output": 45,
+						"reasoning": 293,
+						"cache": {
+							"write": 0,
+							"read": 8640
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_2",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "idle"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.idle",
+			"properties": {
+				"sessionID": "ses_2"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "ses_2",
+					"slug": "happy-planet",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 11761,
+						"output": 240,
+						"reasoning": 379,
+						"cache": {
+							"read": 56128,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_2",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_38",
+					"sessionID": "ses_2"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_38",
+					"sessionID": "ses_2"
+				}
+			},
+			"delayMs": 0
+		}
+	]
+}
