@@ -113,6 +113,7 @@ it.effect(
 			}
 			expect(yield* makeEffectSqlMigrator()).toEqual([
 				[67, "purge_background_shell_sessions"],
+				[68, "input_drafts"],
 			]);
 			for (const { name } of tables) {
 				expect(
@@ -486,6 +487,7 @@ describe("Effect migration lineage", () => {
 					65,
 					66,
 					67,
+					68,
 				]);
 				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, workspace_hint, workspace_hint_sequence)
 					VALUES ('main-database', 'claude', 'Preserved', 'idle', 1, 1, '/repo/worktree', 123)`;
@@ -651,7 +653,7 @@ describe("Effect migration lineage", () => {
 	);
 
 	it("registers the contiguous production chain from 1 through 68", () => {
-		expect(migrationEntries).toHaveLength(67);
+		expect(migrationEntries).toHaveLength(68);
 		expect(migrationEntries.map(([key]) => key)).toEqual(
 			expectedNames.map(
 				(name, index) => `${String(index + 1).padStart(4, "0")}_${name}`,
