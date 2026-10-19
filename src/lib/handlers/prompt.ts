@@ -13,6 +13,8 @@ import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 
 // Stores the last draft per session so that a tab switching to it (e.g. on a
 // different device) reads the current draft in its ViewSession response.
+// A cleared draft stays as "": after a restart the map is empty, and a missing
+// entry must read as "unknown" so it cannot erase the draft a tab still holds.
 
 const sessionInputDrafts = new Map<string, string>();
 
@@ -22,14 +24,14 @@ interface LegacyMessagePayload {
 	commandId?: string;
 }
 
-/** Get the stored input draft for a session (empty string if none). */
-export function getSessionInputDraft(sessionId: string): string {
-	return sessionInputDrafts.get(sessionId) ?? "";
+/** The stored input draft for a session, or undefined if this process never saw one. */
+export function getSessionInputDraft(sessionId: string): string | undefined {
+	return sessionInputDrafts.get(sessionId);
 }
 
 /** Clear the stored input draft for a session (e.g. after sending a message). */
 export function clearSessionInputDraft(sessionId: string): void {
-	sessionInputDrafts.delete(sessionId);
+	sessionInputDrafts.set(sessionId, "");
 }
 
 export interface SendMessageToSessionInput {
@@ -201,11 +203,7 @@ export const syncInputDraftForSession = ({
 }) =>
 	Effect.gen(function* () {
 		// Store the draft so a tab switching to the session reads it
-		if (text) {
-			sessionInputDrafts.set(sessionId, text);
-		} else {
-			sessionInputDrafts.delete(sessionId);
-		}
+		sessionInputDrafts.set(sessionId, text);
 
 		yield* publishInputDraft({ sessionId, text, ...(from ? { from } : {}) });
 	});

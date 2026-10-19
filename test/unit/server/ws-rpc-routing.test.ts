@@ -279,7 +279,7 @@ describe("routed RPC server", () => {
 					sessionId: "session-a",
 					originId: "relay-client",
 				}),
-			).toEqual({ ok: true, draft: "" });
+			).toEqual({ ok: true });
 			expect(resolve).toHaveBeenCalledWith("project-a");
 		}),
 	);

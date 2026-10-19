@@ -299,3 +299,60 @@ test("matching built page and server IDs never reload on reconnect", async ({
 		reloads: navigations - 1,
 	});
 });
+
+for (const sameBuild of [true, false]) {
+	test(`an existing session's draft survives a ${sameBuild ? "same-build" : "new-build"} daemon restart`, async ({
+		page,
+		buildDaemon,
+	}, testInfo) => {
+		// A daemon that just restarted answers slowly. Hold ViewSession replies past
+		// the composer's 1s grace, so a stale server draft would land and show.
+		const frames = (m: string | Buffer) =>
+			[JSON.parse(String(m))].flat() as Array<{
+				tag?: string;
+				id?: string;
+				requestId?: string;
+			}>;
+		const viewIds = new Set<string>();
+		await page.routeWebSocket(/\/rpc$/, (ws) => {
+			const server = ws.connectToServer();
+			ws.onMessage((m) => {
+				for (const f of frames(m))
+					if (f.tag === "ViewSession") viewIds.add(String(f.id));
+				server.send(m);
+			});
+			server.onMessage((m) => {
+				const held = frames(m).some((f) => viewIds.has(String(f.requestId)));
+				setTimeout(() => ws.send(m), held ? 2_000 : 0);
+			});
+		});
+		await page.goto(`${buildDaemon.baseUrl}/?p=build-id-test`);
+		await page.locator(".connect-overlay").waitFor({ state: "detached" });
+		await page.locator("#new-session-btn:visible").click();
+		const input = page.locator("#input");
+		await input.fill("hello");
+		await input.press("Enter");
+		await expect(page).toHaveURL(/\/s\/ses_/);
+		const draft = "Unsent draft on an existing session";
+		await input.fill(draft);
+		// Past the 300ms debounce, so the daemon holds the draft before it stops.
+		await page.waitForTimeout(1_000);
+		await buildDaemon.restart(
+			sameBuild ? buildDaemon.buildId : `${buildDaemon.buildId}-B`,
+		);
+		await page.locator(".connect-overlay").waitFor({ state: "detached" });
+		await page.waitForTimeout(3_000);
+		await expect(input).toHaveValue(draft);
+		// Coming back to the session asks the restarted daemon for its draft again.
+		const sessionUrl = page.url();
+		await page.locator("#new-session-btn:visible").click();
+		await expect(page).toHaveURL(/\/new\b/);
+		await page.goBack();
+		await expect(page).toHaveURL(sessionUrl);
+		await page.waitForTimeout(3_000);
+		await page.screenshot({
+			path: testInfo.outputPath("existing-session-draft.png"),
+		});
+		await expect(input).toHaveValue(draft);
+	});
+}
