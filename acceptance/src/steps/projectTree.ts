@@ -335,7 +335,7 @@ export const projectTreeHandlers: StepHandler[] = [
 		match: /^a draft opens in the ([a-z0-9-]+) project$/,
 		run: async ({ world, match }) => {
 			await expect(world.page).toHaveURL(
-				new RegExp(`/new\\?(.+&)?project=${match[1] ?? ""}(&|$)`),
+				new RegExp(`/draft/[^/?]+\\?(.+&)?project=${match[1] ?? ""}(&|$)`),
 			);
 		},
 	},
