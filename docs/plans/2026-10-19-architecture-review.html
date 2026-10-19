@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Architecture review — conduit</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose", flowchart: { useMaxWidth: true } });
+</script>
+<style>
+  .seam { stroke-dasharray: 4 4; }
+  .leak { stroke: #dc2626; }
+  .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+  .lbl { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; }
+  .diagram { min-height: 300px; }
+  table.cmp { width: 100%; font-size: .78rem; border-collapse: collapse; }
+  table.cmp td { padding: .35rem .5rem; border-top: 1px solid #e7e5e4; vertical-align: top; }
+  table.cmp td:first-child { font-weight: 600; white-space: nowrap; width: 6.5rem; }
+  table.cmp td:last-child { font-family: ui-monospace, monospace; font-size: .7rem; color: #475569; width: 34%; }
+  .g { color:#047857 } .p { color:#b45309 } .x { color:#dc2626 } .o { color:#94a3b8 }
+  table.matrix td, table.matrix th { padding: .3rem .5rem; text-align: center; font-size: .8rem; }
+  table.matrix td:first-child, table.matrix th:first-child { text-align: left; }
+</style>
+</head>
+<body class="bg-stone-50 text-slate-900 font-sans">
+<main class="max-w-6xl mx-auto px-6 py-12 space-y-12">
+
+<header class="space-y-4">
+  <h1 class="font-serif text-4xl">Architecture review — conduit</h1>
+  <p class="text-sm text-slate-500">2026-10-19 · ~/src/personal/conduit @ main · hot spots from 1859 commits / 6 weeks · 12 candidates · weighed against 7 competitors</p>
+  <div class="flex flex-wrap gap-6 text-xs text-slate-600">
+    <span class="flex items-center gap-2"><span class="inline-block w-5 h-4 border border-slate-500 bg-white"></span>module</span>
+    <span class="flex items-center gap-2"><svg width="28" height="6"><line x1="0" y1="3" x2="28" y2="3" stroke="#334155" stroke-width="2" class="seam"/></svg>seam</span>
+    <span class="flex items-center gap-2"><svg width="28" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke-width="2" class="leak"/><path d="M22 0 L28 4 L22 8z" fill="#dc2626"/></svg>leakage</span>
+    <span class="flex items-center gap-2"><span class="inline-block w-5 h-4 deep border-2 border-slate-900"></span>deep module</span>
+  </div>
+  <div class="rounded-lg border border-slate-200 bg-white p-4 text-xs font-mono text-slate-600 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-1">
+    <span>t3code ab6be13d43</span><span>bb 9937c46f5c</span><span>paseo be0378ce63</span><span>zeron c526d6f7cf</span>
+    <span>diri bfa680e69a</span><span>monocode e53e09aad2</span><span>capy docs 2026-10-19T02:39Z</span><span class="text-slate-400">capy rows = vendor claims</span>
+  </div>
+</header>
+
+<section class="rounded-lg border border-slate-200 bg-white p-5 space-y-3">
+  <h2 class="font-serif text-2xl">Survey matrix</h2>
+  <p class="text-xs text-slate-500"><span class="g">●</span> ships the deeper shape · <span class="p">◐</span> partial · <span class="x">✕</span> has conduit's friction · <span class="o">○</span> not attempted / not documented</p>
+  <table class="matrix w-full">
+    <thead class="text-slate-500 lbl"><tr><th>candidate</th><th>t3code</th><th>bb</th><th>paseo</th><th>zeron</th><th>diri</th><th>monocode</th><th>capy</th><th>strength</th></tr></thead>
+    <tbody class="divide-y divide-stone-200">
+      <tr><td><a class="underline" href="#c1">1 RPC scope beside contract</a></td><td class="p">◐</td><td class="p">◐</td><td class="x">✕</td><td class="x">✕</td><td class="x">✕</td><td class="p">◐</td><td class="p">◐</td><td class="p">Worth exploring</td></tr>
+      <tr><td><a class="underline" href="#c2">2 Daemon settings module</a></td><td class="g">●</td><td class="p">◐</td><td class="g">●</td><td class="g">●</td><td class="g">●</td><td class="x">✕</td><td class="o">○</td><td class="g">Strong</td></tr>
+      <tr><td><a class="underline" href="#c3">3 Commit seam owns sidebar change</a></td><td class="g">●</td><td class="p">◐</td><td class="x">✕</td><td class="g">●</td><td class="x">✕</td><td class="x">✕</td><td class="p">◐</td><td class="g">Strong</td></tr>
+      <tr><td><a class="underline" href="#c4">4 One turn-end notifier</a></td><td class="x">✕</td><td class="g">●</td><td class="g">●</td><td class="g">●</td><td class="g">●</td><td class="p">◐</td><td class="p">◐</td><td class="g">Strong</td></tr>
+      <tr><td><a class="underline" href="#c5">5 One composition root</a></td><td class="p">◐</td><td class="x">✕</td><td class="g">●</td><td class="g">●</td><td class="p">◐</td><td class="p">◐</td><td class="o">○</td><td class="p">Worth exploring</td></tr>
+      <tr><td><a class="underline" href="#c6">6 One activity derivation</a></td><td class="x">✕</td><td class="g">●</td><td class="g">●</td><td class="g">●</td><td class="g">●</td><td class="x">✕</td><td class="g">●</td><td class="g">Strong</td></tr>
+      <tr><td><a class="underline" href="#c7">7 File-derived migrations + rebuild</a></td><td class="p">◐</td><td class="g">●</td><td class="o">○</td><td class="p">◐</td><td class="o">○</td><td class="x">✕</td><td class="o">○</td><td class="p">Worth exploring</td></tr>
+      <tr class="bg-emerald-50"><td><a class="underline font-semibold" href="#c8">8 One provider turn launcher</a></td><td class="g">●</td><td class="g">●</td><td class="g">●</td><td class="g">●</td><td class="p">◐</td><td class="p">◐</td><td class="p">◐</td><td class="g font-semibold">Strong · top</td></tr>
+      <tr><td><a class="underline" href="#c9">9 Operations on the adapter</a></td><td class="g">●</td><td class="g">●</td><td class="x">✕</td><td class="p">◐</td><td class="p">◐</td><td class="p">◐</td><td class="o">○</td><td class="p">Worth exploring</td></tr>
+      <tr><td><a class="underline" href="#c10">10 One session-rows module</a></td><td class="p">◐</td><td class="g">●</td><td class="g">●</td><td class="x">✕</td><td class="g">●</td><td class="x">✕</td><td class="o">○</td><td class="p">Worth exploring</td></tr>
+      <tr><td><a class="underline" href="#c11">11 One follow-a-subscription module</a></td><td class="g">●</td><td class="g">●</td><td class="g">●</td><td class="p">◐</td><td class="g">●</td><td class="x">✕</td><td class="p">◐</td><td class="g">Strong</td></tr>
+      <tr><td><a class="underline" href="#c12">12 Composer-draft module</a></td><td class="p">◐</td><td class="g">●</td><td class="g">●</td><td class="p">◐</td><td class="o">○</td><td class="p">◐</td><td class="p">◐</td><td class="p">Worth exploring</td></tr>
+    </tbody>
+  </table>
+  <div class="grid md:grid-cols-3 gap-4 text-xs text-slate-700 pt-2">
+    <div><p class="lbl text-slate-500 mb-1">Convergence</p>One owner with one update op (settings, 5 of 6); one launch path shared with recovery (turn launch, 6 of 6); one pure status function (activity, 5 of 7); one subscription primitive (4 of 6).</div>
+    <div><p class="lbl text-slate-500 mb-1">Outliers worth stealing</p>t3code's <code>satisfies Record&lt;Method, Scope&gt;</code>; paseo's presence-based notification plan; bb's narrow-only capability handshake; diri's server-minted attention ids.</div>
+    <div><p class="lbl text-slate-500 mb-1">Gaps — conduit can lead</p>Nobody resolves RPC context centrally; nobody syncs composer drafts across devices; only bb and t3code run a provider contract suite.</div>
+  </div>
+</section>
+
+<section id="candidates" class="space-y-14">
+
+<!-- 1 -->
+<article id="c1" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+  <div class="flex flex-wrap items-baseline justify-between gap-3">
+    <h2 class="font-serif text-2xl">1 · Declare each RPC's scope beside its contract</h2>
+    <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span></div>
+  </div>
+  <p class="font-mono text-sm text-slate-600 leading-relaxed">server/ws-rpc.ts:225-251 · :313-340 · :405 · :513 · server/ws-rpc/daemon.ts:8-45 · daemon-ws-rpc-layer.ts:724-737 · unknown-session built at ws-rpc.ts:326, ws-rpc/sessions.ts:226, ws-routing-layer.ts:332, daemon-ws-rpc-layer.ts:795</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="diagram rounded-lg border border-slate-200 p-4 space-y-2">
+      <p class="lbl text-slate-500">Before — five layers guess scope</p>
+      <div class="h-10 border-l-4 border-red-500 bg-red-50 px-3 flex items-center lbl">DaemonRpcName union (hand-kept)</div>
+      <div class="h-10 border-l-4 border-red-500 bg-red-50 px-3 flex items-center lbl">daemonOnly stubs + stream stubs</div>
+      <div class="h-10 border-l-4 border-red-500 bg-red-50 px-3 flex items-center lbl">payload sniff: sessionId? projectSlug?</div>
+      <div class="h-10 border-l-4 border-red-500 bg-red-50 px-3 flex items-center lbl">special cases: CreateSession, SubscribeShell</div>
+      <div class="h-10 border-l-4 border-red-500 bg-red-50 px-3 flex items-center lbl">re-wrap wsRpcHandlers.X in run</div>
+      <p class="text-xs text-red-700">unknown-session error built 4×</p>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 p-4 space-y-2">
+      <p class="lbl text-slate-500">After — scope declared once</p>
+      <div class="h-10 border-l-4 border-slate-400 bg-stone-50 px-3 flex items-center lbl">contract: Rpc + scope (daemon | project | session)</div>
+      <div class="deep text-white rounded px-4 py-6 border-2 border-slate-900 space-y-1">
+        <p class="lbl text-slate-300">Scope resolver</p>
+        <p class="text-xs text-slate-400">session → project lookup · one unknown-session · stream scoping</p>
+      </div>
+      <div class="h-10 border-l-4 border-emerald-500 bg-emerald-50 px-3 flex items-center lbl">handlers receive their context</div>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem.</b> The contract never says whether an RPC is daemon-, project- or session-scoped; parallel lists and payload field names decide it.</p>
+  <p class="text-sm"><b>Solution.</b> Each RPC declares its scope next to its contract; one Scope resolver turns scope into context.</p>
+  <ul class="text-sm list-disc pl-5 grid md:grid-cols-2 gap-x-6">
+    <li>locality: a new RPC touches one place</li><li>leverage: one lookup, one error</li>
+    <li>compiler rejects an unscoped RPC</li><li>delete DaemonRpcName and the stubs</li>
+  </ul>
+  <div class="rounded bg-amber-50 border border-amber-200 px-3 py-2 text-sm">ADR-0012 retires relays but leaves dispatch scope undecided — this distinction outlives relays.</div>
+  <div class="rounded-lg border border-slate-200 p-3 space-y-2">
+    <p class="lbl text-slate-500">Competitors</p>
+    <table class="cmp">
+      <tr><td class="p">t3code ◐</td><td>Exhaustive <code>RPC_REQUIRED_SCOPES satisfies Record&lt;WsRpcMethod,…&gt;</code> — a new method without a scope fails to compile. Auth only: handlers still read <code>threadId</code>.</td><td>apps/server/src/auth/RpcAuthorization.ts:40</td></tr>
+      <tr><td class="p">bb ◐</td><td>Scope is the REST path in <code>defineRoute</code>; context lookup repeated ~30×.</td><td>packages/server-contract/src/public-api.ts:435</td></tr>
+      <tr><td class="x">paseo ✕</td><td>Payload-inferred dispatch in an 8686-line Session; decomposition plan in flight.</td><td>packages/server/src/server/session.ts:2152</td></tr>
+      <tr><td class="x">zeron ✕</td><td>Scope in doc comments plus a hand-kept <code>forwardable()</code> list; routing-drift fixes ba280074, 45beb3da.</td><td>crates/engine/src/rpc.rs:1487</td></tr>
+      <tr><td class="x">diri ✕</td><td><code>TERMINAL_ONLY_METHODS</code> list plus a raw-JSON <code>"sessionID"</code> sniff; control.rs has 148 commits.</td><td>diri-engine/src/control.rs:1064</td></tr>
+      <tr><td class="p">monocode ◐</td><td>Per-case ownership checks; identity bound to a turn-scoped token.</td><td>host/server.ts:254</td></tr>
+      <tr><td class="p">capy ◐</td><td>Vendor claim: scope in REST path; "not yours" returns 404.</td><td>docs · API reference › Errors</td></tr>
+    </table>
+    <p class="text-xs text-slate-600"><b>Convergence:</b> t3code, bb and capy declare scope in the contract; nobody resolves context centrally. The payload-sniffers (paseo, zeron, diri) are where routing fixes land. A gap conduit can lead — held at Worth exploring because no competitor has shipped the full shape.</p>
+  </div>
+</article>
+
+<!-- 2 -->
+<article id="c2" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+  <div class="flex flex-wrap items-baseline justify-between gap-3">
+    <h2 class="font-serif text-2xl">2 · One daemon settings module owns update-and-persist</h2>
+    <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">local-substitutable</span></div>
+  </div>
+  <p class="font-mono text-sm text-slate-600 leading-relaxed">domain/daemon/Services/daemon-config-ref.ts:22-77 · daemon-state.ts:27-47 · daemon-foreground.ts:389-410 · config-persistence-service.ts:14-21 · daemon-ws-rpc-layer.ts:428-463 · ws-rpc/settings.ts:52-58 · daemon-config-persistence.ts (dead)</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="diagram rounded-lg border border-slate-200 p-4">
+      <p class="lbl text-slate-500 mb-3">Before — mass: interface ≈ implementation</p>
+      <div class="flex items-end gap-6 h-56">
+        <div class="flex flex-col items-center gap-1"><div class="w-16 h-44 border-2 border-red-400 bg-red-50"></div><span class="lbl">interface</span></div>
+        <div class="flex flex-col items-center gap-1"><div class="w-16 h-48 border border-slate-400 bg-stone-100"></div><span class="lbl">impl</span></div>
+        <ul class="text-xs text-slate-600 space-y-1 pb-6">
+          <li>1 commit config</li><li>2 maybe DaemonState</li><li>3 requestSave <i>or</i> flush</li><li>4 maybe publish</li>
+          <li class="text-red-700">every caller picks the order</li><li class="text-red-700">3 copies of pinHash/keepAwake</li>
+        </ul>
+      </div>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 p-4">
+      <p class="lbl text-slate-500 mb-3">After — deep</p>
+      <div class="flex items-end gap-6 h-56">
+        <div class="flex flex-col items-center gap-1"><div class="w-16 h-8 border-2 border-emerald-500 bg-emerald-50"></div><span class="lbl">update()</span></div>
+        <div class="flex flex-col items-center gap-1"><div class="w-16 h-48 deep border-2 border-slate-900"></div><span class="lbl">impl</span></div>
+        <ul class="text-xs text-slate-600 space-y-1 pb-6">
+          <li>apply → on disk → notify</li><li>replies after daemon.json is written</li><li>sole owner of the fields</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem.</b> Every caller sequences commit, DaemonState, requestSave-or-flush and publish; fix 2d641d49 (nysa, ixhb) was a wrong choice plus a second writer erasing fields.</p>
+  <p class="text-sm"><b>Solution.</b> One Daemon settings module with one <code>update</code> that applies, persists before returning, and notifies followers.</p>
+  <ul class="text-sm list-disc pl-5 grid md:grid-cols-2 gap-x-6">
+    <li>locality: the on-disk invariant lives once</li><li>tests assert disk, not call order</li>
+    <li>delete daemon-config-persistence.ts</li><li>three copies become one</li>
+  </ul>
+  <div class="rounded-lg border border-slate-200 p-3 space-y-2">
+    <p class="lbl text-slate-500">Competitors</p>
+    <table class="cmp">
+      <tr><td class="g">t3code ●</td><td><code>ServerSettingsService.update</code>: semaphore → atomic write → cache → PubSub, plus a debounced fs.watch. Caveat: one stream reads before subscribing.</td><td>apps/server/src/serverSettings.ts:998</td></tr>
+      <tr><td class="g">paseo ●</td><td><code>DaemonConfigStore.patch</code>: Zod, merge, atomic write, field handlers with reverse-order rollback, then broadcast. 19 commits — settled.</td><td>packages/server/src/server/daemon-config-store.ts:349</td></tr>
+      <tr><td class="g">zeron ●</td><td><code>SettingsStore</code> single writer; <code>SavePolicy</code> immediate or debounced 400 ms. Retrofitted in 9b811c32.</td><td>crates/ui/src/settings.rs:438</td></tr>
+      <tr><td class="g">diri ●</td><td><code>update_preferences</code>: save to disk, then swap memory, then emit effects.</td><td>diri-app/src/store/mod.rs:1482</td></tr>
+      <tr><td class="p">bb ◐</td><td>Revisioned CAS single writer for UI prefs (#3303) beside route-sequenced app settings.</td><td>apps/server/src/services/system/ui-preferences.ts:83</td></tr>
+      <tr><td class="x">monocode ✕</td><td>42 hand-written load/save/subscribe triples.</td><td>src/features/settings/model/settings.ts:783</td></tr>
+      <tr><td class="o">capy ○</td><td>Vendor claim: the UI states when a change applies (now, next boot). Persistence not documented.</td><td>docs · Secrets</td></tr>
+    </table>
+    <p class="text-xs text-slate-600"><b>Convergence:</b> 5 of 6 code competitors own settings in one module with one update op; t3code and paseo are near-exact templates (paseo adds rollback). Raises strength.</p>
+  </div>
+</article>
+
+<!-- 3 -->
+<article id="c3" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+  <div class="flex flex-wrap items-baseline justify-between gap-3">
+    <h2 class="font-serif text-2xl">3 · The commit seam owns sidebar change; callers stop announcing</h2>
+    <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span></div>
+  </div>
+  <p class="font-mono text-sm text-slate-600 leading-relaxed">handlers/session.ts:439,464,501 · auto-settle-layer.ts:94 · worktree-cleanup-layer.ts:119 · session-git-layer.ts:304-323 · session-manager-service.ts:1231 · persistence/effect/commit-and-signal.ts:83-97 · session-workspace-hint.ts:45-52 · daemon-ws-rpc-layer.ts:157-199,297-322</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="diagram rounded-lg border border-slate-200 bg-white p-3">
+      <p class="lbl text-slate-500">Before</p>
+      <pre class="mermaid">
+flowchart LR
+  H[session handlers] -->|publish 3 of 6| B((event bus))
+  AS[auto-settle] --> B
+  WC[worktree cleanup] --> B
+  SG[session git] -->|raw json_set| SB[(session_sidebar)]
+  SM[session manager] --> B
+  WH[workspace hint] -->|force marker| SB
+  B --> R[RPC layer: subscriber set + sessionsRevision]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class SG,WH,H leak
+      </pre>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 bg-white p-3">
+      <p class="lbl text-slate-500">After</p>
+      <pre class="mermaid">
+flowchart LR
+  M[mutation commands] --> C[commit seam: stamp content or overlay]
+  C --> F[Daemon feeds module]
+  F --> R[RPC: followList]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a,stroke-width:3px;
+  class C,F deep
+      </pre>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem.</b> Whether a change reaches the sidebar depends on which caller made it: pin, snooze and rename don't publish, and overlay changes must force the sidebar marker by hand.</p>
+  <p class="text-sm"><b>Solution.</b> The commit seam owns the stamp (content or overlay) and the announcement; one Daemon feeds module turns committed changes into list wake-ups.</p>
+  <ul class="text-sm list-disc pl-5 grid md:grid-cols-2 gap-x-6">
+    <li>locality: one sidebar-visibility rule</li><li>leverage: 7+ callers stop publishing</li>
+    <li>lost wake-ups tested once</li><li>grep guard tests can retire</li>
+  </ul>
+  <div class="rounded bg-amber-50 border border-amber-200 px-3 py-2 text-sm">Follows ADR-0004 (mutations are canonical events) and ADR-0009 (one shell feed). Check whether <code>sessionsRevision</code> still earns its place under ADR-0009.</div>
+  <div class="rounded-lg border border-slate-200 p-3 space-y-2">
+    <p class="lbl text-slate-500">Competitors</p>
+    <table class="cmp">
+      <tr><td class="g">t3code ●</td><td>Publishes after commit in commit order; the shell feed subscribes, snapshots, then filters by sequence. Mutation code never publishes.</td><td>apps/server/src/orchestration-v2/EventSink.ts:232 · LiveStreamBudget.ts:279</td></tr>
+      <tr><td class="g">zeron ●</td><td><code>WorkspaceHost</code>'s private <code>mutate()</code> bumps a counter; watch channels send the current value first, so no lost wake-ups.</td><td>crates/engine/src/workspace_host.rs:177</td></tr>
+      <tr><td class="p">bb ◐</td><td>DB mutators notify after commit via a buffer — yet 59 direct <code>notifyThread</code> calls and some mutators that never notify.</td><td>packages/db/src/notifier.ts</td></tr>
+      <tr><td class="x">paseo ✕</td><td>Handlers publish beside AgentManager; renaming a stored agent never dispatches — conduit's exact bug.</td><td>packages/server/src/server/agent/agent-manager.ts:2374</td></tr>
+      <tr><td class="x">diri ✕</td><td>28 <code>publish_updated</code> call sites; a bounded replay plus <code>events.dropped</code> resync catches misses.</td><td>diri-engine/src/control.rs:3412</td></tr>
+      <tr><td class="x">monocode ✕</td><td>Caller-sequenced upsert, pin, setHistory; works only with one webview.</td><td>src/app/App.tsx:5919</td></tr>
+      <tr><td class="p">capy ◐</td><td>Vendor claim: every mutation returns the updated row; "read" is an event cursor.</td><td>docs · List threads</td></tr>
+    </table>
+    <p class="text-xs text-slate-600"><b>Convergence:</b> where the owner publishes (t3code, zeron) the bug class is absent; caller-publish (paseo, diri, half of bb) reproduces it. t3code's shape is ADR-0004's.</p>
+  </div>
+</article>
+
+<!-- 4 -->
+<article id="c4" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+  <div class="flex flex-wrap items-baseline justify-between gap-3">
+    <h2 class="font-serif text-2xl">4 · One turn-end notifier fed by canonical events</h2>
+    <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span></div>
+  </div>
+  <p class="font-mono text-sm text-slate-600 leading-relaxed">relay/sse-wiring.ts:597-672 · poller-wiring.ts:88-230 · monitoring-wiring.ts:175-300 · project-relay-publisher.ts:11-44 · turn-ended-alert.ts:14-23 · notification-policy.ts · relay/event-translator.ts (803 lines) · event-pipeline.ts:143 · opencode-runtime-ingress-service.ts:567</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="diagram rounded-lg border border-slate-200 bg-white p-3">
+      <p class="lbl text-slate-500">Before — five sites, two translators</p>
+      <pre class="mermaid">
+flowchart LR
+  OC[OpenCode SSE] --> T1[legacy event-translator]
+  T1 --> S1[sse-wiring]
+  P[message poller] --> S2[poller-wiring x2]
+  SP[status poller] --> S3[monitoring-wiring]
+  CE[canonical events] --> S4[relay publisher]
+  S1 & S2 & S3 & S4 -.viewer? subagent? alert id.-> N[push + in-app]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class S1,S2,S3,S4,T1 leak
+      </pre>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 bg-white p-3">
+      <p class="lbl text-slate-500">After</p>
+      <pre class="mermaid">
+flowchart LR
+  CL[Claude] --> CE[canonical events]
+  OC[OpenCode] --> CE
+  CU[Cursor] --> CE
+  CE --> A[Turn-end notifier: announce]
+  A --> N[push + in-app, deduped]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a,stroke-width:3px;
+  class A deep
+      </pre>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem.</b> Five sites each work out viewer, subagent and alert id; OpenCode turn ends still come from a second translator whose output has no browser consumer.</p>
+  <p class="text-sm"><b>Solution.</b> Every provider's turn ends come from canonical events; one <code>announce(sessionId, outcome)</code> owns viewer and subagent checks, alert identity and dedup.</p>
+  <ul class="text-sm list-disc pl-5 grid md:grid-cols-2 gap-x-6">
+    <li>delete ~800-line translator, ~1950 test lines</li><li>alert ids defined once</li>
+    <li>leverage: one policy, every provider</li><li>tests cross one interface</li>
+  </ul>
+  <div class="rounded bg-amber-50 border border-amber-200 px-3 py-2 text-sm">Overlaps epic 82tn (.12 moves pollers to the daemon, .24 turn-terminal rule) — fold into it rather than run beside it.</div>
+  <div class="rounded-lg border border-slate-200 p-3 space-y-2">
+    <p class="lbl text-slate-500">Competitors</p>
+    <table class="cmp">
+      <tr><td class="g">paseo ●</td><td>Edge-only <code>checkAndSetAttention</code> feeds a pure <code>computeNotificationPlan</code>: heartbeat presence picks none, in-app or push. Subagents skipped.</td><td>packages/server/src/server/agent-attention-policy.ts:42</td></tr>
+      <tr><td class="g">diri ●</td><td>Reducer emits <code>turn_completed</code> once; server-minted attention ids; one client <code>NotificationFeed</code> owner. Refactor tell: 7d79aa00.</td><td>diri-engine/src/attention.rs:1 · diri-app/src/notification_feed.rs:47</td></tr>
+      <tr><td class="g">bb ●</td><td>One choke point <code>applyLoggedThreadLifecycleEvent</code> → plugin; re-reads at flush and suppresses if already read.</td><td>apps/server/src/services/threads/lifecycle-outcome.ts:66</td></tr>
+      <tr><td class="g">zeron ●</td><td>Completion stamp set in the same step as status; one client edge detector drives every channel.</td><td>crates/engine/src/sessions.rs:1498</td></tr>
+      <tr><td class="x">t3code ✕</td><td>Two unrelated notifier paths (web coordinator, mobile relay); both can alert for one turn.</td><td>apps/web/src/components/ThreadNotificationCoordinator.tsx</td></tr>
+      <tr><td class="p">monocode ◐</td><td>One <code>announceSession</code> policy; triggers scattered through App.tsx.</td><td>src/features/notifications/model/notifications.ts:244</td></tr>
+      <tr><td class="p">capy ◐</td><td>Vendor claim: run vs turn split; turn outcome settled | aborted | dropped.</td><td>docs · Streaming › Events</td></tr>
+    </table>
+    <p class="text-xs text-slate-600"><b>Convergence:</b> 4 competitors route turn ends through one choke point; t3code's split is the cautionary tale. paseo's presence plan maps onto conduit's viewer check.</p>
+  </div>
+</article>
+
+<!-- 5 -->
+<article id="c5" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+  <div class="flex flex-wrap items-baseline justify-between gap-3">
+    <h2 class="font-serif text-2xl">5 · Tests build the daemon's own composition root</h2>
+    <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">ports &amp; adapters</span></div>
+  </div>
+  <p class="font-mono text-sm text-slate-600 leading-relaxed">relay/project-relay-layers.ts:298-395,452-543,706-792 · relay-stack.ts:417-442,644-1005 · test/integration/helpers/relay-harness.ts · test/e2e/helpers/e2e-harness.ts · claude-trace-replayer.ts</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="diagram rounded-lg border border-slate-200 bg-white p-3">
+      <p class="lbl text-slate-500">Before — two roots</p>
+      <pre class="mermaid">
+flowchart TB
+  D[daemon root] --> L[project-relay-layers]
+  RS[createRelayStack: own HTTP, PIN copy] --> L
+  L -->|10x borrow or build| SVC[services]
+  ENV[CONDUIT_TEST_CLAUDE_QUERY_MODULE] -.-> RS
+  T[test harnesses] --> RS
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class RS,ENV leak
+      </pre>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 bg-white p-3">
+      <p class="lbl text-slate-500">After — one root, two adapters</p>
+      <pre class="mermaid">
+flowchart TB
+  P[production inputs: real SDK] --> R[Daemon composition layer]
+  T[test inputs: fake SDK, intervals] --> R
+  R --> SVC[services]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a,stroke-width:3px;
+  class R deep
+      </pre>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem.</b> About ten borrow-or-build forks and a second root exist only for the test harnesses, and production reads an env var to load a test SDK.</p>
+  <p class="text-sm"><b>Solution.</b> One daemon composition layer with explicit test inputs (Claude SDK, title query, intervals), used by production and harnesses alike.</p>
+  <ul class="text-sm list-disc pl-5 grid md:grid-cols-2 gap-x-6">
+    <li>tests cover production wiring</li><li>two adapters make the SDK seam real</li>
+    <li>env-var test seam deleted</li><li>duplicate PIN check deleted</li>
+  </ul>
+  <div class="rounded bg-amber-50 border border-amber-200 px-3 py-2 text-sm">Epic 82tn.16 deletes the per-project relay but not where its harnesses go — this card is that decision.</div>
+  <div class="rounded-lg border border-slate-200 p-3 space-y-2">
+    <p class="lbl text-slate-500">Competitors</p>
+    <table class="cmp">
+      <tr><td class="g">paseo ●</td><td><code>createTestPaseoDaemon</code> wraps the production <code>createPaseoDaemon</code>; 89 test files. No clock injection.</td><td>packages/server/src/server/test-utils/paseo-daemon.ts:96</td></tr>
+      <tr><td class="g">zeron ●</td><td><code>EngineCore::assemble</code> shared by 38 of 46 tests; production adds auth and updater outside it, which tests skip.</td><td>crates/engine/src/lib.rs:133</td></tr>
+      <tr><td class="p">t3code ◐</td><td><code>runtimeLayer</code> exports <code>layer</code> and <code>layerProduction</code>; but <code>ProviderReplayHarness</code> rebuilds the graph by hand and can drift.</td><td>apps/server/src/orchestration-v2/runtimeLayer.ts:347</td></tr>
+      <tr><td class="x">bb ✕</td><td>Three hand-kept wirings; one new dependency touches all three (#5441).</td><td>apps/server/test/helpers/test-app.ts:156</td></tr>
+      <tr><td class="p">diri ◐</td><td>Same <code>ControlServer</code> type with fewer builders; background loops wired per test or not at all.</td><td>diri-engine/tests/control_socket.rs:237</td></tr>
+      <tr><td class="p">monocode ◐</td><td>Only the remote host injects fake providers; App.tsx has no integration coverage.</td><td>host/server.test.ts:46</td></tr>
+      <tr><td class="o">capy ○</td><td>Not documented.</td><td>—</td></tr>
+    </table>
+    <p class="text-xs text-slate-600"><b>Convergence:</b> paseo, zeron and t3code share one root; every second wiring (t3code's harness, bb's three) drifts. Strength held at Worth exploring because 82tn.16 is about to move the ground.</p>
+  </div>
+</article>
+
+<!-- 6 -->
+<article id="c6" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+  <div class="flex flex-wrap items-baseline justify-between gap-3">
+    <h2 class="font-serif text-2xl">6 · One session-activity derivation for sidebar, header and composer</h2>
+    <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span></div>
+  </div>
+  <p class="font-mono text-sm text-slate-600 leading-relaxed">persistence/effect/read-query-effect.ts:137-390,1374,2038 · sidebar-projection.ts:133,184-230 · session-family-query.ts:3 · frontend/stores/session.svelte.ts:116,243 · chat.svelte.ts:299-410 · turn.svelte.ts:75 · SubagentBackBar.svelte:19-26 · SessionBar.svelte:79-82 · InputArea.svelte:159-162</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="diagram rounded-lg border border-slate-200 bg-white p-3">
+      <p class="lbl text-slate-500">Before — five answers, four roots</p>
+      <pre class="mermaid">
+flowchart LR
+  Q1[caller 1374] & Q2[caller 2038] & Q3[sidebar-projection] -->|rebuild 6 maps| F[roll-up fn: 10 optional inputs]
+  F --> R[row status]
+  R --> A[isBusy] & B[isSessionBusy] & C[chat phase] & D[turn.working] & E[attention]
+  A & B & C & D & E --> UI[SubagentBackBar / SessionBar / InputArea re-derive]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class Q1,Q2,Q3,UI leak
+      </pre>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 bg-white p-3">
+      <p class="lbl text-slate-500">After</p>
+      <pre class="mermaid">
+flowchart LR
+  FR[family rows + overlays] --> S[Family summary module]
+  S --> I[SessionInfo incl. activity]
+  I --> AC[activity id: working, monitoring, idle, needs-you]
+  AC --> UI[every component]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a,stroke-width:3px;
+  class S,AC deep
+      </pre>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem.</b> The roll-up takes ten optional inputs that three callers rebuild, "root" is defined four ways, and the client answers "what is this session doing" five ways.</p>
+  <p class="text-sm"><b>Solution.</b> One Family summary module computes activity on the server; the client reads <code>activity(id)</code> from one module, and the legacy chat phase layer goes.</p>
+  <ul class="text-sm list-disc pl-5 grid md:grid-cols-2 gap-x-6">
+    <li>locality: six fix commits concentrate</li><li>interface shrinks to one input type</li>
+    <li>leverage: six+ UI readers, one answer</li><li>delete dead chat streaming fields</li>
+  </ul>
+  <div class="rounded-lg border border-slate-200 p-3 space-y-2">
+    <p class="lbl text-slate-500">Competitors</p>
+    <table class="cmp">
+      <tr><td class="g">paseo ●</td><td>Pure <code>deriveAgentStateBucket</code> in the shared protocol package; the server rolls descendants up to workspace status.</td><td>packages/protocol/src/agent-state-bucket.ts:22</td></tr>
+      <tr><td class="g">bb ●</td><td>Server facts plus one shared <code>resolveThreadListIndicator</code> with child roll-up, used by web, desktop and mobile.</td><td>packages/client-core/src/thread/thread-activity.ts</td></tr>
+      <tr><td class="g">zeron ●</td><td>Pure <code>effective_indicator</code> / <code>display_status</code> in <code>proto::view</code>, shared by desktop and iOS.</td><td>crates/proto/src/view.rs:44</td></tr>
+      <tr><td class="g">diri ●</td><td><code>StatusReducer</code> is "the single canonical answer"; <code>attention()</code> on the wire type. One UI mapping copy already drifted.</td><td>diri-engine/src/status/mod.rs:1</td></tr>
+      <tr><td class="g">capy ●</td><td>Vendor claim: one server status including subagents; needs-you orthogonal; four legacy fields collapsed into one.</td><td>docs · Threads › Read a thread's status</td></tr>
+      <tr><td class="x">t3code ✕</td><td>Four client derivations that can disagree.</td><td>apps/web/src/components/Sidebar.logic.ts:922</td></tr>
+      <tr><td class="x">monocode ✕</td><td>Separate busy / approval / unseen sets, duplicated in Sidebar.</td><td>src/app/App.tsx:2192</td></tr>
+    </table>
+    <p class="text-xs text-slate-600"><b>Convergence:</b> 5 of 7 ship one pure status function; capy collapsed four fields into one. Both outliers show conduit's drift.</p>
+  </div>
+</article>
+
+<!-- 7 -->
+<article id="c7" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+  <div class="flex flex-wrap items-baseline justify-between gap-3">
+    <h2 class="font-serif text-2xl">7 · Migrations derived from files; derived tables rebuilt after</h2>
+    <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">local-substitutable</span></div>
+  </div>
+  <p class="font-mono text-sm text-slate-600 leading-relaxed">persistence/effect/migrations.ts:133,461,972-1250,1115,1219-1237 · persistence/schema.ts · read-model-types.ts:6 · migrations/fork-lineage-import.ts:240-248 · sidebar-projection.ts:73,105,225 · sidebar-row.ts:9</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="diagram rounded-lg border border-slate-200 bg-white p-3">
+      <p class="lbl text-slate-500">Before</p>
+      <pre class="mermaid">
+flowchart TB
+  SQL[0062_sessions_archived.sql] -.id 0063.-> REG[hand-kept registry]
+  COL[one column] --> REG & EXP[expectedTableColumns] & APP[appendedSessionColumns]
+  REG --> MIG[migrations] -->|calls live code| PROJ[refreshSidebar / rerootSession]
+  PROJ -.must handle every schema.-> ROW[SessionRow cast, optional fields]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class SQL,PROJ,ROW leak
+      </pre>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 bg-white p-3">
+      <p class="lbl text-slate-500">After</p>
+      <pre class="mermaid">
+flowchart TB
+  DIR[migrations dir: filename = id] --> M[Migration registry]
+  M --> MARK[mark families dirty]
+  MARK --> RB[Rebuild on final schema + shape version]
+  M --> DEC[SessionRow decoded by Schema]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a,stroke-width:3px;
+  class M,RB deep
+      </pre>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem.</b> Registry ids drift from filenames, a column is listed three times, rows are cast rather than decoded, and migrations call live projection code that must cope with every historical schema.</p>
+  <p class="text-sm"><b>Solution.</b> Filename is the id, one add-column form feeds the schema check, rows decode, and migrations mark families dirty for one rebuild on the final schema.</p>
+  <ul class="text-sm list-disc pl-5 grid md:grid-cols-2 gap-x-6">
+    <li>one column = one file + one field</li><li>merge clashes become filename conflicts</li>
+    <li>projection sees one schema</li><li>stale sidebar rows heal on shape bump</li>
+  </ul>
+  <div class="rounded-lg border border-slate-200 p-3 space-y-2">
+    <p class="lbl text-slate-500">Competitors</p>
+    <table class="cmp">
+      <tr><td class="g">bb ●</td><td>drizzle-kit journal derived from 145 files; rows from <code>$inferSelect</code>; FTS rebuilt in SQL. Cost: a 1472-line migrate wrapper (42 commits).</td><td>packages/db/src/migrate.ts:1412</td></tr>
+      <tr><td class="p">t3code ◐</td><td>Hand-kept list with a fail-fast id-clash guard; rows decoded with Schema; replay rebuild only via <code>t3 doctor</code>.</td><td>apps/server/src/persistence/Migrations.ts:157</td></tr>
+      <tr><td class="x">monocode ✕</td><td>Hand-numbered chain needed an idempotent repair pass because builds reused numbers.</td><td>src-tauri/src/session_store.rs:968</td></tr>
+      <tr><td class="p">zeron ◐</td><td>Versions are array positions; cache DBs are dropped and rebuilt, not migrated.</td><td>crates/engine/src/change_request_store.rs:252</td></tr>
+      <tr><td class="o">diri ○</td><td>No framework; <code>CREATE IF NOT EXISTS</code> and versioned table names.</td><td>diri-engine/src/attention.rs:154</td></tr>
+      <tr><td class="o">paseo ○</td><td>No server DB; one COMPAT migration with a delete date; client cache dropped on version mismatch.</td><td>packages/app/src/runtime/replica-cache/row-store-sqlite.ts:60</td></tr>
+      <tr><td class="o">capy ○</td><td>Not documented.</td><td>—</td></tr>
+    </table>
+    <p class="text-xs text-slate-600"><b>Convergence:</b> rebuild derived data rather than migrate it (zeron, t3code, bb, paseo). Hand-kept ids hurt monocode the way they hurt conduit; bb shows how far a wrapper can grow.</p>
+  </div>
+</article>
+
+<!-- 8 -->
+<article id="c8" class="rounded-xl border-2 border-emerald-600 bg-white p-6 space-y-5">
+  <div class="flex flex-wrap items-baseline justify-between gap-3">
+    <h2 class="font-serif text-2xl">8 · One provider turn launcher, shared by first delivery and recovery</h2>
+    <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">ports &amp; adapters</span></div>
+  </div>
+  <p class="font-mono text-sm text-slate-600 leading-relaxed">provider/orchestration-side-effect-reactor.ts:442-599 · claude/claude-runner-recovery.ts:46-163 · claude-runner-driver.ts:54-80 · prepare-turn.ts:96,340 · config dir resolved ~15× · provider-turn-dispatch.ts:550-565 · runner/runner-recovery.ts:233-245 · cursor-runner-payload.ts:1039</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="diagram rounded-lg border border-slate-200 bg-white p-3">
+      <p class="lbl text-slate-500">Before</p>
+      <pre class="mermaid">
+flowchart TB
+  OB[outbox reactor] -->|if supportsNativeResume| CL[Claude launch planning]
+  RC[claude recovery] -->|copy| CL2[same planning again]
+  DR[runner driver] -->|3rd folder resolve| CFG[(config dir x15)]
+  OB --> S1[settle: native-resume only]
+  PD[turn dispatch] --> S2[settle: every provider]
+  RR[runner recovery] --> S3[settle: every provider]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class CL,CL2,CFG,S1 leak
+      </pre>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 bg-white p-3">
+      <p class="lbl text-slate-500">After</p>
+      <pre class="mermaid">
+flowchart TB
+  OB[outbox reactor] --> L
+  RC[recovery] --> L
+  PW[prewarm / continuation] --> L
+  L[Turn launcher: send-turn row in, dispatch-ready turn + fallback + settlement out]
+  L -.seam.-> C[Claude] & U[Cursor] & O[OpenCode]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a,stroke-width:3px;
+  class L deep
+      </pre>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem.</b> Claude launch planning sits in the generic outbox reactor and is copied into recovery; three owners settle turn results with different gating; the config dir is resolved ~15 times (fixes 0e673ac2, 85363dec, 52af44ca).</p>
+  <p class="text-sm"><b>Solution.</b> Deepen <code>prepareTurnEffect</code> into one Turn launcher that the reactor and recovery both call; it also owns settlement.</p>
+  <ul class="text-sm list-disc pl-5 grid md:grid-cols-2 gap-x-6">
+    <li>locality: one owner of folder and cursor</li><li>leverage: reactor, recovery, prewarm share it</li>
+    <li>reactor's Claude branch deleted</li><li>settlement tested per TurnResult</li>
+  </ul>
+  <div class="rounded-lg border border-slate-200 p-3 space-y-2">
+    <p class="lbl text-slate-500">Competitors</p>
+    <table class="cmp">
+      <tr><td class="g">t3code ●</td><td><code>ProviderTurnStartServiceV2.start</code> serves start and restart; resume, else fresh thread plus a context-handoff event; never replays a process-bound effect.</td><td>apps/server/src/orchestration-v2/ProviderTurnStartService.ts:516</td></tr>
+      <tr><td class="g">zeron ●</td><td>Engine owns resume (<code>resume_for</code>); callers always pass <code>None</code>; recovery auto-resumes through the same dispatch.</td><td>crates/engine/src/sessions.rs:1168</td></tr>
+      <tr><td class="g">bb ●</td><td><code>prepareTurnSubmitCommandPayload</code> for live, queued and retry; each command carries a self-contained <code>resumeContext</code>.</td><td>apps/server/src/services/threads/thread-commands.ts:270</td></tr>
+      <tr><td class="g">paseo ●</td><td><code>sendPromptToAgent</code> — "every surface MUST go through it"; pending/completed receipts report unknown outcomes instead of resending.</td><td>packages/server/src/server/agent/agent-prompt.ts:95</td></tr>
+      <tr><td class="p">monocode ◐</td><td>Recovery resubmits Continue through the normal send; five manual bind sites.</td><td>src/features/sessions/model/inFlight.ts:8</td></tr>
+      <tr><td class="p">diri ◐</td><td><code>conversation_plan</code> is "every launch path", yet branching stays inline in control.rs.</td><td>diri-engine/src/agent.rs:294</td></tr>
+      <tr><td class="p">capy ◐</td><td>Vendor claim: each turn resolves a connection with an out-of-credit fallback policy.</td><td>docs · Models &amp; pricing › Connections</td></tr>
+    </table>
+    <p class="text-xs text-slate-600"><b>Convergence:</b> every code competitor routes first delivery and recovery through one launch path. t3code's Effect service is a near drop-in template. Raises strength.</p>
+  </div>
+</article>
+
+<!-- 9 -->
+<article id="c9" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+  <div class="flex flex-wrap items-baseline justify-between gap-3">
+    <h2 class="font-serif text-2xl">9 · Optional provider operations live on the adapter</h2>
+    <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">ports &amp; adapters</span></div>
+  </div>
+  <p class="font-mono text-sm text-slate-600 leading-relaxed">contracts/provider-instance.ts:22-189 · instance-manager-service.ts (31 trait reads) · runner-provider-instance.ts:96,500 · runner-payload.ts:46 · handlers/background-tasks.ts:29 · session-command.ts:743-900 · test/helpers/provider-runtime-stream-invariants.ts</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="diagram rounded-lg border border-slate-200 p-4">
+      <p class="lbl text-slate-500 mb-2">Before — task stop declared five ways</p>
+      <div class="space-y-2 text-xs">
+        <div class="border border-red-400 bg-red-50 px-2 py-1">sessionCapabilities.supportsTaskStop</div>
+        <div class="border border-red-400 bg-red-50 px-2 py-1">RunnerDriverPieces.stopTask</div>
+        <div class="border border-red-400 bg-red-50 px-2 py-1">RunnerPayload.stopTask?</div>
+        <div class="border border-red-400 bg-red-50 px-2 py-1">runner hello: stopsTasks</div>
+        <div class="border border-red-400 bg-red-50 px-2 py-1">ProviderInstance.stopTaskEffect?</div>
+        <p class="text-red-700 pt-1">~25 traits read in ~55 files · invariants checked on 1 of 3 adapters</p>
+      </div>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 p-4">
+      <p class="lbl text-slate-500 mb-2">After</p>
+      <div class="deep text-white rounded p-4 border-2 border-slate-900 space-y-2">
+        <p class="lbl text-slate-300">Provider adapter</p>
+        <p class="text-xs text-slate-300">fork? · stopTask? · nativeSession? — present = capable</p>
+      </div>
+      <svg width="100%" height="24"><line x1="0" y1="12" x2="100%" y2="12" stroke="#334155" stroke-width="2" class="seam"/></svg>
+      <div class="grid grid-cols-3 gap-2 text-xs text-center"><div class="border border-slate-400 py-2">Claude</div><div class="border border-slate-400 py-2">Cursor</div><div class="border border-slate-400 py-2">OpenCode</div></div>
+      <div class="mt-3 border-l-4 border-emerald-500 bg-emerald-50 px-3 py-2 text-xs">one contract suite over every adapter's committed traces</div>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem.</b> Single-provider traits act as identity checks in ~55 files, task stop is declared five ways, and the stream-invariant contract runs on one adapter of three.</p>
+  <p class="text-sm"><b>Solution.</b> Behaviour-selecting traits become adapter operations whose presence is the capability; static facts stay for the UI; one contract suite runs every adapter's traces.</p>
+  <ul class="text-sm list-disc pl-5 grid md:grid-cols-2 gap-x-6">
+    <li>locality: a new provider touches one module</li><li>four task-stop declarations deleted</li>
+    <li>the seam becomes real for three adapters</li><li>ADR-0002 traces gain a contract</li>
+  </ul>
+  <div class="rounded-lg border border-slate-200 p-3 space-y-2">
+    <p class="lbl text-slate-500">Competitors</p>
+    <table class="cmp">
+      <tr><td class="g">t3code ●</td><td>Optional runtime ops plus typed capabilities; "orchestration reads capabilities, never the driver kind"; replay-fixture contract test.</td><td>packages/provider-core/src/server/ProviderAdapter.ts:541</td></tr>
+      <tr><td class="g">bb ●</td><td>Closed <code>AdapterCommand</code> union; handshake facts may only narrow the declaration; <code>runBridgeConformance</code> on every bridge.</td><td>packages/provider-bridge-protocol/src/conformance/index.ts:41</td></tr>
+      <tr><td class="p">monocode ◐</td><td>Presence-based optional ops behind <code>canX()</code>; per-session op queue; no contract suite across 11 adapters.</td><td>src/integrations/harness/core/registry.ts:53</td></tr>
+      <tr><td class="x">paseo ✕</td><td>Flags and optional methods side by side, checked twice — drift.</td><td>packages/server/src/server/agent/rewind/rewind.ts:18</td></tr>
+      <tr><td class="p">zeron ◐</td><td>Boolean flags on the <code>Harness</code> trait; no conformance suite; turn-end drift fixed in 91fd851c.</td><td>crates/harness/src/lib.rs:163</td></tr>
+      <tr><td class="p">diri ◐</td><td>Data manifests; one function turns provider facts into a capability struct.</td><td>diri-engine/src/agent.rs:224</td></tr>
+      <tr><td class="o">capy ○</td><td>Own harness over model APIs; no comparable layer.</td><td>docs · Models &amp; pricing</td></tr>
+    </table>
+    <p class="text-xs text-slate-600"><b>Convergence:</b> split on flags vs operations — those carrying both (t3code, paseo) name the disagreement a bug. Only bb and t3code run a contract suite, and both lean on it. Steal t3code's "never the driver kind" rule.</p>
+  </div>
+</article>
+
+<!-- 10 -->
+<article id="c10" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+  <div class="flex flex-wrap items-baseline justify-between gap-3">
+    <h2 class="font-serif text-2xl">10 · One session-rows module for every client feed</h2>
+    <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span></div>
+  </div>
+  <p class="font-mono text-sm text-slate-600 leading-relaxed">frontend/transport/session-subscription.svelte.ts:134-207 · stores/session.svelte.ts:59,80,510-578,725,743</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="diagram rounded-lg border border-slate-200 bg-white p-3">
+      <p class="lbl text-slate-500">Before</p>
+      <pre class="mermaid">
+flowchart LR
+  SH[shell feed] --> A1[transport applier]
+  FA[family feed] --> A2[applyFamilyChange]
+  A1 -->|busy, turn end, delete...| X[reactions]
+  A2 -->|same, re-written| X
+  A1 -.imports 7 stores.-> ST[stores]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class A1,A2 leak
+      </pre>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 bg-white p-3">
+      <p class="lbl text-slate-500">After</p>
+      <pre class="mermaid">
+flowchart LR
+  SH[shell] & FA[family] & SE[search] & SV[saved] --> R[Session rows module: version wins]
+  R -->|row changed prev to next| X[reactions, subscribed once]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a,stroke-width:3px;
+  class R deep
+      </pre>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem.</b> Shell and family appliers each re-write the same reactions, split rows by an informal rule, and drifted (b196938b: finished session stuck on Working).</p>
+  <p class="text-sm"><b>Solution.</b> One Session rows module takes every feed, picks the winner by version, and emits one row-changed notice that reactions subscribe to once.</p>
+  <ul class="text-sm list-disc pl-5 grid md:grid-cols-2 gap-x-6">
+    <li>~70-line near-copy deleted</li><li>transitions written once</li>
+    <li>transport only delivers rows</li><li>tests: envelopes in, notices out</li>
+  </ul>
+  <div class="rounded bg-amber-50 border border-amber-200 px-3 py-2 text-sm">Builds on ADR-0009 / ADR-0010 feeds; does not reopen them.</div>
+  <div class="rounded-lg border border-slate-200 p-3 space-y-2">
+    <p class="lbl text-slate-500">Competitors</p>
+    <table class="cmp">
+      <tr><td class="g">paseo ●</td><td><code>DirectoryTransactionOwner</code> replays deltas over an in-flight snapshot; newer row wins by <code>updatedAt</code>.</td><td>packages/app/src/runtime/directory-sync/transaction.ts</td></tr>
+      <tr><td class="g">bb ●</td><td>Cache-owner modules patch every list copy of a row; <code>updatedAt</code> guard; held optimistic patches. Cost: ~45 files.</td><td>apps/app/src/hooks/cache-owners/query-cache.ts:720</td></tr>
+      <tr><td class="g">diri ●</td><td>One record map; the previous/current diff in upsert is the only place side effects run.</td><td>diri-app/src/store/mod.rs:2055</td></tr>
+      <tr><td class="p">t3code ◐</td><td>Sequence-gated apply, but shell and detail stores disagree (documented in connection-runtime.md).</td><td>packages/client-runtime/src/state/shellReducer.ts:130</td></tr>
+      <tr><td class="x">monocode ✕</td><td>Two caches reconciled by hand.</td><td>src/features/sessions/data/sessionHistory.ts:29</td></tr>
+      <tr><td class="x">zeron ✕</td><td>Each list replaced wholesale; optimistic patches flicker away.</td><td>crates/ui/src/state.rs:1158</td></tr>
+      <tr><td class="o">capy ○</td><td>Not documented.</td><td>—</td></tr>
+    </table>
+    <p class="text-xs text-slate-600"><b>Convergence:</b> one row owner with a version guard (paseo, bb, diri); split stores (t3code, monocode, zeron) show conduit's drift. Prefer server sequence over wall-clock <code>updatedAt</code>.</p>
+  </div>
+</article>
+
+<!-- 11 -->
+<article id="c11" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+  <div class="flex flex-wrap items-baseline justify-between gap-3">
+    <h2 class="font-serif text-2xl">11 · One follow-a-subscription module</h2>
+    <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span></div>
+  </div>
+  <p class="font-mono text-sm text-slate-600 leading-relaxed">frontend/stores/todo.svelte.ts:25-66 · input-draft.ts:24-58 · session-family-feed.ts:26-82 · approvals.ts:30-68 · session-list.svelte.ts:132-202 · transcript.svelte.ts:868 · terminal.svelte.ts:340 · project.svelte.ts:134 · alerts.ts:72 · project-settings.ts:79 · discovery.svelte.ts:470-545 · selection.svelte.ts:357-377 · ChatLayout.svelte:360-410</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="diagram rounded-lg border border-slate-200 p-4">
+      <p class="lbl text-slate-500 mb-2">Before — 11 copies of one lifecycle</p>
+      <div class="grid grid-cols-4 gap-1 text-[10px] text-center">
+        <div class="border border-slate-300 py-2">todo<br><span class="text-red-600">no resub</span></div>
+        <div class="border border-slate-300 py-2">draft<br><span class="text-red-600">no resub</span></div>
+        <div class="border border-slate-300 py-2">approvals<br><span class="text-red-600">no resub</span></div>
+        <div class="border border-slate-300 py-2">transcript<br><span class="text-red-600">no resub</span></div>
+        <div class="border border-slate-300 py-2">family</div><div class="border border-slate-300 py-2">session-list</div>
+        <div class="border border-slate-300 py-2">terminal</div><div class="border border-slate-300 py-2">project</div>
+        <div class="border border-slate-300 py-2">alerts</div><div class="border border-slate-300 py-2">proj-settings</div>
+        <div class="border border-slate-300 py-2">discovery</div>
+      </div>
+      <p class="text-xs text-slate-600 mt-3">each: generation counter · fiber swap · getRuntime · forProject · supervise · stale guard</p>
+      <p class="text-xs text-red-700">selection + ChatLayout open/close four feeds and run an eight-call reset</p>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 p-4 space-y-3">
+      <p class="lbl text-slate-500">After — call graph collapsed</p>
+      <div class="deep text-white rounded p-4 border-2 border-slate-900">
+        <p class="lbl text-slate-300">follow(key, open, apply, {resubscribeOn})</p>
+        <div class="grid grid-cols-3 gap-1 mt-2 text-[10px] text-slate-500 text-center">
+          <div class="border border-slate-600 py-1">generation</div><div class="border border-slate-600 py-1">fiber swap</div><div class="border border-slate-600 py-1">account resub</div>
+          <div class="border border-slate-600 py-1">stale guard</div><div class="border border-slate-600 py-1">supervise</div><div class="border border-slate-600 py-1">status</div>
+        </div>
+      </div>
+      <div class="border-2 border-slate-700 rounded p-3 text-xs"><span class="lbl">Viewed session</span> — transcript · todo · draft · family open/close as one unit</div>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem.</b> About eleven hand-rolled copies of the subscribe lifecycle; four skip resubscribe on account switch, and selection and ChatLayout orchestrate store internals.</p>
+  <p class="text-sm"><b>Solution.</b> A transport <code>follow</code> module returns a handle with status; a Viewed session module opens the per-session feeds as one unit.</p>
+  <ul class="text-sm list-disc pl-5 grid md:grid-cols-2 gap-x-6">
+    <li>leverage: 11 call sites, one race rule</li><li>account-switch bug class gone</li>
+    <li>one fake subscription tests every feed</li><li>eight-call reset deleted</li>
+  </ul>
+  <div class="rounded-lg border border-slate-200 p-3 space-y-2">
+    <p class="lbl text-slate-500">Competitors</p>
+    <table class="cmp">
+      <tr><td class="g">paseo ●</td><td><code>OwnedSubscription</code>: ready snapshot, subscribe, release, generation counter; the push router reconciles desired vs active subscriptions (#4596, #4737).</td><td>packages/client/src/connection/owned.ts:12</td></tr>
+      <tr><td class="g">t3code ●</td><td><code>subscribeDynamicMapped</code> switchMaps over the supervisor session; transport vs domain failure split; idle-TTL ref-count.</td><td>packages/client-runtime/src/rpc/client.ts:249</td></tr>
+      <tr><td class="g">bb ●</td><td><code>WebSocketManager</code>: ref-counted keyed subscriptions, resubscribe on open, disconnect watermark.</td><td>apps/app/src/lib/ws.ts:124</td></tr>
+      <tr><td class="g">diri ●</td><td>One global subscription; engine-instance id resets the replay cursor.</td><td>diri-client/src/client.rs:280</td></tr>
+      <tr><td class="p">zeron ◐</td><td>Generic <code>spawn_watch</code>, yet five copies repeat their own stale guards.</td><td>crates/ui/src/state.rs:3173</td></tr>
+      <tr><td class="x">monocode ✕</td><td>~74 hand-rolled <code>listen()</code> sites.</td><td>src/app/App.tsx:13007</td></tr>
+      <tr><td class="p">capy ◐</td><td>Vendor claim: SSE resume via Last-Event-ID; <code>until=run</code>.</td><td>docs · Streaming › Resuming</td></tr>
+    </table>
+    <p class="text-xs text-slate-600"><b>Convergence:</b> paseo, t3code and bb each built one primitive after churn. zeron's half-done primitive shows copies return unless key-scoped stale guards live inside it.</p>
+  </div>
+</article>
+
+<!-- 12 -->
+<article id="c12" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+  <div class="flex flex-wrap items-baseline justify-between gap-3">
+    <h2 class="font-serif text-2xl">12 · A composer-draft module per session</h2>
+    <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span></div>
+  </div>
+  <p class="font-mono text-sm text-slate-600 leading-relaxed">components/input/InputArea.svelte:320,393-413,607,870-885 (1679 lines, ~150 commits/6 wk) · stores/chat.svelte.ts:436-472 · server-status.svelte.ts:222-243 · selection.svelte.ts:344 · turn.svelte.ts:238-295 · transcript.svelte.ts:690</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="diagram rounded-lg border border-slate-200 bg-white p-3">
+      <p class="lbl text-slate-500">Before</p>
+      <pre class="mermaid">
+flowchart TB
+  IA[InputArea.svelte: draft map, grace window, debounce, flush, restore]
+  CS[chat store: global inputSyncState] -.callback hook.-> IA
+  SS[server-status] --> CS
+  SEL[selection] --> CS
+  IA & TU[turn store] & TR[transcript] --> DS[optimistic draftSend]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class IA,CS leak
+      </pre>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 bg-white p-3">
+      <p class="lbl text-slate-500">After</p>
+      <pre class="mermaid">
+flowchart TB
+  D[composerDraft sessionId: text, local-vs-remote, debounce, persist, clear on send, restore on failure]
+  IA[InputArea] -->|binds| D
+  R[remote draft feed] --> D
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a,stroke-width:3px;
+  class D deep
+      </pre>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem.</b> Draft rules live in the busiest component behind a global sync state and an inverted callback, so they are only testable by mounting it.</p>
+  <p class="text-sm"><b>Solution.</b> A Composer draft module per session owns every draft rule; InputArea only binds to it.</p>
+  <ul class="text-sm list-disc pl-5 grid md:grid-cols-2 gap-x-6">
+    <li>~150 lines leave the component</li><li>callback hook deleted</li>
+    <li>draft rules testable as functions</li><li>restore-if-empty stops clobbering</li>
+  </ul>
+  <div class="rounded-lg border border-slate-200 p-3 space-y-2">
+    <p class="lbl text-slate-500">Competitors</p>
+    <table class="cmp">
+      <tr><td class="g">bb ●</td><td>Module store, 250 ms debounce, <code>storage</code>-event sync that ignores keys with a pending local write; <code>restoreIfEmpty</code>. Reverted server autosave (#4455).</td><td>apps/app/src/hooks/usePromptDraftStorage.ts:123</td></tr>
+      <tr><td class="g">paseo ●</td><td>Persisted draft store with lifecycle active | abandoned | sent and a TTL; injectable scheduler; clear-then-restore submit.</td><td>packages/app/src/stores/draft-store/index.ts:253</td></tr>
+      <tr><td class="p">t3code ◐</td><td>Draft store (v9 migrations), restore only if still empty with a generation guard — but send logic sits in an 8706-line ChatView.</td><td>apps/web/src/composerDraftStore.ts</td></tr>
+      <tr><td class="p">monocode ◐</td><td><code>draftCache</code> module plus a revision-guarded restore; not persisted.</td><td>src/features/sessions/model/draftCache.ts:1</td></tr>
+      <tr><td class="p">zeron ◐</td><td>Per-key map in the composer; restore overwrites text typed during send.</td><td>crates/ui/src/composer.rs:9550</td></tr>
+      <tr><td class="o">diri ○</td><td>In-memory map; cleared only on confirmed delivery. The agent TUI holds the real composer.</td><td>diri-app/src/launcher.rs:1742</td></tr>
+      <tr><td class="p">capy ◐</td><td>Vendor claim: a queued message can return to the composer to edit.</td><td>docs · Threads › Send and steer</td></tr>
+    </table>
+    <p class="text-xs text-slate-600"><b>Convergence:</b> bb, paseo, t3code and monocode own drafts outside the view; restore-if-empty with a generation guard recurs. Nobody syncs drafts across devices — conduit leads there, and bb's revert warns against server autosave.</p>
+  </div>
+</article>
+
+</section>
+
+<section id="top-recommendation" class="rounded-xl deep text-white p-8 space-y-3">
+  <p class="lbl text-emerald-300">Top recommendation</p>
+  <h2 class="font-serif text-3xl"><a href="#c8" class="underline decoration-emerald-400">8 · One provider turn launcher</a></h2>
+  <p class="text-slate-300 max-w-3xl">Densest fix history (claude runtime 23, translator 13, runner 12 fixes in 6 weeks), outside epic 82tn so nothing collides, and the strongest convergence in the survey: every code competitor routes first delivery and recovery through one launch path — t3code's <code>ProviderTurnStartServiceV2</code> is an Effect-native template, zeron and bb show the engine owning resume.</p>
+  <p class="text-slate-400 text-sm">Quick wins beside it: <a href="#c2" class="underline">2 · settings module</a> (5 of 6 converge, deletes dead code) · <a href="#c3" class="underline">3 · commit seam owns sidebar change</a> (paseo ships conduit's exact bug).</p>
+</section>
+
+</main>
+</body>
+</html>
