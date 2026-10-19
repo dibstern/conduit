@@ -473,10 +473,20 @@ describe("OpenCode sessions keep their effective working directories", () => {
 			60_000,
 		);
 		const permissionId = String(permission["requestId"]);
+		const providerPermissionId =
+			fixture.providerRequestIdForPrompt(permissionId);
+		check(
+			"permission maps to its native OpenCode request",
+			typeof providerPermissionId,
+			"string",
+		);
 		replacements.unshift([permissionId, "<permission-1>"]);
+		if (providerPermissionId !== undefined)
+			replacements.unshift([providerPermissionId, "<provider-permission-1>"]);
 		evidence["permission"] = {
 			sessionId: s2,
 			requestId: permissionId,
+			providerRequestId: providerPermissionId,
 			permission: permission["permission"],
 		};
 		await browser2.answerApproval(permission, "allow");
@@ -522,7 +532,11 @@ describe("OpenCode sessions keep their effective working directories", () => {
 			["S1 prompt", `/session/${s1}/prompt_async`, w1],
 			["S2 prompt", `/session/${s2}/prompt_async`, w2],
 			["S2 fork", `/session/${s2}/fork`, w2],
-			["permission reply", `/session/${s2}/permissions/${permissionId}`, w2],
+			[
+				"permission reply",
+				`/session/${s2}/permissions/${providerPermissionId}`,
+				w2,
+			],
 		] as const) {
 			const scopes = requests
 				.filter(({ url }) => url.split("?")[0] === path)

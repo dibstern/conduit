@@ -1,6 +1,6 @@
 // The only projection runner. Uses SqlClient.withTransaction for writes.
 
-import { Context, Data, Effect, Exit, Semaphore } from "effect";
+import { Context, Data, Effect, Exit, Ref, Semaphore } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
@@ -11,7 +11,9 @@ import {
 	mergeTouches,
 	type ProjectionContext,
 	type ProjectionTouch,
+	stampMessage,
 } from "./projectors-effect.js";
+import { SessionRollupProjects } from "./session-rollup-projects.js";
 import { refreshSidebar } from "./sidebar-projection.js";
 import {
 	decodeStoredEventRow,
@@ -109,6 +111,10 @@ export const makeProjectionRunnerEffect = (
 	Effect.gen(function* () {
 		const cursorRepo = yield* ProjectorCursorEffectTag;
 		const sql = yield* SqlClient.SqlClient;
+		const projects = yield* SessionRollupProjects;
+		const rollupProjectIds = projects
+			? Ref.get(projects)
+			: Effect.succeed(undefined);
 		const recoveryLock = yield* Semaphore.make(1);
 		const batchCursorName =
 			BATCH_CURSOR_PREFIX +
@@ -240,7 +246,11 @@ export const makeProjectionRunnerEffect = (
 					}
 
 					const touched = mergeTouches(touches);
-					yield* refreshSidebar(touched.sidebar ?? [], version);
+					yield* refreshSidebar(
+						touched.sidebar ?? [],
+						version,
+						yield* rollupProjectIds,
+					);
 					return {
 						version,
 						projectIds: [event.projectId],
@@ -289,13 +299,31 @@ export const makeProjectionRunnerEffect = (
 				const { version, touched } = yield* sql.withTransaction(
 					Effect.gen(function* () {
 						const version = yield* nextVersion;
-						const ctx: ProjectionContext = { version, replaying };
+						const deferredMessageStamps = new Set<string>();
+						const ctx: ProjectionContext = {
+							version,
+							replaying,
+							deferredMessageStamps,
+						};
 						for (const event of events) {
+							// Stamping also syncs a fork point's clock, which needs the
+							// row: take a pending stamp before its message is deleted.
+							if (
+								event.type === "message.removed" &&
+								deferredMessageStamps.delete(event.data.messageId)
+							)
+								touches.push(
+									yield* stampMessage([event.data.messageId], { version }),
+								);
 							const matching = projectorsByEventType.get(event.type) ?? [];
 							for (const projector of matching) {
 								touches.push(yield* projector.project(event, ctx));
 							}
 						}
+						// Last, so each message is stamped once, as the batch left it.
+						touches.push(
+							yield* stampMessage([...deferredMessageStamps], { version }),
+						);
 
 						// Projection and this watermark commit together. Enrollment
 						// cursors stay fixed so a newly added projector still starts at 0.
@@ -305,7 +333,11 @@ export const makeProjectionRunnerEffect = (
 						);
 						// Once for the batch: a refresh reads whole families.
 						const touched = mergeTouches(touches);
-						yield* refreshSidebar(touched.sidebar ?? [], version);
+						yield* refreshSidebar(
+							touched.sidebar ?? [],
+							version,
+							yield* rollupProjectIds,
+						);
 						return { version, touched };
 					}).pipe(
 						Effect.mapError(
@@ -442,7 +474,11 @@ export const makeProjectionRunnerEffect = (
 													replaying: true,
 												});
 												// This savepoint isolates one projector/event pair.
-												yield* refreshSidebar(touched.sidebar ?? [], version);
+												yield* refreshSidebar(
+													touched.sidebar ?? [],
+													version,
+													yield* rollupProjectIds,
+												);
 												yield* cursorRepo.upsert(
 													projector.name,
 													eventRow.sequence,

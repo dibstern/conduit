@@ -567,37 +567,42 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		sessionId: string,
 		requestId: string,
 		decision: PermissionDecision,
+		providerProcessId?: string,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.resolveClientEffect(sessionId).pipe(
 			Effect.flatMap((client) =>
-				Effect.tryPromise({
-					try: async () => {
-						if (decision === "always") {
-							// OpenCode's "always" approvals override rules in other sessions.
-							const session = await client.session.get(sessionId);
-							const request = (
-								await client.permission.list(
-									session.directory || this.workspaceRoot,
-								)
-							).find((pending) => pending.id === requestId);
-							if (request?.always?.length) {
-								await client.session.update(sessionId, {
-									permission: request.always.map((pattern) => ({
-										permission: request.permission,
-										pattern,
-										action: "allow",
-									})),
-								});
-							}
-						}
-						await client.permission.reply(
-							sessionId,
-							requestId,
-							decision === "always" ? "once" : decision,
-						);
-					},
-					catch: (cause) => cause,
-				}),
+				providerProcessId && client.promptProcessId !== providerProcessId
+					? Effect.fail(
+							"The provider process that asked this prompt is no longer running.",
+						)
+					: Effect.tryPromise({
+							try: async () => {
+								if (decision === "always") {
+									// OpenCode's "always" approvals override rules in other sessions.
+									const session = await client.session.get(sessionId);
+									const request = (
+										await client.permission.list(
+											session.directory || this.workspaceRoot,
+										)
+									).find((pending) => pending.id === requestId);
+									if (request?.always?.length) {
+										await client.session.update(sessionId, {
+											permission: request.always.map((pattern) => ({
+												permission: request.permission,
+												pattern,
+												action: "allow",
+											})),
+										});
+									}
+								}
+								await client.permission.reply(
+									sessionId,
+									requestId,
+									decision === "always" ? "once" : decision,
+								);
+							},
+							catch: (cause) => cause,
+						}),
 			),
 			Effect.mapError((cause) =>
 				this.providerFailure("resolvePermission", cause),

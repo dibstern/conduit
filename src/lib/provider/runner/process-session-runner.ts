@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, closeSync, openSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -17,6 +17,7 @@ import { PersistenceProjectTag } from "../../domain/persistence/Services/persist
 import * as Failure from "../../effect/failure-classification.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { createLogger } from "../../logger.js";
+import { makeRetireReplacedProcessPrompts } from "../../persistence/effect/retire-pending-prompts.js";
 import { isRecord } from "../../utils.js";
 import type { ProviderNativeSession, TurnResult } from "../types.js";
 import { connectRunner } from "./runner-connection.js";
@@ -26,7 +27,10 @@ import {
 	runnerFailure,
 	runnerSinkId,
 } from "./runner-protocol.js";
-import { makeRunnerReceiptStore } from "./runner-receipts.js";
+import {
+	currentRunnerOutput,
+	makeRunnerReceiptStore,
+} from "./runner-receipts.js";
 import type { recoverRunnerCommands } from "./runner-recovery.js";
 import {
 	discoverRunners,
@@ -47,6 +51,7 @@ import type {
 } from "./session-runner.js";
 
 interface RunnerChild {
+	readonly sessionId: string;
 	readonly ready: Deferred.Deferred<RunnerSocket, SessionFailure>;
 	readonly stopped: Deferred.Deferred<void>;
 	readonly drained: Deferred.Deferred<void>;
@@ -348,8 +353,23 @@ export const makeProcessSessionRunner = (
 		const receipts = sql
 			? yield* makeRunnerReceiptStore(sql).pipe(Effect.orDie)
 			: undefined;
+		const retireReplacedPrompts = yield* makeRetireReplacedProcessPrompts;
+		const observedProcesses = new Map<string, string>();
+		const observeProcess = (sessionId: string, entry: RunnerChild) =>
+			Effect.gen(function* () {
+				if (observedProcesses.get(sessionId) === entry.runnerId) return;
+				yield* retireReplacedPrompts(entry.runnerId, { sessionId }).pipe(
+					Effect.mapError((cause) =>
+						runnerFailure("retire replaced runner prompts", cause),
+					),
+				);
+				observedProcesses.set(sessionId, entry.runnerId);
+			});
 		const children = new Map<string, RunnerChild>();
 		const candidates = new Set<RunnerChild>();
+		// Liveness only: evicted children whose OS process may not have exited
+		// yet. Pruned lazily by pid, never consulted for ownership.
+		const exiting = new Set<RunnerChild>();
 		const sinks = new Map<
 			string,
 			{
@@ -441,6 +461,8 @@ export const makeProcessSessionRunner = (
 			// A late close from an old child must not remove its replacement.
 			if (children.get(sessionId) !== entry) return;
 			children.delete(sessionId);
+			// Usability ends before the OS process does; keep it visible to liveness.
+			if ((entry.pid ?? entry.child?.pid) !== undefined) exiting.add(entry);
 			for (const [sinkId, binding] of sinks)
 				if (binding.sessionId === sessionId) sinks.delete(sinkId);
 		};
@@ -657,6 +679,15 @@ export const makeProcessSessionRunner = (
 									),
 								);
 							});
+						// Warming candidates have not replaced the active process yet.
+						if (!entry.candidate)
+							yield* lock.withPermits(1)(
+								Effect.gen(function* () {
+									yield* ensureAttached();
+									yield* observeProcess(sessionId, entry);
+									yield* ensureAttached();
+								}),
+							);
 						yield* ensureAttached();
 						entry.pendingSendCommands = hello.sendCommands
 							? new Map(
@@ -810,27 +841,34 @@ export const makeProcessSessionRunner = (
 								import.meta.url,
 							),
 						);
-						const child = spawn(
-							process.execPath,
-							[
-								...process.execArgv,
-								runnerEntry,
-								entry.socketPath,
-								sessionId,
-								entry.runnerId,
-								entry.candidate ? "upgrade" : "active",
-								driver.driverKind,
-							],
-							{
-								cwd: deps.workspaceRoot,
-								env: { ...process.env, CONDUIT_CONFIG_DIR: configDir },
-								detached: true,
-								stdio: ["ignore", "inherit", "inherit", "ipc"],
-							},
-						);
-						entry.child = child;
-						entry.pid = child.pid;
-						return child;
+						// Runners outlive the server, so inherited stdio would keep writing
+						// into whichever terminal first started them.
+						const log = openSync(join(configDir, "runners.log"), "a", 0o600);
+						try {
+							const child = spawn(
+								process.execPath,
+								[
+									...process.execArgv,
+									runnerEntry,
+									entry.socketPath,
+									sessionId,
+									entry.runnerId,
+									entry.candidate ? "upgrade" : "active",
+									driver.driverKind,
+								],
+								{
+									cwd: deps.workspaceRoot,
+									env: { ...process.env, CONDUIT_CONFIG_DIR: configDir },
+									detached: true,
+									stdio: ["ignore", log, log, "ipc"],
+								},
+							);
+							entry.child = child;
+							entry.pid = child.pid;
+							return child;
+						} finally {
+							closeSync(log);
+						}
 					},
 					catch: (cause) => runnerFailure("spawn runner", cause),
 				});
@@ -902,10 +940,11 @@ export const makeProcessSessionRunner = (
 				),
 			);
 
-		const createEntry = (): Effect.Effect<RunnerChild> =>
+		const createEntry = (sessionId: string): Effect.Effect<RunnerChild> =>
 			Effect.gen(function* () {
 				const runnerId = randomBytes(6).toString("hex");
 				return {
+					sessionId,
 					verified: false,
 					runnerId,
 					ready: yield* Deferred.make<RunnerSocket, SessionFailure>(),
@@ -940,8 +979,8 @@ export const makeProcessSessionRunner = (
 		const upgrade = makeRunnerUpgrade<RunnerChild>({
 			eligible,
 			runFork,
-			create: (_sessionId, old) =>
-				createEntry().pipe(
+			create: (sessionId, old) =>
+				createEntry(sessionId).pipe(
 					Effect.tap((entry) =>
 						Effect.sync(() => {
 							entry.candidate = true;
@@ -1025,7 +1064,7 @@ export const makeProcessSessionRunner = (
 					);
 					if (!retired) return false;
 					return yield* lock.withPermits(1)(
-						Effect.sync(() => {
+						Effect.gen(function* () {
 							if (
 								activity !== old.upgrade.activity ||
 								!eligible(sessionId, old) ||
@@ -1035,6 +1074,7 @@ export const makeProcessSessionRunner = (
 								connection.write({ type: "upgrade-cancel" });
 								return false;
 							}
+							yield* observeProcess(sessionId, replacement);
 							replacement.candidate = false;
 							replacement.connection?.write({ type: "upgrade-activate" });
 							children.set(sessionId, replacement);
@@ -1389,6 +1429,23 @@ export const makeProcessSessionRunner = (
 					);
 				}
 			});
+			hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
+				return Effect.sync(() => {
+					// Before hello only the spawned child's pid is known.
+					const alive = (entry: RunnerChild) => {
+						const pid = entry.pid ?? entry.child?.pid;
+						return pid !== undefined && runnerPidAlive(pid);
+					};
+					for (const entry of exiting) if (!alive(entry)) exiting.delete(entry);
+					const owns = (entry: RunnerChild | undefined) =>
+						entry?.sessionId === sessionId && alive(entry);
+					return (
+						owns(children.get(sessionId)) ||
+						[...candidates, ...exiting].some(owns)
+					);
+				});
+			}
+
 			getNativeSessionEffect(
 				sessionId: string,
 			): Effect.Effect<ProviderNativeSession | undefined> {
@@ -1455,6 +1512,7 @@ export const makeProcessSessionRunner = (
 				let admittedSessionId = "";
 				let ending: RunnerChild | undefined;
 				return Effect.gen(function* () {
+					const outputOwner = yield* currentRunnerOutput;
 					if (turn) turn.completed = yield* Deferred.make<void>();
 					if (command.type === "shutdown") {
 						yield* shutdown;
@@ -1482,6 +1540,14 @@ export const makeProcessSessionRunner = (
 										runnerFailure(command.type, "Runners are shutting down"),
 									);
 								const existing = children.get(sessionId);
+								if (
+									outputOwner &&
+									(command.type === "answer-permission" ||
+										command.type === "answer-question" ||
+										command.type === "interaction-failed") &&
+									existing?.runnerId !== outputOwner.runnerId
+								)
+									return { entry: undefined, draining: false };
 								if (
 									existing &&
 									(command.type === "send-turn" || command.type === "pre-warm")
@@ -1625,7 +1691,7 @@ export const makeProcessSessionRunner = (
 										admission: existing?.endingReleased,
 									};
 								}
-								const created: RunnerChild = yield* createEntry();
+								const created: RunnerChild = yield* createEntry(sessionId);
 								created.commandsInFlight++;
 								admitted = created;
 								children.set(sessionId, created);

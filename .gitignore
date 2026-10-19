@@ -22,6 +22,8 @@ media/_test_output/
 # The store compatibility pin's fixture (conduit-test-16c8.3).
 !/test/fixtures/event-store-compat/events.db
 .beads-credential-key
+.beads/proxieddb/
+*.gate.lock*
 
 # bv (beads viewer) local config and caches
 .bv/

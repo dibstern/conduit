@@ -2,7 +2,11 @@ import { expect, type Page, type WebSocketRoute } from "@playwright/test";
 import { Cause, Effect, Exit, Schema, Scope, Stream } from "effect";
 import { RpcSchema } from "effect/rpc";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
-import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
+import {
+	DEFAULT_WORKTREE_CLEANUP,
+	type ProjectWorktreeCleanup,
+	type WorktreeCleanup,
+} from "../../../src/lib/contracts/worktree.js";
 import {
 	type Alert,
 	GetAgentsResponseSchema,
@@ -101,6 +105,8 @@ export interface RecordedRpcRequest {
 export class RpcMockControl {
 	constructor(private readonly page: Page) {}
 	projectSlug = "myapp";
+	worktreeCleanupGlobal: WorktreeCleanup = DEFAULT_WORKTREE_CLEANUP;
+	readonly worktreeCleanupProjects = new Map<string, ProjectWorktreeCleanup>();
 	onConnect?: () => void;
 	onSendMessage?: (payload: Record<string, unknown>) => void;
 	private readonly sockets = new Set<WebSocketRoute>();
@@ -925,7 +931,11 @@ export async function mockWsRpc(
 		}),
 		ResolveSession: () => ({ projectSlug: control.projectSlug }),
 		ViewSession: () => ({ ok: true }),
-		InspectSessionWorktrees: () => ({ worktrees: [], removeWorktrees: false }),
+		InspectSessionWorktrees: () => ({
+			worktrees: [],
+			removeWorktrees: false,
+			onDelete: "ask",
+		}),
 		...control.catalogStubs(),
 		ResolveSessionMode: () => ({ mode: "local", source: "global" }),
 		GetCursorAuth: () => ({
@@ -935,10 +945,30 @@ export async function mockWsRpc(
 			login: { state: "idle" },
 		}),
 		GetStatus: () => MOCK_SERVER_STATUS,
-		GetWorktreeCleanupSetting: () => ({
-			worktreeCleanup: DEFAULT_WORKTREE_CLEANUP,
+		GetWorktreeCleanupSetting: ({ projectSlug }) => ({
+			global: control.worktreeCleanupGlobal,
+			...(projectSlug !== undefined && {
+				project: control.worktreeCleanupProjects.get(projectSlug) ?? null,
+			}),
 		}),
-		SetWorktreeCleanupSetting: ({ worktreeCleanup }) => ({ worktreeCleanup }),
+		SetWorktreeCleanupSetting: (payload) => {
+			if (payload.scope === "global") {
+				control.worktreeCleanupGlobal = payload.rules;
+				return { global: control.worktreeCleanupGlobal };
+			}
+			if (payload.override === null)
+				control.worktreeCleanupProjects.delete(payload.projectSlug);
+			else
+				control.worktreeCleanupProjects.set(
+					payload.projectSlug,
+					payload.override,
+				);
+			return {
+				global: control.worktreeCleanupGlobal,
+				project:
+					control.worktreeCleanupProjects.get(payload.projectSlug) ?? null,
+			};
+		},
 		GetUsageLimitsSetting: () => ({
 			usageLimits: {
 				autoResume: false,

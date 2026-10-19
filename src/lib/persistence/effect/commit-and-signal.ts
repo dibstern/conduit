@@ -1,4 +1,4 @@
-import { Data, Effect, Option, Semaphore } from "effect";
+import { Data, Effect, Option, Ref, Semaphore } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
@@ -11,6 +11,7 @@ import { EventStoreEffectTag } from "./event-store-effect.js";
 import type { ProjectionRunnerError } from "./projection-runner-effect.js";
 import { ProjectionRunnerEffectTag } from "./projection-runner-effect.js";
 import { mergeTouches } from "./projectors-effect.js";
+import { SessionRollupProjects } from "./session-rollup-projects.js";
 import { SessionStateProjectionNotifierTag } from "./session-state-projection-notifier.js";
 import { refreshSidebar } from "./sidebar-projection.js";
 
@@ -136,6 +137,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 			: withPermit(effect);
 	const eventStore = yield* EventStoreEffectTag;
 	const projectionRunner = yield* ProjectionRunnerEffectTag;
+	const projects = yield* SessionRollupProjects;
 	const sessionEventBus = yield* Effect.serviceOption(SessionEventBusTag);
 
 	const write = <A, E, R>(
@@ -243,6 +245,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 								yield* refreshSidebar(
 									stampedSessions,
 									Math.max(0, ...advances.map((advance) => advance.version)),
+									projects ? yield* Ref.get(projects) : undefined,
 								).pipe(Effect.provideService(SqlClient.SqlClient, sql));
 								return result;
 							}),

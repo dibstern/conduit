@@ -25,6 +25,7 @@ import {
 } from "../../../provider/opencode/opencode-runtime-event-translator.js";
 import type { TurnSettings } from "../../../provider/turn-settings.js";
 import type { SSEEvent } from "../../../relay/opencode-events.js";
+import type { OpenCodeEventContext } from "../../../relay/sse-stream.js";
 import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
 import {
 	canSeedSession,
@@ -42,7 +43,12 @@ export interface OpenCodeRuntimeIngressLog {
 }
 
 export type OpenCodeRuntimeIngressResult =
-	| { ok: true; eventsWritten: number; sessionSeeded: boolean }
+	| {
+			ok: true;
+			eventsWritten: number;
+			sessionSeeded: boolean;
+			prompt?: { readonly id: string; readonly status: string };
+	  }
 	| {
 			ok: false;
 			reason: "no-session" | "not-translatable" | "error";
@@ -61,7 +67,7 @@ export interface EffectOpenCodeRuntimeIngressPort {
 		event: SSEEvent,
 		sessionId: string | undefined,
 		providerInstanceId: string,
-		directory?: string,
+		context?: OpenCodeEventContext,
 	): Effect.Effect<OpenCodeRuntimeIngressResult>;
 	onReconnect(providerInstanceId?: string): Effect.Effect<void, SqlError>;
 	onInstanceStopped(
@@ -668,7 +674,7 @@ export class EffectOpenCodeRuntimeIngress
 		event: SSEEvent,
 		sessionId: string | undefined,
 		providerInstanceId: string,
-		directory?: string,
+		context: OpenCodeEventContext = {},
 	): Effect.Effect<OpenCodeRuntimeIngressResult> {
 		return Effect.gen({ self: this }, function* () {
 			this.stats.eventsReceived++;
@@ -686,13 +692,18 @@ export class EffectOpenCodeRuntimeIngress
 					reason: "no-session",
 				} satisfies OpenCodeRuntimeIngressResult;
 			}
-			this.rememberSessionInstance(sessionId, providerInstanceId, directory);
+			this.rememberSessionInstance(
+				sessionId,
+				providerInstanceId,
+				context.directory,
+			);
 			const result = yield* this.sessionGate(sessionId).withPermits(1)(
 				Effect.gen({ self: this }, function* () {
 					const ingest = this.ingestSessionEvent(
 						event,
 						sessionId,
 						providerInstanceId,
+						context.providerProcessId,
 					);
 					if (
 						this.seenSessions.has(sessionId) ||
@@ -726,6 +737,7 @@ export class EffectOpenCodeRuntimeIngress
 		event: SSEEvent,
 		sessionId: string,
 		providerInstanceId: string,
+		providerProcessId?: string,
 	): Effect.Effect<OpenCodeRuntimeIngressResult, unknown> {
 		return Effect.gen({ self: this }, function* () {
 			if (yield* this.withSql(isSessionDeleted(sessionId))) {
@@ -856,7 +868,17 @@ export class EffectOpenCodeRuntimeIngress
 							),
 						]
 					: []),
-				...translated,
+				...translated.map((runtimeEvent) =>
+					providerProcessId
+						? {
+								...runtimeEvent,
+								providerRefs: {
+									...runtimeEvent.providerRefs,
+									providerProcessId,
+								},
+							}
+						: runtimeEvent,
+				),
 			];
 			// Persist and signal committed events to SessionEventBus, but never
 			// publish to the relay. The legacy SSE translator (sse-wiring.ts) is
@@ -889,6 +911,26 @@ export class EffectOpenCodeRuntimeIngress
 					}
 				}),
 			});
+			const promptProperties: Record<string, unknown> = event.properties;
+			const providerRequestId =
+				typeof promptProperties["requestID"] === "string"
+					? promptProperties["requestID"]
+					: promptProperties["id"];
+			const prompt =
+				providerProcessId &&
+				typeof providerRequestId === "string" &&
+				(event.type.startsWith("permission.") ||
+					event.type.startsWith("question."))
+					? (yield* this.withSql(
+							this.sql<{ id: string; status: string }>`
+								SELECT id, status FROM pending_approvals
+								WHERE session_id = ${sessionId}
+									AND ((provider_process_id = ${providerProcessId}
+										AND provider_request_id = ${providerRequestId})
+										OR (id = ${providerRequestId} AND provider_process_id IS NULL))
+								ORDER BY provider_process_id IS NOT NULL DESC LIMIT 1`,
+						))[0]
+					: undefined;
 
 			yield* this.refreshSyncedSession(sessionId, event);
 			if (
@@ -908,6 +950,7 @@ export class EffectOpenCodeRuntimeIngress
 
 			return {
 				ok: true,
+				...(prompt ? { prompt } : {}),
 				eventsWritten: written,
 				sessionSeeded,
 			} satisfies OpenCodeRuntimeIngressResult;
@@ -950,8 +993,9 @@ export class EffectOpenCodeRuntimeIngress
 					yield* this.sessionGate(sessionId).withPermits(1)(
 						Effect.gen({ self: this }, function* () {
 							if (this.stopped || !isCurrent()) return;
-							// An in-flight event may have changed the binding or added an ask
-							// while this stop waited for the session's ingestion gate.
+							// Recheck the binding after waiting for the ingestion gate. A
+							// confirmed stopped process cannot keep processing, even if its
+							// prompts still await expiration when a replacement connects.
 							const rows = yield* sql<{
 								provider_sid: string | null;
 								status: string;
@@ -962,11 +1006,7 @@ export class EffectOpenCodeRuntimeIngress
 									AND EXISTS (
 										SELECT 1 FROM session_providers sp
 											WHERE sp.session_id = s.id AND sp.provider = ${boundInstanceId}
-											AND sp.status = 'active')
-									AND NOT EXISTS (
-										SELECT 1 FROM pending_approvals pa
-										WHERE pa.session_id = s.id AND pa.status = 'pending'
-											AND pa.type IN ('permission', 'question'))`;
+											AND sp.status = 'active')`;
 							const row = rows[0];
 							if (
 								!row ||

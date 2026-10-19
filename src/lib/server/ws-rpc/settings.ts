@@ -1,4 +1,4 @@
-import { Effect, Ref } from "effect";
+import { Effect, Option, Ref } from "effect";
 import {
 	ClaudeSettingsResolveError,
 	ClaudeSettingsTrustBoundaryError,
@@ -19,7 +19,15 @@ import {
 	commitDaemonRuntimeConfig,
 	DaemonConfigRefTag,
 } from "../../domain/daemon/Services/daemon-config-ref.js";
-import { publishInstanceStatusChanged } from "../../domain/daemon/Services/daemon-pubsub.js";
+import {
+	DaemonEventBusTag,
+	publishInstanceStatusChanged,
+} from "../../domain/daemon/Services/daemon-pubsub.js";
+import {
+	getProject,
+	ProjectRegistryTag,
+	updateProject,
+} from "../../domain/daemon/Services/project-registry-service.js";
 import { Usage } from "../../domain/daemon/Services/usage.js";
 import {
 	cleanUpWorktreesNow,
@@ -40,24 +48,56 @@ import { saveRelaySettings } from "../../relay/relay-settings.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 export const settingsHandlers = {
-	GetWorktreeCleanupSetting: (_request) =>
+	GetWorktreeCleanupSetting: ({ projectSlug }) =>
 		Effect.gen(function* () {
 			const config = yield* Ref.get(yield* DaemonConfigRefTag);
+			if (projectSlug === undefined)
+				return { global: config.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP };
+			const registry = yield* Effect.serviceOption(ProjectRegistryTag);
+			if (Option.isNone(registry))
+				return yield* new WsRpcError({
+					message: "Project worktree cleanup settings require the daemon",
+				});
+			const project = yield* getProject(projectSlug).pipe(
+				Effect.provideService(ProjectRegistryTag, registry.value),
+			);
 			return {
-				worktreeCleanup: config.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP,
+				global: config.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP,
+				project: project.worktreeCleanup ?? null,
 			};
-		}),
-	SetWorktreeCleanupSetting: ({ worktreeCleanup }) =>
+		}).pipe(Effect.catch(mapRpcFailure("GetWorktreeCleanupSetting"))),
+	SetWorktreeCleanupSetting: (request) =>
 		Effect.gen(function* () {
-			yield* commitDaemonRuntimeConfig((config) => ({
-				...config,
-				worktreeCleanup,
-			}));
+			if (request.scope === "global") {
+				yield* commitDaemonRuntimeConfig((config) => ({
+					...config,
+					worktreeCleanup: request.rules,
+				}));
+			} else {
+				const registry = yield* Effect.serviceOption(ProjectRegistryTag);
+				const bus = yield* Effect.serviceOption(DaemonEventBusTag);
+				if (Option.isNone(registry) || Option.isNone(bus))
+					return yield* new WsRpcError({
+						message: "Project worktree cleanup settings require the daemon",
+					});
+				yield* updateProject(request.projectSlug, {
+					worktreeCleanup: request.override ?? undefined,
+				}).pipe(
+					Effect.provideService(ProjectRegistryTag, registry.value),
+					Effect.provideService(DaemonEventBusTag, bus.value),
+				);
+			}
 			const persistence = yield* ConfigPersistenceTag;
 			yield* persistence.requestSave;
 			yield* persistence.flush;
-			yield* requestWorktreeCleanup();
-			return { worktreeCleanup };
+			yield* requestWorktreeCleanup(
+				request.scope === "project" ? request.projectSlug : undefined,
+			);
+			const config = yield* Ref.get(yield* DaemonConfigRefTag);
+			return {
+				global: config.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP,
+				...(request.scope === "project" ? { project: request.override } : {}),
+			};
 		}).pipe(Effect.catch(mapRpcFailure("SetWorktreeCleanupSetting"))),
 	CleanUpWorktreesNow: ({ projectSlug }) => cleanUpWorktreesNow(projectSlug),
 	GetAutoSettleSetting: (_request) =>

@@ -252,7 +252,10 @@ const server = createServer(async (request, response) => {
 		});
 		return;
 	}
-	if (request.url?.split("?")[0] === "/session") {
+	if (
+		path === "/session" ||
+		(path === "/api/session" && request.method === "POST")
+	) {
 		appendFileSync(
 			join(configDir, "fake-opencode-session-requests.jsonl"),
 			`${JSON.stringify({ authenticated: true, directory })}\n`,
@@ -260,7 +263,7 @@ const server = createServer(async (request, response) => {
 		if (request.method === "POST") {
 			const input = JSON.parse(body || "{}");
 			const session = {
-				id: `ses_${randomUUID()}`,
+				id: input.id ?? `ses_${randomUUID()}`,
 				slug: "fake-session",
 				version: "1.18.34",
 				projectID: "global",

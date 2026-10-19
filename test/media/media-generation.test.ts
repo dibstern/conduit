@@ -6,13 +6,13 @@ import { afterAll, describe, expect, it } from "vitest";
 
 /** The scene runner needs two different ffmpeg binaries, and missing either
  *  one fails the same way. `ffmpeg` on PATH converts the WebM to a GIF; the
- *  copy Playwright downloads for itself backs recordVideo, and only a full
- *  `playwright install` fetches it — `playwright install chromium` does not.
+ *  copy Playwright downloads for itself backs recordVideo. Fetch it with
+ *  `playwright install ffmpeg`; `playwright install chromium` does not.
  *  Checking just the first one is how this test came to fail on a machine
  *  that had ffmpeg installed, which reads as a product failure and is not.
  *
  *  Both are checked by running them rather than by looking for the file:
- *  Playwright's published macOS build is SIGKILLed on macOS 26 for failing
+ *  Playwright's published macOS build can be SIGKILLed on macOS 26 for failing
  *  code-signature validation, so the copy can be present and still unusable
  *  (conduit-test-tj4q). */
 function hasFfmpeg(): boolean {

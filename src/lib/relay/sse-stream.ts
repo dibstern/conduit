@@ -33,9 +33,14 @@ export interface SSEStreamOptions {
 	log?: Logger;
 }
 
+export interface OpenCodeEventContext {
+	readonly directory?: string | undefined;
+	readonly providerProcessId?: string | undefined;
+}
+
 /** Callback signatures for each SSEStream broadcast event type. */
 export interface SSEStreamCallbacks {
-	event: (data: unknown, directory?: string) => void;
+	event: (data: unknown, context?: OpenCodeEventContext) => void;
 	connected: () => void;
 	disconnected: (error: Error | undefined) => void;
 	reconnecting: (info: { attempt: number; delay: number }) => void;

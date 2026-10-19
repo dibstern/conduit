@@ -156,7 +156,9 @@ export class RunnerProviderInstance implements ProviderInstance {
 	/** Sends handed to the runner and not yet finished, per session. */
 	private readonly sendsInFlight = new Map<string, number>();
 	private detachingInteractions = false;
-	private recoveredSink: ((sessionId: string) => EventSink) | undefined;
+	private recoveredSink:
+		| ((sessionId: string, sinkId: string) => EventSink)
+		| undefined;
 	private readonly recoveredSinkIds = new Set<string>();
 	private readonly recoveredRequests = new Map<
 		string,
@@ -172,7 +174,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		// every running command is unclaimed. Runner processes may outlive it.
 		let claimed = new Set<string>();
 		if (this.runner.recoverEffect) {
-			this.recoveredSink = (sessionId) =>
+			this.recoveredSink = (sessionId, sinkId) =>
 				makeRecoveredEventSink({
 					driverKind: this.providerId,
 					sessionId,
@@ -181,7 +183,9 @@ export class RunnerProviderInstance implements ProviderInstance {
 					pending,
 					timeoutHooks: makeProcessingTimeoutHooks(timeoutRuntime, sessionId),
 					onRegistered: (id) => {
-						const ready = this.recoveredRequests.get(id);
+						const ready = this.recoveredRequests.get(
+							JSON.stringify([sinkId, id]),
+						);
 						return ready ? Deferred.succeed(ready, undefined) : Effect.void;
 					},
 				});
@@ -300,6 +304,10 @@ export class RunnerProviderInstance implements ProviderInstance {
 		options?: { readonly refresh?: boolean },
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
 		return this.driver.discoverEffect(workspaceRoot, account, options);
+	}
+
+	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
+		return this.runner.hasLiveProcessEffect(sessionId);
 	}
 
 	getNativeSessionEffect(
@@ -608,7 +616,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 			}
 			let sink = this.sinks.get(output.sinkId);
 			if (!sink && recoveredSessionId && this.recoveredSink) {
-				sink = this.recoveredSink(recoveredSessionId);
+				sink = this.recoveredSink(recoveredSessionId, output.sinkId);
 				this.sinks.set(output.sinkId, sink);
 				this.recoveredSinkIds.add(output.sinkId);
 				this.reportSinkForTesting(
@@ -627,11 +635,14 @@ export class RunnerProviderInstance implements ProviderInstance {
 						.pipe(Effect.mapError((cause) => sessionFailure("push", cause)));
 				case "permission-request":
 				case "question-request": {
+					const requestKey = JSON.stringify([
+						output.sinkId,
+						output.request.requestId,
+					]);
 					const registered = this.recoveredSinkIds.has(output.sinkId)
 						? yield* Deferred.make<void>()
 						: undefined;
-					if (registered)
-						this.recoveredRequests.set(output.request.requestId, registered);
+					if (registered) this.recoveredRequests.set(requestKey, registered);
 					const request = Effect.suspend(() =>
 						output.type === "permission-request"
 							? sink.requestPermission(output.request).pipe(
@@ -661,6 +672,10 @@ export class RunnerProviderInstance implements ProviderInstance {
 						request.pipe(
 							Effect.onExit((exit) =>
 								Effect.gen({ self: this }, function* () {
+									// Failed asks never register a waiter. Release recovery's
+									// readiness barrier before reporting their cancellation.
+									if (registered)
+										yield* Deferred.succeed(registered, undefined);
 									if (
 										Exit.isFailure(exit) &&
 										!Failure.isInterruptedOnly(exit.cause)
@@ -688,7 +703,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 					);
 					if (registered) {
 						yield* Deferred.await(registered);
-						this.recoveredRequests.delete(output.request.requestId);
+						this.recoveredRequests.delete(requestKey);
 					}
 					return;
 				}

@@ -486,7 +486,19 @@ export async function startProjectRelay(inputs: StartupInputs) {
 					// The sidebar and open family feeds follow the stamped row.
 					announceBackgroundWork: (changedSessionId: string) => {
 						runFork(
-							announceBackgroundWork(changedSessionId).pipe(
+							Effect.gen(function* () {
+								yield* announceBackgroundWork(changedSessionId);
+								if (
+									config.requestWorktreeCleanup &&
+									services.activity.background.backgroundOf(
+										changedSessionId,
+									) === undefined &&
+									(yield* sql<{ settled_at: number | null }>`
+										SELECT settled_at FROM sessions WHERE id = ${changedSessionId}
+									`)[0]?.settled_at != null
+								)
+									yield* config.requestWorktreeCleanup();
+							}).pipe(
 								Effect.catchCause((cause) =>
 									Effect.sync(() =>
 										log.warn(

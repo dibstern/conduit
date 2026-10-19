@@ -35,6 +35,8 @@ describe("Schema Migration", () => {
 					[61, "sessions_lineage"],
 					[62, "legacy_forks"],
 					[63, "sessions_archived"],
+					[64, "prompt_provider_reference"],
+					[65, "tool_result_event_refs"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -311,6 +313,11 @@ describe("Schema Migration", () => {
 					name: "idx_turns_session_requested",
 					table: "turns",
 					unique: false,
+				},
+				{
+					name: "pending_approvals_provider_request",
+					table: "pending_approvals",
+					unique: true,
 				},
 			]);
 		}).pipe(Effect.provide(migratedStore, { local: true })),

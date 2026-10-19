@@ -81,6 +81,9 @@ export interface PendingApprovalRow {
 
 export interface PendingClaudeQuestionToolRow {
 	id: string;
+	prompt_id?: string | null;
+	provider_process_id?: string | null;
+	provider_request_id?: string | null;
 	call_id: string | null;
 	message_id: string;
 	input: string | null;
@@ -135,7 +138,7 @@ export interface MessagePartRow {
 	updated_at: number;
 	version: PartVersion;
 	rest_payload?: string | null;
-	/** Set when a previewing read cut `result`: the whole output's UTF-8 size. */
+	/** Set when stored or read as a preview: the whole output's UTF-8 size. */
 	result_bytes?: number | null;
 }
 

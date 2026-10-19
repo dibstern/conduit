@@ -3,13 +3,7 @@
 // - A provider switch during workspace resolution aborts unrelated provider events.
 // - A refused move leaves its runner receipt uncommitted and is replayed.
 // - A refused move changes the workspace or loses its warning.
-import {
-	mkdirSync,
-	mkdtempSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import {
 	createServer,
 	type IncomingMessage,
@@ -242,19 +236,6 @@ async function eventually<T>(
 }
 
 describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
-	it("does not construct the legacy OpenCodeRuntimeIngress fallback", () => {
-		const source = [
-			"src/lib/relay/project-relay-layers.ts",
-			"src/lib/relay/project-relay-startup.ts",
-		]
-			.map((path) => readFileSync(path, "utf8"))
-			.join("\n");
-
-		expect(source).not.toContain("new OpenCodeRuntimeIngress");
-		expect(source).toContain("makeEffectOpenCodeRuntimeIngress");
-		expect(source).toContain("ProviderRuntimeIngestionLive");
-	});
-
 	it("EffectOpenCodeRuntimeIngress can process SSE events with Effect persistence", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-effect-runtime-ingress-"));
 		const persistenceLayer = makePersistenceEffectLayer(

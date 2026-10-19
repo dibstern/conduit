@@ -1,30 +1,26 @@
 import { Effect, Schema } from "effect";
 
 export const WorktreeCleanupSchema = Schema.Struct({
-	onSettle: Schema.Literals(["off", "merged", "any"]).pipe(
-		Schema.withDecodingDefaultType(Effect.sync(() => "merged" as const)),
-		Schema.withConstructorDefault(Effect.sync(() => "merged" as const)),
+	onSettle: Schema.Literals(["keep", "nothing-missing"]).pipe(
+		Schema.withDecodingDefaultType(
+			Effect.sync(() => "nothing-missing" as const),
+		),
+		Schema.withConstructorDefault(
+			Effect.sync(() => "nothing-missing" as const),
+		),
 	),
 	onDelete: Schema.Boolean.pipe(
 		Schema.withDecodingDefaultType(Effect.sync(() => false)),
 		Schema.withConstructorDefault(Effect.sync(() => false)),
 	),
-	afterInactiveDays: Schema.NullOr(
+	settledAfterDays: Schema.NullOr(
 		Schema.Number.pipe(
 			Schema.check(Schema.isInt()),
-			Schema.check(Schema.isBetween({ minimum: 1, maximum: 3650 })),
+			Schema.check(Schema.isBetween({ minimum: 0, maximum: 3650 })),
 		),
 	).pipe(
 		Schema.withDecodingDefaultType(Effect.sync(() => null)),
 		Schema.withConstructorDefault(Effect.sync(() => null)),
-	),
-	whenMerged: Schema.Boolean.pipe(
-		Schema.withDecodingDefaultType(Effect.sync(() => false)),
-		Schema.withConstructorDefault(Effect.sync(() => false)),
-	),
-	noCommitsBeyondDefault: Schema.Boolean.pipe(
-		Schema.withDecodingDefaultType(Effect.sync(() => false)),
-		Schema.withConstructorDefault(Effect.sync(() => false)),
 	),
 	keepWhen: Schema.Literals([
 		"any-local-files",
@@ -41,12 +37,21 @@ export const WorktreeCleanupSchema = Schema.Struct({
 });
 export type WorktreeCleanup = typeof WorktreeCleanupSchema.Type;
 
+export const ProjectWorktreeCleanupSchema = Schema.Union([
+	Schema.Literal("off"),
+	WorktreeCleanupSchema,
+]);
+export type ProjectWorktreeCleanup = typeof ProjectWorktreeCleanupSchema.Type;
+
+export const resolveWorktreeCleanup = (
+	globalRules: WorktreeCleanup,
+	override: ProjectWorktreeCleanup | undefined,
+): WorktreeCleanup | "off" => override ?? globalRules;
+
 export const DEFAULT_WORKTREE_CLEANUP: WorktreeCleanup = {
-	onSettle: "merged",
+	onSettle: "nothing-missing",
 	onDelete: false,
-	afterInactiveDays: null,
-	whenMerged: false,
-	noCommitsBeyondDefault: false,
+	settledAfterDays: null,
 	keepWhen: "uncommitted-changes",
 };
 

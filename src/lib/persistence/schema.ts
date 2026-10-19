@@ -92,6 +92,10 @@ export const DAEMON_STORE_IMPORTS_MIGRATION = "0059_daemon_store_imports.sql";
 export const SESSIONS_LINEAGE_MIGRATION = "0060_sessions_lineage.sql";
 export const LEGACY_FORKS_MIGRATION = "0061_legacy_forks.sql";
 export const SESSIONS_ARCHIVED_MIGRATION = "0062_sessions_archived.sql";
+export const PROMPT_PROVIDER_REFERENCE_MIGRATION =
+	"0063_prompt_provider_reference.sql";
+export const TOOL_RESULT_EVENT_REFS_MIGRATION =
+	"0064_tool_result_event_refs.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

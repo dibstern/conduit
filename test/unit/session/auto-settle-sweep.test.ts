@@ -54,13 +54,14 @@ afterEach(() => vi.restoreAllMocks());
 describe("relay automatic settlement sweep", () => {
 	it.effect("waits for fresh git before settling recent merged work", () => {
 		const projectDir = "/auto-settle-git";
+		const now = Date.now();
 		const directories = new Map([
 			["merged", `${projectDir}/merged`],
 			["unmerged", `${projectDir}/unmerged`],
 		]);
 		const cached = new Map<string, SessionGit>([
 			[`${projectDir}/merged`, { merged: false }],
-			[`${projectDir}/unmerged`, { merged: true, mergedHead: "stale-head" }],
+			[`${projectDir}/unmerged`, { merged: true, mergedAt: now - 500 }],
 		]);
 		let release!: () => void;
 		const held = new Promise<void>((resolve) => {
@@ -76,21 +77,18 @@ describe("relay automatic settlement sweep", () => {
 				await held;
 				const git =
 					directory === directories.get("merged")
-						? { merged: true, mergedHead: "fresh-head" }
+						? { merged: true, mergedAt: now - 500 }
 						: { merged: false };
 				cached.set(directory, git);
 				return git;
 			});
-		const setSettled = vi.fn((_id: string, _head?: string) =>
-			Effect.succeed(true),
-		);
+		const setSettled = vi.fn((_id: string) => Effect.succeed(true));
 		return Effect.scoped(
 			Effect.gen(function* () {
-				const now = Date.now();
 				const sql = yield* SqlClient.SqlClient;
 				for (const [id, directory] of directories)
 					yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, workspace, last_message_at, created_at, updated_at)
-						VALUES (${id}, 'test-project', 'claude', ${id}, 'idle', ${JSON.stringify({ cause: "user", origin: "existing", worktrees: { [projectDir]: directory } })}, ${now}, ${now}, ${now})`;
+						VALUES (${id}, 'test-project', 'claude', ${id}, 'idle', ${JSON.stringify({ cause: "user", origin: "existing", worktrees: { [projectDir]: directory } })}, ${now}, ${now - 1_000}, ${now})`;
 				const settling = yield* Effect.forkChild(
 					settleIdleSessions(
 						{
@@ -109,7 +107,7 @@ describe("relay automatic settlement sweep", () => {
 				expect(setSettled).not.toHaveBeenCalled();
 				release();
 				expect(yield* Fiber.join(settling)).toBe(1);
-				expect(setSettled.mock.calls).toEqual([["merged", "fresh-head"]]);
+				expect(setSettled.mock.calls).toEqual([["merged"]]);
 				expect(refresh.mock.calls.map(([directory]) => directory)).toContain(
 					directories.get("unmerged"),
 				);

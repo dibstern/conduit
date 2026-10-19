@@ -19,10 +19,15 @@ export type OpenCodeInstanceEvent = {
 			readonly _tag: "event";
 			readonly payload: unknown;
 			readonly directory?: string;
+			readonly providerProcessId?: string;
 	  }
 	| { readonly _tag: "heartbeat" }
 	/** Successful transport connection, including reconnects with unchanged state. */
-	| { readonly _tag: "connected" }
+	| {
+			readonly _tag: "connected";
+			readonly providerProcessId?: string;
+			readonly managed?: boolean;
+	  }
 	/** Transport loss, including quiet managed instances with no lifecycle change. */
 	| { readonly _tag: "disconnected" }
 	| {

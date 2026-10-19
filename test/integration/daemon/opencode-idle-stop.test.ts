@@ -378,7 +378,8 @@ describe("Managed OpenCode stops when idle", () => {
 		const permission = await browser.waitFor(
 			(message) =>
 				message["type"] === "permission_pending" &&
-				message["requestId"] === "pa8-permission",
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+					"pa8-permission",
 		);
 		await fixture.setOpenCodeStatus(fixture.projectDir, sessionId, {
 			type: "idle",
@@ -399,7 +400,8 @@ describe("Managed OpenCode stops when idle", () => {
 		const question = await browser.waitFor(
 			(message) =>
 				message["type"] === "question_pending" &&
-				message["toolId"] === "pa8-question",
+				fixture.providerRequestIdForPrompt(String(message["toolId"])) ===
+					"pa8-question",
 		);
 		await browser.answerApproval(permission, "allow");
 		evidence["question"] = await keptRunning(fixture, browser);
@@ -513,14 +515,18 @@ describe("Managed OpenCode stops when idle", () => {
 		expect(spawned(fixture)).toHaveLength(1);
 		await vi.waitFor(() =>
 			expect(persistedRecovery(fixture, sessionId).pending).toEqual([
-				{ id: "rqbc-2-survivor-permission", type: "permission" },
+				{
+					id: fixture.promptIdForProviderRequest("rqbc-2-survivor-permission"),
+					type: "permission",
+				},
 			]),
 		);
 		const browser = await fixture.connect();
 		evidence["recoveredPermission"] = await browser.waitFor(
 			(message) =>
 				message["type"] === "permission_pending" &&
-				message["requestId"] === "rqbc-2-survivor-permission",
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+					"rqbc-2-survivor-permission",
 		);
 		evidence["readopted"] = await keptRunning(fixture, browser);
 		expect(livePids(fixture)).toEqual(survivor);
@@ -574,11 +580,13 @@ describe("Managed OpenCode stops when idle", () => {
 		await first.waitFor(
 			(message) =>
 				message["type"] === `${kind}_pending` &&
-				(message["requestId"] ?? message["toolId"]) === id,
+				fixture.providerRequestIdForPrompt(
+					String(message["requestId"] ?? message["toolId"]),
+				) === id,
 		);
 		expect(persistedRecovery(fixture, sessionId)).toEqual({
 			session: { status: "idle" },
-			pending: [{ id, type: kind }],
+			pending: [{ id: fixture.promptIdForProviderRequest(id), type: kind }],
 		});
 		await first.close();
 		await fixture.terminate();
@@ -599,7 +607,9 @@ describe("Managed OpenCode stops when idle", () => {
 		evidence["recoveredPrompt"] = await browser.waitFor(
 			(message) =>
 				message["type"] === `${kind}_pending` &&
-				(message["requestId"] ?? message["toolId"]) === id,
+				fixture.providerRequestIdForPrompt(
+					String(message["requestId"] ?? message["toolId"]),
+				) === id,
 		);
 	}, 120_000);
 });

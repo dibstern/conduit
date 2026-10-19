@@ -999,13 +999,25 @@ describe("daemon shared-store startup", () => {
 					expect(
 						await runtime.runPromise(countRunningProjectSessions(own)),
 					).toBe(1);
+					// Cleanup only considers settled sessions, while the auto-settle
+					// reader below needs these sessions unsettled.
+					const setSettledAt = (settledAt: number | null) =>
+						runtime.runPromise(
+							Effect.flatMap(
+								SqlClient.SqlClient,
+								(sql) =>
+									sql`UPDATE sessions SET settled_at = ${settledAt} WHERE project_id = ${own.slug}`,
+							),
+						);
+					await setSettledAt(2000);
 					const rows = await runtime.runPromise(
 						readColdWorktreeCleanupCandidates(
 							own,
-							{ ...DEFAULT_WORKTREE_CLEANUP, whenMerged: true },
+							DEFAULT_WORKTREE_CLEANUP,
 							1_000_000,
 						),
 					);
+					await setSettledAt(null);
 					expect(rows).toEqual([
 						{
 							session_id: `${own.slug}-session`,
@@ -1071,7 +1083,7 @@ describe("daemon shared-store startup", () => {
 					await runtime.runPromise(
 						readColdWorktreeCleanupCandidates(
 							own,
-							{ ...DEFAULT_WORKTREE_CLEANUP, whenMerged: true },
+							DEFAULT_WORKTREE_CLEANUP,
 							1_000_000,
 						),
 					);

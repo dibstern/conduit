@@ -12,6 +12,7 @@ import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import type { Logger } from "../../../logger.js";
+import { makeRetireReplacedProcessPrompts } from "../../../persistence/effect/retire-pending-prompts.js";
 import type {
 	SSEStreamCallbacks,
 	SSEStreamPort,
@@ -85,7 +86,12 @@ const makeChannel = (log: Logger | undefined) => {
 			switch (message._tag) {
 				case "event":
 					for (const callback of callbacks.event)
-						notify(() => callback(message.payload, message.directory));
+						notify(() =>
+							callback(message.payload, {
+								directory: message.directory,
+								providerProcessId: message.providerProcessId,
+							}),
+						);
 					break;
 				case "heartbeat":
 					for (const callback of callbacks.heartbeat) notify(callback);
@@ -115,6 +121,8 @@ export const SSEStreamLive: Layer.Layer<
 		const instances = yield* OpenCodeInstancesTag;
 		const config = yield* ConfigTag;
 		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		const retireReplacedPrompts = yield* makeRetireReplacedProcessPrompts;
+		const observedProcesses = new Map<string, string>();
 		const directories = new Set([
 			config.projectDir,
 			...(config.extraFolders ?? []),
@@ -131,6 +139,36 @@ export const SSEStreamLive: Layer.Layer<
 			| undefined;
 		const route = (message: OpenCodeInstanceEvent) =>
 			Effect.gen(function* () {
+				if (
+					message._tag === "connected" &&
+					message.managed &&
+					message.providerProcessId &&
+					observedProcesses.get(message.instanceId) !==
+						message.providerProcessId
+				) {
+					const retired = yield* retireReplacedPrompts(
+						message.providerProcessId,
+						{
+							providerInstanceIds:
+								message.instanceId ===
+								(config.openCodeInstanceId ?? MANAGED_OPENCODE_ACCOUNT_ID)
+									? [message.instanceId, MANAGED_OPENCODE_ACCOUNT_ID]
+									: [message.instanceId],
+						},
+					).pipe(
+						Effect.tapError((error) =>
+							Effect.sync(() =>
+								log?.error("Failed to retire replaced OpenCode prompts", error),
+							),
+						),
+						Effect.option,
+					);
+					if (retired._tag === "Some")
+						observedProcesses.set(
+							message.instanceId,
+							message.providerProcessId,
+						);
+				}
 				if (message.instanceId === selectedId) return main.dispatch(message);
 				let channel = others.get(message.instanceId);
 				if (!channel) {

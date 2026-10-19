@@ -75,6 +75,7 @@ import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js"
 import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	type broadcastProjectList,
+	getEffectiveWorktreeCleanup,
 	projectInfos as getEffectProjectInfos,
 	openCodeInstanceFor,
 	ProjectRegistryTag,
@@ -538,6 +539,15 @@ export const RelayFactoryLive = (
 													projectSlug: project.slug,
 												}).pipe(Effect.asVoid)
 											: Effect.void,
+									getWorktreeCleanup: () =>
+										getEffectiveWorktreeCleanup(project.slug).pipe(
+											Effect.provideService(
+												ProjectRegistryTag,
+												projectRegistry,
+											),
+											Effect.provideService(DaemonConfigRefTag, configRef),
+											Effect.orElseSucceed(() => "off" as const),
+										),
 									publishGlobalSetting: (tag) =>
 										PubSub.publish(
 											eventBus,
