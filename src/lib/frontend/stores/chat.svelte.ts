@@ -431,45 +431,13 @@ export function draftSendIn(sessionId: string | null): UserMessage | null {
 	return draftSend.sessionId === sessionId ? draftSend.message : null;
 }
 
-// Tracks the last input text received from another tab viewing the same session.
-
-export const inputSyncState = $state({
-	/** The synced input text. */
-	text: "",
-	/** Client ID that originated the sync (empty string if unknown). */
-	lastFrom: "",
-	/** Timestamp of the last sync update (monotonic, for change detection). */
-	lastUpdated: 0,
-	/** A reconnect's older server draft must not replace text being saved. */
-	reloadPending: false,
-});
-
-let persistInputDraftHook: (() => Promise<boolean>) | undefined;
-
-/** The mounted composer flushes its latest text through existing draft sync. */
-export function registerInputDraftPersistence(
-	persist: () => Promise<boolean>,
-): () => void {
-	persistInputDraftHook = persist;
-	return () => {
-		if (persistInputDraftHook === persist) persistInputDraftHook = undefined;
-	};
-}
-
-/** False defers reload to keep pending attachments in the mounted composer. */
-export async function persistInputDraft(): Promise<boolean> {
-	return (await persistInputDraftHook?.()) ?? true;
-}
-
-/** Apply a draft typed in another tab, or the one read at session switch. */
-export function handleInputSyncReceived(msg: {
-	text?: string | undefined;
-	from?: string | undefined;
-}): void {
-	inputSyncState.text = msg.text ?? "";
-	inputSyncState.lastFrom = msg.from ?? "";
-	inputSyncState.lastUpdated = Date.now();
-}
+// Compatibility exports for transport consumers and the build-reload contract.
+export {
+	handleInputSyncReceived,
+	inputSyncState,
+	persistInputDraft,
+	registerInputDraftPersistence,
+} from "./composer-draft/runner.svelte.js";
 
 /** Get the number of messages in current conversation. */
 export function getMessageCount(): number {

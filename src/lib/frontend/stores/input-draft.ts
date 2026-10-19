@@ -2,7 +2,7 @@
 // SubscribeInputDraft stream. The draft at session switch rides the
 // ViewSession response; this carries only what changes after.
 
-import { Effect, Fiber, Stream } from "effect";
+import { Effect, FiberHandle, Scope, Stream } from "effect";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { supervise } from "../transport/supervise.js";
@@ -17,8 +17,16 @@ export const applyInputDraft = (envelope: InputDraftEnvelope): void => {
 };
 
 let viewed: { project: string; sessionId: string | null } | null = null;
-let generation = 0;
-let fiber: Fiber.Fiber<void, never> | null = null;
+
+async function makeFollower() {
+	const runtime = await getRuntime();
+	const handle = await runTransportEffect(
+		FiberHandle.make<void, never>().pipe(Scope.provide(runtime.scope)),
+	);
+	return { runtime, handle };
+}
+
+let follower: ReturnType<typeof makeFollower> | undefined;
 
 /** Follow one session's draft; a `null` session stops. */
 export function viewInputDraft(
@@ -26,34 +34,38 @@ export function viewInputDraft(
 	sessionId: string | null,
 ): void {
 	if (viewed?.project === project && viewed.sessionId === sessionId) return;
-	viewed = { project, sessionId };
-	const currentGeneration = ++generation;
-	const old = fiber;
-	fiber = null;
-	void (old ? runTransportEffect(Fiber.interrupt(old)) : Promise.resolve())
-		.catch(() => undefined)
-		.then(async () => {
-			if (currentGeneration !== generation || !sessionId) return;
-			const runtime = await getRuntime();
-			if (currentGeneration !== generation) return;
-			const next = runtime.runFork(
-				Effect.flatMap(WsRpcClients, (clients) =>
-					Effect.flatMap(clients.forProject(project), ({ subscriptions }) =>
-						Stream.runForEach(
-							supervise(
-								Stream.suspend(() => subscriptions.inputDraft({ sessionId })),
-								() => undefined,
+	const selection = { project, sessionId };
+	viewed = selection;
+	if (!sessionId && !follower) return;
+	follower ??= makeFollower();
+	void follower.then(({ runtime, handle }) => {
+		if (viewed !== selection) return;
+		runtime.runFork(
+			Effect.suspend(() => {
+				if (viewed !== selection) return Effect.void;
+				if (!sessionId) return FiberHandle.clear(handle);
+				return Effect.asVoid(
+					FiberHandle.run(
+						handle,
+						Effect.flatMap(WsRpcClients, (clients) =>
+							Effect.flatMap(clients.forProject(project), ({ subscriptions }) =>
+								Stream.runForEach(
+									supervise(
+										Stream.suspend(() =>
+											subscriptions.inputDraft({ sessionId }),
+										),
+										() => undefined,
+									),
+									(envelope) =>
+										Effect.sync(() => {
+											if (viewed === selection) applyInputDraft(envelope);
+										}),
+								),
 							),
-							(envelope) =>
-								Effect.sync(() => {
-									if (currentGeneration === generation)
-										applyInputDraft(envelope);
-								}),
 						),
 					),
-				),
-			);
-			if (currentGeneration === generation) fiber = next;
-			else runtime.runFork(Fiber.interrupt(next));
-		});
+				);
+			}),
+		);
+	});
 }

@@ -331,7 +331,9 @@ for (const sameBuild of [true, false]) {
 		await page.locator("#new-session-btn:visible").click();
 		const input = page.locator("#input");
 		await input.fill("hello");
-		await input.press("Enter");
+		// Click, not Enter: Enter is a newline on mobile. Click also waits for
+		// Send to enable, which happens once the provider can take a turn.
+		await page.locator("#send").click();
 		await expect(page).toHaveURL(/\/s\/ses_/);
 		const draft = "Unsent draft on an existing session";
 		await input.fill(draft);
@@ -345,9 +347,23 @@ for (const sameBuild of [true, false]) {
 		await expect(input).toHaveValue(draft);
 		// Coming back to the session asks the restarted daemon for its draft again.
 		const sessionUrl = page.url();
-		await page.locator("#new-session-btn:visible").click();
+		const sessionId = new URL(sessionUrl).pathname.split("/").pop();
+		const newSession = page.locator("#new-session-btn:visible");
+		// On mobile the sidebar sits behind the Sessions button, and opening it
+		// adds a history entry, so return through the session row, not goBack.
+		const openSidebar = async () => {
+			if (!(await newSession.isVisible()))
+				await page.getByRole("button", { name: "Sessions" }).click();
+		};
+		await openSidebar();
+		await newSession.click();
 		await expect(page).toHaveURL(/\/new\b/);
-		await page.goBack();
+		await openSidebar();
+		await page
+			.locator(
+				`#session-list [data-session-id="${sessionId}"] .session-item-title`,
+			)
+			.click();
 		await expect(page).toHaveURL(sessionUrl);
 		await page.waitForTimeout(3_000);
 		await page.screenshot({

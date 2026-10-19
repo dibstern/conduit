@@ -39,7 +39,7 @@
 	import PastePreview from "../chat/PastePreview.svelte";
 	import PendingInputTray from "./PendingInputTray.svelte";
 	import { openSideThreads } from "../session/side-threads.svelte.js";
-	import { currentChat, draftSend, inputSyncState, isProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
+	import { currentChat, draftSend, isProcessing, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
 	import { send, stop, turn as readTurn } from "../../stores/turn.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { approvals } from "../../stores/composer-settings.svelte.js";
@@ -68,6 +68,7 @@
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { getCurrentRoute, getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { connectionState } from "../../transport/connection-status.svelte.js";
+	import { createComposerDraft } from "../../stores/composer-draft/runner.svelte.js";
 	import { fade } from "svelte/transition";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { getDriverTraits, instanceState } from "../../stores/instance.svelte.js";
@@ -113,7 +114,11 @@
 		composerMoreOpen = false;
 	});
 
-	let inputText = $state("");
+	const composerDraft = createComposerDraft({
+		sessionId: () => sessionState.currentId,
+		projectSlug: getDraftProject,
+		hasAttachments: () => pendingImages.length > 0,
+	});
 	let draftWorktree = $state<WorktreeInfo | null>(null);
 	let draftNewWorktree = $state(false);
 	let draftWorktreeBase = $state<string | null>(null);
@@ -143,7 +148,7 @@
 			.catch((error) => { if (current) toastFailure("Couldn't load default session mode")(error); });
 		return () => { current = false; };
 	});
-	const isGoalCommand = $derived(discoveryState.currentTraits?.supportsGoalState && inputText.startsWith("/goal"));
+	const isGoalCommand = $derived(discoveryState.currentTraits?.supportsGoalState && composerDraft.text.startsWith("/goal"));
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
 	let composerFocused = $state(false);
 	let pendingImages = $state<PendingImage[]>([]);
@@ -314,126 +319,13 @@
 			composerPresentation ? `Ask ${composerPresentation.label}…` : "Message…",
 	);
 
-	// Each session keeps its own unsent input text. Switching sessions saves the
-	// current draft and restores the target session's draft (or empty string).
-
-	const inputDrafts = new Map<string, string>();
-	// undefined until the first run, so a fresh load restores its draft too.
-	let previousSessionId: string | null | undefined ;
-
-	// The new-session draft has no server-side store, so it lives here to
-	// survive a reload: a half-typed first prompt must not vanish.
-	const NEW_SESSION_DRAFT_KEY = "conduit:new-session-draft";
-	function readNewSessionDraft(): string {
-		try {
-			return localStorage.getItem(NEW_SESSION_DRAFT_KEY) ?? "";
-		} catch {
-			return "";
-		}
-	}
-	function storeNewSessionDraft(text: string) {
-		try {
-			if (text) localStorage.setItem(NEW_SESSION_DRAFT_KEY, text);
-			else localStorage.removeItem(NEW_SESSION_DRAFT_KEY);
-		} catch {
-			// Storage can be unavailable (private mode); the draft just won't persist.
-		}
-	}
-	const reloadRestoredDrafts = new Set<string>();
-	// Extend the existing draft map across a reload, including drafts typed
-	// before a session exists. Session drafts also keep using the server RPC.
-	const reloadDraftKey = "conduit-reload-drafts";
-	try {
-		const saved = sessionStorage.getItem(reloadDraftKey);
-		if (saved) {
-			for (const [id, text] of JSON.parse(saved) as [string, string][]) {
-				inputDrafts.set(id, text);
-				reloadRestoredDrafts.add(id);
-			}
-			sessionStorage.removeItem(reloadDraftKey);
-		}
-	} catch {
-		// A restricted browser can still use the existing server draft sync.
-	}
-
-	$effect(() => {
-		const currentId = sessionState.currentId;
-		untrack(() => {
-			if (currentId !== previousSessionId) {
-				// Save draft for the session we're leaving
-				if (previousSessionId) {
-					inputDrafts.set(previousSessionId, inputText);
-				}
-				// Restore draft for the session we're entering
-				inputText = currentId
-					? (inputDrafts.get(currentId) ?? "")
-					: readNewSessionDraft();
-				previousSessionId = currentId;
-				lastLocalEditAt = reloadRestoredDrafts.delete(currentId ?? "") ? Date.now() : 0;
-				// Cancel any pending outgoing sync from the previous session
-				if (inputSyncTimer) {
-					clearTimeout(inputSyncTimer);
-					inputSyncTimer = null;
-				}
-			}
-		});
-	});
-
-	// Input sync (cross-tab)
-
-	/** Track which sync we last applied to avoid re-applying our own. */
-	let lastSyncApplied = 0;
-
-	/** When the local user last typed, so stale syncs can be told apart. */
-	let lastLocalEditAt = 0;
-
-	// A sync is already behind by our own 300ms debounce plus a round trip, so
-	// one that lands right after a keystroke describes text older than what is
-	// on screen. Applying it deletes what the user just typed.
-	const SYNC_GRACE_MS = 1_000;
-
-	/** Receive input sync from another tab viewing the same session. */
-	$effect(() => {
-		if (inputSyncState.lastUpdated <= lastSyncApplied) return;
-		lastSyncApplied = inputSyncState.lastUpdated;
-		if (inputSyncState.reloadPending) return;
-		if (Date.now() - lastLocalEditAt < SYNC_GRACE_MS) return;
-		inputText = inputSyncState.text;
-	});
-
 	// + opens a draft ready to type into.
 	$effect(() => {
 		const route = getCurrentRoute();
 		if (route.page === "chat" && route.draft) untrack(() => textareaEl?.focus());
 	});
 
-	/** Timer for debounced outgoing input sync. */
-	let inputSyncTimer: ReturnType<typeof setTimeout> | null = null;
-
-	$effect(() => registerInputDraftPersistence(async () => {
-		if (inputSyncTimer) {
-			clearTimeout(inputSyncTimer);
-			inputSyncTimer = null;
-		}
-		let savedText: string;
-		let savedSessionId: string | null;
-		do {
-			savedText = inputText;
-			savedSessionId = sessionState.currentId;
-			// Offline (e.g. a redial found another build): the reload draft below
-			// carries the text, and no RPC reaches a daemon that may not decode it.
-			if (connectionState.status === "connected") await syncInputDraft(savedText);
-		} while (inputText !== savedText || sessionState.currentId !== savedSessionId);
-		// Cancelling the debounce above dropped any pending new-session draft write.
-		if (!sessionState.currentId) storeNewSessionDraft(inputText);
-		// Images live only in this composer. Defer reload until sent or removed.
-		if (pendingImages.length > 0) return false;
-		inputDrafts.set(sessionState.currentId ?? "", inputText);
-		sessionStorage.setItem(reloadDraftKey, JSON.stringify([...inputDrafts]));
-		return true;
-	}));
-
-	const commandMatch = $derived(extractCommandQuery(inputText, cursorPos));
+	const commandMatch = $derived(extractCommandQuery(composerDraft.text, cursorPos));
 	const commandMenuVisible = $derived(commandMatch !== null);
 	const commandQuery = $derived(commandMatch?.query ?? "");
 	const conduitCommandNames = new Set<string>(
@@ -475,7 +367,7 @@
 		new Set(discoveryState.commands.filter((c) => c.builtin && !conduitCommandNames.has(c.name)).map((c) => c.name)),
 	);
 
-	const atQuery = $derived(extractAtQuery(inputText, cursorPos));
+	const atQuery = $derived(extractAtQuery(composerDraft.text, cursorPos));
 	const fileMenuVisible = $derived(
 		!commandMenuVisible && atQuery !== null,
 	);
@@ -527,9 +419,9 @@
 	// whole draft out a second time, which costs ~300ms per megabyte. Fall back to
 	// the textarea's own (unhighlighted) text, exactly as during IME composition.
 	const HIGHLIGHT_MAX_CHARS = 20_000;
-	const plainText = $derived(inputText.length > HIGHLIGHT_MAX_CHARS);
+	const plainText = $derived(composerDraft.text.length > HIGHLIGHT_MAX_CHARS);
 
-	const canSend = $derived(!readOnlySubagent && turnControl.ready && (inputText.trim().length > 0 || pendingImages.length > 0));
+	const canSend = $derived(!readOnlySubagent && turnControl.ready && (composerDraft.text.trim().length > 0 || pendingImages.length > 0));
 	const sendButtonLabel = $derived(
 		sendMode === "at-reset"
 			? `Send at ${sendAtTime}`
@@ -551,7 +443,7 @@
 	});
 	const sendButtonTitle = $derived(
 		isGoalCommand ? "Set goal"
-		: steer === "ready" ? `${sendButtonLabel} · ⌘/Ctrl+Enter or ⌘/Ctrl+click to ${inputText.trimStart().startsWith("/") ? "stop the turn and run it" : "steer"}`
+		: steer === "ready" ? `${sendButtonLabel} · ⌘/Ctrl+Enter or ⌘/Ctrl+click to ${composerDraft.text.trimStart().startsWith("/") ? "stop the turn and run it" : "steer"}`
 		: steer === "prompt_open" ? `${sendButtonLabel} · Answer the open prompt before steering`
 		: sendButtonLabel,
 	);
@@ -604,31 +496,13 @@
 		);
 	}
 
-	async function syncInputDraft(text: string): Promise<void> {
-		const sessionId = sessionState.currentId;
-		if (!sessionId) return;
-		await rpc("SyncInputDraft", {
-			sessionId,
-			text,
-			originId: getBrowserClientId(),
-		});
-	}
-
 	function handleInput() {
 		if (textareaEl) {
 			cursorPos = textareaEl.selectionStart ?? 0;
 		}
-		lastLocalEditAt = Date.now();
+		composerDraft.edited();
 		steerRefusal = null;
 		dismissedRefusal = turnControl.refusal;
-
-		// Debounced outgoing input sync to other tabs
-		if (inputSyncTimer) clearTimeout(inputSyncTimer);
-		inputSyncTimer = setTimeout(() => {
-			inputSyncTimer = null;
-			if (sessionState.currentId) void syncInputDraft(inputText).catch(() => undefined);
-			else storeNewSessionDraft(inputText);
-		}, 300);
 	}
 
 	function handleKeyup() {
@@ -690,14 +564,14 @@
 		const projectSlug = composerProjectSlug;
 		const expectedInstanceId = accountId;
 		if (!sessionId || !projectSlug || !expectedInstanceId || !canSend || switchingAccount) return false;
-		const draft = inputText;
+		const draft = composerDraft.text;
 		const images = pendingImages;
 		switchingAccount = true;
 		try {
 			if (!(await switchSessionAccount({ sessionId, instanceId, expectedInstanceId }))) return false;
 			await tick();
 			// Navigation or edits during the handoff leave the draft for its owner.
-			if (sessionState.currentId !== sessionId || composerProjectSlug !== projectSlug || inputText !== draft || pendingImages !== images) return false;
+			if (sessionState.currentId !== sessionId || composerProjectSlug !== projectSlug || composerDraft.text !== draft || pendingImages !== images) return false;
 			return await sendMessage(undefined, delivery);
 		} finally {
 			switchingAccount = false;
@@ -730,7 +604,7 @@
 			clearComposer();
 			return false;
 		}
-		const draftText = inputText;
+		const draftText = composerDraft.text;
 		const draftImages = pendingImages;
 		const draft = JSON.stringify([parentSessionId, draftText, draftImages.map((image) => image.dataUrl)]);
 		if (sideThreadAttempt?.draft !== draft) sideThreadAttempt = { draft, inputId: crypto.randomUUID() };
@@ -748,20 +622,10 @@
 			});
 			if (outcome.kind === "started") {
 				sideThreadAttempt = undefined;
-				// Following may already have saved the parent's draft and restored the new session's.
-				const parentText = previousSessionId === parentSessionId ? inputText : inputDrafts.get(parentSessionId);
-				if (parentText === draftText && pendingImages === draftImages) {
-					inputDrafts.delete(parentSessionId);
-					if (previousSessionId === parentSessionId) {
-						inputText = "";
-						cursorPos = 0;
-						if (inputSyncTimer) {
-							clearTimeout(inputSyncTimer);
-							inputSyncTimer = null;
-						}
-					}
+				const cleared = composerDraft.sideThreadSent(parentSessionId, draftText, pendingImages === draftImages);
+				if (cleared.cleared) {
+					if (cleared.active) cursorPos = 0;
 					pendingImages = [];
-					void rpc("SyncInputDraft", { sessionId: parentSessionId, text: "", originId: getBrowserClientId() }).catch(() => undefined);
 				}
 			}
 			return outcome.kind === "started" || outcome.kind === "waiting";
@@ -793,7 +657,7 @@
 
 	async function sendMessage(textOverride?: string, delivery: InputDelivery = "queue"): Promise<boolean> {
 		if (readOnlySubagent || !turnControl.ready) return false;
-		let text = textOverride ?? inputText.trim();
+		let text = textOverride ?? composerDraft.text.trim();
 		if (!text) return false;
 		if (textOverride === undefined) {
 			const match = text.match(/^\$(\S+)(?:\s+([\s\S]*))?$/);
@@ -850,11 +714,16 @@
 				draftSend.message = { type: "user", uuid: crypto.randomUUID(), text: messageText, createdAt: Date.now() };
 				draftSend.sessionId = null;
 			}
-			const unsent = { text: inputText, images: pendingImages };
+			const unsentImages = pendingImages;
 			if (!isProcessing()) requestScrollOnNextContent();
 			steerRefusal = null;
 			dismissedRefusal = null;
-			if (textOverride === undefined && delivery !== "steer") clearComposer();
+			const clearOnSend = textOverride === undefined && delivery !== "steer";
+			const unsentText = composerDraft.sendStarted(clearOnSend);
+			if (clearOnSend) {
+				pendingImages = [];
+				cursorPos = 0;
+			}
 			const outcome = await send({
 				text: messageText,
 				delivery,
@@ -863,25 +732,21 @@
 					draft,
 					onCreated: () => {
 						draftId = crypto.randomUUID();
-						storeNewSessionDraft("");
+						composerDraft.sessionCreated();
 					},
 				} : { sessionId: sentFromSessionId! }),
 			});
 			const sentToSessionId = sentFromSessionId ?? draftSend.sessionId;
 			if (outcome.kind === "failed" || outcome.kind === "refused") {
-				const sameScope = sentToSessionId ? sessionState.currentId === sentToSessionId
-					: !sessionState.currentId && getDraftProject() === projectSlug;
-				if (textOverride === undefined && sameScope && !inputText && pendingImages.length === 0) {
-					inputText = unsent.text;
-					cursorPos = unsent.text.length;
-					pendingImages = unsent.images;
+				if (composerDraft.sendFailed(unsentText, sentToSessionId, projectSlug, textOverride === undefined)) {
+					cursorPos = composerDraft.text.length;
+					pendingImages = unsentImages;
 				}
 				return false;
 			}
-			if (delivery === "steer") {
-				if (sessionState.currentId !== sentToSessionId) {
-					if (sentToSessionId) inputDrafts.delete(sentToSessionId);
-				} else if (textOverride === undefined) clearComposer();
+			if (composerDraft.sendSucceeded(sentToSessionId, delivery === "steer", textOverride === undefined)) {
+				pendingImages = [];
+				cursorPos = 0;
 			}
 			return true;
 		} finally {
@@ -891,19 +756,8 @@
 
 	function clearComposer() {
 		pendingImages = [];
-		inputText = "";
+		composerDraft.clear();
 		cursorPos = 0;
-		if (sessionState.currentId) {
-			inputDrafts.delete(sessionState.currentId);
-		}
-		// Cancel any pending debounced draft sync (it would re-sync the old
-		// draft text to the server after we just cleared it) and send an
-		// immediate empty sync so the server-side draft store is cleared too.
-		if (inputSyncTimer) {
-			clearTimeout(inputSyncTimer);
-			inputSyncTimer = null;
-		}
-		void syncInputDraft("").catch(() => undefined);
 	}
 
 	async function undoGoalClear() {
@@ -937,11 +791,11 @@
 
 	function handleAttachSetGoal(condition = "") {
 		if (!discoveryState.currentTraits?.supportsGoalState) return;
-		inputText = `/goal ${condition}`;
-		cursorPos = inputText.length;
+		composerDraft.text = `/goal ${condition}`;
+		cursorPos = composerDraft.text.length;
 		requestAnimationFrame(() => {
 			textareaEl?.focus();
-			textareaEl?.setSelectionRange(inputText.length, inputText.length);
+			textareaEl?.setSelectionRange(composerDraft.text.length, composerDraft.text.length);
 			handleInput();
 		});
 	}
@@ -991,9 +845,9 @@
 
 	/** Edit on a queued row: its text and images come back to the composer. */
 	function takeBackQueuedInput(text: string, images: readonly string[]) {
-		inputText = inputText.trim() ? `${inputText}\n\n${text}` : text;
+		composerDraft.text = composerDraft.text.trim() ? `${composerDraft.text}\n\n${text}` : text;
 		handleInput();
-		cursorPos = inputText.length;
+		cursorPos = composerDraft.text.length;
 		pendingImages = [
 			...pendingImages,
 			...images.map((dataUrl) => ({ id: crypto.randomUUID(), dataUrl, name: "image", size: dataUrl.length })),
@@ -1010,12 +864,12 @@
 		// User can then type arguments and press Enter to send.
 		let newCursorPos: number;
 		if (commandMatch) {
-			const before = inputText.slice(0, commandMatch.start);
-			const after = inputText.slice(commandMatch.end);
+			const before = composerDraft.text.slice(0, commandMatch.start);
+			const after = composerDraft.text.slice(commandMatch.end);
 			newCursorPos = commandMatch.start + command.length;
-			inputText = before + command + after;
+			composerDraft.text = before + command + after;
 		} else {
-			inputText = command;
+			composerDraft.text = command;
 			newCursorPos = command.length;
 		}
 		// Move cursor to end of inserted command and focus the textarea. tick, not a
@@ -1034,21 +888,21 @@
 
 	function handleCommandClose() {
 		if (commandMatch) {
-			const before = inputText.slice(0, commandMatch.start);
-			const after = inputText.slice(commandMatch.end);
-			inputText = before + after;
+			const before = composerDraft.text.slice(0, commandMatch.start);
+			const after = composerDraft.text.slice(commandMatch.end);
+			composerDraft.text = before + after;
 		} else {
-			inputText = "";
+			composerDraft.text = "";
 		}
 	}
 
 	function handleFileSelect(path: string) {
 		if (!atQuery || !textareaEl) return;
 
-		const before = inputText.slice(0, atQuery.start);
-		const after = inputText.slice(atQuery.end);
+		const before = composerDraft.text.slice(0, atQuery.start);
+		const after = composerDraft.text.slice(atQuery.end);
 		const insertion = buildMentionInsertion(path);
-		inputText = before + insertion + after;
+		composerDraft.text = before + insertion + after;
 
 		// Move cursor to after the inserted path
 		const newCursorPos = atQuery.start + insertion.length;
@@ -1065,9 +919,9 @@
 	function handleFileMenuClose() {
 		// Remove the @ trigger character
 		if (atQuery) {
-			const before = inputText.slice(0, atQuery.start);
-			const after = inputText.slice(atQuery.end);
-			inputText = before + after;
+			const before = composerDraft.text.slice(0, atQuery.start);
+			const after = composerDraft.text.slice(atQuery.end);
+			composerDraft.text = before + after;
 		}
 	}
 
@@ -1076,7 +930,7 @@
 		function handleGlobalEsc(e: KeyboardEvent) {
 			if (
 				e.key === "Escape" &&
-				!inputText.trim() &&
+				!composerDraft.text.trim() &&
 				!commandMenuVisible &&
 				!fileMenuVisible &&
 				subagentBackBarRef
@@ -1296,7 +1150,7 @@
 						     so there is still just one scroll position in play. -->
 						<div class="relative {plainText ? 'h-[120px]' : ''}" style:min-height={`max(${phoneIcons ? 30 : 32}px, var(--composer-placeholder-height, 0px))`}>
 							<SkillHighlightBackdrop
-								text={plainText ? "" : inputText}
+								text={plainText ? "" : composerDraft.text}
 								commandNames={commandNameSet}
 								builtinNames={builtinNameSet}
 								dimmed={composing || plainText}
@@ -1334,7 +1188,7 @@
 									: 'overflow-hidden'} {composing || plainText
 									? 'text-text'
 									: 'text-transparent'}"
-								bind:value={inputText}
+								bind:value={composerDraft.text}
 								bind:element={textareaEl}
 								oninput={handleInput}
 								onfocus={() => {
