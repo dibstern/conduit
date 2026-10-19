@@ -312,6 +312,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					subscriber.send({
 						_tag: "event",
 						instanceId,
+						directory,
 						payload,
 						providerProcessId: stream.promptProcessId,
 						health: source.getHealth(),
@@ -1109,10 +1110,11 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 												void running.reconciler.reconcile(
 													running.reconcileClient,
 													subscriber.directories(),
-													(_directory, payload) =>
+													(directory, payload) =>
 														subscriber.send({
 															_tag: "event",
 															instanceId: runningId,
+															directory,
 															payload,
 															providerProcessId: running.promptProcessId,
 															health: running.source.getHealth(),
@@ -1159,13 +1161,15 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						),
 					),
 				// Reads process state only: no request, no stream, never a start.
-				ifRunning: (instanceId: string, directory?: string) =>
+				ifRunning: (instanceId: string, directory?: string | null) =>
 					Effect.flatMap(resolveId(instanceId), (instanceId) =>
 						Effect.map(resolveIn(instanceId), (endpoint) =>
 							endpoint &&
 							endpoint.status !== "stopped" &&
 							!stopping.has(instanceId)
-								? Option.some(clientFor(endpoint, directory, instanceId))
+								? Option.some(
+										clientFor(endpoint, directory ?? undefined, instanceId),
+									)
 								: Option.none(),
 						),
 					),

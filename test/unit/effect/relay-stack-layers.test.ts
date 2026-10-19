@@ -9,6 +9,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RelayStateLive } from "../../../src/lib/domain/relay/Layers/relay-layer.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -35,22 +36,21 @@ const configLayer = Layer.mergeAll(
 );
 const loggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
 const openCodeApi = makeMockOpenCodeAPI();
-const relayStateTestLayer = RelayStateLive.pipe(
-	Layer.provide(
-		Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag)(openCodeApi),
-			configLayer,
-			loggerLayer,
-			Layer.effect(SessionActivityTag, makeSessionActivity),
-			Layer.succeed(OpenCodeInstancesTag)(
-				makeOpenCodeInstancesStub({ opencode: openCodeApi }),
-			),
-			Layer.succeed(OrchestrationEngineTag)(
-				new OrchestrationEngine({ registry: new ProviderRegistry() }),
-			),
-			makePersistenceEffectLayer(":memory:", "test-project"),
-		),
+const dependencies = Layer.mergeAll(
+	Layer.succeed(OpenCodeAPITag)(openCodeApi),
+	configLayer,
+	loggerLayer,
+	Layer.effect(SessionActivityTag, makeSessionActivity),
+	Layer.succeed(OpenCodeInstancesTag)(
+		makeOpenCodeInstancesStub({ opencode: openCodeApi }),
 	),
+	Layer.succeed(OrchestrationEngineTag)(
+		new OrchestrationEngine({ registry: new ProviderRegistry() }),
+	),
+	makePersistenceEffectLayer(":memory:", "test-project"),
+);
+const relayStateTestLayer = RelayStateLive.pipe(
+	Layer.provide(SessionWorkspaceLive.pipe(Layer.provideMerge(dependencies))),
 );
 
 describe("Relay stack Layer composition", () => {

@@ -86,7 +86,12 @@ const makeChannel = (log: Logger | undefined) => {
 			switch (message._tag) {
 				case "event":
 					for (const callback of callbacks.event)
-						notify(() => callback(message.payload, message.providerProcessId));
+						notify(() =>
+							callback(message.payload, {
+								directory: message.directory,
+								providerProcessId: message.providerProcessId,
+							}),
+						);
 					break;
 				case "heartbeat":
 					for (const callback of callbacks.heartbeat) notify(callback);

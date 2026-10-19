@@ -18,6 +18,7 @@ export type OpenCodeInstanceEvent = {
 	| {
 			readonly _tag: "event";
 			readonly payload: unknown;
+			readonly directory?: string;
 			readonly providerProcessId?: string;
 	  }
 	| { readonly _tag: "heartbeat" }
@@ -91,10 +92,13 @@ export interface OpenCodeInstances {
 		instanceId: string,
 		directory?: string,
 	) => Effect.Effect<OpenCodeClient, OpenCodeUnavailable, Scope.Scope>;
-	/** Client when the instance is running; None otherwise. Makes no request. */
+	/**
+	 * Client when the instance is running; None otherwise. Makes no request.
+	 * A null directory uses the instance default, bypassing relay defaults.
+	 */
 	readonly ifRunning: (
 		instanceId: string,
-		directory?: string,
+		directory?: string | null,
 	) => Effect.Effect<Option.Option<OpenCodeClient>, never, Scope.Scope>;
 	/** Positive managed-process termination proof; false also covers unknown/unavailable. */
 	readonly isManagedStopped: (instanceId: string) => Effect.Effect<boolean>;

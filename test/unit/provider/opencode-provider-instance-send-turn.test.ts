@@ -588,7 +588,10 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			providerStateUpdates: [],
 		});
 		expect((await resultPromise).status).toBe("completed");
-		expect(clientForAccount).toHaveBeenCalledExactlyOnceWith(account);
+		expect(clientForAccount).toHaveBeenCalledExactlyOnceWith(
+			account,
+			"/tmp/project",
+		);
 		expect(clientForSession).not.toHaveBeenCalled();
 		expect(namedClient.session.prompt).toHaveBeenCalledOnce();
 		expect(client.session.prompt).not.toHaveBeenCalled();

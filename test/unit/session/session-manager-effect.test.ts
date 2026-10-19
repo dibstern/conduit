@@ -18,6 +18,7 @@ import {
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
 	ConfigTag,
@@ -107,7 +108,7 @@ describe("SessionManager Effect", () => {
 			makeMockConfig(configDir ? { configDir } : {}),
 		);
 		const loggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
-		return Layer.mergeAll(
+		const dependencies = Layer.mergeAll(
 			configDir === undefined
 				? Layer.succeed(AccountDirectory)(makeMockAccountDirectory())
 				: AccountDirectoryFromConfigLive(
@@ -127,6 +128,7 @@ describe("SessionManager Effect", () => {
 				makeOpenCodeInstancesStub({ opencode: mockApi }),
 			),
 		);
+		return Layer.provideMerge(SessionWorkspaceLive, dependencies);
 	};
 
 	const makeLiveServiceLayer = (
@@ -148,7 +150,7 @@ describe("SessionManager Effect", () => {
 			: undefined;
 
 		return Layer.provideMerge(
-			SessionManagerServiceLive,
+			Layer.provideMerge(SessionManagerServiceLive, SessionWorkspaceLive),
 			Layer.mergeAll(
 				Layer.fresh(makeTestLayer(mockApi, configDir)),
 				Layer.succeed(LoggerTag)(makeMockLogger()),

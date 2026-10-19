@@ -79,6 +79,7 @@ export interface OpenCodeProviderInstanceOptions {
 	readonly workspaceRoot?: string;
 	readonly clientForAccount?: (
 		account: OpenCodeAccount,
+		directory?: string,
 	) => Effect.Effect<OpenCodeAPI, Error, Scope.Scope>;
 	/**
 	 * Resolve the scoped API client for the OpenCode instance that owns a
@@ -165,6 +166,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	private resolveClientEffect(
 		sessionId: string,
 		account?: Account,
+		directory?: string,
 	): Effect.Effect<OpenCodeAPI, Error, Scope.Scope> {
 		if (account) {
 			if (!PROVIDER_DRIVERS[account.driver].runsOpenCodeServer)
@@ -172,7 +174,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 					new Error("OpenCode turn requires an OpenCode account"),
 				);
 			if (this.clientForAccount && account.driver === "opencode")
-				return this.clientForAccount(account);
+				return this.clientForAccount(account, directory);
 			if (account.id === MANAGED_OPENCODE_ACCOUNT_ID)
 				return Effect.succeed(this.client);
 			return Effect.fail(
@@ -309,7 +311,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			// send failure — never a hang or a silent fall-through to the
 			// default server.
 			const clientResult = yield* Effect.result(
-				this.resolveClientEffect(sessionId, input.account),
+				this.resolveClientEffect(sessionId, input.account, input.workspaceRoot),
 			);
 			if (clientResult._tag === "Failure") {
 				const message = clientResult.failure.message;

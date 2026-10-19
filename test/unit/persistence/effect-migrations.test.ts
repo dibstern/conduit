@@ -37,6 +37,97 @@ const migrationEntries = Object.entries(effectMigrationEntries);
 const prefix = (count: number) =>
 	Object.fromEntries(migrationEntries.slice(0, count));
 
+// Purge failure modes: either reference source is missed, duplicate references
+// multiply the cohort, content/descendants or non-Claude/root sessions are lost,
+// dependent rows survive, retained rows change, or reopening repeats the purge.
+it.effect(
+	"purges only empty Claude background shell leaves and their dependent rows",
+	() =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator(prefix(66));
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO sessions (id, provider, parent_id, created_at, updated_at) VALUES
+			('parent-card', 'claude', NULL, 1, 1), ('parent-event', 'claude', NULL, 1, 1),
+			('phantom-card', 'claude', 'parent-card', 1, 1), ('phantom-event', 'claude', 'parent-event', 1, 1),
+			('agent', 'claude', 'parent-card', 1, 1), ('with-message', 'claude', 'parent-card', 1, 1),
+			('with-child', 'claude', 'parent-card', 1, 1), ('grandchild', 'claude', 'with-child', 1, 1),
+			('other-provider', 'opencode', 'parent-card', 1, 1)`;
+			yield* sql`INSERT INTO messages (id, session_id, role, text, created_at, updated_at) VALUES
+			('parent-message', 'parent-card', 'assistant', 'Bash tools', 1, 1),
+			('event-parent-message', 'parent-event', 'user', 'Run a shell', 1, 1),
+			('child-message', 'with-message', 'assistant', 'Keep this content', 1, 1)`;
+			yield* sql`INSERT INTO message_parts (id, message_id, type, sort_order, metadata, created_at, updated_at)
+			SELECT id, 'parent-message', 'tool', row_number() OVER (),
+				json_object('childSessionId', id, 'subagentType', CASE WHEN id = 'agent' THEN 'general-purpose' ELSE 'local_bash' END), 1, 1
+			FROM sessions WHERE id NOT IN ('phantom-event', 'grandchild')`;
+			yield* sql`INSERT INTO events (event_id, session_id, stream_version, type, data, provider, created_at)
+			SELECT id, id, 1, 'session.created', '{}', provider, 1 FROM sessions`;
+			yield* sql`INSERT INTO events (event_id, session_id, stream_version, type, data, provider, created_at) VALUES
+			('running', 'parent-event', 2, 'tool.running', '{"metadata":{"childSessionId":"phantom-event","subagentType":"local_bash"}}', 'claude', 2)`;
+			// Populate every deletion target for both purged and retained sessions.
+			yield* sql`INSERT INTO turns (id, session_id, requested_at) SELECT id, id, 1 FROM sessions`;
+			yield* sql`INSERT INTO pending_approvals (id, session_id, turn_id, type, created_at) SELECT id, id, id, 'permission', 1 FROM sessions`;
+			yield* sql`INSERT INTO session_providers (id, session_id, provider, activated_at) SELECT id, id, provider, 1 FROM sessions`;
+			yield* sql`INSERT INTO tool_content (tool_id, session_id, content, created_at) SELECT id, id, 'output', 1 FROM sessions`;
+			yield* sql`INSERT INTO provider_state (session_id, key, value) SELECT id, 'key', 'value' FROM sessions`;
+			yield* sql`INSERT INTO command_receipts (command_id, session_id, status, created_at) SELECT id, id, 'accepted', 1 FROM sessions`;
+			yield* sql`INSERT INTO provider_command_sessions (project_key, session_id, provider_id, provider_kind, status, created_at, updated_at)
+			SELECT 'project', id, provider, provider, 'idle', 1, 1 FROM sessions`;
+			yield* sql`INSERT INTO provider_command_turns (project_key, session_id, turn_id, command_id, status, created_at, updated_at)
+			SELECT 'project', id, id, id, 'completed', 1, 1 FROM sessions`;
+			yield* sql`INSERT INTO provider_command_interactions (project_key, session_id, interaction_id, kind, status, created_at, updated_at)
+			SELECT 'project', id, id, 'permission', 'resolved', 1, 1 FROM sessions`;
+			yield* sql`INSERT INTO provider_command_tombstones (project_key, scope_kind, scope_id, session_id, event_sequence, reason_code, tombstoned_at)
+			SELECT 'project', 'session', id, id, 1, 'deleted', 1 FROM sessions`;
+			yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, requested_at, updated_at)
+			SELECT row_number() OVER (), id, 'project', id, provider, 'send_turn', '{}', 1, 1 FROM sessions`;
+			yield* sql`INSERT INTO session_sidebar (session_id, version, last_activity, row) SELECT id, 1, 1, '{}' FROM sessions`;
+			yield* sql`INSERT INTO message_tombstones (session_id, message_id, version) SELECT id, id, 1 FROM sessions`;
+			yield* sql`INSERT INTO message_part_tombstones (session_id, message_id, part_id, version) SELECT id, id, id, 1 FROM sessions`;
+			yield* sql`INSERT INTO pending_inputs (input_id, session_id, text, request, state, admitted_at, version)
+			SELECT id, id, 'queued', '{}', 'queued', 1, 1 FROM sessions`;
+			yield* sql`INSERT INTO session_goal_checks (event_id, session_id, condition, set_at, iterations, created_at)
+			SELECT id, id, 'done', 1, 0, 1 FROM sessions`;
+			const tables = yield* sql<{ name: string }>`SELECT name FROM sqlite_master
+			WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'effect_sql_migrations' ORDER BY name`;
+			const retained = new Map<string, readonly unknown[]>();
+			for (const { name } of tables) {
+				const columns = yield* sql<{
+					name: string;
+				}>`PRAGMA table_info(${sql(name)})`;
+				const key =
+					name === "sessions"
+						? "id"
+						: columns.some(({ name }) => name === "session_id")
+							? "session_id"
+							: undefined;
+				const rows = yield* sql`SELECT * FROM ${sql(name)} ORDER BY rowid`;
+				retained.set(
+					name,
+					rows.filter(
+						(row) =>
+							!key ||
+							!["phantom-card", "phantom-event"].includes(String(row[key])),
+					),
+				);
+			}
+			expect(yield* makeEffectSqlMigrator()).toEqual([
+				[67, "purge_background_shell_sessions"],
+			]);
+			for (const { name } of tables) {
+				expect(
+					yield* sql`SELECT * FROM ${sql(name)} ORDER BY rowid`,
+					name,
+				).toEqual(retained.get(name));
+			}
+			expect(yield* sql`PRAGMA foreign_key_check`).toEqual([]);
+			expect(
+				yield* sql`SELECT name FROM sqlite_temp_master WHERE type = 'table'`,
+			).toEqual([]);
+			expect(yield* makeEffectSqlMigrator()).toEqual([]);
+		}).pipe(Effect.provide(makeFileSqlLayer())),
+);
+
 it.effect(
 	"extracts synthetic message ids without a correlated event scan",
 	() =>
@@ -95,6 +186,7 @@ it.effect(
 			SELECT 'm-' || id, id, 'user', id, 100, 100 FROM sessions WHERE parent_id = 'root'`;
 			expect(yield* makeEffectSqlMigrator()).toEqual([
 				[66, "project_tree_data"],
+				[67, "purge_background_shell_sessions"],
 			]);
 			expect(
 				yield* sql`SELECT COUNT(*) AS count, COUNT(DISTINCT version) AS versions
@@ -138,6 +230,7 @@ it.effect(
 			VALUES ('late-header', 's', 1, 'message.created', '{"messageId":"late-synthetic"}', '{"synthetic":true}', 'opencode', 601)`;
 			expect(yield* makeEffectSqlMigrator()).toEqual([
 				[66, "project_tree_data"],
+				[67, "purge_background_shell_sessions"],
 			]);
 			expect(
 				yield* sql`SELECT id, is_human_sent FROM messages ORDER BY id`,
@@ -232,6 +325,7 @@ const expectedNames = [
 	"prompt_provider_reference",
 	"tool_result_event_refs",
 	"project_tree_data",
+	"purge_background_shell_sessions",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -264,6 +358,7 @@ it.effect(
 				[64, "prompt_provider_reference"],
 				[65, "tool_result_event_refs"],
 				[66, "project_tree_data"],
+				[67, "purge_background_shell_sessions"],
 			]);
 			yield* sql`UPDATE sessions SET forked_from = 'source' WHERE id = 'fork'`;
 			expect(yield* makeEffectSqlMigrator()).toEqual([]);
@@ -386,6 +481,7 @@ describe("Effect migration lineage", () => {
 					64,
 					65,
 					66,
+					67,
 				]);
 				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, workspace_hint, workspace_hint_sequence)
 					VALUES ('main-database', 'claude', 'Preserved', 'idle', 1, 1, '/repo/worktree', 123)`;
@@ -550,8 +646,8 @@ describe("Effect migration lineage", () => {
 			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it("registers the contiguous production chain from 1 through 66", () => {
-		expect(migrationEntries).toHaveLength(66);
+	it("registers the contiguous production chain from 1 through 67", () => {
+		expect(migrationEntries).toHaveLength(67);
 		expect(migrationEntries.map(([key]) => key)).toEqual(
 			expectedNames.map(
 				(name, index) => `${String(index + 1).padStart(4, "0")}_${name}`,
@@ -734,6 +830,7 @@ describe("Effect migration lineage", () => {
 					[64, "prompt_provider_reference"],
 					[65, "tool_result_event_refs"],
 					[66, "project_tree_data"],
+					[67, "purge_background_shell_sessions"],
 				]);
 				expect(yield* sql`SELECT type FROM events WHERE sequence = 45`).toEqual(
 					[{ type: "thinking.end" }],
@@ -821,6 +918,7 @@ describe("Effect migration lineage", () => {
 					[64, "prompt_provider_reference"],
 					[65, "tool_result_event_refs"],
 					[66, "project_tree_data"],
+					[67, "purge_background_shell_sessions"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace_hint, workspace_hint_sequence
@@ -887,6 +985,7 @@ describe("Effect migration lineage", () => {
 					[64, "prompt_provider_reference"],
 					[65, "tool_result_event_refs"],
 					[66, "project_tree_data"],
+					[67, "purge_background_shell_sessions"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace, claude_worktree_state FROM sessions WHERE id = 'kept-workspace'`,
@@ -1487,6 +1586,7 @@ describe("Effect migration lineage", () => {
 				[64, "prompt_provider_reference"],
 				[65, "tool_result_event_refs"],
 				[66, "project_tree_data"],
+				[67, "purge_background_shell_sessions"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -1590,6 +1690,7 @@ describe("Effect migration lineage", () => {
 					[64, "prompt_provider_reference"],
 					[65, "tool_result_event_refs"],
 					[66, "project_tree_data"],
+					[67, "purge_background_shell_sessions"],
 				]);
 				const rows = yield* sql<{
 					id: string;

@@ -58,11 +58,10 @@ import {
 	SessionDirectoryReadError,
 } from "../domain/daemon/Services/session-directory.js";
 import { makeUsage, Usage } from "../domain/daemon/Services/usage.js";
-import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
+import type { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
 import {
-	backgroundOpenCodeAPI,
 	makeProjectRelayConfigLive,
 	OpenCodeAPILive,
 	ProjectRelayLoggerLive,
@@ -728,6 +727,7 @@ export function createProjectRelayLayers({
 	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
 	const providerOrchestrationDeps = Layer.mergeAll(
 		daemonConfigLayer,
+		sessionWorkspaceLayer,
 		openCodeApiLayer,
 		persistenceEffectLayer,
 		// The engine commits input.sent through commit-and-signal, which
@@ -831,9 +831,9 @@ export function createProjectRelayLayers({
 	}).pipe(
 		Layer.provide(
 			Layer.mergeAll(
-				Layer.effect(OpenCodeAPITag, backgroundOpenCodeAPI).pipe(
-					Layer.provide(Layer.merge(configLayer, openCodeInstancesLayer)),
-				),
+				sessionWorkspaceLayer,
+				openCodeInstancesLayer,
+				persistenceEffectLayer,
 				configLayer,
 				loggerLayer,
 			),
@@ -869,6 +869,7 @@ export function createProjectRelayLayers({
 	}));
 
 	const coreBridgeLayers = Layer.mergeAll(
+		sessionWorkspaceLayer,
 		sessionDirectoryLayer,
 		sessionWorkspaceLayer,
 		daemonConfigLayer,
@@ -965,7 +966,7 @@ export function createProjectRelayLayers({
 	const wiringLayers = Layer.mergeAll(
 		PermissionTimeoutLive,
 		sessionLifecycleWiringLayer,
-	).pipe(Layer.provide(baseLayers));
+	).pipe(Layer.provide(Layer.merge(baseLayers, sessionWorkspaceLayer)));
 	const inboxLayer = SessionInboxLive.pipe(Layer.provide(sessionEventBusLayer));
 	// Provide the borrowed daemon tracer to every layer, including fibers forked
 	// while building services such as the status poller.

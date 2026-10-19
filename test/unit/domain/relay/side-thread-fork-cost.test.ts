@@ -8,6 +8,8 @@ import { expect, it } from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/provider-instance.js";
 import { AccountDirectory } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -29,6 +31,7 @@ import {
 	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
+	makeMockOpenCodeAPI,
 	makeOpenCodeInstancesStub,
 } from "../../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../../helpers/orchestration-engine-test-double.js";
@@ -248,6 +251,8 @@ it("copies a long Side Thread history in bounded statements with the same transc
 					),
 				);
 		}).pipe(
+			Effect.provide(SessionWorkspaceLive),
+			Effect.provideService(OpenCodeAPITag, makeMockOpenCodeAPI()),
 			Effect.provideService(
 				OrchestrationEngineTag,
 				withDispatchEffect({

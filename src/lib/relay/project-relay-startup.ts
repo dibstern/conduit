@@ -6,14 +6,13 @@ import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instanc
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
-import { backgroundOpenCodeAPI } from "../domain/relay/Layers/relay-core-layers.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import type { ProjectSettingsTag } from "../domain/relay/Services/project-settings.js";
 import { RelayStatusSnapshotTag } from "../domain/relay/Services/relay-status-snapshot.js";
 import { resolveOrphanedClaudePermissions } from "../domain/relay/Services/resolve-orphaned-claude-permissions.js";
 import { restoreClaudeQuestionsFromStore } from "../domain/relay/Services/restore-claude-questions.js";
 import {
-	ConfigTag,
+	type ConfigTag,
 	type LoggerTag,
 	type OrchestrationEngineTag,
 	PollerManagerTag,
@@ -39,11 +38,15 @@ import {
 	PollerPubSubTag,
 	PollerStateTag,
 } from "../domain/relay/Services/session-status-poller.js";
+import {
+	makeSessionOpenCodeClient,
+	SessionWorkspaceTag,
+} from "../domain/relay/Services/session-workspace.js";
 import { SSEStreamTag } from "../domain/relay/Services/sse-stream-service.js";
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
 import { makeFailTurn } from "../domain/relay/Services/turn-failure.js";
 import * as Failure from "../effect/failure-classification.js";
-import { formatErrorDetail, OpenCodeApiError } from "../errors.js";
+import { formatErrorDetail } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
@@ -212,26 +215,36 @@ function acquireStartupServices(inputs: StartupInputs) {
 		yield* PollerPubSubTag;
 		const statusPoller = yield* StatusPollerTag;
 		const pollerManager = yield* PollerManagerTag;
+		const sessionClient = yield* makeSessionOpenCodeClient;
 		const instances = yield* OpenCodeInstancesTag;
+		const workspace = yield* SessionWorkspaceTag;
+		const readOpenCodeMessages = (
+			sessionId: string,
+			instanceId?: string,
+			signal?: AbortSignal,
+			directory?: string,
+		) =>
+			Effect.gen(function* () {
+				const client = yield* sessionClient(sessionId, instanceId, directory);
+				if (Option.isNone(client))
+					return yield* Effect.fail(
+						new Error(`Session ${sessionId} has no OpenCode instance`),
+					);
+				return yield* Effect.tryPromise({
+					try: () =>
+						client.value.session.messages(
+							sessionId,
+							signal === undefined ? undefined : { signal },
+						),
+					catch: (cause) => cause,
+				});
+			}).pipe(Effect.scoped);
 		const pickContext = yield* Effect.context<
 			AccountDirectory | ConfigTag | LoggerTag | OrchestrationEngineTag
 		>();
 		const opencodeRuntimeIngress = yield* makeEffectOpenCodeRuntimeIngress(
 			log.child("opencode-runtime-ingress"),
-			(sessionId, instanceId, signal) =>
-				Effect.gen(function* () {
-					const client = yield* instances.ifRunning(instanceId);
-					if (Option.isNone(client)) {
-						// Empty history would incorrectly mark the backfill complete.
-						return yield* Effect.fail(
-							new Error(`OpenCode instance "${instanceId}" is not running`),
-						);
-					}
-					return yield* Effect.tryPromise({
-						try: () => client.value.session.messages(sessionId, { signal }),
-						catch: (cause) => cause,
-					});
-				}).pipe(Effect.scoped),
+			readOpenCodeMessages,
 			(sessionId, messageId) =>
 				orchestration.openCodeInstance.inputIdForUserEcho(sessionId, messageId),
 			(instanceId, parentId) =>
@@ -266,26 +279,18 @@ function acquireStartupServices(inputs: StartupInputs) {
 			recoveryCommands,
 			(instanceId, sessionId) =>
 				Effect.gen(function* () {
-					const client = yield* instances.ifRunning(instanceId);
+					const directory = yield* workspace.withLaunch(
+						workspace.get(sessionId),
+					);
+					const client = yield* instances.ifRunning(instanceId, directory);
 					if (Option.isNone(client))
 						return (yield* instances.isManagedStopped(instanceId))
 							? ("stopped" as const)
 							: undefined;
 					return yield* Effect.tryPromise({
-						try: async () => {
-							// Like live sends, resolve the native session before using
-							// directory-scoped APIs. An old command's cwd can be stale.
-							const session = await client.value.session.get(sessionId);
-							return client.value.session.statuses(session.directory);
-						},
+						try: () => client.value.session.statuses(),
 						catch: (cause) => cause,
-					}).pipe(
-						Effect.catch((cause) =>
-							cause instanceof OpenCodeApiError && cause.responseStatus === 404
-								? Effect.succeed({})
-								: Effect.fail(cause),
-						),
-					);
+					});
 				}).pipe(Effect.scoped),
 			yield* makeFailTurn,
 		);
@@ -314,6 +319,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 			recoverOpenCodeCommands,
 			pollerManager,
 			opencodeRuntimeIngress,
+			readOpenCodeMessages,
 		};
 	});
 }
@@ -346,9 +352,7 @@ function startMonitoringAndPollers(
 	return Effect.gen(function* () {
 		const monitoring = yield* wireMonitoringEffect({
 			// Poller seeding is background work: it must not restart OpenCode.
-			client: yield* backgroundOpenCodeAPI.pipe(
-				Effect.provideService(ConfigTag, config),
-			),
+			readMessages: services.readOpenCodeMessages,
 			wsHandler,
 			pollerManager,
 			sseStream,
@@ -403,7 +407,6 @@ function startSseConsumers(
 ) {
 	const { config, sseLog, pipelineLog } = inputs;
 	const {
-		api,
 		translator,
 		wsHandler,
 		statusPoller,
@@ -413,6 +416,18 @@ function startSseConsumers(
 	} = services;
 	return Effect.gen(function* () {
 		const terminal = yield* OpenCodeTerminalServiceTag;
+		const workspace = yield* SessionWorkspaceTag;
+		const instances = yield* OpenCodeInstancesTag;
+		const replyPermission =
+			(instanceId: string) =>
+			(sessionId: string, permissionId: string, response: "once") =>
+				Effect.gen(function* () {
+					const directory = yield* workspace.get(sessionId);
+					const client = yield* instances.use(instanceId, directory);
+					yield* Effect.tryPromise(() =>
+						client.permission.reply(sessionId, permissionId, response),
+					);
+				}).pipe(Effect.scoped);
 		const sseConsumerDeps = {
 			translator,
 			wsHandler,
@@ -421,11 +436,7 @@ function startSseConsumers(
 			}),
 			log: sseLog,
 			pipelineLog,
-			replyPermission: (
-				sessionId: string,
-				permissionId: string,
-				response: "once",
-			) => api.permission.reply(sessionId, permissionId, response),
+			replyPermission: replyPermission(MANAGED_OPENCODE_ACCOUNT_ID),
 			statusPoller,
 			slug: config.slug,
 			providerInstanceId: MANAGED_OPENCODE_ACCOUNT_ID,
@@ -452,6 +463,7 @@ function startSseConsumers(
 					{
 						...sseConsumerDeps,
 						providerInstanceId: instanceId,
+						replyPermission: replyPermission(instanceId),
 					},
 					stream,
 				);

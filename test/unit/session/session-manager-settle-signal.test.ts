@@ -19,6 +19,7 @@ import { expect } from "vitest";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
 	ConfigTag,
@@ -66,7 +67,7 @@ describe("SessionManagerService settle signal", () => {
 			// Same wiring as project-relay-layers: one shared bus for the
 			// persistence stack and the relay services.
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				Layer.provideMerge(SessionManagerServiceLive, SessionWorkspaceLive),
 				Layer.mergeAll(
 					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					makeSessionManagerStateLive(),

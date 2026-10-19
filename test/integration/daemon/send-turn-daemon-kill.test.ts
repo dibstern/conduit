@@ -955,6 +955,69 @@ describe("a send claimed before daemon SIGKILL", () => {
 	}, 60_000);
 
 	it.each([
+		404, 503,
+	])("defers an orphan while the status endpoint returns HTTP %s", async (status) => {
+		const { fixture, sessionId, directory, prompt } =
+			await startOpenCodeTurn(false);
+		await fixture.kill();
+		const failure = join(fixture.configDir, "fake-opencode-status-failure");
+		writeFileSync(failure, String(status));
+		const recoveryLog = join(fixture.configDir, "daemon.log");
+		const recoveryFailures = () =>
+			existsSync(recoveryLog)
+				? readFileSync(recoveryLog, "utf8").split(
+						"OpenCode send recovery deferred",
+					).length - 1
+				: 0;
+		const previousFailures = recoveryFailures();
+		const proof: Record<string, unknown> = {
+			case: `status endpoint HTTP ${status}`,
+			sessionId,
+			before: snapshot(fixture, sessionId, prompt),
+		};
+		proofs.push(proof);
+		try {
+			await fixture.restart({ skipBrowserProbe: true });
+			await fixture.connect(undefined, undefined, "process-test", false);
+			// Observe the recovery attempt's outcome before checking its row.
+			await vi.waitFor(
+				() =>
+					expect(
+						recoveryFailures() > previousFailures ||
+							snapshot(fixture, sessionId, prompt).outbox[0]?.status !==
+								"running",
+					).toBe(true),
+				{ timeout: 15_000 },
+			);
+			proof["unavailable"] = snapshot(fixture, sessionId, prompt);
+			expect(snapshot(fixture, sessionId, prompt).outbox[0]?.status).toBe(
+				"running",
+			);
+			expect(snapshot(fixture, sessionId, prompt).inbox).toEqual({
+				busy: true,
+				in_flight: true,
+			});
+			expect(snapshot(fixture, sessionId, prompt).providerPromptCount).toBe(1);
+			await fixture.kill();
+			rmSync(failure);
+			await fixture.setOpenCodeStatus(directory, sessionId, { type: "idle" });
+			await fixture.restart({ skipBrowserProbe: true });
+			await vi.waitFor(
+				() => {
+					const state = snapshot(fixture, sessionId, prompt);
+					expect(state.outbox[0]?.status).toBe("failed");
+					expect(state.inbox).toEqual({ busy: false, in_flight: false });
+					expect(state.providerPromptCount).toBe(1);
+				},
+				{ timeout: 15_000 },
+			);
+		} finally {
+			rmSync(failure, { force: true });
+			proof["after"] = snapshot(fixture, sessionId, prompt);
+		}
+	}, 60_000);
+
+	it.each([
 		"completed",
 		"failed",
 	])("clears stale busy when a newer send is already %s", async (status) => {
@@ -1007,7 +1070,10 @@ describe("a send claimed before daemon SIGKILL", () => {
 		}
 	}, 60_000);
 
-	it("preserves a newer running turn after the native session changes directory", async () => {
+	it.each([
+		false,
+		true,
+	])("preserves a newer running turn in its stored directory, stale native directory=%s", async (staleNativeDirectory) => {
 		const { fixture, browser, sessionId, userId, created, directory, prompt } =
 			await startOpenCodeTurn(true);
 		const finished = openCodeHistory(sessionId, userId, created, true);
@@ -1086,6 +1152,14 @@ describe("a send claimed before daemon SIGKILL", () => {
 			db.prepare(
 				"UPDATE provider_command_outbox SET payload_json = json_set(payload_json, '$.workspaceRoot', ?) WHERE session_id = ? AND command_id = ?",
 			).run(movedDirectory, sessionId, nextInputId);
+			db.prepare("UPDATE sessions SET workspace = ? WHERE id = ?").run(
+				JSON.stringify({
+					cause: "user",
+					origin: "existing",
+					worktrees: { [directory]: movedDirectory },
+				}),
+				sessionId,
+			);
 		} finally {
 			db.close();
 		}
@@ -1098,7 +1172,7 @@ describe("a send claimed before daemon SIGKILL", () => {
 			sessionFile,
 			JSON.stringify(
 				sessions.map((session) =>
-					session.id === sessionId
+					session.id === sessionId && !staleNativeDirectory
 						? { ...session, directory: movedDirectory }
 						: session,
 				),
@@ -1109,7 +1183,9 @@ describe("a send claimed before daemon SIGKILL", () => {
 			type: "busy",
 		});
 		const proof: Record<string, unknown> = {
-			case: "moved newer turn",
+			case: staleNativeDirectory
+				? "moved newer turn with stale native directory"
+				: "moved newer turn",
 			sessionId,
 			before: snapshot(fixture, sessionId, prompt),
 		};
@@ -1136,6 +1212,9 @@ describe("a send claimed before daemon SIGKILL", () => {
 				snapshot(fixture, sessionId, prompt).turns.map(({ state }) => state),
 			).toEqual(["completed", "running"]);
 			expect(snapshot(fixture, sessionId, prompt).inbox.busy).toBe(true);
+			expect(
+				snapshot(fixture, sessionId, prompt).outbox.map(({ status }) => status),
+			).toEqual(["running", "running"]);
 			await fixture.kill();
 			await fixture.restart({ skipBrowserProbe: true });
 			expect(
@@ -1220,7 +1299,13 @@ describe("a send claimed before daemon SIGKILL", () => {
 			JSON.stringify({ [sessionId]: finished }),
 		);
 		await fixture.restart({ skipBrowserProbe: true });
-		const after = await fixture.connect(sessionId);
+		// Selecting the session would start an ordinary detail backfill as well.
+		const after = await fixture.connect(
+			undefined,
+			undefined,
+			"process-test",
+			false,
+		);
 		const hold = join(fixture.configDir, "fake-opencode-hold-history");
 		writeFileSync(hold, "hold");
 		writeFileSync(failures, "{}");
@@ -1228,6 +1313,14 @@ describe("a send claimed before daemon SIGKILL", () => {
 		await vi.waitFor(() => expect(existsSync(held)).toBe(true), {
 			timeout: 20_000,
 		});
+		const recoveryLog = join(fixture.configDir, "daemon.log");
+		const recoveryFailures = () =>
+			existsSync(recoveryLog)
+				? readFileSync(recoveryLog, "utf8").split(
+						"OpenCode send recovery deferred",
+					).length - 1
+				: 0;
+		const previousFailures = recoveryFailures();
 		// No provider event advances historyRevisions for this handoff. Its
 		// durable request sequence must invalidate the already-sampled idle.
 		await fixture.dropOpenCodeEvents([
@@ -1265,22 +1358,23 @@ describe("a send claimed before daemon SIGKILL", () => {
 			before: snapshot(fixture, sessionId, prompt),
 		};
 		proofs.push(proof);
-		const recoveryReads = () =>
-			fixture
-				.opencodeRequests()
-				.filter(
-					({ method, url }) =>
-						method === "GET" &&
-						new URL(url, fixture.baseUrl).pathname === `/session/${sessionId}`,
-				).length;
-		const previousReads = recoveryReads();
+		// A timed-out sample would not exercise the durable admission fence.
+		expect(recoveryFailures()).toBe(previousFailures);
+		// The held response already contains the successful snapshot. Fail only
+		// the next pass, whose warning proves the stale attempt released its gate.
+		writeFileSync(failures, JSON.stringify({ [sessionId]: true }));
+		await fixture.dropOpenCodeEvents([
+			{ type: "session.status", status: "busy" },
+			{ type: "session.status", status: "idle" },
+		]);
+		await fixture.setOpenCodeStatus(directory, sessionId, { type: "idle" });
 		rmSync(hold);
 		await vi.waitFor(
-			// A subsequent recovery read only enters after the prior attempt has
-			// released its gate, so this also waits for the stale sample to settle.
-			() => expect(recoveryReads()).toBeGreaterThan(previousReads),
+			() => expect(recoveryFailures()).toBeGreaterThan(previousFailures),
 			{ timeout: 15_000 },
 		);
+		writeFileSync(failures, "{}");
+		await fixture.setOpenCodeStatus(directory, sessionId, { type: "busy" });
 		try {
 			expect(
 				snapshot(fixture, sessionId, prompt).outbox.map(({ status }) => status),

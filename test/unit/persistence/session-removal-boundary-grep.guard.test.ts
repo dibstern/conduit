@@ -19,7 +19,7 @@ const REMOVAL_SEAM = [
 // list someone has to add themselves to is the point: it is a deliberate act,
 // and it needs a reason that survives review.
 //
-//   effect/migrations.ts — the legacy skeleton purge runs once, at startup,
+//   effect/migrations.ts — the legacy skeleton and background shell purges run once, at startup,
 //     before a relay exists for anyone to subscribe to. There is no advance to
 //     publish because there is nobody to publish it to.
 const RECORDED_GAPS = ["src/lib/persistence/effect/migrations.ts"];

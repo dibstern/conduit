@@ -772,7 +772,7 @@ async function createEffectHarness(
 	let changed: ChangedCallback | undefined;
 	let resolveMessages: ((messages: Message[]) => void) | undefined;
 	const messages = vi.fn(
-		() =>
+		(_sessionId: string) =>
 			new Promise<Message[]>((resolve) => {
 				resolveMessages = resolve;
 			}),
@@ -843,7 +843,11 @@ async function createEffectHarness(
 	const statusLog = createSilentLogger();
 	const statusWarn = vi.spyOn(statusLog, "warn");
 	const monitoring = wireMonitoringEffect({
-		client: { session: { messages } },
+		readMessages: (sessionId) =>
+			Effect.tryPromise({
+				try: () => messages(sessionId),
+				catch: (cause) => cause,
+			}),
 		wsHandler: {
 			getClientsForSession,
 		},

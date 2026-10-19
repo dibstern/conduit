@@ -376,6 +376,13 @@ const server = createServer(async (request, response) => {
 			streamLog("close", stream);
 		});
 	} else if (path === "/session/status") {
+		const failure = join(configDir, "fake-opencode-status-failure");
+		if (existsSync(failure)) {
+			response
+				.writeHead(Number(readFileSync(failure, "utf8")))
+				.end('{"message":"Injected status failure"}');
+			return;
+		}
 		const statuses = JSON.stringify(
 			(directory && readState().statuses[directory]) || {},
 		);
