@@ -1,13 +1,4 @@
-import { PersistencePathTag } from "../../../src/lib/domain/daemon/Services/daemon-config-persistence.js";
-import {
-	InstanceMgmtTag,
-	ProjectMgmtTag,
-} from "../../../src/lib/domain/daemon/Services/management-service.js";
-import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
-import type { Logger } from "../../../src/lib/logger.js";
-import { makeMockConfig } from "../../helpers/mock-factories.js";
-import { partialFake } from "../../helpers/partial-fake.js";
-import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
+import { InstanceMgmtTag } from "../../../src/lib/domain/daemon/Services/management-service.js";
 // TDD tests for daemon-main.ts: the top-level Effect entry point that replaces
 // the Daemon class's start() method. Tests exercise runStartupSequence
 // composition and background task supervision, NOT makeDaemonProgramLayer
@@ -16,88 +7,13 @@ import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { runStartupSequence } from "../../../src/lib/domain/daemon/Services/daemon-startup.js";
 import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import { resolveDefaultStaticDir } from "../../../src/lib/domain/daemon/Services/daemon-static-dir.js";
-import {
-	ConfigTag,
-	LoggerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
-
-function makeMockInstanceMgmt(): InstanceManagementDeps {
-	return {
-		getInstances: vi.fn().mockReturnValue([]),
-		addInstance: vi.fn().mockReturnValue({
-			id: "test",
-			name: "test",
-			port: 4000,
-			managed: true,
-			status: "stopped",
-			restartCount: 0,
-			createdAt: Date.now(),
-		}),
-		removeInstance: vi.fn(),
-		startInstance: vi.fn().mockResolvedValue(undefined),
-		stopInstance: vi.fn(),
-		updateInstance: vi.fn().mockReturnValue({
-			id: "test",
-			name: "test",
-			port: 4000,
-			managed: true,
-			status: "stopped",
-			restartCount: 0,
-			createdAt: Date.now(),
-		}),
-		persistConfig: vi.fn(),
-	};
-}
-
-/** Minimal layer providing all DaemonDeps for testing. */
-function makeTestLayer() {
-	return Layer.mergeAll(
-		makeDaemonStateLive(),
-		Layer.succeed(PersistencePathTag)("/tmp/test-daemon.json"),
-		Layer.succeed(InstanceMgmtTag)(makeMockInstanceMgmt()),
-		Layer.succeed(ProjectMgmtTag)({
-			getProjects: vi.fn().mockReturnValue([]),
-		}),
-		Layer.succeed(RelayCacheTag)({
-			get: () => Effect.die("not implemented in test"),
-			peek: () => Effect.succeed(Option.none()),
-			invalidate: () => Effect.die("not implemented in test"),
-		}),
-		Layer.succeed(ConfigTag)(
-			makeMockConfig({
-				httpServer: {} as import("node:http").Server,
-				opencodeUrl: "http://localhost:4096",
-				projectDir: "/tmp/test",
-				slug: "test-project",
-				persistenceDbPath: tempEventsDbPath(),
-				publishGlobalSetting: () => Effect.void,
-			}),
-		),
-		Layer.succeed(LoggerTag)(
-			partialFake<Logger>({
-				info: vi.fn<Logger["info"]>(),
-				warn: vi.fn<Logger["warn"]>(),
-				error: vi.fn<Logger["error"]>(),
-				debug: vi.fn<Logger["debug"]>(),
-				child: vi.fn<Logger["child"]>().mockReturnValue(
-					partialFake<Logger>({
-						info: vi.fn<Logger["info"]>(),
-						warn: vi.fn<Logger["warn"]>(),
-						error: vi.fn<Logger["error"]>(),
-						debug: vi.fn<Logger["debug"]>(),
-						child: vi.fn<Logger["child"]>(),
-					}),
-				),
-			}),
-		),
-	);
-}
+import { partialFake } from "../../helpers/partial-fake.js";
 
 describe("daemon-main", () => {
 	describe("resolveDefaultStaticDir", () => {
@@ -149,7 +65,18 @@ describe("daemon-main", () => {
 		it.effect("completes startup and leaves state unchanged", () =>
 			Effect.gen(function* () {
 				// Run startup sequence with minimal mocks — should complete without error
-				yield* runStartupSequence.pipe(Effect.provide(makeTestLayer()));
+				yield* runStartupSequence.pipe(
+					Effect.provide(
+						Layer.merge(
+							makeDaemonStateLive(),
+							Layer.succeed(InstanceMgmtTag)(
+								partialFake<InstanceManagementDeps>({
+									addInstance: vi.fn(),
+								}),
+							),
+						),
+					),
+				);
 			}),
 		);
 	});

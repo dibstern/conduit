@@ -66,26 +66,6 @@ const withMonitor = (
 
 describe("Leaf service Layers", () => {
 	describe("StorageMonitor", () => {
-		it.effect("Layer constructs and provides tag", () =>
-			Effect.gen(function* () {
-				const layer = StorageMonitorLive({
-					getStorageUsage: vi.fn().mockReturnValue(Effect.succeed(0.5)),
-					persistence: {
-						evictOldEvents: vi.fn().mockReturnValue(Effect.succeed(undefined)),
-					},
-					checkInterval: Duration.seconds(60),
-					highWaterMark: 0.9,
-				});
-
-				const scope = yield* Scope.make();
-				const ctx = yield* Layer.buildWithScope(layer, scope);
-				const svc = Context.get(ctx, StorageMonitorTag);
-				const usage = yield* svc.getUsage();
-				expect(typeof usage).toBe("number");
-				yield* Scope.close(scope, Exit.void);
-			}),
-		);
-
 		it.effect("background check records usage from getStorageUsage", () =>
 			withMonitor(
 				{

@@ -10,6 +10,7 @@ import {
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RelayStateLive } from "../../../src/lib/domain/relay/Layers/relay-layer.js";
 import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
+import { PtyManagerStateTag } from "../../../src/lib/domain/relay/Services/pty-manager-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -72,14 +73,10 @@ describe("Relay stack Layer composition", () => {
 			const pollerRef = yield* PollerStateTag;
 			const pollerState = yield* Ref.get(pollerRef);
 			expect(Object.keys(pollerState.previousStatuses)).toHaveLength(0);
-		}).pipe(Effect.provide(Layer.fresh(relayStateTestLayer))),
-	);
 
-	it.effect("RelayStateLive composes with service dependencies provided", () =>
-		Effect.gen(function* () {
-			// Just verify construction succeeds — bridge layers not needed
-			const ref = yield* SessionRegistryStateTag;
-			expect(ref).toBeDefined();
+			const ptyRef = yield* PtyManagerStateTag;
+			const ptyState = yield* Ref.get(ptyRef);
+			expect(HashMap.size(ptyState.sessions)).toBe(0);
 		}).pipe(Effect.provide(Layer.fresh(relayStateTestLayer))),
 	);
 });

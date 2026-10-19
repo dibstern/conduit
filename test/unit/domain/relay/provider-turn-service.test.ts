@@ -504,47 +504,6 @@ describe("ProviderTurnService", () => {
 	}
 
 	it.effect(
-		"passes Claude provider output to the required ingestion service",
-		() =>
-			Effect.gen(function* () {
-				let capturedSink: EventSink | undefined;
-				const dispatchEffect = vi.fn((command) => {
-					if (command.type === "send_turn") {
-						capturedSink = command.input.eventSink;
-						return Effect.succeed(completedTurn());
-					}
-					return Effect.void;
-				}) as unknown as OrchestrationEngine["dispatchEffect"];
-				const engine = makeEngine({
-					providerId: "claude",
-					dispatchEffect,
-				});
-				const ingestion = makeIngestion();
-				const { layer } = serviceLayer({ engine, ingestion });
-
-				yield* sendTurn().pipe(Effect.provide(layer));
-
-				const sink = capturedSink;
-				expect(sink).toBeDefined();
-				if (!sink) return;
-
-				const event = providerRuntimeEvent(
-					"text.delta",
-					"session-1",
-					{
-						messageId: "msg-1",
-						partId: "part-1",
-						text: "hello",
-					},
-					{ eventId: "evt-required-ingestion", providerId: "claude" },
-				);
-				const result = yield* Effect.result(sink.push(event));
-				expect(result._tag).toBe("Success");
-				expect(ingestion.ingest).toHaveBeenCalledWith(event, undefined);
-			}),
-	);
-
-	it.effect(
 		"sends the stored Claude model with explicit empty effort and context window",
 		() => {
 			const engine = makeEngine();
@@ -723,25 +682,17 @@ describe("ProviderTurnService", () => {
 					},
 				});
 
-				yield* command.input.eventSink.push(
-					providerRuntimeEvent(
-						"text.delta",
-						"session-1",
-						{
-							messageId: "assistant-1",
-							partId: "assistant-1-0",
-							text: "hello",
-						},
-						{ providerId: "claude" },
-					),
+				const event = providerRuntimeEvent(
+					"text.delta",
+					"session-1",
+					{ messageId: "assistant-1", partId: "assistant-1-0", text: "hello" },
+					{ providerId: "claude", eventId: "evt-required-ingestion" },
 				);
-				expect(ingestion.ingest).toHaveBeenCalledWith(
-					expect.objectContaining({
-						type: "text.delta",
-						sessionId: "session-1",
-					}),
-					undefined,
+				const result = yield* Effect.result(
+					command.input.eventSink.push(event),
 				);
+				expect(result._tag).toBe("Success");
+				expect(ingestion.ingest).toHaveBeenCalledWith(event, undefined);
 			}).pipe(Effect.provide(layer));
 		},
 	);
