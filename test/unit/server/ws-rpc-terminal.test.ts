@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Effect, Fiber, Layer, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Stream } from "effect";
 import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
@@ -132,10 +132,20 @@ describe("WsRpcServerLayer terminal controls", () => {
 
 			return Effect.gen(function* () {
 				const client = yield* rpcClient;
+				const subscribed = yield* Deferred.make<void>();
 				const announced = yield* client
 					.SubscribePtys({ projectSlug: "proj-1" })
-					.pipe(Stream.take(4), Stream.runCollect, Effect.forkChild);
-				yield* Effect.sleep("10 millis");
+					.pipe(
+						Stream.tap((envelope) =>
+							envelope._tag === "synchronized"
+								? Deferred.succeed(subscribed, undefined)
+								: Effect.void,
+						),
+						Stream.take(4),
+						Stream.runCollect,
+						Effect.forkChild,
+					);
+				yield* Deferred.await(subscribed);
 
 				expect(
 					yield* client.CreatePty({
