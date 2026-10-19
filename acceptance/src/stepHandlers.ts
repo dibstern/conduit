@@ -31,6 +31,7 @@ import { modelDriftHandlers } from "./steps/modelDrift.js";
 import { opencodeConnectionBannerHandlers } from "./steps/opencodeConnectionBanner.js";
 import { pendingInputTrayHandlers } from "./steps/pendingInputTray.js";
 import { phoneToastsHandlers } from "./steps/phoneToasts.js";
+import { projectTreeHandlers } from "./steps/projectTree.js";
 import { providerInstancesHandlers } from "./steps/providerInstances.js";
 import { sessionGoalHandlers } from "./steps/sessionGoal.js";
 import { sessionGoalDetailsHandlers } from "./steps/sessionGoalDetails.js";
@@ -55,6 +56,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...sessionPresentationHandlers,
 	...phoneToastsHandlers,
 	...sessionRowsHandlers,
+	...projectTreeHandlers,
 	...sessionModeDefaultHandlers,
 	...backgroundTasksHandlers,
 	...launchingRowsHandlers,

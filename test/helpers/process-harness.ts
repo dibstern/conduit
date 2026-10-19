@@ -633,6 +633,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 				Pick<
 					NodeJS.ProcessEnv,
 					| "CONDUIT_SERVICE"
+					| "CONDUIT_OUTBOX_DRAIN_INTERVAL_MS"
 					| "CONDUIT_TAILSCALE_BIN"
 					| "CONDUIT_BUILD_READY_PATH"
 					| "NODE_OPTIONS"
@@ -1847,10 +1848,12 @@ Object.assign(ClaudeDriver, { create: deps => {
 					"release",
 				);
 			}
-			for (const project of Either.getOrThrowWith(
-				loadDaemonConfigResult(this.configDir),
-				(error) => error,
-			)?.projects ?? []) {
+			const config = loadDaemonConfigResult(this.configDir);
+			const projects =
+				config._tag === "Failure" && config.failure._tag === "NotFound"
+					? [] // Startup can fail before the daemon writes its first config.
+					: (Either.getOrThrowWith(config, (error) => error)?.projects ?? []);
+			for (const project of projects) {
 				if (!project.path.startsWith(`${this.root}/`)) continue;
 				for (const name of ["recovery-gated", "recovery-fail-after-adoption"]) {
 					const gate = join(project.path, ".conduit", name);
@@ -2585,11 +2588,12 @@ export class ProcessBrowser {
 			knownMessages.set(owner, ids);
 		}
 		const cursor = this.frames.length;
+		const inputId = randomUUID();
 		const result = await this.run(
 			this.rpc["input.submit"]({
 				sessionId,
 				originId: this.originId,
-				inputId: randomUUID(),
+				inputId,
 				delivery,
 				text: prompt,
 			}),
@@ -2598,7 +2602,13 @@ export class ProcessBrowser {
 		// A queued submit is never refused; only a steer can be.
 		if (!result.ok) throw new Error(`submit refused: ${result.reason}`);
 		await this.followSession(result.sessionId);
-		const done = await this.waitForTurnEnd(result.sessionId, cursor, timeoutMs);
+		const done = await this.waitForTurnEnd(
+			result.sessionId,
+			cursor,
+			timeoutMs,
+			// A steered input shares the running turn's original input identity.
+			delivery === "queue" ? inputId : undefined,
+		);
 		// The detail source currently emits projected messages, not StoredEvents.
 		// A fresh typed history read fences the final text against shell completion.
 		const history = await this.history(result.sessionId);
@@ -2618,12 +2628,14 @@ export class ProcessBrowser {
 		return { chunks, done };
 	}
 
-	/** Wait for a completed/failed turn's shell version to advance past cursor.
+	/** Wait for a completed/failed turn's shell version to advance past cursor,
+	 * optionally matching the input that started it so a late prior end cannot win.
 	 * The current read model does not advance this field on interruption. */
 	waitForTurnEnd(
 		sessionId: string,
 		cursor = 0,
 		timeoutMs = TIMEOUT_MS,
+		inputId?: string,
 	): Promise<Record<string, unknown>> {
 		const endedBefore = Math.max(
 			-1,
@@ -2639,6 +2651,7 @@ export class ProcessBrowser {
 			(message) =>
 				message["type"] === "session_row" &&
 				message["id"] === sessionId &&
+				(inputId === undefined || message["lastTurnEndInputId"] === inputId) &&
 				(message["status"] === "idle" || message["status"] === "error") &&
 				Number(message["lastTurnEndVersion"] ?? -1) > endedBefore,
 			cursor,

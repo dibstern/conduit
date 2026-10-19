@@ -100,6 +100,7 @@ describe("selected OpenCode stop through the relay graph", () => {
 			use: () => Effect.succeed(client),
 			borrow: () => Effect.succeed(client),
 			useIfRunning: () => Effect.succeed(Option.none()),
+			isManagedStopped: () => Effect.succeed(false),
 			ifRunning: () => Effect.succeed(Option.none()),
 			stop: (instanceId) =>
 				Queue.offer(events, {

@@ -284,8 +284,14 @@
 		attention !== "needs-approval" && attention !== "needs-reply",
 	);
 	const emphasis = $derived(EMPHASIS_CLASSES[status.emphasis]);
+	// A live row with no context line (under a project tree header, which names
+	// the project) is one line: it takes the one-line height, with the title
+	// across both grid rows so it centres beside the glyph.
+	const oneLine = $derived(!shelfRow && !contextText);
 	const densityClass = $derived(
-		shelfRow ? DENSITY_CLASSES[density].settled : DENSITY_CLASSES[density].row,
+		shelfRow || oneLine
+			? DENSITY_CLASSES[density].settled
+			: DENSITY_CLASSES[density].row,
 	);
 	// The open row is never faded or greyed, whatever its tier: it is the one
 	// row you have to find at a glance. Its weight still follows the tier, so
@@ -651,7 +657,7 @@
 	<!-- Title line -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<span
-		class="session-item-title col-start-2 row-start-1 flex items-center gap-1.5 overflow-hidden font-brand {titleClass}"
+		class="session-item-title col-start-2 row-start-1 {oneLine ? 'row-span-2' : ''} flex items-center gap-1.5 overflow-hidden font-brand {titleClass}"
 		ondblclick={handleDblClick}
 	>
 		{#if shelfRow && contextText && !isRenaming}

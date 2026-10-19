@@ -518,14 +518,32 @@ describe("SaveProject through the built daemon", () => {
 					({ type }) => type === "turn.error" || type === "turn.interrupted",
 				),
 			).toBe(false);
-			expect(
-				state.events
-					.filter(({ type }) => type === "text.delta")
-					.map(({ data }) => (JSON.parse(data) as { text: string }).text),
-			).toEqual([prompt, ...responseChunks(prompt)]);
+			const [submittedDelta, ...assistantDeltas] = state.events
+				.filter(({ type }) => type === "text.delta")
+				.map(
+					({ data }) =>
+						JSON.parse(data) as {
+							messageId: string;
+							partId: string;
+							text: string;
+						},
+				);
+			// Runner batching can combine adjacent chunks into one stored delta.
+			expect(assistantDeltas.map(({ text }) => text).join("")).toBe(
+				responseChunks(prompt).join(""),
+			);
 			const history = await after.history(sessionId);
 			evidence["history"] = history;
 			expect(history.map(({ role }) => role)).toEqual(["user", "assistant"]);
+			expect(submittedDelta).toEqual({
+				messageId: history[0]?.id,
+				partId: history[0]?.parts?.[0]?.id,
+				text: prompt,
+			});
+			for (const { messageId, partId } of assistantDeltas) {
+				expect(messageId).toBe(history[1]?.id);
+				expect(partId).toBe(history[1]?.parts?.[0]?.id);
+			}
 			expect(history[1]?.parts?.map((part) => part.text ?? "").join("")).toBe(
 				responseChunks(prompt).join(""),
 			);

@@ -1,4 +1,12 @@
-import { Clock, Data, Duration, Effect, Option, Schema } from "effect";
+import {
+	Clock,
+	Data,
+	Duration,
+	Effect,
+	Option,
+	Schema,
+	Semaphore,
+} from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { AccountSchema } from "../contracts/account.js";
@@ -7,6 +15,7 @@ import type { AccountDirectory } from "../domain/daemon/Services/account-directo
 import { mark } from "../domain/daemon/Services/turn-timeline.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
+import * as Failure from "../effect/failure-classification.js";
 import {
 	type ClaudeEventPersistEffect,
 	ClaudeEventPersistEffectTag,
@@ -48,6 +57,11 @@ const REACTOR_COMPLETED_RESULT: TurnResult = {
 	durationMs: 0,
 	providerStateUpdates: [],
 };
+
+export type ProviderCommandInteractionSinkFactory = (
+	sessionId: string,
+	driver: string,
+) => EventSink;
 
 interface ProviderCommandOutboxRow {
 	readonly request_sequence: number;
@@ -179,25 +193,114 @@ const storeFailure =
 		});
 
 export class ProviderSideEffectReactor {
+	private readonly liveCommands = new Set<string>();
+	private readonly drainingSessions = new Set<string>();
+	private readonly admission = Semaphore.makeUnsafe(1);
+
 	constructor(private readonly options: ProviderSideEffectReactorOptions) {}
 
-	drain(): Effect.Effect<void, ProviderCommandStoreFailure> {
+	/** Reserve before commit; the short lock also fences an asynchronous claim. */
+	withLiveCommand<A, E, R>(commandId: string, effect: Effect.Effect<A, E, R>) {
+		return Effect.acquireUseRelease(
+			this.admission.withPermit(
+				Effect.sync(() => {
+					this.liveCommands.add(commandId);
+				}),
+			),
+			() => effect,
+			() =>
+				Effect.sync(() => {
+					this.liveCommands.delete(commandId);
+				}),
+		);
+	}
+
+	drain(
+		makeInteractions?: ProviderCommandInteractionSinkFactory,
+	): Effect.Effect<void, ProviderCommandStoreFailure> {
 		return Effect.gen({ self: this }, function* () {
-			while (true) {
-				const processed = yield* this.runOnce();
-				if (processed === 0) return;
-			}
+			const heads = yield* this.nextPendingRequests();
+			yield* Effect.forEach(
+				heads,
+				(head) =>
+					this.withDrainSession(
+						head.session_id,
+						Effect.gen({ self: this }, function* () {
+							let row: ProviderCommandOutboxRow | undefined = head;
+							while (row) {
+								if ((yield* this.runBackgroundRow(row, makeInteractions)) === 0)
+									return;
+								row = (yield* this.nextPendingRequests(head.session_id))[0];
+							}
+						}),
+					).pipe(
+						// A failed session must not interrupt another session's live turn.
+						Effect.catchCause((cause) =>
+							Failure.isInterruptedOnly(cause)
+								? Effect.interrupt
+								: Effect.logError(
+										"Provider command outbox drain failed",
+										cause,
+									),
+						),
+					),
+				{ concurrency: Math.max(1, heads.length), discard: true },
+			);
 		});
 	}
 
-	runOnce(): Effect.Effect<number, ProviderCommandStoreFailure> {
+	private withDrainSession<A, E, R>(
+		sessionId: string,
+		effect: Effect.Effect<A, E, R>,
+	) {
+		return Effect.acquireUseRelease(
+			Effect.sync(() => {
+				if (this.drainingSessions.has(sessionId)) return false;
+				this.drainingSessions.add(sessionId);
+				return true;
+			}),
+			(acquired) => (acquired ? effect : Effect.succeed(undefined)),
+			(acquired) =>
+				Effect.sync(() => {
+					if (acquired) this.drainingSessions.delete(sessionId);
+				}),
+		);
+	}
+
+	runOnce(
+		makeInteractions?: ProviderCommandInteractionSinkFactory,
+	): Effect.Effect<number, ProviderCommandStoreFailure> {
 		return Effect.gen({ self: this }, function* () {
-			const now = yield* this.currentTimeMillis();
-			const row = yield* this.nextPendingRequest(now);
+			const row = (yield* this.nextPendingRequests())[0];
 			if (!row) return 0;
+			return (
+				(yield* this.withDrainSession(
+					row.session_id,
+					this.runBackgroundRow(row, makeInteractions),
+				)) ?? 0
+			);
+		});
+	}
+
+	private runBackgroundRow(
+		row: ProviderCommandOutboxRow,
+		makeInteractions?: ProviderCommandInteractionSinkFactory,
+	): Effect.Effect<number, ProviderCommandStoreFailure> {
+		return Effect.gen({ self: this }, function* () {
+			if (this.liveCommands.has(row.command_id)) return 0;
 			// Recovery / background path: no waiter, so the row outcome is recorded
 			// durably and swallowed here.
-			const result = yield* Effect.result(this.executeRow(row));
+			const result = yield* Effect.result(
+				this.executeRow(row, { makeInteractions, background: true }),
+			);
+			// Store failures may leave the row executable. Let the scheduler log
+			// and delay; retrying it inside drain's loop would spin without backoff.
+			if (
+				result._tag === "Failure" &&
+				result.failure instanceof ProviderCommandStoreFailure
+			) {
+				return yield* Effect.fail(result.failure);
+			}
 			if (
 				result._tag === "Success" &&
 				result.success.status === "steer-declined"
@@ -228,16 +331,18 @@ export class ProviderSideEffectReactor {
 	 * same-process dispatch path. Provider output still streams to the durable
 	 * ProviderRuntimeIngestion, but permission/question requests route through
 	 * this sink so Claude tool approvals and `AskUserQuestion` behave exactly as
-	 * the inline path did. The recovery/`drain()` path has no waiter, so it omits
-	 * it and interactions remain unsupported.
+	 * the inline path did. Production drains create their sink through the same
+	 * relay factory for unowned commands recovered from a previous process.
 	 */
 	runCommand(
 		commandId: string,
 		interactions?: EventSink,
+		abortSignal?: AbortSignal,
 	): Effect.Effect<TurnResult, ProviderCommandExecutionError> {
 		return Effect.gen({ self: this }, function* () {
 			const row = yield* this.pendingRequestForCommand(commandId);
-			if (row) return yield* this.executeRow(row, interactions);
+			if (row)
+				return yield* this.executeRow(row, { interactions, abortSignal });
 			return yield* this.durableOutcome(commandId);
 		});
 	}
@@ -250,19 +355,39 @@ export class ProviderSideEffectReactor {
 	 */
 	private executeRow(
 		row: ProviderCommandOutboxRow,
-		interactions?: EventSink,
+		options?: {
+			interactions?: EventSink | undefined;
+			makeInteractions?: ProviderCommandInteractionSinkFactory | undefined;
+			abortSignal?: AbortSignal | undefined;
+			background?: boolean;
+		},
 	): Effect.Effect<TurnResult, ProviderCommandExecutionError> {
 		return Effect.gen({ self: this }, function* () {
 			const startedAt = yield* this.currentTimeMillis();
 			// The `pending -> running` update is the exclusive execution claim.
 			// If it changes no rows another executor already claimed this row, so
 			// do NOT run the provider effect; surface the durable outcome instead.
-			const claimed = yield* this.markRunning(row, startedAt);
+			const claimed = yield* options?.background
+				? this.admission.withPermit(
+						Effect.suspend(() =>
+							this.liveCommands.has(row.command_id)
+								? Effect.succeed(undefined)
+								: this.markRunning(row, startedAt),
+						),
+					)
+				: this.markRunning(row, startedAt);
 			if (claimed === undefined) {
+				if (options?.background) return REACTOR_COMPLETED_RESULT;
 				return yield* this.durableOutcome(row.command_id);
 			}
 			const result = yield* Effect.result(
-				this.runProviderEffect(row, claimed, interactions),
+				this.runProviderEffect(
+					row,
+					claimed,
+					options?.interactions,
+					options?.makeInteractions,
+					options?.abortSignal,
+				),
 			);
 			if (result._tag === "Failure") {
 				const failedAt = yield* this.currentTimeMillis();
@@ -366,24 +491,42 @@ export class ProviderSideEffectReactor {
 			: Clock.currentTimeMillis;
 	}
 
-	private nextPendingRequest(
-		nowMs: number,
+	private nextPendingRequests(
+		sessionId?: string,
 	): Effect.Effect<
-		ProviderCommandOutboxRow | undefined,
+		readonly ProviderCommandOutboxRow[],
 		ProviderCommandStoreFailure
 	> {
-		return this.options.sql<ProviderCommandOutboxRow>`
+		return Effect.gen({ self: this }, function* () {
+			const nowMs = yield* this.currentTimeMillis();
+			return yield* this.options.sql<ProviderCommandOutboxRow>`
 			SELECT request_sequence, command_id, project_key, session_id, provider_id,
 			       effect_type, payload_json, attempt_count
-			FROM provider_command_outbox
+			FROM provider_command_outbox AS candidate
 			WHERE project_key = ${this.options.projectId}
+				AND (${sessionId ?? null} IS NULL OR session_id = ${sessionId ?? null})
 				AND (status = 'pending'
 					OR (status = 'retryable_failed' AND next_attempt_at <= ${nowMs}))
+				AND NOT EXISTS (
+					SELECT 1 FROM provider_command_outbox AS earlier
+					WHERE earlier.project_key = candidate.project_key
+						AND earlier.session_id = candidate.session_id
+						AND earlier.status IN ('pending', 'running', 'retryable_failed')
+						AND (earlier.request_sequence < candidate.request_sequence OR earlier.status = 'running')
+				)
 			ORDER BY request_sequence
-			LIMIT 1`.pipe(
-			Effect.map((rows) => rows[0]),
-			Effect.mapError(storeFailure("nextPendingRequest")),
-		);
+			`.pipe(
+				Effect.map((rows) =>
+					rows.filter(
+						(row) =>
+							!this.liveCommands.has(row.command_id) &&
+							(sessionId !== undefined ||
+								!this.drainingSessions.has(row.session_id)),
+					),
+				),
+				Effect.mapError(storeFailure("nextPendingRequest")),
+			);
+		});
 	}
 
 	/** Returns the claimed attempt, or undefined when another executor won. */
@@ -399,7 +542,9 @@ export class ProviderSideEffectReactor {
 			    updated_at = ${updatedAt}
 			WHERE request_sequence = ${row.request_sequence}
 			  AND project_key = ${this.options.projectId}
-			  AND status IN ('pending', 'retryable_failed')
+			  AND attempt_count = ${row.attempt_count}
+			  AND (status = 'pending'
+			    OR (status = 'retryable_failed' AND next_attempt_at <= ${updatedAt}))
 			RETURNING attempt_count`.pipe(
 			Effect.map((rows) => rows[0]?.attempt_count),
 			Effect.mapError(storeFailure("markRunning")),
@@ -410,6 +555,8 @@ export class ProviderSideEffectReactor {
 		row: ProviderCommandOutboxRow,
 		commandAttempt: number,
 		interactions?: EventSink,
+		makeInteractions?: ProviderCommandInteractionSinkFactory,
+		abortSignal?: AbortSignal,
 	): Effect.Effect<
 		TurnResult,
 		| ProviderCommandPayloadParseFailed
@@ -432,6 +579,8 @@ export class ProviderSideEffectReactor {
 								.pipe(Effect.mapError(storeFailure("resolveReplayAccount")))
 						: undefined);
 				const driver = account?.driver ?? row.provider_id;
+				const interactionSink =
+					interactions ?? makeInteractions?.(payload.sessionId, driver);
 				const instanceId = account?.id ?? payload.instanceId ?? row.provider_id;
 				const instance = yield* this.options.registry.getInstanceEffect(driver);
 				const turnKey = {
@@ -469,8 +618,8 @@ export class ProviderSideEffectReactor {
 										...(prepared?.handoff ? { handoff: prepared.handoff } : {}),
 									}
 								: {}),
-							eventSink: this.makeReactorEventSink(interactions),
-							abortSignal: new AbortController().signal,
+							eventSink: this.makeReactorEventSink(interactionSink),
+							abortSignal: abortSignal ?? new AbortController().signal,
 						});
 					});
 				const result = getProviderDriver(driver)?.supportsNativeResume
@@ -818,8 +967,8 @@ export class ProviderSideEffectReactor {
 	 * streams to the durable ProviderRuntimeIngestion (the mandatory persistence
 	 * seam). INTERACTIONS (permission/question) route through the caller's real
 	 * sink on the same-process dispatch path so Claude tool approvals and
-	 * `AskUserQuestion` resolve; on the recovery/`drain()` path there is no waiter
-	 * to answer them, so they remain unsupported.
+	 * `AskUserQuestion` resolve. Production drains supply the same relay sink
+	 * factory so recovered commands and background claim winners can also ask.
 	 */
 	private makeReactorEventSink(interactions?: EventSink): EventSink {
 		// Streamed output bypasses the relay sink, so mark the session alive here

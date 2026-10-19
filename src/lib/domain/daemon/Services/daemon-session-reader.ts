@@ -124,7 +124,8 @@ export const hasProviderRecoveryCandidate = (
 			const sql = yield* SqlClient.SqlClient;
 			const rows = yield* sql<{ needs_recovery: number }>`SELECT EXISTS (
 				SELECT 1 FROM provider_command_outbox
-				WHERE project_key = ${project.slug} AND provider_id = 'claude' AND effect_type = 'send_turn' AND status = 'running'
+				WHERE project_key = ${project.slug} AND (provider_id = 'claude' OR provider_id IN ${sql.in(openCodeInstanceIds)})
+					AND effect_type = 'send_turn' AND status = 'running'
 			) OR EXISTS (
 				SELECT 1 FROM sessions AS session
 				JOIN session_providers AS binding ON binding.session_id = session.id
@@ -134,6 +135,15 @@ export const hasProviderRecoveryCandidate = (
 					SELECT 1 FROM pending_approvals AS approval
 					WHERE approval.session_id = session.id AND approval.status = 'pending'
 				))
+				) OR EXISTS (
+					SELECT 1 FROM pending_inputs pending
+					JOIN sessions session ON session.id = pending.session_id
+					WHERE session.project_id = ${project.slug} AND pending.state = 'steering'
+					AND NOT EXISTS (SELECT 1 FROM messages WHERE input_id = pending.input_id)
+					AND (SELECT status FROM provider_command_outbox
+						WHERE project_key = ${project.slug} AND command_id = pending.input_id
+						AND session_id = pending.session_id AND effect_type = 'send_turn'
+						ORDER BY request_sequence DESC LIMIT 1) = 'failed'
 			) AS needs_recovery`;
 			return rows[0]?.needs_recovery === 1;
 		}).pipe(Effect.provide(database));

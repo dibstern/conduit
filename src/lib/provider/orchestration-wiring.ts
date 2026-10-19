@@ -41,7 +41,10 @@ import {
 } from "./opencode-provider-instance.js";
 import { OrchestrationEngine } from "./orchestration-engine.js";
 import { CommandReadModelRepository } from "./orchestration-read-model.js";
-import type { ProviderCommandStoreFailure } from "./orchestration-side-effect-reactor.js";
+import type {
+	ProviderCommandInteractionSinkFactory,
+	ProviderCommandStoreFailure,
+} from "./orchestration-side-effect-reactor.js";
 import { ProjectShellEnvResolver } from "./project-shell-env.js";
 import { ProviderRegistry, ProviderRegistryTag } from "./provider-registry.js";
 import {
@@ -106,7 +109,9 @@ export interface OrchestrationLayer {
 	 * side effects through the reactor (crash recovery / test flush). Same-process
 	 * dispatch already awaits its own execution.
 	 */
-	drainSideEffects(): Effect.Effect<void, ProviderCommandStoreFailure>;
+	drainSideEffects(
+		makeInteractions?: ProviderCommandInteractionSinkFactory,
+	): Effect.Effect<void, ProviderCommandStoreFailure>;
 }
 
 const TURN_COMPLETE_RESULT: TurnResult = {
@@ -345,7 +350,8 @@ function createOrchestrationView(
 		registry,
 		openCodeInstance,
 		wireSSEToInstance,
-		drainSideEffects: () => engine.drainSideEffects(),
+		drainSideEffects: (makeInteractions) =>
+			engine.drainSideEffects(makeInteractions),
 	};
 }
 

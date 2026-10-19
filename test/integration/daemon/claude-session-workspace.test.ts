@@ -516,6 +516,7 @@ exec '${realGit}' "$@"
 				),
 			).size;
 		expect(runnerStarts()).toBe(1);
+		const markCursor = fixture.marks.length;
 		await sendRpcRequest(socket, {
 			_tag: "SaveProject",
 			slug: "process-test",
@@ -527,6 +528,13 @@ exec '${realGit}' "$@"
 		evidence["additionalDirectories"] = fixture
 			.claudeOptions()
 			.map(({ options }) => options["additionalDirectories"]);
+		await fixture.waitForMark(
+			(mark) =>
+				mark.kind === "runner-started" &&
+				mark.sessionId === sessionId &&
+				runnerStarts() === 2,
+			markCursor,
+		);
 		expect(runnerStarts()).toBe(2);
 		expect(
 			fixture.claudeOptions().at(-1)?.options["additionalDirectories"],
@@ -602,19 +610,19 @@ exec '${realGit}' "$@"
 		await browser.send(sessionId, "Enter the secondary worktree.");
 		if (state === "consumed")
 			await browser.send(sessionId, "Reply with pong in the worktree.");
-		const old = fixture.marks.find(
+		const old = await fixture.waitForMark(
 			(mark) => mark.kind === "runner-started" && mark.sessionId === sessionId,
 		);
 		if (old?.kind !== "runner-started")
 			throw new Error("Missing original runner");
 		await fixture.kill();
 		await fixture.restart({ buildId: "q5u6-14-upgraded" });
-		await vi.waitFor(
-			() =>
-				expect(fixture.logTail).toContain(
-					"Changed Claude settings cannot be replayed without changing trust tiers or filesystem discovery; retaining the old runner",
-				),
-			{ timeout: 15_000 },
+		await fixture.waitForMark(
+			(mark) =>
+				mark.kind === "runner-upgrade" &&
+				mark.phase === "failed" &&
+				mark.sessionId === sessionId &&
+				mark.oldPid === old.pid,
 		);
 		expect(() => process.kill(old.pid, 0)).not.toThrow();
 		const restored = await fixture.connect(sessionId);
