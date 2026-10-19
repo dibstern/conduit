@@ -44,7 +44,7 @@
 				<div class={rowClass}>{@render row()}</div>
 			{/if}
 			{#if onstop}
-				<Button variant="secondary" size="content" tone="inherit" icon="square" iconSize={9} iconOnly class="h-7 w-7 shrink-0 rounded-[8px] text-status-red" data-testid="background-task-stop" ariaLabel="Stop {task.description}" onclick={() => onstop?.(task.id)} />
+				<Button variant="secondary" size="content" tone="inherit" icon="square" iconSize={9} iconOnly class="h-7 w-7 shrink-0 rounded-[8px] text-status-red" data-testid="background-task-stop" ariaLabel="Stop background task {task.description}" onclick={() => onstop?.(task.id)} />
 			{/if}
 		</li>
 	{/each}

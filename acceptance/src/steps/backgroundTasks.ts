@@ -477,10 +477,11 @@ export const backgroundTasksHandlers: StepHandler[] = [
 			/^the background tasks pull-down offers a named stop control for each task$/,
 		run: async ({ world }) => {
 			const panel = world.page.getByTestId("background-tasks-panel");
+			await expect(panel).toBeVisible();
 			for (const task of TASKS)
 				await expect(
-					panel.getByRole("button", {
-						name: `Stop ${task.description}`,
+					world.page.getByRole("button", {
+						name: `Stop background task ${task.description}`,
 						exact: true,
 					}),
 				).toBeVisible();
@@ -494,7 +495,10 @@ export const backgroundTasksHandlers: StepHandler[] = [
 				StopBackgroundTask: () => ({ ok: true }),
 			});
 			await world.page
-				.getByRole("button", { name: `Stop ${match[1]}`, exact: true })
+				.getByRole("button", {
+					name: `Stop background task ${match[1]}`,
+					exact: true,
+				})
 				.click();
 		},
 	},

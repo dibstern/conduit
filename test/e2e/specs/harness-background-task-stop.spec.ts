@@ -276,7 +276,10 @@ test("stops exactly one shell only after the SDK confirms it to both clients", a
 		await steps.record("four-live-tasks");
 		await page
 			.getByTestId("background-tasks-panel")
-			.getByRole("button", { name: `Stop ${shell.description}`, exact: true })
+			.getByRole("button", {
+				name: `Stop background task ${shell.description}`,
+				exact: true,
+			})
 			.click();
 		await expect.poll(() => requestedIds(harness)).toEqual([shell.task_id]);
 		await expectTasks(
@@ -422,7 +425,10 @@ test("stopping an agent also stops its live descendants and leaves unrelated wor
 	try {
 		await page
 			.getByTestId("background-tasks-panel")
-			.getByRole("button", { name: `Stop ${agent.description}`, exact: true })
+			.getByRole("button", {
+				name: `Stop background task ${agent.description}`,
+				exact: true,
+			})
 			.click();
 		await expect
 			.poll(() => requestedIds(harness))
@@ -525,7 +531,10 @@ test("a real failure keeps the row, duplicate clients and finished IDs are harml
 		writeFileSync(failGate, "fail");
 		await page
 			.getByTestId("background-tasks-panel")
-			.getByRole("button", { name: `Stop ${shell.description}`, exact: true })
+			.getByRole("button", {
+				name: `Stop background task ${shell.description}`,
+				exact: true,
+			})
 			.click();
 		await expect(
 			page
@@ -544,11 +553,17 @@ test("a real failure keeps the row, duplicate clients and finished IDs are harml
 			.click();
 		await page
 			.getByTestId("background-tasks-panel")
-			.getByRole("button", { name: `Stop ${shell.description}`, exact: true })
+			.getByRole("button", {
+				name: `Stop background task ${shell.description}`,
+				exact: true,
+			})
 			.click();
 		await second
 			.getByTestId("background-tasks-panel")
-			.getByRole("button", { name: `Stop ${shell.description}`, exact: true })
+			.getByRole("button", {
+				name: `Stop background task ${shell.description}`,
+				exact: true,
+			})
 			.click();
 		await expect
 			.poll(() => requestedIds(harness))
