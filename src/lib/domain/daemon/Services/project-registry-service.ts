@@ -446,23 +446,31 @@ export const addWithoutRelay = (
 	Effect.gen(function* () {
 		const ref = yield* ProjectRegistryTag;
 		const bus = yield* DaemonEventBusTag;
+		const entry: ProjectRegistering = { _tag: "Registering", project };
 
 		// Atomic check-and-set via Ref.modify
 		const alreadyExists = yield* Ref.modify(ref, (state) => {
 			if (HashMap.has(state, project.slug)) {
 				return [true, state] as const;
 			}
-			const entry: ProjectRegistering = {
-				_tag: "Registering",
-				project,
-			};
 			return [false, HashMap.set(state, project.slug, entry)] as const;
 		});
 
 		if (alreadyExists) {
 			return yield* new ProjectAlreadyExists({ slug: project.slug });
 		}
-		yield* refreshProjectRollups([project.slug]);
+		yield* refreshProjectRollups([project.slug]).pipe(
+			Effect.onError(() =>
+				Ref.update(ref, (state) =>
+					Option.exists(
+						HashMap.get(state, project.slug),
+						(current) => current === entry,
+					)
+						? HashMap.remove(state, project.slug)
+						: state,
+				),
+			),
+		);
 
 		if (!options?.silent) {
 			yield* PubSub.publish(
@@ -474,6 +482,7 @@ export const addWithoutRelay = (
 		yield* requestConfigSave;
 		yield* Effect.logInfo("Project registered");
 	}).pipe(
+		Effect.uninterruptible,
 		Effect.annotateLogs("slug", project.slug),
 		Effect.withSpan("projectRegistry.addWithoutRelay", {
 			attributes: { slug: project.slug },
@@ -593,6 +602,7 @@ export const remove = (slug: string) =>
 						removed.value.project.folders[0],
 						state.configDir,
 					);
+					yield* refreshProjectRollups([slug]);
 				}).pipe(
 					Effect.onError(() =>
 						// Failed removal must remain reachable by retries and a full stop.
@@ -606,7 +616,6 @@ export const remove = (slug: string) =>
 						).pipe(Effect.andThen(requestConfigSave)),
 					),
 				);
-				yield* refreshProjectRollups([slug]);
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.InstanceRemoved({ instanceId: slug }),

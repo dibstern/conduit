@@ -14,6 +14,7 @@ import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daem
 import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
 	addWithoutRelay,
+	has,
 	makeProjectRegistryLive,
 	remove,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
@@ -214,15 +215,55 @@ describe("retained child sidebar roll-up", () => {
 							(SELECT value FROM read_model_counter WHERE id = 1) AS version
 							FROM session_sidebar WHERE session_id = 'parent'`,
 						).toEqual(beforeFailure);
-						// The registry entry was added before its roll-up failed; remove it
-						// before exercising the successful registration/removal cycle.
+						expect
+							.soft(
+								yield* has(retained.slug),
+								"failed registration rolls back registry",
+							)
+							.toBe(false);
+						const retriedRegistration = yield* Effect.exit(
+							addWithoutRelay(retained),
+						);
+						expect
+							.soft(retriedRegistration._tag, "registration retry succeeds")
+							.toBe("Success");
+						yield* check(true);
 						yield* remove(retained.slug);
 						const initial = yield* check(false);
 						yield* addWithoutRelay(retained);
 						yield* check(true, initial);
 						yield* writeParentStatus();
 						const registered = yield* check(true);
+						const beforeRemovalFailure = yield* sql`SELECT row,
+							(SELECT value FROM read_model_counter WHERE id = 1) AS version
+							FROM session_sidebar WHERE session_id = 'parent'`;
+						yield* sql`CREATE TEMP TRIGGER fail_rollup BEFORE UPDATE ON session_sidebar
+							BEGIN SELECT RAISE(ABORT, 'rollup failure'); END`;
+						const failedRemoval = yield* Effect.exit(remove(retained.slug));
+						yield* sql`DROP TRIGGER fail_rollup`;
+						expect(failedRemoval._tag).toBe("Failure");
+						expect
+							.soft(
+								yield* has(retained.slug),
+								"failed removal restores registry",
+							)
+							.toBe(true);
+						expect(projects ? yield* Ref.get(projects) : undefined).toContain(
+							retained.slug,
+						);
+						expect(
+							yield* sql`SELECT row,
+							(SELECT value FROM read_model_counter WHERE id = 1) AS version
+							FROM session_sidebar WHERE session_id = 'parent'`,
+						).toEqual(beforeRemovalFailure);
 						yield* remove(retained.slug);
+						expect(yield* has(retained.slug)).toBe(false);
+						expect
+							.soft(
+								projects ? yield* Ref.get(projects) : undefined,
+								"removal retry updates roll-up scope",
+							)
+							.not.toContain(retained.slug);
 						yield* check(false, registered);
 						yield* writeParentStatus();
 						yield* check(false);
@@ -251,6 +292,85 @@ describe("retained child sidebar roll-up", () => {
 						)?.item;
 						expect(parent?.processing ?? false).toBe(false);
 						expect(parent?.attention).toBe("idle");
+						const events = yield* EventStoreEffectTag;
+						const runner = yield* ProjectionRunnerEffectTag;
+						yield* runner.recover();
+						yield* runner.projectBatch(
+							yield* events.appendBatch([
+								canonicalEvent("session.created", "grandchild", {
+									sessionId: "grandchild",
+									title: "Registered grandchild",
+									provider: "opencode",
+									parentId: "child",
+								}),
+								state === "busy"
+									? canonicalEvent("session.status", "grandchild", {
+											sessionId: "grandchild",
+											status: "busy",
+										})
+									: canonicalEvent(`${state}.asked`, "grandchild", {
+											id: "grandchild-approval",
+											sessionId: "grandchild",
+											questions: [],
+											toolName: "Bash",
+											input: {},
+										}),
+							]),
+						);
+						const checkGrandchild = (active: boolean) =>
+							Effect.gen(function* () {
+								const cached = (yield* rows.read()).rows.find(
+									({ item }) => item.id === "parent",
+								)?.item;
+								const listed = (yield* rows.list({ roots: true })).find(
+									({ id }) => id === "parent",
+								);
+								for (const [label, root] of [
+									["cached ancestry", cached],
+									["listed ancestry", listed],
+								] as const) {
+									expect
+										.soft(root?.processing ?? false, label)
+										.toBe(active && state === "busy");
+									expect
+										.soft(root?.attention, label)
+										.toBe(
+											active
+												? state === "busy"
+													? "working"
+													: state === "permission"
+														? "needs-approval"
+														: "needs-reply"
+												: "idle",
+										);
+									expect
+										.soft(root?.pendingPermissionCount ?? 0, label)
+										.toBe(active && state === "permission" ? 1 : 0);
+									expect
+										.soft(root?.pendingQuestionCount ?? 0, label)
+										.toBe(active && state === "question" ? 1 : 0);
+								}
+							});
+						yield* checkGrandchild(true);
+						yield* runner.projectBatch(
+							yield* events.appendBatch([
+								state === "busy"
+									? canonicalEvent("session.status", "grandchild", {
+											sessionId: "grandchild",
+											status: "idle",
+										})
+									: state === "permission"
+										? canonicalEvent("permission.resolved", "grandchild", {
+												id: "grandchild-approval",
+												decision: "once",
+											})
+										: canonicalEvent("question.resolved", "grandchild", {
+												id: "grandchild-approval",
+												answers: {},
+											}),
+							]),
+						);
+						yield* checkGrandchild(false);
 					}),
 				);
 			} finally {

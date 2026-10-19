@@ -140,6 +140,8 @@ export const sessionRowsToSessionInfoList = (
 		readonly now?: number;
 		readonly statuses?: Readonly<Record<string, { type: string }>>;
 		readonly parentMap?: ReadonlyMap<string, string>;
+		/** Contribution owners; the parent map still includes the whole family. */
+		readonly contributingSessionIds?: ReadonlySet<string> | undefined;
 		readonly sideThreadIds?: ReadonlySet<string>;
 		/** Unread descendants, stopping at each Side Thread's edge to its parent. */
 		readonly unreadSessionIds?: ReadonlySet<string>;
@@ -180,16 +182,20 @@ export const sessionRowsToSessionInfoList = (
 		const rowStatuses = new Map(rows.map((row) => [row.id, row.status]));
 		const members = new Set([...rowStatuses.keys(), ...opts.parentMap.keys()]);
 		const backgroundChildren = new Set(
-			[...new Set([...members, ...opts.parentMap.values()])].flatMap(
-				(id) =>
-					opts
-						.backgroundOf?.(id)
-						?.tasks.flatMap((task) =>
-							task.childSessionId ? [task.childSessionId] : [],
-						) ?? [],
-			),
+			[...new Set([...members, ...opts.parentMap.values()])]
+				.filter((id) => opts.contributingSessionIds?.has(id) ?? true)
+				.flatMap(
+					(id) =>
+						opts
+							.backgroundOf?.(id)
+							?.tasks.flatMap((task) =>
+								task.childSessionId ? [task.childSessionId] : [],
+							) ?? [],
+				),
 		);
 		for (const id of members) {
+			if (opts.contributingSessionIds && !opts.contributingSessionIds.has(id))
+				continue;
 			let root = id;
 			let activityRoot: string | undefined;
 			const seen = new Set<string>();
@@ -1344,14 +1350,14 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					status: string;
 					unread: number;
 					side_thread: number;
+					project_id: string | null;
 				}>`
 					WITH RECURSIVE family(id) AS (
 						SELECT value FROM json_each(${JSON.stringify(rows.map((row) => row.id))})
 						UNION
 						SELECT child.id FROM sessions child JOIN family ON child.parent_id = family.id
-						WHERE child.project_id IN ${sql.in(projectIds)}
 					)
-					SELECT id, parent_id, status, unread, side_thread FROM sessions JOIN family USING (id)`,
+					SELECT id, parent_id, status, unread, side_thread, project_id FROM sessions JOIN family USING (id)`,
 				countPendingApprovalsBySession(scope, projectIds),
 			]).pipe(
 				Effect.mapError((cause) =>
@@ -1364,7 +1370,16 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				),
 			);
 			const pending = pendingApprovalCountsByType(approvals);
+			const registered = new Set(projectIds);
 			return sessionRowsToSessionInfoList(rows, {
+				contributingSessionIds: new Set(
+					family
+						.filter(
+							(row) =>
+								row.project_id !== null && registered.has(row.project_id),
+						)
+						.map(({ id }) => id),
+				),
 				sideThreadIds: new Set(
 					family.flatMap((row) => (row.side_thread === 1 ? [row.id] : [])),
 				),

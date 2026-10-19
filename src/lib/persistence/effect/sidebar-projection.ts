@@ -30,7 +30,7 @@ const encodeRow = Schema.encodeSync(Schema.fromJsonString(SidebarRowSchema));
 /** What a family member contributes to its root's row. */
 export type FamilyMember = Pick<
 	SessionRow,
-	"id" | "parent_id" | "side_thread" | "unread" | "status"
+	"id" | "parent_id" | "side_thread" | "unread" | "status" | "project_id"
 >;
 
 /**
@@ -70,10 +70,11 @@ export const refreshSidebar = (
 				SELECT * FROM sessions
 				WHERE id IN (SELECT value FROM json_each(${roots}))
 				AND parent_id IS NULL`,
+			// Early migrations run this before sessions.project_id exists.
 			sql<FamilyMember>`
-				SELECT id, parent_id, side_thread, unread, status FROM sessions
-				WHERE root_id IN (SELECT value FROM json_each(${roots}))
-				${projectIds === undefined ? sql.literal("") : sql`AND project_id IN ${sql.in(projectIds)}`}`,
+				SELECT id, parent_id, side_thread, unread, status
+				${projectIds === undefined ? sql.literal("") : sql`, project_id`} FROM sessions
+				WHERE root_id IN (SELECT value FROM json_each(${roots}))`,
 			sql<PendingApprovalCountRow>`
 				SELECT a.session_id, a.type, COUNT(*) AS pending_count
 				FROM pending_approvals a JOIN sessions s ON s.id = a.session_id
@@ -86,7 +87,7 @@ export const refreshSidebar = (
 				WHERE session_id IN (SELECT value FROM json_each(${roots}))
 				AND row IS NOT NULL`,
 		]);
-		const next = sidebarRows(top, family, approvals, version);
+		const next = sidebarRows(top, family, approvals, version, projectIds);
 		const storedRows = new Map(
 			stored.map((row) => [row.session_id, decodeRow(row.row)]),
 		);
@@ -184,7 +185,18 @@ export const sidebarRows = (
 	family: readonly FamilyMember[],
 	approvals: readonly PendingApprovalCountRow[],
 	version: number,
+	projectIds?: readonly string[],
 ): ReadonlyMap<string, SidebarRow> => {
+	const registered = projectIds && new Set(projectIds);
+	const contributingSessionIds =
+		registered &&
+		new Set(
+			family
+				.filter(
+					(row) => row.project_id != null && registered.has(row.project_id),
+				)
+				.map(({ id }) => id),
+		);
 	const parentMap = new Map(
 		family.flatMap((row) =>
 			row.parent_id === null ? [] : [[row.id, row.parent_id] as const],
@@ -195,6 +207,7 @@ export const sidebarRows = (
 	);
 	const pending = pendingApprovalCountsByType(approvals);
 	const items = sessionRowsToSessionInfoList(roots, {
+		contributingSessionIds,
 		parentMap,
 		sideThreadIds,
 		unreadSessionIds: new Set(
@@ -220,6 +233,7 @@ export const sidebarRows = (
 	};
 	const members = new Map<string, string[]>();
 	for (const row of family) {
+		if (contributingSessionIds && !contributingSessionIds.has(row.id)) continue;
 		const root = activityRoot(row.id);
 		const group = members.get(root);
 		if (group === undefined) members.set(root, [row.id]);
