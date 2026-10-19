@@ -51,6 +51,8 @@ export interface SessionWorkspace {
 	) => Effect.Effect<A, E, R>;
 	readonly get: (
 		sessionId: string,
+		/** Native directory before the session declares a stored workspace. */
+		nativeDirectory?: string,
 	) => Effect.Effect<string, SessionCommandError>;
 	readonly move: (
 		sessionId: string,
@@ -112,26 +114,29 @@ export class SessionWorkspaceTag extends Context.Service<
 	SessionWorkspace
 >()("SessionWorkspace") {}
 
-/** A missing owner returns None; a stopped instance fails without starting it. */
+/** Passive reads never start an instance or extend its idle grace. */
 export const makeSessionOpenCodeClient = Effect.gen(function* () {
 	const workspace = yield* SessionWorkspaceTag;
 	const read = yield* ReadQueryEffectTag;
 	const instances = yield* OpenCodeInstancesTag;
-	return (sessionId: string, instanceId?: string) =>
+	return (sessionId: string, instanceId?: string, directory?: string) =>
 		Effect.gen(function* () {
 			const target = yield* workspace.withLaunch(
 				Effect.gen(function* () {
-					const owner =
-						instanceId ?? (yield* read.getSession(sessionId))?.provider;
+					const row = yield* read.getSession(sessionId);
+					const owner = instanceId ?? row?.provider;
 					if (owner === undefined) return Option.none();
 					return Option.some({
 						instanceId: owner,
-						directory: yield* workspace.get(sessionId),
+						directory:
+							row === undefined
+								? (directory ?? null)
+								: yield* workspace.get(sessionId, directory),
 					});
 				}),
 			);
 			if (Option.isNone(target)) return Option.none();
-			const client = yield* instances.useIfRunning(
+			const client = yield* instances.ifRunning(
 				target.value.instanceId,
 				target.value.directory,
 			);

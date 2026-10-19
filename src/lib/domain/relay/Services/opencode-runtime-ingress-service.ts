@@ -61,6 +61,7 @@ export interface EffectOpenCodeRuntimeIngressPort {
 		event: SSEEvent,
 		sessionId: string | undefined,
 		providerInstanceId: string,
+		directory?: string,
 	): Effect.Effect<OpenCodeRuntimeIngressResult>;
 	onReconnect(providerInstanceId?: string): Effect.Effect<void, SqlError>;
 	onInstanceStopped(
@@ -98,6 +99,7 @@ export interface EffectOpenCodeRuntimeIngressOptions {
 		sessionId: string,
 		providerInstanceId: string,
 		signal: AbortSignal,
+		directory?: string,
 	) => Effect.Effect<readonly Message[], unknown>;
 	/** The send a user message echo belongs to, from the OpenCode adapter. */
 	readonly inputIdForUserEcho?: (
@@ -182,6 +184,12 @@ export class EffectOpenCodeRuntimeIngress
 	 *  on reconnect, so the next event of each session backfills the gap. */
 	private readonly syncedSessions = new Set<string>();
 	private readonly sessionInstanceIds = new Map<string, string>();
+	/** First-sighting REST reads precede the stored workspace; retries keep the
+	 *  observed directory only while the same instance owns the session. */
+	private readonly sessionDirectories = new Map<
+		string,
+		{ readonly instanceId: string; readonly directory: string }
+	>();
 	private readonly reconnectGenerations = new Map<string, number>();
 	private readonly backfillRetries = new Map<
 		string,
@@ -258,6 +266,25 @@ export class EffectOpenCodeRuntimeIngress
 		const gate = Semaphore.makeUnsafe(1);
 		this.sessionGates.set(sessionId, gate);
 		return gate;
+	}
+
+	private instanceIdentity(instanceId: string): string {
+		return instanceId === MANAGED_OPENCODE_ACCOUNT_ID
+			? this.selectedInstanceId
+			: instanceId;
+	}
+
+	private rememberSessionInstance(
+		sessionId: string,
+		providerInstanceId: string,
+		directory?: string,
+	): void {
+		const instanceId = this.instanceIdentity(providerInstanceId);
+		if (this.sessionDirectories.get(sessionId)?.instanceId !== instanceId)
+			this.sessionDirectories.delete(sessionId);
+		if (directory !== undefined)
+			this.sessionDirectories.set(sessionId, { instanceId, directory });
+		this.sessionInstanceIds.set(sessionId, providerInstanceId);
 	}
 
 	private deferBackfill(sessionId: string): void {
@@ -387,11 +414,24 @@ export class EffectOpenCodeRuntimeIngress
 			this.backfillControllers.set(sessionId, controller);
 			const rest = yield* this.backfillFetchPermits
 				.withPermits(1)(
-					fetchSessionMessages(
-						sessionId,
-						providerInstanceId,
-						controller.signal,
-					).pipe(
+					Effect.suspend(() => {
+						if (
+							this.stopped ||
+							this.sessionInstanceIds.get(sessionId) !== providerInstanceId ||
+							generation !==
+								(this.reconnectGenerations.get(providerInstanceId) ?? 0)
+						)
+							return Effect.interrupt;
+						const observed = this.sessionDirectories.get(sessionId);
+						return fetchSessionMessages(
+							sessionId,
+							providerInstanceId,
+							controller.signal,
+							observed?.instanceId === this.instanceIdentity(providerInstanceId)
+								? observed.directory
+								: undefined,
+						);
+					}).pipe(
 						Effect.timeoutOrElse({
 							duration: BACKFILL_TIMEOUT,
 							orElse: () =>
@@ -628,6 +668,7 @@ export class EffectOpenCodeRuntimeIngress
 		event: SSEEvent,
 		sessionId: string | undefined,
 		providerInstanceId: string,
+		directory?: string,
 	): Effect.Effect<OpenCodeRuntimeIngressResult> {
 		return Effect.gen({ self: this }, function* () {
 			this.stats.eventsReceived++;
@@ -645,7 +686,7 @@ export class EffectOpenCodeRuntimeIngress
 					reason: "no-session",
 				} satisfies OpenCodeRuntimeIngressResult;
 			}
-			this.sessionInstanceIds.set(sessionId, providerInstanceId);
+			this.rememberSessionInstance(sessionId, providerInstanceId, directory);
 			const result = yield* this.sessionGate(sessionId).withPermits(1)(
 				Effect.gen({ self: this }, function* () {
 					const ingest = this.ingestSessionEvent(
@@ -1039,7 +1080,7 @@ export class EffectOpenCodeRuntimeIngress
 			Effect.flatMap((rows) => {
 				const instanceId = rows[0]?.provider;
 				if (!instanceId) return Effect.void;
-				this.sessionInstanceIds.set(sessionId, instanceId);
+				this.rememberSessionInstance(sessionId, instanceId);
 				return this.startBackfill(sessionId, instanceId);
 			}),
 			Effect.catch(() => Effect.void),
@@ -1061,6 +1102,7 @@ export class EffectOpenCodeRuntimeIngress
 		this.seenSessions.delete(sessionId);
 		this.parentIds.delete(sessionId);
 		this.sessionGates.delete(sessionId);
+		this.sessionDirectories.delete(sessionId);
 		const instanceId = this.sessionInstanceIds.get(sessionId);
 		this.sessionInstanceIds.delete(sessionId);
 		if (
@@ -1100,6 +1142,7 @@ export class EffectOpenCodeRuntimeIngress
 		this.terminalRechecks.clear();
 		this.terminalRecheckQueued.clear();
 		this.sessionInstanceIds.clear();
+		this.sessionDirectories.clear();
 		this.reconnectGenerations.clear();
 		this.sessionGates.clear();
 		this.parentIds.clear();

@@ -35,7 +35,7 @@ export interface SSEStreamOptions {
 
 /** Callback signatures for each SSEStream broadcast event type. */
 export interface SSEStreamCallbacks {
-	event: (data: unknown) => void;
+	event: (data: unknown, directory?: string) => void;
 	connected: () => void;
 	disconnected: (error: Error | undefined) => void;
 	reconnecting: (info: { attempt: number; delay: number }) => void;

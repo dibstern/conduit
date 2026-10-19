@@ -15,7 +15,11 @@ export type OpenCodeInstanceEvent = {
 	readonly instanceId: string;
 	readonly health: ConnectionHealth;
 } & (
-	| { readonly _tag: "event"; readonly payload: unknown }
+	| {
+			readonly _tag: "event";
+			readonly payload: unknown;
+			readonly directory?: string;
+	  }
 	| { readonly _tag: "heartbeat" }
 	/** Successful transport connection, including reconnects with unchanged state. */
 	| { readonly _tag: "connected" }
@@ -83,10 +87,13 @@ export interface OpenCodeInstances {
 		instanceId: string,
 		directory?: string,
 	) => Effect.Effect<OpenCodeClient, OpenCodeUnavailable, Scope.Scope>;
-	/** Client when the instance is running; None otherwise. Makes no request. */
+	/**
+	 * Client when the instance is running; None otherwise. Makes no request.
+	 * A null directory uses the instance default, bypassing relay defaults.
+	 */
 	readonly ifRunning: (
 		instanceId: string,
-		directory?: string,
+		directory?: string | null,
 	) => Effect.Effect<Option.Option<OpenCodeClient>, never, Scope.Scope>;
 	/** Hold a running instance and its stream for this scope; never start it. */
 	readonly useIfRunning: (

@@ -266,8 +266,13 @@ describe("SessionLifecycleWiringLive", () => {
 						return api;
 					}),
 				),
-				useIfRunning: vi.fn(() =>
+				ifRunning: vi.fn(() =>
 					Effect.sync(() => (running ? Option.some(api) : Option.none())),
+				),
+				useIfRunning: vi.fn(() =>
+					Effect.die(
+						new Error("Lifecycle history must not acquire an instance hold"),
+					),
 				),
 			} satisfies OpenCodeInstances;
 
@@ -287,9 +292,10 @@ describe("SessionLifecycleWiringLive", () => {
 					},
 				});
 				yield* waitForAssertion(() =>
-					expect(instances.useIfRunning).toHaveBeenCalledOnce(),
+					expect(instances.ifRunning).toHaveBeenCalledOnce(),
 				);
 				expect(instances.use).not.toHaveBeenCalled();
+				expect(instances.useIfRunning).not.toHaveBeenCalled();
 				expect(api.session.create).not.toHaveBeenCalled();
 				expect(api.session.messages).not.toHaveBeenCalled();
 				expect(services.pollerManager.startPolling).not.toHaveBeenCalled();
@@ -315,6 +321,7 @@ describe("SessionLifecycleWiringLive", () => {
 					),
 				);
 				expect(instances.use).toHaveBeenCalledOnce();
+				expect(instances.useIfRunning).not.toHaveBeenCalled();
 				expect(api.session.create).toHaveBeenCalledOnce();
 				expect(api.session.messages).toHaveBeenCalledWith(session.id);
 			}).pipe(

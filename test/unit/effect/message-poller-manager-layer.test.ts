@@ -61,16 +61,16 @@ async function buildLayerHarness(options?: {
 	const workspaceGet = vi.fn((sessionId: string) =>
 		Effect.succeed(`/tmp/${sessionId}`),
 	);
-	const released = vi.fn();
+	const ifRunning = vi.fn(() => Effect.succeed(Option.some(api)));
 	const useIfRunning = vi.fn(() =>
-		Effect.acquireRelease(Effect.succeed(Option.some(api)), () =>
-			Effect.sync(released),
+		Effect.die(
+			new Error("Background message reads must not acquire an instance hold"),
 		),
 	);
 	const dependencyLayer = Layer.mergeAll(
 		Layer.succeed(OpenCodeAPITag)(api),
 		Layer.succeed(OpenCodeInstancesTag)(
-			partialFake<OpenCodeInstancesTag["Service"]>({ useIfRunning }),
+			partialFake<OpenCodeInstancesTag["Service"]>({ ifRunning, useIfRunning }),
 		),
 		Layer.succeed(SessionWorkspaceTag)(
 			partialFake<SessionWorkspaceTag["Service"]>({
@@ -109,7 +109,7 @@ async function buildLayerHarness(options?: {
 		api,
 		close,
 		messages,
-		released,
+		ifRunning,
 		runWithContext,
 		useIfRunning,
 		workspaceGet,
@@ -145,8 +145,9 @@ describe("MessagePollerManagerLive", () => {
 		expect(harness.messages).toHaveBeenCalledWith("s1", {
 			signal: expect.any(AbortSignal),
 		});
-		expect(harness.workspaceGet).toHaveBeenCalledWith("s1");
-		expect(harness.useIfRunning).toHaveBeenCalledWith("named-test", "/tmp/s1");
+		expect(harness.workspaceGet).toHaveBeenCalledWith("s1", undefined);
+		expect(harness.ifRunning).toHaveBeenCalledWith("named-test", "/tmp/s1");
+		expect(harness.useIfRunning).not.toHaveBeenCalled();
 		expect(events).toEqual([
 			{
 				sessionId: "s1",
@@ -186,7 +187,7 @@ describe("MessagePollerManagerLive", () => {
 		expect(harness.messages).not.toHaveBeenCalled();
 	});
 
-	it("cancels a blocked read and releases its instance hold when the layer closes", async () => {
+	it("cancels a passive blocked read when the layer closes", async () => {
 		vi.useFakeTimers({
 			now: 1_000,
 			toFake: ["Date", "setInterval", "clearInterval"],
@@ -202,12 +203,13 @@ describe("MessagePollerManagerLive", () => {
 		manager.startPolling("s1");
 		await flushMicrotasks();
 		expect(signal?.aborted).toBe(false);
-		expect(harness.released).not.toHaveBeenCalled();
+		expect(harness.useIfRunning).not.toHaveBeenCalled();
 
 		await harness.close();
 
 		expect(signal?.aborted).toBe(true);
-		expect(harness.released).toHaveBeenCalledTimes(1);
+		expect(harness.ifRunning).toHaveBeenCalledWith("named-test", "/tmp/s1");
+		expect(harness.useIfRunning).not.toHaveBeenCalled();
 		expect(manager.isPolling("s1")).toBe(false);
 	}, 2_000);
 

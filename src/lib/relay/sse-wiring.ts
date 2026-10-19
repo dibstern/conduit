@@ -117,6 +117,7 @@ export interface SSEWiringDeps {
 			event: SSEEvent,
 			sessionId: string | undefined,
 			providerInstanceId: string,
+			directory?: string,
 		): Effect.Effect<OpenCodeRuntimeIngressResult>;
 		onReconnect(providerInstanceId?: string): Effect.Effect<void, SqlError>;
 		onInstanceStopped?(
@@ -391,6 +392,7 @@ const recordSSEEventStartEffect = (
 	deps: SSEWiringDeps,
 	event: SSEEvent,
 	eventSessionId: string | undefined,
+	directory?: string,
 ) =>
 	Effect.gen(function* () {
 		yield* Effect.sync(() =>
@@ -401,6 +403,7 @@ const recordSSEEventStartEffect = (
 				event,
 				eventSessionId,
 				deps.providerInstanceId,
+				directory,
 			);
 		}
 
@@ -665,11 +668,15 @@ const handleSSEEventAfterPendingEffect = (
 		}
 	});
 
-export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
+export const handleSSEEventEffect = (
+	deps: SSEWiringDeps,
+	event: SSEEvent,
+	directory?: string,
+) =>
 	Effect.gen(function* () {
 		const pendingInteractions = yield* PendingInteractionServiceTag;
 		const eventSessionId = extractSessionId(event);
-		yield* recordSSEEventStartEffect(deps, event, eventSessionId);
+		yield* recordSSEEventStartEffect(deps, event, eventSessionId, directory);
 
 		if (event.type === "permission.asked") {
 			const input = permissionRequestInput(event, eventSessionId);
@@ -738,7 +745,7 @@ export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
 	});
 
 interface SSEConsumerCallbacks {
-	handleEvent(event: SSEEvent): void;
+	handleEvent(event: SSEEvent, directory?: string): void;
 	onReconnect?(): void;
 	/** The instance's lifecycle state, for the banner on every tab. */
 	onConnectionStatus(
@@ -778,7 +785,7 @@ function wireSSEConsumerWithCallbacks(
 	// a warning but ALWAYS forward the raw event — a hard fail-closed drop would
 	// silently lose live traffic (e.g. a future server event) and regress today's
 	// pass-through behavior. Field-level consumption stays guarded per translator.
-	consumer.on("event", (event: unknown) => {
+	consumer.on("event", (event: unknown, directory?: string) => {
 		if (Result.isFailure(decodeOpenCodeEvent(event))) {
 			const type =
 				typeof (event as { type?: unknown } | null)?.type === "string"
@@ -788,7 +795,7 @@ function wireSSEConsumerWithCallbacks(
 				`SSE event failed OpenCodeEventSchema decode (forwarded raw): type=${type}`,
 			);
 		}
-		callbacks.handleEvent(event as SSEEvent);
+		callbacks.handleEvent(event as SSEEvent, directory);
 	});
 }
 
@@ -833,13 +840,13 @@ export const wireSSEConsumerEffect = (
 						}),
 					);
 				},
-				handleEvent: (event) => {
+				handleEvent: (event, directory) => {
 					if (isPtyEvent(event)) {
 						deps.onPtysChanged?.(deps.providerInstanceId);
 						return;
 					}
 					runFork(
-						handleSSEEventEffect(deps, event).pipe(
+						handleSSEEventEffect(deps, event, directory).pipe(
 							Effect.catchCause((cause) =>
 								Effect.sync(() =>
 									deps.log.warn(

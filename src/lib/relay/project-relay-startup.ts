@@ -218,9 +218,10 @@ function acquireStartupServices(inputs: StartupInputs) {
 			sessionId: string,
 			instanceId?: string,
 			signal?: AbortSignal,
+			directory?: string,
 		) =>
 			Effect.gen(function* () {
-				const client = yield* sessionClient(sessionId, instanceId);
+				const client = yield* sessionClient(sessionId, instanceId, directory);
 				if (Option.isNone(client))
 					return yield* Effect.fail(
 						new Error(`Session ${sessionId} has no OpenCode instance`),
