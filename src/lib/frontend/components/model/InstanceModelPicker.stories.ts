@@ -179,7 +179,7 @@ async function rootControls(canvasElement: HTMLElement) {
 		within(sheet.getByRole("radiogroup", { name: "Effort" }))
 			.getAllByRole("radio")
 			.map((radio) => radio.textContent),
-	).toEqual(["low", "med", "high", "xhigh", "max"]);
+	).toEqual(["low", "medium", "high", "xhigh", "max"]);
 	const rootFocusTestId = sheet.queryByTestId("picker-harness-claude")
 		? "picker-harness-claude"
 		: "picker-row-model";

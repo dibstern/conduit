@@ -12,7 +12,6 @@ import {
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import Database from "better-sqlite3";
 import {
 	Context,
@@ -23,6 +22,7 @@ import {
 	Option,
 	Ref,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
@@ -192,7 +192,7 @@ function startup(root: string, projects: readonly StoredProject[]) {
 					store,
 					registry,
 					directory,
-					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					Layer.effect(SessionActivityTag, makeSessionActivity),
 					DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
 					makeOpenCodeRuntimeStateLive(),
@@ -200,13 +200,13 @@ function startup(root: string, projects: readonly StoredProject[]) {
 					SessionEventBusLive,
 					ConfigPersistenceNoopLive,
 					InstanceHealthCheckLive,
-					Layer.succeed(PortScannerTag, {
+					Layer.succeed(PortScannerTag)({
 						getKnownPorts: () => Effect.succeed(new Set<number>()),
 						scanNow: () =>
 							Effect.succeed({ discovered: [], lost: [], active: [] }),
 					}),
-					Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
-					Layer.succeed(PushManagerTag, {
+					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
+					Layer.succeed(PushManagerTag)({
 						subscribe: () => Effect.void,
 						unsubscribe: () => Effect.void,
 						broadcast: () => Effect.void,
@@ -228,14 +228,14 @@ function watchReaderPreparation() {
 	const migrationSpy = vi
 		.spyOn(migrations, "makeEffectSqlMigrator")
 		.mockImplementation((...args) =>
-			Effect.sync(migrationRuns).pipe(Effect.zipRight(migrate(...args))),
+			Effect.sync(migrationRuns).pipe(Effect.andThen(migrate(...args))),
 		);
 	const stamp = persistence.stampProjectProvenance;
 	const stampRuns = vi.fn();
 	const stampSpy = vi
 		.spyOn(persistence, "stampProjectProvenance")
 		.mockImplementation((...args) =>
-			Effect.sync(stampRuns).pipe(Effect.zipRight(stamp(...args))),
+			Effect.sync(stampRuns).pipe(Effect.andThen(stamp(...args))),
 		);
 	return {
 		migrationRuns,
@@ -277,7 +277,7 @@ describe("daemon shared-store startup", () => {
 					"History import failed (corrupt)",
 				);
 				expect(unavailable.has("alpha")).toBe(false);
-				const sessions = await runtime.runPromise(listDaemonSessions(root));
+				const sessions = await runtime.runPromise(listDaemonSessions());
 				expect(sessions.sessions.map(({ id }) => id)).toEqual([
 					"healthy-session",
 				]);
@@ -291,9 +291,9 @@ describe("daemon shared-store startup", () => {
 						yield* Ref.set(yield* HttpServerRefTag, createServer());
 						const factory = yield* RelayFactoryTag;
 						for (let retry = 0; retry < 2; retry++) {
-							expect(yield* Effect.either(factory.create(beta))).toMatchObject({
-								_tag: "Left",
-								left: { _tag: "RelayFactoryError", reason },
+							expect(yield* Effect.result(factory.create(beta))).toMatchObject({
+								_tag: "Failure",
+								failure: { _tag: "RelayFactoryError", reason },
 							});
 						}
 						const sql = yield* SqlClient.SqlClient;
@@ -305,9 +305,7 @@ describe("daemon shared-store startup", () => {
 						).toEqual([]);
 						// An unavailable list must not issue even a read against the store.
 						yield* sql`ALTER TABLE sessions RENAME TO unavailable_sessions`;
-						expect(
-							yield* listDaemonSessions(root, { scope: "beta" }),
-						).toMatchObject({
+						expect(yield* listDaemonSessions({ scope: "beta" })).toMatchObject({
 							sessions: [],
 							availability: [
 								{ projectSlug: "beta", available: false, error: reason },
@@ -349,9 +347,7 @@ describe("daemon shared-store startup", () => {
 				expect(
 					imports.mock.calls[0]?.[1].map(({ projectId }) => projectId),
 				).toEqual(["alpha"]);
-				expect(
-					await runtime.runPromise(listDaemonSessions(root)),
-				).toMatchObject({
+				expect(await runtime.runPromise(listDaemonSessions())).toMatchObject({
 					sessions: [{ id: "healthy-session" }],
 					availability: [
 						{ projectSlug: "alpha", available: true },
@@ -475,7 +471,7 @@ describe("daemon shared-store startup", () => {
 					{ outcome: "seeded", backupError: { kind: "io" } },
 				]);
 				expect(
-					(await first.runPromise(listDaemonSessions(root))).availability,
+					(await first.runPromise(listDaemonSessions())).availability,
 				).toEqual([{ projectSlug: "alpha", available: true }]);
 			} finally {
 				await first.dispose();
@@ -493,12 +489,10 @@ describe("daemon shared-store startup", () => {
 					new Map(),
 				);
 				expect(results[1]).toMatchObject([{ outcome: "source-changed" }]);
-				expect(await second.runPromise(listDaemonSessions(root))).toMatchObject(
-					{
-						sessions: [{ id: "original-session" }],
-						availability: [{ projectSlug: "alpha", available: true }],
-					},
-				);
+				expect(await second.runPromise(listDaemonSessions())).toMatchObject({
+					sessions: [{ id: "original-session" }],
+					availability: [{ projectSlug: "alpha", available: true }],
+				});
 				expect(readFileSync(legacyProjectStorePath(root, "alpha"))).toEqual(
 					changed,
 				);
@@ -568,7 +562,7 @@ describe("daemon shared-store startup", () => {
 							{ search: "retained" },
 							{ scope: "a-retained" },
 						]) {
-							const list = yield* listDaemonSessions(root, options);
+							const list = yield* listDaemonSessions(options);
 							expect(list.sessions.map(({ id }) => id)).toEqual(
 								"search" in options || "scope" in options
 									? []
@@ -622,9 +616,10 @@ describe("daemon shared-store startup", () => {
 						),
 					),
 				).toEqual([{ id: "retained-session", project_id: "retained" }]);
-				expect(
-					await runtime.runPromise(listDaemonSessions(root)),
-				).toMatchObject({ sessions: [], availability: [] });
+				expect(await runtime.runPromise(listDaemonSessions())).toMatchObject({
+					sessions: [],
+					availability: [],
+				});
 				expect(
 					await runtime.runPromise(
 						Effect.flatMap(SessionDirectory, (directory) =>
@@ -732,7 +727,7 @@ describe("daemon shared-store startup", () => {
 					["beta", "child"],
 				] as const) {
 					const own = await runtime.runPromise(
-						listDaemonSessions(root, { scope: slug }),
+						listDaemonSessions({ scope: slug }),
 					);
 					expect(
 						own.sessions.map((session) => [session.id, session.projectSlug]),
@@ -743,7 +738,7 @@ describe("daemon shared-store startup", () => {
 						),
 					).toEqual({ projectSlug: slug, sessionId: id });
 				}
-				const list = await runtime.runPromise(listDaemonSessions(root));
+				const list = await runtime.runPromise(listDaemonSessions());
 				expect(
 					list.sessions.map(({ id, projectSlug }) => [id, projectSlug]).sort(),
 				).toEqual([
@@ -927,12 +922,12 @@ describe("daemon shared-store startup", () => {
 					const directory = yield* SessionDirectory;
 					const sql = yield* SqlClient.SqlClient;
 					yield* sql`ALTER TABLE sessions RENAME TO unavailable_sessions`;
-					return yield* Effect.either(directory.projectOf("parent"));
+					return yield* Effect.result(directory.projectOf("parent"));
 				}),
 			);
 			expect(result).toMatchObject({
-				_tag: "Left",
-				left: { _tag: "SessionDirectoryReadError", sessionId: "parent" },
+				_tag: "Failure",
+				failure: { _tag: "SessionDirectoryReadError", sessionId: "parent" },
 			});
 		} finally {
 			await runtime.dispose();
@@ -1059,9 +1054,7 @@ describe("daemon shared-store startup", () => {
 				).toBe(false);
 				const before = daemonStoreManifest(daemonStorePath(root));
 				for (const own of projects) {
-					await runtime.runPromise(
-						listDaemonSessions(root, { scope: own.slug }),
-					);
+					await runtime.runPromise(listDaemonSessions({ scope: own.slug }));
 					await runtime.runPromise(
 						resolveDaemonOpenCodeSession(
 							"opencode",
@@ -1108,7 +1101,7 @@ describe("daemon shared-store startup", () => {
 				expect(await runtime.runPromise(DaemonStoreAvailability)).toEqual(
 					new Map(),
 				);
-				const sessions = await runtime.runPromise(listDaemonSessions(root));
+				const sessions = await runtime.runPromise(listDaemonSessions());
 				expect(
 					sessions.sessions
 						.map(({ id, projectSlug }) => [id, projectSlug])

@@ -1,9 +1,11 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { AccountRefSchema } from "./account.js";
 
 export class AccountUnroutable extends Schema.TaggedError<AccountUnroutable>()(
 	"AccountUnroutable",
-	{ ref: Schema.suspend(() => AccountRefSchema) },
+	{
+		ref: Schema.suspend(() => AccountRefSchema),
+	},
 ) {
 	get message() {
 		const name = this.ref._tag === "Id" ? this.ref.id : this.ref.driver;
@@ -11,11 +13,11 @@ export class AccountUnroutable extends Schema.TaggedError<AccountUnroutable>()(
 	}
 }
 
-export const ContinuationReasonSchema = Schema.Literal(
+export const ContinuationReasonSchema = Schema.Literals([
 	"user",
 	"auto-switch",
 	"reset",
-);
+]);
 export type ContinuationReason = typeof ContinuationReasonSchema.Type;
 
 export class SessionBusy extends Schema.TaggedError<SessionBusy>()(
@@ -75,14 +77,14 @@ export class HandoffTooLarge extends Schema.TaggedError<HandoffTooLarge>()(
 	}
 }
 
-export const ContinuationErrorSchema = Schema.Union(
+export const ContinuationErrorSchema = Schema.Union([
 	AccountUnroutable,
 	SessionBusy,
 	StaleSwitch,
 	AccountUnavailable,
 	DriverMismatch,
 	HandoffTooLarge,
-);
+]);
 export type ContinuationError = typeof ContinuationErrorSchema.Type;
 
 export const LimitRecoverySchema = Schema.Struct({
@@ -94,7 +96,7 @@ export const LimitRecoverySchema = Schema.Struct({
 	scheduledAt: Schema.optional(Schema.Number),
 	/** The limit policy scheduled the resume, not the user. */
 	auto: Schema.optional(Schema.Boolean),
-	rearms: Schema.NonNegativeInt,
+	rearms: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
 	continued: Schema.Boolean,
 	/** The session moved to another account: the strip leaves, the cut-off tag stays. */
 	switched: Schema.optional(Schema.Boolean),
@@ -118,9 +120,10 @@ export type SessionResume = typeof SessionResumeSchema.Type;
 export const UsageLimitsSettingSchema = Schema.Struct({
 	autoResume: Schema.Boolean,
 	autoSwitch: Schema.Boolean,
-	warnAt: Schema.optionalWith(Schema.Literal(70, 80, 90, "off"), {
-		default: () => 80 as const,
-	}),
+	warnAt: Schema.Literals([70, 80, 90, "off"]).pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => 80 as const)),
+		Schema.withConstructorDefault(Effect.sync(() => 80 as const)),
+	),
 	/** Claude instance IDs, in the order auto-switch tries them. */
 	order: Schema.Array(Schema.String),
 });
@@ -135,27 +138,36 @@ export const DEFAULT_USAGE_LIMITS: UsageLimitsSetting = {
 };
 
 export const HandoffSummarySchema = Schema.Struct({
-	included: Schema.NonNegativeInt,
-	omitted: Schema.NonNegativeInt,
+	included: Schema.Number.check(
+		Schema.isInt(),
+		Schema.isGreaterThanOrEqualTo(0),
+	),
+	omitted: Schema.Number.check(
+		Schema.isInt(),
+		Schema.isGreaterThanOrEqualTo(0),
+	),
 	firstMessageIncluded: Schema.Boolean,
-	tokens: Schema.NonNegativeInt,
+	tokens: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
 });
 export type HandoffSummary = typeof HandoffSummarySchema.Type;
 
 const usageWindowFields = {
-	utilization: Schema.Number.pipe(Schema.finite(), Schema.between(0, 100)),
+	utilization: Schema.Number.pipe(
+		Schema.check(Schema.isFinite()),
+		Schema.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
+	),
 	/** ISO timestamp from the usage reader. */
 	resetsAt: Schema.optional(Schema.String),
 };
 
 export const UsageHistoryPointSchema = Schema.Struct({
 	/** Epoch milliseconds. */
-	at: Schema.Number.pipe(Schema.finite()),
+	at: Schema.Number.pipe(Schema.check(Schema.isFinite())),
 	utilization: usageWindowFields.utilization,
 });
 export type UsageHistoryPoint = typeof UsageHistoryPointSchema.Type;
 
-export const UsageForecastSchema = Schema.Union(
+export const UsageForecastSchema = Schema.Union([
 	Schema.Struct({
 		kind: Schema.Literal("under"),
 		atReset: usageWindowFields.utilization,
@@ -163,14 +175,14 @@ export const UsageForecastSchema = Schema.Union(
 	Schema.Struct({
 		kind: Schema.Literal("runs_out"),
 		/** Epoch milliseconds. */
-		at: Schema.Number.pipe(Schema.finite()),
+		at: Schema.Number.pipe(Schema.check(Schema.isFinite())),
 	}),
-);
+]);
 export type UsageForecast = typeof UsageForecastSchema.Type;
 
-export const UsageWindowSchema = Schema.Union(
+export const UsageWindowSchema = Schema.Union([
 	Schema.Struct({
-		kind: Schema.Literal("five_hour", "seven_day", "month"),
+		kind: Schema.Literals(["five_hour", "seven_day", "month"]),
 		...usageWindowFields,
 		history: Schema.optional(Schema.Array(UsageHistoryPointSchema)),
 		forecast: Schema.optional(UsageForecastSchema),
@@ -180,13 +192,13 @@ export const UsageWindowSchema = Schema.Union(
 		model: Schema.optional(Schema.String),
 		...usageWindowFields,
 	}),
-);
+]);
 export type UsageWindow = typeof UsageWindowSchema.Type;
 
 export const UsageReadingSchema = Schema.Struct({
 	accountId: Schema.String,
-	harness: Schema.Literal("claude", "codex", "cursor"),
-	status: Schema.Literal("available", "limited", "unavailable", "unknown"),
+	harness: Schema.Literals(["claude", "codex", "cursor"]),
+	status: Schema.Literals(["available", "limited", "unavailable", "unknown"]),
 	planLabel: Schema.optional(Schema.String),
 	windows: Schema.Array(UsageWindowSchema),
 	/** Epoch milliseconds. */

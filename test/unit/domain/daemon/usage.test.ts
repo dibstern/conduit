@@ -26,17 +26,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "@effect/vitest";
 import {
-	Chunk,
 	Clock,
 	Deferred,
 	Effect,
+	Option as Effect4PollOption,
 	Fiber,
 	Layer,
 	Ref,
 	Schema,
 	Stream,
-	TestClock,
 } from "effect";
+import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/account.js";
 import {
@@ -60,7 +60,7 @@ import type {
 } from "../../../../src/lib/provider/usage-reader.js";
 import { makeMockAccountDirectory } from "../../../helpers/mock-factories.js";
 
-it.scoped("does not sample with no subscribers", () =>
+it.effect("does not sample with no subscribers", () =>
 	Effect.gen(function* () {
 		let calls = 0;
 		yield* makeUsage({
@@ -80,7 +80,7 @@ it.scoped("does not sample with no subscribers", () =>
 	}),
 );
 
-it.scoped("emits the current snapshot before refreshing a subscription", () =>
+it.effect("emits the current snapshot before refreshing a subscription", () =>
 	Effect.gen(function* () {
 		let calls = 0;
 		const service = yield* makeUsage({
@@ -99,7 +99,7 @@ it.scoped("emits the current snapshot before refreshing a subscription", () =>
 		const snapshots = yield* Stream.runCollect(
 			Stream.take(service.readings, 2),
 		);
-		expect(Chunk.toArray(snapshots)).toEqual([
+		expect([...snapshots]).toEqual([
 			previous,
 			[
 				{
@@ -121,7 +121,7 @@ it.scoped("emits the current snapshot before refreshing a subscription", () =>
 	}),
 );
 
-it.scoped("shares a five-minute sampler until the last subscriber leaves", () =>
+it.effect("shares a five-minute sampler until the last subscriber leaves", () =>
 	Effect.gen(function* () {
 		const calls: string[] = [];
 		const service = yield* makeUsage({
@@ -139,10 +139,14 @@ it.scoped("shares a five-minute sampler until the last subscriber leaves", () =>
 				},
 			},
 		});
-		const first = yield* Effect.fork(Stream.runDrain(service.readings));
+		const first = yield* Effect.forkChild(Stream.runDrain(service.readings), {
+			startImmediately: true,
+		});
 		yield* TestClock.adjust("0 millis");
 		expect(calls).toEqual(["account-1", "account-2"]);
-		const second = yield* Effect.fork(Stream.runDrain(service.readings));
+		const second = yield* Effect.forkChild(Stream.runDrain(service.readings), {
+			startImmediately: true,
+		});
 		yield* TestClock.adjust("0 millis");
 		expect(calls).toHaveLength(4);
 		yield* TestClock.adjust("299999 millis");
@@ -158,7 +162,7 @@ it.scoped("shares a five-minute sampler until the last subscriber leaves", () =>
 	}),
 );
 
-it.scoped("debounces turn ends per account only while watched", () =>
+it.effect("debounces turn ends per account only while watched", () =>
 	Effect.gen(function* () {
 		const calls: string[] = [];
 		const service = yield* makeUsage({
@@ -179,7 +183,9 @@ it.scoped("debounces turn ends per account only while watched", () =>
 		yield* service.turnEnded("account-1");
 		yield* TestClock.adjust("10 seconds");
 		expect(calls).toEqual([]);
-		yield* Effect.fork(Stream.runDrain(service.readings));
+		yield* Effect.forkChild(Stream.runDrain(service.readings), {
+			startImmediately: true,
+		});
 		yield* TestClock.adjust("1 millis");
 		calls.length = 0;
 		yield* service.turnEnded("account-1");
@@ -198,7 +204,7 @@ it.scoped("debounces turn ends per account only while watched", () =>
 	}),
 );
 
-it.scoped("keeps five-minute sample times independent of read duration", () =>
+it.effect("keeps five-minute sample times independent of read duration", () =>
 	Effect.gen(function* () {
 		const startedAt: number[] = [];
 		const service = yield* makeUsage({
@@ -214,7 +220,10 @@ it.scoped("keeps five-minute sample times independent of read duration", () =>
 				},
 			},
 		});
-		const subscriber = yield* Effect.fork(Stream.runDrain(service.readings));
+		const subscriber = yield* Effect.forkChild(
+			Stream.runDrain(service.readings),
+			{ startImmediately: true },
+		);
 		yield* TestClock.adjust("4 seconds");
 		expect(startedAt).toEqual([0]);
 		yield* TestClock.adjust("296 seconds");
@@ -226,7 +235,7 @@ it.scoped("keeps five-minute sample times independent of read duration", () =>
 	}),
 );
 
-it.scoped(
+it.effect(
 	"retains the last successful reading and readAt when a read fails",
 	() =>
 		Effect.gen(function* () {
@@ -251,7 +260,7 @@ it.scoped(
 			expect(yield* service.refresh()).toMatchObject([{ status: "unknown" }]);
 			expect(
 				yield* service.readings.pipe(Stream.take(1), Stream.runCollect),
-			).toEqual(Chunk.of([{ ...previous, stale: true }]));
+			).toEqual([[{ ...previous, stale: true }]]);
 			failed = false;
 			expect(yield* service.refresh()).toMatchObject([
 				{ stale: false, readAt: yield* Clock.currentTimeMillis },
@@ -259,7 +268,7 @@ it.scoped(
 		}),
 );
 
-it.scoped("decides on unknown when a refresh times out after a limit", () =>
+it.effect("decides on unknown when a refresh times out after a limit", () =>
 	Effect.gen(function* () {
 		let timedOut = false;
 		const reader: UsageReader = {
@@ -278,19 +287,19 @@ it.scoped("decides on unknown when a refresh times out after a limit", () =>
 		});
 		const [previous] = yield* service.refresh();
 		timedOut = true;
-		const pending = yield* Effect.fork(service.refresh());
+		const pending = yield* Effect.forkChild(service.refresh());
 		yield* TestClock.adjust("5 seconds");
 		expect(yield* Fiber.join(pending)).toMatchObject([{ status: "unknown" }]);
 		expect(
 			yield* service.readings.pipe(Stream.take(1), Stream.runCollect),
-		).toEqual(Chunk.of([{ ...previous, stale: true }]));
-		const failover = yield* Effect.fork(service.pickFailover("other"));
+		).toEqual([[{ ...previous, stale: true }]]);
+		const failover = yield* Effect.forkChild(service.pickFailover("other"));
 		yield* TestClock.adjust("5 seconds");
 		expect(yield* Fiber.join(failover)).toBe("account-1");
 	}),
 );
 
-it.scoped("treats a harness without a reader as unavailable", () =>
+it.effect("treats a harness without a reader as unavailable", () =>
 	Effect.gen(function* () {
 		const service = yield* makeUsage({
 			accounts: Effect.succeed([
@@ -316,7 +325,7 @@ it.scoped("treats a harness without a reader as unavailable", () =>
 	}),
 );
 
-it.scoped(
+it.effect(
 	"picks fresh accounts in the live saved order and allows unknown",
 	() =>
 		Effect.gen(function* () {
@@ -371,7 +380,7 @@ it.scoped(
 		}),
 );
 
-it.scoped(
+it.effect(
 	"shares only in-flight reads and keeps them alive when one waiter cancels",
 	() =>
 		Effect.gen(function* () {
@@ -397,10 +406,10 @@ it.scoped(
 				]),
 				readers: { claude: reader },
 			});
-			const first = yield* Effect.fork(service.refresh(["account-1"]));
+			const first = yield* Effect.forkChild(service.refresh(["account-1"]));
 			yield* Deferred.await(started);
-			const second = yield* Effect.fork(service.refresh(["account-1"]));
-			yield* Effect.yieldNow();
+			const second = yield* Effect.forkChild(service.refresh(["account-1"]));
+			yield* Effect.yieldNow;
 			yield* Fiber.interrupt(first);
 			expect(calls).toBe(1);
 			yield* Deferred.succeed(release, undefined);
@@ -443,7 +452,7 @@ it.scoped(
 		}),
 );
 
-it.scoped(
+it.effect(
 	"bounds the entire read at five seconds, releases it, and retries fresh",
 	() =>
 		Effect.gen(function* () {
@@ -462,10 +471,14 @@ it.scoped(
 				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
 				readers: { claude: reader },
 			});
-			const first = yield* Effect.fork(service.refresh(["account-1"]));
+			const first = yield* Effect.forkChild(service.refresh(["account-1"]));
 			yield* Deferred.await(started);
 			yield* TestClock.adjust("4999 millis");
-			expect((yield* Fiber.poll(first))._tag).toBe("None");
+			expect(
+				(yield* Effect.sync(() =>
+					Effect4PollOption.fromUndefinedOr(first.pollUnsafe()),
+				))._tag,
+			).toBe("None");
 			yield* TestClock.adjust("1 millis");
 			expect(yield* Fiber.join(first)).toEqual([
 				{
@@ -479,7 +492,7 @@ it.scoped(
 				},
 			]);
 			expect(released).toBe(1);
-			const retry = yield* Effect.fork(service.refresh(["account-1"]));
+			const retry = yield* Effect.forkChild(service.refresh(["account-1"]));
 			yield* TestClock.adjust("5 seconds");
 			expect(yield* Fiber.join(retry)).toMatchObject([
 				{ status: "unknown", windows: [] },
@@ -489,7 +502,7 @@ it.scoped(
 		}),
 );
 
-it.scoped(
+it.effect(
 	"turns a failed read into unknown and refreshes all known accounts",
 	() =>
 		Effect.gen(function* () {
@@ -514,7 +527,7 @@ it.scoped(
 		}),
 );
 
-it.scoped(
+it.effect(
 	"returns unavailable for removed accounts and de-duplicates requested IDs",
 	() =>
 		Effect.gen(function* () {
@@ -626,7 +639,7 @@ it.effect(
 		}),
 );
 
-it.scoped(
+it.effect(
 	"omits forecasts until three readings span at least fifteen minutes",
 	() =>
 		Effect.gen(function* () {
@@ -671,7 +684,7 @@ it.scoped(
 		}),
 );
 
-it.scoped("forecasts a steady low burn separately for each window", () =>
+it.effect("forecasts a steady low burn separately for each window", () =>
 	Effect.gen(function* () {
 		const service = yield* makeUsage({
 			accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
@@ -722,7 +735,7 @@ it.scoped("forecasts a steady low burn separately for each window", () =>
 	}),
 );
 
-it.scoped("forecasts a fast burn reaching the limit before reset", () =>
+it.effect("forecasts a fast burn reaching the limit before reset", () =>
 	Effect.gen(function* () {
 		const service = yield* makeUsage({
 			accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
@@ -755,7 +768,7 @@ it.scoped("forecasts a fast burn reaching the limit before reset", () =>
 	}),
 );
 
-it.scoped("loads history once and forecasts immediately after a restart", () =>
+it.effect("loads history once and forecasts immediately after a restart", () =>
 	Effect.gen(function* () {
 		const stored = yield* Ref.make<UsageHistorySnapshot>({});
 		let loads = 0;
@@ -814,7 +827,7 @@ it.scoped("loads history once and forecasts immediately after a restart", () =>
 );
 
 for (const reset of ["later reset time", "utilization drop"] as const) {
-	it.scoped(`starts fresh history on a ${reset}`, () =>
+	it.effect(`starts fresh history on a ${reset}`, () =>
 		Effect.gen(function* () {
 			let utilization = 10;
 			let resetsAt = new Date(3_600_000).toISOString();
@@ -852,7 +865,7 @@ for (const reset of ["later reset time", "utilization drop"] as const) {
 	);
 }
 
-it.scoped(
+it.effect(
 	"records only successful plan windows, independently per account",
 	() =>
 		Effect.gen(function* () {
@@ -921,7 +934,7 @@ it.scoped(
 		}),
 );
 
-it.scoped(
+it.effect(
 	"caps stored history and thins transport while keeping both endpoints",
 	() =>
 		Effect.gen(function* () {
@@ -970,7 +983,7 @@ it.scoped(
 		}),
 );
 
-it.scoped("serializes saves without losing concurrent account history", () =>
+it.effect("serializes saves without losing concurrent account history", () =>
 	Effect.gen(function* () {
 		const started = yield* Deferred.make<void>();
 		const release = yield* Deferred.make<void>();
@@ -1003,10 +1016,10 @@ it.scoped("serializes saves without losing concurrent account history", () =>
 					}),
 			},
 		});
-		const first = yield* Effect.fork(service.refresh(["account-1"]));
+		const first = yield* Effect.forkChild(service.refresh(["account-1"]));
 		yield* Deferred.await(started);
-		const second = yield* Effect.fork(service.refresh(["account-2"]));
-		yield* Effect.yieldNow();
+		const second = yield* Effect.forkChild(service.refresh(["account-2"]));
+		yield* Effect.yieldNow;
 		yield* Deferred.succeed(release, undefined);
 		yield* Fiber.join(first);
 		yield* Fiber.join(second);
@@ -1019,7 +1032,7 @@ it.scoped("serializes saves without losing concurrent account history", () =>
 	}),
 );
 
-it.scoped(
+it.effect(
 	"swallows save failures and retries the history on a later refresh",
 	() =>
 		Effect.gen(function* () {
@@ -1056,7 +1069,7 @@ it.scoped(
 		}),
 );
 
-it.scoped(
+it.effect(
 	"persists daemon-wide history atomically and reloads it through UsageLive",
 	() =>
 		Effect.gen(function* () {
@@ -1089,8 +1102,7 @@ it.scoped(
 				Layer.provide(
 					Layer.merge(
 						makeDaemonStateLive({ configDir }),
-						Layer.succeed(
-							AccountDirectory,
+						Layer.succeed(AccountDirectory)(
 							makeMockAccountDirectory([
 								{
 									id: AccountIdSchema.make("account-1"),
@@ -1111,13 +1123,15 @@ it.scoped(
 				yield* service.refresh();
 				yield* TestClock.adjust("10 minutes");
 				yield* service.refresh();
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 			const file = join(configDir, "usage-history.json");
 			const snapshot = yield* Effect.tryPromise(() =>
 				readFile(file, "utf8"),
 			).pipe(
 				Effect.flatMap(
-					Schema.decodeUnknown(Schema.parseJson(UsageHistorySnapshotSchema)),
+					Schema.decodeUnknownEffect(
+						Schema.fromJsonString(UsageHistorySnapshotSchema),
+					),
 				),
 			);
 			expect(snapshot["account-1"]?.five_hour?.points).toHaveLength(3);
@@ -1130,7 +1144,7 @@ it.scoped(
 			const readings = yield* Effect.gen(function* () {
 				const service = yield* Usage;
 				return yield* service.refresh();
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 			expect(readings[0]?.windows[0]).toHaveProperty("forecast", {
 				kind: "under",
 				atReset: 10,
@@ -1144,7 +1158,7 @@ it.scoped(
 		}),
 );
 
-it.scoped(
+it.effect(
 	"treats missing, corrupt JSON, and invalid history files as empty",
 	() =>
 		Effect.gen(function* () {
@@ -1186,8 +1200,7 @@ it.scoped(
 							Layer.provide(
 								Layer.merge(
 									makeDaemonStateLive({ configDir }),
-									Layer.succeed(
-										AccountDirectory,
+									Layer.succeed(AccountDirectory)(
 										makeMockAccountDirectory([
 											{
 												id: AccountIdSchema.make("account-1"),

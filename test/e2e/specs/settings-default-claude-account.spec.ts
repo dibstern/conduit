@@ -1,13 +1,9 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test as base, expect, type Page } from "@playwright/test";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
-import {
-	GetInstances,
-	GetStatus,
-	RemoveProject,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import {
 	type DaemonConfig,
 	loadDaemonConfigResult,
@@ -55,7 +51,10 @@ const test = base.extend<{
 					}),
 				);
 				await harness.restart({ startupTimeoutMs: 60_000, serviceEnvironment });
-				await harness.requestRpc(new RemoveProject({ slug: "process-test" }));
+				await harness.requestRpc({
+					_tag: "RemoveProject",
+					slug: "process-test",
+				});
 				await use(harness);
 			} finally {
 				writeFileSync(testInfo.outputPath("daemon.log"), harness.logTail);
@@ -117,7 +116,7 @@ test("ordinary Claude accounts apply edits live, can be removed and stay deleted
 		);
 	};
 	const readDefault = async () =>
-		(await harness.requestRpc(new GetInstances({}))).instances.find(
+		(await harness.requestRpc({ _tag: "GetInstances" })).instances.find(
 			({ id }) => id === defaultId,
 		);
 	const readStored = () =>
@@ -132,7 +131,9 @@ test("ordinary Claude accounts apply edits live, can be removed and stay deleted
 		expect(initial?.configDir).toBe(
 			testInfo.outputPath("initial-claude-account"),
 		);
-		expect((await harness.requestRpc(new GetStatus({}))).supervised).toBe(true);
+		expect((await harness.requestRpc({ _tag: "GetStatus" })).supervised).toBe(
+			true,
+		);
 		record("initial", {
 			instance: initial,
 			pid: initialPid,
@@ -204,7 +205,9 @@ test("ordinary Claude accounts apply edits live, can be removed and stay deleted
 		});
 		expect(harness.baseUrl).toBe(baseUrl);
 		expect(daemonPid()).not.toBe(initialPid);
-		expect((await harness.requestRpc(new GetStatus({}))).supervised).toBe(true);
+		expect((await harness.requestRpc({ _tag: "GetStatus" })).supervised).toBe(
+			true,
+		);
 		expect(await readDefault()).toMatchObject({
 			name: "Personal Claude",
 			configDir,
@@ -259,7 +262,7 @@ test("ordinary Claude accounts apply edits live, can be removed and stay deleted
 		await expect(row).toHaveCount(0);
 		expect(await readDefault()).toBeUndefined();
 		expect(
-			(await harness.requestRpc(new GetInstances({}))).instances.filter(
+			(await harness.requestRpc({ _tag: "GetInstances" })).instances.filter(
 				({ driver, isDefault }) => driver === "claude" && isDefault,
 			),
 		).toMatchObject([{ id: "personal" }]);

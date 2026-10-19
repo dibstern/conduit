@@ -9,9 +9,9 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Context, Effect, Layer, ManagedRuntime } from "effect";
+import { RpcClient, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import {
 	AccountIdSchema,
 	MANAGED_OPENCODE_ACCOUNT_ID,
@@ -320,7 +320,7 @@ export async function createReplayHarness(
 			)
 		: undefined;
 	const daemonReadContext = daemonReads
-		? (await daemonReads.runtime()).context
+		? await daemonReads.context()
 		: undefined;
 	const startStack = (port: number): Promise<RelayStack> =>
 		createRelayStack({
@@ -354,7 +354,7 @@ export async function createReplayHarness(
 									Effect.tryPromise({
 										try: () =>
 											stack.effectRuntime.runtime.runPromise(
-												listDaemonSessions(configDir, query).pipe(
+												listDaemonSessions(query).pipe(
 													Effect.provide(daemonReadContext),
 												),
 											),

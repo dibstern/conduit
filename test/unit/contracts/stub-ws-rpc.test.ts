@@ -1,14 +1,14 @@
-import { RpcSchema } from "@effect/rpc";
-import { RpcClientError } from "@effect/rpc/RpcClientError";
 import {
 	Arbitrary,
 	Effect,
-	Fiber,
+	Exit,
 	ManagedRuntime,
 	Schema,
+	type SchemaAST,
 	Stream,
 } from "effect";
-import fc from "fast-check";
+import { RpcSchema } from "effect/rpc";
+import { RpcClientError } from "effect/rpc/RpcClientError";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import {
@@ -39,12 +39,17 @@ it("rejects a stub reply the contract cannot encode", async () => {
 		ListWorktrees: () => ({ worktrees: "stale fixture" }),
 	});
 	const result = await runtime.runPromise(
-		Effect.either(rpcEffect("ListWorktrees", { projectSlug: "p" })),
+		Effect.result(rpcEffect("ListWorktrees", { projectSlug: "p" })),
 	);
-	expect(result).toMatchObject({ _tag: "Left" });
-	if (result._tag === "Left") {
-		expect(result.left).toBeInstanceOf(RpcClientError);
-		expect(String(result.left.cause)).toContain("worktrees");
+	expect(result).toMatchObject({ _tag: "Failure" });
+	if (result._tag === "Failure") {
+		expect(result.failure).toBeInstanceOf(RpcClientError);
+		if (
+			!(result.failure instanceof RpcClientError) ||
+			!("cause" in result.failure.reason)
+		)
+			throw new Error("Expected an RPC client error with a cause");
+		expect(String(result.failure.reason.cause)).toContain("worktrees");
 	}
 });
 
@@ -59,11 +64,16 @@ it.each([
 		ListWorktrees: kind === "sync" ? fail : async () => fail(),
 	});
 	const result = await runtime.runPromise(
-		Effect.either(rpcEffect("ListWorktrees", { projectSlug: "p" })),
+		Effect.result(rpcEffect("ListWorktrees", { projectSlug: "p" })),
 	);
-	if (result._tag !== "Left") throw new Error("call succeeded");
-	expect(result.left).toBeInstanceOf(RpcClientError);
-	expect(String(result.left.cause)).toContain("stub bug");
+	if (result._tag !== "Failure") throw new Error("call succeeded");
+	expect(result.failure).toBeInstanceOf(RpcClientError);
+	if (
+		!(result.failure instanceof RpcClientError) ||
+		!("cause" in result.failure.reason)
+	)
+		throw new Error("Expected an RPC client error with a cause");
+	expect(String(result.failure.reason.cause)).toContain("stub bug");
 });
 
 it("leaves an omitted tag unanswered while other calls still work", async () => {
@@ -77,38 +87,44 @@ it("leaves an omitted tag unanswered while other calls still work", async () => 
 	await expect(
 		runtime.runPromise(rpcEffect("SetLogLevel", { level: "debug" })),
 	).resolves.toEqual({ ok: true });
-	expect(await Effect.runPromise(Fiber.poll(pending))).toMatchObject({
-		_tag: "None",
-	});
+	expect(pending.pollUnsafe()).toBeUndefined();
 });
 
 it("round-trips every declared error class as its own instance", async () => {
 	const checked = new Set<string>();
 	for (const rpc of WsRpcGroup.requests.values()) {
-		const stream = RpcSchema.getStreamSchemas(rpc.successSchema.ast);
-		const schemas =
-			stream._tag === "Some"
-				? [rpc.errorSchema.ast, stream.value.failure.ast]
-				: [rpc.errorSchema.ast];
-		const variants = [...schemas];
+		const schemas = RpcSchema.isStreamSchema(rpc.successSchema)
+			? [rpc.errorSchema.ast, rpc.successSchema.error.ast]
+			: [rpc.errorSchema.ast];
+		const variants: SchemaAST.AST[] = [...schemas];
 		for (const ast of variants) {
 			if (ast._tag === "Union") {
 				variants.push(...ast.types);
 				continue;
 			}
-			if (ast._tag === "NeverKeyword") continue;
-			const error = fc.sample(Arbitrary.make(Schema.make(ast)), {
-				seed: 42,
-				numRuns: 1,
-			})[0];
+			if (ast._tag === "Never") continue;
+			const [error] = await Effect.runPromise(
+				Arbitrary.sampleEffect(Arbitrary.schema(Schema.make(ast)), {
+					seed: 42,
+					count: 1,
+				}),
+			);
 			if (typeof error !== "object" || error === null || !("_tag" in error))
 				throw new Error("untagged error");
 			if (checked.has(String(error._tag))) continue;
 			checked.add(String(error._tag));
-			const payload = fc.sample(
-				Arbitrary.make(Schema.make(rpc.payloadSchema.ast)),
-				{ seed: 42, numRuns: 1 },
-			)[0];
+			const payloadSchema = Schema.toCodecJson(rpc.payloadSchema);
+			const [payload] = await Effect.runPromise(
+				Arbitrary.sampleEffect(
+					Arbitrary.schema(Schema.toEncoded(payloadSchema)).pipe(
+						Arbitrary.filter((payload) =>
+							Exit.isSuccess(Schema.decodeUnknownExit(payloadSchema)(payload)),
+						),
+						Arbitrary.map(Schema.decodeUnknownSync(payloadSchema)),
+					),
+					{ seed: 42, count: 1 },
+				),
+			);
 			const { runtime: current } = serve({
 				[rpc._tag]: () => {
 					throw error;
@@ -126,15 +142,15 @@ it("round-trips every declared error class as its own instance", async () => {
 						| Effect.Effect<unknown, unknown>
 						| Stream.Stream<unknown, unknown>;
 					const response = call(rpc._tag, payload);
-					return yield* Effect.either(
+					return yield* Effect.result(
 						Effect.isEffect(response) ? response : Stream.runDrain(response),
 					);
 				}),
 			);
-			if (result._tag !== "Left") throw new Error(`${rpc._tag} succeeded`);
-			expect(result.left, rpc._tag).toBeInstanceOf(error.constructor);
+			if (result._tag !== "Failure") throw new Error(`${rpc._tag} succeeded`);
+			expect(result.failure, rpc._tag).toBeInstanceOf(error.constructor);
 			// JSON omits optional fields whose value is undefined.
-			expect(JSON.parse(JSON.stringify(result.left))).toEqual(
+			expect(JSON.parse(JSON.stringify(result.failure))).toEqual(
 				JSON.parse(JSON.stringify(error)),
 			);
 			await current.dispose();

@@ -11,9 +11,9 @@ import {
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { StartInstance } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { stopManagedOpenCode } from "../../../src/lib/instance/managed-opencode-process.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -45,9 +45,10 @@ describe("managed OpenCode survives server replacement", () => {
 	/** Managed OpenCode spawns on first use, not with the server. */
 	const firstUse = () => {
 		if (!harness) throw new Error("No process harness");
-		return harness.requestRpc(
-			new StartInstance({ instanceId: "managed-test" }),
-		);
+		return harness.requestRpc({
+			_tag: "StartInstance",
+			instanceId: "managed-test",
+		});
 	};
 	const startManaged = async (
 		options: Parameters<typeof ProcessHarness.start>[0] = {},

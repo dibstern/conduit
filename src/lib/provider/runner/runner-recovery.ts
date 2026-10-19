@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import { ClaudeEventPersistEffectTag } from "../../persistence/effect/claude-event-persist-effect.js";
 import { requeueFailedSteers } from "../../persistence/effect/input-requeue-effect.js";
@@ -41,7 +41,7 @@ export const runningRunnerCommands = (
 		);
 	});
 
-type RunningCommand = Effect.Effect.Success<
+type RunningCommand = Effect.Success<
 	ReturnType<typeof runningRunnerCommands>
 >[number];
 
@@ -100,10 +100,10 @@ export const recoverRunnerCommands = <T extends SessionTurn, E = never>(
 					row.state !== "pending" &&
 					row.state !== "running",
 				wait: Effect.gen(function* () {
-					const execution = yield* Effect.either(options.replay(row, input));
+					const execution = yield* Effect.result(options.replay(row, input));
 					if (options.closing()) return;
-					if (execution._tag === "Left") {
-						yield* options.failTurn(sinkId, execution.left);
+					if (execution._tag === "Failure") {
+						yield* options.failTurn(sinkId, execution.failure);
 						return yield* settleRunnerCommand(
 							sql,
 							projectId,
@@ -111,10 +111,10 @@ export const recoverRunnerCommands = <T extends SessionTurn, E = never>(
 							row.command_id,
 							row.attempt_count,
 							undefined,
-							execution.left,
+							execution.failure,
 						);
 					}
-					const result = execution.right;
+					const result = execution.success;
 					if (result?.status === "completed" && options.onCompleted)
 						yield* options.onCompleted(row, input, result);
 					yield* settleRunnerCommand(

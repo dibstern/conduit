@@ -54,7 +54,7 @@ const listSessionCommands = (
 					})
 					.pipe(
 						Effect.map((capabilities) => capabilities.commands),
-						Effect.catchAll((error) =>
+						Effect.catch((error) =>
 							tolerateDiscoveryFailure
 								? Effect.gen(function* () {
 										(yield* LoggerTag).warn(
@@ -68,15 +68,15 @@ const listSessionCommands = (
 			});
 		if (PROVIDER_DRIVERS[account.driver].catalogSource === "discovery")
 			return yield* listDiscoveredCommands(account);
-		const result = yield* Effect.either(
+		const result = yield* Effect.result(
 			(yield* OpenCodeSettingsServiceTag).listCommands({
 				startIfStopped: !tolerateDiscoveryFailure,
 			}),
 		);
-		if (result._tag === "Right") return result.right;
-		if (boundId !== undefined) return yield* Effect.fail(result.left);
+		if (result._tag === "Success") return result.success;
+		if (boundId !== undefined) return yield* Effect.fail(result.failure);
 		(yield* LoggerTag).warn(
-			`Failed to discover OpenCode commands; falling back to Claude commands: ${result.left instanceof Error ? result.left.message : result.left}`,
+			`Failed to discover OpenCode commands; falling back to Claude commands: ${result.failure instanceof Error ? result.failure.message : result.failure}`,
 		);
 		return yield* listDiscoveredCommands(
 			yield* directory.resolve({ _tag: "DriverDefault", driver: "claude" }),

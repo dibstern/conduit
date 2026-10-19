@@ -6,7 +6,7 @@ import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SaveProject } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -42,6 +42,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 		harness = ProcessHarness.create({
 			rootPrefix: join(realpathSync(tmpdir()), "conduit-usg5-7-"),
 			opencodeRecording: recording,
+			opencodeInitiallyIdle: recording === "multi-folder-project",
 		});
 		evidence["main"] = harness.projectDir;
 		await harness.restart();
@@ -50,10 +51,10 @@ describe("OpenCode project extra folders through the daemon", () => {
 
 	async function save(fixture: ProcessHarness, folders: readonly string[]) {
 		const input = { slug: "process-test", folders };
-		const result = await sendRpcRequest(
-			join(fixture.configDir, "relay.sock"),
-			new SaveProject(input),
-		);
+		const result = await sendRpcRequest(join(fixture.configDir, "relay.sock"), {
+			_tag: "SaveProject",
+			...input,
+		});
 		evidence["save"] = { input, result };
 		expect(result.savedSlug).toBe("process-test");
 		expect(result.warnings).toEqual([]);
@@ -112,6 +113,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 			"Extra folder marker",
 			undefined,
 			"opencode",
+			{ modelProviderId: "opencode", modelId: "nemotron-3-ultra-free" },
 		);
 		evidence["sessionId"] = sessionId;
 		rmSync(missing, { recursive: true });
@@ -164,6 +166,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 			"Single folder",
 			undefined,
 			"opencode",
+			{ modelProviderId: "opencode", modelId: "big-pickle" },
 		);
 		evidence["sessionId"] = sessionId;
 		const first = await browser.send(
@@ -199,6 +202,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 			"Unchanged folder",
 			undefined,
 			"opencode",
+			{ modelProviderId: "opencode", modelId: "big-pickle" },
 		);
 		evidence["sessionId"] = sessionId;
 		const first = await browser.send(
@@ -250,6 +254,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 			"Folder removal",
 			undefined,
 			"opencode",
+			{ modelProviderId: "opencode", modelId: "big-pickle" },
 		);
 		evidence["sessionId"] = sessionId;
 		const first = await before.send(
@@ -306,6 +311,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 			"Missing main folder",
 			undefined,
 			"opencode",
+			{ modelProviderId: "opencode", modelId: "big-pickle" },
 		);
 		evidence["sessionId"] = sessionId;
 		rmSync(fixture.projectDir, { recursive: true });

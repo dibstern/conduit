@@ -1,5 +1,5 @@
-import type { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import type { SqlClient } from "effect/sql";
 import type {
 	PermissionResolvedPayload,
 	QuestionResolvedPayload,
@@ -144,7 +144,7 @@ export const makeRecoveredEventSink = (options: {
 							},
 						});
 					}).pipe(
-						Effect.catchAll((cause) =>
+						Effect.catch((cause) =>
 							Effect.logWarning(
 								"Failed to finish cancelled recovered question",
 								cause,

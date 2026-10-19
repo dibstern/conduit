@@ -279,7 +279,7 @@ test("an open recreated message catches up through overflow without replacing it
 		"recreated-message-overflow-metrics.json",
 	);
 	const initial = event(SESSION);
-	const advanceBusCapacity = 2;
+	const advanceBusCapacity = 1;
 	const unrelatedAdvances = 64;
 	const heldMs = 8000;
 	const heldDeliveries = 4;

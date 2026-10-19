@@ -1,8 +1,8 @@
 // All database operations are Effect programs using @effect/sql template literal queries.
 
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect, Schema } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import type { CanonicalEvent, StoredEvent } from "../events.js";
 import { CanonicalEventSchema } from "../events.js";
@@ -52,10 +52,10 @@ export interface EventStoreEffect {
 	) => Effect.Effect<number, EventStoreError | SqlError>;
 }
 
-export class EventStoreEffectTag extends Context.Tag("EventStoreEffect")<
+export class EventStoreEffectTag extends Context.Service<
 	EventStoreEffectTag,
 	EventStoreEffect
->() {}
+>()("EventStoreEffect") {}
 
 const decodeEventStoreRow = (
 	row: StoredEventRow,
@@ -69,7 +69,7 @@ const decodeEventStoreRow = (
 export const validateCanonicalEvent = (
 	event: CanonicalEvent,
 ): Effect.Effect<void, EventStoreError> =>
-	Schema.decodeUnknown(CanonicalEventSchema)(event).pipe(
+	Schema.decodeUnknownEffect(CanonicalEventSchema)(event).pipe(
 		Effect.asVoid,
 		Effect.mapError(
 			(cause) =>

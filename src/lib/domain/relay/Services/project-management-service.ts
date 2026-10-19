@@ -52,9 +52,10 @@ export interface ProjectManagementService {
 	>;
 }
 
-export class ProjectManagementServiceTag extends Context.Tag(
-	"ProjectManagementService",
-)<ProjectManagementServiceTag, ProjectManagementService>() {}
+export class ProjectManagementServiceTag extends Context.Service<
+	ProjectManagementServiceTag,
+	ProjectManagementService
+>()("ProjectManagementService") {}
 
 export const ProjectManagementServiceLive: Layer.Layer<
 	ProjectManagementServiceTag,

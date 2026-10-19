@@ -4,7 +4,6 @@
 // another tab, or by the CLI, shows here with no refetch.
 
 import { Effect, Fiber, Stream } from "effect";
-import type { RuntimeFiber } from "effect/Fiber";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { supervise } from "../transport/supervise.js";
@@ -18,7 +17,6 @@ import {
 	handleModelList,
 	handleVisibilityInfo,
 } from "./discovery.svelte.js";
-import { projectState } from "./project-state.svelte.js";
 import { getCurrentSlug } from "./router.svelte.js";
 import { setClientCount, uiState } from "./ui.svelte.js";
 
@@ -42,10 +40,6 @@ export const applyProjectSetting = (
 		case "defaultSessionMode":
 			applyDefaultSessionMode(setting.mode);
 			break;
-		case "defaultGroupingMode":
-			projectState.defaultGroupingMode = setting.mode;
-			projectState.defaultGroupingRevision++;
-			break;
 		case "claudeSettings":
 			handleClaudeSettingsInfo(setting);
 			break;
@@ -63,7 +57,7 @@ export const applyProjectSetting = (
 
 let viewed: string | null = null;
 let generation = 0;
-let fiber: RuntimeFiber<void, never> | null = null;
+let fiber: Fiber.Fiber<void, never> | null = null;
 
 /** Follow `project`'s settings until the attached project moves; `null` stops. */
 export function viewProjectSettings(project: string | null): void {

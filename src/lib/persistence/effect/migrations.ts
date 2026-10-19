@@ -1,7 +1,7 @@
-import { SqlClient } from "@effect/sql";
-import * as Migrator from "@effect/sql/Migrator";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
+import * as Migrator from "effect/sql/Migrator";
+import type { SqlError } from "effect/sql/SqlError";
 import {
 	BACKFILL_COMPACTION_MESSAGES_MIGRATION,
 	COMPACT_REDUNDANT_EVENTS_MIGRATION,
@@ -441,7 +441,7 @@ const migrationKeyPattern = /^(\d+)_(.+)$/;
 
 function migrationRegistryError(message: string): Migrator.MigrationError {
 	return new Migrator.MigrationError({
-		reason: "bad-state",
+		kind: "BadState",
 		message,
 	});
 }
@@ -1380,7 +1380,7 @@ export function makeEffectSqlMigrator(
 								(cause) =>
 									new Migrator.MigrationError({
 										cause,
-										reason: "failed",
+										kind: "Failed",
 										message: `Migration "${id}_${name}" failed`,
 									}),
 							),

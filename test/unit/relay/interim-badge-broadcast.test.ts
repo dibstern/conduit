@@ -36,9 +36,9 @@ it("publishes task additions and removals from onChange without another event", 
 		Layer.mergeAll(
 			bus,
 			persistence,
-			Layer.succeed(SessionActivityTag, activity),
-			Layer.succeed(ConfigTag, makeMockConfig()),
-			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+			Layer.succeed(SessionActivityTag)(activity),
+			Layer.succeed(ConfigTag)(makeMockConfig()),
+			Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		),
 	);
 	try {
@@ -148,8 +148,8 @@ it("publishes committed permission counts through the root subscription", async 
 			bus,
 			persistence,
 			Layer.effect(SessionActivityTag, makeSessionActivity),
-			Layer.succeed(ConfigTag, makeMockConfig()),
-			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+			Layer.succeed(ConfigTag)(makeMockConfig()),
+			Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		),
 	);
 	try {

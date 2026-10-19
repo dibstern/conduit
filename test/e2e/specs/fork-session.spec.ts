@@ -19,9 +19,9 @@
 // response to complete — we wait for the fork UI elements instead.
 
 import { writeFileSync } from "node:fs";
-import { Socket } from "@effect/platform";
-import { RpcClient, type RpcClientError, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
+import { RpcClient, type RpcClientError, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import NodeWebSocket from "ws";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { expect, test } from "../helpers/replay-fixture.js";

@@ -4,8 +4,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	afterEach,
 	beforeEach,
@@ -88,7 +88,7 @@ function makeFailFirstBusLayer(
 	outcome: Effect.Effect<never>,
 ): Layer.Layer<SessionEventBusTag> {
 	let published = 0;
-	return Layer.succeed(SessionEventBusTag, {
+	return Layer.succeed(SessionEventBusTag)({
 		publish: () => (published++ === 0 ? outcome : Effect.void),
 		publishAdvance: () => Effect.void,
 		subscribe: () => Effect.succeed(Stream.empty),
@@ -2077,7 +2077,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		let fetches = 0;
 		let armed = false;
 		let reconnected = false;
-		const bus = Layer.succeed(SessionEventBusTag, {
+		const bus = Layer.succeed(SessionEventBusTag)({
 			publish: () => Effect.void,
 			publishAdvance: () =>
 				Effect.sync(() => {

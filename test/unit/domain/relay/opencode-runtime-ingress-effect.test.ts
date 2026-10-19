@@ -2,8 +2,6 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
-import { SqlError } from "@effect/sql/SqlError";
 import {
 	Deferred,
 	Effect,
@@ -13,6 +11,8 @@ import {
 	Queue,
 	Stream,
 } from "effect";
+import { SqlClient } from "effect/sql";
+import { SqlError, UnknownError } from "effect/sql/SqlError";
 import {
 	afterEach,
 	beforeEach,
@@ -322,11 +322,13 @@ function makeFakeIngress(options?: {
 				ingestOptions?: { readonly afterCommit?: Effect.Effect<void> },
 			) =>
 				(options?.ingestBatch?.(events) ?? Effect.succeed(events.length)).pipe(
-					Effect.tap(() => {
-						for (const event of events)
-							if (event.type === "session.created")
-								projected.add(event.sessionId);
-					}),
+					Effect.tap(() =>
+						Effect.sync(() => {
+							for (const event of events)
+								if (event.type === "session.created")
+									projected.add(event.sessionId);
+						}),
+					),
 					// Stand in for the durable boundary: only a batch that committed
 					// runs afterCommit.
 					Effect.tap(() => ingestOptions?.afterCommit ?? Effect.void),
@@ -451,8 +453,8 @@ describe("EffectOpenCodeRuntimeIngress", () => {
 							ingestion.ingestBatch(events, {
 								...options,
 								beforeCommit: Deferred.succeed(entered, undefined).pipe(
-									Effect.zipRight(Deferred.await(release)),
-									Effect.zipRight(options.beforeCommit ?? Effect.void),
+									Effect.andThen(Deferred.await(release)),
+									Effect.andThen(options.beforeCommit ?? Effect.void),
 								),
 							}),
 					}),
@@ -743,7 +745,12 @@ describe("EffectOpenCodeRuntimeIngress ProviderRuntimeIngestion boundary", () =>
 		const { hook } = makeFakeIngress({
 			ingestBatch: () =>
 				Effect.fail(
-					new SqlError({ message: "SQLITE_BUSY: database is locked" }),
+					new SqlError({
+						reason: new UnknownError({
+							cause: new Error("SQLITE_BUSY: database is locked"),
+							message: "SQLITE_BUSY: database is locked",
+						}),
+					}),
 				),
 		});
 		const event = makeSSEEvent("message.created", {

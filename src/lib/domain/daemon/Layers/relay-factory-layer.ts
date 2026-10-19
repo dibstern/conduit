@@ -105,10 +105,10 @@ export class RelayFactoryError extends Data.TaggedError("RelayFactoryError")<{
  * available until the server layer has built. Both the relay factory and
  * daemon-main read from this Ref.
  */
-export class HttpServerRefTag extends Context.Tag("HttpServerRef")<
+export class HttpServerRefTag extends Context.Service<
 	HttpServerRefTag,
 	Ref.Ref<http.Server | null>
->() {}
+>()("HttpServerRef") {}
 
 /**
  * Layer that creates an HttpServerRef initialized to null.
@@ -139,22 +139,22 @@ export interface RelayFactoryProjectControls {
 		input: SaveProjectInput,
 	) => Effect.Effect<
 		Omit<SaveProjectResult, "projects">,
-		| Effect.Effect.Error<ReturnType<typeof saveProject>>
-		| Effect.Effect.Error<typeof broadcastProjectList>
+		| Effect.Error<ReturnType<typeof saveProject>>
+		| Effect.Error<typeof broadcastProjectList>
 	>;
 	readonly removeProject: (
 		slug: string,
 	) => Effect.Effect<
 		void,
-		| Effect.Effect.Error<ReturnType<typeof removeProjectFromEffectRegistry>>
-		| Effect.Effect.Error<typeof broadcastProjectList>
+		| Effect.Error<ReturnType<typeof removeProjectFromEffectRegistry>>
+		| Effect.Error<typeof broadcastProjectList>
 	>;
 }
 
-export class RelayFactoryTag extends Context.Tag("RelayFactory")<
+export class RelayFactoryTag extends Context.Service<
 	RelayFactoryTag,
 	RelayFactory
->() {}
+>()("RelayFactory") {}
 
 /**
  * Create a Layer providing RelayFactoryTag.
@@ -242,7 +242,7 @@ export const RelayFactoryLive = (
 							),
 						),
 					list: (options) =>
-						listEffectDaemonSessions(configDir, options).pipe(
+						listEffectDaemonSessions(options).pipe(
 							Effect.provide(daemonContext),
 							Effect.mapError(
 								(cause) => new DaemonSessionQueryServiceError({ cause }),
@@ -353,12 +353,6 @@ export const RelayFactoryLive = (
 					Effect.gen(function* () {
 						const listProjects = getEffectProjectInfos.pipe(
 							Effect.provide(daemonContext),
-							Effect.map((projects) =>
-								projects.map(({ group, ...project }) => ({
-									...project,
-									...(group === undefined ? {} : { group }),
-								})),
-							),
 							Effect.mapError(
 								(cause) =>
 									new ProjectManagementServiceError({
@@ -582,7 +576,7 @@ export const RelayFactoryLive = (
 												reason: `Failed to stop cancelled relay for project "${project.slug}"`,
 												cause,
 											}),
-									}).pipe(Effect.catchAll((error) => Effect.logError(error)));
+									}).pipe(Effect.catch((error) => Effect.logError(error)));
 								}),
 							),
 						);

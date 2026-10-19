@@ -16,10 +16,7 @@ import { dirname, join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	AddInstance,
-	RenameSession,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import {
 	cursorSessionStorePath,
 	readCursorSessionIdentity,
@@ -192,9 +189,11 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 				},
 			});
 		await restart();
-		const account = await fixture.requestRpc(
-			new AddInstance({ name: "Cursor recovery replay", driver: "cursor" }),
-		);
+		const account = await fixture.requestRpc({
+			_tag: "AddInstance",
+			name: "Cursor recovery replay",
+			driver: "cursor",
+		});
 		if (!account.addedInstanceId) throw new Error("Missing Cursor account");
 		const browser = await fixture.connect();
 		const id = await browser.createSession(
@@ -842,13 +841,12 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 					.at(-1)?.data,
 			).not.toMatchObject({ options: { local: { force: true } } });
 			const beforeRename = rows(capture).length;
-			await fixture.requestRpc(
-				new RenameSession({
-					sessionId: id,
-					title: "Renamed locally",
-					originId: browser.originId,
-				}),
-			);
+			await fixture.requestRpc({
+				_tag: "RenameSession",
+				sessionId: id,
+				title: "Renamed locally",
+				originId: browser.originId,
+			});
 			expect(
 				rows(capture)
 					.slice(beforeRename)

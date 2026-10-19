@@ -81,10 +81,10 @@ export function emptyDaemonState(): DaemonState {
 }
 
 /** Tag for the mutable DaemonState Ref in the Effect Context. */
-export class DaemonStateTag extends Context.Tag("DaemonState")<
+export class DaemonStateTag extends Context.Service<
 	DaemonStateTag,
 	Ref.Ref<DaemonState>
->() {}
+>()("DaemonState") {}
 
 /**
  * Create a Layer providing DaemonStateTag backed by a Ref.

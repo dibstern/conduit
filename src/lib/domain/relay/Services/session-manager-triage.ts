@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Effect, Option, Schema } from "effect";
+import { SqlClient } from "effect/sql";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import { daemonSessionGitCache } from "../../../git/session-git.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
@@ -98,7 +98,7 @@ export const setSessionSettled = (
 		if (settled && consumedHead === undefined && row.workspace !== null) {
 			const config = yield* ConfigTag;
 			const workspace = Schema.decodeUnknownOption(
-				Schema.parseJson(SessionWorkspaceSchema),
+				Schema.fromJsonString(SessionWorkspaceSchema),
 			)(row.workspace);
 			if (Option.isSome(workspace)) {
 				const directory = effectiveWorkingDirectory(

@@ -173,7 +173,7 @@ const traceSummary = (file: string, debuggedSessionId: string | null) => {
 		);
 	});
 	const debuggedShortSpans = shortSuccesses.filter(belongsToDebuggedSession);
-	const sqlSpans = spans.filter((span) => span["name"] === "sql.execute");
+	const sqlSpans = spans.filter((span) => span["name"] === "sqlite");
 	return {
 		spans: spans.length,
 		debuggedSessionId,
@@ -288,7 +288,7 @@ test("creates reach every sidebar under streaming write load", async ({
 					? debuggedSessionId
 					: await driver.createSession(`Latency stream ${index}`);
 			await Effect.runPromise(
-				driver.rpc.input.submit({
+				driver.rpc["input.submit"]({
 					sessionId,
 					originId: driver.originId,
 					inputId: randomUUID(),
@@ -647,7 +647,7 @@ test("overflow catches up every sidebar through create and delete bursts", async
 			keepPort: true,
 			skipBrowserProbe: true,
 			metricsFile,
-			serviceEnvironment: { CONDUIT_TEST_ADVANCE_BUS_CAPACITY: "2" },
+			serviceEnvironment: { CONDUIT_TEST_ADVANCE_BUS_CAPACITY: "1" },
 		});
 		const driver = await harness.connect(
 			undefined,
@@ -662,7 +662,7 @@ test("overflow catches up every sidebar through create and delete bursts", async
 		for (let index = 0; index < parameters.streams; index++) {
 			const sessionId = await driver.createSession(`Overflow stream ${index}`);
 			await Effect.runPromise(
-				driver.rpc.input.submit({
+				driver.rpc["input.submit"]({
 					sessionId,
 					originId: driver.originId,
 					inputId: randomUUID(),
@@ -845,7 +845,7 @@ test("overflow catches up every sidebar through create and delete bursts", async
 						devices: 4,
 						creates: 20,
 						deletes: 5,
-						advanceBusCapacity: 2,
+						advanceBusCapacity: 1,
 					},
 					phaseStart,
 					phaseEnd,

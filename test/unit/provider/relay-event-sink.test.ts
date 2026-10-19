@@ -1,5 +1,5 @@
-import { SqlError } from "@effect/sql/SqlError";
 import { Effect, Fiber } from "effect";
+import { SqlError, UnknownError } from "effect/sql/SqlError";
 import { describe, expect, it, vi } from "vitest";
 import type {
 	ProviderRuntimeEventPayloadMap,
@@ -187,7 +187,12 @@ describe("createRelayEventSink — persistence", () => {
 			partId: "part_1",
 			text: "Hello",
 		});
-		const ingestionError = new SqlError({ message: "ingestion failed" });
+		const ingestionError = new SqlError({
+			reason: new UnknownError({
+				cause: "ingestion failed",
+				message: "ingestion failed",
+			}),
+		});
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
 			ingestion: {
@@ -195,11 +200,11 @@ describe("createRelayEventSink — persistence", () => {
 			},
 		});
 
-		const result = await Effect.runPromise(Effect.either(sink.push(event)));
+		const result = await Effect.runPromise(Effect.result(sink.push(event)));
 
-		expect(result._tag).toBe("Left");
-		if (result._tag === "Left") {
-			expect(result.left).toBe(ingestionError);
+		expect(result._tag).toBe("Failure");
+		if (result._tag === "Failure") {
+			expect(result.failure).toBe(ingestionError);
 		}
 	});
 
@@ -290,7 +295,7 @@ describe("createRelayEventSink — permission/question", () => {
 		const sink = createRelayEventSink({ sessionId: "ses-1" });
 
 		const permissionResult = await Effect.runPromise(
-			Effect.either(
+			Effect.result(
 				sink.requestPermission({
 					requestId: "req_1",
 					toolName: "Bash",
@@ -302,8 +307,8 @@ describe("createRelayEventSink — permission/question", () => {
 			),
 		);
 		expect(permissionResult).toMatchObject({
-			_tag: "Left",
-			left: {
+			_tag: "Failure",
+			failure: {
 				_tag: "MissingPendingInteractions",
 				operation: "requestPermission",
 				sessionId: "ses-1",
@@ -311,7 +316,7 @@ describe("createRelayEventSink — permission/question", () => {
 		});
 
 		const questionResult = await Effect.runPromise(
-			Effect.either(
+			Effect.result(
 				sink.requestQuestion({
 					requestId: "que_1",
 					questions: [
@@ -325,8 +330,8 @@ describe("createRelayEventSink — permission/question", () => {
 			),
 		);
 		expect(questionResult).toMatchObject({
-			_tag: "Left",
-			left: {
+			_tag: "Failure",
+			failure: {
 				_tag: "MissingPendingInteractions",
 				operation: "requestQuestion",
 				sessionId: "ses-1",

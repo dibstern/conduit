@@ -89,18 +89,14 @@ describe("Integration: account catalogues", () => {
 		);
 		const before = harness.mock.diagnostics.length;
 		for (const scope of [
-			{ instanceId: "missing-account" },
+			{ projectSlug: "integration-test", instanceId: "missing-account" },
 			{ sessionId: "ses-unroutable" },
 		]) {
 			await expect(
-				client.rpcCall((rpc) =>
-					rpc.GetModels({ projectSlug: "integration-test", ...scope }),
-				),
+				client.rpcCall((rpc) => rpc.GetModels(scope)),
 			).rejects.toThrow(/missing-account/);
 			await expect(
-				client.rpcCall((rpc) =>
-					rpc.GetAgents({ projectSlug: "integration-test", ...scope }),
-				),
+				client.rpcCall((rpc) => rpc.GetAgents(scope)),
 			).rejects.toThrow(/missing-account/);
 		}
 		expect(
@@ -153,7 +149,7 @@ describe("Integration: account catalogues", () => {
 				registry,
 				DaemonEventBusLive,
 				DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
-				Layer.succeed(ConfigPersistenceTag, {
+				Layer.succeed(ConfigPersistenceTag)({
 					requestSave: Effect.void,
 					flush: Effect.fail(new Error("Fixture never flushes config")),
 				}),

@@ -27,7 +27,7 @@ vi.mock("effect", async (importOriginal) => {
 				effect.Deferred.make<A, E>().pipe(
 					effect.Effect.tap(() =>
 						scheduling.yieldDeferred
-							? effect.Effect.yieldNow()
+							? effect.Effect.yieldNow
 							: effect.Effect.void,
 					),
 				),
@@ -124,8 +124,14 @@ describe("Claude runner output spool", () => {
 		});
 		expect(readFileSync(filename).length).toBe(0);
 		const busy = Effect.runFork(spool.emit(statusOutput("busy")));
-		await Effect.runPromise(Effect.yieldNow());
-		expect(Option.isNone(await Effect.runPromise(Fiber.poll(busy)))).toBe(true);
+		await Effect.runPromise(Effect.yieldNow);
+		expect(
+			Option.isNone(
+				await Effect.runPromise(
+					Effect.sync(() => Option.fromUndefinedOr(busy.pollUnsafe())),
+				),
+			),
+		).toBe(true);
 		spool.reply({
 			type: "output-reply",
 			outputId: "2",
@@ -142,10 +148,14 @@ describe("Claude runner output spool", () => {
 			spool.emit({ type: "release-sink", sinkId: "turn-1" }),
 		);
 		const drain = Effect.runFork(spool.drainEffect());
-		await Effect.runPromise(Effect.yieldNow());
-		expect(Option.isNone(await Effect.runPromise(Fiber.poll(drain)))).toBe(
-			true,
-		);
+		await Effect.runPromise(Effect.yieldNow);
+		expect(
+			Option.isNone(
+				await Effect.runPromise(
+					Effect.sync(() => Option.fromUndefinedOr(drain.pollUnsafe())),
+				),
+			),
+		).toBe(true);
 		spool.reply({
 			type: "output-reply",
 			outputId: "1",
@@ -168,7 +178,7 @@ describe("Claude runner output spool", () => {
 		);
 		for (let index = 0; index < 20; index++) {
 			const drain = Effect.runFork(spool.drainEffect());
-			await Effect.runPromise(Effect.yieldNow());
+			await Effect.runPromise(Effect.yieldNow);
 			expect(Reflect.get(spool, "drainWaiters")).toHaveProperty("size", 1);
 			await Effect.runPromise(Fiber.interrupt(drain));
 			expect(Reflect.get(spool, "drainWaiters")).toHaveProperty("size", 0);

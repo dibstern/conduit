@@ -23,10 +23,10 @@ export interface ScanService {
 	>;
 }
 
-export class ScanServiceTag extends Context.Tag("ScanService")<
+export class ScanServiceTag extends Context.Service<
 	ScanServiceTag,
 	ScanService
->() {}
+>()("ScanService") {}
 
 export const ScanServiceLive: Layer.Layer<ScanServiceTag> = Layer.succeed(
 	ScanServiceTag,

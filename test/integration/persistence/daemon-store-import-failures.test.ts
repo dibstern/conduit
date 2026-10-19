@@ -18,6 +18,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import Database from "better-sqlite3";
 import { Effect, ManagedRuntime } from "effect";
 import { afterAll, afterEach, beforeEach, expect, it } from "vitest";
@@ -353,9 +354,9 @@ for (const mode of ["seeded", "imported"] as const) {
 	it(`S10 committed WAL frames through a symlink are included when ${mode}`, async () => {
 		if (mode === "imported") await seed();
 		const project = await fixture(root, "wal");
-		const writer = new Database(project.sourcePath);
+		const writer = new DatabaseSync(project.sourcePath);
 		try {
-			writer.pragma("wal_autocheckpoint = 0");
+			writer.exec("PRAGMA wal_autocheckpoint = 0");
 			writer.exec("BEGIN; SELECT COUNT(*) FROM events");
 			await append(project, "wal_only");
 			writer.exec("COMMIT");

@@ -5,14 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	AddInstance,
-	CancelCursorLogin,
-	GetCursorAuth,
-	GetInstances,
-	LogoutCursor,
-	StartCursorLogin,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 interface TraceRow {
@@ -137,15 +130,15 @@ describe("Cursor authentication through the built daemon and detached runners", 
 	}
 
 	async function completeLogin(fixture: ProcessHarness) {
-		await fixture.requestRpc(new StartCursorLogin({}));
+		await fixture.requestRpc({ _tag: "StartCursorLogin" });
 		await vi.waitFor(
 			async () =>
 				expect(
-					(await fixture.requestRpc(new GetCursorAuth({}))).login.state,
+					(await fixture.requestRpc({ _tag: "GetCursorAuth" })).login.state,
 				).toBe("complete"),
 			{ timeout: TIMEOUT, interval: 100 },
 		);
-		return fixture.requestRpc(new GetCursorAuth({}));
+		return fixture.requestRpc({ _tag: "GetCursorAuth" });
 	}
 
 	async function expectOperation(kind: string) {
@@ -211,7 +204,7 @@ describe("Cursor authentication through the built daemon and detached runners", 
 
 	it("shows one login link, completes once, reports the key expiry, and refreshes one routable account", async () => {
 		const fixture = await start("login-status-directory");
-		expect(await fixture.requestRpc(new GetCursorAuth({}))).toMatchObject({
+		expect(await fixture.requestRpc({ _tag: "GetCursorAuth" })).toMatchObject({
 			source: "none",
 			status: "logged-out",
 			expiresSoon: false,
@@ -219,13 +212,13 @@ describe("Cursor authentication through the built daemon and detached runners", 
 		});
 		const startedAt = Date.now();
 		const starts = await Promise.all([
-			fixture.requestRpc(new StartCursorLogin({})),
-			fixture.requestRpc(new StartCursorLogin({})),
+			fixture.requestRpc({ _tag: "StartCursorLogin" }),
+			fixture.requestRpc({ _tag: "StartCursorLogin" }),
 		]);
 		for (const state of starts) expect(state.login.state).toBe("pending");
 		await vi.waitFor(
 			async () => {
-				const state = await fixture.requestRpc(new GetCursorAuth({}));
+				const state = await fixture.requestRpc({ _tag: "GetCursorAuth" });
 				expect(state.login.state).toBe("pending");
 				expect(state.login.url).toMatch(
 					/^https:\/\/cursor\.com\/loginDeepControl\?/,
@@ -238,11 +231,11 @@ describe("Cursor authentication through the built daemon and detached runners", 
 		await vi.waitFor(
 			async () =>
 				expect(
-					(await fixture.requestRpc(new GetCursorAuth({}))).login.state,
+					(await fixture.requestRpc({ _tag: "GetCursorAuth" })).login.state,
 				).toBe("complete"),
 			{ timeout: TIMEOUT, interval: 100 },
 		);
-		const authenticated = await fixture.requestRpc(new GetCursorAuth({}));
+		const authenticated = await fixture.requestRpc({ _tag: "GetCursorAuth" });
 		expect(authenticated).toMatchObject({
 			source: "sdk-login",
 			status: "logged-in",
@@ -262,7 +255,7 @@ describe("Cursor authentication through the built daemon and detached runners", 
 			apiKeyName: "conduit",
 		});
 		const instances = (
-			await fixture.requestRpc(new GetInstances({}))
+			await fixture.requestRpc({ _tag: "GetInstances" })
 		).instances.filter(({ driver }) => driver === "cursor");
 		expect(instances).toHaveLength(1);
 		expect(instances[0]).toMatchObject({ available: true });
@@ -307,17 +300,17 @@ describe("Cursor authentication through the built daemon and detached runners", 
 				credential: { ...state.credential, apiKeyExpiresAtMs: expiresSoonAt },
 			}),
 		);
-		expect(await fixture.requestRpc(new GetCursorAuth({}))).toMatchObject({
+		expect(await fixture.requestRpc({ _tag: "GetCursorAuth" })).toMatchObject({
 			apiKeyExpiresAtMs: expiresSoonAt,
 			expiresSoon: true,
 		});
-		expect(await fixture.requestRpc(new LogoutCursor({}))).toMatchObject({
+		expect(await fixture.requestRpc({ _tag: "LogoutCursor" })).toMatchObject({
 			source: "none",
 			status: "logged-out",
 			login: { state: "idle" },
 		});
 		const loggedOut = (
-			await fixture.requestRpc(new GetInstances({}))
+			await fixture.requestRpc({ _tag: "GetInstances" })
 		).instances.filter(({ driver }) => driver === "cursor");
 		expect(loggedOut).toHaveLength(1);
 		expect(loggedOut[0]).toMatchObject({
@@ -328,7 +321,7 @@ describe("Cursor authentication through the built daemon and detached runners", 
 		});
 		await completeLogin(fixture);
 		const loggedIn = (
-			await fixture.requestRpc(new GetInstances({}))
+			await fixture.requestRpc({ _tag: "GetInstances" })
 		).instances.filter(({ driver }) => driver === "cursor");
 		expect(loggedIn).toHaveLength(1);
 		expect(loggedIn[0]).toMatchObject({ id: accountId, available: true });
@@ -349,15 +342,17 @@ describe("Cursor authentication through the built daemon and detached runners", 
 			loginUrlDelayMs: 8_000,
 		});
 		expect(
-			(await fixture.requestRpc(new StartCursorLogin({}))).login.state,
+			(await fixture.requestRpc({ _tag: "StartCursorLogin" })).login.state,
 		).toBe("pending");
-		expect(await fixture.requestRpc(new CancelCursorLogin({}))).toMatchObject({
+		expect(
+			await fixture.requestRpc({ _tag: "CancelCursorLogin" }),
+		).toMatchObject({
 			status: "logged-out",
 			login: { state: "cancelled" },
 		});
 		await expectOperation("auth.login.abort");
 		await expectOperation("auth.loginUrl");
-		const state = await fixture.requestRpc(new GetCursorAuth({}));
+		const state = await fixture.requestRpc({ _tag: "GetCursorAuth" });
 		expect(state.login).toEqual({ state: "cancelled" });
 		expect(state.status).toBe("logged-out");
 		const captured = traceRows(capturePath);
@@ -385,10 +380,10 @@ describe("Cursor authentication through the built daemon and detached runners", 
 			loginUrlDelayMs: 3_000,
 			loginTimeoutMs: 500,
 		});
-		await fixture.requestRpc(new StartCursorLogin({}));
+		await fixture.requestRpc({ _tag: "StartCursorLogin" });
 		await expectOperation("auth.login.abort");
 		await expectOperation("auth.loginUrl");
-		const state = await fixture.requestRpc(new GetCursorAuth({}));
+		const state = await fixture.requestRpc({ _tag: "GetCursorAuth" });
 		expect(state).toMatchObject({
 			status: "logged-out",
 			login: { state: "timed-out", error: expect.stringMatching(/timed out/i) },
@@ -416,10 +411,10 @@ describe("Cursor authentication through the built daemon and detached runners", 
 			environmentKey: true,
 		});
 		for (const request of [
-			new GetCursorAuth({}),
-			new StartCursorLogin({}),
-			new LogoutCursor({}),
-		]) {
+			{ _tag: "GetCursorAuth" },
+			{ _tag: "StartCursorLogin" },
+			{ _tag: "LogoutCursor" },
+		] as const) {
 			const state = await fixture.requestRpc(request);
 			expect(state).toMatchObject({
 				source: "environment",
@@ -429,9 +424,11 @@ describe("Cursor authentication through the built daemon and detached runners", 
 			});
 			expect(JSON.stringify(state)).not.toContain("REDACTED");
 		}
-		const added = await fixture.requestRpc(
-			new AddInstance({ name: "Cursor environment", driver: "cursor" }),
-		);
+		const added = await fixture.requestRpc({
+			_tag: "AddInstance",
+			name: "Cursor environment",
+			driver: "cursor",
+		});
 		expect(added.instances.filter(({ driver }) => driver === "cursor")).toEqual(
 			[expect.objectContaining({ available: true })],
 		);
@@ -462,9 +459,11 @@ describe("Cursor authentication through the built daemon and detached runners", 
 		const fixture = await start("runner-credential-refresh", {
 			initialCredential: true,
 		});
-		const added = await fixture.requestRpc(
-			new AddInstance({ name: "Cursor runner auth", driver: "cursor" }),
-		);
+		const added = await fixture.requestRpc({
+			_tag: "AddInstance",
+			name: "Cursor runner auth",
+			driver: "cursor",
+		});
 		const accountId = added.addedInstanceId;
 		if (!accountId) throw new Error("Missing Cursor account");
 		const browser = await fixture.connect();
@@ -485,7 +484,7 @@ describe("Cursor authentication through the built daemon and detached runners", 
 			({ kind }) => kind === "create.options",
 		)?.data as Record<string, unknown>;
 		expect(initialCreate["credentialFingerprint"]).toEqual(expect.any(String));
-		await fixture.requestRpc(new LogoutCursor({}));
+		await fixture.requestRpc({ _tag: "LogoutCursor" });
 		await browser.send(id, "Try while logged out.", TIMEOUT);
 		await vi.waitFor(
 			() =>
@@ -539,7 +538,7 @@ describe("Cursor authentication through the built daemon and detached runners", 
 			resumed["credentialFingerprint"],
 		);
 		expect(
-			(await fixture.requestRpc(new GetInstances({}))).instances.filter(
+			(await fixture.requestRpc({ _tag: "GetInstances" })).instances.filter(
 				({ driver }) => driver === "cursor",
 			),
 		).toEqual([expect.objectContaining({ id: accountId, available: true })]);
@@ -558,9 +557,11 @@ describe("Cursor authentication through the built daemon and detached runners", 
 			initialCredential: true,
 			catalogTtlMs: 1,
 		});
-		const added = await fixture.requestRpc(
-			new AddInstance({ name: "Cursor rejected credential", driver: "cursor" }),
-		);
+		const added = await fixture.requestRpc({
+			_tag: "AddInstance",
+			name: "Cursor rejected credential",
+			driver: "cursor",
+		});
 		const accountId = added.addedInstanceId;
 		if (!accountId) throw new Error("Missing Cursor account");
 		const browser = await fixture.connect();
@@ -638,7 +639,7 @@ describe("Cursor authentication through the built daemon and detached runners", 
 			`${rejectedCatalog.map((row) => JSON.stringify(row)).join("\n")}\n`,
 		);
 		expect(
-			(await fixture.requestRpc(new GetInstances({}))).instances.filter(
+			(await fixture.requestRpc({ _tag: "GetInstances" })).instances.filter(
 				({ driver }) => driver === "cursor",
 			),
 		).toEqual([
@@ -664,9 +665,11 @@ describe("Cursor authentication through the built daemon and detached runners", 
 		const fixture = await start("sandbox-auth-recovery", {
 			initialCredential: true,
 		});
-		const added = await fixture.requestRpc(
-			new AddInstance({ name: "Cursor sandbox auth", driver: "cursor" }),
-		);
+		const added = await fixture.requestRpc({
+			_tag: "AddInstance",
+			name: "Cursor sandbox auth",
+			driver: "cursor",
+		});
 		const accountId = added.addedInstanceId;
 		if (!accountId) throw new Error("Missing Cursor account");
 		const browser = await fixture.connect();

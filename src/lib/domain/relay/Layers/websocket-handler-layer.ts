@@ -1,4 +1,5 @@
-import { Cause, Effect, Layer } from "effect";
+import { Effect, Layer } from "effect";
+import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { makeEffectWsHandler } from "../../../server/effect-ws-handler.js";
 import { LoggerTag, WebSocketHandlerTag } from "../Services/services.js";
@@ -7,7 +8,7 @@ export const WebSocketHandlerLive: Layer.Layer<
 	WebSocketHandlerTag,
 	never,
 	LoggerTag
-> = Layer.scoped(
+> = Layer.effect(
 	WebSocketHandlerTag,
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
@@ -19,17 +20,17 @@ export const WebSocketHandlerLive: Layer.Layer<
 				try: () => handler.drain(),
 				catch: (cause) => cause,
 			}).pipe(
-				Effect.catchAll((cause) =>
+				Effect.catch((cause) =>
 					Effect.sync(() =>
 						wsLog.warn(
 							`Failed to drain websocket handler during shutdown: ${formatErrorDetail(cause)}`,
 						),
 					),
 				),
-				Effect.catchAllCause((cause) =>
+				Effect.catchCause((cause) =>
 					Effect.sync(() =>
 						wsLog.warn(
-							`Defect while draining websocket handler during shutdown: ${Cause.pretty(cause)}`,
+							`Defect while draining websocket handler during shutdown: ${Failure.renderCause(cause)}`,
 						),
 					),
 				),

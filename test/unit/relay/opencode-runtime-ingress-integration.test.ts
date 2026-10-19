@@ -1,7 +1,7 @@
 // Verifies that SSE events flow through both the Effect relay pipeline and the
 // Effect OpenCode runtime ingress wiring.
 
-import { Cause, Chunk, Effect, Layer } from "effect";
+import { Cause, Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
@@ -52,7 +52,7 @@ function createServicesLayer() {
 		AlertsLive,
 		PendingInteractionServiceLive,
 		makeOverridesStateLive(),
-		Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
+		Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()),
 	);
 }
 
@@ -62,7 +62,7 @@ async function runSSEEvent(
 ) {
 	await Effect.runPromise(
 		handleSSEEventEffect(deps, event).pipe(
-			Effect.provide(createServicesLayer()),
+			Effect.provide(createServicesLayer(), { local: true }),
 		),
 	);
 }
@@ -216,13 +216,15 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 
 		const exit = await Effect.runPromiseExit(
 			handleSSEEventEffect(deps, event).pipe(
-				Effect.provide(createServicesLayer()),
+				Effect.provide(createServicesLayer(), { local: true }),
 			),
 		);
 
 		expect(exit._tag).toBe("Failure");
 		if (exit._tag === "Failure") {
-			const defects = Chunk.toArray(Cause.defects(exit.cause));
+			const defects = exit.cause.reasons
+				.filter(Cause.isDieReason)
+				.map((reason) => reason.defect);
 			expect(defects).toHaveLength(1);
 			expect(defects[0]).toEqual(expect.any(Error));
 			expect((defects[0] as Error).message).toBe("ingress defect");

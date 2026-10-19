@@ -116,38 +116,38 @@ export const loadModelCatalog = (
 		if (PROVIDER_DRIVERS[harness].catalogSource === "discovery") {
 			const engine = yield* OrchestrationEngineTag;
 
-			const capsResult = yield* Effect.either(
+			const capsResult = yield* Effect.result(
 				engine.dispatchEffect({
 					type: "discover",
 					providerId: account.id,
 					account,
 				}),
 			);
-			if (capsResult._tag === "Left") {
+			if (capsResult._tag === "Failure") {
 				yield* publishDiscoveredModels([], account);
 				log.warn(
-					`Failed to fetch ${account.driver} model catalog: ${formatErrorDetail(capsResult.left)}`,
+					`Failed to fetch ${account.driver} model catalog: ${formatErrorDetail(capsResult.failure)}`,
 				);
 				return [] as ModelInfo[];
 			}
-			const models = capsResult.right.models;
+			const models = capsResult.success.models;
 			yield* publishDiscoveredModels(models, account);
 			return models;
 		}
 
 		const modelService = yield* Effect.serviceOption(OpenCodeModelServiceTag);
 		if (modelService._tag === "None") return [] as ModelInfo[];
-		const provListResult = yield* Effect.either(
+		const provListResult = yield* Effect.result(
 			modelService.value.listProviders({ ...options, instanceId: account.id }),
 		);
-		if (provListResult._tag === "Left") {
+		if (provListResult._tag === "Failure") {
 			log.warn(
-				`Failed to fetch OpenCode model catalog: ${formatErrorDetail(provListResult.left)}`,
+				`Failed to fetch OpenCode model catalog: ${formatErrorDetail(provListResult.failure)}`,
 			);
 			return [] as ModelInfo[];
 		}
 		yield* refreshHarnessDefaults;
-		return provListResult.right.providers.flatMap((provider) =>
+		return provListResult.success.providers.flatMap((provider) =>
 			(provider.models ?? []).map((model) => ({
 				...model,
 				name: model.name || model.id,

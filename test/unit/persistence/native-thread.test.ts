@@ -1,7 +1,7 @@
-import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { makeEventStoreEffect } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -74,7 +74,7 @@ describe("nativeThread", () => {
 				expect(
 					yield* state.nativeThread("unknown", "personal"),
 				).toBeUndefined();
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -117,7 +117,7 @@ describe("nativeThread", () => {
 				expect(stored["resumeSessionId"]).toBeUndefined();
 				expect(stored["claudeConfigDir"]).toBeUndefined();
 				expect(stored["turnCount"]).toBe("3");
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -190,6 +190,6 @@ describe("nativeThread", () => {
 				expect(
 					(yield* state.nativeThread("s1", "personal"))?.deliveredThrough,
 				).toBe(5);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });

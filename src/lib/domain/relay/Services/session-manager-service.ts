@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { SqlClient } from "@effect/sql";
 import {
-	Cause,
 	Context,
 	Deferred,
 	Effect,
@@ -11,7 +9,9 @@ import {
 	Option,
 	PubSub,
 	Ref,
+	Semaphore,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../account-directory.js";
 import type { Account } from "../../../contracts/account.js";
 import { AccountUnroutable } from "../../../contracts/limit-recovery.js";
@@ -20,6 +20,7 @@ import {
 	getProviderDriver,
 	PROVIDER_DRIVERS,
 } from "../../../contracts/provider-instance.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../../errors.js";
 import type {
 	SessionDetail,
@@ -154,7 +155,9 @@ function renderProviderCleanupDetail(error: unknown): string {
 	try {
 		return truncateProviderCleanupDiagnostic(
 			// The upstream adapter wraps provider failures; its message is generic.
-			formatErrorDetail(Cause.isUnknownException(error) ? error.error : error),
+			formatErrorDetail(
+				Failure.isUnknownException(error) ? error.cause : error,
+			),
 			PROVIDER_CLEANUP_DETAIL_MAX_LENGTH,
 		);
 	} catch {
@@ -383,7 +386,7 @@ export const deleteSession = (sessionId: string) =>
 		if (bindingExit !== undefined && Exit.isFailure(bindingExit)) {
 			cleanupFailures.push(
 				`binding_resolution: ${renderProviderCleanupDetail(
-					Cause.squash(bindingExit.cause),
+					Failure.squashCause(bindingExit.cause),
 				)}`,
 			);
 		}
@@ -413,7 +416,7 @@ export const deleteSession = (sessionId: string) =>
 			Exit.isFailure(providerResolutionExit)
 		) {
 			cleanupFailures.push(
-				`provider_resolution: ${renderProviderCleanupDetail(Cause.squash(providerResolutionExit.cause))}`,
+				`provider_resolution: ${renderProviderCleanupDetail(Failure.squashCause(providerResolutionExit.cause))}`,
 			);
 		}
 		if (account === undefined) {
@@ -447,12 +450,12 @@ export const deleteSession = (sessionId: string) =>
 						),
 					);
 					if (Exit.isFailure(endSessionExit)) {
-						if (Exit.isInterrupted(endSessionExit)) {
+						if (Failure.isInterrupted(endSessionExit.cause)) {
 							return yield* Effect.failCause(endSessionExit.cause);
 						}
 						cleanupFailures.push(
 							`end_session: ${renderProviderCleanupDetail(
-								Cause.squash(endSessionExit.cause),
+								Failure.squashCause(endSessionExit.cause),
 							)}`,
 						);
 					} else {
@@ -507,12 +510,12 @@ export const deleteSession = (sessionId: string) =>
 					}).pipe(Effect.scoped),
 				);
 				if (Exit.isFailure(providerDeleteExit)) {
-					if (Exit.isInterrupted(providerDeleteExit)) {
+					if (Failure.isInterrupted(providerDeleteExit.cause)) {
 						return yield* Effect.failCause(providerDeleteExit.cause);
 					}
 					cleanupFailures.push(
 						`provider_delete: ${renderProviderCleanupDetail(
-							Cause.squash(providerDeleteExit.cause),
+							Failure.squashCause(providerDeleteExit.cause),
 						)}`,
 					);
 				}
@@ -530,12 +533,13 @@ export const deleteSession = (sessionId: string) =>
 						),
 					);
 					if (Exit.isFailure(cleanupExit)) {
-						const failure = Cause.failureOption(cleanupExit.cause);
+						const failure = Failure.firstFailure(cleanupExit.cause);
 						cleanupFailures.push(
-							Option.isSome(failure) && Cause.isTimeoutException(failure.value)
+							Option.isSome(failure) &&
+								Failure.isTimeoutException(failure.value)
 								? "cleanup: timed out after 2s"
 								: `cleanup: ${renderProviderCleanupDetail(
-										Cause.squash(cleanupExit.cause),
+										Failure.squashCause(cleanupExit.cause),
 									)}`,
 						);
 					}
@@ -614,7 +618,7 @@ export const deleteSession = (sessionId: string) =>
 			const receiptFailure =
 				receiptExit !== undefined && Exit.isFailure(receiptExit)
 					? ` receipt_append_failed=${renderProviderCleanupDetail(
-							Cause.squash(receiptExit.cause),
+							Failure.squashCause(receiptExit.cause),
 						)}`
 					: eventStoreOption._tag === "None"
 						? " receipt_append_failed=event store unavailable"
@@ -729,9 +733,10 @@ export interface SessionManagerService {
 }
 
 /** Bundled service object for callers that prefer DI over free functions. */
-export class SessionManagerServiceTag extends Context.Tag(
-	"SessionManagerService",
-)<SessionManagerServiceTag, SessionManagerService>() {}
+export class SessionManagerServiceTag extends Context.Service<
+	SessionManagerServiceTag,
+	SessionManagerService
+>()("SessionManagerService") {}
 
 const makeServiceCreateSession = ({
 	engine,
@@ -743,7 +748,7 @@ const makeServiceCreateSession = ({
 	sql,
 }: {
 	engine: OrchestrationEngine;
-	accounts: AccountDirectory["Type"];
+	accounts: Context.Service.Shape<typeof AccountDirectory>;
 	instanceClients: OpenCodeInstances;
 	readQuery: ReadQueryEffect;
 	eventStore: EventStoreEffect;
@@ -1067,7 +1072,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 				: provided;
 		};
 
-		const triageLock = yield* Effect.makeSemaphore(1);
+		const triageLock = yield* Semaphore.make(1);
 		return {
 			getDefaultSessionId: (title) =>
 				Effect.gen(function* () {
@@ -1162,7 +1167,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 					);
 					yield* Deferred.done(completion, exit);
 					inFlightDeletes.delete(sessionId);
-					return yield* Exit.matchEffect(exit, {
+					return yield* Effect.matchCauseEffectEager(exit, {
 						onFailure: Effect.failCause,
 						onSuccess: () => Effect.succeed(true),
 					});
@@ -1210,7 +1215,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 							const restored = yield* withSessionCommandServices(
 								operation,
 							).pipe(
-								Effect.catchAll((error) =>
+								Effect.catch((error) =>
 									Effect.sync(() =>
 										log.warn(
 											`Failed to restore ${sessionId} on send: ${String(error)}`,

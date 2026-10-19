@@ -1,5 +1,6 @@
 import { describe, it } from "@effect/vitest";
-import { Clock, Effect, Layer, PubSub, Stream, TestClock } from "effect";
+import { Clock, Effect, Layer, PubSub, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import {
 	DaemonEventBusLive,
@@ -14,7 +15,7 @@ import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/sess
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 
 describe("Session Activity", () => {
-	it.scoped(
+	it.effect(
 		"signals each changed session and stays silent for unchanged state",
 		() =>
 			Effect.gen(function* () {
@@ -117,7 +118,7 @@ describe("Session Activity", () => {
 			}),
 	);
 
-	it.scoped(
+	it.effect(
 		"keeps separate daemon instances isolated without a project store",
 		() =>
 			Effect.gen(function* () {
@@ -136,7 +137,7 @@ describe("Session Activity", () => {
 			}),
 	);
 
-	it.scoped(
+	it.effect(
 		"publishes at most once per second with a final trailing refresh during continuous changes",
 		() =>
 			Effect.gen(function* () {
@@ -144,7 +145,7 @@ describe("Session Activity", () => {
 				const bus = yield* DaemonEventBusTag;
 				const events = yield* PubSub.subscribe(bus);
 				const publishedAt: number[] = [];
-				yield* Stream.fromQueue(events).pipe(
+				yield* Stream.fromSubscription(events).pipe(
 					Stream.filter((event) => event._tag === "DaemonSessionsChanged"),
 					Stream.runForEach(() =>
 						Clock.currentTimeMillis.pipe(

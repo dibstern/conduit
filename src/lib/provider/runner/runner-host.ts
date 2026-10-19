@@ -1,7 +1,8 @@
 import { appendFileSync, chmodSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname } from "node:path";
-import { Cause, Deferred, Effect, FiberSet, Scope } from "effect";
+import { Deferred, Effect, FiberSet, Scope } from "effect";
+import * as Failure from "../../effect/failure-classification.js";
 import { createLogger } from "../../logger.js";
 import type { TurnResult } from "../types.js";
 import { makeRunnerIdleExit } from "./runner-idle.js";
@@ -377,7 +378,7 @@ export const runSessionRunner = (
 								});
 								initializing = false;
 							}).pipe(
-								Effect.catchAll((failure) =>
+								Effect.catch((failure) =>
 									Effect.sync(() => {
 										initializing = false;
 										peer.refuse(failure);
@@ -444,9 +445,7 @@ export const runSessionRunner = (
 								},
 								catch: (cause) => runnerFailure("prune runner sends", cause),
 							}).pipe(
-								Effect.catchAll((failure) =>
-									Effect.logWarning(failure.message),
-								),
+								Effect.catch((failure) => Effect.logWarning(failure.message)),
 							),
 						);
 					} else if (message.type === "upgrade-retire") {
@@ -564,7 +563,7 @@ export const runSessionRunner = (
 												commandId: message.commandId,
 												failure: runnerFailure(
 													command.type,
-													Cause.squash(cause),
+													Failure.squashCause(cause),
 												),
 											});
 											connection?.write({
@@ -572,7 +571,7 @@ export const runSessionRunner = (
 												commandId: message.commandId,
 												failure: runnerFailure(
 													command.type,
-													Cause.squash(cause),
+													Failure.squashCause(cause),
 												),
 											});
 											if (

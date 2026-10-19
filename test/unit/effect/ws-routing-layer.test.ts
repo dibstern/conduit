@@ -101,7 +101,7 @@ const makeLayer = (
 			),
 		),
 		Layer.provide(
-			Layer.succeed(WebSocketRelayRouterTag, {
+			Layer.succeed(WebSocketRelayRouterTag)({
 				ensureRelayStarted: (slug) =>
 					Effect.sync(() => ensureRelayStarted(slug)),
 				waitForRelay,
@@ -184,15 +184,15 @@ describe("WebSocketRelayRouterLive", () => {
 
 		return Effect.gen(function* () {
 			const router = yield* WebSocketRelayRouterTag;
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				router.ensureRelayStarted("missing-project"),
 			);
 
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expect(result.left).toBeInstanceOf(WebSocketUpgradeError);
-				expect(result.left.reason).toBe("relay_unavailable");
-				expect(result.left.slug).toBe("missing-project");
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
+				expect(result.failure).toBeInstanceOf(WebSocketUpgradeError);
+				expect(result.failure.reason).toBe("relay_unavailable");
+				expect(result.failure.slug).toBe("missing-project");
 			}
 			expect(factory).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(Layer.fresh(layer)));
@@ -206,16 +206,16 @@ describe("WebSocketRelayRouterLive", () => {
 
 		return Effect.gen(function* () {
 			const router = yield* WebSocketRelayRouterTag;
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				router.ensureRelayStarted("test-project"),
 			);
 			const entry = yield* getEntry("test-project");
 
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expect(result.left).toBeInstanceOf(WebSocketUpgradeError);
-				expect(result.left.reason).toBe("relay_unavailable");
-				expect(result.left.slug).toBe("test-project");
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
+				expect(result.failure).toBeInstanceOf(WebSocketUpgradeError);
+				expect(result.failure.reason).toBe("relay_unavailable");
+				expect(result.failure.slug).toBe("test-project");
 			}
 			const state = Option.getOrThrow(entry);
 			expect(state._tag).toBe("Error");
@@ -227,7 +227,7 @@ describe("WebSocketRelayRouterLive", () => {
 });
 
 describe("WebSocketRoutingLive", () => {
-	it.scoped.each([
+	it.effect.each([
 		{ hint: "older", projects: true, fails: false, expected: "older" },
 		{ hint: "missing", projects: true, fails: false, expected: "recent" },
 		{ hint: undefined, projects: true, fails: false, expected: "recent" },
@@ -278,7 +278,7 @@ describe("WebSocketRoutingLive", () => {
 						new Error("Missing daemon attachProject handler"),
 					);
 				}
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					attachProject({
 						originId: "unregistered",
 						...(scenario.sessionId
@@ -290,24 +290,24 @@ describe("WebSocketRoutingLive", () => {
 				);
 				if (scenario.sessionId) {
 					expect(result).toMatchObject({
-						_tag: "Left",
-						left: {
+						_tag: "Failure",
+						failure: {
 							_tag: "WsRpcError",
 							message: expect.stringContaining("Unknown session: missing"),
 						},
 					});
 				} else if (scenario.fails) {
-					expect(result._tag).toBe("Left");
-					if (result._tag === "Left") {
-						expect(result.left).toBeInstanceOf(WsRpcError);
-						expect(result.left.message).toContain(
+					expect(result._tag).toBe("Failure");
+					if (result._tag === "Failure") {
+						expect(result.failure).toBeInstanceOf(WsRpcError);
+						expect(result.failure.message).toContain(
 							'Project "older" unavailable',
 						);
 					}
 				} else {
-					expect(result._tag).toBe("Right");
-					if (result._tag === "Right") {
-						expect(result.right).toEqual({
+					expect(result._tag).toBe("Success");
+					if (result._tag === "Success") {
+						expect(result.success).toEqual({
 							projectSlug: scenario.expected,
 							sessionSlug: null,
 						});
@@ -316,7 +316,7 @@ describe("WebSocketRoutingLive", () => {
 			}),
 	);
 
-	it.scoped.each([
+	it.effect.each([
 		"/invalid",
 		"/rpc/",
 		"/rpc-extra",
@@ -347,7 +347,7 @@ describe("WebSocketRoutingLive", () => {
 		}),
 	);
 
-	it.scoped.each(["/rpc", "/rpc?client=browser"])(
+	it.effect.each(["/rpc", "/rpc?client=browser"])(
 		"rejects unauthenticated %s upgrades before relay startup",
 		(path) =>
 			Effect.gen(function* () {
@@ -371,7 +371,7 @@ describe("WebSocketRoutingLive", () => {
 			}),
 	);
 
-	it.scoped("removes the upgrade listener on scope close", () =>
+	it.effect("removes the upgrade listener on scope close", () =>
 		Effect.gen(function* () {
 			const server = createServer();
 			const layer = makeLayer(server);
@@ -384,7 +384,7 @@ describe("WebSocketRoutingLive", () => {
 		}),
 	);
 
-	it.scoped.each(["/rpc", "/rpc?client=browser"])(
+	it.effect.each(["/rpc", "/rpc?client=browser"])(
 		"destroys %s sockets while daemon shutdown is in progress",
 		(path) =>
 			Effect.gen(function* () {
@@ -412,7 +412,7 @@ describe("WebSocketRoutingLive", () => {
 			}),
 	);
 
-	it.scoped.each(["/rpc", "/rpc?client=browser"])(
+	it.effect.each(["/rpc", "/rpc?client=browser"])(
 		"accepts %s without resolving a project at upgrade time",
 		(path) =>
 			Effect.gen(function* () {

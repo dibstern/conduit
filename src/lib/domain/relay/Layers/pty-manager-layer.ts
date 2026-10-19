@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
-import { Cause, Deferred, Effect, Exit, Layer, Option } from "effect";
+import { Deferred, Effect, Exit, Layer, Option } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { PtyManager } from "../../../relay/pty-manager.js";
 import { connectPtyUpstream } from "../../../relay/pty-upstream.js";
@@ -17,7 +18,7 @@ const wsLib = requireWs("ws");
 const DefaultWebSocketClass = wsLib.WebSocket as typeof import("ws").WebSocket;
 
 export const PtyManagerLive: Layer.Layer<PtyManagerTag, never, LoggerTag> =
-	Layer.scoped(
+	Layer.effect(
 		PtyManagerTag,
 		Effect.gen(function* () {
 			const log = yield* LoggerTag;
@@ -28,17 +29,17 @@ export const PtyManagerLive: Layer.Layer<PtyManagerTag, never, LoggerTag> =
 					try: () => manager.detachAll(),
 					catch: (cause) => cause,
 				}).pipe(
-					Effect.catchAll((cause) =>
+					Effect.catch((cause) =>
 						Effect.sync(() =>
 							ptyLog.warn(
 								`Failed to close PTY sessions during shutdown: ${formatErrorDetail(cause)}`,
 							),
 						),
 					),
-					Effect.catchAllCause((cause) =>
+					Effect.catchCause((cause) =>
 						Effect.sync(() =>
 							ptyLog.warn(
-								`Defect while closing PTY sessions during shutdown: ${Cause.pretty(cause)}`,
+								`Defect while closing PTY sessions during shutdown: ${Failure.renderCause(cause)}`,
 							),
 						),
 					),
@@ -55,7 +56,7 @@ export const makeConnectPtyUpstreamLive = (
 	never,
 	PtyManagerTag | OpenCodeInstancesTag | ConfigTag | LoggerTag
 > =>
-	Layer.scoped(
+	Layer.effect(
 		ConnectPtyUpstreamTag,
 		Effect.gen(function* () {
 			const ptyManager = yield* PtyManagerTag;
@@ -84,7 +85,7 @@ export const makeConnectPtyUpstreamLive = (
 										log: ptyLog,
 										WebSocketClass,
 										signal,
-										onClose: () => Deferred.unsafeDone(closed, Exit.void),
+										onClose: () => Deferred.doneUnsafe(closed, Exit.void),
 									},
 									ptyId,
 									cursor,
@@ -96,8 +97,8 @@ export const makeConnectPtyUpstreamLive = (
 					}).pipe(
 						Effect.scoped,
 						Effect.onExit((exit) => Deferred.done(ready, exit)),
-						Effect.catchAll(() => Effect.void),
-						Effect.forkIn(scope),
+						Effect.catch(() => Effect.void),
+						Effect.forkIn(scope, { uninterruptible: "inherit" }),
 					);
 					yield* Deferred.await(ready);
 				});

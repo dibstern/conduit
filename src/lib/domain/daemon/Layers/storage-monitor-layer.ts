@@ -1,16 +1,9 @@
-// Pure Effect replacement for the StorageMonitor class.
-// Periodically checks storage usage and evicts old events when above high-water mark.
-// Background fiber is fork-scoped — automatically interrupted on scope close.
-//
-// Defines its own Tag that will coexist with the one in services.ts until
-// Consumer migration.
-
 import { Context, type Duration, Effect, Layer, Ref, Schedule } from "effect";
 
 export interface StorageMonitorConfig {
 	getStorageUsage: () => Effect.Effect<number>;
 	persistence: { evictOldEvents: () => Effect.Effect<void> };
-	checkInterval: Duration.DurationInput;
+	checkInterval: Duration.Input;
 	highWaterMark: number;
 }
 
@@ -19,13 +12,13 @@ interface StorageMonitorService {
 	getLastCheck: () => Effect.Effect<number>;
 }
 
-export class StorageMonitorTag extends Context.Tag("StorageMonitor")<
+export class StorageMonitorTag extends Context.Service<
 	StorageMonitorTag,
 	StorageMonitorService
->() {}
+>()("StorageMonitor") {}
 
 export const StorageMonitorLive = (config: StorageMonitorConfig) =>
-	Layer.scoped(
+	Layer.effect(
 		StorageMonitorTag,
 		Effect.gen(function* () {
 			const state = yield* Ref.make({ lastCheck: 0, usage: 0 });
@@ -42,11 +35,9 @@ export const StorageMonitorLive = (config: StorageMonitorConfig) =>
 			yield* check.pipe(
 				Effect.repeat(Schedule.spaced(config.checkInterval)),
 				Effect.retry(
-					Schedule.exponential("5 seconds").pipe(
-						Schedule.intersect(Schedule.recurs(3)),
-					),
+					Schedule.max([Schedule.exponential("5 seconds"), Schedule.recurs(3)]),
 				),
-				Effect.catchAll((e) =>
+				Effect.catch((e) =>
 					Effect.logWarning("Storage monitor failed after retries", e),
 				),
 				Effect.forkScoped,

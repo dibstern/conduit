@@ -1,4 +1,4 @@
-import { Clock, Duration, Effect, Fiber, type Scope } from "effect";
+import { Clock, Duration, Effect, Fiber, type Scope, Semaphore } from "effect";
 import { createLogger } from "../../logger.js";
 import { ClaudeEventPersistEffectTag } from "../../persistence/effect/claude-event-persist-effect.js";
 import {
@@ -84,7 +84,7 @@ export function decideClaudeMessageOwnershipEffect(
 		decisions: readonly ClaudeOwnershipDecision[],
 	) => Effect.Effect<void, ClaudeAdapterError>,
 ): Effect.Effect<void, ClaudeAdapterError> {
-	const permit = (ctx.messageOwnershipPermit ??= Effect.unsafeMakeSemaphore(1));
+	const permit = (ctx.messageOwnershipPermit ??= Semaphore.makeUnsafe(1));
 	return Effect.gen(function* () {
 		const timedInput =
 			input.kind === "sdk"
@@ -272,7 +272,7 @@ export function applyClaudeOwnershipDecisionEffect(
 				title: claudeSubagentTitle(task),
 			}).pipe(
 				Effect.as(true),
-				Effect.catchAll((err) =>
+				Effect.catch((err) =>
 					Effect.sync(() => {
 						log.warn(
 							`Failed to ensure Claude subagent session for ${ctx.sessionId}/${taskId}: ${err instanceof Error ? err.message : err}`,
@@ -332,7 +332,7 @@ export function applyClaudeOwnershipDecisionEffect(
 						),
 					)
 					.pipe(
-						Effect.catchAll((err) =>
+						Effect.catch((err) =>
 							Effect.sync(() => {
 								log.warn(
 									`Failed to push Claude subagent metadata for ${ctx.sessionId}/${taskId}: ${err instanceof Error ? err.message : err}`,
@@ -428,7 +428,7 @@ export function startClaudeSubagentFeedEffect(
 						sdk,
 						applyDecisions,
 					).pipe(
-						Effect.catchAll((err) =>
+						Effect.catch((err) =>
 							Effect.sync(() =>
 								log.warn(
 									`Claude subagent poll failed for ${ctx.sessionId}/${poller.sdkSubagentId}: ${err instanceof Error ? err.message : err}`,
@@ -478,7 +478,7 @@ export function finalReadClaudeSubagentFeedEffect(
 			{ allowInactive: true },
 		);
 	}).pipe(
-		Effect.catchAll((err) =>
+		Effect.catch((err) =>
 			Effect.sync(() =>
 				log.warn(
 					`Final Claude subagent poll failed for ${ctx.sessionId}/${decision.taskId}: ${err instanceof Error ? err.message : err}`,
@@ -495,8 +495,7 @@ export function endClaudeMessageOwnershipEffect(
 	return Effect.gen(function* () {
 		for (const poller of ctx.subagentPollers?.values() ?? [])
 			poller.active = false;
-		const permit = (ctx.messageOwnershipPermit ??=
-			Effect.unsafeMakeSemaphore(1));
+		const permit = (ctx.messageOwnershipPermit ??= Semaphore.makeUnsafe(1));
 		const decisions = yield* permit.withPermits(1)(
 			Effect.sync(() => ctx.messageOwnership?.decide({ kind: "end" }) ?? []),
 		);
@@ -549,14 +548,16 @@ export function endClaudeMessageOwnershipEffect(
 		Effect.interruptible,
 		// One budget covers the permit wait and every end-time read, regardless
 		// of how many agents remain. Callers fork this after foreground cleanup.
-		Effect.timeoutFail({
+		Effect.timeoutOrElse({
 			duration: Duration.millis(subagentPollTimeoutMs(deps)),
-			onTimeout: () =>
-				new ClaudeRuntimeError({
-					message: `Claude subagent finalization ${ctx.sessionId} timed out after ${subagentPollTimeoutMs(deps)}ms`,
-				}),
+			orElse: () =>
+				Effect.fail(
+					new ClaudeRuntimeError({
+						message: `Claude subagent finalization ${ctx.sessionId} timed out after ${subagentPollTimeoutMs(deps)}ms`,
+					}),
+				),
 		}),
-		Effect.catchAll((err) =>
+		Effect.catch((err) =>
 			Effect.sync(() =>
 				log.warn(
 					`Claude subagent finalization failed for ${ctx.sessionId}: ${err instanceof Error ? err.message : err}`,
@@ -570,7 +571,8 @@ export function endClaudeMessageOwnershipEffect(
 				for (const poller of remaining) poller.active = false;
 				ctx.subagentPollers?.clear();
 				for (const poller of remaining) {
-					if (poller.fiber) yield* Fiber.interruptFork(poller.fiber);
+					if (poller.fiber)
+						yield* Effect.sync(() => poller.fiber?.interruptUnsafe());
 				}
 			}),
 		),
@@ -604,12 +606,14 @@ function pollClaudeSubagentOnceEffect(
 				new ClaudeBoundaryError({ operation: "getSubagentMessages", cause }),
 		}).pipe(
 			Effect.interruptible,
-			Effect.timeoutFail({
+			Effect.timeoutOrElse({
 				duration: Duration.millis(subagentPollTimeoutMs(deps)),
-				onTimeout: () =>
-					new ClaudeRuntimeError({
-						message: `Claude subagent poll ${ctx.sessionId}/${poller.sdkSubagentId} timed out after ${subagentPollTimeoutMs(deps)}ms`,
-					}),
+				orElse: () =>
+					Effect.fail(
+						new ClaudeRuntimeError({
+							message: `Claude subagent poll ${ctx.sessionId}/${poller.sdkSubagentId} timed out after ${subagentPollTimeoutMs(deps)}ms`,
+						}),
+					),
 			}),
 		);
 		if (!canPollSubagent(ctx, poller, options)) return;

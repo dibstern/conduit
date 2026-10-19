@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import {
-	Cause,
 	Clock,
 	Deferred,
 	Effect,
@@ -17,6 +16,7 @@ import {
 	type WorktreeCleanupEntry,
 	type WorktreeCleanupReport,
 } from "../../../contracts/worktree.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import { cleanUpProjectWorktrees } from "../../../session/worktree-cleanup-sweep.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
@@ -34,7 +34,7 @@ import {
 import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js";
 
 export const WorktreeCleanupLive = () =>
-	Layer.scopedDiscard(
+	Layer.effectDiscard(
 		Effect.gen(function* () {
 			const configRef = yield* DaemonConfigRefTag;
 			const registry = yield* ProjectRegistryTag;
@@ -118,8 +118,8 @@ export const WorktreeCleanupLive = () =>
 							if (projectReport.removed.length > 0)
 								yield* PubSub.publish(bus, DaemonEvent.DaemonSessionsChanged());
 						}).pipe(
-							Effect.catchAllCause((cause) => {
-								if (Cause.isInterruptedOnly(cause))
+							Effect.catchCause((cause) => {
+								if (Failure.isInterruptedOnly(cause))
 									return Effect.failCause(cause);
 								report.failed.push({
 									projectSlug: project.slug,
@@ -129,7 +129,10 @@ export const WorktreeCleanupLive = () =>
 								});
 								return Effect.logWarning(
 									"worktree cleanup failed for project",
-									{ projectSlug: project.slug, cause: Cause.pretty(cause) },
+									{
+										projectSlug: project.slug,
+										cause: Failure.renderCause(cause),
+									},
 								);
 							}),
 						);
@@ -149,7 +152,7 @@ export const WorktreeCleanupLive = () =>
 			// One worker owns all removals; requests arriving during a run form the next batch.
 			yield* Effect.gen(function* () {
 				const first = yield* Queue.take(requests);
-				const batch = [first, ...(yield* Queue.takeAll(requests))];
+				const batch = [first, ...(yield* Queue.clear(requests))];
 				const slugs = batch.some(({ projectSlug }) => projectSlug === undefined)
 					? undefined
 					: new Set(
@@ -158,12 +161,12 @@ export const WorktreeCleanupLive = () =>
 							),
 						);
 				const report = yield* sweep(slugs).pipe(
-					Effect.catchAllCause((cause) =>
-						Cause.isInterruptedOnly(cause)
+					Effect.catchCause((cause) =>
+						Failure.isInterruptedOnly(cause)
 							? Effect.failCause(cause)
 							: Effect.logWarning(
 									"worktree cleanup sweep failed",
-									Cause.pretty(cause),
+									Failure.renderCause(cause),
 								).pipe(
 									Effect.as({
 										removed: [],

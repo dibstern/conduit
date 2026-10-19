@@ -11,13 +11,17 @@ describe("WS transport layer", () => {
 		Effect.gen(function* () {
 			const transport = yield* WsTransportTag;
 			expect(transport.wss).toBeDefined();
-		}).pipe(Effect.provide(makeWsTransportLive({ noServer: true }))),
+		}).pipe(
+			Effect.provide(makeWsTransportLive({ noServer: true }), { local: true }),
+		),
 	);
 
 	it.effect("exposes an upgrade handler", () =>
 		Effect.gen(function* () {
 			const transport = yield* WsTransportTag;
 			expect(transport.handleUpgrade).toBeTypeOf("function");
-		}).pipe(Effect.provide(makeWsTransportLive({ noServer: true }))),
+		}).pipe(
+			Effect.provide(makeWsTransportLive({ noServer: true }), { local: true }),
+		),
 	);
 });

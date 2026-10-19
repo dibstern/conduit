@@ -65,11 +65,18 @@ describe("Toast", () => {
 	});
 
 	beforeEach(() => {
+		vi.stubGlobal("matchMedia", (media: string) => ({
+			media,
+			matches: false,
+			addEventListener: vi.fn(),
+			removeEventListener: vi.fn(),
+		}));
 		uiState.toasts = [];
 	});
 
 	afterEach(() => {
 		cleanup();
+		vi.unstubAllGlobals();
 		uiState.toasts = [];
 	});
 

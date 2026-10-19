@@ -187,7 +187,7 @@ describe("prompt title generation", () => {
 						providerId: "claude",
 					}),
 				);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -219,7 +219,7 @@ describe("prompt title generation", () => {
 						providerId: "opencode",
 					}),
 				);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -248,7 +248,7 @@ describe("prompt title generation", () => {
 						providerId: "opencode",
 					}),
 				);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 });

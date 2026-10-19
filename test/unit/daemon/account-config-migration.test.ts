@@ -16,7 +16,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Either, Option, Schema } from "effect";
+import { Effect, Result as Either, Option, Schema } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	accountRefFromSelection,
@@ -242,7 +242,7 @@ describe("account config migration", () => {
 		).toEqual([]);
 		expect(defaultFor(restarted, "claude")).toEqual(Option.none());
 		expect(
-			Either.isLeft(resolve(restarted, { _tag: "Id", id: "claude" })),
+			Either.isFailure(resolve(restarted, { _tag: "Id", id: "claude" })),
 		).toBe(true);
 		expect(decode(config)).toEqual(config);
 	});

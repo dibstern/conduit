@@ -250,7 +250,9 @@ async function createTestHarness(): Promise<TestHarness> {
 				);
 			}
 		}).pipe(
-			Effect.provide(makePersistenceEffectLayer(dbPath, "test-status-poller")),
+			Effect.provide(makePersistenceEffectLayer(dbPath, "test-status-poller"), {
+				local: true,
+			}),
 		),
 	);
 

@@ -16,10 +16,7 @@ import { createServer as createHttpsServer } from "node:https";
 import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import {
-	Cause,
 	Context,
 	Data,
 	Effect,
@@ -30,6 +27,8 @@ import {
 	Option,
 	Schedule,
 } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { AuthManager } from "../auth.js";
 import { type GlobalSettingTag, WsRpcError } from "../contracts/ws-rpc.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
@@ -59,6 +58,7 @@ import {
 	makeStandaloneHttpRouterRequestHandler,
 	type RouterProjectInfo,
 } from "../domain/server/Layers/http-router-layer.js";
+import * as Failure from "../effect/failure-classification.js";
 import { ENV } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
 import { withCachedProjectGit } from "../git/session-git.js";
@@ -492,8 +492,8 @@ export async function createProjectRelay(
 		Effect.flatMap(ContinuationTag, (continuation) =>
 			Effect.zip(
 				continuation.sweepDueContinuations().pipe(
-					Effect.catchAllCause((cause) =>
-						Cause.isInterruptedOnly(cause)
+					Effect.catchCause((cause) =>
+						Failure.isInterruptedOnly(cause)
 							? Effect.interrupt
 							: Effect.logError("Continuation sweep failed", cause),
 					),
@@ -616,7 +616,7 @@ export async function createProjectRelay(
 				layers.relayManagedRuntime
 					.runFork(Fiber.interrupt(continuationSweep))
 					.addObserver((exit) => {
-						if (Exit.isFailure(exit)) reject(Cause.squash(exit.cause));
+						if (Exit.isFailure(exit)) reject(Failure.squashCause(exit.cause));
 						else resolve();
 					});
 			});
@@ -772,8 +772,7 @@ export async function createRelayStack(
 				dirname(config.persistenceDbPath),
 				`${slug}.events.db`,
 			);
-			const parentContext = (await relay.effectRuntime.runtime.runtime())
-				.context;
+			const parentContext = await relay.effectRuntime.runtime.context();
 			const daemonContext = Context.pick(
 				DaemonConfigRefTag,
 				ConfigPersistenceTag,
@@ -870,7 +869,7 @@ export async function createRelayStack(
 	// standalone WS connections bypassed PIN auth).
 
 	const rpcRuntime = ManagedRuntime.make(
-		Layer.scoped(
+		Layer.effect(
 			RoutedWsRpcWebSocketHandlerTag,
 			makeRoutedWsRpcWebSocketHandler(
 				(slug) =>
@@ -881,7 +880,7 @@ export async function createRelayStack(
 						return context
 							? context.pipe(
 									Effect.mapError(unavailable),
-									Effect.catchAllDefect(() => Effect.fail(unavailable())),
+									Effect.catchDefect(() => Effect.fail(unavailable())),
 								)
 							: Effect.fail(unavailable());
 					}),
@@ -895,14 +894,14 @@ export async function createRelayStack(
 						Effect.gen(function* () {
 							for (const mounted of [...relays.values()]) {
 								const runtime =
-									yield* mounted.effectRuntime.runtime.runtimeEffect.pipe(
+									yield* mounted.effectRuntime.runtime.contextEffect.pipe(
 										Effect.mapError(
 											(cause) =>
 												new SessionDirectoryReadError({ sessionId, cause }),
 										),
 									);
 								const owner = yield* Context.get(
-									runtime.context,
+									runtime,
 									SessionDirectory,
 								).projectOf(sessionId);
 								if (Option.isSome(owner)) return owner;

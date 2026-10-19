@@ -3,9 +3,9 @@
 //
 // ptyStream  – connects to a WebSocket PTY endpoint and emits PtyEvent items.
 //              Uses Effect.acquireRelease for guaranteed cleanup and
-//              Stream.asyncPush for callback-to-stream bridging.
+//              Stream.callback for callback-to-stream bridging.
 
-import { Data, Duration, Effect, Stream } from "effect";
+import { Cause, Data, Duration, Effect, Queue, Stream } from "effect";
 import WebSocket from "ws";
 
 export interface PtyEvent {
@@ -30,8 +30,8 @@ export class PtyConnectionTimeout extends Data.TaggedError(
  *   PtyConnectionTimeout via a fire-and-forget scoped fiber.
  */
 export const ptyStream = (url: string) =>
-	Stream.asyncPush<PtyEvent, PtyConnectionError | PtyConnectionTimeout>(
-		(emit) =>
+	Stream.callback<PtyEvent, PtyConnectionError | PtyConnectionTimeout>(
+		(queue) =>
 			Effect.gen(function* () {
 				const ws = yield* Effect.acquireRelease(
 					Effect.sync(
@@ -47,28 +47,36 @@ export const ptyStream = (url: string) =>
 					// try/catch OK here — sync callback bridge, not Effect context
 					try {
 						const event = JSON.parse(data.toString()) as PtyEvent;
-						emit.single(event);
+						Queue.offerUnsafe(queue, event);
 					} catch {
-						emit.single({ type: "output", data: data.toString() });
+						Queue.offerUnsafe(queue, { type: "output", data: data.toString() });
 					}
 				});
 
 				ws.on("error", (err: Error) => {
-					emit.fail(new PtyConnectionError({ cause: err }));
+					Queue.failCauseUnsafe(
+						queue,
+						Cause.fail(new PtyConnectionError({ cause: err })),
+					);
 				});
 
 				ws.on("close", () => {
-					emit.end();
+					Queue.endUnsafe(queue);
 				});
 
 				// Connection timeout — fire-and-forget fiber
 				yield* Effect.sleep(Duration.seconds(10)).pipe(
 					Effect.flatMap(() =>
 						ws.readyState !== WebSocket.OPEN
-							? Effect.sync(() => emit.fail(new PtyConnectionTimeout({})))
+							? Effect.sync(() =>
+									Queue.failCauseUnsafe(
+										queue,
+										Cause.fail(new PtyConnectionTimeout({})),
+									),
+								)
 							: Effect.void,
 					),
-					Effect.forkScoped,
+					Effect.forkScoped({ uninterruptible: "inherit" }),
 				);
 			}),
 	);

@@ -1,7 +1,7 @@
 // Store preparation, project binding and transaction helpers for the event store.
 
-import { SqlClient } from "@effect/sql";
 import { Context, Data, Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	MAX_PURGEABLE_SKELETON_SESSIONS,
 	makeEffectSqlMigrator,
@@ -21,16 +21,16 @@ export interface PersistenceService {
 	readonly sql: SqlClient.SqlClient;
 }
 
-export class PersistenceServiceTag extends Context.Tag("PersistenceService")<
+export class PersistenceServiceTag extends Context.Service<
 	PersistenceServiceTag,
 	PersistenceService
->() {}
+>()("PersistenceService") {}
 
 /** Required when constructing project services; write call sites inherit its owner. */
-export class PersistenceProjectTag extends Context.Tag("PersistenceProject")<
+export class PersistenceProjectTag extends Context.Service<
 	PersistenceProjectTag,
 	{ readonly projectId: string }
->() {}
+>()("PersistenceProject") {}
 
 export const stampProjectProvenance = (
 	projectId: string,
@@ -134,7 +134,7 @@ export const preparePersistenceStore: Effect.Effect<
 
 	// Boot diagnostic: if the 0010 purge circuit breaker tripped, the cohort is still
 	// present and must stay noticeable on every boot, not just the boot that tripped it.
-	// catchAllCause, not catchAll: this must swallow DEFECTS too, or a throw inside
+	// catchCause must swallow DEFECTS too, or a throw inside
 	// the query would defeat the whole point of the wrapper and turn a safety check
 	// into the outage it exists to avoid.
 	yield* selectLegacySkeletonSessionIds.pipe(
@@ -149,7 +149,7 @@ export const preparePersistenceStore: Effect.Effect<
 				: Effect.void,
 		),
 		Effect.provideService(SqlClient.SqlClient, sql),
-		Effect.catchAllCause(() => Effect.void),
+		Effect.catchCause(() => Effect.void),
 		Effect.withSpan("persistence.legacySkeletonBreakerCheck"),
 	);
 });

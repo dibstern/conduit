@@ -1,12 +1,7 @@
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
-import {
-	FileSystem,
-	HttpServerRequest,
-	HttpServerResponse,
-	Path,
-} from "@effect/platform";
-import { Context, Data, Effect, Layer } from "effect";
+import { Context, Data, Effect, FileSystem, Layer, Path } from "effect";
+import { HttpServerRequest, HttpServerResponse } from "effect/http";
 
 const gzipAsync = promisify(gzip);
 
@@ -60,10 +55,9 @@ const COMPRESS_MIN_BYTES = 1024;
 const gzipCache = new Map<string, Uint8Array>();
 const GZIP_CACHE_MAX = 64;
 
-export class StaticDirTag extends Context.Tag("StaticDir")<
-	StaticDirTag,
-	string
->() {}
+export class StaticDirTag extends Context.Service<StaticDirTag, string>()(
+	"StaticDir",
+) {}
 
 export const makeStaticDirLive = (
 	staticDir: string,
@@ -148,7 +142,7 @@ export const serveStaticFile = (requestPath: string) =>
 
 		const resolved = pathModule.resolve(staticDir, filePath);
 		if (!isWithinBase(pathModule, staticDir, resolved)) {
-			return yield* HttpServerResponse.text("Forbidden", { status: 403 });
+			return HttpServerResponse.text("Forbidden", { status: 403 });
 		}
 
 		const exists = yield* fs.exists(resolved);
@@ -157,7 +151,7 @@ export const serveStaticFile = (requestPath: string) =>
 			if (info.type === "Directory") {
 				const indexPath = pathModule.resolve(resolved, "index.html");
 				if (!isWithinBase(pathModule, staticDir, indexPath)) {
-					return yield* HttpServerResponse.text("Forbidden", { status: 403 });
+					return HttpServerResponse.text("Forbidden", { status: 403 });
 				}
 				const indexExists = yield* fs.exists(indexPath);
 				if (indexExists) {
@@ -168,7 +162,7 @@ export const serveStaticFile = (requestPath: string) =>
 						"index.html",
 					);
 				}
-				return yield* HttpServerResponse.text("Not Found", { status: 404 });
+				return HttpServerResponse.text("Not Found", { status: 404 });
 			}
 			return yield* serveFileContent(fs, pathModule, resolved, filePath);
 		}
@@ -181,15 +175,19 @@ export const serveStaticFile = (requestPath: string) =>
 			}
 		}
 
-		return yield* HttpServerResponse.text("Not Found", { status: 404 });
+		return HttpServerResponse.text("Not Found", { status: 404 });
 	}).pipe(
 		Effect.catchTag("InvalidStaticPathEncoding", () =>
-			HttpServerResponse.text("Bad Request", { status: 400 }),
+			Effect.succeed(HttpServerResponse.text("Bad Request", { status: 400 })),
 		),
-		Effect.catchTag("SystemError", (err) =>
-			HttpServerResponse.text("Internal Server Error", { status: 500 }).pipe(
-				Effect.tap(Effect.logWarning("Static file error", err)),
-			),
+		Effect.catchTag("PlatformError", (err) =>
+			err.reason._tag === "BadArgument"
+				? Effect.fail(err)
+				: Effect.succeed(
+						HttpServerResponse.text("Internal Server Error", { status: 500 }),
+					).pipe(
+						Effect.tap(Effect.logWarning("Static file error", err.reason)),
+					),
 		),
 		Effect.withSpan("static.serveFile"),
 	);

@@ -5,16 +5,14 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Socket } from "@effect/platform";
-import { RpcClient, type RpcClientError, RpcSerialization } from "@effect/rpc";
 import { Effect, Fiber, Layer, Stream } from "effect";
+import { RpcClient, type RpcClientError, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import { describe, expect, it } from "vitest";
 import { run } from "../../../src/bin/cli-core.js";
 import {
-	AddInstance,
 	type OpenCodeInstance,
 	type ProjectInfo,
-	StartInstance,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
@@ -168,10 +166,12 @@ describe("daemon instance and project lists fan out to every connection", () => 
 				.toContain("from-b");
 
 			// The CLI adds an instance and a project over the Unix socket.
-			await sendRpcRequest(
-				socketPath,
-				new AddInstance({ name: "from-cli", managed: false, url: health.url }),
-			);
+			await sendRpcRequest(socketPath, {
+				_tag: "AddInstance",
+				name: "from-cli",
+				managed: false,
+				url: health.url,
+			});
 			await expect
 				.poll(() => latestInstances().map((i) => i.name), { timeout: 10_000 })
 				.toContain("from-cli");
@@ -214,10 +214,12 @@ describe("daemon instance and project lists fan out to every connection", () => 
 		let subscriber: ReturnType<typeof subscribe> | undefined;
 		try {
 			daemon = await startForegroundDaemon(options);
-			await sendRpcRequest(
-				socketPath,
-				new AddInstance({ name: "probe", managed: false, url: health.url }),
-			);
+			await sendRpcRequest(socketPath, {
+				_tag: "AddInstance",
+				name: "probe",
+				managed: false,
+				url: health.url,
+			});
 			// Restart so the persisted instance gets a real health poller. External
 			// instances are health-checked from first use, so start it once; the
 			// start rejects while the server is unhealthy.
@@ -228,10 +230,10 @@ describe("daemon instance and project lists fan out to every connection", () => 
 				subscriber?.instances.at(-1)?.find((i) => i.name === "probe");
 			const probeStatus = () => probe()?.status;
 			await expect.poll(probeStatus, { timeout: 15_000 }).toBe("stopped");
-			await sendRpcRequest(
-				socketPath,
-				new StartInstance({ instanceId: probe()?.id ?? "" }),
-			).catch(() => undefined);
+			await sendRpcRequest(socketPath, {
+				_tag: "StartInstance",
+				instanceId: probe()?.id ?? "",
+			}).catch(() => undefined);
 			await expect
 				.poll(probeStatus, { timeout: 15_000, interval: 100 })
 				.toBe("unhealthy");

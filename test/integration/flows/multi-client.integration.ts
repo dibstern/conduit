@@ -52,6 +52,23 @@ describe("Integration: Multi-Client", () => {
 		const sessionId = client1.getActiveSessionId();
 		await client2.subscribeShell();
 
+		harness.mock.setExactResponse("GET", "/provider", 200, {
+			all: [
+				{
+					id: "multi-test-provider",
+					name: "Multi-client test provider",
+					models: {
+						"multi-test-model": {
+							id: "multi-test-model",
+							name: "Multi-client test model",
+							limit: { context: 200_000, output: 8_192 },
+						},
+					},
+				},
+			],
+			default: { "multi-test-provider": "multi-test-model" },
+			connected: ["multi-test-provider"],
+		});
 		await client1.switchModel("multi-test-model", "multi-test-provider");
 
 		const upsert = await client2.waitFor("shell", {

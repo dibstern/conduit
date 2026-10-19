@@ -21,12 +21,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EventPayloadMap } from "../../../src/lib/contracts/stored-event.js";
-import {
-	CreateSession,
-	GetProjects,
-	ListDaemonSessions,
-	SaveProject,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -142,33 +137,28 @@ describe("Project setup scripts through the built daemon", () => {
 		});
 		const socket = join(fixture.configDir, "relay.sock");
 		const save = (setupScript: string) =>
-			sendRpcRequest(
-				socket,
-				new SaveProject({
-					slug: "process-test",
-					folders: [fixture.projectDir],
-					setupScript,
-				}),
-			);
+			sendRpcRequest(socket, {
+				_tag: "SaveProject",
+				slug: "process-test",
+				folders: [fixture.projectDir],
+				setupScript,
+			});
 		const create = async (title: string, newWorktree = true) => {
-			const created = await sendRpcRequest(
-				socket,
-				new CreateSession({
-					permissionMode: "ask",
-					projectSlug: "process-test",
-					originId: "project-setup-test",
-					providerId: "claude",
-					title,
-					...(newWorktree ? { newWorktree: true } : {}),
-				}),
-			);
-			const rows = await sendRpcRequest(
-				socket,
-				new ListDaemonSessions({
-					projectSlug: "process-test",
-					scope: "process-test",
-				}),
-			);
+			const created = await sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				permissionMode: "ask",
+				projectSlug: "process-test",
+				originId: "project-setup-test",
+				providerId: "claude",
+				model: { providerId: "claude", modelId: "sonnet" },
+				title,
+				...(newWorktree ? { newWorktree: true } : {}),
+			});
+			const rows = await sendRpcRequest(socket, {
+				_tag: "ListDaemonSessions",
+				projectSlug: "process-test",
+				scope: "process-test",
+			});
 			const session = rows.sessions.find(({ id }) => id === created.sessionId);
 			const path = newWorktree
 				? session?.workspace?.worktrees[fixture.projectDir]
@@ -457,7 +447,7 @@ describe("Project setup scripts through the built daemon", () => {
 			"printf 'daemon' > setup-marker.txt; printf 'daemon output\\n'";
 		await save(script);
 		expect(
-			(await sendRpcRequest(socket, new GetProjects({}))).projects.find(
+			(await sendRpcRequest(socket, { _tag: "GetProjects" })).projects.find(
 				({ slug }) => slug === "process-test",
 			)?.setupScript,
 		).toBe(script);
@@ -478,7 +468,7 @@ describe("Project setup scripts through the built daemon", () => {
 			runnerStartupTimeoutMs: 90_000,
 		});
 		expect(
-			(await sendRpcRequest(socket, new GetProjects({}))).projects.find(
+			(await sendRpcRequest(socket, { _tag: "GetProjects" })).projects.find(
 				({ slug }) => slug === "process-test",
 			)?.setupScript,
 		).toBe(script);
@@ -493,7 +483,7 @@ describe("Project setup scripts through the built daemon", () => {
 		);
 		await save(" \n\t ");
 		expect(
-			(await sendRpcRequest(socket, new GetProjects({}))).projects.find(
+			(await sendRpcRequest(socket, { _tag: "GetProjects" })).projects.find(
 				({ slug }) => slug === "process-test",
 			)?.setupScript,
 		).toBeUndefined();

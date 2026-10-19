@@ -8,8 +8,8 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { Session } from "node:inspector/promises";
-import { createRequire } from "node:module";
 import { join } from "node:path";
+import { DatabaseSync, StatementSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Effect, Fiber } from "effect";
 
@@ -125,7 +125,7 @@ function recordServerMetrics(
 }
 
 // Every SQLite statement that holds the loop 1ms or more, timed around
-// better-sqlite3's synchronous calls, the ones the store client makes. The
+// node:sqlite's synchronous calls, the ones the store client makes. The
 // caller drains `statements`.
 //
 // `familyReads` is every session-family read, whatever its statements took:
@@ -151,8 +151,10 @@ function timeStatements(familyWindowSql: string): {
 	}[] = [];
 	const textLengths = new Map<string, number>();
 	const measured = new WeakSet<object>();
-	const walSize = (database: import("better-sqlite3").Database) => {
-		const file = `${database.name}-wal`;
+	const walSize = (database: DatabaseSync) => {
+		const filename = database.location();
+		if (filename === null) return 0;
+		const file = `${filename}-wal`;
 		return existsSync(file) ? statSync(file).size : 0;
 	};
 	const statements: { at: number; ms: number; method: string; sql: string }[] =
@@ -173,112 +175,117 @@ function timeStatements(familyWindowSql: string): {
 			deltas: { messageId: string; chars: number }[];
 		}
 	>();
-	const sqlite = createRequire(
-		createRequire(import.meta.url).resolve("@effect/sql-sqlite-node"),
-	)("better-sqlite3") as typeof import("better-sqlite3");
-	const probe = new sqlite(":memory:");
-	const prototype = Object.getPrototypeOf(probe.prepare("select 1")) as Record<
-		"all" | "get" | "run",
-		(
-			this: { source: string; database: import("better-sqlite3").Database },
-			...params: unknown[]
-		) => unknown
-	>;
-	probe.close();
+	const databases = new WeakMap<StatementSync, DatabaseSync>();
+	const prepare = DatabaseSync.prototype.prepare;
+	DatabaseSync.prototype.prepare = function (sql, options) {
+		const statement = prepare.call(this, sql, options);
+		databases.set(statement, this);
+		return statement;
+	};
+	const prototype = StatementSync.prototype;
 	for (const method of ["all", "get", "run"] as const) {
 		const original = prototype[method];
-		prototype[method] = function (...params) {
-			if (!measured.has(this.database)) {
-				measured.add(this.database);
-				// This hook only runs in an isolated profiling harness. File growth
-				// measures committed WAL frames only when automatic checkpoints are off.
-				this.database.pragma("wal_autocheckpoint = 0");
-			}
-			const started = performance.now();
-			let result: unknown;
-			try {
-				result = original.apply(this, params);
-				return result;
-			} finally {
-				const ms = performance.now() - started;
-				const sql = normalize(this.source);
-				if (ms >= 1)
-					statements.push({
-						at: Date.now(),
-						ms: Math.round(ms * 100) / 100,
-						method,
-						sql: sql.slice(0, 160),
-					});
-				if (sql === "BEGIN")
-					transactions.set(this.database, {
-						fullSessionScans: 0,
-						walBefore: walSize(this.database),
-						deltas: [],
-					});
-				const open = transactions.get(this.database);
-				if (
-					open &&
-					/INSERT(?: OR IGNORE)? INTO events/i.test(sql) &&
-					Array.isArray(result)
-				) {
-					for (const row of result) {
-						if (
-							row === null ||
-							typeof row !== "object" ||
-							!("type" in row) ||
-							row.type !== "text.delta" ||
-							!("data" in row) ||
-							typeof row.data !== "string"
+		Object.defineProperty(prototype, method, {
+			value: function (this: StatementSync, ...params: unknown[]) {
+				const database = databases.get(this);
+				if (!database) return Reflect.apply(original, this, params);
+				if (!measured.has(database)) {
+					measured.add(database);
+					// This hook only runs in an isolated profiling harness. File growth
+					// measures committed WAL frames only when automatic checkpoints are off.
+					database.exec("PRAGMA wal_autocheckpoint = 0");
+				}
+				const started = performance.now();
+				let result: unknown;
+				try {
+					result = Reflect.apply(original, this, params);
+					return result;
+				} finally {
+					const ms = performance.now() - started;
+					const sql = normalize(this.sourceSQL);
+					if (ms >= 1)
+						statements.push({
+							at: Date.now(),
+							ms: Math.round(ms * 100) / 100,
+							method,
+							sql: sql.slice(0, 160),
+						});
+					if (
+						/^BEGIN(?: (?:DEFERRED|IMMEDIATE|EXCLUSIVE))?(?: TRANSACTION)?$/i.test(
+							sql,
 						)
-							continue;
-						const data: unknown = JSON.parse(row.data);
-						if (
-							data !== null &&
-							typeof data === "object" &&
-							"messageId" in data &&
-							typeof data.messageId === "string" &&
-							"text" in data &&
-							typeof data.text === "string"
-						)
-							open.deltas.push({
-								messageId: data.messageId,
-								chars: data.text.length,
+					)
+						transactions.set(database, {
+							fullSessionScans: 0,
+							walBefore: walSize(database),
+							deltas: [],
+						});
+					const open = transactions.get(database);
+					if (
+						open &&
+						/INSERT(?: OR IGNORE)? INTO events/i.test(sql) &&
+						Array.isArray(result)
+					) {
+						for (const row of result) {
+							if (
+								row === null ||
+								typeof row !== "object" ||
+								!("type" in row) ||
+								row.type !== "text.delta" ||
+								!("data" in row) ||
+								typeof row.data !== "string"
+							)
+								continue;
+							const data: unknown = JSON.parse(row.data);
+							if (
+								data !== null &&
+								typeof data === "object" &&
+								"messageId" in data &&
+								typeof data.messageId === "string" &&
+								"text" in data &&
+								typeof data.text === "string"
+							)
+								open.deltas.push({
+									messageId: data.messageId,
+									chars: data.text.length,
+								});
+						}
+					}
+					if (open && sql === familyWindow)
+						open.changed = Array.isArray(result) && result.length > 0;
+					else if (open && /^SELECT [^;]* FROM sessions$/i.test(sql))
+						open.fullSessionScans += 1;
+					else if (open && (sql === "COMMIT" || sql === "ROLLBACK")) {
+						transactions.delete(database);
+						const firstDelta = open.deltas[0];
+						if (sql === "COMMIT" && firstDelta) {
+							const chunkChars = open.deltas.reduce(
+								(sum, delta) => sum + delta.chars,
+								0,
+							);
+							let textChars = 0;
+							for (const delta of open.deltas) {
+								textChars =
+									(textLengths.get(delta.messageId) ?? 0) + delta.chars;
+								textLengths.set(delta.messageId, textChars);
+							}
+							streamingWrites.push({
+								messageId: firstDelta.messageId,
+								chunkChars,
+								textChars,
+								walBytes: walSize(database) - open.walBefore,
+							});
+						}
+						if (open.changed !== undefined)
+							familyReads.push({
+								at: Date.now(),
+								changed: open.changed,
+								fullSessionScans: open.fullSessionScans,
 							});
 					}
 				}
-				if (open && sql === familyWindow)
-					open.changed = Array.isArray(result) && result.length > 0;
-				else if (open && /^SELECT [^;]* FROM sessions$/i.test(sql))
-					open.fullSessionScans += 1;
-				else if (open && (sql === "COMMIT" || sql === "ROLLBACK")) {
-					transactions.delete(this.database);
-					const firstDelta = open.deltas[0];
-					if (sql === "COMMIT" && firstDelta) {
-						const chunkChars = open.deltas.reduce(
-							(sum, delta) => sum + delta.chars,
-							0,
-						);
-						let textChars = 0;
-						for (const delta of open.deltas) {
-							textChars = (textLengths.get(delta.messageId) ?? 0) + delta.chars;
-							textLengths.set(delta.messageId, textChars);
-						}
-						streamingWrites.push({
-							messageId: firstDelta.messageId,
-							chunkChars,
-							textChars,
-							walBytes: walSize(this.database) - open.walBefore,
-						});
-					}
-					if (open.changed !== undefined)
-						familyReads.push({
-							at: Date.now(),
-							changed: open.changed,
-							fullSessionScans: open.fullSessionScans,
-						});
-				}
-			}
-		};
+			},
+		});
 	}
 	return { statements, familyReads, streamingWrites };
 }
@@ -418,14 +425,16 @@ async function main(): Promise<void> {
 									if (!existsSync(join(root, "capabilities-probe-armed")))
 										return readCapabilitiesFixture();
 									const id = ++consumerId;
-									const request = yield* Effect.fork(
+									const request = yield* Effect.forkChild(
 										service.get(workspaceRoot),
 									);
-									yield* Effect.yieldNow();
-									const status = yield* Fiber.status(request);
+									yield* Effect.yieldNow;
+									// The parent is running after a yield, so a pending child is suspended.
+									const status =
+										request.pollUnsafe() === undefined ? "Suspended" : "Done";
 									writeFileSync(
 										join(root, `capabilities-consumer-${id}.json`),
-										JSON.stringify({ workspaceRoot, status: status._tag }),
+										JSON.stringify({ workspaceRoot, status }),
 									);
 									return yield* Fiber.join(request);
 								}),

@@ -1,4 +1,4 @@
-import { Chunk, Effect, Layer, PubSub, Queue } from "effect";
+import { Effect, Layer, PubSub } from "effect";
 import type { Alert } from "../../src/lib/contracts/ws-rpc.js";
 import {
 	type AlertLedger,
@@ -28,24 +28,28 @@ import { makeMockSessionManagerService } from "./mock-factories.js";
 export function makeSSETestServices() {
 	const pendingInteractions = Effect.runSync(
 		PendingInteractionServiceTag.pipe(
-			Effect.provide(PendingInteractionServiceLive),
+			Effect.provide(PendingInteractionServiceLive, { local: true }),
 		),
 	);
 	const projectSettings = Effect.runSync(
-		ProjectSettingsTag.pipe(Effect.provide(ProjectSettingsLive)),
+		ProjectSettingsTag.pipe(
+			Effect.provide(ProjectSettingsLive, { local: true }),
+		),
 	);
 	const sessionService = makeMockSessionManagerService();
 	const alertLedger: AlertLedger = {
 		deliver: (_alert, send) => send.pipe(Effect.as(true)),
 	};
-	const alerts = Effect.runSync(AlertsTag.pipe(Effect.provide(AlertsLive)));
+	const alerts = Effect.runSync(
+		AlertsTag.pipe(Effect.provide(AlertsLive, { local: true })),
+	);
 	const layer = Layer.mergeAll(
-		Layer.succeed(AlertLedgerTag, alertLedger),
-		Layer.succeed(AlertsTag, alerts),
-		Layer.succeed(PendingInteractionServiceTag, pendingInteractions),
+		Layer.succeed(AlertLedgerTag)(alertLedger),
+		Layer.succeed(AlertsTag)(alerts),
+		Layer.succeed(PendingInteractionServiceTag)(pendingInteractions),
 		makeOverridesStateLive(),
-		Layer.succeed(SessionManagerServiceTag, sessionService),
-		Layer.succeed(ProjectSettingsTag, projectSettings),
+		Layer.succeed(SessionManagerServiceTag)(sessionService),
+		Layer.succeed(ProjectSettingsTag)(projectSettings),
 	);
 	return {
 		pendingInteractions,
@@ -67,9 +71,9 @@ export async function runSSEEvent(
 			Effect.gen(function* () {
 				const seen = yield* PubSub.subscribe(services.alerts);
 				yield* handleSSEEventEffect(deps, event);
-				return Chunk.toArray(yield* Queue.takeAll(seen));
+				return yield* PubSub.takeUpTo(seen, Number.POSITIVE_INFINITY);
 			}),
-		).pipe(Effect.provide(services.layer)),
+		).pipe(Effect.provide(services.layer, { local: true })),
 	);
 }
 
@@ -79,6 +83,8 @@ export async function wireSSEConsumerForTest(
 	services = makeSSETestServices(),
 ) {
 	await Effect.runPromise(
-		wireSSEConsumerEffect(deps, consumer).pipe(Effect.provide(services.layer)),
+		wireSSEConsumerEffect(deps, consumer).pipe(
+			Effect.provide(services.layer, { local: true }),
+		),
 	);
 }

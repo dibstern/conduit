@@ -12,18 +12,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-	HttpApp,
-	HttpClient,
-	HttpClientRequest,
-	HttpServer,
-} from "@effect/platform";
-import {
 	NodeFileSystem,
 	NodeHttpServer,
 	NodePath,
 } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { HttpClient, HttpClientRequest, HttpRouter } from "effect/http";
 import { afterAll, beforeAll, expect } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
@@ -53,11 +48,11 @@ const testProjects: RouterProjectInfo[] = [
 	},
 ];
 
-const TestProjectsLayer = Layer.succeed(ProjectsProvider, {
+const TestProjectsLayer = Layer.succeed(ProjectsProvider)({
 	getProjects: () => Effect.succeed(testProjects),
 });
 
-const TestPushLayer = Layer.succeed(PushProvider, {
+const TestPushLayer = Layer.succeed(PushProvider)({
 	getPublicKey: () => "test-vapid-public-key",
 	addSubscription: () => {},
 	removeSubscription: () => {},
@@ -66,7 +61,7 @@ const TestPushLayer = Layer.succeed(PushProvider, {
 let setupInfoPort = 9999;
 let setupInfoIsTls = false;
 
-const TestSetupInfoLayer = Layer.succeed(SetupInfoProvider, {
+const TestSetupInfoLayer = Layer.succeed(SetupInfoProvider)({
 	getPort: () => Effect.sync(() => setupInfoPort),
 	getIsTls: () => Effect.sync(() => setupInfoIsTls),
 	getPublicUrl: () => Effect.succeed(null),
@@ -81,7 +76,7 @@ beforeAll(async () => {
 const baseRouterLayer = () =>
 	Layer.mergeAll(
 		makeAuthManagerLive(new AuthManager()),
-		Layer.succeed(StaticDirTag, staticDir),
+		Layer.succeed(StaticDirTag)(staticDir),
 		NodeFileSystem.layer,
 		NodePath.layer,
 	);
@@ -92,9 +87,10 @@ const disposers: Array<() => Promise<void>> = [];
 
 // biome-ignore lint/suspicious/noExplicitAny: Layer type params vary per test
 function tracked(layer: Layer.Layer<any, any, never>) {
-	const h = HttpApp.toWebHandlerLayer(
-		effectRouter,
-		Layer.merge(layer, baseRouterLayer()),
+	const h = HttpRouter.toWebHandler(
+		effectRouter.pipe(
+			Layer.provideMerge(Layer.merge(layer, baseRouterLayer())),
+		),
 	);
 	disposers.push(h.dispose);
 	return h.handler;
@@ -109,7 +105,7 @@ describe("Effect HTTP Router - Extended Routes", () => {
 	describe("POST /api/push/unsubscribe", () => {
 		it("removes subscription and returns ok", async () => {
 			const removed: string[] = [];
-			const trackingPushLayer = Layer.succeed(PushProvider, {
+			const trackingPushLayer = Layer.succeed(PushProvider)({
 				getPublicKey: () => "key",
 				addSubscription: () => {},
 				removeSubscription: (endpoint: string) => {
@@ -252,7 +248,7 @@ describe("HTTP Server Layer", () => {
 	// 2. An HttpClient with the server URL prepended
 	// 3. Platform context (FileSystem, Etag, Path)
 	//
-	// We combine this with HttpServer.serve(router) and our test service layers.
+	// We combine this with HttpRouter.serve(router) and our test service layers.
 
 	const AllTestLayers = Layer.mergeAll(
 		TestProjectsLayer,
@@ -262,13 +258,13 @@ describe("HTTP Server Layer", () => {
 	);
 
 	// Build a test layer: layerTest provides HttpServer + HttpClient,
-	// HttpServer.serve wires the router into the server.
-	const TestServerLayer = HttpServer.serve(effectRouterWithCors).pipe(
+	// HttpRouter.serve wires the router into the server.
+	const TestServerLayer = HttpRouter.serve(effectRouterWithCors).pipe(
 		Layer.provideMerge(NodeHttpServer.layerTest),
 		Layer.provideMerge(AllTestLayers),
 	);
 
-	it.scoped("health endpoint responds via real HTTP server", () =>
+	it.effect("health endpoint responds via real HTTP server", () =>
 		Effect.gen(function* () {
 			const client = yield* HttpClient.HttpClient;
 			const response = yield* client.get("/health");
@@ -276,20 +272,20 @@ describe("HTTP Server Layer", () => {
 			const data = (yield* response.json) as Record<string, unknown>;
 			expect(data).toHaveProperty("ok", true);
 			expect(data).toHaveProperty("projects", 1);
-		}).pipe(Effect.provide(TestServerLayer)),
+		}).pipe(Effect.provide(TestServerLayer, { local: true })),
 	);
 
-	it.scoped("info endpoint responds via real HTTP server", () =>
+	it.effect("info endpoint responds via real HTTP server", () =>
 		Effect.gen(function* () {
 			const client = yield* HttpClient.HttpClient;
 			const response = yield* client.get("/info");
 			expect(response.status).toBe(200);
 			const data = (yield* response.json) as Record<string, unknown>;
 			expect(data).toHaveProperty("version");
-		}).pipe(Effect.provide(TestServerLayer)),
+		}).pipe(Effect.provide(TestServerLayer, { local: true })),
 	);
 
-	it.scoped("projects endpoint responds via real HTTP server", () =>
+	it.effect("projects endpoint responds via real HTTP server", () =>
 		Effect.gen(function* () {
 			const client = yield* HttpClient.HttpClient;
 			const response = yield* client.get("/api/projects");
@@ -300,19 +296,19 @@ describe("HTTP Server Layer", () => {
 			};
 			expect(data.projects).toHaveLength(1);
 			expect(data.projects[0]).toHaveProperty("slug", "test-project");
-		}).pipe(Effect.provide(TestServerLayer)),
+		}).pipe(Effect.provide(TestServerLayer, { local: true })),
 	);
 
-	it.scoped("CORS headers present on responses", () =>
+	it.effect("CORS headers present on responses", () =>
 		Effect.gen(function* () {
 			const client = yield* HttpClient.HttpClient;
 			const response = yield* client.get("/info");
 			expect(response.status).toBe(200);
 			expect(response.headers["access-control-allow-origin"]).toBe("*");
-		}).pipe(Effect.provide(TestServerLayer)),
+		}).pipe(Effect.provide(TestServerLayer, { local: true })),
 	);
 
-	it.scoped("push subscribe works via real HTTP server", () =>
+	it.effect("push subscribe works via real HTTP server", () =>
 		Effect.gen(function* () {
 			const client = yield* HttpClient.HttpClient;
 			const response = yield* HttpClientRequest.post(
@@ -329,10 +325,10 @@ describe("HTTP Server Layer", () => {
 			expect(response.status).toBe(200);
 			const body = yield* response.json;
 			expect(body).toEqual({ ok: true });
-		}).pipe(Effect.provide(TestServerLayer)),
+		}).pipe(Effect.provide(TestServerLayer, { local: true })),
 	);
 
-	it.scoped("push unsubscribe works via real HTTP server", () =>
+	it.effect("push unsubscribe works via real HTTP server", () =>
 		Effect.gen(function* () {
 			const client = yield* HttpClient.HttpClient;
 			const response = yield* HttpClientRequest.post(
@@ -346,15 +342,15 @@ describe("HTTP Server Layer", () => {
 			expect(response.status).toBe(200);
 			const body = yield* response.json;
 			expect(body).toEqual({ ok: true });
-		}).pipe(Effect.provide(TestServerLayer)),
+		}).pipe(Effect.provide(TestServerLayer, { local: true })),
 	);
 });
 
 describe("HttpServerLive layer construction", () => {
-	it.scoped("can construct and start a server on port 0", () =>
+	it.effect("can construct and start a server on port 0", () =>
 		Effect.gen(function* () {
 			// Provide a minimal config with port 0 to let the OS pick a free port.
-			const configLayer = Layer.succeed(HttpServerConfigTag, {
+			const configLayer = Layer.succeed(HttpServerConfigTag)({
 				port: 0,
 				host: "127.0.0.1",
 				tls: false,

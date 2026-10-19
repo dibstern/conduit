@@ -20,7 +20,7 @@ export const isServerSupervised = (): boolean =>
 	process.env["XPC_SERVICE_NAME"] === "dev.conduit.server";
 
 // Only the daemon starts this layer; SubscribeServerStatus reads its snapshot.
-export const ServerBuildUpdateLive = Layer.scopedDiscard(
+export const ServerBuildUpdateLive = Layer.effectDiscard(
 	Effect.gen(function* () {
 		if (!isServerSupervised() || SERVER_BUILD_ID === "dev") return;
 		const bus = yield* DaemonEventBusTag;
@@ -38,7 +38,7 @@ export const ServerBuildUpdateLive = Layer.scopedDiscard(
 		const check = Effect.gen(function* () {
 			const modified = yield* Effect.tryPromise(() => stat(markerPath)).pipe(
 				Effect.map((info) => info.mtimeMs),
-				Effect.orElseSucceed(() => null),
+				Effect.catch(() => Effect.succeed(null)),
 			);
 			if (modified === lastModified) return;
 			lastModified = modified;
@@ -54,7 +54,7 @@ export const ServerBuildUpdateLive = Layer.scopedDiscard(
 						marker["buildId"].trim().length > 0 &&
 						marker["buildId"] !== SERVER_BUILD_ID
 					);
-				}).pipe(Effect.orElseSucceed(() => false)));
+				}).pipe(Effect.catch(() => Effect.succeed(false))));
 			if (available === restartAvailable) return;
 			restartAvailable = available;
 			yield* PubSub.publish(bus, DaemonEvent.RestartAvailabilityChanged());

@@ -111,10 +111,10 @@ export const makeDaemonRpcTestLayer = (
 		DaemonEventBusLive,
 		BrowserRpcConnectionsLive,
 		options.tailscaleCli ??
-			Layer.succeed(TailscaleCliTag, {
+			Layer.succeed(TailscaleCliTag)({
 				exec: () => Effect.succeed('{"BackendState":"Stopped"}'),
 			}),
-		Layer.succeed(RpcCaller, { kind: "cli" }),
+		Layer.succeed(RpcCaller)({ kind: "cli" }),
 		InstanceHealthCheckLive,
 		DaemonConfigRefLive({
 			...makeDaemonConfigFromOptions({ port: 0 }),
@@ -151,11 +151,11 @@ export const makeDaemonRpcTestLayer = (
 				options.launchLogin ??
 				configuredClaudeConfigDir("/tmp/daemon-rpc-fixture/claude"),
 		}),
-		Layer.scoped(
+		Layer.effect(
 			Usage,
 			makeUsage({ accounts: Effect.succeed([]), readers: {} }),
 		),
-		Layer.succeed(PortScannerTag, {
+		Layer.succeed(PortScannerTag)({
 			getKnownPorts: () => Effect.succeed(new Set<number>()),
 			scanNow: () => Effect.succeed({ discovered: [], lost: [], active: [] }),
 		}),

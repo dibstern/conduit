@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Context, Data, Effect, HashMap, Layer, Option, Ref } from "effect";
+import { SqlClient } from "effect/sql";
 import { ProjectRegistryTag } from "./project-registry-service.js";
 
 export class SessionDirectoryReadError extends Data.TaggedError(
@@ -14,14 +14,14 @@ export class SessionDirectoryReadError extends Data.TaggedError(
 }
 
 /** Resolve stored session ids to their registered project owner. */
-export class SessionDirectory extends Context.Tag("SessionDirectory")<
+export class SessionDirectory extends Context.Service<
 	SessionDirectory,
 	{
 		readonly projectOf: (
 			sessionId: string,
 		) => Effect.Effect<Option.Option<string>, SessionDirectoryReadError>;
 	}
->() {}
+>()("SessionDirectory") {}
 
 /** Read ownership at lookup time; current registration controls visibility. */
 export const makeSharedSessionDirectoryLive = Layer.effect(

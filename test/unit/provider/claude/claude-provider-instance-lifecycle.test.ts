@@ -68,9 +68,9 @@ function collectTurnFailure(
 	deferred: Deferred.Deferred<TurnResult, Error>,
 	rejected: Error[],
 ): Promise<void> {
-	return Effect.runPromise(Deferred.await(deferred).pipe(Effect.either)).then(
+	return Effect.runPromise(Deferred.await(deferred).pipe(Effect.result)).then(
 		(result) => {
-			if (result._tag === "Left") rejected.push(result.left);
+			if (result._tag === "Failure") rejected.push(result.failure);
 		},
 	);
 }
@@ -154,14 +154,14 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			);
 			setClaudeRuntimeTurnWaitersForTest(instance, "sess-shutdown", [deferred]);
 			const result = Effect.runPromise(
-				Deferred.await(deferred).pipe(Effect.either),
+				Deferred.await(deferred).pipe(Effect.result),
 			);
 
 			await Effect.runPromise(instance.shutdownEffect());
 
 			expect(await result).toMatchObject({
-				_tag: "Left",
-				left: { message: "Provider instance shutting down" },
+				_tag: "Failure",
+				failure: { message: "Provider instance shutting down" },
 			});
 		});
 

@@ -1,17 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { SqlClient } from "@effect/sql";
 import {
 	Context,
 	Deferred,
 	Effect,
-	Either,
 	Fiber,
 	FiberMap,
 	Ref,
-	type Runtime,
+	Result,
 	Schema,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { type Account, AccountSchema } from "../../../contracts/account.js";
 import {
 	PROVIDER_DRIVERS,
@@ -196,9 +195,9 @@ export const resolveSessionFolders = (
 		let state =
 			savedWorkspace == null
 				? null
-				: yield* Schema.decodeUnknown(Schema.parseJson(SessionWorkspaceSchema))(
-						savedWorkspace,
-					);
+				: yield* Schema.decodeUnknownEffect(
+						Schema.fromJsonString(SessionWorkspaceSchema),
+					)(savedWorkspace);
 		let workspaceRoot = effectiveWorkingDirectory(config.projectDir, state);
 		const missing = yield* inspectSessionWorktree(
 			{ id: session.id, workspace: state },
@@ -292,33 +291,34 @@ export const resolveSessionRequestFolders = (sessionId: string | undefined) =>
 		return yield* resolveSessionFolders(session);
 	});
 
-export class ProviderTurnDispatchFibersTag extends Context.Tag(
-	"ProviderTurnDispatchFibers",
-)<ProviderTurnDispatchFibersTag, FiberMap.FiberMap<string, void, unknown>>() {}
+export class ProviderTurnDispatchFibersTag extends Context.Service<
+	ProviderTurnDispatchFibersTag,
+	FiberMap.FiberMap<string, void, unknown>
+>()("ProviderTurnDispatchFibers") {}
 
-export class ProviderTurnTimeoutRuntimeTag extends Context.Tag(
-	"ProviderTurnTimeoutRuntime",
-)<
+export class ProviderTurnTimeoutRuntimeTag extends Context.Service<
 	ProviderTurnTimeoutRuntimeTag,
 	{
-		readonly runtime: Runtime.Runtime<OverridesStateTag>;
+		readonly runtime: Context.Context<OverridesStateTag>;
 		readonly overridesRef: Ref.Ref<OverridesState>;
 	}
->() {}
+>()("ProviderTurnTimeoutRuntime") {}
 
 const loadClaudeHistoryMetadata = (sessionId: string) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
 		const readQuery = yield* ReadQueryEffectTag;
-		const result = yield* Effect.either(
+		const result = yield* Effect.result(
 			readQuery.getSessionHistoryMetadata(sessionId),
 		);
-		if (result._tag === "Right") {
-			return result.right;
+		if (result._tag === "Success") {
+			return result.success;
 		}
 		log.warn(
 			`Failed to load prior Claude history metadata for ${sessionId}: ${
-				result.left instanceof Error ? result.left.message : result.left
+				result.failure instanceof Error
+					? result.failure.message
+					: result.failure
 			}`,
 		);
 		return undefined;
@@ -403,7 +403,7 @@ const failUnfinishedSend = (
 					provider: driver,
 				})
 				.pipe(
-					Effect.catchAll((cause) =>
+					Effect.catch((cause) =>
 						Effect.sync(() =>
 							log.warn(
 								`session=${input.sessionId} Failed to place unsent user message: ${formatErrorDetail(cause)}`,
@@ -434,13 +434,11 @@ const makeEventSink = (sessionId: string, driver: ProviderDriverKind) =>
 			persist,
 			ingestion: {
 				ingest: (event, onPrompt) =>
-					ingestion
-						.ingest(event, onPrompt)
-						.pipe(
-							Effect.mapInputContext((caller: Context.Context<never>) =>
-								Context.merge(runtime.context, caller),
-							),
-						),
+					Effect.contextWith((caller: Context.Context<never>) =>
+						ingestion
+							.ingest(event, onPrompt)
+							.pipe(Effect.provide(Context.merge(runtime, caller))),
+					),
 			},
 			pendingInteractions: {
 				beginPermissionRequest: (request) =>
@@ -558,12 +556,12 @@ const handleDispatchResult = (
 			key: update.key,
 			value: String(update.value),
 		}));
-		const saveResult = yield* Effect.either(
+		const saveResult = yield* Effect.result(
 			providerState.saveUpdates(input.sessionId, updates),
 		);
-		if (saveResult._tag === "Left") {
+		if (saveResult._tag === "Failure") {
 			log.warn(
-				`Non-fatal provider state persistence error for ${input.sessionId}: ${formatErrorDetail(saveResult.left)}`,
+				`Non-fatal provider state persistence error for ${input.sessionId}: ${formatErrorDetail(saveResult.failure)}`,
 			);
 		}
 	});
@@ -615,16 +613,16 @@ const prepareEngineTurnInput = (
 				const cached = yield* models.value.cachedProviders(providerId);
 				const available =
 					cached._tag === "Some"
-						? Either.right(cached.value)
-						: yield* Effect.either(
+						? Result.succeed(cached.value)
+						: yield* Effect.result(
 								models.value.listProviders({
 									instanceId: providerId,
 									startIfStopped: true,
 									requireFresh: true,
 								}),
 							);
-				if (Either.isRight(available))
-					catalog = available.right.providers.flatMap((provider) =>
+				if (Result.isSuccess(available))
+					catalog = available.success.providers.flatMap((provider) =>
 						(provider.models ?? []).map((model) => ({
 							...model,
 							providerId: provider.id || provider.name,
@@ -634,22 +632,22 @@ const prepareEngineTurnInput = (
 		}
 		const resolved =
 			harnessForModelProvider(pick.model.providerId) !== harness
-				? Either.left(new ModelNotInCatalog({ harness, ...pick.model }))
+				? Result.fail(new ModelNotInCatalog({ harness, ...pick.model }))
 				: catalog === undefined
-					? Either.right(pick)
+					? Result.succeed(pick)
 					: resolveTurnSettings(pick, catalog);
-		if (Either.isLeft(resolved)) {
+		if (Result.isFailure(resolved)) {
 			yield* clearProcessingTimeout(resolvedInput.sessionId);
 			const failTurn = yield* makeFailTurn;
 			yield* failTurn(
 				resolvedInput.sessionId,
-				resolved.left.message,
+				resolved.failure.message,
 				"PICK_REJECTED",
 				resolvedInput.continuation ? undefined : resolvedInput.commandId,
 			);
 			return undefined;
 		}
-		const settings = resolved.right;
+		const settings = resolved.success;
 		const priorHistoryMetadata = traits.needsPriorHistoryMetadata
 			? yield* loadClaudeHistoryMetadata(resolvedInput.sessionId)
 			: undefined;
@@ -726,8 +724,8 @@ const prepareEngineTurnInput = (
 					AND json_extract(payload_json, '$.account.id') = ${account.id}
 				ORDER BY request_sequence DESC LIMIT 1`;
 			if (turn?.account_json) {
-				turnAccount = yield* Schema.decodeUnknown(
-					Schema.parseJson(AccountSchema),
+				turnAccount = yield* Schema.decodeUnknownEffect(
+					Schema.fromJsonString(AccountSchema),
 				)(turn.account_json);
 			}
 		}
@@ -820,9 +818,11 @@ const dispatchEngineTurn = (
 				...eventSink,
 				push: (event) =>
 					eventSink.push(event).pipe(
-						Effect.tap(() => {
-							if (TURN_END_TYPES.has(event.type)) endedByProvider = true;
-						}),
+						Effect.tap(() =>
+							Effect.sync(() => {
+								if (TURN_END_TYPES.has(event.type)) endedByProvider = true;
+							}),
+						),
 					),
 				noteActivity: (event) => {
 					if (TURN_END_TYPES.has(event.type)) endedByProvider = true;
@@ -869,9 +869,9 @@ const dispatchEngineTurn = (
 			Effect.flatMap((result) =>
 				handleDispatchResult(resolvedInput, result, driver, endedByProvider),
 			),
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				restorePreviousBinding.pipe(
-					Effect.zipRight(
+					Effect.andThen(
 						handleDispatchFailure(
 							resolvedInput,
 							error,
@@ -977,18 +977,18 @@ export const sendTurn = (input: ProviderTurnServiceSendInput) =>
 		}
 		const resolved =
 			input.account === undefined
-				? yield* Effect.either(
+				? yield* Effect.result(
 						(yield* AccountDirectory).resolve({
 							_tag: "Id",
 							id: boundProviderId,
 						}),
 					)
-				: Either.right(input.account);
-		if (Either.isLeft(resolved)) {
-			yield* handleDispatchFailure(input, resolved.left, undefined);
+				: Result.succeed(input.account);
+		if (Result.isFailure(resolved)) {
+			yield* handleDispatchFailure(input, resolved.failure, undefined);
 			return;
 		}
-		yield* sendViaEngine(input, boundProviderId, resolved.right).pipe(
+		yield* sendViaEngine(input, boundProviderId, resolved.success).pipe(
 			Effect.provideService(OrchestrationEngineTag, engine),
 		);
 	});

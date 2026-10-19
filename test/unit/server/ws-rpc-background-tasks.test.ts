@@ -1,6 +1,6 @@
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { RpcTest } from "effect/rpc";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { BackgroundLivenessTag } from "../../../src/lib/domain/relay/Services/services.js";
@@ -66,7 +66,7 @@ describe("StopBackgroundTask RPC", () => {
 						providerRegistry: new ProviderRegistry([provider]),
 						orchestrationEngine: engine,
 					}),
-					Layer.succeed(BackgroundLivenessTag, () =>
+					Layer.succeed(BackgroundLivenessTag)(() =>
 						live
 							? {
 									work: "monitoring" as const,
@@ -104,7 +104,7 @@ describe("StopBackgroundTask RPC", () => {
 			expect(state.stopTaskEffect).toHaveBeenCalledWith("session-1", "shell");
 			expect(state.interruptTurnEffect).not.toHaveBeenCalled();
 			expect(state.engine.dispatchEffect).not.toHaveBeenCalled();
-		}).pipe(Effect.scoped, Effect.provide(state.layer));
+		}).pipe(Effect.scoped, Effect.provide(state.layer, { local: true }));
 	});
 
 	it.effect(
@@ -119,7 +119,7 @@ describe("StopBackgroundTask RPC", () => {
 				expect(first).toEqual({ ok: true });
 				expect(second).toEqual({ ok: true });
 				expect(state.stopTaskEffect).not.toHaveBeenCalled();
-			}).pipe(Effect.scoped, Effect.provide(state.layer));
+			}).pipe(Effect.scoped, Effect.provide(state.layer, { local: true }));
 		},
 	);
 
@@ -135,15 +135,15 @@ describe("StopBackgroundTask RPC", () => {
 			state.stopTaskEffect.mockImplementationOnce(() => Effect.fail(error));
 			return Effect.gen(function* () {
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
-				const result = yield* Effect.either(client.StopBackgroundTask(request));
-				expect(result._tag).toBe("Left");
+				const result = yield* Effect.result(client.StopBackgroundTask(request));
+				expect(result._tag).toBe("Failure");
 				state.stopTaskEffect.mockImplementationOnce(() => {
 					state.finish();
 					return Effect.fail(error);
 				});
 				const finished = yield* client.StopBackgroundTask(request);
 				expect(finished).toEqual({ ok: true });
-			}).pipe(Effect.scoped, Effect.provide(state.layer));
+			}).pipe(Effect.scoped, Effect.provide(state.layer, { local: true }));
 		},
 	);
 
@@ -153,11 +153,11 @@ describe("StopBackgroundTask RPC", () => {
 			const state = setup("opencode");
 			return Effect.gen(function* () {
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
-				const result = yield* Effect.either(client.StopBackgroundTask(request));
-				expect(result._tag).toBe("Left");
+				const result = yield* Effect.result(client.StopBackgroundTask(request));
+				expect(result._tag).toBe("Failure");
 				expect(state.stopTaskEffect).not.toHaveBeenCalled();
 				expect(state.interruptTurnEffect).not.toHaveBeenCalled();
-			}).pipe(Effect.scoped, Effect.provide(state.layer));
+			}).pipe(Effect.scoped, Effect.provide(state.layer, { local: true }));
 		},
 	);
 });

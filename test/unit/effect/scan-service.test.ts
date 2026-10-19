@@ -11,16 +11,16 @@ describe("standalone ScanServiceLive", () => {
 	it.effect("starts without daemon config and reports unavailable scans", () =>
 		Effect.gen(function* () {
 			const service = yield* ScanServiceTag;
-			const result = yield* Effect.either(service.scanNow());
+			const result = yield* Effect.result(service.scanNow());
 			expect(result).toMatchObject({
-				_tag: "Left",
-				left: {
+				_tag: "Failure",
+				failure: {
 					_tag: "ScanServiceNotAvailable",
 					message: "Port scanning not available",
 				},
 			});
-			if (result._tag === "Left")
-				expect(result.left).toBeInstanceOf(ScanServiceNotAvailable);
+			if (result._tag === "Failure")
+				expect(result.failure).toBeInstanceOf(ScanServiceNotAvailable);
 		}).pipe(Effect.provide(ScanServiceLive)),
 	);
 });

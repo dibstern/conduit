@@ -20,22 +20,21 @@ import { createServer } from "node:net";
 import { userInfo } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { Socket } from "@effect/platform";
-import { RpcClient, type RpcGroup, RpcSerialization } from "@effect/rpc";
 import Database from "better-sqlite3";
 import {
 	Cause,
 	Context,
 	Effect,
-	Either,
+	Result as Either,
 	Exit,
 	Fiber,
 	Layer,
 	ManagedRuntime,
-	ParseResult,
+	Schema,
 	Stream,
 } from "effect";
-import type { Request } from "effect/Request";
+import { RpcClient, type RpcGroup, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import WebSocket from "ws";
 import {
 	AccountIdSchema,
@@ -43,10 +42,7 @@ import {
 	type ProviderDriverKind,
 } from "../../src/lib/contracts/provider-instance.js";
 import {
-	GetInstances,
-	GetStatus,
 	type PtyEnvelope,
-	Shutdown,
 	WsRpcGroup,
 	type WsRpcRequest,
 } from "../../src/lib/contracts/ws-rpc.js";
@@ -89,13 +85,13 @@ export { responseChunks };
 
 const TIMEOUT_MS = 15_000;
 
-class BrowserRpc extends Context.Tag("ProcessHarnessBrowserRpc")<
+class BrowserRpc extends Context.Service<
 	BrowserRpc,
 	RpcClient.RpcClient<
 		RpcGroup.Rpcs<typeof WsRpcGroup>,
-		import("@effect/rpc/RpcClientError").RpcClientError
+		import("effect/rpc/RpcClientError").RpcClientError
 	>
->() {}
+>()("ProcessHarnessBrowserRpc") {}
 
 function browserRpcRuntime(
 	port: number,
@@ -105,7 +101,7 @@ function browserRpcRuntime(
 	const protocol = RpcClient.layerProtocolSocket().pipe(
 		Layer.provide(Socket.layerWebSocket(`ws://127.0.0.1:${port}/rpc`)),
 		Layer.provide(
-			Layer.succeed(Socket.WebSocketConstructor, (url) => {
+			Layer.succeed(Socket.WebSocketConstructor)((url) => {
 				const socket = new WebSocket(url);
 				socket.once("error", (error) => onDisconnect?.(error));
 				socket.once("close", () =>
@@ -115,15 +111,14 @@ function browserRpcRuntime(
 			}),
 		),
 		Layer.provide(
-			Layer.succeed(
-				RpcSerialization.RpcSerialization,
+			Layer.succeed(RpcSerialization.RpcSerialization)(
 				diagnostics?.serialization(`ws://127.0.0.1:${port}/rpc`) ??
 					RpcSerialization.json,
 			),
 		),
 	);
 	return ManagedRuntime.make(
-		Layer.scoped(BrowserRpc, RpcClient.make(WsRpcGroup)).pipe(
+		Layer.effect(BrowserRpc, RpcClient.make(WsRpcGroup)).pipe(
 			Layer.provide(protocol),
 		),
 	);
@@ -438,7 +433,7 @@ Object.assign(ClaudeDriver, { create: deps => {
   const projectGate = join(deps.workspaceRoot, ".conduit", "recovery-gated");
   const gate = existsSync(projectGate) ? projectGate : join(root, "capabilities-probe-gated");
   return waitForGate(gate, deps.workspaceRoot).pipe(
-    Effect.zipRight(create({ ...deps, capabilitiesService: { get: () => Effect.succeed(
+    Effect.andThen(create({ ...deps, capabilitiesService: { get: () => Effect.succeed(
       existsSync(join(root, "capabilities-probe-result.json"))
         ? JSON.parse(readFileSync(join(root, "capabilities-probe-result.json"), "utf8"))
         : { models: [], agents: [], commands: [] }
@@ -448,7 +443,7 @@ Object.assign(ClaudeDriver, { create: deps => {
       Object.assign(instance, { recoverEffect: () => {
         const failureGate = join(deps.workspaceRoot, ".conduit", "recovery-fail-after-adoption");
         return recover().pipe(
-          Effect.zipRight(waitForGate(failureGate, deps.workspaceRoot)),
+          Effect.andThen(waitForGate(failureGate, deps.workspaceRoot)),
           Effect.tap(() => Effect.sync(() => {
             if (!existsSync(failureGate)) return;
             writeFileSync(failureGate + "-failed", "original recovery completed before fixture failure");
@@ -1133,8 +1128,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 				void (async () => {
 					while (!finished) {
 						try {
-							const status = await this.requestRpc(new GetStatus({}));
-							const instances = await this.requestRpc(new GetInstances({}));
+							const status = await this.requestRpc({ _tag: "GetStatus" });
+							const instances = await this.requestRpc({ _tag: "GetInstances" });
 							if (
 								child.pid &&
 								(options.exactCliArgs || status.port === this.port)
@@ -1463,7 +1458,11 @@ Object.assign(ClaudeDriver, { create: deps => {
 		await this.stop(signal, 10_000);
 	}
 
-	async runCli(args: string[]): Promise<{
+	async runCli(
+		args: string[],
+		/** A cold CLI start can exceed the default bound on a loaded machine. */
+		options: { timeoutMs?: number } = {},
+	): Promise<{
 		pid: number | undefined;
 		code: number | null;
 		signal: NodeJS.Signals | null;
@@ -1496,7 +1495,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			const timer = setTimeout(() => {
 				timedOut = true;
 				child.kill("SIGKILL");
-			}, TIMEOUT_MS);
+			}, options.timeoutMs ?? TIMEOUT_MS);
 			child.once("error", (cause) => {
 				clearTimeout(timer);
 				fail(cause);
@@ -1522,7 +1521,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 		let rpcFailure: unknown;
 		if (child.exitCode === null && child.signalCode === null) {
 			try {
-				await this.requestRpc(new Shutdown({}));
+				await this.requestRpc({ _tag: "Shutdown" });
 			} catch (cause) {
 				// A startup failure can remove IPC before its owned child exits.
 				rpcFailure = cause;
@@ -1632,24 +1631,22 @@ Object.assign(ClaudeDriver, { create: deps => {
 	}
 
 	/** Keep the original IPC error, and retain its undecoded payload for proof. */
-	async requestRpc<R extends WsRpcRequest>(
+	requestRpc<R extends WsRpcRequest>(
 		request: R,
-	): Promise<Request.Success<R>> {
+	): ReturnType<typeof sendRpcRequest<R>> {
 		const endpoint = join(this.configDir, "relay.sock");
-		try {
-			return await sendRpcRequest(endpoint, request);
-		} catch (error) {
-			if (ParseResult.isParseError(error)) {
+		return sendRpcRequest(endpoint, request).catch((error: unknown) => {
+			if (Schema.isSchemaError(error)) {
 				this.rpcDiagnostics.capture(
 					endpoint,
 					request._tag,
-					JSON.stringify("actual" in error.issue ? error.issue.actual : null) ??
+					JSON.stringify("input" in error.issue ? error.issue.input : null) ??
 						"null",
 					error,
 				);
 			}
 			throw error;
-		}
+		});
 	}
 
 	proof() {
@@ -1684,14 +1681,14 @@ Object.assign(ClaudeDriver, { create: deps => {
 
 	private rememberManagedOpenCode(): void {
 		const loaded = loadDaemonConfigResult(this.configDir);
-		if (loaded._tag === "Left") {
+		if (loaded._tag === "Failure") {
 			// Config-safety scenarios deliberately damage this file. Record the
 			// read failure and retain already authenticated process ownership.
-			if (loaded.left._tag !== "NotFound")
-				this.configReadErrors.add(loaded.left.message);
+			if (loaded.failure._tag !== "NotFound")
+				this.configReadErrors.add(loaded.failure.message);
 			return;
 		}
-		for (const instance of loaded.right.instances ?? []) {
+		for (const instance of loaded.success.instances ?? []) {
 			if (
 				instance.managed &&
 				instance.driver !== "claude" &&
@@ -2013,18 +2010,18 @@ export class ProcessBrowser {
 	>();
 	private closed = false;
 	private failure: Error | undefined;
-	private ptys: Fiber.RuntimeFiber<void, unknown> | undefined;
-	private approvals: Fiber.RuntimeFiber<void, unknown> | undefined;
-	private projectSettings: Fiber.RuntimeFiber<void, unknown> | undefined;
-	private sessions: Fiber.RuntimeFiber<void, unknown> | undefined;
+	private ptys: Fiber.Fiber<void, unknown> | undefined;
+	private approvals: Fiber.Fiber<void, unknown> | undefined;
+	private projectSettings: Fiber.Fiber<void, unknown> | undefined;
+	private sessions: Fiber.Fiber<void, unknown> | undefined;
 	private sessionsReady: Promise<void> | undefined;
 	private readonly details = new Map<string, Promise<void>>();
-	private readonly detailFibers = new Set<Fiber.RuntimeFiber<void, unknown>>();
+	private readonly detailFibers = new Set<Fiber.Fiber<void, unknown>>();
 	private readonly families = new Map<string, Promise<void>>();
-	private readonly familyFibers = new Set<Fiber.RuntimeFiber<void, unknown>>();
+	private readonly familyFibers = new Set<Fiber.Fiber<void, unknown>>();
 	private constructor(
 		private readonly runtime: ManagedRuntime.ManagedRuntime<BrowserRpc, never>,
-		readonly rpc: BrowserRpc["Type"],
+		readonly rpc: BrowserRpc["Service"],
 		originId: string,
 		private readonly projectSlug: string,
 		private readonly followRows: boolean,
@@ -2086,7 +2083,7 @@ export class ProcessBrowser {
 	private watch<A, E>(
 		stream: Stream.Stream<A, E>,
 		record: (envelope: A) => Effect.Effect<void, unknown>,
-	): Fiber.RuntimeFiber<void, unknown> {
+	): Fiber.Fiber<void, unknown> {
 		return this.runtime.runFork(
 			Stream.runForEach(stream, record).pipe(
 				Effect.onExit((exit) =>
@@ -2188,7 +2185,7 @@ export class ProcessBrowser {
 		this.sessionsReady = (async () => {
 			const cursor = this.frames.length;
 			this.sessions = this.watch(this.rpc.SubscribeShell({}), (envelope) =>
-				Effect.gen(this, function* () {
+				Effect.gen({ self: this }, function* () {
 					this.record({ type: "shell", ...envelope });
 					if (envelope._tag === "snapshot")
 						this.record({ type: "session_snapshot" });
@@ -2277,7 +2274,7 @@ export class ProcessBrowser {
 						sessionId,
 					}),
 					(envelope) =>
-						Effect.gen(this, function* () {
+						Effect.gen({ self: this }, function* () {
 							this.record({ type: "family", familyOf: sessionId, ...envelope });
 							const rows =
 								envelope._tag === "snapshot"
@@ -2555,7 +2552,7 @@ export class ProcessBrowser {
 		}
 		const cursor = this.frames.length;
 		const result = await this.run(
-			this.rpc.input.submit({
+			this.rpc["input.submit"]({
 				sessionId,
 				originId: this.originId,
 				inputId: randomUUID(),
@@ -2683,7 +2680,7 @@ export class ProcessBrowser {
 	/** The tray's Send now, and Resume on the oldest queued input. */
 	async sendNow(sessionId: string, inputId: string): Promise<void> {
 		const result = await this.run(
-			this.rpc.input.sendNow({
+			this.rpc["input.sendNow"]({
 				sessionId,
 				originId: this.originId,
 				inputId,

@@ -9,8 +9,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
-import { Effect, Stream } from "effect";
+import { Effect, Semaphore, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
 	accountsStateFromConfig,
@@ -279,7 +279,7 @@ for (const scenario of [
 		let dispatches = 0;
 		const dispatchedAccounts: Account[] = [];
 		const admittedSessions: string[] = [];
-		const admission = Effect.unsafeMakeSemaphore(1);
+		const admission = Semaphore.makeUnsafe(1);
 		const launchLogin = configuredClaudeConfigDir(
 			join(isolatedRoot, "launch-login"),
 		);
@@ -361,13 +361,13 @@ for (const scenario of [
 								}).pipe(Effect.orDie),
 							pickFailover: () => Effect.succeed(undefined),
 						}),
-						Effect.either,
+						Effect.result,
 					);
 				expect(result._tag).toBe(
-					scenario.result === "Right" ? "Right" : "Left",
+					scenario.result === "Right" ? "Success" : "Failure",
 				);
-				if (result._tag === "Left")
-					expect(result.left._tag).toBe(scenario.result);
+				if (result._tag === "Failure")
+					expect(result.failure._tag).toBe(scenario.result);
 				expect(probes).toBe(scenario.probes);
 				expect(dispatches).toBe(scenario.result === "Right" ? 1 : 0);
 				if (scenario.result === "Right") {
@@ -422,7 +422,7 @@ for (const scenario of [
 					withSession: (sessionId, effect) =>
 						admission.withPermits(1)(
 							Effect.sync(() => admittedSessions.push(sessionId)).pipe(
-								Effect.zipRight(effect),
+								Effect.andThen(effect),
 							),
 						),
 					start: Effect.void,
@@ -501,19 +501,19 @@ for (const boundId of ["claude-sdk", "unknown-account", "opencode"] as const) {
 					},
 				]);
 				engine.bindSession("s1", boundId);
-				const result = yield* preWarmSession("s1").pipe(Effect.either);
+				const result = yield* preWarmSession("s1").pipe(Effect.result);
 				if (boundId === "unknown-account") {
-					expect(result._tag).toBe("Left");
-					if (result._tag === "Left") {
-						expect(result.left._tag).toBe("AccountUnroutable");
-						expect(result.left.message).toContain(boundId);
+					expect(result._tag).toBe("Failure");
+					if (result._tag === "Failure") {
+						expect(result.failure._tag).toBe("AccountUnroutable");
+						expect(result.failure.message).toContain(boundId);
 					}
 					expect(warmed).toEqual([]);
 				} else if (boundId === "opencode") {
-					expect(result._tag).toBe("Right");
+					expect(result._tag).toBe("Success");
 					expect(warmed).toEqual([]);
 				} else {
-					expect(result._tag).toBe("Right");
+					expect(result._tag).toBe("Success");
 					expect(warmed).toHaveLength(1);
 					expect(warmed[0]).toMatchObject({
 						instanceId: "personal",

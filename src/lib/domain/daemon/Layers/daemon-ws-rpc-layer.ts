@@ -6,6 +6,7 @@ import {
 	PubSub,
 	Queue,
 	Ref,
+	Semaphore,
 	Stream,
 } from "effect";
 import { hashPin } from "../../../auth.js";
@@ -30,10 +31,6 @@ import { formatErrorDetail } from "../../../errors.js";
 import { getLogLevel } from "../../../logger.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
 import { makeCursorAuth } from "../../../provider/cursor/cursor-auth.js";
-import {
-	loadRelaySettings,
-	saveRelaySettings,
-} from "../../../relay/relay-settings.js";
 import {
 	getRestartAvailable,
 	isServerSupervised,
@@ -109,12 +106,12 @@ import {
 	type TailscaleCliTag,
 } from "./tailscale-serve-layer.js";
 
-export class DaemonWsRpcHandlersTag extends Context.Tag("DaemonWsRpcHandlers")<
+export class DaemonWsRpcHandlersTag extends Context.Service<
 	DaemonWsRpcHandlersTag,
 	DaemonRpcHandlers
->() {}
+>()("DaemonWsRpcHandlers") {}
 
-export const DaemonWsRpcHandlersLive = Layer.scoped(
+export const DaemonWsRpcHandlersLive = Layer.effect(
 	DaemonWsRpcHandlersTag,
 	Effect.gen(function* () {
 		const { configDir } = yield* Ref.get(yield* DaemonStateTag);
@@ -150,8 +147,8 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const openCodeInstances = yield* OpenCodeInstancesTag;
 		const usage = yield* Usage;
 		// Serialize process changes together with their config/persistence updates.
-		const keepAwakeLock = yield* Effect.makeSemaphore(1);
-		const tailscaleServeLock = yield* Effect.makeSemaphore(1);
+		const keepAwakeLock = yield* Semaphore.make(1);
+		const tailscaleServeLock = yield* Semaphore.make(1);
 		const auth = yield* AuthManagerTag;
 		const browserConnections = yield* BrowserRpcConnectionsTag;
 		const invalidateBrowsers = () => {
@@ -168,7 +165,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		// them when it sees a new value (conduit-test-ni8.16.2).
 		let sessionsRevision = 0;
 		const subscription = yield* PubSub.subscribe(bus);
-		yield* Stream.fromQueue(subscription).pipe(
+		yield* Stream.fromSubscription(subscription).pipe(
 			Stream.runForEach((event) => {
 				if (event._tag === "GlobalSettingChanged")
 					return Effect.gen(function* () {
@@ -194,7 +191,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					return Effect.sync(() => {
 						for (const subscriber of listSubscribers)
 							if (subscriber.list === list)
-								Queue.unsafeOffer(subscriber.changed, undefined);
+								Queue.offerUnsafe(subscriber.changed, undefined);
 					});
 				return Effect.void;
 			}),
@@ -310,7 +307,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| DaemonConfigRefTag
 			>,
 		) =>
-			Stream.unwrapScoped(
+			Stream.unwrap(
 				Effect.gen(function* () {
 					const subscriber = { list, changed: yield* Queue.sliding<void>(1) };
 					yield* Effect.acquireRelease(
@@ -363,7 +360,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			sessionCreated: (projectSlug) =>
 				run(rememberNewSessionProject(projectSlug)).pipe(
-					Effect.catchAll((error) =>
+					Effect.catch((error) =>
 						Effect.logWarning(
 							`Could not remember the new-session project: ${error.message}`,
 						),
@@ -584,9 +581,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						...(request.sessionMode !== undefined && {
 							sessionMode: request.sessionMode,
 						}),
-						...(request.groupingMode !== undefined && {
-							groupingMode: request.groupingMode,
-						}),
 					});
 					// Saving without a slug adds a project; its first session goes there.
 					if (request.slug === undefined && kind !== "existing")
@@ -737,30 +731,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(wsRpcHandlers.SetWorktreeCleanupSetting(request)),
 			CleanUpWorktreesNow: (request) =>
 				run(wsRpcHandlers.CleanUpWorktreesNow(request)),
-			GetDefaultGroupingMode: (_request) =>
-				run(
-					Effect.sync(() => ({
-						mode:
-							loadRelaySettings(configDir).defaultGroupingMode ?? "repository",
-					})),
-				),
-			SetDefaultGroupingMode: ({ mode }) =>
-				run(
-					Effect.gen(function* () {
-						yield* Effect.try(() =>
-							saveRelaySettings({ defaultGroupingMode: mode }, configDir),
-						);
-						yield* PubSub.publish(
-							bus,
-							DaemonEvent.GlobalSettingChanged({
-								originSlug: "",
-								tag: "defaultGroupingMode",
-							}),
-						);
-						yield* PubSub.publish(bus, DaemonEvent.ProjectsChanged());
-						return { mode };
-					}),
-				),
 			GetUsageLimitsSetting: (request) =>
 				run(wsRpcHandlers.GetUsageLimitsSetting(request)),
 			SetUsageLimitsSetting: (request) =>
@@ -783,7 +753,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			ListDaemonSessions: (request) =>
 				run(
-					listDaemonSessions(configDir, {
+					listDaemonSessions({
 						...(request.limit !== undefined ? { limit: request.limit } : {}),
 						...(request.roots !== undefined ? { roots: request.roots } : {}),
 						...(request.search !== undefined ? { search: request.search } : {}),

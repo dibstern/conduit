@@ -20,10 +20,9 @@ export interface TlsCertService {
 	readonly caCertPem: Buffer | null;
 }
 
-export class TlsCertTag extends Context.Tag("TlsCert")<
-	TlsCertTag,
-	TlsCertService
->() {}
+export class TlsCertTag extends Context.Service<TlsCertTag, TlsCertService>()(
+	"TlsCert",
+) {}
 
 export class TlsCertLoadError extends Data.TaggedError("TlsCertLoadError")<{
 	cause: unknown;
@@ -37,10 +36,10 @@ export interface EnsureCertsService {
 	}) => Effect.Effect<TlsCerts | null, TlsCertLoadError>;
 }
 
-export class EnsureCertsTag extends Context.Tag("EnsureCerts")<
+export class EnsureCertsTag extends Context.Service<
 	EnsureCertsTag,
 	EnsureCertsService
->() {}
+>()("EnsureCerts") {}
 
 export const EnsureCertsLive = Layer.succeed(EnsureCertsTag, {
 	ensureCerts: (opts) =>

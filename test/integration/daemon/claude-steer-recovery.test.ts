@@ -104,7 +104,7 @@ describe("Claude pending steer recovery through the process seam", () => {
 		expect(
 			(
 				await Effect.runPromise(
-					browser.rpc.input.submit({
+					browser.rpc["input.submit"]({
 						sessionId,
 						originId: browser.originId,
 						inputId: steerId,
@@ -182,7 +182,7 @@ describe("Claude pending steer recovery through the process seam", () => {
 			[steerId, "steer", "correction after runner death"],
 		] as const) {
 			const result = await Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId,
 					originId: browser.originId,
 					inputId,
@@ -268,14 +268,14 @@ describe("Claude pending steer recovery through the process seam", () => {
 		});
 		// Leave only the recovered input, so exactly one requested turn can run.
 		await Effect.runPromise(
-			browser.rpc.input.cancel({
+			browser.rpc["input.cancel"]({
 				sessionId,
 				inputId: queuedId,
 			}),
 		);
 		await browser.sendNow(sessionId, steerId);
 		const duplicate = await Effect.runPromise(
-			browser.rpc.input.sendNow({
+			browser.rpc["input.sendNow"]({
 				sessionId,
 				originId: browser.originId,
 				inputId: steerId,

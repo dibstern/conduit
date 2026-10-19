@@ -46,6 +46,12 @@ vi.mock(
 );
 
 beforeEach(() => {
+	vi.stubGlobal("matchMedia", (media: string) => ({
+		media,
+		matches: false,
+		addEventListener: vi.fn(),
+		removeEventListener: vi.fn(),
+	}));
 	clearSessionState();
 	vi.clearAllMocks();
 	const storage = new Map<string, string>();

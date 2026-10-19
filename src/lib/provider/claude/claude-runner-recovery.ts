@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
+import { SqlClient } from "effect/sql";
 import { accountsStateFromConfig, resolve } from "../../account-directory.js";
 import {
 	defaultDaemonConfig,
@@ -45,7 +45,7 @@ export const recoverClaudeRunnerCommands = (
 ) =>
 	Effect.gen(function* () {
 		const config = yield* Effect.suspend(() =>
-			loadDaemonConfigResult(deps.daemonConfigDir),
+			Effect.fromResult(loadDaemonConfigResult(deps.daemonConfigDir)),
 		).pipe(
 			Effect.catchTag("NotFound", () => Effect.succeed(defaultDaemonConfig())),
 		);
@@ -54,7 +54,7 @@ export const recoverClaudeRunnerCommands = (
 			captureClaudeLaunchLogin(process.env),
 		);
 		const driverForAccount = (id: string) =>
-			Either.getOrUndefined(resolve(accounts, { _tag: "Id", id }))?.driver;
+			Result.getOrUndefined(resolve(accounts, { _tag: "Id", id }))?.driver;
 		return yield* recoverRunnerCommands(sql, sessionId, "claude", {
 			driverForAccount,
 			decodeInput: (row) => ({
@@ -77,7 +77,7 @@ export const recoverClaudeRunnerCommands = (
 							prepareShellEnv(input.workspaceRoot),
 						).pipe(
 							Effect.timeoutOption("10 seconds"),
-							Effect.catchAll(() => Effect.void),
+							Effect.catch(() => Effect.void),
 						);
 					// The shared recovery drops a result that arrives while closing.
 					if (closing()) return undefined;

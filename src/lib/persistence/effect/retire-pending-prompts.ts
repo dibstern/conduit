@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Context, Effect, Option } from "effect";
+import { SqlClient } from "effect/sql";
 import { PendingInteractionServiceTag } from "../../domain/relay/Services/pending-interaction-service.js";
 import { canonicalEvent } from "../events.js";
 import { makeCommitAndSignal } from "./commit-and-signal.js";

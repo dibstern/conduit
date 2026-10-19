@@ -1,6 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import {
-	Cause,
+	type Cause,
 	Duration,
 	Effect,
 	HashMap,
@@ -8,7 +7,10 @@ import {
 	Option,
 	PubSub,
 	Ref,
+	Stream,
 } from "effect";
+import { SqlClient } from "effect/sql";
+import * as Failure from "../../../effect/failure-classification.js";
 import type { SessionStatus } from "../../../instance/sdk-types.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
@@ -68,7 +70,7 @@ export const StatusPollerLive: Layer.Layer<
 	| EventStoreEffectTag
 	| ProjectionRunnerEffectTag
 	| SqlClient.SqlClient
-> = Layer.scoped(
+> = Layer.effect(
 	StatusPollerTag,
 	Effect.gen(function* () {
 		const scope = yield* Effect.scope;
@@ -168,10 +170,10 @@ export const StatusPollerLive: Layer.Layer<
 		const started = yield* Ref.make(false);
 		const statusLog = log.child("status-poller");
 		const reportFailure = (prefix: string, cause: Cause.Cause<unknown>) =>
-			Cause.isInterruptedOnly(cause)
+			Failure.isInterruptedOnly(cause)
 				? Effect.interrupt
 				: Effect.sync(() =>
-						statusLog.warn(`${prefix}: ${Cause.pretty(cause)}`),
+						statusLog.warn(`${prefix}: ${Failure.renderCause(cause)}`),
 					);
 		const updateStatusSnapshot = Effect.gen(function* () {
 			const statuses = yield* pollerState(getCurrentStatuses);
@@ -184,8 +186,8 @@ export const StatusPollerLive: Layer.Layer<
 		const runPoll = poll(pollDeps).pipe(
 			pollerState,
 			pollerPubSub,
-			Effect.zipRight(updateStatusSnapshot),
-			Effect.catchAllCause((cause) =>
+			Effect.andThen(updateStatusSnapshot),
+			Effect.catchCause((cause) =>
 				reportFailure("Status poller poll failed", cause),
 			),
 		);
@@ -194,11 +196,14 @@ export const StatusPollerLive: Layer.Layer<
 				? sessionGit.value.refresh({ staleOnly: true })
 				: Effect.void
 		).pipe(
-			Effect.catchAllCause((cause) =>
+			Effect.catchCause((cause) =>
 				reportFailure("Git state refresh failed", cause),
 			),
 		);
-		const forkPoll = runPoll.pipe(Effect.fork, Effect.asVoid);
+		const forkPoll = runPoll.pipe(
+			Effect.forkChild({ uninterruptible: "inherit" }),
+			Effect.asVoid,
+		);
 		const invokeChangedCallback = (
 			callback: StatusPollerChangedCallback,
 			event: {
@@ -215,7 +220,7 @@ export const StatusPollerLive: Layer.Layer<
 							})
 						: Effect.void,
 				),
-				Effect.catchAll((cause) =>
+				Effect.catch((cause) =>
 					Effect.sync(() =>
 						statusLog.warn(
 							`Status poller changed callback failed: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -227,24 +232,26 @@ export const StatusPollerLive: Layer.Layer<
 			Effect.scoped(
 				Effect.gen(function* () {
 					const subscription = yield* PubSub.subscribe(pubsub);
-					yield* Effect.forever(
-						Effect.gen(function* () {
-							const event = yield* subscription.take;
-							const callbacks = yield* Ref.get(subscribers);
-							yield* Effect.forEach(
-								callbacks,
-								(callback) => invokeChangedCallback(callback, event),
-								{ discard: true },
-							);
-						}),
+					yield* Stream.runForEach(
+						Stream.fromSubscription(subscription),
+						(event) =>
+							Effect.gen(function* () {
+								const callbacks = yield* Ref.get(subscribers);
+								yield* Effect.forEach(
+									callbacks,
+									(callback) => invokeChangedCallback(callback, event),
+									{ discard: true },
+								);
+							}),
 					);
 				}),
 			),
+			{ uninterruptible: "inherit" },
 		);
 		yield* Effect.forkScoped(
 			Effect.forever(
 				Effect.sleep(interval).pipe(
-					Effect.zipRight(
+					Effect.andThen(
 						Effect.gen(function* () {
 							if (yield* Ref.get(started)) {
 								yield* runPoll;
@@ -254,6 +261,7 @@ export const StatusPollerLive: Layer.Layer<
 					),
 				),
 			),
+			{ uninterruptible: "inherit" },
 		);
 		const service: SessionStatusPollerService = {
 			on: (_event, callback) =>
@@ -270,6 +278,7 @@ export const StatusPollerLive: Layer.Layer<
 								Effect.withSpan("statusPoller.initialGitRefresh"),
 							),
 							scope,
+							{ uninterruptible: "inherit" },
 						);
 					}
 				}),

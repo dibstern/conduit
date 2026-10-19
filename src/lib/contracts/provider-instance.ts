@@ -189,9 +189,9 @@ export const PROVIDER_DRIVERS = {
 } as const satisfies { readonly [driver: string]: ProviderDriverTraits };
 
 export type KnownProviderDriverKind = keyof typeof PROVIDER_DRIVERS;
-export const KnownProviderDriverKindSchema = Schema.Literal(
+export const KnownProviderDriverKindSchema = Schema.Literals([
 	...(Object.keys(PROVIDER_DRIVERS) as KnownProviderDriverKind[]),
-);
+]);
 const isKnownProviderDriverKind = Schema.is(KnownProviderDriverKindSchema);
 
 export function isKnownDriverKind(
@@ -203,14 +203,17 @@ export function isKnownDriverKind(
 export const BrowserDriverTraitsSchema = Schema.Struct({
 	sessionCapabilities: ProviderSessionCapabilitiesSchema,
 	runsOpenCodeServer: Schema.Boolean,
-	usageHarness: Schema.optional(Schema.Literal("claude", "cursor")),
-	composerModeControl: Schema.Literal("agent", "permission-mode"),
-	accountKind: Schema.Literal("config-directory", "server"),
-	catalogSource: Schema.Literal("discovery", "server"),
-	modelIdFormat: Schema.Literal("context-window-suffix", "provider-qualified"),
+	usageHarness: Schema.optional(Schema.Literals(["claude", "cursor"])),
+	composerModeControl: Schema.Literals(["agent", "permission-mode"]),
+	accountKind: Schema.Literals(["config-directory", "server"]),
+	catalogSource: Schema.Literals(["discovery", "server"]),
+	modelIdFormat: Schema.Literals([
+		"context-window-suffix",
+		"provider-qualified",
+	]),
 	supportsGoalState: Schema.Boolean,
 	permissionModes: Schema.Array(
-		Schema.Literal("ask", "acceptEdits", "full", "plan", "auto", "dontAsk"),
+		Schema.Literals(["ask", "acceptEdits", "full", "plan", "auto", "dontAsk"]),
 	),
 	supportsQuestionSkip: Schema.Boolean,
 	supportsFileRewind: Schema.Boolean,
@@ -262,12 +265,12 @@ export function migrateLegacyDefaultOpencodeInstanceId<
 	);
 }
 
-export const ProviderInstanceStatusSchema = Schema.Literal(
+export const ProviderInstanceStatusSchema = Schema.Literals([
 	"ready",
 	"warning",
 	"error",
 	"disabled",
-);
+]);
 export type ProviderInstanceStatus = typeof ProviderInstanceStatusSchema.Type;
 
 export const ProviderInstanceSchema = Schema.Struct({

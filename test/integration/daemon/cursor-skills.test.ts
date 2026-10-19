@@ -12,13 +12,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-	AddInstance,
-	GetCommands,
-	GetCommandsForSession,
-	ReloadProviderSession,
-	SaveProject,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const TIMEOUT = 90_000;
@@ -262,16 +256,17 @@ describe("Cursor skills through the built daemon and runner", () => {
 				CONDUIT_CURSOR_SDK_CAPTURE: capture,
 			},
 		});
-		const { addedInstanceId } = await fixture.requestRpc(
-			new AddInstance({ name: "Cursor skills", driver: "cursor" }),
-		);
+		const { addedInstanceId } = await fixture.requestRpc({
+			_tag: "AddInstance",
+			name: "Cursor skills",
+			driver: "cursor",
+		});
 		if (!addedInstanceId) throw new Error("Missing Cursor account");
-		const draft = await fixture.requestRpc(
-			new GetCommands({
-				projectSlug: "process-test",
-				instanceId: addedInstanceId,
-			}),
-		);
+		const draft = await fixture.requestRpc({
+			_tag: "GetCommands",
+			projectSlug: "process-test",
+			instanceId: addedInstanceId,
+		});
 		evidence = { sourceCapture: "basic.jsonl", draft: draft.commands };
 		expect(draft.commands.map(({ name }) => name).sort()).toEqual(
 			expected.sort(),
@@ -291,9 +286,7 @@ describe("Cursor skills through the built daemon and runner", () => {
 				permissionMode: "full",
 			},
 		);
-		const before = await fixture.requestRpc(
-			new GetCommandsForSession({ sessionId }),
-		);
+		const before = await fixture.requestRpc({ _tag: "GetCommands", sessionId });
 		expect(before.commands).toEqual(draft.commands);
 		const sent = await browser.send(sessionId, "/nested release", TIMEOUT);
 		expect(sent.chunks.join("")).toBe(
@@ -304,12 +297,15 @@ describe("Cursor skills through the built daemon and runner", () => {
 		evidence["sent"] = sends.at(-1)?.data;
 		skill(join(root, "fresh"));
 		rmSync(join(root, "crlf"), { recursive: true });
-		await fixture.requestRpc(
-			new ReloadProviderSession({ sessionId, commandId: randomUUID() }),
-		);
-		const refreshed = await fixture.requestRpc(
-			new GetCommandsForSession({ sessionId }),
-		);
+		await fixture.requestRpc({
+			_tag: "ReloadProviderSession",
+			sessionId,
+			commandId: randomUUID(),
+		});
+		const refreshed = await fixture.requestRpc({
+			_tag: "GetCommands",
+			sessionId,
+		});
 		expect(refreshed.commands.map(({ name }) => name).sort()).toEqual(
 			expected
 				.filter((name) => name !== "crlf")
@@ -321,12 +317,15 @@ describe("Cursor skills through the built daemon and runner", () => {
 		mkdirSync(moved);
 		execFileSync("git", ["init", "-b", "main", moved], { stdio: "pipe" });
 		skill(join(moved, ".agents", "skills", "moved-only"));
-		await fixture.requestRpc(
-			new SaveProject({ slug: "process-test", folders: [moved] }),
-		);
-		const afterMove = await fixture.requestRpc(
-			new GetCommandsForSession({ sessionId }),
-		);
+		await fixture.requestRpc({
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [moved],
+		});
+		const afterMove = await fixture.requestRpc({
+			_tag: "GetCommands",
+			sessionId,
+		});
 		expect(afterMove.commands.map(({ name }) => name).sort()).toEqual(
 			expected
 				.filter(
@@ -340,20 +339,20 @@ describe("Cursor skills through the built daemon and runner", () => {
 		);
 		expect(
 			(
-				await fixture.requestRpc(
-					new GetCommands({
-						projectSlug: "process-test",
-						instanceId: addedInstanceId,
-					}),
-				)
+				await fixture.requestRpc({
+					_tag: "GetCommands",
+					projectSlug: "process-test",
+					instanceId: addedInstanceId,
+				})
 			).commands,
 		).toEqual(afterMove.commands);
 		evidence["afterMove"] = afterMove.commands;
 		for (let i = 0; i < 300; i++)
 			skill(join(moved, ".cursor", "skills", `bounded-${i}`));
-		const bounded = await fixture.requestRpc(
-			new GetCommandsForSession({ sessionId }),
-		);
+		const bounded = await fixture.requestRpc({
+			_tag: "GetCommands",
+			sessionId,
+		});
 		expect(bounded.commands).toHaveLength(256);
 		expect(new Set(bounded.commands.map(({ name }) => name)).size).toBe(256);
 		evidence["boundedCount"] = bounded.commands.length;

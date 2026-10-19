@@ -3,7 +3,7 @@
 //
 // The layer reads config (port, host, TLS) from DaemonEnvConfigTag,
 // constructs the appropriate Node.js server factory, and wires the
-// Effect HTTP router via HttpServer.serve.
+// Effect HTTP router via HttpRouter.serve.
 //
 // WebSocket upgrade is outside this HTTP layer. This layer
 // only serves HTTP routes through the Effect router.
@@ -11,10 +11,10 @@
 import { readFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
-import type { HttpServerError } from "@effect/platform";
-import { HttpServer } from "@effect/platform";
 import { NodeHttpServer } from "@effect/platform-node";
 import { Context, Effect, Layer } from "effect";
+import type { HttpServerError } from "effect/http";
+import { HttpRouter } from "effect/http";
 import {
 	effectRouterWithCors,
 	type ProjectsProvider,
@@ -36,10 +36,10 @@ export interface HttpServerConfig {
 	readonly tlsKeyPath: string | undefined;
 }
 
-export class HttpServerConfigTag extends Context.Tag("HttpServerConfig")<
+export class HttpServerConfigTag extends Context.Service<
 	HttpServerConfigTag,
 	HttpServerConfig
->() {}
+>()("HttpServerConfig") {}
 
 /**
  * Derive HttpServerConfigTag from DaemonEnvConfigTag — production use.
@@ -92,22 +92,23 @@ export const HttpServerLive: Layer.Layer<
 	| ProjectsProvider
 	| SetupInfoProvider
 	| StaticDirTag
-> = Layer.unwrapEffect(
+> = Layer.unwrap(
 	Effect.gen(function* () {
 		const config = yield* HttpServerConfigTag;
 		const factory = makeServerFactory(config);
 
 		// NodeHttpServer.layer provides HttpServer + platform context (FileSystem, Etag, Path).
-		// HttpServer.serve(router) creates a Layer that starts serving the router
+		// HttpRouter.serve(router) creates a Layer that starts serving the router
 		// using the provided HttpServer.
 		const serverLayer = NodeHttpServer.layer(factory, {
 			port: config.port,
 			host: config.host,
 		});
 
-		return HttpServer.serve(effectRouterWithCors).pipe(
-			Layer.provide(serverLayer),
-		);
+		return HttpRouter.serve(effectRouterWithCors, {
+			disableLogger: true,
+			disableListenLog: true,
+		}).pipe(Layer.provide(serverLayer));
 	}),
 );
 

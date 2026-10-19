@@ -2,8 +2,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Context, Effect, Layer, ManagedRuntime, Schema } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PersistenceServiceTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -150,7 +150,7 @@ describe("store and project persistence tiers", () => {
 			handles: ["session.created", "message.created", "text.delta"],
 			project: (event) =>
 				Effect.gen(function* () {
-					yield* Effect.yieldNow();
+					yield* Effect.yieldNow;
 					projected.set(event.eventId, (projected.get(event.eventId) ?? 0) + 1);
 					return { stamped: [], removed: [], collections: [] };
 				}),
@@ -298,7 +298,7 @@ describe("store and project persistence tiers", () => {
 			const migrationRuns = vi.fn();
 			vi.spyOn(migrations, "makeEffectSqlMigrator").mockImplementation(
 				(...args) =>
-					Effect.sync(migrationRuns).pipe(Effect.zipRight(migrator(...args))),
+					Effect.sync(migrationRuns).pipe(Effect.andThen(migrator(...args))),
 			);
 			const b = ManagedRuntime.make(projectLayer("beta", context));
 			try {
@@ -316,9 +316,9 @@ describe("store and project persistence tiers", () => {
 
 	it("memoizes each per-file composition while keeping separate compositions independent", async () => {
 		const first =
-			Context.GenericTag<PersistenceServiceTag["Type"]>("FirstStore");
+			Context.Service<PersistenceServiceTag["Service"]>("FirstStore");
 		const second =
-			Context.GenericTag<PersistenceServiceTag["Type"]>("SecondStore");
+			Context.Service<PersistenceServiceTag["Service"]>("SecondStore");
 		const alpha = makePersistenceEffectLayer(":memory:", "alpha");
 		const beta = makePersistenceEffectLayer(":memory:", "beta");
 		const runtime = ManagedRuntime.make(

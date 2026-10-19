@@ -1,7 +1,7 @@
-import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import {
 	effectMigrationEntries,
@@ -93,7 +93,7 @@ describe("Schema Migration", () => {
 				"tool_content",
 				"turns",
 			]);
-		}).pipe(Effect.provide(migratedStore)),
+		}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
 	it.effect(
@@ -123,7 +123,7 @@ describe("Schema Migration", () => {
 				expect(
 					(yield* sql`SELECT method FROM daemon_store_imports WHERE project_id = 'alpha'`)[0],
 				).toEqual({ method: "seeded" });
-			}).pipe(Effect.provide(migratedStore)),
+			}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
 	it.effect("creates the full production index inventory", () =>
@@ -319,7 +319,7 @@ describe("Schema Migration", () => {
 					unique: true,
 				},
 			]);
-		}).pipe(Effect.provide(migratedStore)),
+		}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
 	it.effect("creates events table with correct columns", () =>
@@ -340,7 +340,7 @@ describe("Schema Migration", () => {
 				"created_at",
 				"project_id",
 			]);
-		}).pipe(Effect.provide(migratedStore)),
+		}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
 	it.effect("enforces unique event_id", () =>
@@ -350,12 +350,12 @@ describe("Schema Migration", () => {
 				VALUES ('s1', 'opencode', 'Test', 'idle', ${T}, ${T})`;
 			yield* sql`INSERT INTO events (event_id, session_id, stream_version, type, data, provider, created_at)
 				VALUES ('evt-1', 's1', 0, 'session.created', '{}', 'opencode', ${T})`;
-			const duplicate = yield* Effect.either(
+			const duplicate = yield* Effect.result(
 				sql`INSERT INTO events (event_id, session_id, stream_version, type, data, provider, created_at)
 				VALUES ('evt-1', 's1', 1, 'session.created', '{}', 'opencode', ${T})`,
 			);
-			expect(duplicate._tag).toBe("Left");
-		}).pipe(Effect.provide(migratedStore)),
+			expect(duplicate._tag).toBe("Failure");
+		}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
 	it.effect(
@@ -367,12 +367,12 @@ describe("Schema Migration", () => {
 				VALUES ('s1', 'opencode', 'Test', 'idle', ${T}, ${T})`;
 				yield* sql`INSERT INTO events (event_id, session_id, stream_version, type, data, provider, created_at)
 				VALUES ('evt-1', 's1', 0, 'session.created', '{}', 'opencode', ${T})`;
-				const conflict = yield* Effect.either(
+				const conflict = yield* Effect.result(
 					sql`INSERT INTO events (event_id, session_id, stream_version, type, data, provider, created_at)
 				VALUES ('evt-2', 's1', 0, 'text.delta', '{}', 'opencode', ${T})`,
 				);
-				expect(conflict._tag).toBe("Left");
-			}).pipe(Effect.provide(migratedStore)),
+				expect(conflict._tag).toBe("Failure");
+			}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
 	it.effect("creates command_receipts table with correct columns", () =>
@@ -397,7 +397,7 @@ describe("Schema Migration", () => {
 				"error_code",
 				"updated_at",
 			]);
-		}).pipe(Effect.provide(migratedStore)),
+		}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
 	it.effect("creates projector_cursors table", () =>
@@ -411,13 +411,13 @@ describe("Schema Migration", () => {
 				"last_applied_seq",
 				"updated_at",
 			]);
-		}).pipe(Effect.provide(migratedStore)),
+		}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
 	it.effect("is idempotent — running twice applies nothing", () =>
 		Effect.gen(function* () {
 			expect(yield* makeEffectSqlMigrator()).toEqual([]);
-		}).pipe(Effect.provide(migratedStore)),
+		}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
 	it.effect(
@@ -430,7 +430,7 @@ describe("Schema Migration", () => {
 				expect(
 					yield* sql`SELECT session_id FROM events WHERE event_id = 'evt-1'`,
 				).toEqual([{ session_id: "s1" }]);
-			}).pipe(Effect.provide(migratedStore)),
+			}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 
 	it.effect(
@@ -442,13 +442,13 @@ describe("Schema Migration", () => {
 				VALUES ('s1', 'opencode', 'Test', 'idle', ${T}, ${T})`;
 				yield* sql`INSERT INTO events (event_id, session_id, stream_version, type, data, provider, created_at)
 				VALUES ('evt-1', 's1', 0, 'session.created', '{}', 'opencode', ${T})`;
-				const deleted = yield* Effect.either(
+				const deleted = yield* Effect.result(
 					sql`DELETE FROM sessions WHERE id = 's1'`,
 				);
-				expect(deleted._tag).toBe("Right");
+				expect(deleted._tag).toBe("Success");
 				expect(
 					yield* sql`SELECT event_id FROM events WHERE session_id = 's1'`,
 				).toEqual([{ event_id: "evt-1" }]);
-			}).pipe(Effect.provide(migratedStore)),
+			}).pipe(Effect.provide(migratedStore, { local: true })),
 	);
 });

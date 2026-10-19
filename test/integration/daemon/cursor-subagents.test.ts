@@ -7,7 +7,7 @@ import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AddInstance } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 interface TraceRow {
@@ -138,9 +138,11 @@ describe("Cursor live child sessions through daemon and detached runner", () => 
 				CONDUIT_TEST_CURSOR_WAIT_DELAY_MS: String(waitDelayMs),
 			},
 		});
-		const account = await harness.requestRpc(
-			new AddInstance({ name: "Cursor subagent replay", driver: "cursor" }),
-		);
+		const account = await harness.requestRpc({
+			_tag: "AddInstance",
+			name: "Cursor subagent replay",
+			driver: "cursor",
+		});
 		if (!account.addedInstanceId) throw new Error("Missing Cursor account");
 		const browser = await harness.connect();
 		sessionId = await browser.createSession(
@@ -154,7 +156,7 @@ describe("Cursor live child sessions through daemon and detached runner", () => 
 			},
 		);
 		await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId,
 				originId: browser.originId,
 				inputId: randomUUID(),
@@ -357,7 +359,7 @@ describe("Cursor live child sessions through daemon and detached runner", () => 
 		const childInputId = randomUUID();
 		await expect(
 			Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId: child.id,
 					originId: browser.originId,
 					inputId: childInputId,

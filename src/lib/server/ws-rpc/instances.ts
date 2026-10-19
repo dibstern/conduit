@@ -65,7 +65,7 @@ export const instancesHandlers = {
 				projectSlug: request.projectSlug,
 				instances,
 			};
-		}).pipe(Effect.catchAll(instanceFailure("StartInstance"))),
+		}).pipe(Effect.catch(instanceFailure("StartInstance"))),
 	StopInstance: (request) =>
 		Effect.gen(function* () {
 			const instanceService = yield* instanceServiceOrFail("StopInstance");
@@ -74,7 +74,7 @@ export const instancesHandlers = {
 				projectSlug: request.projectSlug,
 				instances,
 			};
-		}).pipe(Effect.catchAll(instanceFailure("StopInstance"))),
+		}).pipe(Effect.catch(instanceFailure("StopInstance"))),
 	RemoveInstance: (request) =>
 		Effect.gen(function* () {
 			const instanceService = yield* instanceServiceOrFail("RemoveInstance");
@@ -84,7 +84,7 @@ export const instancesHandlers = {
 				instances,
 			};
 		}).pipe(
-			Effect.catchAll(
+			Effect.catch(
 				accountMutationFailure(request.instanceId, "RemoveInstance"),
 			),
 		),
@@ -100,7 +100,7 @@ export const instancesHandlers = {
 				instances,
 			};
 		}).pipe(
-			Effect.catchAll(
+			Effect.catch(
 				accountMutationFailure(request.instanceId, "RenameInstance"),
 			),
 		),
@@ -122,9 +122,7 @@ export const instancesHandlers = {
 				projectSlug: request.projectSlug,
 				instances,
 			};
-		}).pipe(
-			Effect.catchAll(accountMutationFailure(request.name, "AddInstance")),
-		),
+		}).pipe(Effect.catch(accountMutationFailure(request.name, "AddInstance"))),
 	UpdateInstance: (request) =>
 		Effect.gen(function* () {
 			const instanceService = yield* instanceServiceOrFail("UpdateInstance");
@@ -142,7 +140,7 @@ export const instancesHandlers = {
 				instances,
 			};
 		}).pipe(
-			Effect.catchAll(
+			Effect.catch(
 				accountMutationFailure(request.instanceId, "UpdateInstance"),
 			),
 		),
@@ -163,10 +161,10 @@ export const instancesHandlers = {
 				lost: result.lost,
 				active: result.active,
 			};
-		}).pipe(Effect.catchAll(mapRpcFailure("ScanNow"))),
+		}).pipe(Effect.catch(mapRpcFailure("ScanNow"))),
 	DetectProxy: (request) =>
 		Effect.gen(function* () {
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				Effect.tryPromise(() =>
 					fetch(`http://127.0.0.1:${CCS_DEFAULT_PORT}/health`, {
 						signal: AbortSignal.timeout(3_000),
@@ -175,7 +173,7 @@ export const instancesHandlers = {
 			);
 			return {
 				projectSlug: request.projectSlug,
-				found: result._tag === "Right" && result.right.ok,
+				found: result._tag === "Success" && result.success.ok,
 				port: CCS_DEFAULT_PORT,
 			};
 		}),

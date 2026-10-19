@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { createServer, type Server, Socket } from "node:net";
 import { join } from "node:path";
-import { Deferred, Effect, Either, Fiber } from "effect";
+import { Deferred, Effect, Result as Either, Fiber } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const config = vi.hoisted(() => ({
@@ -289,7 +289,7 @@ describe("Claude runner adoption", () => {
 						() => Effect.succeed({}),
 					);
 					yield* runner.recoverEffect;
-					return yield* Effect.either(
+					return yield* Effect.result(
 						runner.executeEffect({
 							type: "stop-task",
 							sessionId: "adoption-session",
@@ -299,7 +299,7 @@ describe("Claude runner adoption", () => {
 				}),
 			),
 		);
-		expect(Either.isLeft(result)).toBe(true);
+		expect(Either.isFailure(result)).toBe(true);
 		expect(
 			fixture.commands.some(
 				(message) =>
@@ -325,12 +325,12 @@ describe("Claude runner adoption", () => {
 						},
 						() => Effect.succeed({}),
 					);
-					return yield* Effect.either(runner.recoverEffect);
+					return yield* Effect.result(runner.recoverEffect);
 				}),
 			),
 		);
 		const elapsed = Date.now() - started;
-		expect(Either.isLeft(outcome)).toBe(true);
+		expect(Either.isFailure(outcome)).toBe(true);
 		expect(fixture.attempts.length).toBeGreaterThan(1);
 		expect(fixture.attempts.length).toBeLessThanOrEqual(6);
 		expect(elapsed).toBeLessThan(5000);
@@ -341,7 +341,7 @@ describe("Claude runner adoption", () => {
 			case: "bounded rejection",
 			attempts: fixture.attempts,
 			elapsed,
-			failedClosed: Either.isLeft(outcome),
+			failedClosed: Either.isFailure(outcome),
 			filesPreserved: true,
 		});
 	});
@@ -350,7 +350,7 @@ describe("Claude runner adoption", () => {
 		const rejected = await Effect.runPromise(Deferred.make<void>());
 		const fixture = await runnerSocket({
 			rejections: Number.POSITIVE_INFINITY,
-			onReject: () => Deferred.unsafeDone(rejected, Effect.void),
+			onReject: () => Deferred.doneUnsafe(rejected, Effect.void),
 		});
 		const kill = vi.spyOn(process, "kill");
 		await Effect.runPromise(
@@ -363,7 +363,7 @@ describe("Claude runner adoption", () => {
 						},
 						() => Effect.succeed({}),
 					);
-					const recovery = yield* Effect.fork(runner.recoverEffect);
+					const recovery = yield* Effect.forkChild(runner.recoverEffect);
 					yield* Deferred.await(rejected);
 					yield* Fiber.interrupt(recovery);
 				}),

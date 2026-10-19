@@ -10,7 +10,7 @@ import { Context, type Duration, Effect, Layer, Ref, Schedule } from "effect";
 export interface VersionCheckerConfig {
 	getCurrentVersion: () => string;
 	fetchLatestVersion: () => Effect.Effect<string | null>;
-	checkInterval: Duration.DurationInput;
+	checkInterval: Duration.Input;
 }
 
 interface VersionCheckerService {
@@ -18,10 +18,10 @@ interface VersionCheckerService {
 	getCurrentVersion: () => Effect.Effect<string>;
 }
 
-export class VersionCheckerTag extends Context.Tag("VersionChecker")<
+export class VersionCheckerTag extends Context.Service<
 	VersionCheckerTag,
 	VersionCheckerService
->() {}
+>()("VersionChecker") {}
 
 /**
  * Returns true if `latest` is a newer semver than `current`.
@@ -40,7 +40,7 @@ const isNewerVersion = (current: string, latest: string): boolean => {
 };
 
 export const VersionCheckerLive = (config: VersionCheckerConfig) =>
-	Layer.scoped(
+	Layer.effect(
 		VersionCheckerTag,
 		Effect.gen(function* () {
 			const latestKnown = yield* Ref.make<string | null>(null);
@@ -60,11 +60,12 @@ export const VersionCheckerLive = (config: VersionCheckerConfig) =>
 			yield* check.pipe(
 				Effect.repeat(Schedule.spaced(config.checkInterval)),
 				Effect.retry(
-					Schedule.exponential("10 seconds").pipe(
-						Schedule.intersect(Schedule.recurs(3)),
-					),
+					Schedule.max([
+						Schedule.exponential("10 seconds"),
+						Schedule.recurs(3),
+					]),
 				),
-				Effect.catchAll((e) =>
+				Effect.catch((e) =>
 					Effect.logWarning("Version checker failed after retries", e),
 				),
 				Effect.forkScoped,

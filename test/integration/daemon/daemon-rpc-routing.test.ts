@@ -2,11 +2,11 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, ManagedRuntime, Ref } from "effect";
+import { RpcClient, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
@@ -54,7 +54,7 @@ const makeProjectStore = (
 };
 
 describe("daemon shared RPC routing", () => {
-	it.scoped.each(["ViewSession", "AttachProject"] as const)(
+	it.effect.each(["ViewSession", "AttachProject"] as const)(
 		"routes %s across projects on one daemon RPC socket",
 		(operation) =>
 			Effect.gen(function* () {
@@ -113,7 +113,7 @@ describe("daemon shared RPC routing", () => {
 						);
 						const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
 							runtime,
-						}).pipe(Effect.provide(runtime));
+						}).pipe(Effect.provide(yield* runtime.contextEffect));
 						handlers.set(slug, wsHandler);
 						return {
 							slug,
@@ -129,13 +129,13 @@ describe("daemon shared RPC routing", () => {
 					});
 
 				const server = yield* Effect.acquireRelease(
-					Effect.async<Server, Error>((resume) => {
+					Effect.callback<Server, Error>((resume) => {
 						const server = createServer();
 						server.once("error", (error) => resume(Effect.fail(error)));
 						server.listen(0, "127.0.0.1", () => resume(Effect.succeed(server)));
 					}),
 					(server) =>
-						Effect.async<void>((resume) => {
+						Effect.callback<void>((resume) => {
 							server.close(() => resume(Effect.void));
 						}),
 				);
@@ -168,7 +168,7 @@ describe("daemon shared RPC routing", () => {
 								makeAuthManagerLive(
 									new AuthManager({ getPinHash: () => null }),
 								),
-								Layer.succeed(WebSocketRelayRouterTag, relayRouter),
+								Layer.succeed(WebSocketRelayRouterTag)(relayRouter),
 							),
 						),
 					),
@@ -239,7 +239,7 @@ describe("daemon shared RPC routing", () => {
 			}),
 	);
 
-	it.scoped(
+	it.effect(
 		"adds the first project over one daemon RPC socket without starting a relay",
 		() =>
 			Effect.gen(function* () {
@@ -251,13 +251,13 @@ describe("daemon shared RPC routing", () => {
 						Effect.sync(() => rmSync(path, { recursive: true, force: true })),
 				);
 				const server = yield* Effect.acquireRelease(
-					Effect.async<Server, Error>((resume) => {
+					Effect.callback<Server, Error>((resume) => {
 						const server = createServer();
 						server.once("error", (error) => resume(Effect.fail(error)));
 						server.listen(0, "127.0.0.1", () => resume(Effect.succeed(server)));
 					}),
 					(server) =>
-						Effect.async<void>((resume) => {
+						Effect.callback<void>((resume) => {
 							server.close(() => resume(Effect.void));
 						}),
 				);
@@ -275,7 +275,7 @@ describe("daemon shared RPC routing", () => {
 								makeAuthManagerLive(
 									new AuthManager({ getPinHash: () => null }),
 								),
-								Layer.succeed(WebSocketRelayRouterTag, {
+								Layer.succeed(WebSocketRelayRouterTag)({
 									ensureRelayStarted: ensure,
 									waitForRelay: wait,
 									touchLastUsed: touch,
@@ -316,7 +316,7 @@ describe("daemon shared RPC routing", () => {
 			}),
 	);
 
-	it.scoped.each(["/rpc", "/rpc?client=browser"])(
+	it.effect.each(["/rpc", "/rpc?client=browser"])(
 		"routes two projects and recovers from unavailable projects on one %s socket",
 		(path) =>
 			Effect.gen(function* () {
@@ -348,8 +348,8 @@ describe("daemon shared RPC routing", () => {
 											Effect.succeed(
 												projects.filter((project) => project.slug === slug),
 											),
-										save: () => Effect.dieMessage("unused save"),
-										remove: () => Effect.dieMessage("unused remove"),
+										save: () => Effect.die(new Error("unused save")),
+										remove: () => Effect.die(new Error("unused remove")),
 									},
 								}),
 								makeWsTransportLive({ noServer: true }),
@@ -358,7 +358,7 @@ describe("daemon shared RPC routing", () => {
 						relays.set(slug, runtime);
 						const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
 							runtime,
-						}).pipe(Effect.provide(runtime));
+						}).pipe(Effect.provide(yield* runtime.contextEffect));
 						return {
 							slug,
 							wsHandler: {},
@@ -373,13 +373,13 @@ describe("daemon shared RPC routing", () => {
 					}),
 				);
 				const server = yield* Effect.acquireRelease(
-					Effect.async<Server, Error>((resume) => {
+					Effect.callback<Server, Error>((resume) => {
 						const server = createServer();
 						server.once("error", (error) => resume(Effect.fail(error)));
 						server.listen(0, "127.0.0.1", () => resume(Effect.succeed(server)));
 					}),
 					(server) =>
-						Effect.async<void>((resume) => {
+						Effect.callback<void>((resume) => {
 							server.close(() => resume(Effect.void));
 						}),
 				);
@@ -412,7 +412,7 @@ describe("daemon shared RPC routing", () => {
 								makeAuthManagerLive(
 									new AuthManager({ getPinHash: () => null }),
 								),
-								Layer.succeed(WebSocketRelayRouterTag, {
+								Layer.succeed(WebSocketRelayRouterTag)({
 									ensureRelayStarted: ensure,
 									waitForRelay: wait,
 									touchLastUsed: touch,
@@ -453,26 +453,26 @@ describe("daemon shared RPC routing", () => {
 					expect(touch).toHaveBeenCalledWith(slug);
 				}
 				for (const slug of ["missing-project", "unavailable"]) {
-					const result = yield* Effect.either(
+					const result = yield* Effect.result(
 						client.GetCommands({ projectSlug: slug }),
 					);
-					expect(result._tag).toBe("Left");
-					if (result._tag === "Left") {
-						expect(result.left).toBeInstanceOf(WsRpcError);
-						expect(result.left.message).toContain(slug);
+					expect(result._tag).toBe("Failure");
+					if (result._tag === "Failure") {
+						expect(result.failure).toBeInstanceOf(WsRpcError);
+						expect(result.failure.message).toContain(slug);
 					}
 				}
 				// A disposed relay fails context acquisition without killing other requests.
 				const firstRelay = relays.get("project-a");
 				if (!firstRelay) throw new Error("Project A was not started");
 				yield* firstRelay.disposeEffect;
-				const disposed = yield* Effect.either(
+				const disposed = yield* Effect.result(
 					client.GetCommands({ projectSlug: "project-a" }),
 				);
-				expect(disposed._tag).toBe("Left");
-				if (disposed._tag === "Left") {
-					expect(disposed.left).toBeInstanceOf(WsRpcError);
-					expect(disposed.left.message).toContain("project-a");
+				expect(disposed._tag).toBe("Failure");
+				if (disposed._tag === "Failure") {
+					expect(disposed.failure).toBeInstanceOf(WsRpcError);
+					expect(disposed.failure.message).toContain("project-a");
 				}
 				expect(
 					yield* client.GetCommands({ projectSlug: "project-b" }),

@@ -12,16 +12,9 @@ import {
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import {
-	GetProjects,
-	GetStatus,
-	RemoveProject,
-	SaveProject,
-	Shutdown,
-	ViewSession,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { inspectManagedOpenCodeProcess } from "../../../src/lib/instance/managed-opencode-process.js";
@@ -68,10 +61,10 @@ describe("foreground conduit serve", () => {
 		if (!harness) throw new Error("No process harness");
 		if (directory) {
 			mkdirSync(directory);
-			await sendRpcRequest(
-				join(harness.configDir, "relay.sock"),
-				new SaveProject({ folders: [directory] }),
-			);
+			await sendRpcRequest(join(harness.configDir, "relay.sock"), {
+				_tag: "SaveProject",
+				folders: [directory],
+			});
 		}
 		const browser = await harness.connect(undefined, undefined, projectSlug);
 		const sessionId = await browser.createSession(`recovery-${projectSlug}`);
@@ -349,7 +342,7 @@ describe("foreground conduit serve", () => {
 			if (!replacement) throw new Error("Missing replacement generation");
 			const projects = await sendRpcRequest(
 				join(harness.configDir, "relay.sock"),
-				new GetProjects({}),
+				{ _tag: "GetProjects" },
 			);
 			expect(
 				projects.projects.find(({ slug }) => slug === "process-test"),
@@ -416,7 +409,7 @@ describe("foreground conduit serve", () => {
 			await vi.waitFor(() => expect(existsSync(interruptMarker)).toBe(true));
 			const response = await sendRpcRequest(
 				join(harness.configDir, "relay.sock"),
-				new Shutdown({}),
+				{ _tag: "Shutdown" },
 			);
 			expect(response).toEqual({ ok: true });
 			writeFileSync(release, "finish recovery");
@@ -472,7 +465,7 @@ describe("foreground conduit serve", () => {
 			await adopted.close();
 			const response = await sendRpcRequest(
 				join(harness.configDir, "relay.sock"),
-				new RemoveProject({ slug: "process-test" }),
+				{ _tag: "RemoveProject", slug: "process-test" },
 			);
 			expect(response.projects.map((project) => project.slug)).not.toContain(
 				removed.projectSlug,
@@ -484,7 +477,7 @@ describe("foreground conduit serve", () => {
 			expect(existsSync(release)).toBe(false);
 			const status = await sendRpcRequest(
 				join(harness.configDir, "relay.sock"),
-				new GetStatus({}),
+				{ _tag: "GetStatus" },
 			);
 			expect(status.projects.map((project) => project.slug)).not.toContain(
 				"process-test",
@@ -578,13 +571,11 @@ describe("foreground conduit serve", () => {
 			});
 			expect(alive(failed.runner.pid)).toBe(true);
 			// Retry through ordinary lazy relay startup on this same live server.
-			const attempt = sendRpcRequest(
-				join(harness.configDir, "relay.sock"),
-				new ViewSession({
-					sessionId: failed.sessionId,
-					originId: "failed-lazy-adoption",
-				}),
-			);
+			const attempt = sendRpcRequest(join(harness.configDir, "relay.sock"), {
+				_tag: "ViewSession",
+				sessionId: failed.sessionId,
+				originId: "failed-lazy-adoption",
+			});
 			await expect(attempt).rejects.toBeDefined();
 			expect(alive(failed.runner.pid)).toBe(true);
 			expect(alive(replacement.pid)).toBe(true);
@@ -692,7 +683,7 @@ describe("foreground conduit serve", () => {
 				expect(alive(failed.runner.pid)).toBe(true);
 				const status = await sendRpcRequest(
 					join(harness.configDir, "relay.sock"),
-					new GetStatus({}),
+					{ _tag: "GetStatus" },
 				);
 				if (command === "signal") {
 					await harness.signal("SIGINT");
@@ -940,10 +931,10 @@ describe("foreground conduit serve", () => {
 			});
 			evidence["pathRequest"] = readFileSync(`${gate}-started`, "utf8");
 			const started = Date.now();
-			const request = sendRpcRequest(
-				join(harness.configDir, "relay.sock"),
-				new RemoveProject({ slug: removed.projectSlug }),
-			);
+			const request = sendRpcRequest(join(harness.configDir, "relay.sock"), {
+				_tag: "RemoveProject",
+				slug: removed.projectSlug,
+			});
 			pendingRemoval = request;
 			const removal = await Promise.race([
 				request,
@@ -1074,7 +1065,7 @@ describe("foreground conduit serve", () => {
 		try {
 			const removal = await sendRpcRequest(
 				join(harness.configDir, "relay.sock"),
-				new RemoveProject({ slug: removed.projectSlug }),
+				{ _tag: "RemoveProject", slug: removed.projectSlug },
 				{ requestTimeoutMs: 10_000 },
 			).catch((cause: unknown) => {
 				evidence["failure"] = String(cause);
@@ -1150,7 +1141,7 @@ describe("foreground conduit serve", () => {
 			expect(alive(server.pid)).toBe(true);
 			const removal = await sendRpcRequest(
 				join(harness.configDir, "relay.sock"),
-				new RemoveProject({ slug: removed.projectSlug }),
+				{ _tag: "RemoveProject", slug: removed.projectSlug },
 			);
 			expect(removal.projects.map((project) => project.slug)).not.toContain(
 				removed.projectSlug,
@@ -1405,7 +1396,7 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 			).toEqual([]);
 			const status = await sendRpcRequest(
 				join(harness.configDir, "relay.sock"),
-				new GetStatus({}),
+				{ _tag: "GetStatus" },
 			);
 			expect(status.projects).toHaveLength(2);
 			expect(
@@ -1507,7 +1498,7 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 		);
 		const restoredStatus = await sendRpcRequest(
 			join(harness.configDir, "relay.sock"),
-			new GetStatus({}),
+			{ _tag: "GetStatus" },
 		);
 		const evidence: Record<string, unknown> = {
 			duplicate,
@@ -1538,7 +1529,7 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 		);
 		const autoServed = await sendRpcRequest(
 			join(harness.configDir, "relay.sock"),
-			new GetStatus({}),
+			{ _tag: "GetStatus" },
 		);
 		expect(
 			autoServed.projects.find((project) => project.slug === "process-test"),

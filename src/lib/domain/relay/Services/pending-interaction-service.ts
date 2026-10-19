@@ -180,9 +180,10 @@ export interface PendingInteractionService {
 	): Effect.Effect<void>;
 }
 
-export class PendingInteractionServiceTag extends Context.Tag(
-	"PendingInteractionService",
-)<PendingInteractionServiceTag, PendingInteractionService>() {}
+export class PendingInteractionServiceTag extends Context.Service<
+	PendingInteractionServiceTag,
+	PendingInteractionService
+>()("PendingInteractionService") {}
 
 export interface PendingInteractionServiceOptions {
 	readonly permissionTimeoutMs?: number;

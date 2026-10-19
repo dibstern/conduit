@@ -1,6 +1,6 @@
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import {
 	PartVersion,
@@ -33,7 +33,7 @@ const serve = (
 		Layer.provideMerge(
 			Layer.merge(
 				makeTestHandlerLayer(),
-				Layer.succeed(ToolContentServiceTag, { details }),
+				Layer.succeed(ToolContentServiceTag)({ details }),
 			),
 		),
 	);
@@ -51,19 +51,19 @@ describe("WsRpcServerLayer GetToolDetails", () => {
 			});
 			expect(details).toHaveBeenCalledWith("session-a", ["tool-1", "missing"]);
 			expect(result).toEqual({ projectSlug: "test-project", tools: [detail] });
-		}).pipe(Effect.scoped, Effect.provide(serve(details)));
+		}).pipe(Effect.scoped, Effect.provide(serve(details), { local: true }));
 	});
 
 	it.effect("fails the request when the read fails", () =>
 		Effect.gen(function* () {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				client.GetToolDetails({
 					sessionId: "session-a",
 					toolIds: [ToolCallId.make("tool-1")],
 				}),
 			);
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -77,6 +77,7 @@ describe("WsRpcServerLayer GetToolDetails", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		),
 	);

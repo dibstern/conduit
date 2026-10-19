@@ -4,11 +4,11 @@ import fs, { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
+import { DatabaseSync } from "node:sqlite";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
-import Database from "better-sqlite3";
 import { Effect, Layer, Logger } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import {
 	makePersistenceServiceLive,
@@ -26,7 +26,7 @@ import { seedLegacyEventStore } from "../../helpers/legacy-event-store.js";
 
 const testPersistenceServiceLive = makePersistenceServiceLive.pipe(
 	Layer.provide(
-		Layer.succeed(PersistenceProjectTag, { projectId: "test-project" }),
+		Layer.succeed(PersistenceProjectTag)({ projectId: "test-project" }),
 	),
 );
 
@@ -36,7 +36,7 @@ function makeTestSqlLayer(setup?: (filename: string) => void) {
 	setup?.(filename);
 	return EffectSqliteClient.layer({ filename }).pipe(
 		Layer.merge(
-			Layer.scopedDiscard(
+			Layer.effectDiscard(
 				Effect.addFinalizer(() =>
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 				),
@@ -55,7 +55,7 @@ function makeReadonlySqlLayer() {
 		disableWAL: true,
 	}).pipe(
 		Layer.merge(
-			Layer.scopedDiscard(
+			Layer.effectDiscard(
 				Effect.addFinalizer(() =>
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 				),
@@ -71,8 +71,8 @@ function makePersistenceLayer(setup?: (filename: string) => void) {
 	);
 }
 
-function seedDatabase(filename: string, seed: (db: Database.Database) => void) {
-	const db = new Database(filename);
+function seedDatabase(filename: string, seed: (db: DatabaseSync) => void) {
+	const db = new DatabaseSync(filename);
 	try {
 		seed(db);
 	} finally {
@@ -89,29 +89,29 @@ function expectMigrationFailure(error: unknown, reason: string) {
 	expect(String(persistenceError.cause)).toContain(reason);
 }
 
-function seedTrippedDatabase(db: Database.Database) {
+function seedTrippedDatabase(db: DatabaseSync) {
 	seedLegacyEventStore(db);
 	for (let index = 0; index <= MAX_PURGEABLE_SKELETON_SESSIONS; index++) {
 		db.prepare(
 			"INSERT INTO sessions (id, provider, created_at, updated_at) VALUES (?, ?, ?, ?)",
-		).run([
+		).run(
 			`matching-${index.toString().padStart(2, "0")}`,
 			"opencode",
 			LEGACY_SKELETON_CUTOFF_MS - 1,
 			LEGACY_SKELETON_CUTOFF_MS - 1,
-		]);
+		);
 	}
 }
 
 function makeErrorLogger(messages: string[]) {
 	const logger = Logger.make<unknown, void>((options) => {
-		if (options.logLevel._tag !== "Error") return;
+		if (options.logLevel !== "Error") return;
 		const parts = Array.isArray(options.message)
 			? options.message
 			: [options.message];
 		messages.push(parts.map(String).join(" "));
 	});
-	return Logger.replace(Logger.defaultLogger, logger);
+	return Logger.layer([logger, Logger.tracerLogger]);
 }
 
 describe("Persistence Effect", () => {
@@ -343,7 +343,7 @@ describe("Persistence Effect", () => {
 				name: string;
 			}>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
 			expect(afterSecondRun).toEqual(migrationRows);
-		}).pipe(Effect.provide(makePersistenceLayer())),
+		}).pipe(Effect.provide(makePersistenceLayer(), { local: true })),
 	);
 
 	it.effect("startup migration supports in-memory Effect SQLite layers", () =>
@@ -364,6 +364,7 @@ describe("Persistence Effect", () => {
 					testPersistenceServiceLive,
 					EffectSqliteClient.layer({ filename: ":memory:" }),
 				),
+				{ local: true },
 			),
 		),
 	);
@@ -376,11 +377,12 @@ describe("Persistence Effect", () => {
 				makePersistenceLayer((filename) =>
 					seedDatabase(filename, seedTrippedDatabase),
 				),
+				{ local: true },
 			),
 		),
 	);
 
-	it.scoped(
+	it.effect(
 		"re-announces a tripped legacy skeleton breaker on every startup",
 		() => {
 			const messages: string[] = [];
@@ -398,8 +400,8 @@ describe("Persistence Effect", () => {
 					EffectSqliteClient.layer({ filename }),
 				);
 
-				yield* Effect.provide(PersistenceServiceTag, layer);
-				yield* Effect.provide(PersistenceServiceTag, layer);
+				yield* Effect.provide(PersistenceServiceTag, layer, { local: true });
+				yield* Effect.provide(PersistenceServiceTag, layer, { local: true });
 
 				expect(
 					messages.filter((message) =>
@@ -408,7 +410,7 @@ describe("Persistence Effect", () => {
 						),
 					),
 				).toHaveLength(2);
-			}).pipe(Effect.provide(makeErrorLogger(messages)));
+			}).pipe(Effect.provide(makeErrorLogger(messages), { local: true }));
 		},
 	);
 
@@ -426,8 +428,8 @@ describe("Persistence Effect", () => {
 					),
 				).toBe(false);
 			}).pipe(
-				Effect.provide(makePersistenceLayer()),
-				Effect.provide(makeErrorLogger(messages)),
+				Effect.provide(makePersistenceLayer(), { local: true }),
+				Effect.provide(makeErrorLogger(messages), { local: true }),
 			);
 		},
 	);
@@ -436,7 +438,7 @@ describe("Persistence Effect", () => {
 		"rejects an unknown migration ledger before changing the database",
 		() =>
 			Effect.gen(function* () {
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					Effect.gen(function* () {
 						yield* PersistenceServiceTag;
 					}).pipe(
@@ -457,12 +459,13 @@ describe("Persistence Effect", () => {
 						`);
 								}),
 							),
+							{ local: true },
 						),
 					),
 				);
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left")
-					expectMigrationFailure(result.left, "Unknown recorded migration");
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure")
+					expectMigrationFailure(result.failure, "Unknown recorded migration");
 			}),
 	);
 
@@ -474,10 +477,10 @@ describe("Persistence Effect", () => {
 				makePersistenceLayer((filename) =>
 					seedDatabase(filename, seedTrippedDatabase),
 				),
+				{ local: true },
 			),
 			Effect.provide(
-				Logger.replace(
-					Logger.defaultLogger,
+				Logger.layer([
 					Logger.make<unknown, void>((options) => {
 						const parts = Array.isArray(options.message)
 							? options.message
@@ -491,7 +494,9 @@ describe("Persistence Effect", () => {
 							throw new Error("diagnostic defect");
 						}
 					}),
-				),
+					Logger.tracerLogger,
+				]),
+				{ local: true },
 			),
 		),
 	);
@@ -502,7 +507,9 @@ describe("Persistence Effect", () => {
 		try {
 			await Effect.runPromise(
 				makeEffectSqlMigrator().pipe(
-					Effect.provide(EffectSqliteClient.layer({ filename })),
+					Effect.provide(EffectSqliteClient.layer({ filename }), {
+						local: true,
+					}),
 				),
 			);
 			seedDatabase(filename, (db) => db.exec("DROP TABLE messages"));
@@ -515,6 +522,7 @@ describe("Persistence Effect", () => {
 							testPersistenceServiceLive,
 							EffectSqliteClient.layer({ filename }),
 						),
+						{ local: true },
 					),
 				),
 			);
@@ -525,7 +533,7 @@ describe("Persistence Effect", () => {
 
 	it.effect("startup migration refuses readonly Effect SQLite layers", () =>
 		Effect.gen(function* () {
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				Effect.gen(function* () {
 					yield* PersistenceServiceTag;
 				}).pipe(
@@ -534,18 +542,19 @@ describe("Persistence Effect", () => {
 							testPersistenceServiceLive,
 							makeReadonlySqlLayer(),
 						),
+						{ local: true },
 					),
 				),
 			);
 
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expectMigrationFailure(result.left, "Failed to execute statement");
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
+				expectMigrationFailure(result.failure, "Failed to execute statement");
 			}
 		}),
 	);
 
-	it.scoped.each(["reclaim", "below threshold", "low disk", "rename failure"])(
+	it.effect.each(["reclaim", "below threshold", "low disk", "rename failure"])(
 		"file-backed startup stays healthy after %s",
 		(scenario) => {
 			const messages: string[] = [];
@@ -568,7 +577,9 @@ describe("Persistence Effect", () => {
 				);
 				const filename = join(dir, "events.db");
 				yield* PersistenceServiceTag.pipe(
-					Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+					Effect.provide(makePersistenceEffectLayer(filename, "test-project"), {
+						local: true,
+					}),
 					Effect.asVoid,
 				);
 				let retainedRows: Record<string, unknown>[] = [];
@@ -582,12 +593,11 @@ describe("Persistence Effect", () => {
 					insert.run("start", 1, "thinking.start", '{"partId":"part"}', 1);
 					insert.run("end", 2, "thinking.end", '{"partId":"part"}', 2);
 					retainedRows = db
-						.prepare<[], Record<string, unknown>>(
-							"SELECT * FROM events ORDER BY sequence",
-						)
+						.prepare("SELECT * FROM events ORDER BY sequence")
 						.all();
 					if (scenario === "below threshold") return;
-					db.transaction(() => {
+					db.exec("BEGIN");
+					try {
 						for (let index = 0; index < 80; index++) {
 							insert.run(
 								`redundant-${index}`,
@@ -597,9 +607,13 @@ describe("Persistence Effect", () => {
 								index + 3,
 							);
 						}
-					})();
+						db.exec("COMMIT");
+					} catch (cause) {
+						db.exec("ROLLBACK");
+						throw cause;
+					}
 					retainedRows = db
-						.prepare<[], Record<string, unknown>>(
+						.prepare(
 							`SELECT * FROM events
 							WHERE event_id IN ('start', 'end', 'redundant-79')
 							ORDER BY sequence`,
@@ -638,7 +652,9 @@ describe("Persistence Effect", () => {
 						{ quick_check: "ok" },
 					]);
 				}).pipe(
-					Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+					Effect.provide(makePersistenceEffectLayer(filename, "test-project"), {
+						local: true,
+					}),
 				);
 				const afterBytes = statSync(filename).size;
 				if (scenario === "reclaim") {
@@ -660,7 +676,11 @@ describe("Persistence Effect", () => {
 				expect(
 					readdirSync(dir).filter((name) => name.includes(".tmp")),
 				).toEqual([]);
-			}).pipe(Effect.provide(Logger.replace(Logger.defaultLogger, logger)));
+			}).pipe(
+				Effect.provide(Logger.layer([logger, Logger.tracerLogger]), {
+					local: true,
+				}),
+			);
 		},
 	);
 
@@ -673,7 +693,7 @@ describe("Persistence Effect", () => {
 			);
 			const rows = yield* sql`SELECT * FROM test_items`;
 			expect(rows.length).toBe(1);
-		}).pipe(Effect.provide(makeTestSqlLayer())),
+		}).pipe(Effect.provide(makeTestSqlLayer(), { local: true })),
 	);
 
 	it.effect("withTransaction rolls back on failure", () =>
@@ -685,9 +705,9 @@ describe("Persistence Effect", () => {
 					yield* sql`INSERT INTO test_rollback (id, name) VALUES (1, 'x')`;
 					yield* Effect.fail(new Error("boom"));
 				}),
-			).pipe(Effect.catchAll(() => Effect.void));
+			).pipe(Effect.catch(() => Effect.void));
 			const rows = yield* sql`SELECT * FROM test_rollback`;
 			expect(rows.length).toBe(0);
-		}).pipe(Effect.provide(makeTestSqlLayer())),
+		}).pipe(Effect.provide(makeTestSqlLayer(), { local: true })),
 	);
 });

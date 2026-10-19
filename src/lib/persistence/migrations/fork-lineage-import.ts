@@ -10,12 +10,14 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { Reactivity } from "@effect/experimental";
-import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { Cause, type ConfigError, Data, Effect, Layer, Schema } from "effect";
+import { Data, Effect, Layer, Schema } from "effect";
+import { Reactivity } from "effect/reactivity";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import type { DaemonConfig } from "../../daemon/config-persistence.js";
 import { deserializeRecent } from "../../daemon/recent-projects.js";
+import * as Failure from "../../effect/failure-classification.js";
 import { refreshSidebar, rerootSession } from "../effect/sidebar-projection.js";
 import { projectEventsDbPath } from "../project-storage.js";
 
@@ -25,16 +27,16 @@ class ForkLineageImportError extends Data.TaggedError(
 	readonly message: string;
 }> {}
 
-const Sidecar = Schema.Record({
-	key: Schema.String,
-	value: Schema.Union(
+const Sidecar = Schema.Record(
+	Schema.String,
+	Schema.Union([
 		Schema.String,
 		Schema.Struct({
 			parentID: Schema.String,
 			forkMessageId: Schema.String,
 		}),
-	),
-});
+	]),
+);
 
 /**
  * Global data import, not a numbered schema migration. The source has no project key, so this runs before
@@ -73,9 +75,9 @@ export const migrateForkLineage = (
 					}
 					if (source === archive) archiveText = text;
 					else hasSidecar = true;
-					const decoded = Schema.decodeUnknownSync(Schema.parseJson(Sidecar))(
-						text,
-					);
+					const decoded = Schema.decodeUnknownSync(
+						Schema.fromJsonString(Sidecar),
+					)(text);
 					for (const [id, entry] of Object.entries(decoded)) {
 						if (
 							entries.has(id) &&
@@ -126,19 +128,18 @@ export const migrateForkLineage = (
 		]);
 		// Shared mode resolves each child's stored owner after import. The legacy
 		// branch retains its per-file discovery, including recent projects.
-		const stores: Layer.Layer<SqlClient.SqlClient, ConfigError.ConfigError>[] =
-			sharedSql
-				? [Layer.succeed(SqlClient.SqlClient, sharedSql)]
-				: [...projects.values()].flatMap((project) => {
-						const filename = projectEventsDbPath({ configDir, ...project });
-						return existsSync(filename)
-							? [
-									SqliteNode.layer({ filename }).pipe(
-										Layer.provide(Reactivity.layer),
-									),
-								]
-							: [];
-					});
+		const stores: Layer.Layer<SqlClient.SqlClient, SqlError>[] = sharedSql
+			? [Layer.succeed(SqlClient.SqlClient, sharedSql)]
+			: [...projects.values()].flatMap((project) => {
+					const filename = projectEventsDbPath({ configDir, ...project });
+					return existsSync(filename)
+						? [
+								SqliteNode.layer({ filename }).pipe(
+									Layer.provide(Reactivity.layer),
+								),
+							]
+						: [];
+				});
 		for (const sqliteLayer of stores) {
 			const imported = yield* Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -344,11 +345,11 @@ export const migrateForkLineage = (
 		});
 		if (warning !== undefined) yield* Effect.logWarning(warning);
 	}).pipe(
-		Effect.catchAllCause((cause) =>
-			Cause.isInterruptedOnly(cause)
+		Effect.catchCause((cause) =>
+			Failure.isInterruptedOnly(cause)
 				? Effect.failCause(cause)
 				: Effect.logWarning(
-						`Fork lineage import incomplete; startup continues and the source is retained. ${Cause.pretty(cause)}`,
+						`Fork lineage import incomplete; startup continues and the source is retained. ${Failure.renderCause(cause)}`,
 					),
 		),
 	);

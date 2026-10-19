@@ -60,7 +60,7 @@ export default defineConfig({
 					pool: "forks",
 					maxWorkers: 1,
 					isolate: false,
-					// Vitest 4 requires a separate group for a different worker limit.
+					// Vitest requires a separate group for a different worker limit.
 					sequence: { groupOrder: 1 },
 					testTimeout: 10_000,
 					hookTimeout: 10_000,

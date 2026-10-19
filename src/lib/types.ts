@@ -120,7 +120,6 @@ export interface StoredProject {
 	readonly sessionMode?:
 		| import("./contracts/project-file.js").SessionMode
 		| undefined;
-	readonly groupingMode?: import("./shared-types.js").GroupingMode | undefined;
 }
 
 export interface RecentProject {

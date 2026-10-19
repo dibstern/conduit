@@ -24,7 +24,6 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { it as effectIt } from "@effect/vitest";
 import {
 	Context,
@@ -34,9 +33,11 @@ import {
 	Queue,
 	Schedule,
 	Schema,
+	Semaphore,
 	Stream,
-	TestClock,
 } from "effect";
+import { SqlClient } from "effect/sql";
+import { TestClock } from "effect/testing";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { accountsStateFromConfig } from "../../../../src/lib/account-directory.js";
 import { AccountSchema } from "../../../../src/lib/contracts/account.js";
@@ -229,7 +230,7 @@ const withSwitchServices = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 };
 
 const withContinuationAdmission = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
-	const permit = Effect.unsafeMakeSemaphore(1);
+	const permit = Semaphore.makeUnsafe(1);
 	return effect.pipe(
 		Effect.provideService(SessionInboxTag, {
 			steerDeclined: () => Effect.void,
@@ -379,7 +380,7 @@ const resetInboxFixture = Effect.gen(function* () {
 	const continuation = yield* makeContinuation;
 	const sent = yield* Queue.unbounded<string>();
 	const dispatches: string[] = [];
-	const turns: ProviderTurnServiceTag["Type"] = {
+	const turns: ProviderTurnServiceTag["Service"] = {
 		holdUserTurnsForAccountSwitch: () => Effect.void,
 		prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 		interruptTurn: () => Effect.void,
@@ -459,7 +460,7 @@ const resetInboxFixture = Effect.gen(function* () {
 const withResetInbox = <A, E, R>(
 	reading: () => UsageReading,
 	use: (
-		fixture: Effect.Effect.Success<typeof resetInboxFixture>,
+		fixture: Effect.Success<typeof resetInboxFixture>,
 	) => Effect.Effect<A, E, R>,
 ) =>
 	Effect.flatMap(resetInboxFixture, (fixture) =>
@@ -539,7 +540,7 @@ it("a due continuation waits for the session admission lock before dispatch", as
 });
 
 for (const admission of ["user", "quota-reset"] as const) {
-	effectIt.scoped(
+	effectIt.effect(
 		`pending rewind allows ${admission} scheduling and blocks continuation dispatch`,
 		() =>
 			withResetInbox(
@@ -581,8 +582,8 @@ for (const admission of ["user", "quota-reset"] as const) {
 											),
 										)
 								: fixture.submit("q1")
-						).pipe(Effect.either);
-						expect(scheduled).toMatchObject({ _tag: "Right" });
+						).pipe(Effect.result);
+						expect(scheduled).toMatchObject({ _tag: "Success" });
 						expect(
 							(yield* fixture.read.listSessionInfos({
 								projectIds: ["test-project"],
@@ -601,11 +602,11 @@ for (const admission of ["user", "quota-reset"] as const) {
 							})
 							.pipe(
 								Effect.provideService(ProviderTurnServiceTag, fixture.turns),
-								Effect.either,
+								Effect.result,
 							);
 						expect(immediate).toMatchObject({
-							_tag: "Left",
-							left: { _tag: "SessionBusy" },
+							_tag: "Failure",
+							failure: { _tag: "SessionBusy" },
 						});
 						expect(yield* fixture.store.readAllBySession("s1")).toEqual(before);
 						expect(fixture.dispatches).toEqual([]);
@@ -625,7 +626,7 @@ for (const schedule of [
 	"cancelled",
 	"later-stopped",
 ] as const) {
-	effectIt.scoped(
+	effectIt.effect(
 		`send at reset: ${schedule} schedules once and releases in turn order`,
 		() => {
 			let reading = usageReading("claude", {
@@ -723,7 +724,7 @@ for (const schedule of [
 						).toEqual([{ input_id: "q1" }, { input_id: "q2" }]);
 						if (schedule === "cancelled") {
 							yield* fixture.continuation.cancelContinuation("s1");
-							yield* Effect.yieldNow().pipe(Effect.repeat(Schedule.recurs(10)));
+							yield* Effect.yieldNow.pipe(Effect.repeat(Schedule.recurs(10)));
 							expect(
 								(yield* fixture.store.readAllBySession("s1")).filter(
 									(event) => event.type === "session.resume_scheduled",
@@ -759,7 +760,7 @@ for (const schedule of [
 							]);
 						yield* fixture.sweep;
 						if (schedule === "later-stopped") {
-							yield* Effect.yieldNow().pipe(Effect.repeat(Schedule.recurs(10)));
+							yield* Effect.yieldNow.pipe(Effect.repeat(Schedule.recurs(10)));
 							expect(fixture.dispatches).toEqual([]);
 							return;
 						}
@@ -789,7 +790,7 @@ for (const schedule of [
 }
 
 for (const reset of ["expired", "missing", "invalid"] as const) {
-	effectIt.scoped(`send at reset: a ${reset} reset holds nothing`, () =>
+	effectIt.effect(`send at reset: a ${reset} reset holds nothing`, () =>
 		withResetInbox(
 			() =>
 				usageReading("claude", {

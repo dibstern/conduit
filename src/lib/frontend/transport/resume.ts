@@ -101,19 +101,8 @@
 // the same place: the whole cause goes on as defects, because a cause that
 // killed us is not half a retryable thing.
 
-import type { RpcClientError } from "@effect/rpc/RpcClientError";
-import {
-	Cause,
-	Chunk,
-	Data,
-	Duration,
-	Effect,
-	HashSet,
-	Option,
-	Ref,
-	Schema,
-	Stream,
-} from "effect";
+import { Data, Duration, Effect, Option, Ref, Schema, Stream } from "effect";
+import type { RpcClientError } from "effect/rpc/RpcClientError";
 import {
 	digestRows,
 	PartRemovalId,
@@ -122,6 +111,7 @@ import {
 	ResumePoint,
 	type WsRpcError,
 } from "../../contracts/ws-rpc.js";
+import * as Failure from "../../effect/failure-classification.js";
 import type { DetailLengthMismatch } from "./session-detail-wire.js";
 
 declare global {
@@ -389,10 +379,7 @@ const reissueDelay = (failures: number): Duration.Duration =>
  * test named "does not re-issue an interruption the consumer itself caused"
  * holds that shape open.
  */
-const unsubscribed = Effect.map(
-	Effect.descriptor,
-	(fiber) => HashSet.size(fiber.interruptors) > 0,
-);
+const unsubscribed = Failure.isInterruptedByCaller;
 
 /**
  * Wraps one subscription so a transport-class ending re-issues it from the last
@@ -466,20 +453,19 @@ export const resumeStream = <A extends object>(
 							return true;
 						}),
 					),
-					Stream.catchAllCause((cause): Stream.Stream<A, WsRpcError> => {
+					Stream.catchCause((cause): Stream.Stream<A, WsRpcError> => {
 						// A defect is nobody's contract, and it decides before anything
 						// else can be picked out of the cause. The rest goes with it: a
 						// cause that killed us is not half a retryable thing.
-						if (Chunk.isNonEmpty(Cause.defects(cause)))
-							return Stream.failCause(Cause.flatMap(cause, Cause.die));
+						if (Failure.defects(cause).length > 0)
+							return Stream.failCause(Failure.failuresAsDefects(cause));
 
 						// A suffix can only be decoded against the exact sent prefix,
 						// and a view the server's checksum disowns cannot be resumed.
 						// Ask the existing cold-start path for whole rows, even if the
 						// cursor claims they were delivered.
 						if (
-							Chunk.some(
-								Cause.failures(cause),
+							Failure.failures(cause).some(
 								(failure) =>
 									failure._tag === "DetailLengthMismatch" ||
 									failure._tag === "ResumeChecksumMismatch",
@@ -491,9 +477,11 @@ export const resumeStream = <A extends object>(
 									open: undefined,
 									seen: nothingSeen,
 								}).pipe(
-									Effect.tap(() => {
-										if (ledger !== undefined) clearLedger(ledger);
-									}),
+									Effect.tap(
+										Effect.sync(() => {
+											if (ledger !== undefined) clearLedger(ledger);
+										}),
+									),
 									Effect.as(reissue()),
 								),
 							);
@@ -501,11 +489,10 @@ export const resumeStream = <A extends object>(
 
 						// The server declining to serve this subscription is a domain
 						// failure, deterministic, and re-issuing it would loop.
-						const domain = Chunk.findFirst(
-							Cause.failures(cause),
+						const domain = Failure.failures(cause).find(
 							(failure): failure is WsRpcError => failure._tag === "WsRpcError",
 						);
-						if (Option.isSome(domain)) return Stream.fail(domain.value);
+						if (domain !== undefined) return Stream.fail(domain);
 
 						// What is left is transport class. An interruption is the
 						// ambiguous one: a torn-down socket and an unsubscribe look
@@ -516,13 +503,13 @@ export const resumeStream = <A extends object>(
 									Effect.as(reissue()),
 								),
 							);
-						return Cause.isInterrupted(cause)
+						return Failure.isInterrupted(cause)
 							? Stream.unwrap(
 									Effect.map(
 										unsubscribed,
 										(byConsumer): Stream.Stream<A, WsRpcError> =>
 											byConsumer
-												? Stream.failCause(Cause.stripFailures(cause))
+												? Stream.failCause(Failure.withoutFailures(cause))
 												: reissueAfterDrop(),
 									),
 								)

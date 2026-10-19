@@ -1,10 +1,11 @@
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
+
 //
 // Browser ids name Conduit's persisted prompts. OpenCode answers use the
 // provider reference on that row, so questions survive relay restarts.
 
-import { SqlClient } from "@effect/sql";
 import { Data, Effect, Option } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	getProviderDriver,
 	MANAGED_OPENCODE_ACCOUNT_ID,
@@ -282,12 +283,12 @@ export const recordApprovalResolved = (
 			Effect.provideService(SqlClient.SqlClient, sql.value),
 			Effect.provideService(EventStoreEffectTag, eventStore.value),
 			Effect.provideService(ProjectionRunnerEffectTag, projectionRunner.value),
-			Effect.either,
+			Effect.result,
 		);
-		if (written._tag === "Left") {
+		if (written._tag === "Failure") {
 			log.error(
 				`${what} resolution not recorded for session=${sessionId}`,
-				written.left,
+				written.failure,
 			);
 		}
 	});
@@ -341,7 +342,7 @@ const persistPermissionRule = (
 		const config = yield* ConfigTag;
 		const log = yield* LoggerTag;
 
-		const persistResult = yield* Effect.either(
+		const persistResult = yield* Effect.result(
 			Effect.gen(function* () {
 				const configData = yield* Effect.tryPromise(() => client.config.get());
 				const rawPermission = configData["permission"];
@@ -384,8 +385,8 @@ const persistPermissionRule = (
 				log.info(`Persisted: ${toolName} ${scope}=${pattern ?? "*"}`);
 			}),
 		);
-		if (persistResult._tag === "Left") {
-			log.warn(`Config persist failed: ${persistResult.left}`);
+		if (persistResult._tag === "Failure") {
+			log.warn(`Config persist failed: ${persistResult.failure}`);
 		}
 	});
 
@@ -456,7 +457,7 @@ export const handlePermissionResponse = (
 				? (yield* ProviderRegistryTag).getInstance("opencode")
 				: undefined;
 			if (opencode) {
-				const replied = yield* Effect.either(
+				const replied = yield* Effect.result(
 					opencode.resolvePermissionEffect(
 						sessionId,
 						stored?.provider_request_id ?? requestId,
@@ -464,11 +465,11 @@ export const handlePermissionResponse = (
 						stored?.provider_process_id ?? undefined,
 					),
 				);
-				if (replied._tag === "Left" && stored?.provider_process_id) {
+				if (replied._tag === "Failure" && stored?.provider_process_id) {
 					yield* resolveOpenCodeQuestionTarget(sessionId, stored);
-					return yield* Effect.fail(replied.left);
+					return yield* Effect.fail(replied.failure);
 				}
-				if (replied._tag === "Right" && stored) {
+				if (replied._tag === "Success" && stored) {
 					yield* recordApprovalResolved(
 						canonicalEvent("permission.resolved", sessionId, {
 							id: stored.id,
@@ -603,18 +604,18 @@ export const handleAskUserResponse = (
 							new Error("Recovered question turn service unavailable"),
 						);
 					}
-					const completed = yield* Effect.either(
+					const completed = yield* Effect.result(
 						turns.completeRecoveredQuestion(
 							resolved.question,
 							answerText,
 							answers,
 						),
 					);
-					if (completed._tag === "Left") {
+					if (completed._tag === "Failure") {
 						yield* pendingInteractionsOption.value.recoverPendingQuestions([
 							resolved.question,
 						]);
-						return yield* Effect.fail(completed.left);
+						return yield* Effect.fail(completed.failure);
 					}
 					yield* sendMessageToSession({
 						clientId,
@@ -657,12 +658,12 @@ export const handleAskUserResponse = (
 			sessionId,
 			stored,
 		);
-		const replyResult = yield* Effect.either(
+		const replyResult = yield* Effect.result(
 			Effect.tryPromise(() =>
 				client.question.reply(providerRequestId, formatted, directory),
 			),
 		);
-		if (replyResult._tag === "Right") {
+		if (replyResult._tag === "Success") {
 			yield* announceQuestionResolved(sessionId, toolId, answers);
 			return;
 		}
@@ -670,16 +671,16 @@ export const handleAskUserResponse = (
 			if (stored.provider_process_id)
 				yield* resolveOpenCodeQuestionTarget(sessionId, stored);
 			return yield* new WsRpcError({
-				message: `OpenCode could not answer this question: ${String(replyResult.left)}`,
+				message: `OpenCode could not answer this question: ${String(replyResult.failure)}`,
 			});
 		}
 
 		log.warn(
-			`client=${clientId} session=${sessionId} replyQuestion failed for ${toolId}: ${replyResult.left}`,
+			`client=${clientId} session=${sessionId} replyQuestion failed for ${toolId}: ${replyResult.failure}`,
 		);
 
 		// Fallback: query pending questions and reply to the first match
-		const fallbackResult = yield* Effect.either(
+		const fallbackResult = yield* Effect.result(
 			Effect.gen(function* () {
 				const pendingQuestions = yield* Effect.tryPromise(() =>
 					client.question.list(directory),
@@ -710,11 +711,11 @@ export const handleAskUserResponse = (
 			}),
 		);
 
-		if (fallbackResult._tag === "Right" && fallbackResult.right) return;
+		if (fallbackResult._tag === "Success" && fallbackResult.success) return;
 
-		if (fallbackResult._tag === "Left") {
+		if (fallbackResult._tag === "Failure") {
 			log.warn(
-				`client=${clientId} session=${sessionId} API fallback also failed: ${fallbackResult.left}`,
+				`client=${clientId} session=${sessionId} API fallback also failed: ${fallbackResult.failure}`,
 			);
 		}
 
@@ -836,12 +837,12 @@ export const handleQuestionReject = (
 			sessionId,
 			stored,
 		);
-		const rejectResult = yield* Effect.either(
+		const rejectResult = yield* Effect.result(
 			Effect.tryPromise(() =>
 				client.question.reject(providerRequestId, directory),
 			),
 		);
-		if (rejectResult._tag === "Right") {
+		if (rejectResult._tag === "Success") {
 			yield* announceQuestionResolved(sessionId, toolId, {});
 			return;
 		}
@@ -849,16 +850,16 @@ export const handleQuestionReject = (
 			if (stored.provider_process_id)
 				yield* resolveOpenCodeQuestionTarget(sessionId, stored);
 			return yield* new WsRpcError({
-				message: `OpenCode could not reject this question: ${String(rejectResult.left)}`,
+				message: `OpenCode could not reject this question: ${String(rejectResult.failure)}`,
 			});
 		}
 
 		log.warn(
-			`client=${clientId} session=${sessionId} rejectQuestion failed for ${toolId}: ${rejectResult.left}`,
+			`client=${clientId} session=${sessionId} rejectQuestion failed for ${toolId}: ${rejectResult.failure}`,
 		);
 
 		// Fallback: query pending questions
-		const fallbackResult = yield* Effect.either(
+		const fallbackResult = yield* Effect.result(
 			Effect.gen(function* () {
 				const pendingQuestions = yield* Effect.tryPromise(() =>
 					client.question.list(directory),
@@ -885,11 +886,11 @@ export const handleQuestionReject = (
 			}),
 		);
 
-		if (fallbackResult._tag === "Right" && fallbackResult.right) return;
+		if (fallbackResult._tag === "Success" && fallbackResult.success) return;
 
-		if (fallbackResult._tag === "Left") {
+		if (fallbackResult._tag === "Failure") {
 			log.warn(
-				`client=${clientId} session=${sessionId} reject fallback also failed: ${fallbackResult.left}`,
+				`client=${clientId} session=${sessionId} reject fallback also failed: ${fallbackResult.failure}`,
 			);
 		}
 

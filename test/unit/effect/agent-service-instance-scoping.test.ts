@@ -65,15 +65,14 @@ const makeLayer = ({
 	readonly engine?: OrchestrationEngine;
 } = {}) => {
 	const baseDependencies = Layer.mergeAll(
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-		Layer.succeed(OpenCodeAPITag, api),
-		Layer.succeed(
-			OpenCodeInstancesTag,
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+		Layer.succeed(OpenCodeAPITag)(api),
+		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: api }),
 		),
 		makeOverridesStateLive(),
-		Layer.succeed(LoggerTag, log),
-		Layer.succeed(OrchestrationEngineTag, engine),
+		Layer.succeed(LoggerTag)(log),
+		Layer.succeed(OrchestrationEngineTag)(engine),
 	);
 	return Layer.provideMerge(AgentServiceLive, baseDependencies);
 };
@@ -217,11 +216,12 @@ describe("AgentService instance scoping", () => {
 		return Effect.gen(function* () {
 			const service = yield* AgentServiceTag;
 			for (const id of ["future-instance", "unknown-instance"]) {
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					service.listAgents(undefined, { _tag: "Id", id }),
 				);
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left") expect(result.left.message).toContain(id);
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure")
+					expect(result.failure.message).toContain(id);
 			}
 			expect(api.app.agents).not.toHaveBeenCalled();
 			expect(engine.dispatchEffect).not.toHaveBeenCalled();

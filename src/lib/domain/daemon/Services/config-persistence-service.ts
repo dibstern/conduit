@@ -5,20 +5,20 @@ export interface ConfigSnapshot {
 	readonly build: Effect.Effect<DaemonConfig, Error>;
 }
 
-export class ConfigSnapshotTag extends Context.Tag("ConfigSnapshot")<
+export class ConfigSnapshotTag extends Context.Service<
 	ConfigSnapshotTag,
 	ConfigSnapshot
->() {}
+>()("ConfigSnapshot") {}
 
 export interface ConfigPersistence {
 	readonly requestSave: Effect.Effect<void>;
 	readonly flush: Effect.Effect<void, Error>;
 }
 
-export class ConfigPersistenceTag extends Context.Tag("ConfigPersistence")<
+export class ConfigPersistenceTag extends Context.Service<
 	ConfigPersistenceTag,
 	ConfigPersistence
->() {}
+>()("ConfigPersistence") {}
 
 export const requestConfigSave = ConfigPersistenceTag.pipe(
 	Effect.flatMap((persistence) => persistence.requestSave),

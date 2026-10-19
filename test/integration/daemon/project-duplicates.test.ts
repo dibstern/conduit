@@ -9,12 +9,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	FindFolders,
-	GetProjects,
-	ProjectSaveRejected,
-	SaveProject,
-} from "../../../src/lib/contracts/ws-rpc.js";
+import { ProjectSaveRejected } from "../../../src/lib/contracts/ws-rpc.js";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -28,10 +23,9 @@ describe("canonical project folders through the daemon", () => {
 	let manifest: Record<string, unknown> = {};
 
 	async function projects(fixture: ProcessHarness) {
-		const result = await sendRpcRequest(
-			join(fixture.configDir, "relay.sock"),
-			new GetProjects({}),
-		);
+		const result = await sendRpcRequest(join(fixture.configDir, "relay.sock"), {
+			_tag: "GetProjects",
+		});
 		return result.projects
 			.map(({ slug, title, folders }) => ({ slug, title, folders }))
 			.sort((left, right) => left.slug.localeCompare(right.slug));
@@ -86,10 +80,11 @@ describe("canonical project folders through the daemon", () => {
 		symlinkSync(directory, alias, "dir");
 		await fixture.restart();
 		const save = (folders: string[], title = "Original") =>
-			sendRpcRequest(
-				join(fixture.configDir, "relay.sock"),
-				new SaveProject({ folders, title }),
-			);
+			sendRpcRequest(join(fixture.configDir, "relay.sock"), {
+				_tag: "SaveProject",
+				folders,
+				title,
+			});
 		const added = await save([alias]);
 		manifest["projectsBefore"] = await projects(fixture);
 		expect(added.projects).toEqual(
@@ -153,7 +148,7 @@ describe("canonical project folders through the daemon", () => {
 			for (const path of [denied, child]) {
 				const error = await sendRpcRequest(
 					join(fixture.configDir, "relay.sock"),
-					new SaveProject({ folders: [path] }),
+					{ _tag: "SaveProject", folders: [path] },
 				).then(
 					() => undefined,
 					(cause: unknown) => cause,
@@ -165,7 +160,7 @@ describe("canonical project folders through the daemon", () => {
 				expect(error.issues).toEqual([{ kind: "permission-denied", path }]);
 				const lookup = await sendRpcRequest(
 					join(fixture.configDir, "relay.sock"),
-					new FindFolders({ query: `${path}/` }),
+					{ _tag: "FindFolders", query: `${path}/` },
 				).then(
 					() => undefined,
 					(cause: unknown) => cause,

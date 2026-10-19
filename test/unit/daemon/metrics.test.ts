@@ -13,8 +13,8 @@ import {
 describe("Effect.Metric definitions", () => {
 	it.effect("wsConnectionsGauge increments and decrements", () =>
 		Effect.gen(function* () {
-			yield* Metric.increment(wsConnectionsGauge);
-			yield* Metric.increment(wsConnectionsGauge);
+			yield* Metric.modify(wsConnectionsGauge, 1);
+			yield* Metric.modify(wsConnectionsGauge, 1);
 			// No Metric.decrement — use modify with negative value (delta)
 			yield* Metric.modify(wsConnectionsGauge, -1);
 			const state = yield* Metric.value(wsConnectionsGauge);
@@ -24,7 +24,7 @@ describe("Effect.Metric definitions", () => {
 
 	it.effect("activePollersGauge tracks via set", () =>
 		Effect.gen(function* () {
-			yield* Metric.set(activePollersGauge, 5);
+			yield* Metric.update(activePollersGauge, 5);
 			const state = yield* Metric.value(activePollersGauge);
 			expect(state.value).toBe(5);
 		}),
@@ -39,8 +39,8 @@ describe("Effect.Metric definitions", () => {
 
 	it.effect("rateLimitRejectionsCounter increments", () =>
 		Effect.gen(function* () {
-			yield* Metric.increment(rateLimitRejectionsCounter);
-			yield* Metric.increment(rateLimitRejectionsCounter);
+			yield* Metric.update(rateLimitRejectionsCounter, 1);
+			yield* Metric.update(rateLimitRejectionsCounter, 1);
 			const state = yield* Metric.value(rateLimitRejectionsCounter);
 			expect(state.count).toBeGreaterThanOrEqual(2);
 		}),
@@ -48,7 +48,7 @@ describe("Effect.Metric definitions", () => {
 
 	it.effect("configPersistsCounter increments", () =>
 		Effect.gen(function* () {
-			yield* Metric.increment(configPersistsCounter);
+			yield* Metric.update(configPersistsCounter, 1);
 			const state = yield* Metric.value(configPersistsCounter);
 			expect(state.count).toBeGreaterThanOrEqual(1);
 		}),

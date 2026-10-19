@@ -2,7 +2,7 @@ import { readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type { Settings } from "@anthropic-ai/claude-agent-sdk";
-import { Deferred, Effect, Exit, FiberMap } from "effect";
+import { Deferred, Effect, Exit, FiberMap, Semaphore } from "effect";
 import { getProviderDriver } from "../../contracts/provider-instance.js";
 import {
 	type ClaudeAdapterError,
@@ -111,6 +111,7 @@ export const closeClaudeEmptyQuery = <Q extends { close(): void }>(
 	});
 
 interface PendingWarmedQuery {
+	readonly initializingKey: symbol;
 	readonly resource: WarmedClaudeQuery;
 	readonly ready: Deferred.Deferred<WarmedClaudeQuery, ClaudeAdapterError>;
 	readonly inheritedSettings: string | undefined;
@@ -200,8 +201,8 @@ export const makeClaudeWarmedQueryOwner = (
 	prepareQuery?: () => Promise<void>,
 ) =>
 	Effect.gen(function* () {
-		const initializing = yield* FiberMap.make<PendingWarmedQuery, void>();
-		const lock = yield* Effect.makeSemaphore(1);
+		const initializing = yield* FiberMap.make<symbol, void>();
+		const lock = yield* Semaphore.make(1);
 		const pending = new Map<string, PendingWarmedQuery>();
 		let closing = false;
 		const close = (entry: PendingWarmedQuery) =>
@@ -217,7 +218,7 @@ export const makeClaudeWarmedQueryOwner = (
 						cause: new Error("Unused Claude query discarded"),
 					}),
 				);
-				yield* FiberMap.remove(initializing, entry);
+				yield* FiberMap.remove(initializing, entry.initializingKey);
 				yield* close(entry);
 			}).pipe(Effect.uninterruptible);
 		const owner: ClaudeWarmedQueryOwner = {
@@ -286,6 +287,7 @@ export const makeClaudeWarmedQueryOwner = (
 								},
 							};
 							const created: PendingWarmedQuery = {
+								initializingKey: Symbol(),
 								resource,
 								inheritedSettings,
 								inheritedSettingsFrozen,
@@ -297,18 +299,20 @@ export const makeClaudeWarmedQueryOwner = (
 							pending.set(input.sessionId, created);
 							yield* FiberMap.run(
 								initializing,
-								created,
+								created.initializingKey,
 								Effect.tryPromise({
 									try: () => resource.query.initializationResult(),
 									catch: (cause) =>
 										new ClaudeBoundaryError({ operation: "preWarm", cause }),
 								}).pipe(
-									Effect.timeoutFail({
+									Effect.timeoutOrElse({
 										duration: "10 seconds",
-										onTimeout: () =>
-											new ClaudeRuntimeError({
-												message: "Claude pre-warm initialization timed out",
-											}),
+										orElse: () =>
+											Effect.fail(
+												new ClaudeRuntimeError({
+													message: "Claude pre-warm initialization timed out",
+												}),
+											),
 									}),
 									Effect.onExit((exit) =>
 										Effect.gen(function* () {
@@ -354,7 +358,7 @@ export const makeClaudeWarmedQueryOwner = (
 						return;
 					}
 					const resource = yield* Deferred.await(entry.ready).pipe(
-						Effect.catchAll((error) =>
+						Effect.catch((error) =>
 							error instanceof ClaudeBoundaryError &&
 							error.operation === "discardPreWarm"
 								? Effect.fail(error)

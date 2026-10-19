@@ -10,7 +10,6 @@ import {
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
-	Cause,
 	Clock,
 	Context,
 	Deferred,
@@ -21,7 +20,9 @@ import {
 	Option,
 	Ref,
 	Schema,
+	Semaphore,
 } from "effect";
+import * as Failure from "../../effect/failure-classification.js";
 import { ClaudeBoundaryError } from "../event-sink-errors.js";
 import type { ProbeResult } from "./claude-capabilities-probe.js";
 import {
@@ -39,7 +40,7 @@ const CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const ContextWindowOptionSchema = Schema.Struct({
 	value: Schema.String,
 	label: Schema.String,
-	isDefault: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	isDefault: Schema.optionalKey(Schema.Boolean),
 });
 
 const CacheFileSchema = Schema.Struct({
@@ -53,38 +54,34 @@ const CacheFileSchema = Schema.Struct({
 				id: Schema.String,
 				name: Schema.String,
 				providerId: Schema.String,
-				resolvedModel: Schema.optionalWith(Schema.String, { exact: true }),
-				limit: Schema.optionalWith(
+				resolvedModel: Schema.optionalKey(Schema.String),
+				limit: Schema.optionalKey(
 					Schema.Struct({
-						context: Schema.optionalWith(Schema.Number, { exact: true }),
-						output: Schema.optionalWith(Schema.Number, { exact: true }),
+						context: Schema.optionalKey(Schema.Number),
+						output: Schema.optionalKey(Schema.Number),
 					}),
-					{ exact: true },
 				),
-				variants: Schema.optionalWith(
-					Schema.Record({
-						key: Schema.String,
-						value: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-					}),
-					{ exact: true },
+				variants: Schema.optionalKey(
+					Schema.Record(
+						Schema.String,
+						Schema.Record(Schema.String, Schema.Unknown),
+					),
 				),
-				routingOptions: Schema.optionalWith(
+				routingOptions: Schema.optionalKey(
 					Schema.Array(ContextWindowOptionSchema),
-					{ exact: true },
 				),
-				contextWindowOptions: Schema.optionalWith(
+				contextWindowOptions: Schema.optionalKey(
 					Schema.Array(ContextWindowOptionSchema),
-					{ exact: true },
 				),
 			}),
 		),
-		subscriptionType: Schema.optionalWith(Schema.String, { exact: true }),
+		subscriptionType: Schema.optionalKey(Schema.String),
 		commands: Schema.Array(
 			Schema.Struct({
 				name: Schema.String,
-				description: Schema.optionalWith(Schema.String, { exact: true }),
-				args: Schema.optionalWith(Schema.String, { exact: true }),
-				source: Schema.Literal(
+				description: Schema.optionalKey(Schema.String),
+				args: Schema.optionalKey(Schema.String),
+				source: Schema.Literals([
 					"builtin",
 					"user-command",
 					"project-command",
@@ -92,15 +89,15 @@ const CacheFileSchema = Schema.Struct({
 					"project-skill",
 					"plugin-skill",
 					"sdk",
-				),
+				]),
 			}),
 		),
 		agents: Schema.Array(
 			Schema.Struct({
 				id: Schema.String,
 				name: Schema.String,
-				description: Schema.optionalWith(Schema.String, { exact: true }),
-				model: Schema.optionalWith(Schema.String, { exact: true }),
+				description: Schema.optionalKey(Schema.String),
+				model: Schema.optionalKey(Schema.String),
 			}),
 		),
 	}),
@@ -112,7 +109,9 @@ type _CachedResultFitsProbeResult = AssertExtends<
 	ProbeResult
 >;
 
-const decodeCacheFile = Schema.decodeUnknown(Schema.parseJson(CacheFileSchema));
+const decodeCacheFile = Schema.decodeUnknownEffect(
+	Schema.fromJsonString(CacheFileSchema),
+);
 
 interface CacheEntry {
 	readonly expiresAt: number;
@@ -139,9 +138,10 @@ export interface ClaudeCapabilitiesService {
 	) => Effect.Effect<ProbeResult, ClaudeBoundaryError>;
 }
 
-export class ClaudeCapabilitiesServiceTag extends Context.Tag(
-	"ClaudeCapabilitiesService",
-)<ClaudeCapabilitiesServiceTag, ClaudeCapabilitiesService>() {}
+export class ClaudeCapabilitiesServiceTag extends Context.Service<
+	ClaudeCapabilitiesServiceTag,
+	ClaudeCapabilitiesService
+>()("ClaudeCapabilitiesService") {}
 
 export interface ClaudeCapabilitiesServiceDeps {
 	readonly launchConfig: () => ClaudeLaunchConfig;
@@ -152,7 +152,7 @@ export interface ClaudeCapabilitiesServiceDeps {
 
 const makeClaudeCapabilitiesServiceWithCache = (
 	cacheRef: Ref.Ref<HashMap.HashMap<string, CacheEntry>>,
-	lock: Effect.Semaphore,
+	lock: Semaphore.Semaphore,
 	deps: ClaudeCapabilitiesServiceDeps,
 ): ClaudeCapabilitiesService => {
 	const ttlMs = deps.ttlMs ?? CAPABILITY_CACHE_TTL_MS;
@@ -304,7 +304,7 @@ const makeClaudeCapabilitiesServiceWithCache = (
 										);
 										await rename(temp, file);
 									}).pipe(
-										Effect.catchAll((cause) =>
+										Effect.catch((cause) =>
 											Effect.logWarning(
 												"Failed to persist Claude capabilities",
 												cause,
@@ -319,11 +319,11 @@ const makeClaudeCapabilitiesServiceWithCache = (
 							Exit.isFailure(exit)
 								? Effect.gen(function* () {
 										const error = Option.getOrElse(
-											Cause.failureOption(exit.cause),
+											Failure.firstFailure(exit.cause),
 											() =>
 												new ClaudeBoundaryError({
 													operation: "probeCapabilities",
-													cause: Cause.squash(exit.cause),
+													cause: Failure.squashCause(exit.cause),
 												}),
 										);
 										const failedAt = yield* Clock.currentTimeMillis;
@@ -358,8 +358,8 @@ const makeClaudeCapabilitiesServiceWithCache = (
 									cache: "stale",
 								},
 							}),
-							Effect.catchAllCause(() => Effect.void),
-							Effect.forkDaemon,
+							Effect.catchCause(() => Effect.void),
+							Effect.forkDetach,
 						);
 						return staleValue;
 					}
@@ -376,7 +376,7 @@ export const makeClaudeCapabilitiesService = (
 ): Effect.Effect<ClaudeCapabilitiesService> =>
 	Effect.gen(function* () {
 		const cacheRef = yield* Ref.make(HashMap.empty<string, CacheEntry>());
-		const lock = yield* Effect.makeSemaphore(1);
+		const lock = yield* Semaphore.make(1);
 		if (deps.cacheDir !== undefined) {
 			const cacheDir = deps.cacheDir;
 			yield* Effect.tryPromise(async () => {
@@ -394,7 +394,7 @@ export const makeClaudeCapabilitiesService = (
 							if ((await stat(path)).mtimeMs < cutoff) await unlink(path);
 						}),
 				);
-			}).pipe(Effect.ignore, Effect.forkDaemon);
+			}).pipe(Effect.ignore, Effect.forkDetach);
 		}
 		return makeClaudeCapabilitiesServiceWithCache(cacheRef, lock, deps);
 	});

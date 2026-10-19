@@ -1,5 +1,5 @@
-import type { SqlClient } from "@effect/sql";
 import { Context, Effect, Layer } from "effect";
+import type { SqlClient } from "effect/sql";
 import {
 	type PersistenceEffectError,
 	PersistenceStore,
