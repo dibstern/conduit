@@ -113,7 +113,7 @@ describe("authenticateEffect", () => {
 			// Exhaust attempts
 			for (let i = 0; i < 3; i++) {
 				yield* authenticateEffect(manager, "0000", "10.0.0.2").pipe(
-					Effect.catchAll(() => Effect.void),
+					Effect.catch(() => Effect.void),
 				);
 			}
 

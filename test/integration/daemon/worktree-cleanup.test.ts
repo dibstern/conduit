@@ -18,20 +18,6 @@ import {
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	CleanUpWorktreesNow,
-	ClosePty,
-	CreatePty,
-	CreatePtyForSession,
-	CreateSession,
-	DeleteSession,
-	GetWorktreeCleanupSetting,
-	ListDaemonSessions,
-	ListPtys,
-	MoveSessionWorkspace,
-	SetSessionSettled,
-	SetWorktreeCleanupSetting,
-} from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { PtyHostClient } from "../../../src/lib/terminal/pty-host-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -130,26 +116,22 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		await fixture.restart({ startupTimeoutMs: 120_000 });
 		const socket = join(fixture.configDir, "relay.sock");
 		const sessions = () =>
-			sendRpcRequest(
-				socket,
-				new ListDaemonSessions({
-					projectSlug: "process-test",
-					scope: "process-test",
-				}),
-			);
+			sendRpcRequest(socket, {
+				_tag: "ListDaemonSessions",
+				projectSlug: "process-test",
+				scope: "process-test",
+			});
 		const create = async (title: string, newWorktree = true) => {
-			const result = await sendRpcRequest(
-				socket,
-				new CreateSession({
-					projectSlug: "process-test",
-					originId: "cleanup-test",
-					providerId: "claude",
-					permissionMode: "ask",
-					model: { providerId: "claude", modelId: "sonnet" },
-					title,
-					...(newWorktree ? { newWorktree: true } : {}),
-				}),
-			);
+			const result = await sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				projectSlug: "process-test",
+				originId: "cleanup-test",
+				providerId: "claude",
+				permissionMode: "ask",
+				model: { providerId: "claude", modelId: "sonnet" },
+				title,
+				...(newWorktree ? { newWorktree: true } : {}),
+			});
 			const session = (await sessions()).sessions.find(
 				({ id }) => id === result.sessionId,
 			);
@@ -161,19 +143,18 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			return { id: result.sessionId, path: path ?? fixture.projectDir, branch };
 		};
 		const settle = (sessionId: string) =>
-			sendRpcRequest(
-				socket,
-				new SetSessionSettled({
-					sessionId,
-					settled: true,
-				}),
-			);
+			sendRpcRequest(socket, {
+				_tag: "SetSessionSettled",
+				sessionId,
+				settled: true,
+			});
 		const sweep = async (label: string, projectSlug?: string) => {
 			const result = await sendRpcRequest(
 				socket,
-				new CleanUpWorktreesNow(
-					projectSlug === undefined ? {} : { projectSlug },
-				),
+				{
+					_tag: "CleanUpWorktreesNow",
+					...(projectSlug === undefined ? {} : { projectSlug }),
+				},
 				{ requestTimeoutMs: 30_000 },
 			);
 			(evidence["sweeps"] as unknown[]).push({ label, ...result });
@@ -190,14 +171,14 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			return result;
 		};
 		const setting = () =>
-			sendRpcRequest(socket, new GetWorktreeCleanupSetting({}));
+			sendRpcRequest(socket, { _tag: "GetWorktreeCleanupSetting" });
 		const set = async (value: Partial<CleanupSetting>) => {
 			const worktreeCleanup = { ...defaults, ...value };
 			expect(
-				await sendRpcRequest(
-					socket,
-					new SetWorktreeCleanupSetting({ worktreeCleanup }),
-				),
+				await sendRpcRequest(socket, {
+					_tag: "SetWorktreeCleanupSetting",
+					worktreeCleanup,
+				}),
 			).toEqual({ worktreeCleanup });
 			return worktreeCleanup;
 		};
@@ -288,13 +269,11 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		expect(
 			git(fixture.projectDir, "rev-parse", `refs/heads/${session.branch}`),
 		).toBe(head);
-		const rows = await sendRpcRequest(
-			socket,
-			new ListDaemonSessions({
-				projectSlug: "process-test",
-				scope: "process-test",
-			}),
-		);
+		const rows = await sendRpcRequest(socket, {
+			_tag: "ListDaemonSessions",
+			projectSlug: "process-test",
+			scope: "process-test",
+		});
 		expect(
 			rows.sessions.find(({ id }) => id === session.id)?.workspace?.worktrees[
 				fixture.projectDir
@@ -496,17 +475,16 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 	it("keeps a checkout with a hosted terminal after daemon restart until it closes", async () => {
 		const { fixture, socket, create, settle, enable, sweep } = await start();
 		const session = await create("terminal ownership");
-		await sendRpcRequest(
-			socket,
-			new CreatePtyForSession({
-				sessionId: session.id,
-				originId: "cleanup-test",
-			}),
-		);
-		const { ptys } = await sendRpcRequest(
-			socket,
-			new ListPtys({ projectSlug: "process-test", originId: "cleanup-test" }),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "CreatePty",
+			sessionId: session.id,
+			originId: "cleanup-test",
+		});
+		const { ptys } = await sendRpcRequest(socket, {
+			_tag: "ListPtys",
+			projectSlug: "process-test",
+			originId: "cleanup-test",
+		});
 		const pty = ptys.find(({ cwd }) => cwd === session.path);
 		expect(pty?.status).toBe("running");
 		if (!pty) throw new Error("Worktree terminal was not created");
@@ -526,10 +504,11 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		});
 		expect(existsSync(session.path)).toBe(true);
 		evidence["terminal"] = { id: pty.id, cwd: pty.cwd, pid: pty.pid };
-		await sendRpcRequest(
-			socket,
-			new ClosePty({ projectSlug: "process-test", ptyId: pty.id }),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "ClosePty",
+			projectSlug: "process-test",
+			ptyId: pty.id,
+		});
 		const removed = await sweep("terminal closed");
 		expect(
 			removed.removed.some(({ sessionId }) => sessionId === session.id),
@@ -545,9 +524,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const session = await create("admitted handoff");
 		await settle(session.id);
 		await enable(session, { onSettle: "any" });
-		const db = new Database(
-			join(fixture.configDir, "projects", "process-test", "events.db"),
-		);
+		const db = new Database(fixture.daemonStorePath());
 		try {
 			// Reproduce admission's durable handoff before normal turn/status events.
 			// A future retry is not dispatched by the fixture's background reactor.
@@ -555,7 +532,8 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 					(request_sequence, command_id, project_key, session_id, provider_id,
 					effect_type, payload_json, status, next_attempt_at, requested_at, updated_at)
 					VALUES (-1, 'cleanup-handoff', ?, ?, 'claude', 'send_turn', '{}', ?, ?, ?, ?)`).run(
-				fixture.projectDir,
+				// Admission keys durable commands by project slug.
+				"process-test",
 				session.id,
 				outboxStatus,
 				Date.now() + 86_400_000,
@@ -590,10 +568,11 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const session = await create("cross-project terminal");
 		// Start the fixture host, then retain a terminal whose owning project
 		// differs from its cwd through the host's public protocol.
-		await sendRpcRequest(
-			socket,
-			new CreatePty({ projectSlug: "process-test", originId: "cleanup-test" }),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "CreatePty",
+			projectSlug: "process-test",
+			originId: "cleanup-test",
+		});
 		const host = await PtyHostClient.connect({
 			configDir: fixture.configDir,
 			start: false,
@@ -637,13 +616,11 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const { socket, create, settle, enable, sweep } = await start();
 		const owner = await create("shared owner");
 		const other = await create("shared user", false);
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId: other.id,
-				path: owner.path,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId: other.id,
+			path: owner.path,
+		});
 		await settle(owner.id);
 		await enable(owner, { onSettle: "any" });
 		const result = await sweep("shared checkout");
@@ -684,24 +661,20 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			}),
 		);
 		await fixture.restart({ startupTimeoutMs: 120_000 });
-		const other = await sendRpcRequest(
-			socket,
-			new CreateSession({
-				projectSlug,
-				originId: "cleanup-test",
-				providerId: "claude",
-				permissionMode: "ask",
-				model: { providerId: "claude", modelId: "sonnet" },
-				title: "Registered project session",
-			}),
-		);
-		const rows = await sendRpcRequest(
-			socket,
-			new ListDaemonSessions({
-				projectSlug,
-				scope: projectSlug,
-			}),
-		);
+		const other = await sendRpcRequest(socket, {
+			_tag: "CreateSession",
+			projectSlug,
+			originId: "cleanup-test",
+			providerId: "claude",
+			permissionMode: "ask",
+			model: { providerId: "claude", modelId: "sonnet" },
+			title: "Registered project session",
+		});
+		const rows = await sendRpcRequest(socket, {
+			_tag: "ListDaemonSessions",
+			projectSlug,
+			scope: projectSlug,
+		});
 		const row = rows.sessions.find(({ id }) => id === other.sessionId);
 		expect(row).toBeDefined();
 		expect(row?.workspace ?? null).toBeNull();
@@ -731,7 +704,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const recent = await create("recent");
 		await enable(old, { onSettle: "off", afterInactiveDays: 7 });
 		const now = Date.now();
-		const db = new Database(fixture.projectStorePath());
+		const db = new Database(fixture.daemonStorePath());
 		try {
 			db.prepare("UPDATE sessions SET last_message_at = ? WHERE id = ?").run(
 				now - 8 * 86_400_000,
@@ -768,12 +741,10 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const head = git(session.path, "rev-parse", "HEAD");
 		await settle(session.id);
 		writeFileSync(join(session.path, "base.txt"), "cleanup guard\n");
-		await sendRpcRequest(
-			socket,
-			new DeleteSession({
-				sessionId: session.id,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "DeleteSession",
+			sessionId: session.id,
+		});
 		expect(existsSync(session.path)).toBe(true);
 		await enable(session, { onSettle: "any", noCommitsBeyondDefault: true });
 		const kept = await sweep("deleted without onDelete");
@@ -815,7 +786,10 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			checkoutExists: existsSync(session.path),
 		};
 		expect(existsSync(session.path)).toBe(true);
-		const deletion = await sendRpcRequest(socket, new DeleteSession(payload));
+		const deletion = await sendRpcRequest(socket, {
+			_tag: "DeleteSession",
+			...payload,
+		});
 		evidence["deletionResponse"] = deletion;
 		expect(deletion.ok).toBe(true);
 		expect(deletion.worktreeWarnings ?? []).toEqual([]);
@@ -839,13 +813,11 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const session = await create("deferred removal");
 		const head = git(session.path, "rev-parse", "HEAD");
 		writeFileSync(join(session.path, "base.txt"), "unfinished work\n");
-		const deletion = await sendRpcRequest(
-			socket,
-			new DeleteSession({
-				sessionId: session.id,
-				removeWorktrees: true,
-			}),
-		);
+		const deletion = await sendRpcRequest(socket, {
+			_tag: "DeleteSession",
+			sessionId: session.id,
+			removeWorktrees: true,
+		});
 		evidence["deletion"] = deletion;
 		expect(deletion.worktreeWarnings?.join(" ")).toMatch(/uncommitted/i);
 		expect(existsSync(session.path)).toBe(true);

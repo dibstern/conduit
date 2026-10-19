@@ -47,7 +47,7 @@ Done when the target versions are in the bead.
   - Anything else conduit doesn't read: no change.
 - `[contract]`: the declaration's name appears in a contract file. Read these first. It is a whole-word match, so common names can be false hits.
 
-Cursor's contract is `src/lib/provider/cursor/sdk-port.ts`: every SDK call crosses it, and `sdk-real.ts` and `sdk-trace-player.ts` implement it. `audit` diffs `dist/esm` and marks names used in the port or the player. A changed SDK call means changing both adapters together.
+Cursor's contract is `src/lib/provider/cursor/sdk-port.ts`: every SDK call crosses it, and `sdk-real.ts` and `sdk-trace-player.ts` implement it. `audit` diffs `dist/esm` and marks names used in the port or the player. A changed SDK call means changing both adapters together. `audit` cannot see one private call: `primeSandbox` in `sdk-real.ts` calls the agent's internal `getExecutor()` to prime the sandbox without a billable send. Confirm it still exists in the new `dist/esm`; if it is gone, every turn fails with "Cursor SDK sandbox initialization API changed".
 
 Done when every `[review]` group has a class, and the summary is in the bead.
 

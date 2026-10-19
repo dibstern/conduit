@@ -24,7 +24,7 @@ export const normalizeProjectTitle = (title: string): string =>
 
 const listSessionCommands = (
 	activeSessionId: string | undefined,
-	tolerateClaudeFailure = true,
+	tolerateDiscoveryFailure = true,
 	draftInstanceId?: string,
 ) =>
 	Effect.gen(function* () {
@@ -40,7 +40,7 @@ const listSessionCommands = (
 				? { _tag: "DriverDefault", driver: "opencode" }
 				: { _tag: "Id", id: accountId },
 		);
-		const listClaudeCommands = (claude: Account) =>
+		const listDiscoveredCommands = (selected: Account) =>
 			Effect.gen(function* () {
 				const workspaceRoot = activeSessionId
 					? yield* (yield* SessionWorkspaceTag).get(activeSessionId)
@@ -48,17 +48,17 @@ const listSessionCommands = (
 				return yield* engine
 					.dispatchEffect({
 						type: "discover",
-						providerId: "claude",
-						account: claude,
+						providerId: selected.id,
+						account: selected,
 						workspaceRoot,
 					})
 					.pipe(
 						Effect.map((capabilities) => capabilities.commands),
-						Effect.catchAll((error) =>
-							tolerateClaudeFailure
+						Effect.catch((error) =>
+							tolerateDiscoveryFailure
 								? Effect.gen(function* () {
 										(yield* LoggerTag).warn(
-											`Failed to discover Claude commands: ${error instanceof Error ? error.message : error}`,
+											`Failed to discover ${selected.name} commands: ${error instanceof Error ? error.message : error}`,
 										);
 										return [];
 									})
@@ -67,18 +67,18 @@ const listSessionCommands = (
 					);
 			});
 		if (PROVIDER_DRIVERS[account.driver].catalogSource === "discovery")
-			return yield* listClaudeCommands(account);
-		const result = yield* Effect.either(
+			return yield* listDiscoveredCommands(account);
+		const result = yield* Effect.result(
 			(yield* OpenCodeSettingsServiceTag).listCommands({
-				startIfStopped: !tolerateClaudeFailure,
+				startIfStopped: !tolerateDiscoveryFailure,
 			}),
 		);
-		if (result._tag === "Right") return result.right;
-		if (boundId !== undefined) return yield* Effect.fail(result.left);
+		if (result._tag === "Success") return result.success;
+		if (boundId !== undefined) return yield* Effect.fail(result.failure);
 		(yield* LoggerTag).warn(
-			`Failed to discover OpenCode commands; falling back to Claude commands: ${result.left instanceof Error ? result.left.message : result.left}`,
+			`Failed to discover OpenCode commands; falling back to Claude commands: ${result.failure instanceof Error ? result.failure.message : result.failure}`,
 		);
-		return yield* listClaudeCommands(
+		return yield* listDiscoveredCommands(
 			yield* directory.resolve({ _tag: "DriverDefault", driver: "claude" }),
 		);
 	});

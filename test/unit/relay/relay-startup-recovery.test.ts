@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -56,6 +56,7 @@ it("recovers historical sessions before startup can create a live session", asyn
 			}).pipe(
 				Effect.provide(
 					makePersistenceEffectLayer(filename, "startup-recovery"),
+					{ local: true },
 				),
 			),
 		);
@@ -150,7 +151,10 @@ it("rejects Claude permissions a crash left pending and leaves OpenCode's alone"
 	try {
 		await Effect.runPromise(
 			Effect.all([seed("claude"), seed("opencode")]).pipe(
-				Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+				Effect.provide(
+					makePersistenceEffectLayer(filename, "orphaned-permissions"),
+					{ local: true },
+				),
 			),
 		);
 

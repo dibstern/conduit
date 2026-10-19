@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 
 import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
@@ -44,6 +44,7 @@ function makeSampleConfig(overrides?: Partial<DaemonConfig>): DaemonConfig {
 		debug: false,
 		keepAwake: false,
 		autoSettleAfterDays: 3,
+		autoArchiveAfterDays: 30,
 		projects: [],
 		...overrides,
 	};
@@ -157,8 +158,8 @@ describe("loadDaemonConfigResult", () => {
 			tempDir,
 		);
 		expect(loadDaemonConfigResult(tempDir)).toMatchObject({
-			_tag: "Left",
-			left: { _tag: "Invalid", path: join(tempDir, "daemon.json") },
+			_tag: "Failure",
+			failure: { _tag: "Invalid", path: join(tempDir, "daemon.json") },
 		});
 	});
 	it("returns parsed config from valid JSON file", () => {
@@ -183,8 +184,8 @@ describe("loadDaemonConfigResult", () => {
 
 	it("returns NotFound when file doesn't exist", () => {
 		expect(loadDaemonConfigResult(tempDir)).toMatchObject({
-			_tag: "Left",
-			left: { _tag: "NotFound", path: join(tempDir, "daemon.json") },
+			_tag: "Failure",
+			failure: { _tag: "NotFound", path: join(tempDir, "daemon.json") },
 		});
 	});
 
@@ -193,16 +194,16 @@ describe("loadDaemonConfigResult", () => {
 		writeFileSync(join(tempDir, "daemon.json"), "{ not valid json !!!");
 
 		expect(loadDaemonConfigResult(tempDir)).toMatchObject({
-			_tag: "Left",
-			left: { _tag: "Invalid", path: join(tempDir, "daemon.json") },
+			_tag: "Failure",
+			failure: { _tag: "Invalid", path: join(tempDir, "daemon.json") },
 		});
 	});
 
 	it("handles missing configDir gracefully", () => {
 		const nonExistentDir = join(tempDir, "does", "not", "exist");
 		expect(loadDaemonConfigResult(nonExistentDir)).toMatchObject({
-			_tag: "Left",
-			left: { _tag: "NotFound", path: join(nonExistentDir, "daemon.json") },
+			_tag: "Failure",
+			failure: { _tag: "NotFound", path: join(nonExistentDir, "daemon.json") },
 		});
 	});
 });

@@ -411,14 +411,14 @@ test("tools open as previews and expand to full detail", async ({
 }, testInfo) => {
 	test.setTimeout(120_000);
 	await harness.terminate();
-	await seed(harness.projectStorePath());
+	await seed(harness.daemonStorePath());
 	await harness.restart({ keepPort: true });
 
 	const driver = await harness.connect();
 	await expect.poll(() => harness.generations.at(-1)?.fakeSdkActive).toBe(true);
 	const send = (sessionId: string, text: string) =>
 		Effect.runPromise(
-			driver.rpc.input.submit({
+			driver.rpc["input.submit"]({
 				sessionId,
 				originId: driver.originId,
 				inputId: randomUUID(),
@@ -651,7 +651,7 @@ test("resting on a turn activity block prefetches its tools, once loaded", async
 }, testInfo) => {
 	test.setTimeout(120_000);
 	await harness.terminate();
-	await seed(harness.projectStorePath());
+	await seed(harness.daemonStorePath());
 	await harness.restart({ keepPort: true });
 
 	const { viewport, isMobile, hasTouch } = testInfo.project.use;
@@ -716,7 +716,7 @@ test("resting on a turn activity block prefetches its tools, once loaded", async
 	const liveFrom = rpc.frames.length;
 	const requestsBeforeLive = rpc.detailRequests.length;
 	await Effect.runPromise(
-		driver.rpc.input.submit({
+		driver.rpc["input.submit"]({
 			sessionId: liveSession,
 			originId: driver.originId,
 			inputId: randomUUID(),

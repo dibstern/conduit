@@ -14,6 +14,7 @@ export interface SessionRow {
 	status: string;
 	history_complete?: number;
 	parent_id: string | null;
+	forked_from?: string | null;
 	side_thread?: number;
 	fork_point_event: string | null;
 	fork_point_timestamp?: number | null;
@@ -43,6 +44,9 @@ export interface SessionRow {
 	/** Generated: 1 while a root or fork has a turn end newer than seen. */
 	unread?: number;
 	settled_at: number | null;
+	archived_at?: number | null;
+	archived_automatically?: number;
+	unarchived_at?: number | null;
 	unsettled_at?: number | null;
 	auto_settle_disabled_at?: number | null;
 	settled_automatically?: number;
@@ -77,6 +81,9 @@ export interface PendingApprovalRow {
 
 export interface PendingClaudeQuestionToolRow {
 	id: string;
+	prompt_id?: string | null;
+	provider_process_id?: string | null;
+	provider_request_id?: string | null;
 	call_id: string | null;
 	message_id: string;
 	input: string | null;

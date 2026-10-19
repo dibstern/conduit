@@ -7,7 +7,6 @@ import type {
 	SessionPermissionMode,
 } from "../types.js";
 import {
-	applyGetAgentsResponse,
 	chooseContextWindow,
 	chooseModel,
 	choosePermissionMode,
@@ -18,6 +17,7 @@ import {
 	getActiveModelVariants,
 	getEffectiveInstanceId,
 	getProviderGroupsForInstance,
+	refreshCatalogs,
 } from "./discovery.svelte.js";
 import { getCurrentSlug } from "./router.svelte.js";
 import { findSession, sessionState } from "./session.svelte.js";
@@ -64,6 +64,9 @@ function switchSetting(
 ): void {
 	pending[setting] += 1;
 	void request()
+		.then(() => {
+			void refreshCatalogs();
+		})
 		.catch((error: unknown) => {
 			undo();
 			toastFailure(failure, "warn")(error);
@@ -276,16 +279,6 @@ export const model: ComposerSetting<ComposerModel> = {
 								}
 							: {}),
 					});
-					void rpc("GetAgents", { sessionId })
-						.then((response) => {
-							// Agents are shared composer state, unlike the per-session pick.
-							if (
-								sessionState.currentId === sessionId &&
-								getCurrentSlug() === projectSlug
-							)
-								applyGetAgentsResponse(response, sessionId);
-						})
-						.catch(() => undefined);
 				}),
 			`Couldn't switch model to "${value.modelId}"`,
 		);

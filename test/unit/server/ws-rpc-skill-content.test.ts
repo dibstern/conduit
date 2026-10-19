@@ -9,15 +9,12 @@ import {
 import fs from "node:fs/promises";
 import os from "node:os";
 import { dirname, join } from "node:path";
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
+import { RpcTest } from "effect/rpc";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import {
-	makeSessionDirectoryLive,
-	SessionDirectory,
-} from "../../../src/lib/domain/daemon/Services/session-directory.js";
+import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
@@ -72,6 +69,7 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 						}),
 					),
 				),
+				{ local: true },
 			),
 		);
 
@@ -124,10 +122,10 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 				"a..b",
 				".hidden",
 			]) {
-				const result = yield* Effect.either(readSkill(name));
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left") {
-					expect(result.left.message).toBe("Skill content not available");
+				const result = yield* Effect.result(readSkill(name));
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure") {
+					expect(result.failure.message).toBe("Skill content not available");
 				}
 			}
 			expect(realpath).not.toHaveBeenCalled();
@@ -182,10 +180,10 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 					join(root, "escaped-file", "SKILL.md"),
 				);
 				for (const name of ["escaped-dir", "escaped-file"]) {
-					const result = yield* Effect.either(readSkill(name));
-					expect(result._tag).toBe("Left");
-					if (result._tag === "Left") {
-						expect(result.left.message).toBe("Skill content not available");
+					const result = yield* Effect.result(readSkill(name));
+					expect(result._tag).toBe("Failure");
+					if (result._tag === "Failure") {
+						expect(result.failure.message).toBe("Skill content not available");
 					}
 				}
 			}),
@@ -196,10 +194,12 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 			writeSkill(project, "review", "Project A instructions");
 			const homePath = writeSkill(home, "review", "Home instructions");
 			const otherProject = join(temp, "project-b");
-			const directory = yield* SessionDirectory.pipe(
-				Effect.provide(makeSessionDirectoryLive(temp, [])),
-			);
-			const directoryLayer = Layer.succeed(SessionDirectory, directory);
+			const directoryLayer = Layer.succeed(SessionDirectory)({
+				projectOf: (sessionId) =>
+					Effect.succeed(
+						sessionId === "owned-b" ? Option.some("project-b") : Option.none(),
+					),
+			});
 			const projectA = yield* Layer.build(
 				makeTestHandlerLayer({
 					config: makeMockConfig({ slug: "project-a", projectDir: project }),
@@ -211,13 +211,7 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 						slug: "project-b",
 						projectDir: otherProject,
 					}),
-					persistenceLayer: makePersistenceEffectLayer(
-						":memory:",
-						"project-b",
-						undefined,
-						undefined,
-						directoryLayer,
-					),
+					persistenceLayer: makePersistenceEffectLayer(":memory:", "project-b"),
 					seedEvents: [
 						canonicalEvent("session.created", "owned-b", {
 							sessionId: "owned-b",
@@ -241,6 +235,7 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 					makeRoutedWsRpcServerLayer(resolve, undefined, "project-a").pipe(
 						Layer.provide(directoryLayer),
 					),
+					{ local: true },
 				),
 			);
 			const realpath = vi.spyOn(fs, "realpath");
@@ -282,12 +277,12 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 			realpath.mockClear();
 			open.mockClear();
 			expect(
-				yield* Effect.either(
+				yield* Effect.result(
 					client.GetSkillContent({ sessionId: "missing", name: "review" }),
 				),
 			).toMatchObject({
-				_tag: "Left",
-				left: { _tag: "WsRpcError", code: "unknown-session" },
+				_tag: "Failure",
+				failure: { _tag: "WsRpcError", code: "unknown-session" },
 			});
 			expect(resolve).not.toHaveBeenCalled();
 			expect(realpath).not.toHaveBeenCalled();
@@ -297,10 +292,10 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 
 	it.effect("returns not-found when neither root contains the skill", () =>
 		Effect.gen(function* () {
-			const result = yield* Effect.either(readSkill("missing"));
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expect(result.left.message).toBe("Skill content not available");
+			const result = yield* Effect.result(readSkill("missing"));
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
+				expect(result.failure.message).toBe("Skill content not available");
 			}
 		}),
 	);

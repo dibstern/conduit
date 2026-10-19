@@ -20,7 +20,11 @@ import { basename, join, resolve, sep } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import { Data, Effect } from "effect";
-import { makePersistenceEffectLayer } from "../effect/live.js";
+import {
+	makePersistenceEffectLayer,
+	makePersistenceStoreLayer,
+	type PersistenceEffectError,
+} from "../effect/live.js";
 import { effectMigrationEntries } from "../effect/migrations.js";
 import { ProjectionRunnerEffectTag } from "../effect/projection-runner-effect.js";
 import { createAllEffectProjectors } from "../effect/projectors-effect.js";
@@ -29,6 +33,8 @@ import { daemonStorePath } from "../project-storage.js";
 export interface ProjectStoreSource {
 	readonly projectId: string;
 	readonly sourcePath: string;
+	/** Retained history follows every registered source and cannot seed. */
+	readonly retained?: boolean;
 }
 
 export type DaemonStoreImportCheckpoint =
@@ -1464,12 +1470,12 @@ function writeReport(
 	}
 }
 
-/** Only the supplied registered sources participate; failed projects stay isolated. */
+/** Registered sources seed first; retained sources follow without taking ownership. */
 export const importRegisteredProjectStores = (
 	configDir: string,
 	projects: readonly ProjectStoreSource[],
 	options: DaemonStoreImportOptions = {},
-): Effect.Effect<readonly ProjectStoreImportResult[]> =>
+): Effect.Effect<readonly ProjectStoreImportResult[], PersistenceEffectError> =>
 	Effect.gen(function* () {
 		yield* Effect.sync(() => clearImportScratch(configDir, projects));
 		const results = new Map<string, ProjectStoreImportResult>();
@@ -1483,6 +1489,7 @@ export const importRegisteredProjectStores = (
 		});
 		if (!existsSync(daemonStorePath(configDir))) {
 			const sized = projects
+				.filter((project) => !project.retained)
 				.map((project) => {
 					try {
 						return { project, size: statSync(project.sourcePath).size };
@@ -1497,52 +1504,61 @@ export const importRegisteredProjectStores = (
 				);
 			for (const { project } of sized) {
 				const result = yield* seedDaemonStore(configDir, project, options).pipe(
-					Effect.either,
+					Effect.result,
 				);
-				if (result._tag === "Right") {
+				if (result._tag === "Success") {
 					const completed = yield* attempt(project, () =>
-						finishBackup(configDir, project, options, result.right),
-					).pipe(Effect.either);
+						finishBackup(configDir, project, options, result.success),
+					).pipe(Effect.result);
 					results.set(
 						project.projectId,
-						completed._tag === "Right"
-							? (completed.right ?? result.right)
-							: failed(project, completed.left),
+						completed._tag === "Success"
+							? (completed.success ?? result.success)
+							: failed(project, completed.failure),
 					);
-					if (result.right.outcome === "seeded") break;
-				} else results.set(project.projectId, failed(project, result.left));
+					if (result.success.outcome === "seeded") break;
+				} else results.set(project.projectId, failed(project, result.failure));
 			}
+		}
+		// Retained sources cannot seed, even if there are no registered histories.
+		if (
+			!existsSync(daemonStorePath(configDir)) &&
+			projects.some((project) => project.retained)
+		) {
+			yield* Effect.void.pipe(
+				Effect.provide(makePersistenceStoreLayer(daemonStorePath(configDir))),
+			);
 		}
 		for (const project of projects) {
 			if (results.has(project.projectId)) continue;
 			const marked = yield* attempt(project, () =>
 				finishBackup(configDir, project, options),
-			).pipe(Effect.either);
-			if (marked._tag === "Left") {
-				results.set(project.projectId, failed(project, marked.left));
+			).pipe(Effect.result);
+			if (marked._tag === "Failure") {
+				results.set(project.projectId, failed(project, marked.failure));
 				continue;
 			}
-			if (marked.right) {
-				results.set(project.projectId, marked.right);
+			if (marked.success) {
+				results.set(project.projectId, marked.success);
 				continue;
 			}
 			const result = yield* importProjectStore(
 				configDir,
 				project,
 				options,
-			).pipe(Effect.either);
-			if (result._tag === "Left") {
-				results.set(project.projectId, failed(project, result.left));
+			).pipe(Effect.result);
+			if (result._tag === "Failure") {
+				results.set(project.projectId, failed(project, result.failure));
 				continue;
 			}
 			const completed = yield* attempt(project, () =>
-				finishBackup(configDir, project, options, result.right),
-			).pipe(Effect.either);
+				finishBackup(configDir, project, options, result.success),
+			).pipe(Effect.result);
 			results.set(
 				project.projectId,
-				completed._tag === "Right"
-					? (completed.right ?? result.right)
-					: failed(project, completed.left),
+				completed._tag === "Success"
+					? (completed.success ?? result.success)
+					: failed(project, completed.failure),
 			);
 		}
 		const ordered = projects.flatMap((project) => {

@@ -20,6 +20,7 @@
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { isLoading, sessionMessages } from "../../stores/chat.svelte.js";
 	import { followFork, sessionState } from "../../stores/session.svelte.js";
+	import { selection } from "../../stores/selection.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
@@ -349,11 +350,12 @@
 			const projectSlug = getCurrentSlug();
 			if (!projectSlug) return;
 			const sourceSessionId = sessionId ?? sessionState.currentId;
+			const from = selection.scope;
 			void rpc("ForkSession", {
 				...(sourceSessionId ? { sessionId: sourceSessionId } : { projectSlug }),
 				originId: getBrowserClientId(),
 				messageId: forkMessageId,
-			}).then(followFork)
+			}).then((response) => followFork(from, response))
 				.catch(toastFailure("Failed to fork session"));
 		}
 	}

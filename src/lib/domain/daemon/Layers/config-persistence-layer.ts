@@ -14,10 +14,12 @@ import {
 	Queue,
 	Record,
 	Ref,
+	Semaphore,
 } from "effect";
 import { DEFAULT_WORKTREE_CLEANUP } from "../../../contracts/worktree.js";
 import {
 	type DaemonConfig,
+	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	loadDaemonConfigResult,
 	saveDaemonConfig,
@@ -83,9 +85,16 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 			runtime.autoSettleAfterDays === undefined
 				? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 				: runtime.autoSettleAfterDays,
+		autoArchiveAfterDays:
+			runtime.autoArchiveAfterDays === undefined
+				? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS
+				: runtime.autoArchiveAfterDays,
 		worktreeCleanup: runtime.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP,
 		...(runtime.usageLimits !== undefined && {
 			usageLimits: runtime.usageLimits,
+		}),
+		...(runtime.cursorUsageBinding !== undefined && {
+			cursorUsageBinding: runtime.cursorUsageBinding,
 		}),
 		...(runtime.keepAwakeCommand !== undefined && {
 			keepAwakeCommand: runtime.keepAwakeCommand,
@@ -115,14 +124,11 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 				...(project.sessionMode !== undefined && {
 					sessionMode: project.sessionMode,
 				}),
-				...(project.groupingMode !== undefined && {
-					groupingMode: project.groupingMode,
-				}),
 				...(sessionCount > 0 && { sessionCount }),
 			};
 		}),
 		instances,
-		accountDefaults: Record.filterMap(accounts.defaults, (id) => id),
+		accountDefaults: Record.getSomes(accounts.defaults),
 		deletedAccounts: [...accounts.deleted],
 	} satisfies DaemonConfig;
 }).pipe(Effect.withSpan("configPersistence.buildSnapshot"));
@@ -149,10 +155,10 @@ export interface ConfigWriter {
 	readonly write: (config: DaemonConfig) => Effect.Effect<void, Error>;
 }
 
-export class ConfigWriterTag extends Context.Tag("ConfigWriter")<
+export class ConfigWriterTag extends Context.Service<
 	ConfigWriterTag,
 	ConfigWriter
->() {}
+>()("ConfigWriter") {}
 
 export const makeConfigWriterLive = (configDir: string) =>
 	Layer.succeed(ConfigWriterTag, {
@@ -160,10 +166,10 @@ export const makeConfigWriterLive = (configDir: string) =>
 			Effect.tryPromise({
 				try: () => {
 					const loaded = loadDaemonConfigResult(configDir);
-					if (loaded._tag === "Left" && loaded.left._tag !== "NotFound") {
-						throw loaded.left;
+					if (loaded._tag === "Failure" && loaded.failure._tag !== "NotFound") {
+						throw loaded.failure;
 					}
-					const persisted = loaded._tag === "Right" ? loaded.right : null;
+					const persisted = loaded._tag === "Success" ? loaded.success : null;
 					return saveDaemonConfig(
 						{
 							...config,
@@ -184,13 +190,13 @@ export const makeConfigWriterLive = (configDir: string) =>
 
 const CONFIG_PERSISTENCE_RETRY_DELAY = Duration.millis(500);
 
-export const ConfigPersistenceLive = Layer.scoped(
+export const ConfigPersistenceLive = Layer.effect(
 	ConfigPersistenceTag,
 	Effect.gen(function* () {
 		const snapshot = yield* ConfigSnapshotTag;
 		const writer = yield* ConfigWriterTag;
 		const dirty = yield* Ref.make(false);
-		const permits = yield* Effect.makeSemaphore(1);
+		const permits = yield* Semaphore.make(1);
 		const requests = yield* Queue.dropping<void>(1);
 
 		const flush = permits.withPermits(1)(
@@ -202,8 +208,8 @@ export const ConfigPersistenceLive = Layer.scoped(
 					const config = yield* snapshot.build;
 					yield* writer.write(config);
 				}).pipe(
-					Effect.catchAll((error) =>
-						Ref.set(dirty, true).pipe(Effect.zipRight(Effect.fail(error))),
+					Effect.catch((error) =>
+						Ref.set(dirty, true).pipe(Effect.andThen(Effect.fail(error))),
 					),
 				);
 			}).pipe(
@@ -214,16 +220,16 @@ export const ConfigPersistenceLive = Layer.scoped(
 		);
 
 		const scheduleRetry = Effect.sleep(CONFIG_PERSISTENCE_RETRY_DELAY).pipe(
-			Effect.zipRight(Queue.offer(requests, void 0)),
+			Effect.andThen(Queue.offer(requests, void 0)),
 			Effect.asVoid,
 		);
 
 		const logFlush = (options?: { retry?: boolean }) =>
 			flush.pipe(
-				Effect.catchAll((e) =>
+				Effect.catch((e) =>
 					Effect.logWarning("Config persistence failed").pipe(
 						Effect.annotateLogs("error", String(e)),
-						Effect.zipRight(options?.retry ? scheduleRetry : Effect.void),
+						Effect.andThen(options?.retry ? scheduleRetry : Effect.void),
 					),
 				),
 			);
@@ -232,7 +238,7 @@ export const ConfigPersistenceLive = Layer.scoped(
 		const finalizerFlush = logFlush();
 
 		const requestSave = Ref.set(dirty, true).pipe(
-			Effect.zipRight(Queue.offer(requests, void 0)),
+			Effect.andThen(Queue.offer(requests, void 0)),
 			Effect.asVoid,
 		);
 
@@ -240,7 +246,7 @@ export const ConfigPersistenceLive = Layer.scoped(
 			Effect.gen(function* () {
 				yield* Queue.take(requests);
 				yield* Effect.sleep(Duration.millis(500));
-				yield* Queue.takeAll(requests);
+				yield* Queue.clear(requests);
 				yield* backgroundFlush;
 			}).pipe(Effect.forever),
 		);

@@ -20,8 +20,8 @@
 // Resume is a rebase for the same reason as the shell: the query can only
 // report rows that still exist.
 
-import type { SqlClient } from "@effect/sql";
 import { Effect, Stream } from "effect";
+import type { SqlClient } from "effect/sql";
 import { advanceTouchesScope } from "../../../contracts/read-model-advance.js";
 import {
 	ReadQueryEffectTag,

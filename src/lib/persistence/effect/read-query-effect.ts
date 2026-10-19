@@ -1,7 +1,7 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
-import type { Fragment } from "@effect/sql/Statement";
 import { Context, Data, Effect, Option, Schema } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
+import type { Fragment } from "effect/sql/Statement";
 import type { SessionScope } from "../../contracts/session-scope.js";
 
 export type { SessionScope } from "../../contracts/session-scope.js";
@@ -69,10 +69,10 @@ type SessionProjection = Omit<SessionInfo, "projectSlug" | "accountId">;
 
 const isSessionPermissionMode = Schema.is(SessionPermissionModeSchema);
 const decodeGoalState = Schema.decodeUnknownSync(
-	Schema.parseJson(SessionGoalChangedPayloadSchema),
+	Schema.fromJsonString(SessionGoalChangedPayloadSchema),
 );
 const decodeTurnWaits = Schema.decodeUnknownSync(
-	Schema.parseJson(
+	Schema.fromJsonString(
 		Schema.Array(
 			Schema.Struct({
 				id: Schema.String,
@@ -264,7 +264,7 @@ export const sessionRowsToSessionInfoList = (
 				? {}
 				: {
 						workspace: Schema.decodeUnknownSync(
-							Schema.parseJson(SessionWorkspaceSchema),
+							Schema.fromJsonString(SessionWorkspaceSchema),
 						)(row.workspace),
 					}),
 			workspaceMismatch: row.claude_worktree_state
@@ -284,6 +284,7 @@ export const sessionRowsToSessionInfoList = (
 				? { contextWindow: row.context_window }
 				: {}),
 			...(parentID ? { parentID } : {}),
+			...(row.forked_from != null ? { forkedFrom: row.forked_from } : {}),
 			...(row.side_thread === 1 ? { sideThread: true } : {}),
 			...(row.fork_point_event ? { forkMessageId: row.fork_point_event } : {}),
 			...(row.fork_point_timestamp != null
@@ -307,17 +308,18 @@ export const sessionRowsToSessionInfoList = (
 				? { lastTurnEndInputId: row.last_turn_end_input_id }
 				: {}),
 			...(row.settled_at !== null ? { settledAt: row.settled_at } : {}),
+			...(row.archived_at != null ? { archivedAt: row.archived_at } : {}),
 			limitRecovery:
 				row.limit_recovery == null
 					? null
-					: Schema.decodeUnknownSync(Schema.parseJson(LimitRecoverySchema))(
-							row.limit_recovery,
-						),
+					: Schema.decodeUnknownSync(
+							Schema.fromJsonString(LimitRecoverySchema),
+						)(row.limit_recovery),
 			resumes:
 				row.resumes == null
 					? []
 					: Schema.decodeUnknownSync(
-							Schema.parseJson(Schema.Array(SessionResumeSchema)),
+							Schema.fromJsonString(Schema.Array(SessionResumeSchema)),
 						)(row.resumes),
 			...(row.settled_automatically === 1
 				? { settledAutomatically: true }
@@ -333,7 +335,7 @@ export const sessionRowsToSessionInfoList = (
 };
 
 const decodeSidebarRow = Schema.decodeUnknownSync(
-	Schema.parseJson(SidebarRowSchema),
+	Schema.fromJsonString(SidebarRowSchema),
 );
 
 /**
@@ -499,7 +501,10 @@ export interface ReadQueryEffect {
 			roots?: boolean;
 			limit?: number;
 			titleQuery?: string;
-			before?: { updatedAt: number; id: string };
+			excludeArchived?: boolean;
+			archivedOnly?: boolean;
+			orderColumn?: "updated_at" | "archived_at";
+			before?: { at: number; id: string };
 		},
 	) => Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError>;
 
@@ -509,7 +514,10 @@ export interface ReadQueryEffect {
 			roots?: boolean;
 			limit?: number;
 			titleQuery?: string;
-			before?: { updatedAt: number; id: string };
+			excludeArchived?: boolean;
+			archivedOnly?: boolean;
+			orderColumn?: "updated_at" | "archived_at";
+			before?: { at: number; id: string };
 			statuses?: Readonly<Record<string, { type: string }>>;
 			backgroundOf?: (sessionId: string) => SessionBackground | undefined;
 			hintDismissals?: ReadonlyMap<string, number>;
@@ -784,14 +792,14 @@ export interface PendingInputRow {
 	readonly version: number;
 }
 
-const decodeInputRequest = Schema.decodeUnknown(
-	Schema.parseJson(InputRequestSchema),
+const decodeInputRequest = Schema.decodeUnknownEffect(
+	Schema.fromJsonString(InputRequestSchema),
 );
 
-export class ReadQueryEffectTag extends Context.Tag("ReadQueryEffect")<
+export class ReadQueryEffectTag extends Context.Service<
 	ReadQueryEffectTag,
 	ReadQueryEffect
->() {}
+>()("ReadQueryEffect") {}
 
 type MessageWithTurnModelRow = MessageRow & {
 	turn_cost: number | null;
@@ -1193,11 +1201,21 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			roots?: boolean;
 			limit?: number;
 			titleQuery?: string;
-			before?: { updatedAt: number; id: string };
+			excludeArchived?: boolean;
+			archivedOnly?: boolean;
+			orderColumn?: "updated_at" | "archived_at";
+			before?: { at: number; id: string };
 		},
 	): Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError> =>
 		Effect.gen(function* () {
 			const predicates = [sql`project_id IN ${sql.in(scope.projectIds)}`];
+			// Archive state lives on the root and hides the whole family.
+			if (opts?.excludeArchived)
+				predicates.push(
+					sql`archived_at IS NULL AND NOT EXISTS (SELECT 1 FROM sessions AS archived_root WHERE archived_root.id = sessions.root_id AND archived_root.archived_at IS NOT NULL)`,
+				);
+			if (opts?.archivedOnly) predicates.push(sql`archived_at IS NOT NULL`);
+			const orderColumn = sql(opts?.orderColumn ?? "updated_at");
 			if (opts?.roots) predicates.push(sql`parent_id IS NULL`);
 			if (opts?.titleQuery !== undefined) {
 				const escapedQuery = opts.titleQuery.replace(/[\\%_]/g, "\\$&");
@@ -1207,7 +1225,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			}
 			if (opts?.before !== undefined) {
 				predicates.push(
-					sql`(updated_at < ${opts.before.updatedAt} OR (updated_at = ${opts.before.updatedAt} AND id < ${opts.before.id}))`,
+					sql`(${orderColumn} < ${opts.before.at} OR (${orderColumn} = ${opts.before.at} AND id < ${opts.before.id}))`,
 				);
 			}
 			const limit =
@@ -1219,7 +1237,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			return yield* sql<SessionRow>`
 				SELECT * FROM sessions
 				WHERE ${sql.and(predicates)}
-				ORDER BY updated_at DESC, id DESC
+				ORDER BY ${orderColumn} DESC, id DESC
 				${limit}`;
 		}).pipe(
 			Effect.mapError((e) =>
@@ -1271,7 +1289,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						? {}
 						: {
 								workspace: Schema.decodeUnknownSync(
-									Schema.parseJson(SessionWorkspaceSchema),
+									Schema.fromJsonString(SessionWorkspaceSchema),
 								)(row.workspace),
 							}),
 				}));

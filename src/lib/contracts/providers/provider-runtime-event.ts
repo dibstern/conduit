@@ -2,11 +2,15 @@ import { Schema } from "effect";
 import type { EventPayloadMap } from "../stored-event.js";
 
 const NonBlankString = Schema.String.pipe(
-	Schema.filter((value) => value.trim().length > 0 && value === value.trim()),
+	Schema.check(
+		Schema.makeFilter(
+			(value) => value.trim().length > 0 && value === value.trim(),
+		),
+	),
 );
 
 const RequiredUnknown = Schema.Unknown.pipe(
-	Schema.filter((value) => value !== undefined),
+	Schema.check(Schema.makeFilter((value) => value !== undefined)),
 );
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> => {
@@ -53,9 +57,9 @@ export const PROVIDER_RUNTIME_EVENT_TYPES = [
 	"question.resolved",
 ] as const;
 
-export const ProviderRuntimeEventTypeSchema = Schema.Literal(
+export const ProviderRuntimeEventTypeSchema = Schema.Literals([
 	...PROVIDER_RUNTIME_EVENT_TYPES,
-);
+]);
 export type ProviderRuntimeEventType = Schema.Schema.Type<
 	typeof ProviderRuntimeEventTypeSchema
 >;
@@ -85,8 +89,8 @@ const ProviderRuntimeRawSourceStruct = Schema.Struct({
 });
 
 export const ProviderRuntimeRawSourceSchema = Schema.Unknown.pipe(
-	Schema.filter(isRawSourceMetadataOnly),
-	Schema.compose(ProviderRuntimeRawSourceStruct),
+	Schema.check(Schema.makeFilter(isRawSourceMetadataOnly)),
+	Schema.decodeTo(ProviderRuntimeRawSourceStruct),
 );
 export type ProviderRuntimeRawSource = Schema.Schema.Type<
 	typeof ProviderRuntimeRawSourceSchema
@@ -98,6 +102,7 @@ const PROVIDER_RUNTIME_PROVIDER_REF_KEYS = [
 	"providerTurnId",
 	"providerToolUseId",
 	"providerRequestId",
+	"providerProcessId",
 	"providerTaskId",
 	"parentProviderTaskId",
 ] as const;
@@ -115,22 +120,23 @@ const ProviderRuntimeProviderRefsStruct = Schema.Struct({
 	providerTurnId: Schema.optional(NonBlankString),
 	providerToolUseId: Schema.optional(NonBlankString),
 	providerRequestId: Schema.optional(NonBlankString),
+	providerProcessId: Schema.optional(NonBlankString),
 	providerTaskId: Schema.optional(NonBlankString),
 	parentProviderTaskId: Schema.optional(NonBlankString),
 });
 
 export const ProviderRuntimeProviderRefsSchema = Schema.Unknown.pipe(
-	Schema.filter(isProviderRefsMetadataOnly),
-	Schema.compose(ProviderRuntimeProviderRefsStruct),
+	Schema.check(Schema.makeFilter(isProviderRefsMetadataOnly)),
+	Schema.decodeTo(ProviderRuntimeProviderRefsStruct),
 );
 export type ProviderRuntimeProviderRefs = Schema.Schema.Type<
 	typeof ProviderRuntimeProviderRefsSchema
 >;
 
-const ProviderRuntimeCreatedAtSchema = Schema.Union(
+const ProviderRuntimeCreatedAtSchema = Schema.Union([
 	Schema.Number,
 	NonBlankString,
-);
+]);
 
 const REQUIRED_PROVIDER_RUNTIME_EVENT_KEYS = [
 	"eventId",
@@ -165,14 +171,12 @@ const ProviderRuntimeEventEnvelopeFields = {
 	providerRefs: ProviderRuntimeProviderRefsSchema,
 	rawSource: ProviderRuntimeRawSourceSchema,
 	createdAt: ProviderRuntimeCreatedAtSchema,
-	metadata: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-	),
+	metadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
 };
 
 export const ProviderWorkspaceChangedDataSchema = Schema.Struct({
 	path: NonBlankString,
-	source: Schema.Literal("tool", "start"),
+	source: Schema.Literals(["tool", "start"]),
 });
 export type ProviderWorkspaceChangedData = Schema.Schema.Type<
 	typeof ProviderWorkspaceChangedDataSchema
@@ -185,7 +189,7 @@ export type ProviderRuntimeEventPayloadMap = Pick<
 	"workspace.changed": ProviderWorkspaceChangedData;
 };
 
-const ProviderRuntimeEventEnvelopeSchema = Schema.Union(
+const ProviderRuntimeEventEnvelopeSchema = Schema.Union([
 	Schema.Struct({
 		...ProviderRuntimeEventEnvelopeFields,
 		type: Schema.Literal("workspace.changed"),
@@ -193,18 +197,18 @@ const ProviderRuntimeEventEnvelopeSchema = Schema.Union(
 	}),
 	Schema.Struct({
 		...ProviderRuntimeEventEnvelopeFields,
-		type: Schema.Literal(
+		type: Schema.Literals([
 			...PROVIDER_RUNTIME_EVENT_TYPES.filter(
 				(type) => type !== "workspace.changed",
 			),
-		),
+		]),
 		data: RequiredUnknown,
 	}),
-);
+]);
 
 export const ProviderRuntimeEventSchema = Schema.Unknown.pipe(
-	Schema.filter(hasOnlyProviderRuntimeEventEnvelopeKeys),
-	Schema.compose(ProviderRuntimeEventEnvelopeSchema),
+	Schema.check(Schema.makeFilter(hasOnlyProviderRuntimeEventEnvelopeKeys)),
+	Schema.decodeTo(ProviderRuntimeEventEnvelopeSchema),
 );
 export type ProviderRuntimeEvent = Schema.Schema.Type<
 	typeof ProviderRuntimeEventSchema

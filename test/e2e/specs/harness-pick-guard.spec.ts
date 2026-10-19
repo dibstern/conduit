@@ -9,7 +9,14 @@ import { createServer } from "node:net";
 import { join } from "node:path";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import Database from "better-sqlite3";
-import { Effect, Either, Fiber, Option, Schema, Stream } from "effect";
+import {
+	Effect,
+	Result as Either,
+	Fiber,
+	Option,
+	Schema,
+	Stream,
+} from "effect";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	GetAgentsResponseSchema,
@@ -92,9 +99,9 @@ type GuardCase = {
 };
 type RpcFrame = {
 	readonly _tag?: string;
-	readonly id?: string;
+	readonly id?: string | number;
 	readonly tag?: string;
-	readonly requestId?: string;
+	readonly requestId?: string | number;
 	readonly payload?: Readonly<Record<string, unknown>>;
 	readonly exit?: { readonly _tag: string; readonly value?: unknown };
 	readonly values?: readonly unknown[];
@@ -143,7 +150,7 @@ function readStoredState(
 	slug: string,
 	sessionId: string,
 ) {
-	const db = new Database(harness.projectStorePath(slug), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		const events = db
 			.prepare<[string], EventRow>(
@@ -155,10 +162,10 @@ function readStoredState(
 		return {
 			sessionCount:
 				db
-					.prepare<[], { count: number }>(
-						"SELECT count(*) AS count FROM sessions",
+					.prepare<[string], { count: number }>(
+						"SELECT count(*) AS count FROM sessions WHERE project_id = ?",
 					)
-					.get()?.count ?? 0,
+					.get(slug)?.count ?? 0,
 			pick: db
 				.prepare<[string], StoredPickRow>(
 					`SELECT provider, model_id, model_provider, variant, context_window
@@ -193,10 +200,13 @@ async function editRpc(
 			async (message: string | Buffer) => {
 				if (typeof message !== "string") return send(message);
 				const frame = JSON.parse(message) as RpcFrame;
-				if (frame._tag === "Request" && frame.id) requests.set(frame.id, frame);
+				if (frame._tag === "Request" && frame.id !== undefined)
+					requests.set(String(frame.id), frame);
 				const edited = await edit(
 					frame,
-					frame.requestId ? requests.get(frame.requestId) : undefined,
+					frame.requestId !== undefined
+						? requests.get(String(frame.requestId))
+						: undefined,
 				);
 				if (edited !== null) send(JSON.stringify(edited));
 			};
@@ -375,7 +385,7 @@ async function sendAndCapture(
 		);
 		if (!slug || !sessionId)
 			throw new Error("No project/session for Claude receipt");
-		const db = new Database(harness.projectStorePath(slug), { readonly: true });
+		const db = new Database(harness.daemonStorePath(), { readonly: true });
 		let contextWindow: string | null | undefined;
 		try {
 			contextWindow = db
@@ -685,9 +695,9 @@ async function observeSessionRpc(
 					const frame = JSON.parse(event.data) as RpcFrame;
 					if (
 						(frame._tag === "Exit" || frame._tag === "Chunk") &&
-						frame.requestId
+						frame.requestId !== undefined
 					)
-						receipts.add(frame.requestId);
+						receipts.add(String(frame.requestId));
 				});
 			}
 		};
@@ -697,9 +707,9 @@ async function observeSessionRpc(
 		replies,
 		async received(frames: readonly RpcFrame[]) {
 			const requestIds = frames.map((frame) => {
-				if (!frame.requestId)
+				if (frame.requestId === undefined)
 					throw new Error("Held RPC reply omitted requestId");
-				return frame.requestId;
+				return String(frame.requestId);
 			});
 			await page.waitForFunction(
 				(ids) =>
@@ -1943,14 +1953,17 @@ function readDraftReceipt(
 	slug: string,
 	sessionId: string,
 ) {
-	const db = new Database(harness.projectStorePath(slug), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		const stored = db
-			.prepare<[string], StoredPickRow & { permission_mode: string | null }>(
+			.prepare<
+				[string, string],
+				StoredPickRow & { permission_mode: string | null }
+			>(
 				`SELECT provider, model_id, model_provider, variant, context_window, permission_mode
-			 FROM sessions WHERE id = ?`,
+			 FROM sessions WHERE id = ? AND project_id = ?`,
 			)
-			.get(sessionId);
+			.get(sessionId, slug);
 		const row = db
 			.prepare<[string], { payload_json: string }>(
 				`SELECT payload_json FROM provider_command_outbox WHERE session_id = ?
@@ -2366,7 +2379,11 @@ test.describe("draft owns one complete pick", () => {
 								contextWindow: undefined,
 							}
 						: response;
-					delivered.push({ requestId: request.id, response: value });
+					delivered.push({
+						requestId:
+							request.id === undefined ? undefined : String(request.id),
+						response: value,
+					});
 					return value;
 				});
 			},
@@ -2556,7 +2573,7 @@ test.describe("draft owns one complete pick", () => {
 			);
 			if (!ownReply) throw new Error("B did not receive its own catalog");
 			const frame = observed.replies.find(
-				({ request }) => request.id === ownReply.requestId,
+				({ request }) => String(request.id) === ownReply.requestId,
 			)?.frame;
 			if (!frame) throw new Error("B's catalog reply omitted its frame");
 			await observed.received([frame]);
@@ -3141,7 +3158,7 @@ test("pick-required-create: no model rejects before session creation", async ({
 	for (const model of requests) {
 		try {
 			const result = await Effect.runPromise(
-				Effect.either(
+				Effect.result(
 					browser.rpc
 						.CreateSession({
 							permissionMode: "ask",
@@ -3153,7 +3170,7 @@ test("pick-required-create: no model rejects before session creation", async ({
 						.pipe(Effect.timeout("10 seconds")),
 				),
 			);
-			errors.push(result._tag === "Left" ? result.left : undefined);
+			errors.push(result._tag === "Failure" ? result.failure : undefined);
 		} catch (error) {
 			errors.push(error);
 		}
@@ -3211,7 +3228,7 @@ test("legacy-pick-backfill: last turn restores once and survives a second restar
 	const before = readStoredState(harness, slug, sessionId);
 	await browser.close();
 	await harness.terminate();
-	const db = new Database(harness.projectStorePath(slug));
+	const db = new Database(harness.daemonStorePath());
 	try {
 		expect(
 			db
@@ -3219,7 +3236,8 @@ test("legacy-pick-backfill: last turn restores once and survives a second restar
 			variant = NULL, context_window = NULL WHERE id = ?`)
 				.run(sessionId).changes,
 		).toBe(1);
-		// This fixture now represents a legacy database needing its first repair.
+		// Deliberately reset the daemon-wide singleton: these isolated fixtures
+		// exercise the first store-wide pick repair across all registered projects.
 		db.exec(
 			"UPDATE session_pick_backfill_state SET initialized = 0 WHERE singleton = 1",
 		);
@@ -3339,7 +3357,7 @@ test("legacy-opencode-pick-backfill: message input receipt restores once across 
 		`${caseId}-before`,
 	);
 	const before = readStoredState(harness, slug, sessionId);
-	const receiptDb = new Database(harness.projectStorePath(slug), {
+	const receiptDb = new Database(harness.daemonStorePath(), {
 		readonly: true,
 	});
 	let lastTurn:
@@ -3384,7 +3402,7 @@ test("legacy-opencode-pick-backfill: message input receipt restores once across 
 	);
 	await browser.close();
 	await harness.terminate();
-	const db = new Database(harness.projectStorePath(slug));
+	const db = new Database(harness.daemonStorePath());
 	try {
 		expect(
 			db
@@ -3392,7 +3410,8 @@ test("legacy-opencode-pick-backfill: message input receipt restores once across 
 			variant = NULL, context_window = NULL WHERE id = ?`)
 				.run(sessionId).changes,
 		).toBe(1);
-		// This fixture now represents a legacy database needing its first repair.
+		// Deliberately reset the daemon-wide singleton: these isolated fixtures
+		// exercise the first store-wide pick repair across all registered projects.
 		db.exec(
 			"UPDATE session_pick_backfill_state SET initialized = 0 WHERE singleton = 1",
 		);
@@ -3526,7 +3545,7 @@ test("legacy-partial-pick-backfill: fills NULL effort and context while preservi
 		);
 		const prompt = `${caseId}-empty-${empty}`;
 		await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId: created.sessionId,
 				inputId: prompt,
 				originId: caseId,
@@ -3539,7 +3558,7 @@ test("legacy-partial-pick-backfill: fills NULL effort and context while preservi
 				enqueues(harness, true).some((mark) => mark.prompt === prompt),
 			)
 			.toBe(true);
-		const receiptDb = new Database(harness.projectStorePath(slug), {
+		const receiptDb = new Database(harness.daemonStorePath(), {
 			readonly: true,
 		});
 		try {
@@ -3574,19 +3593,20 @@ test("legacy-partial-pick-backfill: fills NULL effort and context while preservi
 	);
 	await browser.close();
 	await harness.terminate();
-	const db = new Database(harness.projectStorePath(slug));
+	const db = new Database(harness.daemonStorePath());
 	let executedTurns: { session_id: string; started_at: number | null }[];
 	try {
 		executedTurns = db
-			.prepare<[], { session_id: string; started_at: number | null }>(
-				"SELECT session_id, started_at FROM turns ORDER BY requested_at",
+			.prepare<[string], { session_id: string; started_at: number | null }>(
+				"SELECT t.session_id, t.started_at FROM turns t JOIN sessions s ON s.id = t.session_id WHERE s.project_id = ? ORDER BY t.requested_at",
 			)
-			.all();
+			.all(slug);
 		for (const sample of samples)
 			db.prepare(
 				"UPDATE sessions SET variant = ?, context_window = ? WHERE id = ?",
 			).run(sample.variant, sample.contextWindow, sample.sessionId);
-		// This fixture now represents a legacy database needing its first repair.
+		// Deliberately reset the daemon-wide singleton: these isolated fixtures
+		// exercise the first store-wide pick repair across all registered projects.
 		db.exec(
 			"UPDATE session_pick_backfill_state SET initialized = 0 WHERE singleton = 1",
 		);
@@ -3673,7 +3693,7 @@ test("legacy-executed-unrecoverable-pick: a turn without a recoverable model nev
 	const receiptsBefore = enqueues(harness, true).length;
 	await browser.close();
 	await harness.terminate();
-	const db = new Database(harness.projectStorePath(slug));
+	const db = new Database(harness.daemonStorePath());
 	let history:
 		| {
 				started_at: number | null;
@@ -3720,7 +3740,7 @@ test("legacy-executed-unrecoverable-pick: a turn without a recoverable model nev
 	let after = restarted;
 	try {
 		await Effect.runPromise(
-			restoredBrowser.rpc.input.submit({
+			restoredBrowser.rpc["input.submit"]({
 				sessionId,
 				inputId: `${caseId}-rejected`,
 				originId: caseId,
@@ -4418,7 +4438,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 					}
 					const beforePrompts = openCodePrompts(harness).length;
 					await Effect.runPromise(
-						browser.rpc.input.submit({
+						browser.rpc["input.submit"]({
 							sessionId,
 							originId: caseId,
 							inputId: `${caseId}-rejected`,
@@ -4456,7 +4476,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 						}),
 					);
 					await Effect.runPromise(
-						browser.rpc.input.submit({
+						browser.rpc["input.submit"]({
 							sessionId,
 							originId: caseId,
 							inputId: `${caseId}-offered`,
@@ -4574,7 +4594,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 			evidence["beforeTurn"] = before;
 			const promptCount = openCodePrompts(harness).length;
 			await Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId,
 					originId: "9cn3-review-bound-switches",
 					inputId: "9cn3-review-bound-switches",
@@ -4652,14 +4672,25 @@ test.describe("OpenCode draft inventory borrows", () => {
 						contextWindow: "",
 					}),
 				);
+				const ordinaryFiber = ordinary;
 				// An ordered request on this same RPC client fences handler delivery;
 				// health stays held, so neither use can complete its shared start.
 				await setup.browser.getModels("opencode");
-				expect(Option.isNone(await Effect.runPromise(Fiber.poll(borrow)))).toBe(
-					true,
-				);
 				expect(
-					Option.isNone(await Effect.runPromise(Fiber.poll(ordinary))),
+					Option.isNone(
+						await Effect.runPromise(
+							Effect.sync(() => Option.fromUndefinedOr(borrow.pollUnsafe())),
+						),
+					),
+				).toBe(true);
+				expect(
+					Option.isNone(
+						await Effect.runPromise(
+							Effect.sync(() =>
+								Option.fromUndefinedOr(ordinaryFiber.pollUnsafe()),
+							),
+						),
+					),
 				).toBe(true);
 				await Effect.runPromise(Fiber.interrupt(ordinary));
 				await Effect.runPromise(Fiber.interrupt(borrow));
@@ -5119,7 +5150,7 @@ test.describe("runtime and stopped OpenCode picks", () => {
 							bound_provider: string | null;
 					  })
 					| undefined;
-				const db = new Database(harness.projectStorePath(slug), {
+				const db = new Database(harness.daemonStorePath(), {
 					readonly: true,
 				});
 				try {
@@ -5151,7 +5182,7 @@ test.describe("runtime and stopped OpenCode picks", () => {
 				const promptsBefore = openCodePrompts(harness).length;
 				const prompt = `${caseId}-${parentId ? "child" : "external"}`;
 				await Effect.runPromise(
-					browser.rpc.input.submit({
+					browser.rpc["input.submit"]({
 						sessionId: native.id,
 						inputId: prompt,
 						originId: caseId,
@@ -5173,7 +5204,7 @@ test.describe("runtime and stopped OpenCode picks", () => {
 				} finally {
 					observation["prompts"] = prompts;
 					observation["after"] = readStoredState(harness, slug, native.id);
-					const commandDb = new Database(harness.projectStorePath(slug), {
+					const commandDb = new Database(harness.daemonStorePath(), {
 						readonly: true,
 					});
 					try {
@@ -5265,7 +5296,7 @@ test.describe("runtime and stopped OpenCode picks", () => {
 		const requestsBefore = harness.opencodeRequests().length;
 		await browser.close();
 		await harness.terminate();
-		const db = new Database(harness.projectStorePath(slug));
+		const db = new Database(harness.daemonStorePath());
 		try {
 			db.prepare(`UPDATE sessions SET model_id = NULL, model_provider = NULL,
 			 variant = NULL, context_window = NULL WHERE id = ?`).run(sessionId);
@@ -5344,20 +5375,21 @@ test.describe("runtime and stopped OpenCode picks", () => {
 		const requestsBefore = harness.opencodeRequests().length;
 		await browser.close();
 		await harness.terminate();
-		const db = new Database(harness.projectStorePath(slug));
+		const db = new Database(harness.daemonStorePath());
 		let executedTurns: number;
 		try {
 			executedTurns =
 				db
-					.prepare<[], { count: number }>(
-						"SELECT count(*) AS count FROM turns WHERE started_at IS NOT NULL",
+					.prepare<[string], { count: number }>(
+						"SELECT count(*) AS count FROM turns t JOIN sessions s ON s.id = t.session_id WHERE s.project_id = ? AND t.started_at IS NOT NULL",
 					)
-					.get()?.count ?? 0;
+					.get(slug)?.count ?? 0;
 			for (const sample of samples)
 				db.prepare(
 					"UPDATE sessions SET variant = ?, context_window = ? WHERE id = ?",
 				).run(sample.variant, sample.contextWindow, sample.sessionId);
-			// This fixture now represents a legacy database needing its first repair.
+			// Deliberately reset the daemon-wide singleton: these isolated fixtures
+			// exercise the first store-wide pick repair across all registered projects.
 			db.exec(
 				"UPDATE session_pick_backfill_state SET initialized = 0 WHERE singleton = 1",
 			);
@@ -5476,7 +5508,7 @@ for (const rejection of [
 		await Effect.runPromise(browser.rpc.GetModels({ sessionId }));
 		const before = readStoredState(harness, slug, sessionId);
 		const receiptsBefore = enqueues(harness, true).length;
-		const db = new Database(harness.projectStorePath(slug));
+		const db = new Database(harness.daemonStorePath());
 		try {
 			const changed =
 				rejection === "uncatalogued"
@@ -5504,7 +5536,7 @@ for (const rejection of [
 			db.close();
 		}
 		const submit = await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId,
 				inputId: caseId,
 				originId: "pick-guard",
@@ -5682,13 +5714,13 @@ test("server-side-thread-pick: a server-created session inherits its source pick
 		effort: "high",
 		contextWindow: "1m",
 	});
-	const db = new Database(harness.projectStorePath(slug));
+	const db = new Database(harness.daemonStorePath());
 	try {
 		db.prepare("UPDATE sessions SET context_window = NULL WHERE id = ?").run(
 			sessionId,
 		);
 		const rejected = await Effect.runPromise(
-			Effect.either(
+			Effect.result(
 				browser.rpc.StartSideThread({
 					...sideRequest,
 					inputId: crypto.randomUUID(),
@@ -5709,7 +5741,7 @@ test("server-side-thread-pick: a server-created session inherits its source pick
 			rejected,
 			afterRejected,
 		});
-		expect(rejected._tag).toBe("Left");
+		expect(rejected._tag).toBe("Failure");
 		expect(afterRejected.sessionCount).toBe(created.sessionCount);
 		expect(
 			enqueues(harness, true).filter((mark) =>
@@ -5726,7 +5758,7 @@ test("server-side-thread-pick: a server-created session inherits its source pick
 
 async function assertPickRejected(
 	guard: GuardCase,
-	result: Either.Either<unknown, unknown>,
+	result: Either.Result<unknown, unknown>,
 	tag: "EffortNotOffered" | "ContextWindowNotOffered",
 	testInfo: TestInfo,
 	evidence: {
@@ -5737,7 +5769,7 @@ async function assertPickRejected(
 		sessionsAfter: readonly string[];
 	},
 ): Promise<void> {
-	const error = result._tag === "Left" ? result.left : undefined;
+	const error = result._tag === "Failure" ? result.failure : undefined;
 	const mismatches: string[] = [];
 	if (!(error instanceof WsRpcError))
 		mismatches.push(`RPC did not reject with WsRpcError: ${result._tag}`);
@@ -5766,7 +5798,7 @@ async function assertPickRejected(
 		sent: null,
 		expectedRejection: tag,
 		rpcResult:
-			result._tag === "Left" && error instanceof WsRpcError
+			result._tag === "Failure" && error instanceof WsRpcError
 				? { _tag: "Left", error: { _tag: error._tag, message: error.message } }
 				: result,
 		equal: mismatches.length === 0,
@@ -5883,7 +5915,7 @@ test.describe("server pick rejections", () => {
 						: rejection === "context"
 							? browser.rpc.SwitchContextWindow(contextRequest)
 							: browser.rpc.SwitchVariant(variantRequest);
-				const result = await Effect.runPromise(Effect.either(call));
+				const result = await Effect.runPromise(Effect.result(call));
 				// Rehydrate server settings so a stale composer cannot hide mutation.
 				await page.reload();
 				await expect(picker).toHaveAttribute("data-shown-model", model.modelID);

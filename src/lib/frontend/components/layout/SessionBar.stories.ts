@@ -37,6 +37,7 @@ import {
 } from "../../stores/terminal.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import type { rpc } from "../../transport/ws-rpc-client.js";
 import type {
@@ -117,7 +118,7 @@ const meta = {
 			{ slug: "conduit", title: "conduit", folders: ["/src/conduit"] },
 		];
 		seedSessions([mockSession, mockSessionLongTitle]);
-		sessionState.currentId = mockSession.id;
+		openSessionForSetup(mockSession.id, "conduit");
 		// The bar reads its collapse rule from this store, and Storybook shares
 		// module-level state across story files. Pin the expanded state so only
 		// the story that wants the collapse gets it.
@@ -159,12 +160,6 @@ export const Default: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 
-		// The back control is the only way off this screen on a phone, so its
-		// accessible name and its wiring are both worth pinning.
-		const back = canvas.getByRole("button", { name: /Sessions/ });
-		await userEvent.click(back);
-		expect(routerState.path).toBe("/");
-
 		expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
 			"Test Session",
 		);
@@ -174,6 +169,13 @@ export const Default: Story = {
 		expect(canvas.getByTestId("session-bar-island-overflow")).toBeVisible();
 		expect(canvas.queryByTestId("session-bar-overflow")).toBeNull();
 		expect(canvas.queryByTestId("session-bar-views")).toBeNull();
+
+		// The back control is the only way off this screen on a phone, so its
+		// accessible name and its wiring are both worth pinning. It leaves the
+		// session's route, so it runs last.
+		const back = canvas.getByRole("button", { name: /Sessions/ });
+		await userEvent.click(back);
+		expect(routerState.path).toBe("/");
 	},
 };
 
@@ -579,7 +581,7 @@ export const OpeningTerminalClearsBadge: Story = {
 function showState(overrides: Partial<typeof mockSession>) {
 	const session = { ...mockSession, ...overrides };
 	seedSessions([session]);
-	sessionState.currentId = session.id;
+	openSessionForSetup(session.id, "conduit");
 }
 
 export const Settled: Story = {
@@ -634,8 +636,7 @@ export const NeedsAttention: Story = {
 
 export const LongTitle: Story = {
 	beforeEach: () => {
-		sessionState.currentId = mockSessionLongTitle.id;
-		routerState.path = `/s/${mockSessionLongTitle.id}`;
+		openSessionForSetup(mockSessionLongTitle.id, "conduit");
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -658,8 +659,7 @@ export const LongTitle: Story = {
 export const NarrowestPhone: Story = {
 	args: { width: 320 },
 	beforeEach: () => {
-		sessionState.currentId = mockSessionLongTitle.id;
-		routerState.path = `/s/${mockSessionLongTitle.id}`;
+		openSessionForSetup(mockSessionLongTitle.id, "conduit");
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -1083,8 +1083,7 @@ export const DesktopLongTitleNarrow: Story = {
 	args: { width: 480 },
 	beforeEach: () => {
 		sessionViewState.compact = false;
-		sessionState.currentId = mockSessionLongTitle.id;
-		routerState.path = `/s/${mockSessionLongTitle.id}`;
+		openSessionForSetup(mockSessionLongTitle.id, "conduit");
 	},
 	play: async ({ canvasElement }) => {
 		const bar = within(canvasElement).getByTestId("session-bar");
@@ -1118,8 +1117,7 @@ export const DesktopNoSession: Story = {
 	args: { width: 900 },
 	beforeEach: () => {
 		sessionViewState.compact = false;
-		sessionState.currentId = null;
-		routerState.path = "/";
+		openSessionForSetup(null);
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);

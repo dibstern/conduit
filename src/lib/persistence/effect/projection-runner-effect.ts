@@ -1,10 +1,9 @@
 // The only projection runner. Uses SqlClient.withTransaction for writes.
 
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Data, Effect, Exit, Option } from "effect";
+import { Context, Data, Effect, Exit, Semaphore } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
-import { SessionDirectory } from "../../domain/daemon/Services/session-directory.js";
 import type { StoredEvent } from "../events.js";
 import { ProjectorCursorEffectTag } from "./projector-cursor-effect.js";
 import {
@@ -40,7 +39,6 @@ export interface ProjectionFailure {
 }
 
 export interface RecoveryResult {
-	readonly projectId: string;
 	readonly startCursor: number;
 	readonly endCursor: number;
 	readonly totalReplayed: number;
@@ -100,9 +98,10 @@ export interface ProjectionRunnerEffect {
 	readonly markRecovered: () => Effect.Effect<void>;
 }
 
-export class ProjectionRunnerEffectTag extends Context.Tag(
-	"ProjectionRunnerEffect",
-)<ProjectionRunnerEffectTag, ProjectionRunnerEffect>() {}
+export class ProjectionRunnerEffectTag extends Context.Service<
+	ProjectionRunnerEffectTag,
+	ProjectionRunnerEffect
+>()("ProjectionRunnerEffect") {}
 
 export const makeProjectionRunnerEffect = (
 	projectors: readonly EffectProjector[],
@@ -110,7 +109,7 @@ export const makeProjectionRunnerEffect = (
 	Effect.gen(function* () {
 		const cursorRepo = yield* ProjectorCursorEffectTag;
 		const sql = yield* SqlClient.SqlClient;
-		const directory = yield* Effect.serviceOption(SessionDirectory);
+		const recoveryLock = yield* Semaphore.make(1);
 		const batchCursorName =
 			BATCH_CURSOR_PREFIX +
 			projectors
@@ -382,7 +381,6 @@ export const makeProjectionRunnerEffect = (
 				if (allCaughtUp) {
 					recovered = true;
 					return {
-						projectId: cursorRepo.projectId,
 						startCursor: latestSeq,
 						endCursor: latestSeq,
 						totalReplayed: 0,
@@ -428,13 +426,13 @@ export const makeProjectionRunnerEffect = (
 											(projectorCursors.get(projector.name) ?? 0),
 									);
 									if (pending.length === 0) continue;
-									const decoded = yield* Effect.either(
+									const decoded = yield* Effect.result(
 										decodeProjectionEventRow(eventRow),
 									);
 									// Commit the valid prefix before surfacing a decode error,
 									// preserving progress already made by the old replay loop.
-									if (decoded._tag === "Left") return decoded.left;
-									const storedEvent = decoded.right;
+									if (decoded._tag === "Failure") return decoded.failure;
+									const storedEvent = decoded.success;
 									for (const projector of pending) {
 										const projected = yield* withReplaySavepoint(
 											Effect.gen(function* () {
@@ -451,7 +449,7 @@ export const makeProjectionRunnerEffect = (
 												);
 											}),
 										).pipe(
-											Effect.catchAll((err) =>
+											Effect.catch((err) =>
 												Effect.gen(function* () {
 													const failure = recordFailure(
 														projector,
@@ -484,10 +482,10 @@ export const makeProjectionRunnerEffect = (
 													);
 												}),
 											),
-											Effect.either,
+											Effect.result,
 										);
 										// A failure to persist the skip must leave this event pending.
-										if (projected._tag === "Left") return projected.left;
+										if (projected._tag === "Failure") return projected.failure;
 
 										projectorCursors.set(projector.name, eventRow.sequence);
 										totalReplayed++;
@@ -517,26 +515,12 @@ export const makeProjectionRunnerEffect = (
 				);
 
 				return {
-					projectId: cursorRepo.projectId,
 					startCursor,
 					endCursor: latestSeq,
 					totalReplayed,
 					durationMs: Date.now() - startTime,
 				};
 			}).pipe(
-				Effect.tap(() =>
-					Effect.gen(function* () {
-						// Recovery can replay creations/deletions before live writers start.
-						if (Option.isNone(directory)) return;
-						const sessions = yield* sql<{
-							readonly id: string;
-						}>`SELECT id FROM sessions`;
-						yield* directory.value.replaceProject(
-							cursorRepo.projectId,
-							sessions.map(({ id }) => id),
-						);
-					}),
-				),
 				Effect.mapError((e) =>
 					e instanceof ProjectionRunnerError
 						? e
@@ -545,6 +529,8 @@ export const makeProjectionRunnerEffect = (
 								cause: e,
 							}),
 				),
+				// Cursor reads must wait too, so the next recovery sees committed progress.
+				recoveryLock.withPermits(1),
 			);
 
 		const getFailures = (): Effect.Effect<readonly ProjectionFailure[]> =>

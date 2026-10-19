@@ -3,7 +3,8 @@
 // whose discovery is faked, read through `subscribePtys`.
 
 import { describe, it } from "@effect/vitest";
-import { Chunk, Effect, Fiber, Layer, Stream, TestClock } from "effect";
+import { Effect, Fiber, Layer, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import type { PtyEnvelope } from "../../../src/lib/contracts/ws-rpc.js";
 import { subscribePtys } from "../../../src/lib/domain/relay/Services/pty-subscription.js";
@@ -34,7 +35,7 @@ const terminalLayer = (
 	manager: PtyManager,
 	discovered: readonly PtyInfo[] = [],
 ) =>
-	Layer.succeed(OpenCodeTerminalServiceTag, {
+	Layer.succeed(OpenCodeTerminalServiceTag)({
 		create: () => Effect.void,
 		list: () => Effect.succeed([...discovered]),
 		snapshot: () =>
@@ -60,14 +61,14 @@ const collect = (
 		const fiber = yield* subscribePtys().pipe(
 			Stream.take(count),
 			Stream.runCollect,
-			Effect.fork,
+			Effect.forkChild,
 		);
 		// Let the subscription attach before publishing.
-		yield* Effect.yieldNow();
+		yield* Effect.yieldNow;
 		yield* TestClock.adjust("1 millis");
 		publish();
 		for (let i = 0; i < 10; i++) yield* TestClock.adjust("50 millis");
-		return Chunk.toReadonlyArray(yield* Fiber.join(fiber));
+		return [...(yield* Fiber.join(fiber))];
 	}).pipe(Effect.provide(terminalLayer(manager, discovered)));
 
 const outputs = (envelopes: readonly PtyEnvelope[]) =>
@@ -159,12 +160,11 @@ describe("subscribePtys", () => {
 			const subscriber = subscribePtys().pipe(
 				Stream.take(4),
 				Stream.runCollect,
-				Effect.map(Chunk.toReadonlyArray),
-				Effect.fork,
+				Effect.forkChild,
 			);
 			const a = yield* subscriber;
 			const b = yield* subscriber;
-			yield* Effect.yieldNow();
+			yield* Effect.yieldNow;
 			yield* TestClock.adjust("1 millis");
 			manager.publish({ _tag: "output", ptyId: "pty-1", data: "ls\r\n" });
 			yield* TestClock.adjust("60 millis");

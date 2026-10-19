@@ -18,14 +18,9 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-	AddInstance,
-	GetInstances,
-	GetStatus,
-	UpdateInstance,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import {
 	CURRENT_CONFIG_VERSION,
 	loadDaemonConfigResult,
@@ -103,8 +98,8 @@ syncBuiltinESMExports();
 			// so teardown can read the fixture's process ownership safely.
 			const loaded = loadDaemonConfigResult(harness.configDir);
 			if (
-				loaded._tag === "Left" &&
-				loaded.left._tag !== "NotFound" &&
+				loaded._tag === "Failure" &&
+				loaded.failure._tag !== "NotFound" &&
 				cleanupConfig
 			) {
 				chmodSync(cleanupConfig.path, 0o600);
@@ -149,7 +144,7 @@ syncBuiltinESMExports();
 				kind === "unreadable" ? original : Buffer.from(damaged),
 			);
 			expect(
-				(await fixture.harness.requestRpc(new GetStatus({}))).projects,
+				(await fixture.harness.requestRpc({ _tag: "GetStatus" })).projects,
 			).toContainEqual(expect.objectContaining({ slug: "process-test" }));
 			evidence = { kind, result, unchanged: true, daemonStillRunning: true };
 		} finally {
@@ -161,34 +156,31 @@ syncBuiltinESMExports();
 	it("rejects unsupported driver mutations without poisoning subsequent saves", async () => {
 		const fixture = createFixture("invalid-driver-mutation");
 		await fixture.start();
-		const added = await fixture.harness.requestRpc(
-			new AddInstance({
-				name: "Valid account",
-				driver: "claude",
-			}),
-		);
+		const added = await fixture.harness.requestRpc({
+			_tag: "AddInstance",
+			name: "Valid account",
+			driver: "claude",
+		});
 		const instanceId = added.addedInstanceId;
 		if (!instanceId) throw new Error("Missing added account id");
 		await expect(
-			fixture.harness.requestRpc(
-				new AddInstance({
-					name: "Invalid account",
-					driver: "future",
-					managed: false,
-					port: 49152,
-				}),
-			),
+			fixture.harness.requestRpc({
+				_tag: "AddInstance",
+				name: "Invalid account",
+				driver: "future",
+				managed: false,
+				port: 49152,
+			}),
 		).rejects.toThrow(/claude|opencode/);
 		await expect(
-			fixture.harness.requestRpc(
-				new UpdateInstance({
-					instanceId,
-					driver: "future",
-					name: "Invalid edit",
-				}),
-			),
+			fixture.harness.requestRpc({
+				_tag: "UpdateInstance",
+				instanceId,
+				driver: "future",
+				name: "Invalid edit",
+			}),
 		).rejects.toThrow(/claude|opencode/);
-		const accounts = await fixture.harness.requestRpc(new GetInstances({}));
+		const accounts = await fixture.harness.requestRpc({ _tag: "GetInstances" });
 		expect(accounts.instances).toContainEqual(
 			expect.objectContaining({
 				id: instanceId,
@@ -199,9 +191,11 @@ syncBuiltinESMExports();
 		expect(
 			accounts.instances.some(({ name }) => name === "Invalid account"),
 		).toBe(false);
-		await fixture.harness.requestRpc(
-			new UpdateInstance({ instanceId: "claude", name: "Save still works" }),
-		);
+		await fixture.harness.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: "claude",
+			name: "Save still works",
+		});
 		const saved = Either.getOrThrowWith(
 			loadDaemonConfigResult(fixture.harness.configDir),
 			(error) => error,
@@ -301,7 +295,7 @@ syncBuiltinESMExports();
 			projects: [],
 		});
 		expect(
-			(await fixture.harness.requestRpc(new GetInstances({}))).instances,
+			(await fixture.harness.requestRpc({ _tag: "GetInstances" })).instances,
 		).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({ id: "claude", driver: "claude" }),
@@ -341,8 +335,8 @@ syncBuiltinESMExports();
 			}),
 		);
 		await fixture.start();
-		const status = await fixture.harness.requestRpc(new GetStatus({}));
-		const accounts = await fixture.harness.requestRpc(new GetInstances({}));
+		const status = await fixture.harness.requestRpc({ _tag: "GetStatus" });
+		const accounts = await fixture.harness.requestRpc({ _tag: "GetInstances" });
 		expect(status.pinEnabled).toBe(true);
 		expect(status.projects).toEqual([
 			expect.objectContaining({
@@ -402,7 +396,9 @@ syncBuiltinESMExports();
 		);
 		for (let i = 0; i < 2; i++) {
 			await fixture.start();
-			const accounts = await fixture.harness.requestRpc(new GetInstances({}));
+			const accounts = await fixture.harness.requestRpc({
+				_tag: "GetInstances",
+			});
 			expect(
 				accounts.instances.filter(({ driver }) => driver === "claude"),
 			).toEqual([]);
@@ -426,9 +422,11 @@ syncBuiltinESMExports();
 	] as const)("handles a %s file during an account save", async (kind) => {
 		const fixture = createFixture(`save-${kind}`);
 		await fixture.start();
-		await fixture.harness.requestRpc(
-			new UpdateInstance({ instanceId: "claude", name: "Before" }),
-		);
+		await fixture.harness.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: "claude",
+			name: "Before",
+		});
 		const original = readFileSync(fixture.configPath);
 		const damaged =
 			kind === "newer"
@@ -441,9 +439,11 @@ syncBuiltinESMExports();
 		else if (kind === "unreadable") chmodSync(fixture.configPath, 0o000);
 		else writeFileSync(fixture.configPath, damaged);
 		try {
-			const request = fixture.harness.requestRpc(
-				new UpdateInstance({ instanceId: "claude", name: "After" }),
-			);
+			const request = fixture.harness.requestRpc({
+				_tag: "UpdateInstance",
+				instanceId: "claude",
+				name: "After",
+			});
 			if (kind === "missing") {
 				await request;
 				const saved = JSON.parse(readFileSync(fixture.configPath, "utf8"));

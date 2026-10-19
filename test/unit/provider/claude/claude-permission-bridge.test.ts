@@ -219,7 +219,7 @@ describe("ClaudePermissionBridge", () => {
 		expect(settled).toBe(false);
 		expect(sink.requestQuestion).toHaveBeenCalledWith(
 			expect.objectContaining({
-				requestId: "tool-question",
+				requestId: "req-tool-question",
 				toolUseId: "tool-question",
 				questions: [
 					expect.objectContaining({

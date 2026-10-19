@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { Deferred, Effect, Layer, Ref } from "effect";
 import type { AccountsState } from "../../src/lib/account-directory.js";
 import { ShutdownSignalTag } from "../../src/lib/domain/daemon/Layers/daemon-layers.js";
@@ -43,12 +44,21 @@ import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../src/lib/domain/daemon/Services/session-activity.js";
-import { makeSessionDirectoryLive } from "../../src/lib/domain/daemon/Services/session-directory.js";
+import {
+	makeSharedSessionDirectoryLive,
+	type SessionDirectory,
+} from "../../src/lib/domain/daemon/Services/session-directory.js";
 import {
 	makeUsage,
 	Usage,
 } from "../../src/lib/domain/daemon/Services/usage.js";
+import { SessionEventBusLive } from "../../src/lib/domain/relay/Services/session-event-bus.js";
 import { AuthManagerFromConfigLive } from "../../src/lib/domain/server/Layers/auth-middleware.js";
+import {
+	makePersistenceStoreLayer,
+	PersistenceStore,
+	type PersistenceStoreContext,
+} from "../../src/lib/persistence/effect/live.js";
 import {
 	type ClaudeConfigDir,
 	configuredClaudeConfigDir,
@@ -59,12 +69,23 @@ import {
 } from "../../src/lib/server/ws-rpc.js";
 import type { StoredProject } from "../../src/lib/types.js";
 
+export const makeDaemonStoreTestLayer = (filename = ":memory:") =>
+	Layer.effect(
+		PersistenceStore,
+		Effect.context<PersistenceStoreContext>(),
+	).pipe(
+		Layer.provideMerge(makePersistenceStoreLayer(filename)),
+		Layer.merge(SessionEventBusLive),
+	);
+
 export const makeDaemonRpcTestLayer = (
 	projects: ReadonlyArray<StoredProject> = [],
 	factory: RelayFactory = () => Effect.die("Unexpected relay startup"),
 	options: {
 		config?: Partial<DaemonRuntimeConfig>;
 		configDir?: string;
+		/** Routing fixtures may supply a lookup double. */
+		sessionDirectory?: Layer.Layer<SessionDirectory>;
 		instances?: ReadonlyArray<DaemonInstanceConfig>;
 		launchLogin?: ClaudeConfigDir;
 		accountsState?: AccountsState;
@@ -80,21 +101,20 @@ export const makeDaemonRpcTestLayer = (
 		>;
 	} = {},
 ) => {
+	const store = makeDaemonStoreTestLayer(
+		options.configDir ? join(options.configDir, "events.db") : ":memory:",
+	);
 	const base = Layer.mergeAll(
-		makeSessionDirectoryLive(
-			options.configDir ?? "/tmp/daemon-rpc-fixture",
-			projects,
-		),
 		Layer.effect(SessionActivityTag, makeSessionActivity),
 		makeProjectRegistryLive(projects),
 		makeRelayCacheLive(factory),
 		DaemonEventBusLive,
 		BrowserRpcConnectionsLive,
 		options.tailscaleCli ??
-			Layer.succeed(TailscaleCliTag, {
+			Layer.succeed(TailscaleCliTag)({
 				exec: () => Effect.succeed('{"BackendState":"Stopped"}'),
 			}),
-		Layer.succeed(RpcCaller, { kind: "cli" }),
+		Layer.succeed(RpcCaller)({ kind: "cli" }),
 		InstanceHealthCheckLive,
 		DaemonConfigRefLive({
 			...makeDaemonConfigFromOptions({ port: 0 }),
@@ -131,21 +151,24 @@ export const makeDaemonRpcTestLayer = (
 				options.launchLogin ??
 				configuredClaudeConfigDir("/tmp/daemon-rpc-fixture/claude"),
 		}),
-		Layer.scoped(
+		Layer.effect(
 			Usage,
 			makeUsage({ accounts: Effect.succeed([]), readers: {} }),
 		),
-		Layer.succeed(PortScannerTag, {
+		Layer.succeed(PortScannerTag)({
 			getKnownPorts: () => Effect.succeed(new Set<number>()),
 			scanNow: () => Effect.succeed({ discovered: [], lost: [], active: [] }),
 		}),
-	);
+	).pipe(Layer.provideMerge(store));
+	const withDirectory = (
+		options.sessionDirectory ?? makeSharedSessionDirectoryLive
+	).pipe(Layer.provideMerge(base));
 	const dependencies = OpenCodeInstancesLive.pipe(
 		Layer.provideMerge(
 			Layer.merge(
 				AuthManagerFromConfigLive,
 				options.persistence ?? ConfigPersistenceNoopLive,
-			).pipe(Layer.provideMerge(base)),
+			).pipe(Layer.provideMerge(withDirectory)),
 		),
 	);
 	return DaemonWsRpcHandlersLive.pipe(

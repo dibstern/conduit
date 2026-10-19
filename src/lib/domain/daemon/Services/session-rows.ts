@@ -1,5 +1,6 @@
-import { SqlClient } from "@effect/sql";
 import { Array as Arr, Effect } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import {
 	type createSessionGitCache,
 	withCachedSessionGit,
@@ -28,31 +29,82 @@ export interface SessionRowsScope {
 }
 
 /** The common read path for full lists and versioned sidebar/family windows. */
-export const makeSessionRows = (scope: SessionRowsScope) =>
+export const makeSessionRows = (
+	scope:
+		| SessionRowsScope
+		| { readonly projects: () => readonly SessionRowsScope[] },
+) =>
 	Effect.gen(function* () {
 		const readQuery = yield* ReadQueryEffectTag;
 		const sql = yield* SqlClient.SqlClient;
 		const accounts = yield* AccountDirectory;
 		const activity = yield* SessionActivityTag;
-		const sessionScope: SessionScope = { projectIds: [scope.slug] };
+		const projects = () => ("projects" in scope ? scope.projects() : [scope]);
+		const [first, ...rest] = projects();
+		const sessionScope: SessionScope | undefined = first && {
+			projectIds: [first.slug, ...rest.map(({ slug }) => slug)],
+		};
 		const overlay = {
 			backgroundOf: activity.background.backgroundOf,
 			hintDismissals: activity.hintDismissals,
 		};
+		const readOwned = <T>(
+			read: Effect.Effect<T, ReadQueryEffectError | SqlError>,
+			items: (value: T) => readonly { readonly id: string }[],
+		): Effect.Effect<
+			{
+				readonly value: T;
+				readonly owners: ReadonlyMap<string, string> | undefined;
+			},
+			ReadQueryEffectError | SqlError
+		> =>
+			"projects" in scope
+				? sql.withTransaction(
+						Effect.gen(function* () {
+							const value = yield* read;
+							const ids = items(value).map(({ id }) => id);
+							const owners =
+								ids.length === 0
+									? new Map<string, string>()
+									: new Map(
+											(yield* sql<{ id: string; project_id: string }>`
+										SELECT id, project_id FROM sessions
+										WHERE id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`).map(
+												({ id, project_id }) => [id, project_id],
+											),
+										);
+							return { value, owners };
+						}),
+					)
+				: read.pipe(Effect.map((value) => ({ value, owners: undefined })));
 		const decorate = <T extends Omit<SessionInfo, "projectSlug" | "accountId">>(
 			sessions: readonly T[],
+			owners?: ReadonlyMap<string, string>,
 		) =>
 			Effect.gen(function* () {
+				const scopes = projects();
+				const bySlug = new Map(
+					scopes.map((project) => [project.slug, project]),
+				);
 				// Cold project reads have no relay git-change signal to warm this cache.
-				if (scope.refreshGit && scope.gitCache) {
-					const cache = scope.gitCache;
+				for (const project of scopes) {
+					if (!project.refreshGit || !project.gitCache) continue;
+					const cache = project.gitCache;
 					const directories = new Set(
-						sessions.flatMap((session) => [
-							effectiveWorkingDirectory(scope.folders[0], session.workspace),
-							...effectiveSessionFolders(scope.folders, session.workspace).map(
-								({ directory }) => directory,
-							),
-						]),
+						sessions.flatMap((session) =>
+							owners && owners.get(session.id) !== project.slug
+								? []
+								: [
+										effectiveWorkingDirectory(
+											project.folders[0],
+											session.workspace,
+										),
+										...effectiveSessionFolders(
+											project.folders,
+											session.workspace,
+										).map(({ directory }) => directory),
+									],
+						),
 					);
 					yield* Effect.forEach(
 						[...directories].filter((directory) => cache.isStale(directory)),
@@ -76,22 +128,30 @@ export const makeSessionRows = (scope: SessionRowsScope) =>
 				);
 				return yield* Effect.forEach(sessions, (session) =>
 					Effect.gen(function* () {
+						const project = owners
+							? bySlug.get(owners.get(session.id) ?? "")
+							: scopes[0];
+						if (project === undefined)
+							return yield* new ReadQueryEffectError({
+								operation: "sessionRows.owner",
+								cause: `No registered owner for session ${session.id}`,
+							});
 						const compacting = activity.compactions.compactingOf(session.id);
 						const retrying = activity.retries.retryingOf(session.id);
 						const enriched = yield* withSessionWorktreeStatus(
 							withCachedSessionGit(
 								{
 									...session,
-									projectSlug: scope.slug,
+									projectSlug: project.slug,
 									accountId: accountIds.get(session.id) ?? null,
 								},
-								scope.folders,
-								scope.gitCache,
+								project.folders,
+								project.gitCache,
 							),
 							{
-								slug: scope.slug,
-								projectDir: scope.folders[0],
-								extraFolders: scope.folders.slice(1),
+								slug: project.slug,
+								projectDir: project.folders[0],
+								extraFolders: project.folders.slice(1),
 							},
 						).pipe(Effect.provideService(SqlClient.SqlClient, sql));
 						return {
@@ -111,27 +171,63 @@ export const makeSessionRows = (scope: SessionRowsScope) =>
 					"backgroundOf" | "hintDismissals"
 				>,
 			) =>
-				readQuery
-					.listSessionInfos(sessionScope, { ...options, ...overlay })
-					.pipe(Effect.flatMap(decorate)),
+				sessionScope === undefined
+					? Effect.succeed([])
+					: readOwned(
+							readQuery.listSessionInfos(sessionScope, {
+								...options,
+								...overlay,
+							}),
+							(sessions) => sessions,
+						).pipe(
+							Effect.flatMap(({ value, owners }) => decorate(value, owners)),
+						),
 			read: (
 				range?: Omit<
 					NonNullable<Parameters<ReadQueryEffect["readSessionList"]>[1]>,
 					"backgroundOf" | "hintDismissals"
 				>,
-			) =>
-				readQuery.readSessionList(sessionScope, { ...range, ...overlay }).pipe(
-					Effect.flatMap((list) =>
-						decorate(list.rows.map(({ item }) => item)).pipe(
-							Effect.map((items) => ({
-								...list,
-								rows: Arr.zip(list.rows, items).map(([row, item]) => ({
-									...row,
-									item,
-								})),
+			): Effect.Effect<
+				Omit<
+					Effect.Success<ReturnType<ReadQueryEffect["readSessionList"]>>,
+					"rows"
+				> & {
+					readonly rows: readonly {
+						readonly item: SessionInfo;
+						readonly version: number;
+					}[];
+				},
+				ReadQueryEffectError | SqlError
+			> =>
+				sessionScope === undefined
+					? sql<{
+							value: number;
+						}>`SELECT value FROM read_model_counter WHERE id = 1`.pipe(
+							Effect.map(([counter]) => ({
+								rows: [],
+								version: counter?.value ?? 0,
+								listing: [],
+								removedSince: 0,
 							})),
+						)
+					: readOwned(
+							readQuery.readSessionList(sessionScope, { ...range, ...overlay }),
+							(list) => list.rows.map(({ item }) => item),
+						).pipe(
+							Effect.flatMap(({ value: list, owners }) =>
+								decorate(
+									list.rows.map(({ item }) => item),
+									owners,
+								).pipe(
+									Effect.map((items) => ({
+										...list,
+										rows: Arr.zip(list.rows, items).map(([row, item]) => ({
+											...row,
+											item,
+										})),
+									})),
+								),
+							),
 						),
-					),
-				),
 		};
 	});

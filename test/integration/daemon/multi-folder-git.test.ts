@@ -4,14 +4,7 @@ import { basename, join } from "node:path";
 import Database from "better-sqlite3";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	GetProjects,
-	ListDaemonSessions,
-	MoveSessionWorkspace,
-	SaveProject,
-	SessionInfoSchema,
-	SetSessionSettled,
-} from "../../../src/lib/contracts/ws-rpc.js";
+import { SessionInfoSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { SessionGit } from "../../../src/lib/shared-types.js";
 import {
@@ -56,7 +49,7 @@ function latestGit(
 	return browser.frames
 		.flatMap(({ message }) => {
 			if (message["type"] !== feed) return [];
-			const rows =
+			const rows: readonly unknown[] =
 				message["_tag"] === "snapshot" && Array.isArray(message["rows"])
 					? message["rows"]
 					: message["_tag"] === "upsert"
@@ -128,13 +121,11 @@ describe("Multi-folder git through the built daemon", () => {
 		commit(secondary, "Local only");
 		await fixture.restart();
 		const socket = join(fixture.configDir, "relay.sock");
-		await sendRpcRequest(
-			socket,
-			new SaveProject({
-				slug: "process-test",
-				folders: [fixture.projectDir, secondary, scratch],
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [fixture.projectDir, secondary, scratch],
+		});
 		return { fixture, socket, secondary, scratch };
 	}
 
@@ -161,7 +152,7 @@ describe("Multi-folder git through the built daemon", () => {
 
 	it("reports each repository, independent dirty/upstream state and detached HEAD through live and cold reads", async () => {
 		const { fixture, socket, secondary, scratch } = await start("status");
-		const projects = await sendRpcRequest(socket, new GetProjects({}));
+		const projects = await sendRpcRequest(socket, { _tag: "GetProjects" });
 		const project = projects.projects.find(
 			({ slug }) => slug === "process-test",
 		);
@@ -222,10 +213,10 @@ describe("Multi-folder git through the built daemon", () => {
 		);
 		for (const feed of ["shell", "family"] as const)
 			evidence[feed] = normalizedGit(latestGit(browser, feed, sessionId));
-		const list = await sendRpcRequest(
-			socket,
-			new ListDaemonSessions({ scope: "process-test" }),
-		);
+		const list = await sendRpcRequest(socket, {
+			_tag: "ListDaemonSessions",
+			scope: "process-test",
+		});
 		evidence["daemonList"] = normalizedGit(
 			list.sessions.find(({ id }) => id === sessionId)?.git,
 		);
@@ -248,10 +239,11 @@ describe("Multi-folder git through the built daemon", () => {
 	it("reports a sole git extra when the primary folder is not git", async () => {
 		const { fixture, socket, secondary, scratch } =
 			await start("non-git-primary");
-		await sendRpcRequest(
-			socket,
-			new SaveProject({ slug: "process-test", folders: [scratch, secondary] }),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [scratch, secondary],
+		});
 		writeFileSync(join(secondary, "tracked.txt"), "git extra changed\n");
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession("Non-git primary");
@@ -286,20 +278,16 @@ describe("Multi-folder git through the built daemon", () => {
 		git(secondary, "worktree", "add", "-b", "feature/isolated", worktree);
 		const original = await fixture.connect();
 		const sessionId = await original.createSession("Detached mapped folder");
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId,
-				path: worktree,
-			}),
-		);
-		await sendRpcRequest(
-			socket,
-			new SaveProject({
-				slug: "process-test",
-				folders: [fixture.projectDir, scratch],
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId,
+			path: worktree,
+		});
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [fixture.projectDir, scratch],
+		});
 		const browser = await fixture.connect();
 		await browser.followFamily(sessionId);
 		writeFileSync(
@@ -332,10 +320,10 @@ describe("Multi-folder git through the built daemon", () => {
 		}
 		await fixture.shutdown();
 		await fixture.restart();
-		const list = await sendRpcRequest(
-			socket,
-			new ListDaemonSessions({ scope: "process-test" }),
-		);
+		const list = await sendRpcRequest(socket, {
+			_tag: "ListDaemonSessions",
+			scope: "process-test",
+		});
 		const restored = list.sessions.find(({ id }) => id === sessionId)?.git;
 		expect(restored?.branch).toBe("feature/isolated");
 		expect(restored?.dirty).toBe(true);
@@ -355,25 +343,26 @@ describe("Multi-folder git through the built daemon", () => {
 		const browser = await fixture.connect();
 		const unchangedId = await browser.createSession("Unchanged git folders");
 		const sessionId = await browser.createSession("Mapped git folders");
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId,
-				path: worktree,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId,
+			path: worktree,
+		});
 		const list = () =>
-			sendRpcRequest(socket, new ListDaemonSessions({ scope: "process-test" }));
+			sendRpcRequest(socket, {
+				_tag: "ListDaemonSessions",
+				scope: "process-test",
+			});
 		const readGitState = () => {
-			const db = new Database(
-				join(fixture.configDir, "projects", "process-test", "events.db"),
-				{ readonly: true, fileMustExist: true },
-			);
+			const db = new Database(fixture.daemonStorePath(), {
+				readonly: true,
+				fileMustExist: true,
+			});
 			try {
 				const sessions = db
 					.prepare<[], { id: string; version: number; sidebarVersion: number }>(
 						`SELECT id, sessions.version, session_sidebar.version AS sidebarVersion
-						FROM sessions JOIN session_sidebar ON session_id = id ORDER BY id`,
+						FROM sessions JOIN session_sidebar ON session_id = id WHERE sessions.project_id = 'process-test' ORDER BY id`,
 					)
 					.all();
 				const published = db
@@ -417,7 +406,7 @@ describe("Multi-folder git through the built daemon", () => {
 		await vi.waitFor(
 			async () => {
 				const project = (
-					await sendRpcRequest(socket, new GetProjects({}))
+					await sendRpcRequest(socket, { _tag: "GetProjects" })
 				).projects.find(({ slug }) => slug === "process-test");
 				expect(project?.git?.folders?.[1]).toMatchObject({
 					branch: "feature/api",
@@ -441,13 +430,11 @@ describe("Multi-folder git through the built daemon", () => {
 				),
 			{ timeout: 20_000 },
 		);
-		await sendRpcRequest(
-			socket,
-			new SetSessionSettled({
-				sessionId,
-				settled: true,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SetSessionSettled",
+			sessionId,
+			settled: true,
+		});
 		const beforeRestart = (await list()).sessions;
 		const before = beforeRestart.find(({ id }) => id === sessionId);
 		const beforeVersions = readGitState().sessions;

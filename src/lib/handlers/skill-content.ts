@@ -17,7 +17,7 @@ export const getSkillContentValue = (
 			join(os.homedir(), ".claude", "skills"),
 		];
 		for (const root of roots) {
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				Effect.tryPromise(async () => {
 					const realRoot = await fs.realpath(root);
 					const path = await fs.realpath(join(root, name, "SKILL.md"));
@@ -51,8 +51,8 @@ export const getSkillContentValue = (
 					}
 				}),
 			);
-			if (result._tag === "Right" && result.right !== undefined) {
-				return result.right;
+			if (result._tag === "Success" && result.success !== undefined) {
+				return result.success;
 			}
 		}
 		return undefined;

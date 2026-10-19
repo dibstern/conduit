@@ -7,11 +7,8 @@ import Database from "better-sqlite3";
 import { Effect, Fiber, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-	GetProjects,
-	GetStatus,
 	type ProjectInfo,
 	ProjectSaveRejected,
-	SaveProject,
 	type SaveProjectInput,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
@@ -32,10 +29,9 @@ const readConfig = (harness: ProcessHarness): DaemonConfig =>
 	JSON.parse(readFileSync(join(harness.configDir, "daemon.json"), "utf8"));
 
 async function projectFolders(harness: ProcessHarness) {
-	const { projects } = await sendRpcRequest(
-		socket(harness),
-		new GetProjects({}),
-	);
+	const { projects } = await sendRpcRequest(socket(harness), {
+		_tag: "GetProjects",
+	});
 	return projects.map(({ slug, folders, title }) => ({
 		slug,
 		folders,
@@ -44,7 +40,7 @@ async function projectFolders(harness: ProcessHarness) {
 }
 
 function persistedTurn(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath(), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		return {
 			session: db
@@ -102,10 +98,10 @@ describe("SaveProject through the built daemon", () => {
 		for (const folder of input.folders)
 			folders.add(typeof folder === "string" ? folder : folder.path);
 		try {
-			const result = await sendRpcRequest(
-				socket(fixture),
-				new SaveProject(input),
-			);
+			const result = await sendRpcRequest(socket(fixture), {
+				_tag: "SaveProject",
+				...input,
+			});
 			operations.push({ input, result });
 			return result;
 		} catch (error) {
@@ -365,8 +361,10 @@ describe("SaveProject through the built daemon", () => {
 		folders.add(directory);
 		const lists: (readonly ProjectInfo[])[] = [];
 		const following = Effect.runFork(
-			Stream.runForEach(observer.rpc.SubscribeProjects({}), ({ projects }) =>
-				Effect.sync(() => lists.push(projects)),
+			Stream.runForEach(observer.rpc.SubscribeShell({}), (frame) =>
+				Effect.sync(() => {
+					if (frame._tag === "projects") lists.push(frame.projects);
+				}),
 			),
 		);
 		const latest = () => lists.at(-1) ?? [];
@@ -427,7 +425,7 @@ describe("SaveProject through the built daemon", () => {
 		evidence["sendInput"] = input;
 		const release = join(fixture.root, "release-upgrade-turn");
 		try {
-			await Effect.runPromise(before.rpc.input.submit(input));
+			await Effect.runPromise(before.rpc["input.submit"](input));
 			await before.waitFor(
 				(message) =>
 					message["type"] === "transcript_message" &&
@@ -451,10 +449,9 @@ describe("SaveProject through the built daemon", () => {
 			const runner = registrations[0];
 			if (!runner) throw new Error("Missing held runner");
 			const markCursor = fixture.marks.length;
-			evidence["readinessBefore"] = await sendRpcRequest(
-				socket(fixture),
-				new GetStatus({}),
-			);
+			evidence["readinessBefore"] = await sendRpcRequest(socket(fixture), {
+				_tag: "GetStatus",
+			});
 			const saved = await save(fixture, {
 				slug: "process-test",
 				folders: [fixture.projectDir, extra],
@@ -470,7 +467,9 @@ describe("SaveProject through the built daemon", () => {
 					expect.objectContaining({ sessionId, pid: runner.pid }),
 				);
 			});
-			const status = await sendRpcRequest(socket(fixture), new GetStatus({}));
+			const status = await sendRpcRequest(socket(fixture), {
+				_tag: "GetStatus",
+			});
 			evidence["readinessAfter"] = status;
 			expect(
 				status.projects.find(({ slug }) => slug === "process-test")?.status,

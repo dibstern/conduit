@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, HashMap, Layer, Option, Ref } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
@@ -103,29 +103,27 @@ describe("SessionManager Effect", () => {
 		mockApi: ReturnType<typeof makeMockApi>,
 		configDir?: string,
 	) => {
-		const configLayer = Layer.succeed(
-			ConfigTag,
+		const configLayer = Layer.succeed(ConfigTag)(
 			makeMockConfig(configDir ? { configDir } : {}),
 		);
-		const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
+		const loggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
 		return Layer.mergeAll(
 			configDir === undefined
-				? Layer.succeed(AccountDirectory, makeMockAccountDirectory())
+				? Layer.succeed(AccountDirectory)(makeMockAccountDirectory())
 				: AccountDirectoryFromConfigLive(
 						configDir,
 						configuredClaudeConfigDir(join(configDir, "login")),
 					),
 			makeSessionManagerStateLive(),
-			Layer.succeed(OpenCodeAPITag, mockApi),
+			Layer.succeed(OpenCodeAPITag)(mockApi),
 			makePersistenceEffectLayer(":memory:", "test-project"),
 			configLayer,
 			loggerLayer,
-			Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+			Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 			Layer.effect(SessionActivityTag, makeSessionActivity),
 			RelayStatusSnapshotLive,
 			makeOverridesStateLive(),
-			Layer.succeed(
-				OpenCodeInstancesTag,
+			Layer.succeed(OpenCodeInstancesTag)(
 				makeOpenCodeInstancesStub({ opencode: mockApi }),
 			),
 		);
@@ -153,15 +151,14 @@ describe("SessionManager Effect", () => {
 			SessionManagerServiceLive,
 			Layer.mergeAll(
 				Layer.fresh(makeTestLayer(mockApi, configDir)),
-				Layer.succeed(LoggerTag, makeMockLogger()),
+				Layer.succeed(LoggerTag)(makeMockLogger()),
 				DaemonEventBusLive,
 				persistenceLayer,
-				Layer.succeed(
-					OrchestrationEngineTag,
+				Layer.succeed(OrchestrationEngineTag)(
 					new OrchestrationEngine({ registry: new ProviderRegistry() }),
 				),
 				...(readQueryOverride
-					? [Layer.succeed(ReadQueryEffectTag, readQueryOverride)]
+					? [Layer.succeed(ReadQueryEffectTag)(readQueryOverride)]
 					: []),
 				...(projectionRunnerOverride ? [projectionRunnerOverride] : []),
 			),
@@ -260,8 +257,8 @@ describe("SessionManager Effect", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* runner.markRecovered();
 				yield* sql`
-					INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-					VALUES (${sessionId}, 'claude', 'Claude Session', 'idle', 1000, 1000)`;
+					INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+					VALUES (${sessionId}, 'test-project', 'claude', 'Claude Session', 'idle', 1000, 1000)`;
 
 				const created = yield* store.append(
 					canonicalEvent(
@@ -358,29 +355,31 @@ describe("SessionManager Effect", () => {
 			const sql = yield* SqlClient.SqlClient;
 			yield* runner.markRecovered();
 			yield* sql`
-				INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-				VALUES (${sessionId}, 'claude', 'Claude Session', 'idle', 1000, 1000)`;
+				INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+				VALUES (${sessionId}, 'test-project', 'claude', 'Claude Session', 'idle', 1000, 1000)`;
 
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				service.renameSession(sessionId, "Useful title"),
 			);
 
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expect(result.left).toBeInstanceOf(SessionManagerError);
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
+				expect(result.failure).toBeInstanceOf(SessionManagerError);
 				// Rename now runs through the command seam, so the projector failure
 				// arrives wrapped in the seam's error rather than a rename-specific one.
-				expect(result.left.operation).toBe("renameSession");
-				expect(result.left.cause).toBeInstanceOf(SessionCommandError);
-				if (result.left.cause instanceof SessionCommandError) {
-					expect(result.left.cause.operation).toBe("session.renamed.commit");
-					expect(result.left.cause.cause).toBeInstanceOf(ProjectionRunnerError);
-					if (result.left.cause.cause instanceof ProjectionRunnerError) {
-						expect(result.left.cause.cause.cause).toBeInstanceOf(
+				expect(result.failure.operation).toBe("renameSession");
+				expect(result.failure.cause).toBeInstanceOf(SessionCommandError);
+				if (result.failure.cause instanceof SessionCommandError) {
+					expect(result.failure.cause.operation).toBe("session.renamed.commit");
+					expect(result.failure.cause.cause).toBeInstanceOf(
+						ProjectionRunnerError,
+					);
+					if (result.failure.cause.cause instanceof ProjectionRunnerError) {
+						expect(result.failure.cause.cause.cause).toBeInstanceOf(
 							ProjectionError,
 						);
-						if (result.left.cause.cause.cause instanceof ProjectionError) {
-							expect(result.left.cause.cause.cause.cause).toBe(rootCause);
+						if (result.failure.cause.cause.cause instanceof ProjectionError) {
+							expect(result.failure.cause.cause.cause.cause).toBe(rootCause);
 						}
 					}
 				}
@@ -432,8 +431,8 @@ describe("SessionManager Effect", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* runner.markRecovered();
 				yield* sql`
-					INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-					VALUES (${sessionId}, 'work-claude', 'Claude Session', 'idle', 1000, 1000)`;
+					INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+					VALUES (${sessionId}, 'test-project', 'work-claude', 'Claude Session', 'idle', 1000, 1000)`;
 
 				const created = yield* store.append(
 					canonicalEvent(
@@ -511,6 +510,7 @@ describe("SessionManager Effect", () => {
 				const session = yield* service.createSession("New", {
 					account: {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},
@@ -562,8 +562,8 @@ describe("SessionManager Effect", () => {
 				const store = yield* EventStoreEffectTag;
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`
-					INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-					VALUES (${sessionId}, 'opencode', 'OpenCode Session', 'idle', 1000, 1000)`;
+					INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+					VALUES (${sessionId}, 'test-project', 'opencode', 'OpenCode Session', 'idle', 1000, 1000)`;
 
 				yield* service.renameSession(sessionId, "API title");
 
@@ -640,11 +640,11 @@ describe("SessionManager Effect", () => {
 			return Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
 
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					service.renameSession(sessionId, "API title"),
 				);
 
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 				expect(mockApi.session.update).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.provide(layer),
@@ -669,8 +669,8 @@ describe("SessionManager Effect", () => {
 				const sessionId = "ses-permission-mode";
 				yield* runner.markRecovered();
 				yield* sql`
-				INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-				VALUES (${sessionId}, 'claude', 'Permission session', 'idle', 1000, 1000)`;
+				INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+				VALUES (${sessionId}, 'test-project', 'claude', 'Permission session', 'idle', 1000, 1000)`;
 
 				yield* persistSessionPermissionMode(sessionId, "full");
 
@@ -703,20 +703,20 @@ describe("SessionManager Effect", () => {
 				yield* runner.markRecovered();
 				yield* sql`
 					INSERT INTO sessions (
-						id, provider, title, status, permission_mode, created_at, updated_at
+						id, project_id, provider, title, status, permission_mode, created_at, updated_at
 					) VALUES
-						('ses-auto', 'claude', 'Auto', 'idle', 'auto', 1000, 1000),
-						('ses-default', 'claude', 'Default', 'idle', NULL, 1000, 1000),
-						('ses-invalid', 'claude', 'Invalid', 'idle', 'broken', 1000, 1000)`;
+						('ses-auto', 'test-project', 'claude', 'Auto', 'idle', 'auto', 1000, 1000),
+						('ses-default', 'test-project', 'claude', 'Default', 'idle', NULL, 1000, 1000),
+						('ses-invalid', 'test-project', 'claude', 'Invalid', 'idle', 'broken', 1000, 1000)`;
 				yield* sql`INSERT INTO sessions (
-					id, provider, title, status, created_at, updated_at,
+					id, project_id, provider, title, status, created_at, updated_at,
 					model_id, model_provider, variant, context_window, permission_mode
 				) VALUES
-					('ses-complete', 'claude', 'Complete', 'idle', 1000, 1000, 'model', 'claude', 'high', '1m', 'full'),
-					('ses-model-only', 'claude', 'Partial', 'idle', 1000, 1000, 'model', NULL, NULL, NULL, NULL),
-					('ses-provider-only', 'claude', 'Partial', 'idle', 1000, 1000, NULL, 'claude', NULL, NULL, NULL),
-					('ses-variant', 'claude', 'Empty', 'idle', 1000, 1000, NULL, NULL, '', NULL, NULL),
-					('ses-context', 'claude', 'Empty', 'idle', 1000, 1000, NULL, NULL, NULL, '', NULL)`;
+					('ses-complete', 'test-project', 'claude', 'Complete', 'idle', 1000, 1000, 'model', 'claude', 'high', '1m', 'full'),
+					('ses-model-only', 'test-project', 'claude', 'Partial', 'idle', 1000, 1000, 'model', NULL, NULL, NULL, NULL),
+					('ses-provider-only', 'test-project', 'claude', 'Partial', 'idle', 1000, 1000, NULL, 'claude', NULL, NULL, NULL),
+					('ses-variant', 'test-project', 'claude', 'Empty', 'idle', 1000, 1000, NULL, NULL, '', NULL, NULL),
+					('ses-context', 'test-project', 'claude', 'Empty', 'idle', 1000, 1000, NULL, NULL, NULL, '', NULL)`;
 				yield* setDefaultPermissionMode("plan");
 				const read = yield* ReadQueryEffectTag;
 				const fullRead = vi.fn(read.listSessions);
@@ -775,7 +775,7 @@ describe("SessionManager Effect", () => {
 			const layer = () =>
 				Layer.mergeAll(
 					makePersistenceEffectLayer(filename, "test-project"),
-					Layer.succeed(ConfigTag, makeMockConfig({ configDir: dir })),
+					Layer.succeed(ConfigTag)(makeMockConfig({ configDir: dir })),
 					AccountDirectoryFromConfigLive(
 						dir,
 						configuredClaudeConfigDir(join(dir, "login")),
@@ -940,10 +940,10 @@ describe("SessionManager Effect", () => {
 				yield* runner.markRecovered();
 				yield* sql`
 				INSERT INTO sessions (
-					id, provider, title, status, parent_id, created_at, updated_at
+					id, project_id, provider, title, status, parent_id, created_at, updated_at
 				) VALUES
-					('ses-parent', 'claude', 'Parent', 'idle', NULL, 1000, 1000),
-					('ses-child', 'claude', 'Subagent', 'idle', 'ses-parent', 1000, 1000)`;
+					('ses-parent', 'test-project', 'claude', 'Parent', 'idle', NULL, 1000, 1000),
+					('ses-child', 'test-project', 'claude', 'Subagent', 'idle', 'ses-parent', 1000, 1000)`;
 
 				yield* deleteSession("ses-parent");
 

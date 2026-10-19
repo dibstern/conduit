@@ -1,8 +1,8 @@
 // All database operations are Effect programs using @effect/sql template literal queries.
 
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect, Schema } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import type { CanonicalEvent, StoredEvent } from "../events.js";
 import { CanonicalEventSchema } from "../events.js";
@@ -14,6 +14,9 @@ import {
 export class EventStoreError extends Data.TaggedError("EventStoreError")<{
 	readonly operation: string;
 	readonly cause: unknown;
+	readonly sessionId?: string;
+	readonly projectId?: string;
+	readonly ownerProjectId?: string;
 }> {}
 
 const DEFAULT_READ_LIMIT = 1000;
@@ -49,10 +52,10 @@ export interface EventStoreEffect {
 	) => Effect.Effect<number, EventStoreError | SqlError>;
 }
 
-export class EventStoreEffectTag extends Context.Tag("EventStoreEffect")<
+export class EventStoreEffectTag extends Context.Service<
 	EventStoreEffectTag,
 	EventStoreEffect
->() {}
+>()("EventStoreEffect") {}
 
 const decodeEventStoreRow = (
 	row: StoredEventRow,
@@ -66,7 +69,7 @@ const decodeEventStoreRow = (
 export const validateCanonicalEvent = (
 	event: CanonicalEvent,
 ): Effect.Effect<void, EventStoreError> =>
-	Schema.decodeUnknown(CanonicalEventSchema)(event).pipe(
+	Schema.decodeUnknownEffect(CanonicalEventSchema)(event).pipe(
 		Effect.asVoid,
 		Effect.mapError(
 			(cause) =>
@@ -77,6 +80,25 @@ export const validateCanonicalEvent = (
 export const makeEventStoreEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const { projectId } = yield* PersistenceProjectTag;
+	const assertSessionOwnership = (sessionIds: readonly string[]) =>
+		Effect.gen(function* () {
+			// Reserve SQLite's writer slot before reading ownership. A deferred
+			// read snapshot cannot upgrade after another connection commits.
+			yield* sql`UPDATE sessions SET project_id = project_id WHERE 0`;
+			for (const sessionId of new Set(sessionIds)) {
+				const [session] = yield* sql<{ project_id: string | null }>`
+					SELECT project_id FROM sessions WHERE id = ${sessionId}`;
+				// An unstamped row (NULL or '') has no owner yet; the provenance stamp claims it.
+				if (session?.project_id && session.project_id !== projectId)
+					return yield* new EventStoreError({
+						operation: "appendOwnership",
+						sessionId,
+						projectId,
+						ownerProjectId: session.project_id,
+						cause: `Project ${projectId} cannot append to session ${sessionId} owned by project ${session.project_id}`,
+					});
+			}
+		});
 
 	const getNextStreamVersion = (
 		sessionId: string,
@@ -190,9 +212,10 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 		event: CanonicalEvent,
 	): Effect.Effect<StoredEvent, EventStoreError | SqlError> =>
 		sql.withTransaction(
-			appendInCurrentTransaction(event).pipe(
-				Effect.map(({ stored }) => stored),
-			),
+			Effect.gen(function* () {
+				yield* assertSessionOwnership([event.sessionId]);
+				return (yield* appendInCurrentTransaction(event)).stored;
+			}),
 		);
 
 	const appendBatch = (
@@ -202,6 +225,7 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 
 		return sql.withTransaction(
 			Effect.gen(function* () {
+				yield* assertSessionOwnership(events.map((event) => event.sessionId));
 				const results: StoredEvent[] = [];
 				for (const event of events) {
 					// Re-projecting a child seed would reset a renamed title. OpenCode

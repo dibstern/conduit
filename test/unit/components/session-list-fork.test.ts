@@ -10,10 +10,10 @@ import {
 	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import {
 	clearSessionSearch,
-	seedDaemonSessions,
 	seedFamilySessions,
 	seedRootSessions,
 } from "../stores/session-fixtures.js";
@@ -24,14 +24,14 @@ vi.mock(
 		...(await importOriginal<
 			typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js")
 		>()),
-		// Discovery never answers, so only the fork and its view settle.
+		// Keep catalog reads pending while the fork reply settles.
 		rpc: vi.fn((tag: string) =>
 			tag === "GetAgents" || tag === "GetCommands"
 				? new Promise(() => undefined)
 				: Promise.resolve({
 						projectSlug: "current-project",
 						sessionId: "fork",
-						parentId: "other",
+						forkedFrom: "other",
 					}),
 		),
 	}),
@@ -55,10 +55,10 @@ describe("SessionList fork", () => {
 			{ id: "other", title: "Other work" },
 		]);
 		seedFamilySessions([...sessionState.rootSessions]);
-		seedDaemonSessions([]);
+
 		sessionState.searchQuery = "";
 		clearSessionSearch();
-		sessionState.currentId = "open";
+		openSessionForSetup("open", "current-project");
 		routerState.path = "/s/open";
 		routerState.search = "";
 	});
@@ -84,11 +84,5 @@ describe("SessionList fork", () => {
 		);
 		await vi.waitFor(() => expect(sessionState.currentId).toBe("fork"));
 		expect(routerState.path).toContain("/s/fork");
-		expect(rpc).toHaveBeenCalledWith(
-			"ViewSession",
-			expect.objectContaining({
-				sessionId: "fork",
-			}),
-		);
 	});
 });

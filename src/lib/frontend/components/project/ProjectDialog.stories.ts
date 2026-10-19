@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import type { Rpc } from "effect/rpc";
 import { expect, fn, userEvent, within } from "storybook/test";
 import {
 	type FindFolders,
@@ -17,7 +18,7 @@ const existing = [app, docs, site, `${app}/packages/sdk`];
 
 async function findFolders({
 	query,
-}: ConstructorParameters<typeof FindFolders>[0]): Promise<FindFoldersResponse> {
+}: Rpc.PayloadConstructor<typeof FindFolders>): Promise<FindFoldersResponse> {
 	if (!/^[/~]/.test(query)) return { home, entries: [] };
 	return {
 		home,
@@ -333,7 +334,7 @@ export const SuggestionsOpen: Story = {
 	args: {
 		findFolders: async ({
 			query,
-		}: ConstructorParameters<typeof FindFolders>[0]) => ({
+		}: Rpc.PayloadConstructor<typeof FindFolders>) => ({
 			home,
 			entries: suggestions.filter((entry) =>
 				entry.path.toLowerCase().includes(query.toLowerCase()),
@@ -510,52 +511,5 @@ export const WithSetupScript: Story = {
 		await expect(
 			canvas.getByText("It runs in each new worktree before the agent starts."),
 		).toBeVisible();
-	},
-};
-
-export const RepositoryGroupingOverride: Story = {
-	args: {
-		project: {
-			...editedProject,
-			groupingMode: "repository+subfolder",
-		},
-		projects: [editedProject],
-	},
-	play: async ({ canvasElement, args }) => {
-		const canvas = canvasFor(canvasElement);
-		const grouping = canvas.getByRole("combobox", {
-			name: "Repository grouping",
-		});
-		await expect(grouping).toHaveValue("repository+subfolder");
-		await expect(within(grouping).getAllByRole("option")).toHaveLength(4);
-		await expect(
-			within(grouping).getByRole("option", { name: "Use global default" }),
-		).toHaveValue("");
-		await expect(
-			within(grouping).getByRole("option", {
-				name: /^By repository$/,
-			}),
-		).toHaveValue("repository");
-		await expect(
-			within(grouping).getByRole("option", {
-				name: "By repository and subfolder",
-			}),
-		).toHaveValue("repository+subfolder");
-		await expect(
-			within(grouping).getByRole("option", { name: "Off" }),
-		).toHaveValue("off");
-		const save = canvas.getByRole("button", { name: "Save" });
-		await expect(save).toBeDisabled();
-		await userEvent.selectOptions(grouping, "off");
-		await expect(save).toBeEnabled();
-		await userEvent.click(save);
-		await expect(args["saveProject"]).toHaveBeenCalledWith({
-			slug: "conduit",
-			title: "Conduit",
-			folders: [app, docs],
-			groupingMode: "off",
-		});
-		await userEvent.selectOptions(grouping, "repository+subfolder");
-		await expect(grouping).toHaveValue("repository+subfolder");
 	},
 };

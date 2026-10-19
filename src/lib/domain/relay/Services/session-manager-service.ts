@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { SqlClient } from "@effect/sql";
 import {
-	Cause,
 	Context,
 	Deferred,
 	Effect,
@@ -9,8 +7,11 @@ import {
 	HashMap,
 	Layer,
 	Option,
+	PubSub,
 	Ref,
+	Semaphore,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../account-directory.js";
 import type { Account } from "../../../contracts/account.js";
 import { AccountUnroutable } from "../../../contracts/limit-recovery.js";
@@ -19,6 +20,7 @@ import {
 	getProviderDriver,
 	PROVIDER_DRIVERS,
 } from "../../../contracts/provider-instance.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../../errors.js";
 import type {
 	SessionDetail,
@@ -39,6 +41,7 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
+import { removeRunnerSessionSends } from "../../../provider/runner/runner-send-journal.js";
 import {
 	isPickRejection,
 	ModelNotInCatalog,
@@ -53,6 +56,7 @@ import type {
 import type { SessionInfo } from "../../../types.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import {
+	DaemonEvent,
 	DaemonEventBusTag,
 	publishSessionCreated,
 	publishSessionDeleted,
@@ -62,8 +66,6 @@ import {
 	OpenCodeInstancesTag,
 } from "../../daemon/Services/opencode-instances-service.js";
 import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
-import { SessionDirectory } from "../../daemon/Services/session-directory.js";
-import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { RelayStatusSnapshotTag } from "./relay-status-snapshot.js";
 import {
@@ -77,9 +79,9 @@ import {
 	applySessionCommand,
 	createOpenCodeSession,
 	normalizeSessionTitle,
-	openCodeUpstreamAdapter,
 	type SessionCommand,
 	type SessionUpstreamAdapter,
+	sessionUpstreamAdapter,
 } from "./session-command.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 import { SessionManagerError } from "./session-manager-error.js";
@@ -108,6 +110,7 @@ import {
 	markSessionSeen,
 	markSessionUnread,
 	renameSession,
+	setSessionArchived,
 	setSessionAutoSettleDisabled,
 	setSessionPinned,
 	setSessionSettled,
@@ -152,7 +155,9 @@ function renderProviderCleanupDetail(error: unknown): string {
 	try {
 		return truncateProviderCleanupDiagnostic(
 			// The upstream adapter wraps provider failures; its message is generic.
-			formatErrorDetail(Cause.isUnknownException(error) ? error.error : error),
+			formatErrorDetail(
+				Failure.isUnknownException(error) ? error.cause : error,
+			),
 			PROVIDER_CLEANUP_DETAIL_MAX_LENGTH,
 		);
 	} catch {
@@ -190,6 +195,16 @@ export interface SetSessionSettledOptions {
 	readonly automatic?: boolean;
 	readonly mergedHead?: string;
 }
+
+export type SetSessionArchivedOptions =
+	| { readonly archived: false; readonly cause?: "manual" | "send" }
+	| { readonly archived: true; readonly automatic?: false }
+	| {
+			readonly archived: true;
+			readonly automatic: true;
+			readonly idleWindowMs: number;
+			readonly now: number;
+	  };
 
 /**
  * Initialize session state from the provider and return the most recent session,
@@ -309,6 +324,7 @@ export const deleteSession = (sessionId: string) =>
 		const stateRef = yield* SessionManagerStateTag;
 		const logOption = yield* Effect.serviceOption(LoggerTag);
 		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+		const configOption = yield* Effect.serviceOption(ConfigTag);
 		const instanceClientsOption =
 			yield* Effect.serviceOption(OpenCodeInstancesTag);
 		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
@@ -370,7 +386,7 @@ export const deleteSession = (sessionId: string) =>
 		if (bindingExit !== undefined && Exit.isFailure(bindingExit)) {
 			cleanupFailures.push(
 				`binding_resolution: ${renderProviderCleanupDetail(
-					Cause.squash(bindingExit.cause),
+					Failure.squashCause(bindingExit.cause),
 				)}`,
 			);
 		}
@@ -400,7 +416,7 @@ export const deleteSession = (sessionId: string) =>
 			Exit.isFailure(providerResolutionExit)
 		) {
 			cleanupFailures.push(
-				`provider_resolution: ${renderProviderCleanupDetail(Cause.squash(providerResolutionExit.cause))}`,
+				`provider_resolution: ${renderProviderCleanupDetail(Failure.squashCause(providerResolutionExit.cause))}`,
 			);
 		}
 		if (account === undefined) {
@@ -415,6 +431,7 @@ export const deleteSession = (sessionId: string) =>
 					return;
 				}
 
+				let runnerStopped = false;
 				if (engineOption._tag === "None") {
 					cleanupFailures.push(
 						"end_session: orchestration engine is unavailable",
@@ -433,46 +450,74 @@ export const deleteSession = (sessionId: string) =>
 						),
 					);
 					if (Exit.isFailure(endSessionExit)) {
-						if (Exit.isInterrupted(endSessionExit)) {
+						if (Failure.isInterrupted(endSessionExit.cause)) {
 							return yield* Effect.failCause(endSessionExit.cause);
 						}
 						cleanupFailures.push(
 							`end_session: ${renderProviderCleanupDetail(
-								Cause.squash(endSessionExit.cause),
+								Failure.squashCause(endSessionExit.cause),
 							)}`,
 						);
+					} else {
+						runnerStopped = true;
 					}
 				}
 
-				if (getProviderDriver(provider)?.runsOpenCodeServer) {
-					const providerDeleteExit = yield* Effect.exit(
-						Effect.gen(function* () {
-							let deleteApi = api;
-							if (capturedInstanceId !== MANAGED_OPENCODE_ACCOUNT_ID) {
-								if (instanceClientsOption._tag === "None") {
-									return yield* Effect.fail(
-										new Error(
-											`OpenCode instance client registry is unavailable for "${capturedInstanceId}"`,
-										),
-									);
-								}
-								deleteApi =
-									yield* instanceClientsOption.value.use(capturedInstanceId);
+				const providerDeleteExit = yield* Effect.exit(
+					Effect.gen(function* () {
+						let deleteApi = api;
+						if (
+							getProviderDriver(provider)?.runsOpenCodeServer &&
+							capturedInstanceId !== MANAGED_OPENCODE_ACCOUNT_ID
+						) {
+							if (instanceClientsOption._tag === "None") {
+								return yield* Effect.fail(
+									new Error(
+										`OpenCode instance client registry is unavailable for "${capturedInstanceId}"`,
+									),
+								);
 							}
-
-							yield* openCodeUpstreamAdapter(deleteApi).sync(command);
-						}).pipe(Effect.scoped),
-					);
-					if (Exit.isFailure(providerDeleteExit)) {
-						if (Exit.isInterrupted(providerDeleteExit)) {
-							return yield* Effect.failCause(providerDeleteExit.cause);
+							deleteApi =
+								yield* instanceClientsOption.value.use(capturedInstanceId);
 						}
-						cleanupFailures.push(
-							`provider_delete: ${renderProviderCleanupDetail(
-								Cause.squash(providerDeleteExit.cause),
-							)}`,
-						);
+
+						const adapter = yield* sessionUpstreamAdapter(provider, deleteApi);
+						yield* adapter.sync(command);
+						if (
+							runnerStopped &&
+							getProviderDriver(provider)?.usesLocalSessions
+						) {
+							const config =
+								configOption._tag === "Some" ? configOption.value : undefined;
+							const configDir = config?.configDir;
+							if (config === undefined || configDir === undefined) {
+								return yield* Effect.fail(
+									new SessionManagerError({
+										operation: "deleteSession.runnerJournal",
+										cause:
+											"Runner cleanup requires the project and config directories",
+									}),
+								);
+							}
+							yield* Effect.try(() =>
+								removeRunnerSessionSends(
+									config.projectDir,
+									configDir,
+									sessionId,
+								),
+							);
+						}
+					}).pipe(Effect.scoped),
+				);
+				if (Exit.isFailure(providerDeleteExit)) {
+					if (Failure.isInterrupted(providerDeleteExit.cause)) {
+						return yield* Effect.failCause(providerDeleteExit.cause);
 					}
+					cleanupFailures.push(
+						`provider_delete: ${renderProviderCleanupDetail(
+							Failure.squashCause(providerDeleteExit.cause),
+						)}`,
+					);
 				}
 			});
 
@@ -488,12 +533,13 @@ export const deleteSession = (sessionId: string) =>
 						),
 					);
 					if (Exit.isFailure(cleanupExit)) {
-						const failure = Cause.failureOption(cleanupExit.cause);
+						const failure = Failure.firstFailure(cleanupExit.cause);
 						cleanupFailures.push(
-							Option.isSome(failure) && Cause.isTimeoutException(failure.value)
+							Option.isSome(failure) &&
+								Failure.isTimeoutException(failure.value)
 								? "cleanup: timed out after 2s"
 								: `cleanup: ${renderProviderCleanupDetail(
-										Cause.squash(cleanupExit.cause),
+										Failure.squashCause(cleanupExit.cause),
 									)}`,
 						);
 					}
@@ -572,7 +618,7 @@ export const deleteSession = (sessionId: string) =>
 			const receiptFailure =
 				receiptExit !== undefined && Exit.isFailure(receiptExit)
 					? ` receipt_append_failed=${renderProviderCleanupDetail(
-							Cause.squash(receiptExit.cause),
+							Failure.squashCause(receiptExit.cause),
 						)}`
 					: eventStoreOption._tag === "None"
 						? " receipt_append_failed=event store unavailable"
@@ -638,6 +684,13 @@ export interface SessionManagerService {
 		sessionId: string,
 		options: SetSessionSettledOptions,
 	): Effect.Effect<boolean, SessionManagerError>;
+	setSessionArchived(
+		sessionId: string,
+		options: SetSessionArchivedOptions,
+	): Effect.Effect<boolean, SessionManagerError>;
+	restoreSessionForSend(
+		sessionId: string,
+	): Effect.Effect<void, SessionManagerError>;
 	setSessionAutoSettleDisabled(
 		sessionId: string,
 		disabled: boolean,
@@ -680,9 +733,10 @@ export interface SessionManagerService {
 }
 
 /** Bundled service object for callers that prefer DI over free functions. */
-export class SessionManagerServiceTag extends Context.Tag(
-	"SessionManagerService",
-)<SessionManagerServiceTag, SessionManagerService>() {}
+export class SessionManagerServiceTag extends Context.Service<
+	SessionManagerServiceTag,
+	SessionManagerService
+>()("SessionManagerService") {}
 
 const makeServiceCreateSession = ({
 	engine,
@@ -694,7 +748,7 @@ const makeServiceCreateSession = ({
 	sql,
 }: {
 	engine: OrchestrationEngine;
-	accounts: AccountDirectory["Type"];
+	accounts: Context.Service.Shape<typeof AccountDirectory>;
 	instanceClients: OpenCodeInstances;
 	readQuery: ReadQueryEffect;
 	eventStore: EventStoreEffect;
@@ -821,16 +875,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 		// a daemon fiber that lacks the project's bus, and a commit without it
 		// never reaches the sidebar's shell subscription.
 		const sessionEventBus = yield* Effect.serviceOption(SessionEventBusTag);
-		const directory = yield* Effect.serviceOption(SessionDirectory);
-		const ownershipContext = Context.make(PersistenceProjectTag, {
-			projectId: config.slug,
-		}).pipe(
-			Context.merge(
-				Option.isSome(directory)
-					? Context.make(SessionDirectory, directory.value)
-					: Context.empty(),
-			),
-		);
 		const inFlightDeletes = new Map<
 			string,
 			Deferred.Deferred<void, SessionManagerError>
@@ -858,7 +902,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 				// through the handle it hands us is what makes the announcement
 				// unskippable.
 				const commitAndSignal = yield* makeCommitAndSignal.pipe(
-					Effect.provide(ownershipContext),
 					Effect.provideService(SqlClient.SqlClient, sql),
 					Effect.provideService(EventStoreEffectTag, eventStore),
 					Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
@@ -979,7 +1022,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 			options?: CreateSessionOptions,
 		) => {
 			const create = serviceCreateSession(title, options).pipe(
-				Effect.provide(ownershipContext),
 				Effect.provideService(AccountDirectory, accounts),
 				Effect.provideService(ConfigTag, config),
 				Effect.provideService(LoggerTag, log),
@@ -1007,10 +1049,11 @@ export const SessionManagerServiceLive: Layer.Layer<
 				| SqlClient.SqlClient
 				| ConfigTag
 				| LoggerTag
+				| SessionActivityTag
 			>,
 		): Effect.Effect<A, E> => {
 			const provided = effect.pipe(
-				Effect.provide(ownershipContext),
+				Effect.provideService(SessionActivityTag, activity),
 				Effect.provideService(AccountDirectory, accounts),
 				Effect.provideService(OpenCodeAPITag, api),
 				Effect.provideService(ReadQueryEffectTag, readQuery),
@@ -1029,7 +1072,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 				: provided;
 		};
 
-		const triageLock = yield* Effect.makeSemaphore(1);
+		const triageLock = yield* Semaphore.make(1);
 		return {
 			getDefaultSessionId: (title) =>
 				Effect.gen(function* () {
@@ -1101,7 +1144,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 					const exit = yield* Effect.exit(
 						Effect.gen(function* () {
 							yield* deleteSession(sessionId).pipe(
-								Effect.provide(ownershipContext),
 								Effect.provideService(AccountDirectory, accounts),
 								Effect.provideService(OpenCodeAPITag, api),
 								Effect.provideService(OrchestrationEngineTag, engine),
@@ -1125,7 +1167,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 					);
 					yield* Deferred.done(completion, exit);
 					inFlightDeletes.delete(sessionId);
-					return yield* Exit.matchEffect(exit, {
+					return yield* Effect.matchCauseEffectEager(exit, {
 						onFailure: Effect.failCause,
 						onSuccess: () => Effect.succeed(true),
 					});
@@ -1156,6 +1198,40 @@ export const SessionManagerServiceLive: Layer.Layer<
 								: Effect.void,
 						),
 					),
+			setSessionArchived: (sessionId, options) =>
+				triageLock.withPermits(1)(
+					withSessionCommandServices(setSessionArchived(sessionId, options)),
+				),
+			restoreSessionForSend: (sessionId) =>
+				triageLock.withPermits(1)(
+					Effect.gen(function* () {
+						// A sweep must see either the old state or the fully restored state.
+						let changed = false;
+						for (const operation of [
+							setSessionArchived(sessionId, { archived: false, cause: "send" }),
+							unsnoozeSession(sessionId),
+							setSessionSettled(sessionId, { settled: false }),
+						]) {
+							const restored = yield* withSessionCommandServices(
+								operation,
+							).pipe(
+								Effect.catch((error) =>
+									Effect.sync(() =>
+										log.warn(
+											`Failed to restore ${sessionId} on send: ${String(error)}`,
+										),
+									).pipe(Effect.as(false)),
+								),
+							);
+							changed ||= restored;
+						}
+						if (changed)
+							yield* PubSub.publish(
+								eventBus,
+								DaemonEvent.DaemonSessionsChanged(),
+							);
+					}),
+				),
 			setSessionAutoSettleDisabled: (sessionId, disabled) =>
 				triageLock.withPermits(1)(
 					withSessionCommandServices(

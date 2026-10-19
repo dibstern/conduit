@@ -10,13 +10,7 @@ import {
 import { basename, join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	ListDaemonSessions,
-	ListWorktrees,
-	ListWorktreesForSession,
-	MoveSessionWorkspace,
-	SaveProject,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { SessionWorkspaceChangedPayload } from "../../../src/lib/persistence/events.js";
 import type { SessionGit } from "../../../src/lib/shared-types.js";
@@ -60,11 +54,11 @@ function initRepo(directory: string) {
 }
 
 function workspaceEvents(harness: ProcessHarness) {
-	const db = new Database(harness.projectStorePath(), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		return db
 			.prepare(
-				"SELECT session_id, data FROM events WHERE type = 'session.workspace_changed' ORDER BY sequence",
+				"SELECT session_id, data FROM events WHERE project_id = 'process-test' AND type = 'session.workspace_changed' ORDER BY sequence",
 			)
 			.all()
 			.map((row) => {
@@ -134,7 +128,7 @@ describe("Session workspace through the built daemon", () => {
 		if (!harness) return;
 		const fixture = harness;
 		try {
-			evidence["events"] = existsSync(fixture.projectStorePath())
+			evidence["events"] = existsSync(fixture.daemonStorePath())
 				? workspaceEvents(fixture)
 				: [];
 			evidence["logs"] = fixture.logTail;
@@ -178,23 +172,15 @@ describe("Session workspace through the built daemon", () => {
 		);
 		const two = await browser.createSession("Worktree two");
 		const move = (sessionId: string, path: string) =>
-			sendRpcRequest(
-				socket,
-				new MoveSessionWorkspace({
-					sessionId,
-					path,
-				}),
-			);
+			sendRpcRequest(socket, { _tag: "MoveSessionWorkspace", sessionId, path });
 		await move(one, first);
 		await move(two, second);
 		const list = () =>
-			sendRpcRequest(
-				socket,
-				new ListDaemonSessions({
-					projectSlug: "process-test",
-					scope: "process-test",
-				}),
-			);
+			sendRpcRequest(socket, {
+				_tag: "ListDaemonSessions",
+				projectSlug: "process-test",
+				scope: "process-test",
+			});
 		await vi.waitFor(async () => {
 			const { sessions } = await list();
 			expect(sessions.find(({ id }) => id === one)).toMatchObject({
@@ -233,10 +219,10 @@ describe("Session workspace through the built daemon", () => {
 		const gone = join(fixture.root, "gone");
 		git(fixture.projectDir, "worktree", "add", "-b", "gone", gone);
 		rmSync(gone, { recursive: true });
-		const { worktrees } = await sendRpcRequest(
-			socket,
-			new ListWorktrees({ projectSlug: "process-test" }),
-		);
+		const { worktrees } = await sendRpcRequest(socket, {
+			_tag: "ListWorktrees",
+			projectSlug: "process-test",
+		});
 		expect(worktrees).toEqual([
 			{ path: main, branch: "main", main: true },
 			{ path: first, branch: "feature/one", main: false },
@@ -311,13 +297,11 @@ describe("Session workspace through the built daemon", () => {
 			[other, "other-repository"],
 		] as const) {
 			await expect(
-				sendRpcRequest(
-					socket,
-					new MoveSessionWorkspace({
-						sessionId,
-						path,
-					}),
-				),
+				sendRpcRequest(socket, {
+					_tag: "MoveSessionWorkspace",
+					sessionId,
+					path,
+				}),
 			).rejects.toMatchObject({ _tag: "WorkspaceMoveError", reason });
 			expect(workspaceEvents(fixture)).toEqual([]);
 		}
@@ -335,13 +319,11 @@ describe("Session workspace through the built daemon", () => {
 				frame["processing"] === true,
 		);
 		const cursor = browser.frames.length;
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId,
-				path: first,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId,
+			path: first,
+		});
 		await browser.waitFor(
 			(frame) =>
 				frame["type"] === "session_row" &&
@@ -371,22 +353,18 @@ describe("Session workspace through the built daemon", () => {
 		mkdirSync(extra, { recursive: true });
 		const linked = join(fixture.root, "extra-worktree");
 		git(extraRepo, "worktree", "add", "-b", "feature/extra", linked);
-		await sendRpcRequest(
-			socket,
-			new SaveProject({
-				slug: "process-test",
-				folders: [fixture.projectDir, extra],
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [fixture.projectDir, extra],
+		});
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession("Secondary worktree");
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId,
-				path: linked,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId,
+			path: linked,
+		});
 		await browser.preWarmSession(sessionId);
 		expect(sessionQueries(fixture, sessionId).at(-1)?.options).toMatchObject({
 			cwd: realpathSync(linked),
@@ -399,13 +377,11 @@ describe("Session workspace through the built daemon", () => {
 			[extra]: realpathSync(linked),
 		});
 		// Selecting a configured secondary folder removes its workspace entry.
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId,
-				path: extra,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId,
+			path: extra,
+		});
 		expect(workspaceEvents(fixture).at(-1)?.data.worktrees).toEqual({});
 		expect(
 			(await browser.send(sessionId, "Reply with pong again.")).chunks.join(""),
@@ -417,13 +393,11 @@ describe("Session workspace through the built daemon", () => {
 		// A missing primary checkout must not block a valid secondary repository.
 		rmSync(fixture.projectDir, { recursive: true, force: true });
 		try {
-			await sendRpcRequest(
-				socket,
-				new MoveSessionWorkspace({
-					sessionId,
-					path: linked,
-				}),
-			);
+			await sendRpcRequest(socket, {
+				_tag: "MoveSessionWorkspace",
+				sessionId,
+				path: linked,
+			});
 			expect(workspaceEvents(fixture).at(-1)?.data.worktrees).toEqual({
 				[extra]: realpathSync(linked),
 			});
@@ -441,20 +415,15 @@ describe("Session workspace through the built daemon", () => {
 		} = await start("subdirectory-reset");
 		const primary = join(main, "packages", "app");
 		mkdirSync(primary, { recursive: true });
-		await sendRpcRequest(
-			socket,
-			new SaveProject({ slug: "process-test", folders: [primary] }),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [primary],
+		});
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession("Subdirectory workspace");
 		const move = (path: string) =>
-			sendRpcRequest(
-				socket,
-				new MoveSessionWorkspace({
-					sessionId,
-					path,
-				}),
-			);
+			sendRpcRequest(socket, { _tag: "MoveSessionWorkspace", sessionId, path });
 		await move(primary);
 		expect(workspaceEvents(fixture)).toEqual([]);
 		await move(first);
@@ -468,10 +437,10 @@ describe("Session workspace through the built daemon", () => {
 		symlinkSync(primary, alias);
 		await move(alias);
 		expect(workspaceEvents(fixture)).toHaveLength(count);
-		const { worktrees, directory } = await sendRpcRequest(
-			socket,
-			new ListWorktreesForSession({ sessionId }),
-		);
+		const { worktrees, directory } = await sendRpcRequest(socket, {
+			_tag: "ListWorktrees",
+			sessionId,
+		});
 		expect(directory).toBe(primary);
 		expect(worktrees).toContainEqual({
 			path: primary,
@@ -501,29 +470,26 @@ describe("Session workspace through the built daemon", () => {
 			"OpenCode workspace",
 			undefined,
 			"opencode",
+			{ modelProviderId: "opencode", modelId: "big-pickle" },
 		);
 		for (const path of [first, main, join(fixture.root, "missing")]) {
 			await expect(
-				sendRpcRequest(
-					socket,
-					new MoveSessionWorkspace({
-						sessionId,
-						path,
-					}),
-				),
+				sendRpcRequest(socket, {
+					_tag: "MoveSessionWorkspace",
+					sessionId,
+					path,
+				}),
 			).rejects.toMatchObject({
 				_tag: "WorkspaceMoveError",
 				reason: "unsupported-provider",
 			});
 			expect(workspaceEvents(fixture)).toEqual([]);
 		}
-		const { sessions } = await sendRpcRequest(
-			socket,
-			new ListDaemonSessions({
-				projectSlug: "process-test",
-				scope: "process-test",
-			}),
-		);
+		const { sessions } = await sendRpcRequest(socket, {
+			_tag: "ListDaemonSessions",
+			projectSlug: "process-test",
+			scope: "process-test",
+		});
 		expect(
 			sessions.find(({ id }) => id === sessionId)?.workspace ?? null,
 		).toBeNull();

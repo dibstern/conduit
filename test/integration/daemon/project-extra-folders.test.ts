@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SaveProject } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { ClaudeTraceName } from "../../e2e/helpers/claude-trace-replayer.js";
 import { readNativeThread } from "../../helpers/native-thread.js";
@@ -53,10 +53,10 @@ describe("Claude project extra folders through the built daemon", () => {
 
 	async function save(fixture: ProcessHarness, folders: readonly string[]) {
 		const input = { slug: "process-test", folders };
-		const saved = await sendRpcRequest(
-			join(fixture.configDir, "relay.sock"),
-			new SaveProject(input),
-		);
+		const saved = await sendRpcRequest(join(fixture.configDir, "relay.sock"), {
+			_tag: "SaveProject",
+			...input,
+		});
 		evidence["save"] = { input, result: saved };
 		expect(saved.savedSlug).toBe("process-test");
 		expect(saved.warnings).toEqual([]);
@@ -219,7 +219,7 @@ describe("Claude project extra folders through the built daemon", () => {
 		await save(fixture, [fixture.projectDir, extra]);
 		const after = await fixture.connect(sessionId);
 		let resumeSessionId: string | undefined;
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			// Completion can arrive while SaveProject replaces the relay, before
 			// this browser reconnects. The durable turn survives that WS gap.
@@ -236,7 +236,7 @@ describe("Claude project extra folders through the built daemon", () => {
 						)
 						.all(sessionId);
 					resumeSessionId = (
-						await readNativeThread(fixture.projectStorePath(), sessionId)
+						await readNativeThread(fixture.daemonStorePath(), sessionId)
 					)?.resumeSessionId;
 					evidence["turnsBeforeNextSend"] = turns;
 					evidence["turnErrorsBeforeNextSend"] = errors;

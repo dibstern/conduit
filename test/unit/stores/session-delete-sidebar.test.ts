@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import {
 	applyFamilyFeedChange,
 	applySessionChange,
@@ -46,6 +47,7 @@ import {
 	getFilteredSessions,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 
 const VICTIM = {
@@ -69,7 +71,7 @@ beforeEach(() => {
 	clearSessionState();
 	attachedProjectState.slug = "project-a";
 	routerState.search = "";
-	sessionState.currentId = "keeper";
+	openSessionForSetup("keeper", "project-a");
 	seedSessions([VICTIM, KEEPER]);
 });
 
@@ -145,12 +147,6 @@ describe("deleted sessions leave the sidebar", () => {
 	it("stays dropped after the feed synchronizes", () => {
 		searchFor("s", [VICTIM, KEEPER]);
 		deleteVictim();
-		applySessionChange({ _tag: "snapshot", rows: [KEEPER] });
-		expect(sidebarIds()).toEqual(["keeper"]);
-	});
-
-	it("drops a stale searched session after an authoritative tagged refresh", () => {
-		searchFor("s", [VICTIM, KEEPER]);
 		applySessionChange({ _tag: "snapshot", rows: [KEEPER] });
 		expect(sidebarIds()).toEqual(["keeper"]);
 	});

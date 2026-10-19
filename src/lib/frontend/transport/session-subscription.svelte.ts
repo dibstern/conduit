@@ -18,6 +18,7 @@ import {
 } from "../stores/discovery.svelte.js";
 import { hydrateSessionGoal, sessionGoals } from "../stores/goal.svelte.js";
 import { followSessionResumes } from "../stores/handoff-review.svelte.js";
+import { applyShellProjects } from "../stores/project.svelte.js";
 import type { SavedShell } from "../stores/saved-shell.js";
 import {
 	forgetSession,
@@ -25,10 +26,14 @@ import {
 	sessionState,
 	settleReadMarks,
 } from "../stores/session.svelte.js";
+import {
+	applyTurnRow,
+	deleteTurn,
+	rebaseTurns,
+} from "../stores/turn.svelte.js";
 import type { SessionInfo } from "../types.js";
 import type { WsRpcSubscriptions } from "./shared-client.js";
 import {
-	type Change,
 	emptySubscription,
 	reduce,
 	type SubscriptionState,
@@ -39,7 +44,7 @@ import type { FeedStatus } from "./supervise.js";
  * One thing `subscriptions.shell()` delivers, typed off the subscription
  * itself rather than restated.
  */
-export type ShellEnvelope = Stream.Stream.Success<
+export type ShellEnvelope = Stream.Success<
 	ReturnType<WsRpcSubscriptions["shell"]>
 >;
 
@@ -48,13 +53,12 @@ const identify = (session: SessionInfo): string => session.id;
 export const isBusy = (row: Pick<SessionInfo, "status"> | undefined): boolean =>
 	row?.status === "busy" || row?.status === "retry";
 
-/** The server ended a turn on this row since `previous` (never for a first sighting). */
+/** The server reports a newer turn end, including a first sighting after it ended. */
 export const turnEnded = (
 	previous: Pick<SessionInfo, "lastTurnEndVersion"> | undefined,
 	next: Pick<SessionInfo, "lastTurnEndVersion">,
 ): boolean =>
-	previous !== undefined &&
-	(next.lastTurnEndVersion ?? -1) > (previous.lastTurnEndVersion ?? -1);
+	(next.lastTurnEndVersion ?? 0) > (previous?.lastTurnEndVersion ?? 0);
 
 // `$state.raw`, not `$state`: the applier replaces the state whole and never
 // mutates it, so a deep proxy would cost work to track writes that cannot
@@ -98,6 +102,10 @@ export function noteTransportDrop(): void {
 
 /** Settled reactive state. Envelope vocabulary does not travel past here. */
 export const sessionSubscription = {
+	/** Confirmed rows only; saved shell rows never place a session. */
+	get liveRows(): ReadonlyMap<string, SessionInfo> {
+		return applied.rows;
+	},
 	/** Live rows, or the device's provisional rows before the first snapshot. */
 	get rows(): ReadonlyMap<string, SessionInfo> {
 		return savedShell?.rows ?? applied.rows;
@@ -121,9 +129,13 @@ export const sessionSubscription = {
 /**
  * Apply one change to the session map. The only writer.
  *
- * Takes only the versioned shell envelope.
+ * Project frames update project metadata without changing the row cursor.
  */
-export function applySessionChange(change: Change<SessionInfo>): void {
+export function applySessionChange(change: ShellEnvelope): void {
+	if (change._tag === "projects") {
+		applyShellProjects(change);
+		return;
+	}
 	if (change._tag === "synchronized") transportFailureSince = null;
 	const next = reduce(applied, change, identify);
 	if (next === applied) return;
@@ -140,40 +152,42 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 		followSessionModelSettings(row, previous);
 	};
 	if (change._tag === "upsert") {
+		applyTurnRow(change.item);
 		hydrateSessionGoal(change.item);
 		followViewedSession(change.item);
-		// Only a transition moves the phase: an idle write (the user message)
-		// must not end the sender's optimistic turn, and a late busy write
-		// must not restart one already ended. A turn can start and end between
-		// two upserts, so an advanced turn-end version also ends it, unless it
-		// names an earlier send than the one waiting.
+		// Transitions start/end the phase; a turn-end version also catches a
+		// turn that started and ended between row updates.
 		const previous = applied.rows.get(change.item.id);
 		const busy = isBusy(change.item);
 		if (
 			busy !== isBusy(previous) ||
 			(!busy && turnEnded(previous, change.item))
 		)
-			followSessionBusy(change.item.id, busy, change.item.lastTurnEndInputId);
+			followSessionBusy(change.item.id, busy, change.item.lastTurnEndVersion);
 		if (change.item.compacting !== applied.rows.get(change.item.id)?.compacting)
 			followSessionCompaction(change.item.id, change.item.compacting);
 		if (change.item.retrying !== applied.rows.get(change.item.id)?.retrying)
 			followSessionRetry(change.item.id, change.item.retrying);
 		followSessionResumes(change.item, previous);
 	}
-	// A root that gained a parent only leaves the list; one that is gone, or a
+	// An archived root or one that gained a parent only leaves the list; one that is gone, or a
 	// child that is, comes marked deleted, live or on catch-up.
 	if (change._tag === "remove" && change.deleted === true) {
+		deleteTurn(change.id);
 		leaveDeletedSession(change.id);
 		forgetSession(change.id);
 	}
 	if (change._tag === "snapshot") {
-		for (const id of applied.rows.keys())
-			if (!next.rows.has(id)) forgetSession(id);
+		if (applied.floor !== undefined)
+			rebaseTurns([...applied.rows.keys(), ...next.rows.keys()]);
+		// Snapshot omissions can be archives. Only an explicit deletion may clear
+		// chat state; the independent family subscription still owns open sessions.
 		for (const row of next.rows.values()) {
+			applyTurnRow(row);
 			hydrateSessionGoal(row);
 			followViewedSession(row);
 			// A snapshot (cold start, resume) is absolute.
-			followSessionBusy(row.id, isBusy(row));
+			followSessionBusy(row.id, isBusy(row), row.lastTurnEndVersion);
 			followSessionCompaction(row.id, row.compacting);
 			followSessionRetry(row.id, row.retrying);
 			followSessionResumes(row, applied.rows.get(row.id));
@@ -184,7 +198,7 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 	settleReadMarks(next.rows);
 }
 
-/** Forget the project we were watching. */
+/** Clear the daemon shell when resetting the browser's session state. */
 export function resetSessionSubscription(): void {
 	sessionGoals.clear();
 	applied = emptySubscription();

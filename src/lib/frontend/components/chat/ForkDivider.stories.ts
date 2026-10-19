@@ -7,8 +7,8 @@ const meta = {
 	component: ForkDivider,
 	tags: ["autodocs"],
 	argTypes: {
-		parentTitle: { control: "text" },
-		parentId: { control: "text" },
+		sourceTitle: { control: "text" },
+		sourceId: { control: "text" },
 	},
 } satisfies Meta<typeof ForkDivider>;
 
@@ -17,8 +17,8 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
 	args: {
-		parentTitle: mockSession.title,
-		parentId: mockSession.id,
+		sourceTitle: mockSession.title,
+		sourceId: mockSession.id,
 	},
 };
 

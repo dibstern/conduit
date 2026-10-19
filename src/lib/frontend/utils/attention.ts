@@ -1,4 +1,4 @@
-import { RpcClientError } from "@effect/rpc/RpcClientError";
+import { RpcClientError } from "effect/rpc/RpcClientError";
 import type { Attachment } from "svelte/attachments";
 import { on } from "svelte/events";
 import { getBrowserClientId } from "../stores/client-identity.js";

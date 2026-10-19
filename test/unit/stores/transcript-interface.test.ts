@@ -7,6 +7,7 @@ import {
 	type WsRpcError,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import type { SavedTranscript } from "../../../src/lib/frontend/stores/saved-transcripts.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { makeWsRpcClientsLayer } from "../../../src/lib/frontend/transport/shared-client.js";
 import type { HistoryMessage } from "../../../src/lib/frontend/types.js";
 
@@ -35,7 +36,6 @@ import {
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	loadOlderTranscript,
 	transcriptStatus,
@@ -46,7 +46,7 @@ import { makeRpcStream, makeRpcWire } from "../../helpers/rpc-wire.js";
 import type { StubTable } from "../../helpers/stub-ws-rpc.js";
 
 interface Request {
-	id: string;
+	id: string | number;
 	tag: string;
 	payload: unknown;
 }
@@ -54,7 +54,7 @@ interface Request {
 function adapter() {
 	const feeds = new Map<
 		string,
-		Effect.Effect.Success<
+		Effect.Success<
 			ReturnType<typeof makeRpcStream<SessionDetailEnvelope, WsRpcError>>
 		>[]
 	>();
@@ -150,7 +150,7 @@ beforeEach(() => {
 	runtimeMock.runTransportEffect.mockImplementation((effect) =>
 		runtime.runPromise(effect),
 	);
-	sessionState.currentId = "A";
+	openSessionForSetup("A", "project-a");
 });
 afterEach(async () => {
 	viewTranscript("project", null);
@@ -162,7 +162,7 @@ afterEach(async () => {
 	savedMock.openSavedTranscript.mockReset();
 	sessionActivity.clear();
 	sessionMessages.clear();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 });
 
 describe("transcript feed interface", () => {
@@ -302,8 +302,8 @@ describe("transcript feed interface", () => {
 			() =>
 				first !== undefined &&
 				second !== undefined &&
-				wire.interrupted.includes(first.id) &&
-				wire.interrupted.includes(second.id),
+				wire.interrupted.includes(String(first.id)) &&
+				wire.interrupted.includes(String(second.id)),
 		);
 		expect(wire.requests.length - wire.interrupted.length).toBe(1);
 	});

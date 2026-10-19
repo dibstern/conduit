@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Effect, Layer, Logger, ManagedRuntime, Schema } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HistoryMessageSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import {
@@ -506,6 +506,10 @@ describe("Claude turn economics through SQLite persistence", () => {
 					[58, "compact_redundant_events"],
 					[59, "session_project_scope"],
 					[60, "daemon_store_imports"],
+					[61, "sessions_lineage"],
+					[62, "legacy_forks"],
+					[63, "sessions_archived"],
+					[64, "prompt_provider_reference"],
 				]);
 				expect(yield* makeEffectSqlMigrator()).toEqual([]);
 			}),
@@ -863,7 +867,7 @@ describe("Claude turn economics through SQLite persistence", () => {
 	it("handles missing, zero, equal and backwards totals without losing the durable baseline", async () => {
 		const warnings: unknown[] = [];
 		const logger = Logger.make<unknown, void>((options) => {
-			if (options.logLevel._tag === "Warning") warnings.push(options.message);
+			if (options.logLevel === "Warn") warnings.push(options.message);
 		});
 		await runtime.runPromise(
 			Effect.gen(function* () {
@@ -891,7 +895,7 @@ describe("Claude turn economics through SQLite persistence", () => {
 				expect((yield* costs).turns).toEqual([{ id: "u1", cost: 1.25 }]);
 				expect(warnings).toHaveLength(1);
 				expect(String(warnings[0])).toMatch(/s1.*sdk-session|sdk-session.*s1/);
-			}).pipe(Effect.provide(Logger.replace(Logger.defaultLogger, logger))),
+			}).pipe(Effect.provide(Logger.layer([Logger.tracerLogger, logger]))),
 		);
 	});
 
@@ -913,13 +917,13 @@ describe("Claude turn economics through SQLite persistence", () => {
 				yield* sql`CREATE TEMP TRIGGER reject_cost BEFORE INSERT ON events
 					WHEN NEW.type = 'turn.completed' AND json_extract(NEW.data, '$.providerCostTotalUsd') = 2
 					BEGIN SELECT RAISE(ABORT, 'reject test completion'); END`;
-				const rejected = yield* Effect.either(
+				const rejected = yield* Effect.result(
 					persist.persistEvents([
 						completion("s1", "a1", 1.5),
 						completion("s1", "a1", 2),
 					]),
 				);
-				expect(rejected._tag).toBe("Left");
+				expect(rejected._tag).toBe("Failure");
 				yield* persist.persistEvent(completion("s1", "a1", 1.6));
 				const rows = yield* sql<{ cost: number }>`
 					SELECT json_extract(data, '$.cost') AS cost FROM events WHERE type = 'turn.completed' ORDER BY sequence`;

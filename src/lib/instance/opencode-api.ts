@@ -71,6 +71,7 @@ export interface OpenCodeAPIOptions {
 	baseUrl: string;
 	authHeaders: Record<string, string>;
 	processIdentity?: string | undefined;
+	promptProcessId?: string | undefined;
 }
 
 /**
@@ -82,6 +83,7 @@ export interface OpenCodeAPIOptions {
  */
 export class OpenCodeAPI {
 	readonly processIdentity: string;
+	readonly promptProcessId: string | undefined;
 	private readonly client: OpencodeClient;
 	private readonly _baseUrl: string;
 	private readonly _authHeaders: Record<string, string>;
@@ -99,6 +101,7 @@ export class OpenCodeAPI {
 
 	constructor(options: OpenCodeAPIOptions) {
 		this.processIdentity = options.processIdentity ?? options.baseUrl;
+		this.promptProcessId = options.promptProcessId;
 		this.client = options.sdk;
 		this._baseUrl = options.baseUrl;
 		this._authHeaders = options.authHeaders;

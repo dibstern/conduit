@@ -1,7 +1,7 @@
-import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { makeEventStoreEffect } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -16,8 +16,8 @@ const setup = Effect.gen(function* () {
 	yield* makeEffectSqlMigrator();
 	const sql = yield* SqlClient.SqlClient;
 	yield* sql`
-		INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-		VALUES ('s1', 'personal', 'Test', 'idle', 1, 1), ('s2', 'work', 'Other', 'idle', 1, 1)`;
+		INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+		VALUES ('s1', 'test-project', 'personal', 'Test', 'idle', 1, 1), ('s2', 'test-project', 'work', 'Other', 'idle', 1, 1)`;
 	const events = yield* makeEventStoreEffect.pipe(
 		Effect.provideService(PersistenceProjectTag, { projectId: "test-project" }),
 	);
@@ -74,7 +74,7 @@ describe("nativeThread", () => {
 				expect(
 					yield* state.nativeThread("unknown", "personal"),
 				).toBeUndefined();
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -117,7 +117,7 @@ describe("nativeThread", () => {
 				expect(stored["resumeSessionId"]).toBeUndefined();
 				expect(stored["claudeConfigDir"]).toBeUndefined();
 				expect(stored["turnCount"]).toBe("3");
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -190,6 +190,6 @@ describe("nativeThread", () => {
 				expect(
 					(yield* state.nativeThread("s1", "personal"))?.deliveredThrough,
 				).toBe(5);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });

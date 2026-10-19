@@ -1,8 +1,4 @@
-// Tests initSWMessageListener(), onNavigateToSession(), and
-// clearNavigateToSession() from ws-notifications.ts.
-//
-// These functions wire push notification clicks (posted by the SW as
-// `navigate_to_session` messages) to the registered navigation callback.
+// Service worker notification clicks open sessions through selection.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -10,6 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getCurrentSlugMock = vi.fn(() => "test-project");
 const navigateMock = vi.fn();
+const openSession = vi.hoisted(() => vi.fn());
+
+vi.mock("../../../src/lib/frontend/stores/selection.svelte.js", () => ({
+	selection: { open: openSession },
+}));
 
 vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
 	getCurrentSlug: getCurrentSlugMock,
@@ -69,6 +70,7 @@ beforeEach(() => {
 	addEventListenerMock.mockClear();
 	getCurrentSlugMock.mockReturnValue("test-project");
 	navigateMock.mockClear();
+	openSession.mockClear();
 });
 
 afterEach(() => {
@@ -99,12 +101,10 @@ describe("SW navigation listener", () => {
 		expect(addEventListenerMock).toHaveBeenCalledTimes(1);
 	});
 
-	it("calls registered callback when SW posts navigate_to_session", async () => {
+	it("opens the session when SW posts navigate_to_session", async () => {
 		const mod: WSNotificationsModule = await import(
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
-		const callback = vi.fn();
-		mod.onNavigateToSession(callback);
 		mod.initSWMessageListener();
 
 		postSWMessage({
@@ -113,34 +113,27 @@ describe("SW navigation listener", () => {
 			slug: "test-project",
 		});
 
-		expect(callback).toHaveBeenCalledWith("sess-123");
+		expect(openSession).toHaveBeenCalledExactlyOnceWith("sess-123");
 	});
 
-	it("does not call callback when sessionId is missing", async () => {
+	it("does not open a session when sessionId is missing", async () => {
 		const mod: WSNotificationsModule = await import(
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
-		const callback = vi.fn();
-		mod.onNavigateToSession(callback);
 		mod.initSWMessageListener();
 
 		postSWMessage({
 			type: "navigate_to_session",
 		});
 
-		expect(callback).not.toHaveBeenCalled();
+		expect(openSession).not.toHaveBeenCalled();
 	});
 
-	it("navigates via URL when slug differs from current project", async () => {
+	it("opens the session without URL navigation when slug differs from the current project", async () => {
 		const mod: WSNotificationsModule = await import(
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
-		const callback = vi.fn();
-		mod.onNavigateToSession(callback);
 		mod.initSWMessageListener();
-
-		// Current slug is "test-project", incoming is "other-project"
-		getCurrentSlugMock.mockReturnValue("test-project");
 
 		postSWMessage({
 			type: "navigate_to_session",
@@ -149,16 +142,14 @@ describe("SW navigation listener", () => {
 			url: "/p/other-project/s/sess-456",
 		});
 
-		expect(navigateMock).toHaveBeenCalledWith("/p/other-project/s/sess-456");
-		expect(callback).not.toHaveBeenCalled();
+		expect(openSession).toHaveBeenCalledExactlyOnceWith("sess-456");
+		expect(navigateMock).not.toHaveBeenCalled();
 	});
 
-	it("calls callback normally when slug matches current project", async () => {
+	it("opens the session when slug matches the current project", async () => {
 		const mod: WSNotificationsModule = await import(
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
-		const callback = vi.fn();
-		mod.onNavigateToSession(callback);
 		mod.initSWMessageListener();
 
 		getCurrentSlugMock.mockReturnValue("my-project");
@@ -169,55 +160,7 @@ describe("SW navigation listener", () => {
 			slug: "my-project",
 		});
 
-		expect(callback).toHaveBeenCalledWith("sess-789");
+		expect(openSession).toHaveBeenCalledExactlyOnceWith("sess-789");
 		expect(navigateMock).not.toHaveBeenCalled();
-	});
-
-	it("silently drops messages when no callback is registered", async () => {
-		const mod: WSNotificationsModule = await import(
-			"../../../src/lib/frontend/stores/ws-notifications.js"
-		);
-		// Do NOT register a callback
-		mod.initSWMessageListener();
-
-		// Should not throw
-		expect(() => {
-			postSWMessage({
-				type: "navigate_to_session",
-				sessionId: "sess-orphan",
-				slug: "test-project",
-			});
-		}).not.toThrow();
-
-		expect(navigateMock).not.toHaveBeenCalled();
-	});
-
-	it("clearNavigateToSession prevents subsequent navigation", async () => {
-		const mod: WSNotificationsModule = await import(
-			"../../../src/lib/frontend/stores/ws-notifications.js"
-		);
-		const callback = vi.fn();
-		mod.onNavigateToSession(callback);
-		mod.initSWMessageListener();
-
-		// Verify it works first
-		postSWMessage({
-			type: "navigate_to_session",
-			sessionId: "sess-first",
-			slug: "test-project",
-		});
-		expect(callback).toHaveBeenCalledWith("sess-first");
-
-		// Clear the callback
-		mod.clearNavigateToSession();
-		callback.mockClear();
-
-		// Subsequent messages should be silently dropped
-		postSWMessage({
-			type: "navigate_to_session",
-			sessionId: "sess-second",
-			slug: "test-project",
-		});
-		expect(callback).not.toHaveBeenCalled();
 	});
 });

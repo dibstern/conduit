@@ -1,7 +1,7 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { expect, vi } from "vitest";
 import {
 	decodeProviderRuntimeEvent,
@@ -122,6 +122,47 @@ function receiptRow(sql: SqlClient.SqlClient, commandId: string) {
 }
 
 describe("OrchestrationEngine durable receipts", () => {
+	// Caller-supplied command ids are globally unique keys, not ownership proof.
+	it.effect("rejects replay of another project's orphaned command", () =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const command = sendTurnCommand();
+			const hash = fingerprintHash(effectiveDispatchFingerprint(command));
+			yield* sql`INSERT INTO command_receipts (
+				command_id, session_id, project_key, status, created_at,
+				fingerprint_hash, fingerprint_version, updated_at
+			) VALUES (${command.commandId}, 'session-b', 'project-b',
+				'side_effect_requested', 1000, ${hash}, 2, 1000)`;
+			yield* sql`INSERT INTO provider_command_outbox (
+				request_sequence, command_id, project_key, session_id, provider_id,
+				effect_type, payload_json, status, attempt_count, requested_at, updated_at
+			) VALUES (1, ${command.commandId}, 'project-b', 'session-b', 'opencode',
+				'send_turn', '{}', 'pending', 0, 1000, 1000)`;
+			const before = JSON.stringify({
+				receipts: yield* sql`SELECT * FROM command_receipts`,
+				outbox: yield* sql`SELECT * FROM provider_command_outbox`,
+			});
+			const registry = new ProviderRegistry();
+			const instance = makeStubInstance("opencode");
+			registry.registerInstance(instance);
+			const engine = new OrchestrationEngine({
+				registry,
+				durableCommands: yield* makeDurableOptions({ sql }),
+			});
+			const result = yield* Effect.result(engine.dispatchEffect(command));
+			expect(result._tag).toBe("Failure");
+			expect(
+				JSON.stringify({
+					receipts: yield* sql`SELECT * FROM command_receipts`,
+					outbox: yield* sql`SELECT * FROM provider_command_outbox`,
+				}),
+			).toBe(before);
+			expect(instance.sendTurnEffect).not.toHaveBeenCalled();
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
+	);
+
 	for (const providerId of ["claude", "opencode"]) {
 		it.effect(
 			`commits ${providerId} send_turn without a transcript in the outbox`,
@@ -286,13 +327,13 @@ describe("OrchestrationEngine durable receipts", () => {
 				}),
 			});
 
-			const failed = yield* Effect.either(
+			const failed = yield* Effect.result(
 				engine.dispatchEffect(sendTurnCommand()),
 			);
 
-			expect(failed._tag).toBe("Left");
-			if (failed._tag === "Left") {
-				expect(failed.left._tag).toBe("CommandIdGenerationFailed");
+			expect(failed._tag).toBe("Failure");
+			if (failed._tag === "Failure") {
+				expect(failed.failure._tag).toBe("CommandIdGenerationFailed");
 			}
 			expect(instance.sendTurnEffect).not.toHaveBeenCalled();
 			expect(yield* receiptRow(sql, "cmd-durable-1")).toBeUndefined();
@@ -358,13 +399,13 @@ describe("OrchestrationEngine durable receipts", () => {
 					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
-				const rejected = yield* Effect.either(
+				const rejected = yield* Effect.result(
 					secondEngine.dispatchEffect(sendTurnCommand({ prompt: "changed" })),
 				);
 
-				expect(rejected._tag).toBe("Left");
-				if (rejected._tag === "Left") {
-					expect(rejected.left._tag).toBe("CommandFingerprintMismatch");
+				expect(rejected._tag).toBe("Failure");
+				if (rejected._tag === "Failure") {
+					expect(rejected.failure._tag).toBe("CommandFingerprintMismatch");
 				}
 				expect(secondInstance.sendTurnEffect).not.toHaveBeenCalled();
 
@@ -376,10 +417,10 @@ describe("OrchestrationEngine durable receipts", () => {
 					registry: thirdRegistry,
 					durableCommands: yield* makeDurableOptions({ sql }),
 				});
-				const rejectedAgain = yield* Effect.either(
+				const rejectedAgain = yield* Effect.result(
 					thirdEngine.dispatchEffect(sendTurnCommand({ prompt: "changed" })),
 				);
-				expect(rejectedAgain._tag).toBe("Left");
+				expect(rejectedAgain._tag).toBe("Failure");
 				expect(thirdInstance.sendTurnEffect).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
@@ -460,10 +501,10 @@ describe("OrchestrationEngine durable receipts", () => {
 					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
-				const first = yield* Effect.either(
+				const first = yield* Effect.result(
 					engine.dispatchEffect(sendTurnCommand()),
 				);
-				expect(first._tag).toBe("Left");
+				expect(first._tag).toBe("Failure");
 				expect(providerCalls).toBe(1);
 
 				const retry = yield* engine.dispatchEffect(sendTurnCommand());
@@ -523,7 +564,7 @@ describe("OrchestrationEngine durable receipts", () => {
 					registry: secondRegistry,
 					durableCommands: yield* makeDurableOptions({ sql }),
 				});
-				yield* Effect.either(secondEngine.dispatchEffect(sendTurnCommand()));
+				yield* Effect.result(secondEngine.dispatchEffect(sendTurnCommand()));
 				expect(secondInstance.sendTurnEffect).toHaveBeenCalled();
 			}).pipe(
 				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
@@ -551,7 +592,7 @@ describe("OrchestrationEngine durable receipts", () => {
 						"side_effect_requested",
 						1000,
 						"send_turn",
-						"project-1",
+						"test-project",
 						hash,
 						2,
 						1,
@@ -597,7 +638,7 @@ describe("OrchestrationEngine durable receipts", () => {
 						"side_effect_requested",
 						1000,
 						"send_turn",
-						"project-1",
+						"test-project",
 						hash,
 						2,
 						1,
@@ -617,7 +658,7 @@ describe("OrchestrationEngine durable receipts", () => {
 					[
 						1,
 						command.commandId,
-						"project-1",
+						"test-project",
 						"session-1",
 						"opencode",
 						"send_turn",
@@ -683,7 +724,7 @@ describe("OrchestrationEngine durable receipts", () => {
 						"side_effect_completed",
 						1000,
 						"send_turn",
-						"project-1",
+						"test-project",
 						hash,
 						1,
 						1,
@@ -698,10 +739,10 @@ describe("OrchestrationEngine durable receipts", () => {
 					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
-				const result = yield* Effect.either(engine.dispatchEffect(command));
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left") {
-					expect((result.left as { _tag: string })._tag).toBe(
+				const result = yield* Effect.result(engine.dispatchEffect(command));
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure") {
+					expect((result.failure as { _tag: string })._tag).toBe(
 						"CommandFingerprintMismatch",
 					);
 				}
@@ -721,7 +762,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				yield* sql.unsafe(
 					`INSERT INTO provider_command_tombstones
 						(project_key, scope_kind, scope_id, event_sequence, reason_code, tombstoned_at)
-					 VALUES ('project-1', 'session', 'session-1', 1, 'session_deleted', 500)`,
+					 VALUES ('test-project', 'session', 'session-1', 1, 'session_deleted', 500)`,
 				);
 
 				const registry = new ProviderRegistry();
@@ -732,13 +773,13 @@ describe("OrchestrationEngine durable receipts", () => {
 					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
-				const rejected = yield* Effect.either(
+				const rejected = yield* Effect.result(
 					engine.dispatchEffect(sendTurnCommand()),
 				);
 
-				expect(rejected._tag).toBe("Left");
-				if (rejected._tag === "Left") {
-					expect(rejected.left._tag).toBe("StaleCommandRejected");
+				expect(rejected._tag).toBe("Failure");
+				if (rejected._tag === "Failure") {
+					expect(rejected.failure._tag).toBe("StaleCommandRejected");
 				}
 				expect(instance.sendTurnEffect).not.toHaveBeenCalled();
 				expect(yield* receiptRow(sql, "cmd-durable-1")).toBeUndefined();

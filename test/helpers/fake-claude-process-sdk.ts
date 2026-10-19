@@ -149,6 +149,13 @@ export type ProcessMark =
 	  }
 	| { kind: "emit"; prompt: string; text: string; at: string }
 	| { kind: "approval"; prompt: string; behavior: "allow" | "deny" }
+	| {
+			kind: "prompt-answer";
+			prompt: string;
+			requestId: string;
+			pid: number;
+			response: unknown;
+	  }
 	| { kind: "pre-assistant-held"; prompt: string; queryId: string }
 	| { kind: "assistant-held"; prompt: string; queryId: string }
 	| {
@@ -846,7 +853,8 @@ function query(params: {
 							.join("");
 			const request = currentRequest(prompt);
 			const userUuid = input.uuid ?? randomUUID();
-			if (request.includes("correction"))
+			// A held queued input is placed when the SDK reports its start.
+			if (request.includes("correction") || request === "after-mode-change")
 				yield {
 					type: "command_lifecycle",
 					state: "started",
@@ -1599,7 +1607,9 @@ function query(params: {
 			if (request.startsWith("question-")) {
 				if (!params.options?.canUseTool)
 					throw new Error("Missing question bridge");
+				const fixedId = request.startsWith("question-fixed-");
 				const toolUseID = randomUUID();
+				const requestId = fixedId ? "0" : randomUUID();
 				const longQuestion = request.startsWith("question-long-");
 				const questionInput = longQuestion
 					? LONG_QUESTION
@@ -1615,7 +1625,7 @@ function query(params: {
 							],
 						};
 				// The long question also reaches the transcript as its tool call.
-				if (longQuestion) {
+				if (longQuestion || fixedId) {
 					yield stream(sessionId, {
 						type: "content_block_start",
 						index: 1,
@@ -1628,13 +1638,25 @@ function query(params: {
 					});
 					yield stream(sessionId, { type: "content_block_stop", index: 1 });
 				}
-				await params.options.canUseTool("AskUserQuestion", questionInput, {
-					signal:
-						params.options.abortController?.signal ??
-						new AbortController().signal,
-					toolUseID,
-					requestId: randomUUID(),
-				});
+				const response = await params.options.canUseTool(
+					"AskUserQuestion",
+					questionInput,
+					{
+						signal:
+							params.options.abortController?.signal ??
+							new AbortController().signal,
+						toolUseID,
+						requestId,
+					},
+				);
+				if (fixedId)
+					mark({
+						kind: "prompt-answer",
+						prompt: request,
+						requestId,
+						pid: process.pid,
+						response,
+					});
 			}
 			// A long Bash call. With a proof directory it stays running until the
 			// spec releases its result; without one it completes straight away.
@@ -1712,7 +1734,9 @@ function query(params: {
 				}
 			}
 			if (request.startsWith("approval-")) {
+				const fixedId = request.startsWith("approval-fixed-");
 				const toolUseID = randomUUID();
+				const requestId = fixedId ? "0" : randomUUID();
 				const handoffHistory =
 					request === "approval-account-switch-history" ||
 					request.startsWith("approval-thread-read-history-");
@@ -1738,7 +1762,7 @@ function query(params: {
 						params.options.abortController?.signal ??
 						new AbortController().signal,
 					toolUseID,
-					requestId: randomUUID(),
+					requestId,
 					...(request === "approval-restart"
 						? {
 								suggestions: [
@@ -1758,6 +1782,14 @@ function query(params: {
 						: {}),
 				});
 				if (!approval) throw new Error("Approval bridge returned no decision");
+				if (fixedId)
+					mark({
+						kind: "prompt-answer",
+						prompt: request,
+						requestId,
+						pid: process.pid,
+						response: approval,
+					});
 				mark({
 					kind: "approval",
 					prompt,

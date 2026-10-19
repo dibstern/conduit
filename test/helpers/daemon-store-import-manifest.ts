@@ -8,9 +8,10 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { SqlClient } from "@effect/sql";
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { Effect, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/sql";
+import { defaultDaemonConfig } from "../../src/lib/daemon/config-persistence.js";
 import { makeCommitAndSignal } from "../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../src/lib/persistence/effect/live.js";
@@ -188,7 +189,7 @@ export function projectManifest(
 	projectId: string,
 	source?: ProjectManifest,
 ): ProjectManifest {
-	const db = new Database(filename, { readonly: true, fileMustExist: true });
+	const db = new DatabaseSync(filename, { readOnly: true, timeout: 5000 });
 	try {
 		const legacyOwner = source === undefined ? " OR project_id IS NULL" : "";
 		const names = db
@@ -429,14 +430,18 @@ export interface StoreImportPosition {
 }
 
 export function storeImportPosition(filename: string): StoreImportPosition {
-	const db = new Database(filename, { readonly: true, fileMustExist: true });
+	const db = new DatabaseSync(filename, { readOnly: true, timeout: 5000 });
 	try {
 		return db
 			.prepare(`SELECT
 			COALESCE((SELECT MAX(sequence) FROM events), 0) AS eventSequence,
 			(SELECT value FROM read_model_counter WHERE id = 1) AS readModelVersion,
 			COALESCE((SELECT MAX(request_sequence) FROM provider_command_outbox), 0) AS outboxSequence`)
-			.get() as StoreImportPosition;
+			.get() as {
+			eventSequence: number;
+			readModelVersion: number;
+			outboxSequence: number;
+		};
 	} finally {
 		db.close();
 	}
@@ -450,7 +455,7 @@ export function daemonStoreAssertions(
 		readonly before: StoreImportPosition;
 	},
 ) {
-	const db = new Database(filename, { readonly: true, fileMustExist: true });
+	const db = new DatabaseSync(filename, { readOnly: true, timeout: 5000 });
 	try {
 		const names = db
 			.prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -584,7 +589,7 @@ export function sourceChecksums(filename: string): {
 }
 
 export function storeTableCounts(filename: string): Record<string, number> {
-	const db = new Database(filename, { readonly: true, fileMustExist: true });
+	const db = new DatabaseSync(filename, { readOnly: true, timeout: 5000 });
 	try {
 		return Object.fromEntries(
 			(
@@ -617,7 +622,7 @@ export function daemonStoreManifest(filename: string): {
 	tables: Readonly<Record<string, readonly Row[]>>;
 	hash: string;
 } {
-	const db = new Database(filename, { readonly: true, fileMustExist: true });
+	const db = new DatabaseSync(filename, { readOnly: true, timeout: 5000 });
 	try {
 		const names = db
 			.prepare(
@@ -659,10 +664,68 @@ export function daemonStoreManifest(filename: string): {
 
 export type ProjectStoreFixture = { projectId: string; sourcePath: string };
 
+/** Legacy startup inputs; call before the first daemon start. */
+export async function createLegacyDaemonFixture(
+	configDir: string,
+	projects: readonly {
+		projectId: string;
+		folder: string;
+		sessionId: string;
+		prompt: string;
+		reply: string;
+		legacy?: boolean;
+		retained?: boolean;
+	}[],
+): Promise<void> {
+	const configPath = join(configDir, "daemon.json");
+	const config = existsSync(configPath)
+		? (JSON.parse(readFileSync(configPath, "utf8")) as ReturnType<
+				typeof defaultDaemonConfig
+			>)
+		: defaultDaemonConfig();
+	writeFileSync(
+		configPath,
+		JSON.stringify({
+			...config,
+			projects: projects
+				.filter(({ retained }) => !retained)
+				.map(({ projectId, folder }) => ({
+					slug: projectId,
+					title: projectId,
+					path: folder,
+					folders: [folder],
+					addedAt: 1,
+				})),
+		}),
+	);
+	for (const project of projects) {
+		mkdirSync(project.folder, { recursive: true });
+		const storage = join(configDir, "projects", project.projectId);
+		mkdirSync(storage, { recursive: true });
+		writeFileSync(
+			join(storage, "project.json"),
+			JSON.stringify({ mainFolder: project.folder }),
+		);
+		await createProjectStoreFixture(
+			join(configDir, "projects"),
+			project.projectId,
+			{
+				sessionId: project.sessionId,
+				...(project.legacy
+					? { sourcePath: join(project.folder, ".conduit", "events.db") }
+					: {}),
+				transcript: { prompt: project.prompt, reply: project.reply },
+			},
+		);
+	}
+}
+
 export async function createProjectStoreFixture(
 	root: string,
 	projectId: string,
 	options: {
+		sourcePath?: string;
+		transcript?: { prompt: string; reply: string; title?: string };
 		sessionId?: string;
 		large?: boolean;
 		synthetic?: boolean;
@@ -673,7 +736,8 @@ export async function createProjectStoreFixture(
 ): Promise<ProjectStoreFixture> {
 	const folder = join(root, projectId);
 	mkdirSync(folder, { recursive: true });
-	const sourcePath = join(folder, "events.db");
+	const sourcePath = options.sourcePath ?? join(folder, "events.db");
+	mkdirSync(dirname(sourcePath), { recursive: true });
 	const runtime = ManagedRuntime.make(
 		makePersistenceEffectLayer(sourcePath, projectId),
 	);
@@ -681,6 +745,95 @@ export async function createProjectStoreFixture(
 	const user = `${id}_user`;
 	const assistant = `${id}_assistant`;
 	const time = { provider: "claude", createdAt: 1000 };
+	if (options.transcript) {
+		const transcript = options.transcript;
+		try {
+			await runtime.runPromise(
+				Effect.gen(function* () {
+					yield* (yield* ProjectionRunnerEffectTag).recover();
+					const write = yield* makeCommitAndSignal;
+					yield* write([
+						canonicalEvent(
+							"session.created",
+							id,
+							{
+								sessionId: id,
+								title: transcript.title ?? "Imported history",
+								provider: "claude",
+								permissionMode: "ask",
+							},
+							time,
+						),
+						canonicalEvent(
+							"session.model_changed",
+							id,
+							{ sessionId: id, modelId: "sonnet", providerId: "claude" },
+							time,
+						),
+						canonicalEvent(
+							"session.variant_changed",
+							id,
+							{ sessionId: id, variant: "" },
+							time,
+						),
+						canonicalEvent(
+							"session.context_window_changed",
+							id,
+							{ sessionId: id, contextWindow: "200k" },
+							time,
+						),
+						canonicalEvent(
+							"message.created",
+							id,
+							{ sessionId: id, messageId: user, role: "user" },
+							time,
+						),
+						canonicalEvent(
+							"text.delta",
+							id,
+							{
+								messageId: user,
+								partId: `${user}_text`,
+								text: transcript.prompt,
+							},
+							time,
+						),
+						canonicalEvent(
+							"message.created",
+							id,
+							{ sessionId: id, messageId: assistant, role: "assistant" },
+							time,
+						),
+						canonicalEvent(
+							"text.delta",
+							id,
+							{
+								messageId: assistant,
+								partId: `${assistant}_text`,
+								text: transcript.reply,
+							},
+							time,
+						),
+						canonicalEvent(
+							"turn.completed",
+							id,
+							{
+								messageId: assistant,
+								userMessageId: user,
+								cost: 0,
+								duration: 20,
+								tokens: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+							},
+							time,
+						),
+					]);
+				}),
+			);
+		} finally {
+			await runtime.dispose();
+		}
+		return { projectId, sourcePath: realpathSync(sourcePath) };
+	}
 	const events: CanonicalEvent[] = [
 		canonicalEvent(
 			"session.created",

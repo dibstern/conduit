@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Effect, Schema, type Types } from "effect";
 import { ContinuationReasonSchema } from "./limit-recovery.js";
 import {
 	SessionSetupFinishedPayloadSchema,
@@ -69,7 +69,7 @@ export type FileAttachedPayload = PayloadOf<"file.attached">;
 // maps raw provider casing (snake_case, camelCase) into this canonical form.
 // Unknown tools collapse to { tool: "Unknown" } — never lost, always renderable.
 
-export type CanonicalToolInput = Schema.SimplifyMutable<
+export type CanonicalToolInput = Types.Mutable<
 	typeof CanonicalToolInputSchema.Type
 >;
 
@@ -120,6 +120,8 @@ export type SessionSettledPayload = PayloadOf<"session.settled">;
 export type SessionAutoSettleSetPayload = PayloadOf<"session.auto_settle_set">;
 
 export type SessionUnsettledPayload = PayloadOf<"session.unsettled">;
+export type SessionArchivedPayload = PayloadOf<"session.archived">;
+export type SessionUnarchivedPayload = PayloadOf<"session.unarchived">;
 
 export type SessionPinnedPayload = PayloadOf<"session.pinned">;
 
@@ -182,7 +184,10 @@ export type SessionContextWindowChangedPayload =
 
 const SessionGoalSchema = Schema.Struct({
 	condition: Schema.String,
-	iterations: Schema.NonNegativeInt,
+	iterations: Schema.Number.check(
+		Schema.isInt(),
+		Schema.isGreaterThanOrEqualTo(0),
+	),
 	setAt: Schema.Number,
 	tokensAtStart: Schema.Number,
 	lastReason: Schema.optional(Schema.String),
@@ -254,60 +259,58 @@ export type StoredEvent = CanonicalEvent<CanonicalEventType> & {
 };
 
 export const EventMetadataSchema = Schema.Struct({
-	commandId: Schema.optionalWith(Schema.String, { exact: true }),
-	causationEventId: Schema.optionalWith(Schema.String, { exact: true }),
-	correlationId: Schema.optionalWith(Schema.String, { exact: true }),
-	adapterKey: Schema.optionalWith(Schema.String, { exact: true }),
-	providerTurnId: Schema.optionalWith(Schema.String, { exact: true }),
-	providerRuntimeEventId: Schema.optionalWith(Schema.String, { exact: true }),
-	rawSource: Schema.optionalWith(Schema.String, { exact: true }),
-	providerRefs: Schema.optionalWith(
+	commandId: Schema.optionalKey(Schema.String),
+	causationEventId: Schema.optionalKey(Schema.String),
+	correlationId: Schema.optionalKey(Schema.String),
+	adapterKey: Schema.optionalKey(Schema.String),
+	providerTurnId: Schema.optionalKey(Schema.String),
+	providerRuntimeEventId: Schema.optionalKey(Schema.String),
+	rawSource: Schema.optionalKey(Schema.String),
+	providerRefs: Schema.optionalKey(
 		Schema.Struct({
-			providerTurnId: Schema.optionalWith(Schema.String, { exact: true }),
-			providerItemId: Schema.optionalWith(Schema.String, { exact: true }),
-			providerMessageId: Schema.optionalWith(Schema.String, { exact: true }),
-			providerToolUseId: Schema.optionalWith(Schema.String, { exact: true }),
-			providerRequestId: Schema.optionalWith(Schema.String, { exact: true }),
-			providerSessionId: Schema.optionalWith(Schema.String, { exact: true }),
-			providerTaskId: Schema.optionalWith(Schema.String, { exact: true }),
-			parentProviderTaskId: Schema.optionalWith(Schema.String, {
-				exact: true,
-			}),
+			providerTurnId: Schema.optionalKey(Schema.String),
+			providerItemId: Schema.optionalKey(Schema.String),
+			providerMessageId: Schema.optionalKey(Schema.String),
+			providerToolUseId: Schema.optionalKey(Schema.String),
+			providerRequestId: Schema.optionalKey(Schema.String),
+			providerSessionId: Schema.optionalKey(Schema.String),
+			providerTaskId: Schema.optionalKey(Schema.String),
+			parentProviderTaskId: Schema.optionalKey(Schema.String),
 		}),
-		{ exact: true },
 	),
-	synthetic: Schema.optionalWith(Schema.Boolean, { exact: true }),
-	source: Schema.optionalWith(Schema.String, { exact: true }),
-	sseBatchId: Schema.optionalWith(Schema.String, { exact: true }),
-	sseBatchSize: Schema.optionalWith(Schema.Number, { exact: true }),
-	schemaVersion: Schema.optionalWith(Schema.Number, { exact: true }),
+	synthetic: Schema.optionalKey(Schema.Boolean),
+	source: Schema.optionalKey(Schema.String),
+	sseBatchId: Schema.optionalKey(Schema.String),
+	sseBatchSize: Schema.optionalKey(Schema.Number),
+	schemaVersion: Schema.optionalKey(Schema.Number),
 });
 
-const MessageRoleSchema = Schema.Literal("user", "assistant");
-const SessionStatusSchema = Schema.Literal("idle", "busy", "retry", "error");
-const PermissionDecisionSchema = Schema.Literal("once", "always", "reject");
+const MessageRoleSchema = Schema.Literals(["user", "assistant"]);
+const SessionStatusSchema = Schema.Literals(["idle", "busy", "retry", "error"]);
+const PermissionDecisionSchema = Schema.Literals(["once", "always", "reject"]);
 
 const TokensSchema = Schema.Struct({
-	input: Schema.optionalWith(Schema.Number, { exact: true }),
-	output: Schema.optionalWith(Schema.Number, { exact: true }),
-	cacheRead: Schema.optionalWith(Schema.Number, { exact: true }),
-	cacheWrite: Schema.optionalWith(Schema.Number, { exact: true }),
-	contextWindow: Schema.optionalWith(Schema.Number, { exact: true }),
+	input: Schema.optionalKey(Schema.Number),
+	output: Schema.optionalKey(Schema.Number),
+	cacheRead: Schema.optionalKey(Schema.Number),
+	cacheWrite: Schema.optionalKey(Schema.Number),
+	/** Omission means capacity unknown; readers also treat legacy zero values as unknown. */
+	contextWindow: Schema.optionalKey(Schema.Number),
 });
 
-const CanonicalToolInputSchema = Schema.Union(
+const CanonicalToolInputSchema = Schema.Union([
 	Schema.Struct({
 		tool: Schema.Literal("Read"),
 		filePath: Schema.String,
-		offset: Schema.optionalWith(Schema.Number, { exact: true }),
-		limit: Schema.optionalWith(Schema.Number, { exact: true }),
+		offset: Schema.optionalKey(Schema.Number),
+		limit: Schema.optionalKey(Schema.Number),
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("Edit"),
 		filePath: Schema.String,
 		oldString: Schema.String,
 		newString: Schema.String,
-		replaceAll: Schema.optionalWith(Schema.Boolean, { exact: true }),
+		replaceAll: Schema.optionalKey(Schema.Boolean),
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("Write"),
@@ -322,26 +325,26 @@ const CanonicalToolInputSchema = Schema.Union(
 	Schema.Struct({
 		tool: Schema.Literal("Bash"),
 		command: Schema.String,
-		workingDirectory: Schema.optionalWith(Schema.String, { exact: true }),
-		description: Schema.optionalWith(Schema.String, { exact: true }),
-		timeoutMs: Schema.optionalWith(Schema.Number, { exact: true }),
+		workingDirectory: Schema.optionalKey(Schema.String),
+		description: Schema.optionalKey(Schema.String),
+		timeoutMs: Schema.optionalKey(Schema.Number),
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("Grep"),
 		pattern: Schema.String,
-		path: Schema.optionalWith(Schema.String, { exact: true }),
-		include: Schema.optionalWith(Schema.String, { exact: true }),
-		fileType: Schema.optionalWith(Schema.String, { exact: true }),
+		path: Schema.optionalKey(Schema.String),
+		include: Schema.optionalKey(Schema.String),
+		fileType: Schema.optionalKey(Schema.String),
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("Glob"),
 		pattern: Schema.String,
-		path: Schema.optionalWith(Schema.String, { exact: true }),
+		path: Schema.optionalKey(Schema.String),
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("WebFetch"),
 		url: Schema.String,
-		prompt: Schema.optionalWith(Schema.String, { exact: true }),
+		prompt: Schema.optionalKey(Schema.String),
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("WebSearch"),
@@ -351,12 +354,12 @@ const CanonicalToolInputSchema = Schema.Union(
 		tool: Schema.Literal("Task"),
 		description: Schema.String,
 		prompt: Schema.String,
-		subagentType: Schema.optionalWith(Schema.String, { exact: true }),
+		subagentType: Schema.optionalKey(Schema.String),
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("LSP"),
 		operation: Schema.String,
-		filePath: Schema.optionalWith(Schema.String, { exact: true }),
+		filePath: Schema.optionalKey(Schema.String),
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("Skill"),
@@ -364,38 +367,39 @@ const CanonicalToolInputSchema = Schema.Union(
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("AskUserQuestion"),
-		questions: Schema.Unknown,
+		questions: Schema.Unknown.pipe(
+			Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+		),
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("Unknown"),
 		name: Schema.String,
-		raw: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+		raw: Schema.Record(Schema.String, Schema.Unknown),
 	}),
-);
+]);
 
-const NonEmptyStringSchema = Schema.String.pipe(Schema.minLength(1));
+const NonEmptyStringSchema = Schema.String.pipe(
+	Schema.check(Schema.isMinLength(1)),
+);
 
 export const InputRequestSchema = Schema.Struct({
 	text: Schema.String,
-	images: Schema.optionalWith(Schema.Array(Schema.String), { exact: true }),
-	model: Schema.optionalWith(
+	images: Schema.optionalKey(Schema.Array(Schema.String)),
+	model: Schema.optionalKey(
 		Schema.Struct({ providerID: Schema.String, modelID: Schema.String }),
-		{ exact: true },
 	),
-	agent: Schema.optionalWith(Schema.String, { exact: true }),
-	variant: Schema.optionalWith(Schema.String, { exact: true }),
-	contextWindow: Schema.optionalWith(Schema.String, { exact: true }),
+	agent: Schema.optionalKey(Schema.String),
+	variant: Schema.optionalKey(Schema.String),
+	contextWindow: Schema.optionalKey(Schema.String),
 });
 
-const optionalString = Schema.optionalWith(Schema.String, { exact: true });
+const optionalString = Schema.optionalKey(Schema.String);
 
 /** The optional card fields of a permission.asked payload (ni8.9). */
 export const PermissionAskedDetailsSchema = Schema.Struct({
 	toolUseId: optionalString,
-	always: Schema.optionalWith(Schema.Array(Schema.String), { exact: true }),
-	permissionSuggestions: Schema.optionalWith(Schema.Array(Schema.Unknown), {
-		exact: true,
-	}),
+	always: Schema.optionalKey(Schema.Array(Schema.String)),
+	permissionSuggestions: Schema.optionalKey(Schema.Array(Schema.Unknown)),
 	permissionTitle: optionalString,
 	permissionDisplayName: optionalString,
 	permissionDescription: optionalString,
@@ -434,11 +438,11 @@ type SnapshotMessage = {
 	readonly [key: string]: unknown;
 };
 
-function live<S extends Schema.Schema.Any>(payload: S) {
+function live<S extends Schema.Top>(payload: S) {
 	return { status: "live", payload } as const;
 }
 
-function retired<S extends Schema.Schema.Any>(reason: string, payload: S) {
+function retired<S extends Schema.Top>(reason: string, payload: S) {
 	return { status: "retired", reason, payload } as const;
 }
 
@@ -448,13 +452,13 @@ export const CanonicalEvents = {
 			messageId: Schema.String,
 			role: MessageRoleSchema,
 			sessionId: Schema.String,
-			parentID: Schema.optionalWith(Schema.String, { exact: true }),
-			turnId: Schema.optionalWith(Schema.String, { exact: true }),
+			parentID: Schema.optionalKey(Schema.String),
+			turnId: Schema.optionalKey(Schema.String),
 			/** The browser send this user message was placed for. */
-			inputId: Schema.optionalWith(Schema.String, { exact: true }),
+			inputId: Schema.optionalKey(Schema.String),
 			/** Imported from the provider's own record rather than observed streaming
 			 *  (OpenCode history backfill, conduit-test-iea). */
-			backfilled: Schema.optionalWith(Schema.Literal(true), { exact: true }),
+			backfilled: Schema.optionalKey(Schema.Literal(true)),
 		}),
 	),
 	"message.removed": live(
@@ -472,9 +476,9 @@ export const CanonicalEvents = {
 		Schema.Struct({
 			messageId: Schema.String,
 			digest: Schema.String,
-			supersedesEventId: Schema.optionalWith(Schema.String, { exact: true }),
+			supersedesEventId: Schema.optionalKey(Schema.String),
 			message: Schema.Unknown.pipe(
-				Schema.filter(
+				Schema.refine(
 					(value): value is SnapshotMessage =>
 						typeof value === "object" &&
 						value !== null &&
@@ -538,29 +542,29 @@ export const CanonicalEvents = {
 		Schema.Struct({
 			messageId: Schema.String,
 			partId: Schema.String,
-			metadata: Schema.optionalWith(
-				Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-				{ exact: true },
+			metadata: Schema.optionalKey(
+				Schema.Record(Schema.String, Schema.Unknown),
 			),
 			/** Refreshed tool input when the provider streamed args after tool.started. */
-			input: Schema.optionalWith(CanonicalToolInputSchema, { exact: true }),
+			input: Schema.optionalKey(CanonicalToolInputSchema),
 			/** Anchors the input refresh to the tool_start id in live clients; only set alongside input. */
-			callId: Schema.optionalWith(Schema.String, { exact: true }),
-			toolName: Schema.optionalWith(Schema.String, { exact: true }),
+			callId: Schema.optionalKey(Schema.String),
+			toolName: Schema.optionalKey(Schema.String),
 		}),
 	),
 	"tool.completed": live(
 		Schema.Struct({
 			messageId: Schema.String,
 			partId: Schema.String,
-			result: Schema.Unknown,
+			result: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
 			duration: Schema.Number,
-			metadata: Schema.optionalWith(
-				Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-				{ exact: true },
+			metadata: Schema.optionalKey(
+				Schema.Record(Schema.String, Schema.Unknown),
 			),
 			/** Final tool input when the provider streamed args after tool.started. */
-			input: Schema.optionalWith(CanonicalToolInputSchema, { exact: true }),
+			input: Schema.optionalKey(CanonicalToolInputSchema),
 		}),
 	),
 	"file.attached": live(
@@ -568,7 +572,7 @@ export const CanonicalEvents = {
 			messageId: Schema.String,
 			partId: Schema.String,
 			mime: Schema.String,
-			filename: Schema.optionalWith(Schema.String, { exact: true }),
+			filename: Schema.optionalKey(Schema.String),
 			url: Schema.String,
 		}),
 	),
@@ -577,34 +581,35 @@ export const CanonicalEvents = {
 		Schema.Struct({
 			messageId: Schema.String,
 			partId: Schema.String,
-		}).pipe(
-			Schema.extend(
-				Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-			),
+		}).pipe((schema) =>
+			Schema.StructWithRest(schema, [
+				Schema.Record(Schema.String, Schema.Unknown),
+			]),
 		),
 	),
 	"turn.completed": live(
 		Schema.Struct({
 			messageId: Schema.String,
 			/** Names the turn when no assistant message of its own answered it. */
-			userMessageId: Schema.optionalWith(Schema.String, { exact: true }),
-			cost: Schema.optionalWith(Schema.Number, { exact: true }),
+			userMessageId: Schema.optionalKey(Schema.String),
+			cost: Schema.optionalKey(Schema.Number),
 			/** Claude's session running total; cost is its delta at persistence time. */
-			providerCostTotalUsd: Schema.optionalWith(Schema.Number, { exact: true }),
-			providerSessionId: Schema.optionalWith(Schema.String, { exact: true }),
+			providerCostTotalUsd: Schema.optionalKey(Schema.Number),
+			providerSessionId: Schema.optionalKey(Schema.String),
 			/** Input and cache tokens in the final main request, excluding output. */
-			contextTokens: Schema.optionalWith(Schema.Number, { exact: true }),
-			tokens: Schema.optionalWith(TokensSchema, { exact: true }),
-			duration: Schema.optionalWith(Schema.Number, { exact: true }),
+			contextTokens: Schema.optionalKey(Schema.Number),
+			tokens: Schema.optionalKey(TokensSchema),
+			duration: Schema.optionalKey(Schema.Number),
 		}),
 	),
 	"turn.error": live(
 		Schema.Struct({
 			messageId: Schema.String,
 			/** Durable turn owner when a process fails before or between messages. */
-			userMessageId: Schema.optionalWith(Schema.String, { exact: true }),
+			userMessageId: Schema.optionalKey(Schema.String),
 			error: Schema.String,
-			code: Schema.optionalWith(Schema.String, { exact: true }),
+			code: Schema.optionalKey(Schema.String),
+			retryable: Schema.optionalKey(Schema.Boolean),
 		}),
 	),
 	"turn.interrupted": live(
@@ -614,10 +619,9 @@ export const CanonicalEvents = {
 	),
 	"turn.model_resolved": live(
 		Schema.Struct({
-			requestedModel: Schema.optionalWith(NonEmptyStringSchema, {
-				exact: true,
-			}),
-			expectedModel: Schema.optionalWith(NonEmptyStringSchema, { exact: true }),
+			messageId: Schema.optionalKey(Schema.String),
+			requestedModel: Schema.optionalKey(NonEmptyStringSchema),
+			expectedModel: Schema.optionalKey(NonEmptyStringSchema),
 			actualModel: NonEmptyStringSchema,
 		}),
 	),
@@ -625,7 +629,7 @@ export const CanonicalEvents = {
 		Schema.Struct({
 			sessionId: Schema.String,
 			inputId: Schema.String,
-			delivery: Schema.Literal(...INPUT_DELIVERIES),
+			delivery: Schema.Literals([...INPUT_DELIVERIES]),
 			request: InputRequestSchema,
 		}),
 	),
@@ -634,11 +638,9 @@ export const CanonicalEvents = {
 			sessionId: Schema.String,
 			inputId: Schema.String,
 			/** Handed into the running turn rather than starting one. */
-			steer: Schema.optionalWith(Schema.Literal(true), { exact: true }),
+			steer: Schema.optionalKey(Schema.Literal(true)),
 			/** The user workspace move whose directive was included in this handoff. */
-			workspaceMoveSequence: Schema.optionalWith(Schema.Number, {
-				exact: true,
-			}),
+			workspaceMoveSequence: Schema.optionalKey(Schema.Number),
 		}),
 	),
 	"input.requeued": live(
@@ -646,7 +648,7 @@ export const CanonicalEvents = {
 			sessionId: Schema.String,
 			inputId: Schema.String,
 			sentSequence: Schema.Number,
-			reason: Schema.Literal("declined", "failed"),
+			reason: Schema.Literals(["declined", "failed"]),
 		}),
 	),
 	"input.cancelled": live(
@@ -666,19 +668,17 @@ export const CanonicalEvents = {
 			sessionId: Schema.String,
 			title: Schema.String,
 			provider: Schema.String,
-			parentId: Schema.optionalWith(Schema.String, { exact: true }),
-			forkPointEvent: Schema.optionalWith(Schema.String, { exact: true }),
-			forkPointTimestamp: Schema.optionalWith(Schema.Number, { exact: true }),
-			forkPointMessageId: Schema.optionalWith(Schema.String, { exact: true }),
-			providerSessionId: Schema.optionalWith(Schema.String, { exact: true }),
-			sideThread: Schema.optionalWith(Schema.Boolean, { exact: true }),
+			parentId: Schema.optionalKey(Schema.String),
+			forkedFrom: Schema.optionalKey(Schema.String),
+			forkPointEvent: Schema.optionalKey(Schema.String),
+			forkPointTimestamp: Schema.optionalKey(Schema.Number),
+			forkPointMessageId: Schema.optionalKey(Schema.String),
+			providerSessionId: Schema.optionalKey(Schema.String),
+			sideThread: Schema.optionalKey(Schema.Boolean),
 			/** The input a Side Thread was started with, so a retried start finds it. */
-			startInputId: Schema.optionalWith(Schema.String, { exact: true }),
-			permissionMode: Schema.optionalWith(
-				Schema.Literal(...SESSION_PERMISSION_MODES),
-				{
-					exact: true,
-				},
+			startInputId: Schema.optionalKey(Schema.String),
+			permissionMode: Schema.optionalKey(
+				Schema.Literals([...SESSION_PERMISSION_MODES]),
 			),
 		}),
 	),
@@ -691,16 +691,12 @@ export const CanonicalEvents = {
 	"session.rewound": live(
 		Schema.Struct({
 			messageId: Schema.String,
-			previousMessageId: Schema.optionalWith(Schema.NullOr(Schema.String), {
-				exact: true,
-			}),
+			previousMessageId: Schema.optionalKey(Schema.NullOr(Schema.String)),
 		}),
 	),
 	"session.rewind_undone": live(
 		Schema.Struct({
-			previousMessageId: Schema.optionalWith(Schema.NullOr(Schema.String), {
-				exact: true,
-			}),
+			previousMessageId: Schema.optionalKey(Schema.NullOr(Schema.String)),
 		}),
 	),
 	"session.rewind_committed": live(Schema.Struct({ messageId: Schema.String })),
@@ -708,18 +704,17 @@ export const CanonicalEvents = {
 		Schema.Struct({
 			sessionId: Schema.String,
 			/** Effective cwd after applying the mapping, including a reset to main. */
-			path: Schema.optionalWith(Schema.String, { exact: true }),
+			path: Schema.optionalKey(Schema.String),
 			/** Launch ownership, or its branch-name update. Forks never copy this metadata. */
-			ownership: Schema.optionalWith(
+			ownership: Schema.optionalKey(
 				Schema.Array(SessionWorktreeOwnershipSchema),
-				{ exact: true },
 			),
 			...SessionWorkspaceSchema.fields,
 			/** A branch rename updates ownership without moving the workspace. */
-			cause: Schema.Union(
+			cause: Schema.Union([
 				SessionWorkspaceSchema.fields.cause,
 				Schema.Literal("branch-rename"),
-			),
+			]),
 		}),
 	),
 	"session.workspace_hint_changed": live(
@@ -751,13 +746,25 @@ export const CanonicalEvents = {
 	"session.settled": live(
 		Schema.Struct({
 			sessionId: Schema.String,
-			automatic: Schema.optionalWith(Schema.Boolean, { exact: true }),
-			mergedHead: Schema.optionalWith(Schema.String, { exact: true }),
+			automatic: Schema.optionalKey(Schema.Boolean),
+			mergedHead: Schema.optionalKey(Schema.String),
 		}),
 	),
 	"session.unsettled": live(
 		Schema.Struct({
 			sessionId: Schema.String,
+		}),
+	),
+	"session.archived": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			automatic: Schema.Boolean,
+		}),
+	),
+	"session.unarchived": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			cause: Schema.Literals(["manual", "send"]),
 		}),
 	),
 	"session.pinned": live(
@@ -796,35 +803,33 @@ export const CanonicalEvents = {
 			 * Optional: historical
 			 * tombstones lack it, and it is omitted when the session has no children.
 			 */
-			childSessionIds: Schema.optionalWith(Schema.Array(Schema.String), {
-				exact: true,
-			}),
+			childSessionIds: Schema.optionalKey(Schema.Array(Schema.String)),
 		}),
 	),
 	"session.forked": live(
 		Schema.Struct({
 			sessionId: Schema.String,
 			parentId: Schema.String,
-			forkPointEvent: Schema.optionalWith(Schema.String, { exact: true }),
-			forkPointTimestamp: Schema.optionalWith(Schema.Number, { exact: true }),
+			forkPointEvent: Schema.optionalKey(Schema.String),
+			forkPointTimestamp: Schema.optionalKey(Schema.Number),
 		}),
 	),
 	"session.status": live(
 		Schema.Struct({
 			sessionId: Schema.String,
 			status: SessionStatusSchema,
-			turnId: Schema.optionalWith(Schema.String, { exact: true }),
+			turnId: Schema.optionalKey(Schema.String),
 			/** A retry's reason, for the shell row while the provider waits. */
-			message: Schema.optionalWith(Schema.String, { exact: true }),
+			message: Schema.optionalKey(Schema.String),
 		}),
 	),
 	"session.compaction": live(
 		Schema.Struct({
 			sessionId: Schema.String,
-			state: Schema.Literal("started", "completed", "failed"),
+			state: Schema.Literals(["started", "completed", "failed"]),
 			detail: Schema.String,
-			preTokens: Schema.optionalWith(Schema.Number, { exact: true }),
-			postTokens: Schema.optionalWith(Schema.Number, { exact: true }),
+			preTokens: Schema.optionalKey(Schema.Number),
+			postTokens: Schema.optionalKey(Schema.Number),
 		}),
 	),
 	"session.provider_changed": live(
@@ -832,9 +837,8 @@ export const CanonicalEvents = {
 			sessionId: Schema.String,
 			oldProvider: Schema.String,
 			newProvider: Schema.String,
-			reason: Schema.optionalWith(
+			reason: Schema.optionalKey(
 				Schema.suspend(() => ContinuationReasonSchema),
-				{ exact: true },
 			),
 		}),
 	),
@@ -842,14 +846,14 @@ export const CanonicalEvents = {
 		Schema.Struct({
 			sessionId: Schema.String,
 			provider: Schema.String,
-			instanceId: Schema.optionalWith(Schema.String, { exact: true }),
+			instanceId: Schema.optionalKey(Schema.String),
 			reason: Schema.String,
 		}),
 	),
 	"session.permission_mode_changed": live(
 		Schema.Struct({
 			sessionId: Schema.String,
-			mode: Schema.Literal(...SESSION_PERMISSION_MODES),
+			mode: Schema.Literals([...SESSION_PERMISSION_MODES]),
 		}),
 	),
 	"session.model_changed": live(
@@ -875,7 +879,7 @@ export const CanonicalEvents = {
 		Schema.Struct({
 			sessionId: Schema.String,
 			goal: Schema.NullOr(SessionGoalSchema),
-			ended: Schema.optional(Schema.Literal("met", "cleared")),
+			ended: Schema.optional(Schema.Literals(["met", "cleared"])),
 			endedGoal: Schema.optional(SessionGoalSchema),
 			endedAt: Schema.optional(Schema.Number),
 			pausedReason: Schema.optional(Schema.String),
@@ -883,13 +887,20 @@ export const CanonicalEvents = {
 	),
 	"session.handoff_delivered": live(
 		Schema.Struct({
-			included: Schema.NonNegativeInt,
-			omitted: Schema.NonNegativeInt,
-			tokens: Schema.NonNegativeInt,
-			firstMessageIncluded: Schema.optionalWith(Schema.Boolean, {
-				exact: true,
-			}),
-			instanceId: Schema.optionalWith(Schema.String, { exact: true }),
+			included: Schema.Number.check(
+				Schema.isInt(),
+				Schema.isGreaterThanOrEqualTo(0),
+			),
+			omitted: Schema.Number.check(
+				Schema.isInt(),
+				Schema.isGreaterThanOrEqualTo(0),
+			),
+			tokens: Schema.Number.check(
+				Schema.isInt(),
+				Schema.isGreaterThanOrEqualTo(0),
+			),
+			firstMessageIncluded: Schema.optionalKey(Schema.Boolean),
+			instanceId: Schema.optionalKey(Schema.String),
 		}),
 	),
 	"session.usage_limited": live(
@@ -897,7 +908,7 @@ export const CanonicalEvents = {
 			instanceId: Schema.String,
 			rateLimitType: Schema.String,
 			/** SDK reset time, in Unix seconds. */
-			resetsAt: Schema.optionalWith(Schema.Number, { exact: true }),
+			resetsAt: Schema.optionalKey(Schema.Number),
 			cutOffMessageId: Schema.String,
 		}),
 	),
@@ -911,48 +922,60 @@ export const CanonicalEvents = {
 			reason: Schema.suspend(() => ContinuationReasonSchema),
 			instanceId: Schema.String,
 			/** The previous account, when the continuation switched accounts. */
-			from: Schema.optionalWith(Schema.String, { exact: true }),
+			from: Schema.optionalKey(Schema.String),
 		}),
 	),
 	"session.resume_scheduled": live(
 		Schema.Struct({
 			instanceId: Schema.String,
 			/** Unix seconds, matching the SDK's reset time. */
-			at: Schema.Number.pipe(Schema.finite()),
+			at: Schema.Number.pipe(Schema.check(Schema.isFinite())),
 		}),
 	),
 	// Preserve the empty payload type while accepting historical extra fields.
 	"session.resume_cancelled": live(
-		Schema.Struct({}) as Schema.Schema<Record<string, never>>,
+		Schema.Struct({}) as Schema.Codec<Record<string, never>>,
 	),
 	"permission.asked": live(
 		Schema.Struct({
 			id: Schema.String,
+			providerProcessId: Schema.optionalKey(Schema.String),
+			providerRequestId: Schema.optionalKey(Schema.String),
 			sessionId: Schema.String,
 			toolName: Schema.String,
-			input: Schema.Unknown,
+			input: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
 			...PermissionAskedDetailsSchema.fields,
 		}),
 	),
 	"permission.resolved": live(
 		Schema.Struct({
 			id: Schema.String,
+			providerProcessId: Schema.optionalKey(Schema.String),
+			providerRequestId: Schema.optionalKey(Schema.String),
 			decision: PermissionDecisionSchema,
-			resolvedBy: Schema.optionalWith(Schema.Literal("auto"), { exact: true }),
+			resolvedBy: Schema.optionalKey(Schema.Literal("auto")),
 		}),
 	),
 	"question.asked": live(
 		Schema.Struct({
 			id: Schema.String,
+			providerProcessId: Schema.optionalKey(Schema.String),
+			providerRequestId: Schema.optionalKey(Schema.String),
 			sessionId: Schema.String,
-			questions: Schema.Unknown,
+			questions: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
 			...QuestionAskedDetailsSchema.fields,
 		}),
 	),
 	"question.resolved": live(
 		Schema.Struct({
 			id: Schema.String,
-			answers: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+			providerProcessId: Schema.optionalKey(Schema.String),
+			providerRequestId: Schema.optionalKey(Schema.String),
+			answers: Schema.Record(Schema.String, Schema.Unknown),
 		}),
 	),
 } as const;
@@ -983,10 +1006,10 @@ export const SessionHandoffDeliveredPayloadSchema =
 export const SessionUsageLimitedPayloadSchema =
 	CanonicalEvents["session.usage_limited"].payload;
 
-function eventEnvelope<
-	T extends CanonicalEventType,
-	S extends Schema.Schema.Any,
->(type: T, dataSchema: S) {
+function eventEnvelope<T extends CanonicalEventType, S extends Schema.Top>(
+	type: T,
+	dataSchema: S,
+) {
 	return Schema.Struct({
 		eventId: Schema.String,
 		sessionId: Schema.String,
@@ -1013,17 +1036,23 @@ export type CanonicalEvent<T extends CanonicalEventType = LiveEventType> = {
 
 // Array.map loses the correlation between each key and its payload schema.
 // The mapped type above restates the discriminated union of those envelopes.
-export const CanonicalEventSchema = Schema.Union(
-	...CANONICAL_EVENT_TYPES.map((type) =>
-		eventEnvelope(type, CanonicalEvents[type].payload),
-	),
-) as Schema.Schema<CanonicalEvent<CanonicalEventType>>;
+function canonicalEventSchema<
+	const Fields extends Readonly<Record<string, Schema.Codec<unknown>>>,
+>(fields: Fields) {
+	return Schema.Union(
+		CANONICAL_EVENT_TYPES.map((type) =>
+			eventEnvelope(type, CanonicalEvents[type].payload).pipe(
+				Schema.fieldsAssign(fields),
+			),
+		),
+	) as Schema.Codec<
+		CanonicalEvent<CanonicalEventType> & Schema.Struct.Type<Fields>
+	>;
+}
 
-export const StoredEventSchema = Schema.extend(
-	CanonicalEventSchema,
-	Schema.Struct({
-		projectId: Schema.NonEmptyString,
-		sequence: Schema.Number,
-		streamVersion: Schema.Number,
-	}),
-);
+export const CanonicalEventSchema = canonicalEventSchema({});
+export const StoredEventSchema = canonicalEventSchema({
+	projectId: Schema.NonEmptyString,
+	sequence: Schema.Number,
+	streamVersion: Schema.Number,
+});

@@ -308,7 +308,7 @@ describe("Claude provider runtime boundary", () => {
 				}).pipe(Effect.provideService(Scope.Scope, scope));
 				const instance = runtime;
 
-				const turnFiber = yield* Effect.fork(
+				const turnFiber = yield* Effect.forkChild(
 					instance
 						.sendTurnEffect(
 							makeBaseSendTurnInput({
@@ -316,12 +316,13 @@ describe("Claude provider runtime boundary", () => {
 								model: { providerId: "claude", modelId: "sonnet" },
 							}),
 						)
-						.pipe(Effect.either),
+						.pipe(Effect.result),
 				);
 				yield* Deferred.await(streamStarted).pipe(
-					Effect.timeoutFail({
+					Effect.timeoutOrElse({
 						duration: "1 second",
-						onTimeout: () => new Error("Claude stream did not start"),
+						orElse: () =>
+							Effect.fail((() => new Error("Claude stream did not start"))()),
 					}),
 				);
 
@@ -331,7 +332,7 @@ describe("Claude provider runtime boundary", () => {
 				expect(query.interrupt).toHaveBeenCalledTimes(1);
 				expect(query.close).toHaveBeenCalledTimes(1);
 				expect(getClaudeRuntimeSessionCountForTest(instance)).toBe(0);
-				expect(turnResult._tag).toBe("Left");
+				expect(turnResult._tag).toBe("Failure");
 			}),
 		);
 	});
@@ -354,7 +355,7 @@ describe("Claude provider runtime boundary", () => {
 						},
 					});
 					const instance = runtime;
-					const turn = yield* Effect.fork(
+					const turn = yield* Effect.forkChild(
 						instance
 							.sendTurnEffect(
 								makeBaseSendTurnInput({
@@ -362,7 +363,7 @@ describe("Claude provider runtime boundary", () => {
 									model: { providerId: "claude", modelId: "sonnet" },
 								}),
 							)
-							.pipe(Effect.either),
+							.pipe(Effect.result),
 					);
 					yield* Deferred.await(started);
 					expect(options?.perTaskStopAffordance).toBe(true);
@@ -373,10 +374,10 @@ describe("Claude provider runtime boundary", () => {
 					vi.mocked(query.stopTask).mockRejectedValueOnce(
 						new Error("SDK unavailable"),
 					);
-					const failure = yield* Effect.either(
+					const failure = yield* Effect.result(
 						instance.stopTaskEffect("task-stop", "shell"),
 					);
-					expect(failure._tag).toBe("Left");
+					expect(failure._tag).toBe("Failure");
 					expect(query.close).not.toHaveBeenCalled();
 					// Composer Stop retains its existing teardown behavior.
 					yield* instance.interruptTurnEffect("task-stop");

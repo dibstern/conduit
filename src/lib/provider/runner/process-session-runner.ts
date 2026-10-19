@@ -3,10 +3,21 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { appendFileSync, closeSync, openSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { SqlClient } from "@effect/sql";
-import { Cause, Data, Deferred, Effect, Exit, FiberSet } from "effect";
+import {
+	Cause,
+	Data,
+	Deferred,
+	Effect,
+	Exit,
+	FiberSet,
+	Semaphore,
+} from "effect";
+import { SqlClient } from "effect/sql";
+import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
+import * as Failure from "../../effect/failure-classification.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { createLogger } from "../../logger.js";
+import { makeRetireReplacedProcessPrompts } from "../../persistence/effect/retire-pending-prompts.js";
 import { isRecord } from "../../utils.js";
 import type { ProviderNativeSession, TurnResult } from "../types.js";
 import { connectRunner } from "./runner-connection.js";
@@ -16,7 +27,10 @@ import {
 	runnerFailure,
 	runnerSinkId,
 } from "./runner-protocol.js";
-import { makeRunnerReceiptStore } from "./runner-receipts.js";
+import {
+	currentRunnerOutput,
+	makeRunnerReceiptStore,
+} from "./runner-receipts.js";
 import type { recoverRunnerCommands } from "./runner-recovery.js";
 import {
 	discoverRunners,
@@ -41,7 +55,7 @@ interface RunnerChild {
 	readonly stopped: Deferred.Deferred<void>;
 	readonly drained: Deferred.Deferred<void>;
 	readonly socketPath: string;
-	readonly outputs: Effect.Semaphore;
+	readonly outputs: Semaphore.Semaphore;
 	stopping: boolean;
 	stopSignalled?: boolean;
 	ending: number;
@@ -60,6 +74,7 @@ interface RunnerChild {
 	draftPreWarm?: boolean;
 	candidate?: boolean;
 	commandsInFlight: number;
+	pendingSendCommands?: Map<string, number> | undefined;
 	readonly upgrade: RunnerUpgrade;
 }
 
@@ -78,6 +93,8 @@ interface ProcessRunnerDeps {
 
 export interface ProcessRunnerDriver {
 	readonly driverKind: string;
+	/** The payload resumes durable state on demand and needs no warm SDK query. */
+	readonly coldUpgrade?: true;
 	readonly connect: typeof connectRunner;
 	readonly settingsDeferredCode: string;
 	readonly warmCommand: (
@@ -112,7 +129,7 @@ export interface ProcessRunnerDriver {
 			nativeResumeFallback?: boolean,
 		) => string,
 	) => Effect.Effect<
-		Effect.Effect.Success<
+		Effect.Success<
 			ReturnType<
 				typeof recoverRunnerCommands<
 					import("./session-runner.js").SessionTurn,
@@ -120,7 +137,8 @@ export interface ProcessRunnerDriver {
 				>
 			>
 		>,
-		unknown
+		unknown,
+		PersistenceProjectTag
 	>;
 }
 
@@ -147,7 +165,7 @@ const stop = (
 			if (entry.stopSignalled || !entry.verified) return;
 		}
 		entry.stopping = true;
-		const cleanup = Effect.async<void>((resume) => {
+		const cleanup = Effect.callback<void>((resume) => {
 			entry.connection?.destroy();
 			const child = entry.child;
 			let force: ReturnType<typeof setTimeout> | undefined;
@@ -226,7 +244,7 @@ export const stopRegisteredRunners = (
 				registrations,
 				(registration) =>
 					Effect.gen(function* () {
-						const connection = yield* Effect.either(
+						const connection = yield* Effect.result(
 							Effect.acquireRelease(
 								connectRunner({
 									...registration,
@@ -244,7 +262,7 @@ export const stopRegisteredRunners = (
 							),
 						);
 						if (
-							connection._tag === "Left" &&
+							connection._tag === "Failure" &&
 							!runnerPidMatchesRegistration(registration)
 						) {
 							if (runnerPidAlive(registration.pid)) {
@@ -252,7 +270,7 @@ export const stopRegisteredRunners = (
 									{
 										...registration,
 										driverKind: registration.driverKind ?? "claude",
-										cause: connection.left,
+										cause: connection.failure,
 									},
 									"Leaving unverified Runner after failed hello",
 								);
@@ -262,9 +280,9 @@ export const stopRegisteredRunners = (
 							return;
 						}
 						const ready = yield* Deferred.make<RunnerSocket, SessionFailure>();
-						if (connection._tag === "Right")
-							yield* Deferred.succeed(ready, connection.right);
-						else yield* Deferred.fail(ready, connection.left);
+						if (connection._tag === "Success")
+							yield* Deferred.succeed(ready, connection.success);
+						else yield* Deferred.fail(ready, connection.failure);
 						// A failed hello requires independent argv identity before signalling.
 						yield* stop({
 							ready,
@@ -273,8 +291,8 @@ export const stopRegisteredRunners = (
 							pid: registration.pid,
 							stopping: false,
 							verified: true,
-							...(connection._tag === "Right"
-								? { connection: connection.right }
+							...(connection._tag === "Success"
+								? { connection: connection.success }
 								: {}),
 						});
 						if (runnerPidAlive(registration.pid)) {
@@ -283,7 +301,7 @@ export const stopRegisteredRunners = (
 							});
 						}
 					}).pipe(
-						Effect.catchAll((error) =>
+						Effect.catch((error) =>
 							runnerPidAlive(registration.pid)
 								? Effect.fail(error)
 								: Effect.sync(() => removeRunner(registration.socketPath)),
@@ -295,7 +313,9 @@ export const stopRegisteredRunners = (
 			const failures = outcomes.filter(Exit.isFailure);
 			if (failures.length > 0) {
 				return yield* new RunnerProcessError({
-					message: failures.map((exit) => Cause.pretty(exit.cause)).join("\n"),
+					message: failures
+						.map((exit) => Failure.renderCause(exit.cause))
+						.join("\n"),
 				});
 			}
 		}),
@@ -312,7 +332,7 @@ export const makeProcessSessionRunner = (
 	Effect.gen(function* () {
 		const runFork = yield* FiberSet.makeRuntime<never, void, never>();
 		const runnerLabel = `${driver.driverKind.charAt(0).toUpperCase()}${driver.driverKind.slice(1)} runner`;
-		const lock = yield* Effect.makeSemaphore(1);
+		const lock = yield* Semaphore.make(1);
 		const configDir = resolve(deps.daemonConfigDir ?? DEFAULT_CONFIG_DIR);
 		const startupTimeoutMs =
 			process.env["NODE_ENV"] === "test"
@@ -322,9 +342,28 @@ export const makeProcessSessionRunner = (
 				: 10_000;
 		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const sql = sqlOption._tag === "Some" ? sqlOption.value : undefined;
+		const project = yield* Effect.serviceOption(PersistenceProjectTag);
+		if (sql && project._tag === "None")
+			return yield* Effect.die(
+				new Error("A persistent session runner requires project ownership"),
+			);
+		const projectId =
+			project._tag === "Some" ? project.value.projectId : undefined;
 		const receipts = sql
 			? yield* makeRunnerReceiptStore(sql).pipe(Effect.orDie)
 			: undefined;
+		const retireReplacedPrompts = yield* makeRetireReplacedProcessPrompts;
+		const observedProcesses = new Map<string, string>();
+		const observeProcess = (sessionId: string, entry: RunnerChild) =>
+			Effect.gen(function* () {
+				if (observedProcesses.get(sessionId) === entry.runnerId) return;
+				yield* retireReplacedPrompts(entry.runnerId, { sessionId }).pipe(
+					Effect.mapError((cause) =>
+						runnerFailure("retire replaced runner prompts", cause),
+					),
+				);
+				observedProcesses.set(sessionId, entry.runnerId);
+			});
 		const children = new Map<string, RunnerChild>();
 		const candidates = new Set<RunnerChild>();
 		const sinks = new Map<
@@ -345,6 +384,54 @@ export const makeProcessSessionRunner = (
 			}
 		>();
 		let closing = false;
+		const acknowledgeSends = (
+			sessionId: string,
+			entry: RunnerChild,
+			connection: RunnerSocket,
+		) =>
+			Effect.gen(function* () {
+				if (!sql || !entry.pendingSendCommands?.size) return;
+				const rows = yield* sql<{
+					command_id: string;
+					attempt: number;
+				}>`SELECT command_id, MAX(attempt_count) AS attempt FROM provider_command_outbox
+				WHERE session_id = ${sessionId} AND effect_type = 'send_turn'
+					AND status IN ('completed', 'failed') AND command_id IN ${sql.in([...entry.pendingSendCommands.keys()])}
+				GROUP BY command_id`;
+				if (closing || entry.connection !== connection || connection.closed)
+					return;
+				if (rows.length)
+					connection.write({
+						type: "settled-commands",
+						commands: rows.map((row) => ({
+							commandId: row.command_id,
+							attempt: row.attempt,
+						})),
+					});
+			}).pipe(
+				Effect.catch((cause) =>
+					Effect.logWarning("Runner send acknowledgement failed", cause),
+				),
+			);
+		if (sql)
+			yield* Effect.forkScoped(
+				Effect.forever(
+					Effect.sleep("1 second").pipe(
+						Effect.andThen(
+							Effect.suspend(() =>
+								Effect.forEach(
+									[...children],
+									([sessionId, entry]) =>
+										entry.connection
+											? acknowledgeSends(sessionId, entry, entry.connection)
+											: Effect.void,
+									{ discard: true },
+								),
+							),
+						),
+					),
+				),
+			);
 		const upgradeMark = (
 			sessionId: string,
 			old: RunnerChild,
@@ -525,7 +612,9 @@ export const makeProcessSessionRunner = (
 							received.event.type === "turn.error" &&
 							binding?.userMessageId &&
 							received.event.sessionId === binding.sessionId &&
-							isRecord(received.event.data)
+							isRecord(received.event.data) &&
+							// A payload can name a newer input delivered within this run.
+							typeof received.event.data["userMessageId"] !== "string"
 								? {
 										...received,
 										event: {
@@ -584,7 +673,25 @@ export const makeProcessSessionRunner = (
 									),
 								);
 							});
+						// Warming candidates have not replaced the active process yet.
+						if (!entry.candidate)
+							yield* lock.withPermits(1)(
+								Effect.gen(function* () {
+									yield* ensureAttached();
+									yield* observeProcess(sessionId, entry);
+									yield* ensureAttached();
+								}),
+							);
 						yield* ensureAttached();
+						entry.pendingSendCommands = hello.sendCommands
+							? new Map(
+									hello.sendCommands.map(({ commandId, attempt }) => [
+										commandId,
+										attempt,
+									]),
+								)
+							: undefined;
+						yield* acknowledgeSends(sessionId, entry, connection);
 						entry.buildId = hello.buildId;
 						entry.stopsTasks = hello.stopsTasks === true;
 						entry.upgrade.state = hello.upgradeState;
@@ -610,7 +717,7 @@ export const makeProcessSessionRunner = (
 									FROM provider_command_outbox outbox
 									LEFT JOIN turns ON turns.session_id = outbox.session_id
 										AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
-									WHERE outbox.command_id = ${binding.commandId ?? binding.sinkId} AND outbox.session_id = ${sessionId}`.pipe(
+									WHERE outbox.project_key = ${projectId} AND outbox.command_id = ${binding.commandId ?? binding.sinkId} AND outbox.session_id = ${sessionId}`.pipe(
 									Effect.mapError((cause) =>
 										runnerFailure("restore runner history", cause),
 									),
@@ -678,6 +785,13 @@ export const makeProcessSessionRunner = (
 						binding.accepted = true;
 						if (binding.admission)
 							runFork(Deferred.succeed(binding.admission, undefined));
+					}
+				},
+				onCommandsSettled: (commands) => {
+					for (const { commandId, attempt } of commands) {
+						const pending = entry.pendingSendCommands?.get(commandId);
+						if (pending !== undefined && pending <= attempt)
+							entry.pendingSendCommands?.delete(commandId);
 					}
 				},
 				onUpgradeState: (state) => {
@@ -768,7 +882,7 @@ export const makeProcessSessionRunner = (
 					);
 					removeRunner(entry.socketPath);
 				});
-				yield* Effect.async<void, SessionFailure>((resume) => {
+				yield* Effect.callback<void, SessionFailure>((resume) => {
 					const timer = setTimeout(
 						() =>
 							resume(
@@ -814,7 +928,7 @@ export const makeProcessSessionRunner = (
 						failed(
 							sessionId,
 							entry,
-							runnerFailure("spawn runner", Cause.squash(cause)),
+							runnerFailure("spawn runner", Failure.squashCause(cause)),
 						);
 					}),
 				),
@@ -834,7 +948,7 @@ export const makeProcessSessionRunner = (
 					idleExiting: false,
 					commandsInFlight: 0,
 					upgrade: { activity: 0, inFlight: false, failures: 0, retryAt: 0 },
-					outputs: yield* Effect.makeSemaphore(1),
+					outputs: yield* Semaphore.make(1),
 					socketPath: join(
 						runnerDirectory(deps.workspaceRoot, configDir),
 						runnerId,
@@ -853,7 +967,8 @@ export const makeProcessSessionRunner = (
 			entry.buildId !== undefined &&
 			entry.buildId !== runnerBuildId() &&
 			entry.upgrade.state?.quiescent === true &&
-			entry.upgrade.state.snapshot !== undefined;
+			(entry.upgrade.state.snapshot !== undefined ||
+				driver.coldUpgrade === true);
 		const upgrade = makeRunnerUpgrade<RunnerChild>({
 			eligible,
 			runFork,
@@ -871,7 +986,7 @@ export const makeProcessSessionRunner = (
 				Effect.gen(function* () {
 					const state = old.upgrade.state;
 					const snapshot = state?.snapshot;
-					if (!snapshot)
+					if (!snapshot && !driver.coldUpgrade)
 						return yield* Effect.fail(
 							runnerFailure(
 								"upgrade runner",
@@ -881,10 +996,11 @@ export const makeProcessSessionRunner = (
 					const connection = yield* start(sessionId, replacement);
 					yield* Deferred.succeed(replacement.ready, connection);
 					upgradeMark(sessionId, old, "warming", replacement);
-					yield* connection.commandEffect(
-						randomUUID(),
-						driver.warmCommand(sessionId, state, snapshot),
-					);
+					if (state && snapshot)
+						yield* connection.commandEffect(
+							randomUUID(),
+							driver.warmCommand(sessionId, state, snapshot),
+						);
 				}),
 			commit: (sessionId, old, replacement, activity) =>
 				Effect.gen(function* () {
@@ -899,7 +1015,7 @@ export const makeProcessSessionRunner = (
 								return false;
 							const running = yield* sql<{
 								command_id: string;
-							}>`SELECT command_id FROM provider_command_outbox WHERE session_id = ${sessionId} AND status = 'running' AND effect_type = 'send_turn' LIMIT 1`.pipe(
+							}>`SELECT command_id FROM provider_command_outbox WHERE project_key = ${projectId} AND session_id = ${sessionId} AND status = 'running' AND effect_type = 'send_turn' LIMIT 1`.pipe(
 								Effect.mapError((cause) =>
 									runnerFailure("upgrade runner", cause),
 								),
@@ -925,12 +1041,14 @@ export const makeProcessSessionRunner = (
 					if (revision === undefined || !connection) return false;
 					// The runner validates work and its revision atomically before retirement.
 					const retired = yield* connection.retireEffect(revision).pipe(
-						Effect.timeoutFail({
+						Effect.timeoutOrElse({
 							duration: "1 second",
-							onTimeout: () =>
-								runnerFailure(
-									"upgrade runner",
-									"Retirement confirmation timed out",
+							orElse: () =>
+								Effect.fail(
+									runnerFailure(
+										"upgrade runner",
+										"Retirement confirmation timed out",
+									),
 								),
 						}),
 						Effect.onError(() =>
@@ -939,7 +1057,7 @@ export const makeProcessSessionRunner = (
 					);
 					if (!retired) return false;
 					return yield* lock.withPermits(1)(
-						Effect.sync(() => {
+						Effect.gen(function* () {
 							if (
 								activity !== old.upgrade.activity ||
 								!eligible(sessionId, old) ||
@@ -949,6 +1067,7 @@ export const makeProcessSessionRunner = (
 								connection.write({ type: "upgrade-cancel" });
 								return false;
 							}
+							yield* observeProcess(sessionId, replacement);
 							replacement.candidate = false;
 							replacement.connection?.write({ type: "upgrade-activate" });
 							children.set(sessionId, replacement);
@@ -995,16 +1114,17 @@ export const makeProcessSessionRunner = (
 						continue;
 					const persisted = sql
 						? (yield* sql<{
-								id: string;
-							}>`SELECT id FROM sessions WHERE id = ${registration.sessionId} LIMIT 1`.pipe(
+								project_id: string;
+							}>`SELECT project_id FROM sessions WHERE id = ${registration.sessionId} LIMIT 1`.pipe(
 								Effect.mapError((cause) =>
 									runnerFailure("recover runner session", cause),
 								),
-							)).length > 0
-						: true;
+							))[0]
+						: undefined;
+					if (persisted && persisted.project_id !== projectId) continue;
 					// Draft warms are not durable; verify their identity before stopping them.
 					let abandoned =
-						!persisted ||
+						(sql !== undefined && !persisted) ||
 						registration.role === "candidate" ||
 						children.has(registration.sessionId);
 					const entry: RunnerChild = {
@@ -1017,7 +1137,7 @@ export const makeProcessSessionRunner = (
 						idleExiting: false,
 						commandsInFlight: 0,
 						upgrade: { activity: 0, inFlight: false, failures: 0, retryAt: 0 },
-						outputs: yield* Effect.makeSemaphore(1),
+						outputs: yield* Semaphore.make(1),
 						drained: yield* Deferred.make<void>(),
 						ready: yield* Deferred.make<RunnerSocket, SessionFailure>(),
 						stopped: yield* Deferred.make<void>(),
@@ -1051,7 +1171,7 @@ export const makeProcessSessionRunner = (
 					);
 					yield* Effect.gen(function* () {
 						yield* ensureRecovering;
-						let connected = yield* Effect.either(
+						let connected = yield* Effect.result(
 							attach(registration.sessionId, entry),
 						);
 						yield* ensureRecovering;
@@ -1059,22 +1179,22 @@ export const makeProcessSessionRunner = (
 						// drains. Rejected hellos do not prove that the runner is dead.
 						for (
 							let retry = 0;
-							(connected._tag === "Left" || connected.right.closed) &&
+							(connected._tag === "Failure" || connected.success.closed) &&
 							runnerPidAlive(registration.pid) &&
 							retry < 4;
 							retry++
 						) {
 							yield* Effect.sleep(100 * 2 ** retry);
 							yield* ensureRecovering;
-							connected = yield* Effect.either(
+							connected = yield* Effect.result(
 								attach(registration.sessionId, entry),
 							);
 							yield* ensureRecovering;
 						}
-						if (connected._tag === "Left" || connected.right.closed) {
+						if (connected._tag === "Failure" || connected.success.closed) {
 							const failure =
-								connected._tag === "Left"
-									? connected.left
+								connected._tag === "Failure"
+									? connected.failure
 									: runnerFailure(
 											"recover runner",
 											"Runner disconnected during recovery",
@@ -1097,7 +1217,7 @@ export const makeProcessSessionRunner = (
 						}
 						if (abandoned) {
 							entry.recovering = false;
-							yield* Deferred.succeed(entry.ready, connected.right);
+							yield* Deferred.succeed(entry.ready, connected.success);
 							yield* Effect.suspend(() =>
 								closing ? Effect.void : stop(entry),
 							).pipe(
@@ -1111,7 +1231,7 @@ export const makeProcessSessionRunner = (
 									.recoverCommands(
 										sql,
 										registration.sessionId,
-										connected.right,
+										connected.success,
 										(sinkId, failure) => {
 											const binding = sinks.get(sinkId);
 											if (!binding?.pending) return Effect.void;
@@ -1120,7 +1240,7 @@ export const makeProcessSessionRunner = (
 													? Deferred.await(entry.stopped)
 													: Effect.void
 											).pipe(
-												Effect.zipRight(
+												Effect.andThen(
 													entry.outputs.withPermits(1)(
 														failRunnerTurn(
 															(output) => emit(output, registration.sessionId),
@@ -1140,6 +1260,7 @@ export const makeProcessSessionRunner = (
 										() => closing,
 										runner.getNativeSessionEffect(registration.sessionId),
 										(commandId, inputId, attempt, nativeResumeFallback) => {
+											entry.pendingSendCommands?.set(commandId, attempt);
 											const sinkId = runnerSinkId(
 												inputId,
 												attempt,
@@ -1155,6 +1276,16 @@ export const makeProcessSessionRunner = (
 										},
 									)
 									.pipe(
+										Effect.provideServiceEffect(
+											PersistenceProjectTag,
+											project._tag === "Some"
+												? Effect.succeed(project.value)
+												: Effect.die(
+														new Error(
+															"Runner recovery requires project ownership",
+														),
+													),
+										),
 										Effect.mapError((cause) =>
 											runnerFailure("recover runner commands", cause),
 										),
@@ -1223,7 +1354,7 @@ export const makeProcessSessionRunner = (
 													? Deferred.succeed(admission, undefined)
 													: Effect.void,
 											),
-											Effect.catchAllCause((cause) =>
+											Effect.catchCause((cause) =>
 												Effect.logError(
 													"Runner command recovery failed",
 													cause,
@@ -1241,7 +1372,7 @@ export const makeProcessSessionRunner = (
 								// Waiters own restored turns before commands or close callbacks run.
 								entry.recovering = false;
 								if (admissions.length === 0)
-									yield* Deferred.succeed(entry.ready, connected.right);
+									yield* Deferred.succeed(entry.ready, connected.success);
 								else
 									runFork(
 										Effect.forEach(admissions, Deferred.await, {
@@ -1249,21 +1380,21 @@ export const makeProcessSessionRunner = (
 										}).pipe(
 											Effect.andThen(ensureRecovering),
 											Effect.flatMap(() =>
-												connected.right.closed
+												connected.success.closed
 													? Effect.fail(
 															runnerFailure(
 																"recover runner",
 																"Runner disconnected during recovery",
 															),
 														)
-													: Deferred.succeed(entry.ready, connected.right),
+													: Deferred.succeed(entry.ready, connected.success),
 											),
-											Effect.catchAll((failure) =>
+											Effect.catch((failure) =>
 												Deferred.fail(entry.ready, failure),
 											),
 										),
 									);
-								if (connected.right.closed)
+								if (connected.success.closed)
 									failed(
 										registration.sessionId,
 										entry,
@@ -1281,7 +1412,7 @@ export const makeProcessSessionRunner = (
 							entry.recovering = false;
 							entry.failure = runnerFailure(
 								"recover runner",
-								Cause.squash(exit.cause),
+								Failure.squashCause(exit.cause),
 							);
 							entry.connection?.destroy();
 							evict(registration.sessionId, entry);
@@ -1357,6 +1488,7 @@ export const makeProcessSessionRunner = (
 				let admittedSessionId = "";
 				let ending: RunnerChild | undefined;
 				return Effect.gen(function* () {
+					const outputOwner = yield* currentRunnerOutput;
 					if (turn) turn.completed = yield* Deferred.make<void>();
 					if (command.type === "shutdown") {
 						yield* shutdown;
@@ -1384,6 +1516,14 @@ export const makeProcessSessionRunner = (
 										runnerFailure(command.type, "Runners are shutting down"),
 									);
 								const existing = children.get(sessionId);
+								if (
+									outputOwner &&
+									(command.type === "answer-permission" ||
+										command.type === "answer-question" ||
+										command.type === "interaction-failed") &&
+									existing?.runnerId !== outputOwner.runnerId
+								)
+									return { entry: undefined, draining: false };
 								if (
 									existing &&
 									(command.type === "send-turn" || command.type === "pre-warm")
@@ -1602,7 +1742,7 @@ export const makeProcessSessionRunner = (
 							prepareShellEnv(command.input.workspaceRoot),
 						).pipe(
 							Effect.timeoutOption("10 seconds"),
-							Effect.catchAllCause((cause) =>
+							Effect.catchCause((cause) =>
 								Effect.sync(() =>
 									log.debug(
 										`Draft environment readiness failed: ${String(cause)}`,
@@ -1672,7 +1812,7 @@ export const makeProcessSessionRunner = (
 						const rows = yield* sql<{
 							command_id: string;
 						}>`SELECT command_id FROM provider_command_outbox
-							WHERE session_id = ${sessionId} AND effect_type = 'send_turn'
+							WHERE project_key = ${projectId} AND session_id = ${sessionId} AND effect_type = 'send_turn'
 								AND status = 'running' AND attempt_count = ${command.input.commandAttempt}
 								AND COALESCE(json_extract(payload_json, '$.inputId'), json_extract(payload_json, '$.userMessageId'), json_extract(payload_json, '$.commandId'), json_extract(payload_json, '$.turnId')) = ${command.input.inputId}
 							ORDER BY request_sequence LIMIT 1`.pipe(
@@ -1730,6 +1870,11 @@ export const makeProcessSessionRunner = (
 						yield* Effect.never;
 					}
 					sentToRunner = true;
+					if (command.type === "send-turn")
+						entry.pendingSendCommands?.set(
+							commandId,
+							command.input.commandAttempt ?? 0,
+						);
 					return yield* connection
 						.commandEffect(
 							commandId,
@@ -1778,10 +1923,10 @@ export const makeProcessSessionRunner = (
 								yield* Deferred.succeed(ending.endingReleased, undefined);
 						}),
 					),
-					Effect.catchAllDefect((cause) =>
+					Effect.catchDefect((cause) =>
 						Effect.fail(runnerFailure(command.type, cause)),
 					),
-					Effect.catchAll((failure) =>
+					Effect.catch((failure) =>
 						command.type === "pre-warm" &&
 						(closing ||
 							failure.code === "runner_idle_exit" ||
@@ -1797,14 +1942,14 @@ export const makeProcessSessionRunner = (
 							command.type !== "send-turn" ||
 							!turn ||
 							closing ||
-							Cause.isInterruptedOnly(cause)
+							Failure.isInterruptedOnly(cause)
 						)
 							return Effect.void;
 						const cleanup = failRunnerTurn(
 							emit,
 							command.sinkId,
 							turn,
-							runnerFailure(command.type, Cause.squash(cause)),
+							runnerFailure(command.type, Failure.squashCause(cause)),
 							driver.driverKind,
 						).pipe(
 							Effect.ensuring(Effect.sync(() => sinks.delete(command.sinkId))),
@@ -1816,7 +1961,7 @@ export const makeProcessSessionRunner = (
 									? Deferred.await(child.stopped)
 									: Effect.void
 							).pipe(
-								Effect.zipRight(
+								Effect.andThen(
 									child ? child.outputs.withPermits(1)(cleanup) : cleanup,
 								),
 							)

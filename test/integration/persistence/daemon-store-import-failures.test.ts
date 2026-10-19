@@ -18,6 +18,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import Database from "better-sqlite3";
 import { Effect, ManagedRuntime } from "effect";
 import { afterAll, afterEach, beforeEach, expect, it } from "vitest";
@@ -353,9 +354,9 @@ for (const mode of ["seeded", "imported"] as const) {
 	it(`S10 committed WAL frames through a symlink are included when ${mode}`, async () => {
 		if (mode === "imported") await seed();
 		const project = await fixture(root, "wal");
-		const writer = new Database(project.sourcePath);
+		const writer = new DatabaseSync(project.sourcePath);
 		try {
-			writer.pragma("wal_autocheckpoint = 0");
+			writer.exec("PRAGMA wal_autocheckpoint = 0");
 			writer.exec("BEGIN; SELECT COUNT(*) FROM events");
 			await append(project, "wal_only");
 			writer.exec("COMMIT");
@@ -588,20 +589,23 @@ it("C4 fork and subagent children survive exclusion of their shared parent", asy
 	expect(
 		query(
 			daemonStorePath(configDir),
-			"SELECT c.id, c.parent_id, c.project_id, p.project_id AS parent_owner FROM sessions c JOIN sessions p ON p.id = c.parent_id WHERE c.project_id = 'later' ORDER BY c.id",
+			"SELECT c.id, c.parent_id, c.forked_from, c.project_id, p.project_id AS source_owner FROM sessions c JOIN sessions p ON p.id = COALESCE(c.parent_id, c.forked_from) WHERE c.project_id = 'later' ORDER BY c.id",
 		),
 	).toEqual([
 		{
 			id: "unique_child",
 			parent_id: "ses_shared",
+			forked_from: null,
 			project_id: "later",
-			parent_owner: "first",
+			source_owner: "first",
 		},
+		// A fork is top-level and keeps its Source as lineage (ADR-0007).
 		{
 			id: "unique_fork",
-			parent_id: "ses_shared",
+			parent_id: null,
+			forked_from: "ses_shared",
 			project_id: "later",
-			parent_owner: "first",
+			source_owner: "first",
 		},
 	]);
 });

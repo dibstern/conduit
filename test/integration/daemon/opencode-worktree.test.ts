@@ -9,14 +9,9 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	ListDaemonSessions,
-	OpenCodeUseWorktree,
-	SaveProject,
-	SubmitInput,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { SessionWorkspaceChangedPayload } from "../../../src/lib/persistence/events.js";
@@ -61,11 +56,11 @@ function initRepo(directory: string) {
 }
 
 function moves(fixture: ProcessHarness) {
-	const db = new Database(fixture.projectStorePath(), { readonly: true });
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
 		return db
 			.prepare(
-				"SELECT session_id, data FROM events WHERE type = 'session.workspace_changed' ORDER BY sequence",
+				"SELECT session_id, data FROM events WHERE project_id = 'process-test' AND type = 'session.workspace_changed' ORDER BY sequence",
 			)
 			.all()
 			.map((row) => {
@@ -139,7 +134,7 @@ describe("OpenCode declared worktree moves", () => {
 		if (!harness) return;
 		const fixture = harness;
 		try {
-			evidence["moves"] = existsSync(fixture.projectStorePath())
+			evidence["moves"] = existsSync(fixture.daemonStorePath())
 				? moves(fixture)
 				: [];
 			evidence["errors"] =
@@ -179,15 +174,13 @@ describe("OpenCode declared worktree moves", () => {
 			"managed-test",
 			"opencode",
 		);
-		await sendRpcRequest(
-			socket,
-			new SubmitInput({
-				sessionId,
-				inputId: "worktree-prompt",
-				text: "Reply with pong.",
-				delivery: "queue",
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "input.submit",
+			sessionId,
+			inputId: "worktree-prompt",
+			text: "Reply with pong.",
+			delivery: "queue",
+		});
 		await vi.waitFor(
 			() =>
 				expect(
@@ -208,10 +201,10 @@ describe("OpenCode declared worktree moves", () => {
 		evidence["prompt"] = prompt.system;
 		const otherDirectory = join(fixture.root, "other-project");
 		initRepo(otherDirectory);
-		const { savedSlug } = await sendRpcRequest(
-			socket,
-			new SaveProject({ folders: [otherDirectory] }),
-		);
+		const { savedSlug } = await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			folders: [otherDirectory],
+		});
 		const otherBrowser = await fixture.connect(undefined, undefined, savedSlug);
 		const otherSessionId = await otherBrowser.createSession(
 			"Other project",
@@ -261,7 +254,7 @@ describe("OpenCode declared worktree moves", () => {
 		expect(Object.keys(plugin.tool)).toEqual(["conduit_use_worktree"]);
 		// Seed a resumed binding whose provider id differs from Conduit's session id.
 		const providerSessionId = `opencode-${sessionId}`;
-		const db = new Database(fixture.projectStorePath());
+		const db = new Database(fixture.daemonStorePath());
 		try {
 			expect(
 				db
@@ -282,10 +275,9 @@ describe("OpenCode declared worktree moves", () => {
 		expect(result).toContain(worktree);
 		expect(result).toContain("moved");
 		evidence["toolResult"] = result;
-		const { sessions } = await sendRpcRequest(
-			socket,
-			new ListDaemonSessions({}),
-		);
+		const { sessions } = await sendRpcRequest(socket, {
+			_tag: "ListDaemonSessions",
+		});
 		expect(sessions.find(({ id }) => id === sessionId)).toMatchObject({
 			workspace: {
 				cause: "agent",
@@ -404,10 +396,12 @@ describe("OpenCode declared worktree moves", () => {
 			providerSessionId = sessionId,
 			instanceId = "managed-test",
 		) =>
-			sendRpcRequest(
-				socket,
-				new OpenCodeUseWorktree({ instanceId, providerSessionId, path }),
-			);
+			sendRpcRequest(socket, {
+				_tag: "OpenCodeUseWorktree",
+				instanceId,
+				providerSessionId,
+				path,
+			});
 		await move(worktree);
 		const plain = join(fixture.root, "plain-directory");
 		mkdirSync(plain);
@@ -438,10 +432,9 @@ describe("OpenCode declared worktree moves", () => {
 		await expect(
 			move(fixture.projectDir, sessionId, "opencode"),
 		).rejects.toMatchObject({ _tag: "WsRpcError" });
-		const { sessions } = await sendRpcRequest(
-			socket,
-			new ListDaemonSessions({}),
-		);
+		const { sessions } = await sendRpcRequest(socket, {
+			_tag: "ListDaemonSessions",
+		});
 		expect(
 			sessions.find(({ id }) => id === sessionId)?.workspace,
 		).toMatchObject({
@@ -465,6 +458,10 @@ describe("OpenCode declared worktree moves", () => {
 			"External",
 			undefined,
 			"opencode",
+			{
+				modelProviderId: "anthropic",
+				modelId: "claude-opus-4-5-20251101",
+			},
 		);
 		await browser.send(sessionId, "Reply with pong.");
 		const sent = fixture

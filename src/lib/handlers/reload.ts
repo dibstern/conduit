@@ -29,7 +29,7 @@ export const reloadProviderSessionForClient = (
 			`client=${input.clientId} session=${input.sessionId} Reloading provider session`,
 		);
 
-		const engineResult = yield* Effect.either(
+		const engineResult = yield* Effect.result(
 			Effect.gen(function* () {
 				const engine = yield* OrchestrationEngineTag;
 				const instanceId = yield* engine.getProviderForSessionEffect(
@@ -49,7 +49,7 @@ export const reloadProviderSessionForClient = (
 					// Refresh is an explicit user action; its subsequent catalog reads are passive.
 					yield* (yield* OpenCodeInstancesTag).use(account.id);
 				}
-				const endSessionResult = yield* Effect.either(
+				const endSessionResult = yield* Effect.result(
 					engine.dispatchEffect({
 						type: "end_session",
 						commandId: input.commandId,
@@ -60,9 +60,9 @@ export const reloadProviderSessionForClient = (
 						...(account === undefined ? {} : { account }),
 					}),
 				);
-				if (endSessionResult._tag === "Left") {
+				if (endSessionResult._tag === "Failure") {
 					log.warn(
-						`endSession failed: ${formatErrorDetail(endSessionResult.left)}`,
+						`endSession failed: ${formatErrorDetail(endSessionResult.failure)}`,
 					);
 				}
 				if (
@@ -97,17 +97,15 @@ export const reloadProviderSessionForClient = (
 								},
 							],
 							(command) =>
-								engine
-									.dispatchEffect(command)
-									.pipe(Effect.catchAll(warnRefresh)),
+								engine.dispatchEffect(command).pipe(Effect.catch(warnRefresh)),
 							{ concurrency: 2, discard: true },
 						);
-					}).pipe(Effect.catchAll(warnRefresh));
+					}).pipe(Effect.catch(warnRefresh));
 				}
 			}).pipe(Effect.scoped),
 		);
-		if (engineResult._tag === "Left") {
-			log.warn(`endSession failed: ${formatErrorDetail(engineResult.left)}`);
+		if (engineResult._tag === "Failure") {
+			log.warn(`endSession failed: ${formatErrorDetail(engineResult.failure)}`);
 		}
 
 		return { sessionId: input.sessionId };

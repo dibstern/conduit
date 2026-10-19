@@ -1,7 +1,7 @@
-import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
@@ -26,7 +26,7 @@ describe("ProviderStateEffect", () => {
 			const state = yield* setup;
 			expect(yield* state.getState("nonexistent")).toEqual({});
 			expect(yield* state.getState("s1")).toEqual({});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("round-trips updates and upserts duplicate keys", () =>
@@ -45,7 +45,7 @@ describe("ProviderStateEffect", () => {
 				resume_cursor: "cursor_v2",
 				last_event_id: "evt_123",
 			});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("keeps state isolated between sessions", () =>
@@ -56,7 +56,7 @@ describe("ProviderStateEffect", () => {
 
 			expect(yield* state.getState("s1")).toEqual({ cursor: "s1_cursor" });
 			expect(yield* state.getState("s2")).toEqual({ cursor: "s2_cursor" });
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -75,6 +75,6 @@ describe("ProviderStateEffect", () => {
 
 				expect(yield* state.getState("s1")).toEqual({});
 				expect(yield* state.getState("s2")).toEqual({ key2: "val2" });
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });

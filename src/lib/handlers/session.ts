@@ -1,4 +1,4 @@
-import { Cause, Effect, Either, PubSub } from "effect";
+import { Effect, PubSub, Result } from "effect";
 import { accountRefFromSelection } from "../account-directory.js";
 import type { Account, AccountRef } from "../contracts/account.js";
 import type { AccountId } from "../contracts/provider-instance.js";
@@ -28,6 +28,7 @@ import {
 	cleanupSessionWorktrees,
 	prepareSessionWorktreeDeletion,
 } from "../domain/relay/Services/session-worktree-deletion.js";
+import * as Failure from "../effect/failure-classification.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import {
@@ -110,8 +111,8 @@ export const resolveSessionCreation = (
 			},
 			catalog,
 		);
-		if (Either.isLeft(resolved)) return yield* resolved.left;
-		return { account, pick: resolved.right, permissionMode };
+		if (Result.isFailure(resolved)) return yield* resolved.failure;
+		return { account, pick: resolved.success, permissionMode };
 	});
 
 interface DeleteSessionPayload {
@@ -128,10 +129,10 @@ const shouldStartOpenCodePoller = (sessionId: string) =>
 	Effect.gen(function* () {
 		const readQuery = yield* ReadQueryEffectTag;
 
-		const rowResult = yield* Effect.either(readQuery.getSession(sessionId));
-		if (rowResult._tag === "Left") return true;
+		const rowResult = yield* Effect.result(readQuery.getSession(sessionId));
+		if (rowResult._tag === "Failure") return true;
 
-		const row = rowResult.right;
+		const row = rowResult.success;
 		return !row || getProviderDriver(row.provider)?.runsOpenCodeServer === true;
 	});
 
@@ -210,7 +211,7 @@ export const createSessionForClient = <E = never>({
 	readonly accountRef?: AccountRef;
 	readonly account?: Account;
 	readonly sessionId?: string;
-	readonly resolvedCreation?: Effect.Effect.Success<
+	readonly resolvedCreation?: Effect.Success<
 		ReturnType<typeof resolveSessionCreation>
 	>;
 	readonly permissionMode: SessionPermissionMode;
@@ -283,7 +284,7 @@ export const createSessionForClient = <E = never>({
 									yield* refreshGlobalDefaults;
 								}
 							}).pipe(
-								Effect.catchAllCause((cause) =>
+								Effect.catchCause((cause) =>
 									Effect.sync(() =>
 										log.warn(
 											`client=${clientId} session=${session.id} Failed to remember effort preference`,
@@ -346,11 +347,11 @@ export const deleteSessionForClient = ({
 			if (!id) return [];
 			const inspection = yield* prepareSessionWorktreeDeletion(id).pipe(
 				Effect.map((plan) => ({ plan, warnings: [] as string[] })),
-				Effect.catchAllCause((cause) =>
+				Effect.catchCause((cause) =>
 					Effect.succeed({
 						plan: undefined,
 						warnings: [
-							`Worktrees kept because inspection failed: ${Cause.pretty(cause).slice(0, 2_000)}`,
+							`Worktrees kept because inspection failed: ${Failure.renderCause(cause).slice(0, 2_000)}`,
 						],
 					}),
 				),
@@ -367,9 +368,9 @@ export const deleteSessionForClient = ({
 			) {
 				warnings.push(
 					...(yield* cleanupSessionWorktrees(id, inspection.plan).pipe(
-						Effect.catchAllCause((cause) =>
+						Effect.catchCause((cause) =>
 							Effect.succeed([
-								`Worktree cleanup failed: ${Cause.pretty(cause).slice(0, 2_000)}`,
+								`Worktree cleanup failed: ${Failure.renderCause(cause).slice(0, 2_000)}`,
 							]),
 						),
 					)),
@@ -437,6 +438,31 @@ export const setSessionSettledForClient = ({
 			if (bus._tag === "Some")
 				yield* PubSub.publish(bus.value, DaemonEvent.DaemonSessionsChanged());
 			log.info(`client=${clientId} Set settled=${settled}: ${sessionId}`);
+		}
+	});
+
+export const setSessionArchivedForClient = ({
+	clientId,
+	sessionId,
+	archived,
+}: {
+	readonly clientId: string;
+	readonly sessionId: string;
+	readonly archived: boolean;
+}) =>
+	Effect.gen(function* () {
+		const service = yield* SessionManagerServiceTag;
+		const log = yield* LoggerTag;
+		if (
+			yield* service.setSessionArchived(
+				sessionId,
+				archived ? { archived: true } : { archived: false },
+			)
+		) {
+			const bus = yield* Effect.serviceOption(DaemonEventBusTag);
+			if (bus._tag === "Some")
+				yield* PubSub.publish(bus.value, DaemonEvent.DaemonSessionsChanged());
+			log.info(`client=${clientId} Set archived=${archived}: ${sessionId}`);
 		}
 	});
 
@@ -647,7 +673,7 @@ export const forkSessionForClient = ({
 
 		return {
 			id: forked.id,
-			parentId: sessionId,
+			forkedFrom: sessionId,
 			...(forkMessageId && { forkMessageId }),
 			...(forkPointTimestamp != null && { forkPointTimestamp }),
 		};

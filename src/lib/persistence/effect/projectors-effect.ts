@@ -1,8 +1,8 @@
 // Each projector's `project` method is an Effect program over @effect/sql SqlClient.
 
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Effect } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import type { ReadModelCollection } from "../../contracts/read-model-advance.js";
 import { persistedTurnState } from "../../contracts/turn-phase.js";
 import { CLAUDE_WORKTREE_EVENTS } from "../../session/claude-worktree-state.js";
@@ -372,6 +372,10 @@ export const makeSessionProjector = defineProjector(() => ({
 						SESSION_SUBTREE_SQL,
 						[stmt.removeSession],
 					);
+					// SET NULL preserves Forks of any Source in this subtree. Their
+					// lineage and sidebar rows still change under the same delete.
+					const forks = yield* sql<{ id: string }>`SELECT id FROM sessions
+						WHERE forked_from IN (SELECT value FROM json_each(${JSON.stringify(subtree.map((row) => row.id))}))`;
 					const roots = yield* sql<{ root_id: string | null }>`
 						SELECT root_id FROM sessions WHERE id = ${stmt.removeSession}`;
 					left.push(...roots.flatMap((row) => row.root_id ?? []));
@@ -382,7 +386,10 @@ export const makeSessionProjector = defineProjector(() => ({
 						WHERE id IN (SELECT value FROM json_each(${JSON.stringify(subtree.map((row) => row.id))}))
 						ON CONFLICT (session_id) DO UPDATE SET project_id = excluded.project_id`;
 					yield* sql.unsafe(REMOVE_SESSION_SQL, [stmt.removeSession]);
-					written.push(...subtree.map((row) => row.id));
+					written.push(
+						...subtree.map((row) => row.id),
+						...forks.map((row) => row.id),
+					);
 					continue;
 				}
 				const rows = yield* sql.unsafe<{ id: string }>(
@@ -393,7 +400,7 @@ export const makeSessionProjector = defineProjector(() => ({
 			}
 			// Only these two write a parent.
 			if (event.type === "session.created" || event.type === "session.forked")
-				left.push(...(yield* rerootSession(event.data.sessionId)));
+				left.push(...(yield* rerootSession(event.data.sessionId, ctx.version)));
 			const touch = yield* stampSessions(written, ctx.version);
 			// A removed session, child or root, leaves a deleted tombstone.
 			return {
@@ -889,6 +896,11 @@ export const makeMessageProjector = defineProjector(() => ({
 
 			if (isEventType(event, "tool.completed")) {
 				const resultJson = encodeJson(event.data.result);
+				const toolStatus =
+					typeof event.data.metadata?.["cursorToolType"] === "string" &&
+					event.data.metadata["isError"] === true
+						? "error"
+						: "completed";
 				const rows = yield* sql<{ metadata: string | null }>`
 					SELECT metadata FROM message_parts WHERE id = ${event.data.partId}`;
 				const metadata = yield* mergeMetadata(
@@ -899,7 +911,7 @@ export const makeMessageProjector = defineProjector(() => ({
 				);
 				yield* sql`
 					UPDATE message_parts
-					SET result = ${resultJson}, duration = ${event.data.duration}, status = 'completed', metadata = ${metadata}, updated_at = ${event.createdAt}, version = ${ctx.version},
+					SET result = ${resultJson}, duration = ${event.data.duration}, status = ${toolStatus}, metadata = ${metadata}, updated_at = ${event.createdAt}, version = ${ctx.version},
 						input = COALESCE(${event.data.input === undefined ? null : encodeJson(event.data.input)}, input)
 					WHERE id = ${event.data.partId}`;
 				return ids(
@@ -1414,32 +1426,34 @@ export const makeTurnProjector = defineProjector(() => ({
 				return { sessions: owners(written), messages: ids(written) };
 			}
 
-			// Attributed to the newest open turn rather than by id, because the
-			// event carries no key that reaches a turns row: turns.id is the user
-			// message id, while the provider's turnId is a per-send uuid. This is
-			// exact only while a session has at most one turn in flight. The
-			// Claude translator is the sole emitter and its runtime serializes
-			// turn admission, so a turn's model_resolved always lands before the
-			// next turn's row exists. A second emitter, or concurrent turns,
-			// needs a real key first (tracked in conduit-test-7i3).
+			// Cursor reports its actual model at wait(), after the turn may have
+			// settled. Its assistant message identifies that turn exactly. Legacy
+			// Claude init events arrive before a reply and use the newest open turn.
 			if (isEventType(event, "turn.model_resolved")) {
+				const target = event.data.messageId
+					? sql`SELECT turn_id FROM messages
+						WHERE id = ${event.data.messageId} AND session_id = ${event.sessionId}`
+					: sql`SELECT id FROM turns
+						WHERE session_id = ${event.sessionId}
+							AND state IN ('pending', 'running')
+						ORDER BY requested_at DESC LIMIT 1`;
+				const written = yield* sql<OwnedRow & { id: string }>`
+					UPDATE turns
+					SET requested_model = ${event.data.requestedModel ?? null},
+						expected_model = ${event.data.expectedModel ?? null},
+						actual_model = ${event.data.actualModel}
+					WHERE session_id = ${event.sessionId} AND id = (${target})
+					RETURNING id, session_id`;
+				if (event.data.messageId && written.length) {
+					// Keyed resolution also associates its prompt with the resolved turn.
+					// The history adapter carries execution from that prompt to UserMessage.
+					yield* sql`UPDATE messages SET turn_id = id
+						WHERE session_id = ${event.sessionId}
+						AND id IN ${sql.in(written.map(({ id }) => id))}`;
+				}
 				return {
-					sessions: owners(
-						yield* sql<OwnedRow>`
-							UPDATE turns
-							SET requested_model = ${event.data.requestedModel ?? null},
-								expected_model = ${event.data.expectedModel ?? null},
-								actual_model = ${event.data.actualModel}
-							WHERE id = (
-								SELECT id FROM turns
-								WHERE session_id = ${event.sessionId}
-									AND state IN ('pending', 'running')
-								ORDER BY requested_at DESC
-								LIMIT 1
-							)
-							RETURNING session_id`,
-					),
-					messages: [],
+					sessions: owners(written),
+					messages: event.data.messageId ? ids(written) : [],
 				};
 			}
 			return { sessions: [], messages: [] };
@@ -1476,17 +1490,23 @@ export const makeApprovalProjector = defineProjector(() => ({
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 
-			// The resolve statements find their approval by id and never name a
-			// session, so only the row can say whose it was.
 			// `version` is what the approvals subscription windows on (ni8.9);
 			// `details` keeps the rest of the asked payload for the card.
 			if (isEventType(event, "permission.asked")) {
-				const { id, sessionId, toolName, input, ...details } = event.data;
+				const {
+					id,
+					sessionId,
+					toolName,
+					input,
+					providerProcessId,
+					providerRequestId,
+					...details
+				} = event.data;
 				return yield* sql<OwnedRow & { created_at: number }>`
 						INSERT INTO pending_approvals
-						(id, session_id, type, status, tool_name, input, details, version, created_at)
-						VALUES (${id}, ${sessionId}, 'permission', 'pending', ${toolName}, ${encodeJson(input)}, ${encodeJson(details)}, ${ctx.version}, ${event.createdAt})
-						ON CONFLICT (id) DO NOTHING
+						(id, session_id, type, status, tool_name, input, details, version, created_at, provider_process_id, provider_request_id)
+						VALUES (${id}, ${sessionId}, 'permission', 'pending', ${toolName}, ${encodeJson(input)}, ${encodeJson(details)}, ${ctx.version}, ${event.createdAt}, ${providerProcessId ?? null}, ${providerRequestId ?? null})
+						ON CONFLICT DO NOTHING
 						RETURNING session_id, created_at`;
 			}
 
@@ -1494,17 +1514,24 @@ export const makeApprovalProjector = defineProjector(() => ({
 				return yield* sql<OwnedRow & { created_at: number }>`
 						UPDATE pending_approvals
 						SET status = 'resolved', decision = ${event.data.decision}, resolved_at = ${event.createdAt}, version = ${ctx.version}
-						WHERE id = ${event.data.id}
+						WHERE id = ${event.data.id} AND session_id = ${event.sessionId} AND type = 'permission'
 						RETURNING session_id, created_at`;
 			}
 
 			if (isEventType(event, "question.asked")) {
-				const { id, sessionId, questions, ...details } = event.data;
+				const {
+					id,
+					sessionId,
+					questions,
+					providerProcessId,
+					providerRequestId,
+					...details
+				} = event.data;
 				return yield* sql<OwnedRow & { created_at: number }>`
 						INSERT INTO pending_approvals
-						(id, session_id, type, status, input, details, version, created_at)
-						VALUES (${id}, ${sessionId}, 'question', 'pending', ${encodeJson(questions)}, ${encodeJson(details)}, ${ctx.version}, ${event.createdAt})
-						ON CONFLICT (id) DO NOTHING
+						(id, session_id, type, status, input, details, version, created_at, provider_process_id, provider_request_id)
+						VALUES (${id}, ${sessionId}, 'question', 'pending', ${encodeJson(questions)}, ${encodeJson(details)}, ${ctx.version}, ${event.createdAt}, ${providerProcessId ?? null}, ${providerRequestId ?? null})
+						ON CONFLICT DO NOTHING
 						RETURNING session_id, created_at`;
 			}
 
@@ -1513,7 +1540,7 @@ export const makeApprovalProjector = defineProjector(() => ({
 				return yield* sql<OwnedRow & { created_at: number }>`
 						UPDATE pending_approvals
 						SET status = 'resolved', decision = ${answersJson}, resolved_at = ${event.createdAt}, version = ${ctx.version}
-						WHERE id = ${event.data.id}
+						WHERE id = ${event.data.id} AND session_id = ${event.sessionId} AND type = 'question'
 						RETURNING session_id, created_at`;
 			}
 			return [];

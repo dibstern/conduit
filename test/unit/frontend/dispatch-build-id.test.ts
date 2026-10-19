@@ -1,4 +1,5 @@
 import { Effect, Stream } from "effect";
+import type { Rpc } from "effect/rpc";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
 	RestartWithConfig,
@@ -19,7 +20,9 @@ const mocks = vi.hoisted(() => ({
 	showToast: vi.fn(),
 	restartWithConfig:
 		vi.fn<
-			(input: Omit<RestartWithConfig, "_tag">) => Effect.Effect<{
+			(
+				input: Omit<Rpc.Payload<typeof RestartWithConfig>, "_tag">,
+			) => Effect.Effect<{
 				readonly ok: true;
 			}>
 		>(),
@@ -49,7 +52,6 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 	showBanner: mocks.showBanner,
 	removeBanner: mocks.removeBanner,
 	setClientCount: vi.fn(),
-	updateContextPercent: vi.fn(),
 }));
 vi.mock("../../../src/lib/frontend/transport/runtime.js", async () => {
 	const { Effect } = await import("effect");
@@ -62,13 +64,13 @@ vi.mock("../../../src/lib/frontend/transport/runtime.js", async () => {
 				Effect.provideService(effect, WsRpcClients, {
 					wake: Effect.void,
 					forProject: () => {
-						const control = (
+						const control = ((
 							tag: string,
-							input: Omit<RestartWithConfig, "_tag">,
+							input: Omit<Rpc.Payload<typeof RestartWithConfig>, "_tag">,
 						) => {
 							expect(tag).toBe("RestartWithConfig");
 							return mocks.restartWithConfig(input);
-						};
+						}) as WsRpcSockets["control"];
 						return Effect.succeed({ control } as WsRpcSockets);
 					},
 				}),
@@ -245,10 +247,10 @@ describe("build ID dispatch", () => {
 		const run = restartAction();
 		mocks.showBanner.mockClear();
 		await run();
-		expect(mocks.showToast).toHaveBeenCalledWith(
-			expect.stringContaining("restart rejected"),
-			{ variant: "error" },
-		);
+		expect(mocks.showToast).toHaveBeenCalledWith({
+			title: "Failed to restart conduit",
+			variant: "error",
+		});
 		await restartAction()();
 		expect(mocks.restartWithConfig).toHaveBeenCalledTimes(2);
 		expect(mocks.showToast).toHaveBeenCalledWith("Restarting conduit…");

@@ -21,6 +21,7 @@ import {
 	Ref,
 	Schedule,
 	Scope,
+	Semaphore,
 } from "effect";
 import {
 	type AccountChange,
@@ -36,6 +37,7 @@ import {
 	getProviderDriver,
 	type KnownProviderDriverKind,
 	MANAGED_OPENCODE_ACCOUNT_ID,
+	PROVIDER_DRIVERS,
 } from "../../../contracts/provider-instance.js";
 import { instanceNotFound } from "../../../instance/instance-errors.js";
 import {
@@ -58,6 +60,7 @@ import {
 	captureClaudeLaunchLogin,
 } from "../../../provider/claude/claude-sdk-env.js";
 import { discoverCursorEffect } from "../../../provider/cursor/cursor-runner-driver.js";
+import { cursorUsageSource } from "../../../provider/cursor/cursor-usage.js";
 import type { OpenCodeInstance } from "../../../shared-types.js";
 import { isRecord } from "../../../utils.js";
 import {
@@ -107,9 +110,7 @@ const DEFAULT_CONFIG: InstanceManagerConfig = {
 	restartWindowMs: 60_000,
 };
 
-export class ManagedOpenCodeLifecycleTag extends Context.Tag(
-	"ManagedOpenCodeLifecycle",
-)<
+export class ManagedOpenCodeLifecycleTag extends Context.Service<
 	ManagedOpenCodeLifecycleTag,
 	{
 		readonly start: (instance: OpenCodeInstance) => Effect.Effect<void>;
@@ -117,7 +118,7 @@ export class ManagedOpenCodeLifecycleTag extends Context.Tag(
 			effect: Effect.Effect<A, E, R>,
 		) => Effect.Effect<A, E, R>;
 	}
->() {}
+>()("ManagedOpenCodeLifecycle") {}
 
 const withManagedOpenCodeLock = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	Effect.gen(function* () {
@@ -288,15 +289,16 @@ const initialInstanceConfigs = (
 };
 
 /** Tag for the mutable InstanceManagerState Ref in the Effect Context. */
-export class InstanceManagerStateTag extends Context.Tag(
-	"InstanceManagerState",
-)<InstanceManagerStateTag, Ref.Ref<InstanceManagerState>>() {}
+export class InstanceManagerStateTag extends Context.Service<
+	InstanceManagerStateTag,
+	Ref.Ref<InstanceManagerState>
+>()("InstanceManagerState") {}
 
 /** Tag for the FiberMap tracking per-instance health poll fibers. */
-export class PollerFibersTag extends Context.Tag("PollerFibers")<
+export class PollerFibersTag extends Context.Service<
 	PollerFibersTag,
 	FiberMap.FiberMap<string>
->() {}
+>()("PollerFibers") {}
 
 /**
  * Create a Layer providing both InstanceManagerStateTag and PollerFibersTag.
@@ -359,7 +361,7 @@ export function makeOpenCodeRuntimeStateLive(
 		Ref.make(
 			buildInitialInstanceManagerState(config, initialInstances, options),
 		),
-	).pipe(Layer.merge(Layer.scoped(PollerFibersTag, FiberMap.make<string>())));
+	).pipe(Layer.merge(Layer.effect(PollerFibersTag, FiberMap.make<string>())));
 }
 
 export function makeInstanceManagerStateFromDaemonStateLive(
@@ -370,7 +372,7 @@ export function makeInstanceManagerStateFromDaemonStateLive(
 	never,
 	DaemonStateTag
 > {
-	return Layer.unwrapEffect(
+	return Layer.unwrap(
 		Effect.gen(function* () {
 			const state = yield* Ref.get(yield* DaemonStateTag);
 			return makeInstanceManagerStateLive(config, state.instances, options);
@@ -561,6 +563,15 @@ function instanceInfo(instance: OpenCodeInstance): OpenCodeInstance {
 	const traits = getProviderDriver(driver);
 	return {
 		...instance,
+		...(instance.env?.["CURSOR_AUTH_TOKEN"] !== undefined
+			? {
+					env: Object.fromEntries(
+						Object.entries(instance.env).filter(
+							([key]) => key !== "CURSOR_AUTH_TOKEN",
+						),
+					),
+				}
+			: {}),
 		capabilities: traits?.sessionCapabilities ?? {
 			supportsMultiFolder: false,
 			supportsWorktree: false,
@@ -576,6 +587,10 @@ const instanceDiscovery: Partial<
 export const getInstances = Effect.gen(function* () {
 	const directory = yield* AccountDirectory;
 	const accounts = yield* directory.list;
+	const config = yield* Effect.serviceOption(DaemonConfigRefTag);
+	const binding = Option.isSome(config)
+		? (yield* Ref.get(config.value)).cursorUsageBinding
+		: undefined;
 	const state = yield* Ref.get(yield* InstanceManagerStateTag);
 	const runtimeOrder = new Map(
 		Array.from(
@@ -618,7 +633,12 @@ export const getInstances = Effect.gen(function* () {
 									: { ...account.env },
 						}),
 				isDefault: account.isDefault,
-				usageEligible: account.driver === "claude" && account.usageEligible,
+				usageEligible:
+					PROVIDER_DRIVERS[account.driver].usageHarness !== undefined &&
+					account.usageEligible,
+				...(account.driver === "cursor"
+					? { cursorUsageSource: cursorUsageSource(account, binding) }
+					: {}),
 			});
 		})
 		.sort(
@@ -631,30 +651,38 @@ export const getInstances = Effect.gen(function* () {
 /** External inventory probes must not delay other providers' runtime operations. */
 export const discoverInstances = Effect.gen(function* () {
 	const instances = yield* getInstances;
+	const accounts = yield* (yield* AccountDirectory).list;
 	const availability = new Map<
 		string,
-		{ available: boolean; unavailableReason?: string }
+		{
+			available: boolean;
+			unavailableReason?: string;
+			unavailableCode?: "auth_required";
+		}
 	>();
-	for (const [driver, discover] of Object.entries(instanceDiscovery)) {
-		if (!discover || !instances.some((instance) => instance.driver === driver))
-			continue;
-		const result = yield* Effect.either(discover());
+	for (const account of accounts) {
+		const discover = instanceDiscovery[account.driver];
+		if (!discover) continue;
+		const result = yield* Effect.result(discover(undefined, account));
 		availability.set(
-			driver,
-			result._tag === "Right"
+			account.id,
+			result._tag === "Success"
 				? { available: true }
 				: {
 						available: false,
 						unavailableReason:
-							result.left.cause instanceof Error
-								? result.left.cause.message
+							result.failure.cause instanceof Error
+								? result.failure.cause.message
 								: "Provider discovery failed",
+						...(result.failure.code
+							? { unavailableCode: result.failure.code }
+							: {}),
 					},
 		);
 	}
 	return instances.map((instance) => ({
 		...instance,
-		...availability.get(instance.driver ?? "opencode"),
+		...availability.get(instance.id),
 	}));
 }).pipe(Effect.withSpan("instance.discover"));
 
@@ -802,7 +830,7 @@ export const checkInstanceHealth = (instanceId: string) =>
 		});
 		if (changed) yield* publishInstanceStatusChanged(instanceId);
 	}).pipe(
-		Effect.catchAll(() =>
+		Effect.catch(() =>
 			Effect.logWarning("Health check error").pipe(
 				Effect.annotateLogs("instanceId", instanceId),
 			),
@@ -929,7 +957,7 @@ const startManagedOpenCodeServer = (
 			const ref = yield* InstanceManagerStateTag;
 			const persistence = yield* ConfigPersistenceTag;
 			const save = persistence.requestSave.pipe(
-				Effect.zipRight(persistence.flush),
+				Effect.andThen(persistence.flush),
 			);
 			let owned: ManagedOpenCodeRecord | undefined;
 			let previous: ManagedOpenCodeRecord | undefined;
@@ -1103,14 +1131,14 @@ const startManagedOpenCodeServer = (
 					...health,
 				};
 			}).pipe(
-				Effect.catchAll((cause) =>
+				Effect.catch((cause) =>
 					Effect.gen(function* () {
 						let released = true;
 						if (owned) {
 							const record = owned;
 							released = yield* stopRecordedManagedOpenCode(record).pipe(
 								Effect.as(true),
-								Effect.catchAll((error) =>
+								Effect.catch((error) =>
 									Effect.logWarning(
 										"Retaining failed-start OpenCode ownership",
 										error,
@@ -1134,7 +1162,7 @@ const startManagedOpenCodeServer = (
 							}));
 						}
 						yield* save.pipe(
-							Effect.catchAll((error) =>
+							Effect.catch((error) =>
 								Effect.logError(
 									"Failed to persist OpenCode startup recovery state",
 									error,
@@ -1150,7 +1178,7 @@ const startManagedOpenCodeServer = (
 				),
 			);
 		}).pipe(
-			Effect.catchAll((cause) =>
+			Effect.catch((cause) =>
 				Effect.logError(
 					`Managed OpenCode startup failed for ${instance.id}`,
 					cause,
@@ -1212,7 +1240,7 @@ const startManagedOpenCodeServer = (
 				yield* persistence.requestSave;
 				yield* persistence.flush;
 			}).pipe(
-				Effect.catchAll((cause) =>
+				Effect.catch((cause) =>
 					Effect.logError(
 						`Managed OpenCode cleanup failed for ${instance.id}`,
 						cause,
@@ -1227,7 +1255,7 @@ export const requestManagedOpenCodeShutdown = Effect.gen(function* () {
 });
 
 export const ManagedOpenCodeLifecycleLive = (configDir: string) =>
-	Layer.scoped(
+	Layer.effect(
 		ManagedOpenCodeLifecycleTag,
 		Effect.gen(function* () {
 			const scope = yield* Effect.scope;
@@ -1238,7 +1266,7 @@ export const ManagedOpenCodeLifecycleLive = (configDir: string) =>
 			const context = yield* Effect.context<
 				InstanceManagerStateTag | ConfigPersistenceTag | DaemonEventBusTag
 			>();
-			const semaphore = yield* Effect.makeSemaphore(1);
+			const semaphore = yield* Semaphore.make(1);
 			const start = (instance: OpenCodeInstance, adoptOnly: boolean) =>
 				startManagedOpenCodeServer(
 					instance,
@@ -1247,7 +1275,7 @@ export const ManagedOpenCodeLifecycleLive = (configDir: string) =>
 					adoptOnly,
 				).pipe(
 					// RPC scopes end after each request; ownership lasts with the daemon.
-					Scope.extend(scope),
+					Scope.provide(scope),
 					Effect.provide(context),
 					Effect.asVoid,
 				);

@@ -4,9 +4,9 @@ import {
 	getOrCreateSessionActivity,
 	getOrCreateSessionMessages,
 } from "../../stores/chat.svelte.js";
-import { sessionState } from "../../stores/session.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { mockSession } from "../../stories/mocks.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import RewindBanner from "./RewindBanner.svelte";
 
@@ -38,7 +38,7 @@ function seed({
 		sequence: ++sequence,
 	});
 	applySessionChange({ _tag: "synchronized" });
-	sessionState.currentId = storySessionId;
+	openSessionForSetup(storySessionId, "conduit");
 	getOrCreateSessionActivity(storySessionId);
 	getOrCreateSessionMessages(storySessionId).transcript = pending
 		? {

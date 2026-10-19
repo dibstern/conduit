@@ -7,7 +7,8 @@ import type { RelayMessage } from "../types.js";
 import { NOTIFICATION_DISMISS_MS } from "../ui-constants.js";
 import { getNotifSettings } from "../utils/notif-settings.js";
 import { emitDoneSound, readyDoneSound } from "../utils/sound.js";
-import { getCurrentSlug, navigate } from "./router.svelte.js";
+import { getCurrentSlug } from "./router.svelte.js";
+import { selection } from "./selection.svelte.js";
 
 // When push notifications are active, browser alerts and the in-page ding are
 // suppressed: the alert travels through the service worker instead, which
@@ -55,26 +56,6 @@ export async function reconcilePushActive(): Promise<boolean> {
 /** Check if push notifications are currently active. */
 export function isPushActive(): boolean {
 	return _pushActive;
-}
-
-// Registered by ChatLayout so notification clicks can switch to the correct
-// session without a circular dependency on session/router modules.
-
-let _navigateToSession: ((sessionId: string) => void) | null = null;
-
-/**
- * Register a callback to navigate to a session when a notification is clicked.
- * Called by ChatLayout during initialization.
- */
-export function onNavigateToSession(fn: (sessionId: string) => void): void {
-	_navigateToSession = fn;
-}
-
-/**
- * Clear the navigation callback (for cleanup on unmount).
- */
-export function clearNavigateToSession(): void {
-	_navigateToSession = null;
 }
 
 // Two messages come back from the SW: `navigate_to_session` when a push
@@ -128,22 +109,7 @@ export function initSWMessageListener(): void {
 			return;
 		}
 		if (event.data?.type === "navigate_to_session" && event.data.sessionId) {
-			const { sessionId, slug, url } = event.data as {
-				sessionId: string;
-				slug?: string;
-				url?: string;
-			};
-
-			// If the notification is for a different project than the one
-			// currently viewed, navigate via URL instead of switchToSession
-			// (which would send ViewSession on the wrong project RPC route).
-			const currentSlug = getCurrentSlug();
-			if (slug && currentSlug && slug !== currentSlug) {
-				if (url) navigate(url);
-				return;
-			}
-
-			_navigateToSession?.(sessionId);
+			selection.open(event.data.sessionId);
 		}
 	});
 }
@@ -175,7 +141,7 @@ function showBrowserNotification(
 		notification.onclick = () => {
 			window.focus();
 			if (sessionId) {
-				_navigateToSession?.(sessionId);
+				selection.open(sessionId);
 			}
 			notification.close();
 		};

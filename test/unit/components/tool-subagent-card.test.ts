@@ -2,11 +2,11 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ToolItem from "../../../src/lib/frontend/components/chat/ToolItem.svelte";
 import ToolSubagentCard from "../../../src/lib/frontend/components/chat/ToolSubagentCard.svelte";
-import { switchToSession } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { selection } from "../../../src/lib/frontend/stores/selection.svelte.js";
 import type { ToolMessage } from "../../../src/lib/frontend/types.js";
 
-vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
-	switchToSession: vi.fn(),
+vi.mock("../../../src/lib/frontend/stores/selection.svelte.js", () => ({
+	selection: { open: vi.fn() },
 }));
 
 describe("ToolSubagentCard", () => {
@@ -63,7 +63,7 @@ describe("ToolSubagentCard", () => {
 
 		await fireEvent.click(screen.getByRole("button"));
 
-		expect(switchToSession).toHaveBeenCalledWith("claude-subagent-abc");
+		expect(selection.open).toHaveBeenCalledWith("claude-subagent-abc");
 	});
 
 	it("renders Claude Agent tool messages as subagent cards", async () => {
@@ -94,6 +94,6 @@ describe("ToolSubagentCard", () => {
 
 		await fireEvent.click(screen.getByRole("button"));
 
-		expect(switchToSession).toHaveBeenCalledWith("claude-subagent-agent");
+		expect(selection.open).toHaveBeenCalledWith("claude-subagent-agent");
 	});
 });

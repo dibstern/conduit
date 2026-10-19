@@ -1,6 +1,7 @@
-import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
+import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { announceSidebar } from "../../../persistence/effect/sidebar-projection.js";
 
 /**
@@ -20,8 +21,7 @@ import { announceSidebar } from "../../../persistence/effect/sidebar-projection.
  * file from writing the column.
  */
 
-const MARKABLE =
-	"parent_id IS NULL OR fork_point_event IS NOT NULL OR fork_point_timestamp IS NOT NULL";
+const MARKABLE = "parent_id IS NULL OR side_thread = 1";
 
 const writeSeen = (
 	sessionId: string,
@@ -65,15 +65,19 @@ export const markSeen = (sessionId: string, upTo: number) =>
 export const announceBackgroundWork = (sessionId: string) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		const { projectId } = yield* EventStoreEffectTag;
 		const commitAndSignal = yield* makeCommitAndSignal;
 		yield* commitAndSignal.write((_project, stamp) =>
 			stamp((version) =>
 				sql<{ id: string }>`
-					UPDATE sessions SET version = ${version} WHERE id = ${sessionId}
+					UPDATE sessions SET version = ${version}
+					WHERE id = ${sessionId} AND project_id = ${projectId}
 					RETURNING id`.pipe(
 					Effect.map((rows) => rows.map((row) => row.id)),
 					// Its family's sidebar row cannot see the change either.
-					Effect.tap(() => announceSidebar(sessionId, version)),
+					Effect.tap((ids) =>
+						ids.length > 0 ? announceSidebar(sessionId, version) : Effect.void,
+					),
 				),
 			),
 		);

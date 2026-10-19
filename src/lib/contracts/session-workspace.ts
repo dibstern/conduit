@@ -1,17 +1,17 @@
 import { Schema } from "effect";
 
-export const WorkspaceMoveCauseSchema = Schema.Literal(
+export const WorkspaceMoveCauseSchema = Schema.Literals([
 	"launch",
 	"agent",
 	"user",
 	"missing",
-);
+]);
 export type WorkspaceMoveCause = typeof WorkspaceMoveCauseSchema.Type;
 
 export const SessionWorkspaceSchema = Schema.Struct({
 	cause: WorkspaceMoveCauseSchema,
-	worktrees: Schema.Record({ key: Schema.String, value: Schema.String }),
-	origin: Schema.Literal("existing", "conduit"),
+	worktrees: Schema.Record(Schema.String, Schema.String),
+	origin: Schema.Literals(["existing", "conduit"]),
 });
 export type SessionWorkspace = typeof SessionWorkspaceSchema.Type;
 
@@ -61,11 +61,11 @@ export class WorkspaceMoveError extends Schema.TaggedError<WorkspaceMoveError>()
 	"WorkspaceMoveError",
 	{
 		path: Schema.String,
-		reason: Schema.Literal(
+		reason: Schema.Literals([
 			"missing",
 			"not-a-worktree",
 			"other-repository",
 			"unsupported-provider",
-		),
+		]),
 	},
 ) {}

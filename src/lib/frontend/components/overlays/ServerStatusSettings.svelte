@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { refreshServerStatus, restartServer, serverStatus, shutdownServer } from "../../stores/server-status.svelte.js";
-	import { showToast } from "../../stores/ui.svelte.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import Button from "../ui/Button.svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import type { ServerForm } from "./ServerSettingsTab.svelte";
@@ -23,8 +23,8 @@
 		try {
 			await shutdownServer();
 			onClose?.();
-		} catch {
-			showToast("Failed to shut down conduit", { variant: "error" });
+		} catch (error) {
+			toastFailure("Failed to shut down conduit")(error);
 		}
 	}
 </script>

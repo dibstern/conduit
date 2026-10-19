@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // `chatState` is a read-only view of the current session's slot
 // (sessionActivity / sessionMessages). It has no storage of its own, nothing
 // writes it, and it cannot be written. See ni8.5 §13 / conduit-test-ni8.5.17.
@@ -45,16 +46,16 @@ import {
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 beforeEach(() => {
-	sessionState.currentId = "session-a";
+	openSessionForSetup("session-a", "project-a");
 });
 
 afterEach(() => {
 	sessionActivity.clear();
 	sessionMessages.clear();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 });
 
 describe("chatState is read-only", () => {
@@ -104,14 +105,14 @@ describe("chatState reflects the current session's slot", () => {
 		expect(chatState.phase).toBe("streaming");
 		expect(chatState.messages).toEqual(a.messages.messages);
 
-		sessionState.currentId = "session-b";
+		openSessionForSetup("session-b", "project-a");
 		expect(chatState.phase).toBe("idle");
 		expect(chatState.messages).toEqual(b.messages.messages);
 	});
 
 	it("is empty when no session is current", () => {
 		getOrCreateSessionSlot("session-a");
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		expect(chatState.messages).toEqual([]);
 		expect(chatState.phase).toBe("idle");
 		expect(chatState.loadLifecycle).toBe("empty");

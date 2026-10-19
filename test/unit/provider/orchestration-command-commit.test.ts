@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
 import { describe, expect, it } from "@effect/vitest";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
 	type DurableCommandCommitInput,
@@ -61,6 +61,67 @@ const withRepository = <A, E>(
 	);
 
 describe("DurableCommandCommitRepository", () => {
+	// A caller may reuse a command id across projects whose session ids differ.
+	// Neither the receipt upsert nor idle-claim replacement may move B's rows.
+	it.effect("rejects a command id already owned by another project", () =>
+		withRepository((sql, repository) =>
+			Effect.gen(function* () {
+				const input = commitInput();
+				const foreign = new DurableCommandCommitRepository(sql, "project-b");
+				yield* foreign.commit({
+					...input,
+					events: [makeSessionCreatedEvent("session-b")],
+					receipt: { ...input.receipt, sessionId: "session-b" },
+					outboxRequests: input.outboxRequests.map((request) => ({
+						...request,
+						sessionId: "session-b",
+					})),
+				});
+				const before = JSON.stringify({
+					receipts: yield* sql`SELECT * FROM command_receipts`,
+					outbox: yield* sql`SELECT * FROM provider_command_outbox`,
+				});
+				const result = yield* Effect.result(
+					repository.commit(commitInput({ requestSequence: 2, at: 2000 })),
+				);
+				expect(result._tag).toBe("Failure");
+				expect(
+					JSON.stringify({
+						receipts: yield* sql`SELECT * FROM command_receipts`,
+						outbox: yield* sql`SELECT * FROM provider_command_outbox`,
+					}),
+				).toBe(before);
+				expect(
+					yield* sql`SELECT id FROM sessions WHERE id = 'session-1'`,
+				).toEqual([]);
+			}),
+		),
+	);
+
+	it.effect("rejects a foreign outbox claim even without its receipt", () =>
+		withRepository((sql, repository) =>
+			Effect.gen(function* () {
+				yield* sql`INSERT INTO provider_command_outbox (
+					request_sequence, command_id, project_key, session_id, provider_id,
+					effect_type, payload_json, status, attempt_count, requested_at, updated_at
+				) VALUES (1, 'cmd-1', 'project-b', 'session-b', 'claude',
+					'send_turn', '{}', 'pending', 0, 1000, 1000)`;
+				const before = JSON.stringify(
+					yield* sql`SELECT * FROM provider_command_outbox`,
+				);
+				const result = yield* Effect.result(
+					repository.commit(commitInput({ requestSequence: 2, at: 2000 })),
+				);
+				expect(result._tag).toBe("Failure");
+				expect(
+					JSON.stringify(yield* sql`SELECT * FROM provider_command_outbox`),
+				).toBe(before);
+				expect(yield* sql`SELECT * FROM command_receipts`).toEqual([]);
+				expect(yield* sql`SELECT * FROM events`).toEqual([]);
+			}),
+		),
+	);
+
 	it.effect(
 		"commits command events, receipt, outbox, and meta atomically",
 		() =>
@@ -100,13 +161,13 @@ describe("DurableCommandCommitRepository", () => {
 						) VALUES (1, 'cmd-1', 'test-project', 'session-1', 'claude',
 							'send_turn', '{}', 'running', 1, 1000, 1000)`;
 
-					const result = yield* Effect.either(
+					const result = yield* Effect.result(
 						repository.commit(commitInput({ requestSequence: 2, at: 2000 })),
 					);
 
-					expect(result._tag).toBe("Left");
-					if (result._tag === "Left") {
-						expect(result.left.message).toMatch(/already running/);
+					expect(result._tag).toBe("Failure");
+					if (result._tag === "Failure") {
+						expect(result.failure.message).toMatch(/already running/);
 					}
 					// The live running claim survives untouched; no competing pending row
 					// was inserted; the whole commit (receipt included) rolled back.
@@ -126,11 +187,11 @@ describe("DurableCommandCommitRepository", () => {
 			Effect.gen(function* () {
 				const event = makeSessionCreatedEvent("session-1");
 
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					repository.commit(commitInput({ events: [event, event] })),
 				);
 
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 				expect(yield* sql`SELECT * FROM events`).toEqual([]);
 				expect(yield* sql`SELECT * FROM command_receipts`).toEqual([]);
 				expect(yield* sql`SELECT * FROM provider_command_outbox`).toEqual([]);
@@ -146,9 +207,9 @@ describe("DurableCommandCommitRepository", () => {
 					CREATE TRIGGER fail_receipt_write BEFORE INSERT ON command_receipts
 					BEGIN SELECT RAISE(ABORT, 'receipt write failed'); END`;
 
-				const result = yield* Effect.either(repository.commit(commitInput()));
+				const result = yield* Effect.result(repository.commit(commitInput()));
 
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 				expect(yield* sql`SELECT * FROM events`).toEqual([]);
 				expect(yield* sql`SELECT * FROM command_receipts`).toEqual([]);
 				expect(yield* sql`SELECT * FROM provider_command_outbox`).toEqual([]);

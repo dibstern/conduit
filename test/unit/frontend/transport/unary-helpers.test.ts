@@ -6,11 +6,7 @@ import type {
 	TrafficClass,
 	WsRpcConnect,
 } from "../../../../src/lib/frontend/transport/shared-client.js";
-import {
-	rpc,
-	saveProjectRpc,
-	setLogLevelRpc,
-} from "../../../../src/lib/frontend/transport/ws-rpc-client.js";
+import { rpc } from "../../../../src/lib/frontend/transport/ws-rpc-client.js";
 import { makeRpcWire } from "../../../helpers/rpc-wire.js";
 
 const harness = vi.hoisted(() => ({
@@ -100,7 +96,7 @@ it("preserves typed folder issues at the SaveProject Promise boundary", async ()
 	harness.saveFailure = failure;
 
 	await expect(
-		saveProjectRpc({
+		rpc("SaveProject", {
 			projectSlug: "alpha",
 			title: "Notes",
 			folders: [{ path: "/missing/parent/notes", create: { gitInit: true } }],
@@ -115,18 +111,18 @@ afterEach(async () => {
 
 it("shares one control transport across unary helpers and projects", async () => {
 	await Promise.all([
-		setLogLevelRpc({ projectSlug: "alpha", level: "debug" }),
+		rpc("SetLogLevel", { projectSlug: "alpha", level: "debug" }),
 		rpc("SyncInputDraft", {
 			sessionId: "s1",
 			text: "draft",
 		}),
 	]);
-	await setLogLevelRpc({ projectSlug: "alpha", level: "info" });
+	await rpc("SetLogLevel", { projectSlug: "alpha", level: "info" });
 	await rpc("SyncInputDraft", {
 		sessionId: "s2",
 		text: "other",
 	});
-	await setLogLevelRpc({ projectSlug: "beta", level: "info" });
+	await rpc("SetLogLevel", { projectSlug: "beta", level: "info" });
 	// Include legacy attempts in the assertion diagnostic for the red run.
 	expect({ legacySockets }).toEqual({ legacySockets: [] });
 	expect(transports).toEqual([

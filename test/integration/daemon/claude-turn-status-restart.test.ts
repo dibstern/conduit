@@ -20,9 +20,12 @@ const capabilityModels = ["sonnet", "claude-sonnet-4"].map((id) => ({
 
 async function sessionSnapshot(browser: ProcessBrowser, sessionId: string) {
 	const envelopes = await Effect.runPromise(
-		browser.rpc
-			.SubscribeShell({ projectSlug: "process-test" })
-			.pipe(Stream.take(1), Stream.runCollect, Effect.timeout("5 seconds")),
+		browser.rpc.SubscribeShell({}).pipe(
+			Stream.filter((frame) => frame._tag !== "projects"),
+			Stream.take(1),
+			Stream.runCollect,
+			Effect.timeout("5 seconds"),
+		),
 	);
 	const snapshot = [...envelopes][0];
 	if (snapshot?._tag !== "snapshot") throw new Error("Missing shell snapshot");
@@ -32,7 +35,7 @@ async function sessionSnapshot(browser: ProcessBrowser, sessionId: string) {
 }
 
 function persisted(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath(), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		return {
 			session: db
@@ -339,7 +342,7 @@ describe("Claude turn status before the model streams", () => {
 		// that used to read as idle.
 		await vi.waitFor(() => {
 			if (!harness) throw new Error("Missing harness");
-			const db = new Database(harness.projectStorePath(), { readonly: true });
+			const db = new Database(harness.daemonStorePath(), { readonly: true });
 			try {
 				expect(
 					db
@@ -354,7 +357,7 @@ describe("Claude turn status before the model streams", () => {
 		}, 15_000);
 		const inputId = randomUUID();
 		await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				...payload,
 				inputId,
 				delivery: "queue",

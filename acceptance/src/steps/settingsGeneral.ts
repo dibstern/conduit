@@ -7,8 +7,10 @@ export const settingsGeneralHandlers: StepHandler[] = [
 		name: "seed General auto-settle",
 		match: /^General auto-settle is set to 3 days$/,
 		run: ({ world }) => {
-			requireRpcControl(world.page).setResponse("GetAutoSettleSetting", {
-				autoSettleAfterDays: 3,
+			requireRpcControl(world.page).setStubs({
+				GetAutoSettleSetting: () => ({
+					autoSettleAfterDays: 3,
+				}),
 			});
 		},
 	},

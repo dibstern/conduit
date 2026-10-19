@@ -1,6 +1,6 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { SqlClient } from "@effect/sql";
-import { Effect, Either, Schema } from "effect";
+import { Effect, Result, Schema } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	SessionWorkspaceSchema,
 	type SessionWorktreeInspection,
@@ -34,29 +34,32 @@ export const worktreeUsers = (sessionId: string) =>
 		const sql = yield* SqlClient.SqlClient;
 		const local = yield* sql<{
 			id: string;
+			project_id: string;
 			workspace: string;
-		}>`SELECT id, workspace FROM sessions WHERE id != ${sessionId} AND workspace IS NOT NULL`;
-		const uses = (yield* Effect.forEach(local, ({ id, workspace }) =>
-			Schema.decodeUnknown(Schema.parseJson(SessionWorkspaceSchema))(
-				workspace,
-			).pipe(
-				Effect.map((value) =>
-					Object.values(value.worktrees).map((path) => ({
-						key: `${config.slug}:${id}`,
-						path,
-					})),
+		}>`SELECT id, project_id, workspace FROM sessions WHERE id != ${sessionId} AND workspace IS NOT NULL`;
+		const uses = (yield* Effect.forEach(
+			local,
+			({ id, project_id, workspace }) =>
+				Schema.decodeUnknownEffect(
+					Schema.fromJsonString(SessionWorkspaceSchema),
+				)(workspace).pipe(
+					Effect.map((value) =>
+						Object.values(value.worktrees).map((path) => ({
+							key: `${project_id}:${id}`,
+							path,
+						})),
+					),
 				),
-			),
 		)).flat();
 		let unknown = false;
 		const daemon = yield* Effect.serviceOption(DaemonSessionQueryServiceTag);
 		if (daemon._tag === "Some") {
-			const result = yield* Effect.either(daemon.value.list({ roots: false }));
-			if (Either.isRight(result)) {
+			const result = yield* Effect.result(daemon.value.list({ roots: false }));
+			if (Result.isSuccess(result)) {
 				unknown =
-					result.right.hasMore ||
-					result.right.availability.some((project) => !project.available);
-				for (const session of result.right.sessions)
+					result.success.hasMore ||
+					result.success.availability.some((project) => !project.available);
+				for (const session of result.success.sessions)
 					if (
 						session.id !== sessionId ||
 						(session.projectSlug != null && session.projectSlug !== config.slug)
@@ -69,7 +72,7 @@ export const worktreeUsers = (sessionId: string) =>
 								}),
 							),
 						);
-			} else if (result.left._tag !== "DaemonSessionQueryNotSupported")
+			} else if (result.failure._tag !== "DaemonSessionQueryNotSupported")
 				unknown = true;
 		}
 		const users = yield* Effect.forEach(uses, (use) =>
@@ -99,8 +102,8 @@ export const readSessionWorktreeOwnership = (
 				cause: "Worktree inspection is unavailable.",
 			});
 		const launches = yield* Effect.forEach(events, ({ data }) =>
-			Schema.decodeUnknown(
-				Schema.parseJson(SessionWorkspaceChangedPayloadSchema),
+			Schema.decodeUnknownEffect(
+				Schema.fromJsonString(SessionWorkspaceChangedPayloadSchema),
 			)(data),
 		);
 		const ownership = new Map<string, SessionWorktreeOwnership>();
@@ -246,17 +249,17 @@ export const cleanupSessionWorktrees = (
 						users.unknown ||
 						users.paths.some((path) => containsPath(owned.path, path)),
 				),
-				Effect.catchAllCause(() => Effect.succeed(true)),
+				Effect.catchCause(() => Effect.succeed(true)),
 			);
-			const outcome = yield* Effect.either(
+			const outcome = yield* Effect.result(
 				service.value.remove(
 					{ path: owned.folder, projectSlug: config.slug, sessionId },
 					owned,
 					inUse,
 				),
 			);
-			if (Either.isLeft(outcome))
-				warnings.push(`${owned.folder}: ${outcome.left.message}`);
+			if (Result.isFailure(outcome))
+				warnings.push(`${owned.folder}: ${outcome.failure.message}`);
 		}
 		return warnings;
 	});

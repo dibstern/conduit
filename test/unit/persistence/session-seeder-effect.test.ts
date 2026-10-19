@@ -1,7 +1,7 @@
-import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -12,7 +12,7 @@ import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 
 const testLayer = Layer.mergeAll(
 	EffectSqliteClient.layer({ filename: ":memory:" }),
-	Layer.succeed(PersistenceProjectTag, { projectId: "test-project" }),
+	Layer.succeed(PersistenceProjectTag)({ projectId: "test-project" }),
 );
 
 describe("EffectSessionSeeder", () => {
@@ -64,8 +64,10 @@ describe("EffectSessionSeeder", () => {
 					title: "Child",
 					provider: "opencode",
 				}),
-				canonicalEvent("session.forked", "child", {
+				canonicalEvent("session.created", "child", {
 					sessionId: "child",
+					title: "Child",
+					provider: "opencode",
 					parentId: "parent",
 				}),
 			]);
@@ -106,7 +108,7 @@ describe("EffectSessionSeeder", () => {
 			expect(row?.created_at).toBeGreaterThanOrEqual(before);
 			expect(row?.created_at).toBeLessThanOrEqual(after);
 			expect(row?.updated_at).toBe(row?.created_at);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("is idempotent and never overwrites existing session data", () =>
@@ -124,7 +126,7 @@ describe("EffectSessionSeeder", () => {
 				provider: string;
 			}>`SELECT title, provider FROM sessions WHERE id = 'sess-1'`;
 			expect(rows).toEqual([{ title: "Custom Title", provider: "opencode" }]);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("creates sessions with different providers", () =>
@@ -143,7 +145,7 @@ describe("EffectSessionSeeder", () => {
 				{ id: "sess-1", provider: "opencode" },
 				{ id: "sess-2", provider: "claude" },
 			]);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("stores optional parent and provider session ids", () =>
@@ -164,7 +166,7 @@ describe("EffectSessionSeeder", () => {
 			expect(rows).toEqual([
 				{ parent_id: "parent-session", provider_sid: "sdk-subagent-1" },
 			]);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("skips SQL for a cached session until reset()", () =>
@@ -184,6 +186,6 @@ describe("EffectSessionSeeder", () => {
 			seeder.reset();
 			expect(yield* seeder.ensureSession("sess-1", "opencode")).toBe(true);
 			expect((yield* countRows)[0]?.n).toBe(1);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });

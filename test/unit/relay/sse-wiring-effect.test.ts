@@ -38,7 +38,7 @@ const makeEffectLayer = () =>
 		AlertsLive,
 		PendingInteractionServiceLive,
 		makeOverridesStateLive(),
-		Layer.succeed(SessionManagerServiceTag, {
+		Layer.succeed(SessionManagerServiceTag)({
 			getSessionParentMap: () => Effect.succeed(new Map()),
 		} as never),
 	);
@@ -98,10 +98,11 @@ describe("handleSSEEventEffect", () => {
 						AlertsLive,
 						PendingInteractionServiceLive,
 						makeOverridesStateLive(),
-						Layer.succeed(SessionManagerServiceTag, {
+						Layer.succeed(SessionManagerServiceTag)({
 							getSessionParentMap: () => Effect.succeed(new Map()),
 						} as never),
 					),
+					{ local: true },
 				),
 			),
 		);
@@ -134,11 +135,12 @@ describe("handleSSEEventEffect", () => {
 						AlertsLive,
 						PendingInteractionServiceLive,
 						makeOverridesStateLive(),
-						Layer.succeed(SessionManagerServiceTag, {
+						Layer.succeed(SessionManagerServiceTag)({
 							recordMessageActivity,
 							getSessionParentMap: () => Effect.succeed(new Map()),
 						} as never),
 					),
+					{ local: true },
 				),
 			),
 		);
@@ -161,7 +163,7 @@ describe("handleSSEEventEffect", () => {
 				expect(
 					yield* pendingInteractions.listPendingPermissions("session-1"),
 				).toEqual([]);
-			}).pipe(Effect.provide(makeEffectLayer())),
+			}).pipe(Effect.provide(makeEffectLayer(), { local: true })),
 		);
 
 		expect(replyPermission).toHaveBeenCalledWith("session-1", "perm-1", "once");
@@ -175,7 +177,7 @@ describe("handleSSEEventEffect", () => {
 			Effect.gen(function* () {
 				yield* setPermissionMode("session-1", "acceptEdits");
 				yield* handleSSEEventEffect(effectDeps, permissionAskedEvent("edit"));
-			}).pipe(Effect.provide(makeEffectLayer())),
+			}).pipe(Effect.provide(makeEffectLayer(), { local: true })),
 		);
 
 		expect(replyPermission).toHaveBeenCalledWith("session-1", "perm-1", "once");
@@ -193,7 +195,7 @@ describe("handleSSEEventEffect", () => {
 				expect(
 					yield* pendingInteractions.listPendingPermissions("session-1"),
 				).toHaveLength(1);
-			}).pipe(Effect.provide(makeEffectLayer())),
+			}).pipe(Effect.provide(makeEffectLayer(), { local: true })),
 		);
 
 		expect(replyPermission).not.toHaveBeenCalled();
@@ -211,7 +213,7 @@ describe("handleSSEEventEffect", () => {
 				expect(
 					yield* pendingInteractions.listPendingPermissions("session-1"),
 				).toHaveLength(1);
-			}).pipe(Effect.provide(makeEffectLayer())),
+			}).pipe(Effect.provide(makeEffectLayer(), { local: true })),
 		);
 
 		expect(replyPermission).not.toHaveBeenCalled();
@@ -228,7 +230,7 @@ describe("handleSSEEventEffect", () => {
 				expect(
 					yield* pendingInteractions.listPendingPermissions("session-1"),
 				).toHaveLength(1);
-			}).pipe(Effect.provide(makeEffectLayer())),
+			}).pipe(Effect.provide(makeEffectLayer(), { local: true })),
 		);
 
 		expect(replyPermission).not.toHaveBeenCalled();
@@ -248,7 +250,7 @@ describe("handleSSEEventEffect", () => {
 				expect(
 					yield* pendingInteractions.listPendingPermissions("session-1"),
 				).toHaveLength(1);
-			}).pipe(Effect.provide(makeEffectLayer())),
+			}).pipe(Effect.provide(makeEffectLayer(), { local: true })),
 		);
 	});
 
@@ -263,7 +265,7 @@ describe("handleSSEEventEffect", () => {
 				expect(
 					yield* pendingInteractions.listPendingPermissions("session-1"),
 				).toHaveLength(1);
-			}).pipe(Effect.provide(makeEffectLayer())),
+			}).pipe(Effect.provide(makeEffectLayer(), { local: true })),
 		);
 	});
 
@@ -281,7 +283,7 @@ describe("handleSSEEventEffect", () => {
 				expect(
 					yield* pendingInteractions.listPendingPermissions(""),
 				).toHaveLength(1);
-			}).pipe(Effect.provide(makeEffectLayer())),
+			}).pipe(Effect.provide(makeEffectLayer(), { local: true })),
 		);
 
 		expect(replyPermission).not.toHaveBeenCalled();

@@ -5,9 +5,9 @@
 // stored `root_id`, so a refresh reads the touched families and nothing else,
 // once: its cost is the family's size, not that times the commit's events.
 
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Effect, Schema } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import type {
 	PendingApprovalCountRow,
 	SessionRow,
@@ -22,8 +22,10 @@ import {
 	sessionRowsToSessionInfoList,
 } from "./read-query-effect.js";
 
-const decodeRow = Schema.decodeUnknownSync(Schema.parseJson(SidebarRowSchema));
-const encodeRow = Schema.encodeSync(Schema.parseJson(SidebarRowSchema));
+const decodeRow = Schema.decodeUnknownSync(
+	Schema.fromJsonString(SidebarRowSchema),
+);
+const encodeRow = Schema.encodeSync(Schema.fromJsonString(SidebarRowSchema));
 
 /** What a family member contributes to its root's row. */
 export type FamilyMember = Pick<
@@ -122,9 +124,11 @@ export const refreshSidebar = (
  * both agree on a session whose chain never reaches a top-level one: an orphan
  * (its parent is missing) or a member of a parent cycle has no root, and no
  * family shows it, as the full session list does not.
+ * When supplied, `version` stamps every row whose root changes.
  */
 export const rerootSession = (
 	sessionId: string,
+	version?: number,
 ): Effect.Effect<readonly string[], SqlError, SqlClient.SqlClient> =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
@@ -145,8 +149,8 @@ export const rerootSession = (
 					SELECT child.id FROM sessions child
 					JOIN subtree ON child.parent_id = subtree.id
 				)
-				UPDATE sessions SET root_id = ${row.next}
-				WHERE id IN (SELECT id FROM subtree)`;
+				UPDATE sessions SET root_id = ${row.next}${version === undefined ? sql.literal("") : sql`, version = ${version}`}
+				WHERE id IN (SELECT id FROM subtree) AND root_id IS NOT ${row.next}`;
 		return row.root_id === null ? [sessionId] : [sessionId, row.root_id];
 	});
 
@@ -220,6 +224,9 @@ export const sidebarRows = (
 	}
 	return new Map(
 		roots.flatMap((root, index) => {
+			// Older migrations build this projection before archive columns exist.
+			// An archived root leaves a tombstone while its session still exists.
+			if (root.archived_at != null) return [];
 			const item = items[index];
 			if (item === undefined) return [];
 			const {

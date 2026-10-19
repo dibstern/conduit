@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { Effect, Either } from "effect";
+import { Effect, Result as Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	defaultDaemonConfig,
@@ -22,7 +22,7 @@ import {
 // launch options, cancellation poisoning another session's shared catalog,
 // named-instance config routing, and an unused query surviving shutdown.
 function durableCounts(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath(), {
+	const db = new Database(harness.daemonStorePath(), {
 		readonly: true,
 	});
 	try {
@@ -74,7 +74,7 @@ function sdkProof(harness: ProcessHarness): ProcessMark[] {
 
 // Seed the legacy discovery path only while the isolated daemon is stopped.
 function seedSessionWithoutPick(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath());
+	const db = new Database(harness.daemonStorePath());
 	try {
 		db.prepare(
 			"UPDATE sessions SET model_id = NULL, model_provider = NULL, variant = NULL, context_window = NULL WHERE id = ?",
@@ -1650,7 +1650,7 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		if (state === "approval") {
 			const cursor = browser.frames.length;
 			await Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId,
 					originId: browser.originId,
 					inputId: randomUUID(),

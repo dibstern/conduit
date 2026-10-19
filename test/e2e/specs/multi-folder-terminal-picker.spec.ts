@@ -51,7 +51,10 @@ for (const scenario of [
 				{
 					slug: projectSlug,
 					title: "Terminal folders project",
-					folders: scenario.roots.map(({ root }) => root),
+					folders: [
+						primary,
+						...scenario.roots.slice(1).map(({ root }) => root),
+					] as const,
 				},
 			];
 			const session = {
@@ -96,8 +99,6 @@ for (const scenario of [
 						providerScope: { id: "claude", name: "Claude" },
 						instanceId: "claude",
 					}),
-				},
-				handlers: {
 					GetProjects: () => ({ projects, current: projectSlug }),
 					CreatePty: ({ root }) => {
 						const id = `pty-${++terminalCount}`;

@@ -74,7 +74,16 @@ export const completeRecoveredQuestion = (
 			...completedEvent,
 			eventId: createEventId(),
 			type: "question.resolved" as const,
-			data: { id: question.requestId, answers },
+			providerRefs: {
+				...completedEvent.providerRefs,
+				...(question.providerProcessId
+					? { providerProcessId: question.providerProcessId }
+					: {}),
+				...(question.providerRequestId
+					? { providerRequestId: question.providerRequestId }
+					: {}),
+			},
+			data: { id: question.providerRequestId ?? question.requestId, answers },
 		};
 		if (question.messageId) {
 			// A fresh mapper has not seen the stored tool start. Seed its identity
@@ -136,17 +145,17 @@ const materializeOpenCodeSession = (
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const readQuery = yield* ReadQueryEffectTag;
 
-		const rowResult = yield* Effect.either(
+		const rowResult = yield* Effect.result(
 			readQuery.getSession(input.sessionId),
 		);
-		if (rowResult._tag === "Left") {
+		if (rowResult._tag === "Failure") {
 			log.warn(
-				`Could not inspect session provider before OpenCode dispatch for ${input.sessionId}: ${formatErrorDetail(rowResult.left)}`,
+				`Could not inspect session provider before OpenCode dispatch for ${input.sessionId}: ${formatErrorDetail(rowResult.failure)}`,
 			);
 			return input.sessionId;
 		}
 
-		const row = rowResult.right;
+		const row = rowResult.success;
 		if (!row || row.provider === providerId) {
 			return input.sessionId;
 		}
@@ -183,6 +192,15 @@ export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 		});
 		const traits: ProviderDriverTraits = PROVIDER_DRIVERS[account.driver];
 		if (
+			traits.readOnlySubagents &&
+			session?.parent_id &&
+			session.side_thread !== 1 &&
+			!session.fork_point_event &&
+			session.fork_point_message_id == null &&
+			session.fork_point_timestamp == null
+		)
+			return yield* Effect.fail(new Error("Subagent sessions are read-only."));
+		if (
 			traits.interactionSink === "permission-asking" &&
 			input.delivery !== "steer"
 		)
@@ -202,13 +220,13 @@ const interruptLegacyTurn = (input: ProviderTurnServiceInterruptInput) =>
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
 		const log = yield* LoggerTag;
-		const abortResult = yield* Effect.either(
+		const abortResult = yield* Effect.result(
 			Effect.tryPromise(() => client.session.abort(input.sessionId)),
 		);
-		if (abortResult._tag === "Left") {
+		if (abortResult._tag === "Failure") {
 			log.warn(
 				`client=${input.clientId} session=${input.sessionId} Abort failed:`,
-				formatErrorDetail(abortResult.left),
+				formatErrorDetail(abortResult.failure),
 			);
 		}
 	});
@@ -237,18 +255,18 @@ export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 		}
 		if (!PROVIDER_DRIVERS[account.driver].interruptViaEngine) return;
 
-		const interruptResult = yield* Effect.either(
+		const interruptResult = yield* Effect.result(
 			engine.dispatchEffect({
 				type: "interrupt_turn",
 				commandId: input.commandId,
 				sessionId: input.sessionId,
 			}),
 		);
-		if (interruptResult._tag === "Left") {
+		if (interruptResult._tag === "Failure") {
 			log.warn(
 				`client=${input.clientId} session=${input.sessionId} engine interrupt_turn failed:`,
-				formatErrorDetail(interruptResult.left),
+				formatErrorDetail(interruptResult.failure),
 			);
-			yield* Effect.fail(interruptResult.left);
+			yield* Effect.fail(interruptResult.failure);
 		}
 	});

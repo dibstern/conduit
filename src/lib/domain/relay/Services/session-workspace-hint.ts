@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
-import { Effect, Layer, Schema, Stream } from "effect";
+import { Effect, Layer, Schema, Semaphore, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import type { StoredEvent } from "../../../contracts/stored-event.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
@@ -19,6 +19,7 @@ import {
 	collectWorkspaceHintPaths,
 	resolveWorkspaceHint,
 } from "../../../session/workspace-hint.js";
+import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
 import { ConfigTag } from "./services.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 import { SessionWorkspaceTag } from "./session-workspace.js";
@@ -55,23 +56,24 @@ export const dismissWorkspaceHint = (sessionId: string, path: string) =>
 	});
 
 const decodeMove = Schema.decodeUnknownSync(
-	Schema.parseJson(SessionWorkspaceChangedPayloadSchema),
+	Schema.fromJsonString(SessionWorkspaceChangedPayloadSchema),
 );
 const decodeWorkspace = Schema.decodeUnknownSync(
-	Schema.parseJson(SessionWorkspaceSchema),
+	Schema.fromJsonString(SessionWorkspaceSchema),
 );
 
 /** Observe live turn ends; projection and replay only fold the recorded result. */
-export const SessionWorkspaceHintReactorLive = Layer.scopedDiscard(
+export const SessionWorkspaceHintReactorLive = Layer.effectDiscard(
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const bus = yield* SessionEventBusTag;
 		const workspace = yield* SessionWorkspaceTag;
 		const config = yield* ConfigTag;
+		const { projectId } = yield* PersistenceProjectTag;
 		const store = yield* EventStoreEffectTag;
 		const commit = yield* makeCommitAndSignal;
 		const events = yield* bus.subscribe();
-		const observations = yield* Effect.makeSemaphore(1);
+		const observations = yield* Semaphore.make(1);
 		const observedTurns = new Map<string, number>();
 
 		const observeTurn = (end: StoredEvent) =>
@@ -165,6 +167,7 @@ export const SessionWorkspaceHintReactorLive = Layer.scopedDiscard(
 
 		yield* Effect.forkScoped(
 			Stream.runForEach(events, (event) => {
+				if (event.projectId !== projectId) return Effect.void;
 				if (
 					event.type === "turn.completed" ||
 					event.type === "turn.error" ||
@@ -182,14 +185,15 @@ export const SessionWorkspaceHintReactorLive = Layer.scopedDiscard(
 							}),
 						)
 						.pipe(
-							Effect.catchAll((error) =>
+							Effect.catch((error) =>
 								Effect.logWarning("Could not observe workspace hint", error),
 							),
-							Effect.forkScoped,
+							Effect.forkScoped({ uninterruptible: "inherit" }),
 							Effect.asVoid,
 						);
 				return Effect.void;
 			}),
+			{ uninterruptible: "inherit" },
 		);
 	}),
 );

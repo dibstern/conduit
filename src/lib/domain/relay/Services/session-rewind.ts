@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Data, Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";

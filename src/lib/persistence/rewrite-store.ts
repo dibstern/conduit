@@ -10,10 +10,11 @@ import {
 	unlinkSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { Reactivity } from "@effect/experimental";
-import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { Cause, Data, Effect, Layer } from "effect";
+import { Data, Effect, Layer } from "effect";
+import { Reactivity } from "effect/reactivity";
+import { SqlClient } from "effect/sql";
+import * as Failure from "../effect/failure-classification.js";
 
 export class RewriteError extends Data.TaggedError("RewriteError")<{
 	readonly message: string;
@@ -122,8 +123,8 @@ export const rewriteStore = (
 				return { beforeBytes, afterBytes };
 			});
 		}).pipe(
-			Effect.catchAllCause((cause) =>
-				Cause.isInterruptedOnly(cause)
+			Effect.catchCause((cause) =>
+				Failure.isInterruptedOnly(cause)
 					? Effect.interrupt
 					: Effect.fail(
 							new RewriteError({
@@ -139,7 +140,7 @@ export const rewriteStore = (
 							unlinkSync(`${temporary}${suffix}`);
 					}
 				}).pipe(
-					Effect.catchAll((cause) =>
+					Effect.catch((cause) =>
 						Effect.logWarning("Failed to remove store rewrite temporary file", {
 							temporary,
 							cause,
@@ -201,12 +202,12 @@ export const reclaimStore = (filename: string): Effect.Effect<void> =>
 			...sizes,
 		});
 	}).pipe(
-		Effect.catchAllCause((cause) =>
-			Cause.isInterruptedOnly(cause)
+		Effect.catchCause((cause) =>
+			Failure.isInterruptedOnly(cause)
 				? Effect.interrupt
 				: Effect.logWarning("Event store reclaim failed; keeping original", {
 						filename,
-						cause: Cause.pretty(cause),
+						cause: Failure.renderCause(cause),
 					}),
 		),
 	);

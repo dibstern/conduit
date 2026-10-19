@@ -55,5 +55,7 @@
 			</span>
 			<span>{ctx.pct}%</span>
 		</span>
+	{:else if economics.contextWithoutCapacity !== undefined}
+		<span title="{fmtTokens(economics.contextWithoutCapacity)} tokens in context; context window not reported">{fmtTokens(economics.contextWithoutCapacity)} ctx</span>
 	{/if}
 </span>

@@ -248,7 +248,9 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		name: "press Dismiss on the cut-off tag",
 		match: /^I press Dismiss on the cut-off tag$/,
 		run: async ({ world }) => {
-			requireRpcControl(world.page).setResponse("DismissCutOff", { ok: true });
+			requireRpcControl(world.page).setStubs({
+				DismissCutOff: () => ({ ok: true }),
+			});
 			await world.page.getByTestId("cut-off-dismiss").click();
 		},
 	},
@@ -395,7 +397,8 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				{
 					id: "msg-resumed-reply",
 					role: "assistant",
-					parentID: parent?.["id"],
+					// RPC JSON rejects an explicit undefined, so omit a missing parent.
+					...(parent && { parentID: parent["id"] }),
 					time: { created: at + 1, completed: at + 20_000 },
 					parts: [
 						{ id: "part-resumed-reply", type: "text", text: match[4] ?? "" },

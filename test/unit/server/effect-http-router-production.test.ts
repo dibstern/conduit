@@ -1,9 +1,9 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HttpApp, HttpServerResponse } from "@effect/platform";
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { Effect, Layer } from "effect";
+import { HttpRouter, HttpServerResponse } from "effect/http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
@@ -53,24 +53,26 @@ function makeHandler(options?: {
 }) {
 	const auth = options?.auth ?? new AuthManager();
 	const layer = Layer.mergeAll(
-		Layer.succeed(ProjectsProvider, {
+		Layer.succeed(ProjectsProvider)({
 			getProjects: () => Effect.succeed(options?.projects ?? oneProject),
 		}),
 		makeAuthManagerLive(auth),
-		Layer.succeed(StaticDirTag, staticDir),
-		Layer.succeed(SetupInfoProvider, {
+		Layer.succeed(StaticDirTag)(staticDir),
+		Layer.succeed(SetupInfoProvider)({
 			getPort: () => Effect.succeed(2633),
 			getIsTls: () => Effect.succeed(false),
 			getPublicUrl: () => Effect.succeed(null),
 		}),
-		Layer.succeed(ProjectApiDelegateProvider, {
+		Layer.succeed(ProjectApiDelegateProvider)({
 			delegateApiRequest: () =>
 				Effect.succeed(HttpServerResponse.text("delegated", { status: 299 })),
 		}),
 		NodeFileSystem.layer,
 		NodePath.layer,
 	);
-	return HttpApp.toWebHandlerLayer(effectRouterWithCors, layer);
+	return HttpRouter.toWebHandler(
+		effectRouterWithCors.pipe(Layer.provideMerge(layer)),
+	);
 }
 
 describe("Effect HTTP Router production routes", () => {

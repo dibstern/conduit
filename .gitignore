@@ -19,6 +19,8 @@ media/_test_output/
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db
+# The store compatibility pin's fixture (conduit-test-16c8.3).
+!/test/fixtures/event-store-compat/events.db
 .beads-credential-key
 
 # bv (beads viewer) local config and caches
@@ -42,3 +44,6 @@ media/_test_output/
 
 # pnpm content-addressable store created by local installs
 /.pnpm-store/
+
+# Privileged Linux service E2E evidence, one directory per run.
+/test/e2e/linux-service/artifacts/

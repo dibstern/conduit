@@ -15,11 +15,9 @@ import {
 	selectInstance,
 } from "../../stores/discovery.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
-import {
-	clearSessionState,
-	sessionState,
-} from "../../stores/session.svelte.js";
+import { clearSessionState } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import type { OpenCodeInstance, ProviderInfo } from "../../types.js";
 import InstanceModelPicker from "./InstanceModelPicker.svelte";
@@ -181,7 +179,7 @@ async function rootControls(canvasElement: HTMLElement) {
 		within(sheet.getByRole("radiogroup", { name: "Effort" }))
 			.getAllByRole("radio")
 			.map((radio) => radio.textContent),
-	).toEqual(["low", "med", "high", "xhigh", "max"]);
+	).toEqual(["low", "medium", "high", "xhigh", "max"]);
 	const rootFocusTestId = sheet.queryByTestId("picker-harness-claude")
 		? "picker-harness-claude"
 		: "picker-row-model";
@@ -234,7 +232,7 @@ const meta = {
 		clearSessionState();
 		instanceState.instances = [];
 		// An active session locks the harness selection.
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		return () => {
 			sessionViewState.compact = compact;
 			sessionViewState.composerWidth = composerWidth;
@@ -404,7 +402,7 @@ export const ContextUsage: Story = {
 		// currentChat() is a frozen empty state until the session has activity.
 		getOrCreateSessionActivity(id);
 		getOrCreateSessionMessages(id).contextPercent = 37;
-		sessionState.currentId = id;
+		openSessionForSetup(id, "conduit");
 		applyGetModelsResponse(
 			{
 				projectSlug: "story",
@@ -579,7 +577,7 @@ export const Locked: Story = {
 				},
 			],
 		});
-		sessionState.currentId = "session-1";
+		openSessionForSetup("session-1", "conduit");
 		applyGetModelsResponse(
 			{
 				projectSlug: "story",

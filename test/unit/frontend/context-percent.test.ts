@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // Bug: fable-family models got no limit from the capability probe, so the
 // context bar never rendered; the [1m] context-window override was ignored;
 // and history replay never restored contextPercent after a reload.
@@ -20,10 +21,12 @@ import {
 	clearDiscoveryState,
 	handleModelList,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { RelayMessage } from "../../../src/lib/frontend/types.js";
 import { probeClaudeCapabilities } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
+import { seedSessions } from "../stores/session-fixtures.js";
 
 function _resultMsg(usage: {
 	input?: number;
@@ -66,12 +69,17 @@ describe("context percent computation", () => {
 		_activity = testActivity();
 		messages = testMessages();
 		clearDiscoveryState();
-		sessionState.currentId = "history-session";
+		seedSessions([
+			{ id: "history-session", title: "History", projectSlug: "project-a" },
+		]);
+		attachedProjectState.slug = "project-a";
+		openSessionForSetup("history-session", "project-a");
 	});
 
 	afterEach(() => {
 		clearDiscoveryState();
-		sessionState.currentId = null;
+		openSessionForSetup(null);
+		attachedProjectState.slug = null;
 	});
 
 	it("restores percent from the last result message in history", () => {

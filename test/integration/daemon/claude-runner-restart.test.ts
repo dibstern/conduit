@@ -25,7 +25,7 @@ import {
 } from "../../helpers/process-harness.js";
 
 function persisted(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath(), {
+	const db = new Database(harness.daemonStorePath(), {
 		readonly: true,
 	});
 	try {
@@ -453,7 +453,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started")
 			throw new Error("Missing verified runner");
-		const db = new Database(harness.projectStorePath());
+		const db = new Database(harness.daemonStorePath());
 		const command = db
 			.prepare(
 				"SELECT command_id, payload_json, attempt_count FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn'",
@@ -578,7 +578,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 					.pipe(Effect.timeout("15 seconds")),
 			);
 			cachedFailure = await Effect.runPromise(
-				Effect.either(
+				Effect.result(
 					direct.commandEffect(
 						command.command_id,
 						{
@@ -594,7 +594,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 					),
 				).pipe(Effect.timeout("15 seconds")),
 			);
-			expect(cachedFailure).toMatchObject({ _tag: "Left" });
+			expect(cachedFailure).toMatchObject({ _tag: "Failure" });
 			await new Promise<void>((resolve) => {
 				socket.once("close", resolve);
 				direct?.destroy();
@@ -885,7 +885,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 			);
 			const steer = "recovery-steer";
 			const submitted = await Effect.runPromise(
-				after.rpc.input.submit({
+				after.rpc["input.submit"]({
 					sessionId,
 					inputId: randomUUID(),
 					originId: after.originId,

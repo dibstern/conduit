@@ -1,16 +1,12 @@
 <script lang="ts">
-	import { untrack } from "svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
 	import Select from "../ui/Select.svelte";
 	import { Schema } from "effect";
-	import { GroupingModeSchema } from "../../../shared-types.js";
 	import { DefaultSessionModeSchema } from "../../../contracts/project-file.js";
-	import { projectState } from "../../stores/project-state.svelte.js";
-	import { showToast } from "../../stores/ui.svelte.js";
 	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
-	import { rpc, getAutoSettleSettingRpc, setAutoSettleSettingRpc, getDefaultGroupingModeRpc, setDefaultGroupingModeRpc, getWorktreeCleanupSettingRpc, setWorktreeCleanupSettingRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { applyDefaultSessionMode, discoveryState } from "../../stores/discovery.svelte.js";
 	import { getDraftProject } from "../../stores/project.svelte.js";
@@ -18,7 +14,7 @@
 	import { DEFAULT_WORKTREE_CLEANUP, type WorktreeCleanup, type WorktreeCleanupReport } from "../../../contracts/worktree.js";
 	import Button from "../ui/Button.svelte";
 	import Disclosure from "../ui/Disclosure.svelte";
-	let state = $state({ autoSettleDays: 3 as number | null, autoSettleSaving: false, sessionModeSaving: false, groupingSaving: false, cleanup: DEFAULT_WORKTREE_CLEANUP as WorktreeCleanup, cleanupSaving: false, cleanupOpen: false, cleanupDetailsOpen: false, cleanupRun: { status: "idle" } as { status: "idle" | "running" | "failed" } | { status: "done"; report: WorktreeCleanupReport } });
+	let state = $state({ autoSettleDays: 3 as number | null, autoSettleSaving: false, autoArchiveDays: 30 as number | null, autoArchiveSaving: false, sessionModeSaving: false, cleanup: DEFAULT_WORKTREE_CLEANUP as WorktreeCleanup, cleanupSaving: false, cleanupOpen: false, cleanupDetailsOpen: false, cleanupRun: { status: "idle" } as { status: "idle" | "running" | "failed" } | { status: "done"; report: WorktreeCleanupReport } });
 
 	const idlePresets = [7, 14, 30, 90];
 	const outcomes = [
@@ -49,13 +45,13 @@
 		const next = { ...previous, ...patch };
 		state.cleanup = next;
 		state.cleanupSaving = true;
-		void setWorktreeCleanupSettingRpc(next)
-			.then((saved) => {
+		void rpc("SetWorktreeCleanupSetting", { worktreeCleanup: next })
+			.then(({ worktreeCleanup: saved }) => {
 				state.cleanup = saved;
 			})
-			.catch(() => {
+			.catch((error) => {
 				state.cleanup = previous;
-				showToast("Couldn't save worktree cleanup setting", { variant: "error" });
+				toastFailure("Couldn't save worktree cleanup setting")(error);
 			})
 			.finally(() => {
 				state.cleanupSaving = false;
@@ -79,53 +75,32 @@
 		const route = getCurrentRoute();
 		if (route.page === "chat" && route.sessionId && !getCurrentSlug()) return;
 		let current = true;
-		const groupingReadRevision = untrack(() => projectState.defaultGroupingRevision);
-		void getAutoSettleSettingRpc()
-			.then((days) => {
+		void rpc("GetAutoArchiveSetting", {})
+			.then(({ autoArchiveAfterDays: days }) => {
+				if (current && !state.autoArchiveSaving) state.autoArchiveDays = days;
+			})
+			.catch((error) => {
+				if (current) toastFailure("Couldn't load auto-archive setting")(error);
+			});
+		void rpc("GetAutoSettleSetting", {})
+			.then(({ autoSettleAfterDays: days }) => {
 				if (current && !state.autoSettleSaving) state.autoSettleDays = days;
 			})
-			.catch(() => {
-				if (current) showToast("Couldn't load auto-settle setting", { variant: "error" });
+			.catch((error) => {
+				if (current) toastFailure("Couldn't load auto-settle setting")(error);
 			});
-		void getDefaultGroupingModeRpc()
-			.then((mode) => {
-				if (current && groupingReadRevision === projectState.defaultGroupingRevision) projectState.defaultGroupingMode = mode;
-			})
-			.catch(() => {
-				if (current) showToast("Couldn't load grouping setting", { variant: "error" });
-			});
-		void getWorktreeCleanupSettingRpc()
-			.then((cleanup) => {
+		void rpc("GetWorktreeCleanupSetting", {})
+			.then(({ worktreeCleanup: cleanup }) => {
 				if (current && !state.cleanupSaving) state.cleanup = cleanup;
 			})
-			.catch(() => {
-				if (current) showToast("Couldn't load worktree cleanup setting", { variant: "error" });
+			.catch((error) => {
+				if (current) toastFailure("Couldn't load worktree cleanup setting")(error);
 			});
 		return () => { current = false; };
 	});
 </script>
 
 <SettingsGroup id="settings-sessions" title="Sessions">
-	<SettingsRow label="Default repository grouping" labelFor="settings-grouping-mode-select" description="Projects inherit this unless they choose their own mode.">
-		{#snippet control()}
-			<Select id="settings-grouping-mode-select" value={projectState.defaultGroupingMode} disabled={state.groupingSaving} onchange={(event) => {
-				const mode = event.currentTarget.value;
-				if (!Schema.is(GroupingModeSchema)(mode)) return;
-				const groupingSaveRevision = ++projectState.defaultGroupingRevision;
-				state.groupingSaving = true;
-				void setDefaultGroupingModeRpc(mode)
-					.then((saved) => {
-						if (groupingSaveRevision === projectState.defaultGroupingRevision) projectState.defaultGroupingMode = saved;
-					})
-					.catch(() => { showToast("Couldn't save grouping setting", { variant: "error" }); })
-					.finally(() => { state.groupingSaving = false; });
-			}}>
-				<option value="repository">By repository</option>
-				<option value="repository+subfolder">By repository and subfolder</option>
-				<option value="off">Off</option>
-			</Select>
-		{/snippet}
-	</SettingsRow>
 	<SettingsRow
 		label="Default session mode"
 		labelFor="settings-default-session-mode"
@@ -169,16 +144,43 @@
 					const value = event.currentTarget.value;
 					const next = value === "never" ? null : Number(value);
 					state.autoSettleSaving = true;
-					void setAutoSettleSettingRpc(next)
-						.then((days) => {
+					void rpc("SetAutoSettleSetting", { autoSettleAfterDays: next })
+						.then(({ autoSettleAfterDays: days }) => {
 							state.autoSettleDays = days;
 						})
-						.catch(() => {
-							showToast("Couldn't save auto-settle setting", { variant: "error" });
-						})
+						.catch(toastFailure("Couldn't save auto-settle setting"))
 						.finally(() => {
 							state.autoSettleSaving = false;
 						});
+				}}
+			>
+				<option value="1">1 day</option>
+				<option value="2">2 days</option>
+				<option value="3">3 days</option>
+				<option value="7">1 week</option>
+				<option value="14">2 weeks</option>
+				<option value="30">30 days</option>
+				<option value="90">90 days</option>
+				<option value="never">Never</option>
+			</Select>
+		{/snippet}
+	</SettingsRow>
+	<SettingsRow
+		label="Archive settled sessions after"
+		labelFor="settings-auto-archive-select"
+		description="Hides them from the sidebar. Search still finds them."
+	>
+		{#snippet control()}
+			<Select id="settings-auto-archive-select" data-testid="settings-auto-archive-select"
+				value={state.autoArchiveDays === null ? "never" : String(state.autoArchiveDays)}
+				disabled={state.autoArchiveSaving}
+				onchange={(event) => {
+					const value = event.currentTarget.value;
+					state.autoArchiveSaving = true;
+					void rpc("SetAutoArchiveSetting", { autoArchiveAfterDays: value === "never" ? null : Number(value) })
+						.then(({ autoArchiveAfterDays: days }) => { state.autoArchiveDays = days; })
+						.catch(toastFailure("Couldn't save auto-archive setting"))
+						.finally(() => { state.autoArchiveSaving = false; });
 				}}
 			>
 				<option value="1">1 day</option>

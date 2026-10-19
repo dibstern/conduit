@@ -2,13 +2,15 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { RpcTest } from "@effect/rpc";
-import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { it } from "@effect/vitest";
 import { Effect, Fiber, Layer, Option } from "effect";
+import { RpcTest } from "effect/rpc";
+import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { makeDaemonSharedStoreLayer } from "../../../src/lib/domain/daemon/Layers/daemon-shared-store-layer.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
@@ -16,12 +18,17 @@ import {
 	listDaemonSessions,
 	resolveDaemonOpenCodeSession,
 } from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
+import { DaemonStoreAvailability } from "../../../src/lib/domain/daemon/Services/daemon-store-availability.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { createSessionGitCache } from "../../../src/lib/git/session-git.js";
+import {
+	effectMigrationEntries,
+	makeEffectSqlMigrator,
+} from "../../../src/lib/persistence/effect/migrations.js";
 import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
@@ -111,25 +118,23 @@ const makeProjectStore = (
 		readonly type: "permission" | "question";
 		readonly status: "pending" | "resolved";
 	}> = [],
+	filename = join(dirname(projectDirectory), "events.db"),
 ): void => {
-	const storageDirectory = projectStorageDir(
-		dirname(projectDirectory),
-		basename(projectDirectory),
-	);
+	const projectId = basename(projectDirectory);
 	mkdirSync(projectDirectory, { recursive: true });
-	mkdirSync(storageDirectory, { recursive: true });
+	mkdirSync(dirname(filename), { recursive: true });
 	writeEventStore(
-		join(storageDirectory, "events.db"),
+		filename,
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			for (const session of sessions) {
 				yield* sql`INSERT INTO sessions (
-					id, provider, title, status, parent_id, last_message_at,
+					id, project_id, provider, title, status, parent_id, last_message_at,
 					last_turn_end_version, seen_version, settled_at,
 					pinned_at, snoozed_at, snoozed_until, woken_at, woken_reason,
 					created_at, updated_at
 				) VALUES (
-					${session.id}, 'opencode', ${session.title}, ${session.status ?? "idle"},
+					${session.id}, ${projectId}, 'opencode', ${session.title}, ${session.status ?? "idle"},
 					${session.parentId ?? null}, ${session.lastMessageAt ?? null},
 					${session.lastTurnEndVersion ?? null},
 					${session.seenVersion ?? null}, ${session.settledAt ?? null},
@@ -159,32 +164,38 @@ afterEach(() => {
 describe("listDaemonSessions", () => {
 	for (const read of ["list", "binding"] as const) {
 		it.effect(
-			`migrates a cold legacy project store before its scoped ${read} read`,
+			`imports a legacy project store at startup before its scoped ${read} read`,
 			() => {
 				const root = makeTemporaryRoot();
 				const folder = join(root, "legacy-project");
-				makeProjectStore(folder, [
-					{ id: "legacy-session", title: "Legacy", updatedAt: 1 },
-				]);
 				const filename = join(
 					projectStorageDir(root, "legacy-project"),
 					"events.db",
 				);
+				mkdirSync(folder, { recursive: true });
+				mkdirSync(dirname(filename), { recursive: true });
 				Effect.runSync(
-					Effect.gen(function* () {
-						const sql = yield* SqlClient.SqlClient;
-						yield* sql`DROP INDEX idx_sessions_project_updated`;
-						yield* sql`DROP INDEX idx_sessions_project_status`;
-						yield* sql`DROP INDEX idx_session_sidebar_project_version`;
-						yield* sql`DROP INDEX idx_session_sidebar_project_activity`;
-						yield* sql`ALTER TABLE sessions DROP COLUMN project_id`;
-						yield* sql`ALTER TABLE session_sidebar DROP COLUMN project_id`;
-						yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id >= 59`;
-					}).pipe(Effect.provide(SqliteClient.layer({ filename }))),
+					makeEffectSqlMigrator(
+						Object.fromEntries(
+							Object.entries(effectMigrationEntries).filter(
+								([key]) => key < "0059_session_project_scope",
+							),
+						),
+					).pipe(
+						Effect.andThen(
+							Effect.gen(function* () {
+								const sql = yield* SqlClient.SqlClient;
+								yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+								VALUES ('legacy-session', 'opencode', 'Legacy', 'idle', 1, 1)`;
+							}),
+						),
+						Effect.provide(SqliteClient.layer({ filename })),
+					),
 				);
 				return Effect.gen(function* () {
+					expect([...(yield* DaemonStoreAvailability)]).toEqual([]);
 					if (read === "list") {
-						const result = yield* listDaemonSessions(root, {});
+						const result = yield* listDaemonSessions({});
 						expect(result.sessions.map((session) => session.title)).toEqual([
 							"Legacy",
 						]);
@@ -193,17 +204,16 @@ describe("listDaemonSessions", () => {
 						]);
 					} else {
 						expect(
-							yield* resolveDaemonOpenCodeSession(
-								root,
-								"opencode",
-								"legacy-session",
-							),
+							yield* resolveDaemonOpenCodeSession("opencode", "legacy-session"),
 						).toEqual({
 							projectSlug: "legacy-project",
 							sessionId: "legacy-session",
 						});
 					}
 				}).pipe(
+					Effect.provide(
+						makeDaemonSharedStoreLayer(root, defaultDaemonConfig()),
+					),
 					Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 					Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 					Effect.provide(
@@ -249,19 +259,24 @@ describe("listDaemonSessions", () => {
 				Effect.gen(function* () {
 					const unusedGit = vi.fn(async () => undefined);
 					const empty = yield* listDaemonSessions(
-						root,
 						{ search: "absent" },
 						createSessionGitCache(unusedGit),
 					);
 					expect(empty.sessions).toEqual([]);
 					expect(unusedGit).not.toHaveBeenCalled();
-					const listing = yield* Effect.fork(
-						listDaemonSessions(root, {}, cache),
+					const listing = yield* Effect.forkChild(
+						listDaemonSessions({}, cache),
 					);
 					yield* Effect.tryPromise(() =>
 						vi.waitFor(() => expect(read).toHaveBeenCalledTimes(4)),
 					);
-					expect(Option.isNone(yield* Fiber.poll(listing))).toBe(true);
+					expect(
+						Option.isNone(
+							yield* Effect.sync(() =>
+								Option.fromUndefinedOr(listing.pollUnsafe()),
+							),
+						),
+					).toBe(true);
 					expect(cache.peek(project)?.branch).toBe("cached");
 					release();
 					const result = yield* Fiber.join(listing);
@@ -270,6 +285,7 @@ describe("listDaemonSessions", () => {
 					expect(result.sessions[0]?.git?.branch).toBe("fresh");
 				}),
 			).pipe(
+				Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 				Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 				Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 				Effect.provide(
@@ -302,7 +318,7 @@ describe("listDaemonSessions", () => {
 		return Effect.gen(function* () {
 			yield* Effect.promise(() => cache.refresh(gitProject));
 			yield* Effect.promise(() => cache.refresh(plainProject));
-			const result = yield* listDaemonSessions(root, {}, cache);
+			const result = yield* listDaemonSessions({}, cache);
 			expect(
 				result.sessions.find((session) => session.id === "git-session")?.git,
 			).toEqual({
@@ -321,6 +337,7 @@ describe("listDaemonSessions", () => {
 				result.sessions.find((session) => session.id === "plain-session"),
 			).not.toHaveProperty("git");
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
@@ -367,7 +384,7 @@ describe("listDaemonSessions", () => {
 		]);
 
 		return Effect.gen(function* () {
-			const result = yield* listDaemonSessions(root);
+			const result = yield* listDaemonSessions();
 			const sessions = new Map(
 				result.sessions.map((session) => [session.id, session]),
 			);
@@ -381,6 +398,7 @@ describe("listDaemonSessions", () => {
 			expect(result.hasMore).toBe(false);
 			expect(result.nextCursor).toBeNull();
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
@@ -429,7 +447,7 @@ describe("listDaemonSessions", () => {
 			},
 		]);
 		return Effect.gen(function* () {
-			const result = yield* listDaemonSessions(root);
+			const result = yield* listDaemonSessions();
 			const sessions = new Map(
 				result.sessions.map((session) => [session.id, session]),
 			);
@@ -448,6 +466,7 @@ describe("listDaemonSessions", () => {
 				wokeBecause: "turn",
 			});
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
@@ -493,7 +512,7 @@ describe("listDaemonSessions", () => {
 		]);
 
 		return Effect.gen(function* () {
-			const result = yield* listDaemonSessions(root);
+			const result = yield* listDaemonSessions();
 			const sessions = new Map(
 				result.sessions.map((session) => [session.id, session]),
 			);
@@ -504,6 +523,7 @@ describe("listDaemonSessions", () => {
 			expect(result.hasMore).toBe(false);
 			expect(result.nextCursor).toBeNull();
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
@@ -553,7 +573,7 @@ describe("listDaemonSessions", () => {
 		]);
 
 		return Effect.gen(function* () {
-			const first = yield* listDaemonSessions(root, { roots: true, limit: 1 });
+			const first = yield* listDaemonSessions({ roots: true, limit: 1 });
 			expect(first.sessions).toEqual([
 				expect.objectContaining({
 					id: "root-a",
@@ -561,7 +581,7 @@ describe("listDaemonSessions", () => {
 					pendingQuestionCount: 1,
 				}),
 			]);
-			const rest = yield* listDaemonSessions(root, {
+			const rest = yield* listDaemonSessions({
 				roots: true,
 				...(first.nextCursor ? { cursor: first.nextCursor } : {}),
 			});
@@ -570,6 +590,7 @@ describe("listDaemonSessions", () => {
 			expect(rootB).not.toHaveProperty("processing");
 			expect(rootC).toMatchObject({ id: "root-c", processing: true });
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
@@ -617,7 +638,7 @@ describe("listDaemonSessions", () => {
 		);
 
 		return Effect.gen(function* () {
-			const result = yield* listDaemonSessions(root);
+			const result = yield* listDaemonSessions();
 			const sessions = new Map(
 				result.sessions.map((session) => [session.id, session]),
 			);
@@ -647,6 +668,7 @@ describe("listDaemonSessions", () => {
 			expect(result.hasMore).toBe(false);
 			expect(result.nextCursor).toBeNull();
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
@@ -697,7 +719,7 @@ describe("listDaemonSessions", () => {
 			]);
 
 			return Effect.gen(function* () {
-				const result = yield* listDaemonSessions(root, {
+				const result = yield* listDaemonSessions({
 					limit: 2,
 					roots: true,
 				});
@@ -752,6 +774,7 @@ describe("listDaemonSessions", () => {
 				expect(result.hasMore).toBe(true);
 				expect(result.nextCursor).toEqual({ updatedAt: 200, id: "b-mid" });
 			}).pipe(
+				Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 				Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 				Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 				Effect.provide(
@@ -836,12 +859,12 @@ describe("listDaemonSessions", () => {
 		];
 
 		return Effect.gen(function* () {
-			const unbounded = yield* listDaemonSessions(root);
+			const unbounded = yield* listDaemonSessions();
 			expect(unbounded.sessions.map((session) => session.id)).toEqual(expected);
 			expect(unbounded.hasMore).toBe(false);
 			expect(unbounded.nextCursor).toBeNull();
 
-			const first = yield* listDaemonSessions(root, { limit: 2 });
+			const first = yield* listDaemonSessions({ limit: 2 });
 			expect(first.sessions.map((session) => session.id)).toEqual(
 				expected.slice(0, 2),
 			);
@@ -855,7 +878,7 @@ describe("listDaemonSessions", () => {
 			let cursor: { updatedAt: number; id: string } | undefined;
 			let finalCursor: { updatedAt: number; id: string } | undefined;
 			for (;;) {
-				const page = yield* listDaemonSessions(root, {
+				const page = yield* listDaemonSessions({
 					limit: 2,
 					...(cursor === undefined ? {} : { cursor }),
 				});
@@ -879,7 +902,7 @@ describe("listDaemonSessions", () => {
 			expect(new Set(collected).size).toBe(expected.length);
 			expect(finalCursor).toBeDefined();
 			if (finalCursor === undefined) return;
-			const pastEnd = yield* listDaemonSessions(root, {
+			const pastEnd = yield* listDaemonSessions({
 				limit: 2,
 				cursor: finalCursor,
 			});
@@ -887,6 +910,7 @@ describe("listDaemonSessions", () => {
 			expect(pastEnd.hasMore).toBe(false);
 			expect(pastEnd.nextCursor).toBeNull();
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
@@ -913,7 +937,7 @@ describe("listDaemonSessions", () => {
 		]);
 
 		return Effect.gen(function* () {
-			const first = yield* listDaemonSessions(root, { limit: 2 });
+			const first = yield* listDaemonSessions({ limit: 2 });
 			expect(first.sessions.map((session) => session.id)).toEqual([
 				"five",
 				"four",
@@ -922,7 +946,7 @@ describe("listDaemonSessions", () => {
 			expect(first.nextCursor).toEqual({ updatedAt: 400, id: "four" });
 			if (first.nextCursor === null) return;
 
-			const second = yield* listDaemonSessions(root, {
+			const second = yield* listDaemonSessions({
 				limit: 2,
 				cursor: first.nextCursor,
 			});
@@ -934,7 +958,7 @@ describe("listDaemonSessions", () => {
 			expect(second.nextCursor).toEqual({ updatedAt: 200, id: "two" });
 			if (second.nextCursor === null) return;
 
-			const final = yield* listDaemonSessions(root, {
+			const final = yield* listDaemonSessions({
 				limit: 2,
 				cursor: second.nextCursor,
 			});
@@ -942,6 +966,7 @@ describe("listDaemonSessions", () => {
 			expect(final.hasMore).toBe(false);
 			expect(final.nextCursor).toBeNull();
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
@@ -997,7 +1022,7 @@ describe("listDaemonSessions", () => {
 		];
 
 		return Effect.gen(function* () {
-			const allMatches = yield* listDaemonSessions(root, { search: "nEeDlE" });
+			const allMatches = yield* listDaemonSessions({ search: "nEeDlE" });
 			expect(allMatches.sessions.map((session) => session.id)).toEqual(
 				expected,
 			);
@@ -1007,7 +1032,7 @@ describe("listDaemonSessions", () => {
 			const paged: string[] = [];
 			let cursor: { updatedAt: number; id: string } | undefined;
 			for (;;) {
-				const page = yield* listDaemonSessions(root, {
+				const page = yield* listDaemonSessions({
 					search: "needle",
 					limit: 2,
 					...(cursor === undefined ? {} : { cursor }),
@@ -1018,6 +1043,7 @@ describe("listDaemonSessions", () => {
 			}
 			expect(paged).toEqual(expected);
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
@@ -1053,7 +1079,7 @@ describe("listDaemonSessions", () => {
 		]);
 
 		return Effect.gen(function* () {
-			const firstPage = yield* listDaemonSessions(root, {
+			const firstPage = yield* listDaemonSessions({
 				scope: "project-b",
 				limit: 2,
 			});
@@ -1066,7 +1092,7 @@ describe("listDaemonSessions", () => {
 				"project-b",
 			]);
 
-			const secondPage = yield* listDaemonSessions(root, {
+			const secondPage = yield* listDaemonSessions({
 				scope: "project-b",
 				limit: 2,
 				...(firstPage.nextCursor === null
@@ -1078,7 +1104,7 @@ describe("listDaemonSessions", () => {
 			]);
 			expect(secondPage.hasMore).toBe(false);
 
-			const scopedSearch = yield* listDaemonSessions(root, {
+			const scopedSearch = yield* listDaemonSessions({
 				scope: "project-a",
 				search: "needle",
 			});
@@ -1086,6 +1112,7 @@ describe("listDaemonSessions", () => {
 				"a-needle",
 			]);
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
@@ -1111,12 +1138,13 @@ describe("listDaemonSessions", () => {
 		]);
 
 		return Effect.gen(function* () {
-			const result = yield* listDaemonSessions(root, { search: "%_" });
+			const result = yield* listDaemonSessions({ search: "%_" });
 			expect(result.sessions.map((session) => session.id)).toEqual([
 				"literal-a",
 				"literal-b",
 			]);
 		}).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
@@ -1165,7 +1193,7 @@ describe("listDaemonSessions", () => {
 			]);
 
 			return Effect.gen(function* () {
-				const result = yield* listDaemonSessions(root, { limit: 1 });
+				const result = yield* listDaemonSessions({ limit: 1 });
 				expect(result.sessions.map((session) => session.id)).toEqual(["a-new"]);
 				expect(result.hasMore).toBe(true);
 				expect(result.availability).toEqual(
@@ -1179,6 +1207,7 @@ describe("listDaemonSessions", () => {
 					]),
 				);
 			}).pipe(
+				Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 				Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 				Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 				Effect.provide(
@@ -1206,7 +1235,7 @@ describe("listDaemonSessions", () => {
 });
 
 describe("ResolveSession", () => {
-	it.scoped("finds indexed sessions and rejects unknown IDs", () => {
+	it.effect("finds indexed sessions and rejects unknown IDs", () => {
 		const root = makeTemporaryRoot();
 		const projects = ["project-a", "project-b"].map((slug) => ({
 			slug,
@@ -1241,10 +1270,10 @@ describe("ResolveSession", () => {
 				}),
 			).toEqual({ projectSlug: "project-b" });
 			expect(
-				yield* Effect.either(client.ResolveSession({ sessionId: "unknown" })),
+				yield* Effect.result(client.ResolveSession({ sessionId: "unknown" })),
 			).toMatchObject({
-				_tag: "Left",
-				left: { _tag: "WsRpcError", message: "Unknown session: unknown" },
+				_tag: "Failure",
+				failure: { _tag: "WsRpcError", message: "Unknown session: unknown" },
 			});
 		}).pipe(
 			Effect.provide(

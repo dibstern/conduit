@@ -2,18 +2,12 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import {
-	Effect,
-	Exit,
-	Layer,
-	Logger,
-	LogLevel,
-	Option,
-	Scope,
-	TestClock,
-} from "effect";
+import { Effect, Exit, Layer, Logger, Option, References, Scope } from "effect";
+import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
+import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { AutoSettleLive } from "../../../src/lib/domain/daemon/Layers/auto-settle-layer.js";
+import { makeDaemonSharedStoreLayer } from "../../../src/lib/domain/daemon/Layers/daemon-shared-store-layer.js";
 import {
 	DaemonConfigRefLive,
 	makeDaemonConfigFromOptions,
@@ -28,7 +22,6 @@ import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-s
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
 
 const DAY = 86_400_000;
 
@@ -47,7 +40,7 @@ function fakeRelay(
 }
 
 describe("daemon automatic settlement layer", () => {
-	it.scoped(
+	it.effect(
 		"skips missing projects on every sweep and logs once at debug level",
 		() =>
 			Effect.gen(function* () {
@@ -57,9 +50,12 @@ describe("daemon automatic settlement layer", () => {
 				const get = vi.fn(() => Effect.succeed(fakeRelay("cold", sweep)));
 				const logs: Array<{ level: string; message: unknown }> = [];
 				const logger = Logger.make(({ logLevel, message }) => {
-					logs.push({ level: logLevel.label, message });
+					logs.push({ level: logLevel.toUpperCase(), message });
 				});
-				const layer = AutoSettleLive(directory).pipe(
+				const layer = AutoSettleLive().pipe(
+					Layer.provide(
+						makeDaemonSharedStoreLayer(directory, defaultDaemonConfig()),
+					),
 					Layer.provide(
 						Layer.mergeAll(
 							DaemonConfigRefLive(
@@ -77,7 +73,7 @@ describe("daemon automatic settlement layer", () => {
 									folders: [missingDirectory],
 								},
 							]),
-							Layer.succeed(RelayCacheTag, {
+							Layer.succeed(RelayCacheTag)({
 								peek: (slug) =>
 									Effect.succeed(
 										slug === "running"
@@ -88,20 +84,28 @@ describe("daemon automatic settlement layer", () => {
 								invalidate: () => Effect.void,
 							}),
 							DaemonEventBusLive,
-							Logger.replace(Logger.defaultLogger, logger),
+							Logger.layer([logger]),
 						),
 					),
 				);
 				const scope = yield* Scope.make();
 				try {
-					yield* Layer.buildWithScope(layer, scope).pipe(
-						Logger.withMinimumLogLevel(LogLevel.Debug),
+					yield* Layer.buildWithScope(Layer.fresh(layer), scope).pipe(
+						Effect.provideService(References.MinimumLogLevel, "Debug"),
 					);
 					yield* TestClock.adjust("1 millis");
 					yield* TestClock.adjust("2 minutes");
 					expect(get).not.toHaveBeenCalled();
 					expect(sweep).not.toHaveBeenCalled();
-					expect(logs.filter((log) => log.level === "DEBUG")).toHaveLength(1);
+					expect(
+						logs.filter(
+							(log) =>
+								log.level === "DEBUG" &&
+								String(log.message).includes(
+									"Skipping background work for missing project directory",
+								),
+						),
+					).toHaveLength(1);
 					expect(logs.filter((log) => log.level === "WARN")).toEqual([]);
 					mkdirSync(missingDirectory);
 					yield* TestClock.adjust("1 minute");
@@ -113,7 +117,7 @@ describe("daemon automatic settlement layer", () => {
 			}),
 	);
 
-	it.scoped(
+	it.effect(
 		"ticks a running relay, skips cold empty projects, and survives one project failure",
 		() =>
 			Effect.gen(function* () {
@@ -136,7 +140,8 @@ describe("daemon automatic settlement layer", () => {
 						relays.get(slug) ?? fakeRelay(slug, () => Effect.succeed(0)),
 					),
 				);
-				const layer = AutoSettleLive(dir).pipe(
+				const layer = AutoSettleLive().pipe(
+					Layer.provide(makeDaemonSharedStoreLayer(dir, defaultDaemonConfig())),
 					Layer.provideMerge(
 						Layer.mergeAll(
 							DaemonConfigRefLive(
@@ -162,9 +167,9 @@ describe("daemon automatic settlement layer", () => {
 									lastUsed: 1,
 								},
 							]),
-							Layer.succeed(RelayCacheTag, {
+							Layer.succeed(RelayCacheTag)({
 								peek: (slug: string) =>
-									Effect.succeed(Option.fromNullable(relays.get(slug))),
+									Effect.succeed(Option.fromNullishOr(relays.get(slug))),
 								get,
 								invalidate: () => Effect.void,
 							}),
@@ -174,7 +179,7 @@ describe("daemon automatic settlement layer", () => {
 				);
 				const scope = yield* Scope.make();
 				try {
-					yield* Layer.buildWithScope(layer, scope);
+					yield* Layer.buildWithScope(Layer.fresh(layer), scope);
 					yield* TestClock.adjust("1 millis");
 					expect(calls).toContain("running");
 					expect(get).not.toHaveBeenCalled();
@@ -187,15 +192,14 @@ describe("daemon automatic settlement layer", () => {
 			}),
 	);
 
-	it.scoped(
+	it.effect(
 		"starts a cold project only when its persisted session is eligible",
 		() =>
 			Effect.gen(function* () {
 				const dir = mkdtempSync(join(tmpdir(), "conduit-auto-cold-"));
-				mkdirSync(projectStorageDir(dir, "cold"), { recursive: true });
 				const now = Date.now();
 				const old = now - 4 * DAY;
-				const dbPath = join(projectStorageDir(dir, "cold"), "events.db");
+				const dbPath = join(dir, "events.db");
 				yield* Effect.gen(function* () {
 					const store = yield* EventStoreEffectTag;
 					const runner = yield* ProjectionRunnerEffectTag;
@@ -216,11 +220,14 @@ describe("daemon automatic settlement layer", () => {
 					])
 						yield* runner.projectEvent(yield* store.append(event));
 				}).pipe(
-					Effect.provide(makePersistenceEffectLayer(dbPath, "test-project")),
+					Effect.provide(makePersistenceEffectLayer(dbPath, "cold"), {
+						local: true,
+					}),
 				);
 				const sweep = vi.fn(() => Effect.succeed(1));
 				const get = vi.fn(() => Effect.succeed(fakeRelay("cold", sweep)));
-				const layer = AutoSettleLive(dir).pipe(
+				const layer = AutoSettleLive().pipe(
+					Layer.provide(makeDaemonSharedStoreLayer(dir, defaultDaemonConfig())),
 					Layer.provideMerge(
 						Layer.mergeAll(
 							DaemonConfigRefLive(
@@ -234,7 +241,7 @@ describe("daemon automatic settlement layer", () => {
 									lastUsed: 1,
 								},
 							]),
-							Layer.succeed(RelayCacheTag, {
+							Layer.succeed(RelayCacheTag)({
 								peek: () => Effect.succeed(Option.none<Relay>()),
 								get,
 								invalidate: () => Effect.void,
@@ -246,7 +253,7 @@ describe("daemon automatic settlement layer", () => {
 				const scope = yield* Scope.make();
 				try {
 					yield* TestClock.setTime(now);
-					yield* Layer.buildWithScope(layer, scope);
+					yield* Layer.buildWithScope(Layer.fresh(layer), scope);
 					yield* TestClock.adjust("1 millis");
 					expect(get).toHaveBeenCalledWith("cold");
 					expect(sweep).toHaveBeenCalled();
@@ -257,13 +264,18 @@ describe("daemon automatic settlement layer", () => {
 			}),
 	);
 
-	it.scoped(
+	it.effect(
 		"disables settlement but still stops workers for missing projects",
 		() =>
 			Effect.gen(function* () {
 				const peek = vi.fn(() => Effect.succeed(Option.none<Relay>()));
 				const invalidate = vi.fn(() => Effect.void);
-				const layer = AutoSettleLive("/tmp/conduit-auto-disabled-fixture").pipe(
+				const dir = mkdtempSync(join(tmpdir(), "conduit-auto-disabled-"));
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				);
+				const layer = AutoSettleLive().pipe(
+					Layer.provide(makeDaemonSharedStoreLayer(dir, defaultDaemonConfig())),
 					Layer.provideMerge(
 						Layer.mergeAll(
 							DaemonConfigRefLive(
@@ -277,7 +289,7 @@ describe("daemon automatic settlement layer", () => {
 									lastUsed: 1,
 								},
 							]),
-							Layer.succeed(RelayCacheTag, {
+							Layer.succeed(RelayCacheTag)({
 								peek,
 								get: () => Effect.fail(new Error("must skip")),
 								invalidate,
@@ -287,7 +299,7 @@ describe("daemon automatic settlement layer", () => {
 					),
 				);
 				const scope = yield* Scope.make();
-				yield* Layer.buildWithScope(layer, scope);
+				yield* Layer.buildWithScope(Layer.fresh(layer), scope);
 				yield* TestClock.adjust("1 minute");
 				expect(peek).not.toHaveBeenCalled();
 				expect(invalidate).toHaveBeenCalledWith("cold");

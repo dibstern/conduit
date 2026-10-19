@@ -65,7 +65,7 @@ export class InProcessSessionRunner implements SessionRunner {
 	executeEffect(
 		command: SessionCommand,
 	): Effect.Effect<TurnResult | undefined, SessionFailure> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			switch (command.type) {
 				case "send-turn": {
 					this.sessions.add(command.input.sessionId);
@@ -79,7 +79,7 @@ export class InProcessSessionRunner implements SessionRunner {
 					if (!controller)
 						return yield* Effect.die("Missing runner sink binding");
 					if (command.aborted) controller.abort();
-					return yield* Effect.gen(this, function* () {
+					return yield* Effect.gen({ self: this }, function* () {
 						yield* this.payload.prepareTurn?.(command, sink) ?? Effect.void;
 						return yield* this.payload.sendTurn(
 							command.input,

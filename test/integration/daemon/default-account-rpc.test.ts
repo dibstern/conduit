@@ -12,10 +12,10 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcTest } from "@effect/rpc";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
-import { Effect, Either, Layer, Queue, Stream } from "effect";
+import { Effect, Result as Either, Layer, Queue, Stream } from "effect";
+import { RpcTest } from "effect/rpc";
+import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
 import { AccountChangeRejected } from "../../../src/lib/contracts/account.js";
@@ -29,7 +29,7 @@ import {
 } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import type { DaemonInstanceConfig } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
-import { projectEventsDbPath } from "../../../src/lib/persistence/project-storage.js";
+import { daemonStorePath } from "../../../src/lib/persistence/project-storage.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import type { StoredProject } from "../../../src/lib/types.js";
@@ -127,8 +127,7 @@ const sessionFixture = () => {
 		folders: [join(root, "project")],
 	};
 	mkdirSync(project.folders[0]);
-	const database = projectEventsDbPath({ configDir: root, ...project });
-	mkdirSync(join(root, "projects", project.slug), { recursive: true });
+	const database = daemonStorePath(root);
 	writeEventStore(
 		database,
 		Effect.gen(function* () {
@@ -140,8 +139,8 @@ const sessionFixture = () => {
 				"opencode",
 				"unknown",
 			]) {
-				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-				VALUES (${accountId}, 'opencode', ${accountId}, 'idle', 1, 1)`;
+				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, project_id)
+				VALUES (${accountId}, 'opencode', ${accountId}, 'idle', 1, 1, ${project.slug})`;
 				yield* sql`INSERT INTO session_providers (id, session_id, provider, status, activated_at)
 				VALUES (${`binding-${accountId}`}, ${accountId}, ${accountId}, 'active', 1)`;
 			}
@@ -163,7 +162,7 @@ const makeClient = Effect.gen(function* () {
 });
 
 describe("default Claude account through daemon RPC", () => {
-	it.scoped(
+	it.effect(
 		"resolves deleted bindings and refreshes effective accounts when the default moves",
 		() => {
 			const project = sessionFixture();
@@ -214,7 +213,7 @@ describe("default Claude account through daemon RPC", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"keeps legacy history visible without a built-in account and after adding the first account",
 		() => {
 			const project = sessionFixture();
@@ -260,7 +259,7 @@ describe("default Claude account through daemon RPC", () => {
 		},
 	);
 
-	it.scoped("follows a new default when no live claude id remains", () => {
+	it.effect("follows a new default when no live claude id remains", () => {
 		const project = sessionFixture();
 		return Effect.gen(function* () {
 			const client = yield* makeClient;
@@ -298,7 +297,7 @@ describe("default Claude account through daemon RPC", () => {
 		);
 	});
 
-	it.scoped(
+	it.effect(
 		"persists the pointer and refreshes two clients and session subscribers",
 		() =>
 			Effect.gen(function* () {
@@ -360,18 +359,18 @@ describe("default Claude account through daemon RPC", () => {
 			}).pipe(Effect.provide(fixture()), Effect.timeout("10 seconds")),
 	);
 
-	it.scoped(
+	it.effect(
 		"rejects unknown and OpenCode defaults without moving the pointer",
 		() =>
 			Effect.gen(function* () {
 				const client = yield* makeClient;
 				for (const instanceId of ["missing", "opencode"]) {
-					const result = yield* Effect.either(
+					const result = yield* Effect.result(
 						client.SetDefault({ instanceId }),
 					);
-					expect(Either.isLeft(result)).toBe(true);
-					if (Either.isLeft(result))
-						expect(result.left).toBeInstanceOf(AccountChangeRejected);
+					expect(Either.isFailure(result)).toBe(true);
+					if (Either.isFailure(result))
+						expect(result.failure).toBeInstanceOf(AccountChangeRejected);
 				}
 				const initial = yield* Stream.runHead(client.SubscribeInstances({}));
 				expect(

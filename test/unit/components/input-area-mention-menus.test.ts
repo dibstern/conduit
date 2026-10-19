@@ -13,7 +13,8 @@ import {
 	applyApprovalEnvelope,
 	clearAll,
 } from "../../../src/lib/frontend/stores/permissions.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import { seedRootSessions } from "../stores/session-fixtures.js";
 
 const testSessionId = "input-area-mention-menus-test";
 
@@ -35,7 +36,10 @@ function keydown(textarea: HTMLTextAreaElement, key: string) {
 
 describe("InputArea detached listboxes", () => {
 	beforeEach(() => {
-		sessionState.currentId = testSessionId;
+		seedRootSessions([
+			{ id: testSessionId, title: "Session", projectSlug: "test" },
+		]);
+		openSessionForSetup(testSessionId, "test");
 		phaseToIdle(getOrCreateSessionActivity(testSessionId));
 		clearAll();
 		getOrCreateSessionActivity(testSessionId).phase = "idle";
@@ -61,7 +65,7 @@ describe("InputArea detached listboxes", () => {
 	afterEach(() => {
 		cleanup();
 		phaseToIdle(getOrCreateSessionActivity(testSessionId));
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		applyGetCommandsResponse({ projectSlug: "test", commands: [] });
 		clearAll();
 		fileTreeState.entries = [];

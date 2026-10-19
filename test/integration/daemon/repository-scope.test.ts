@@ -1,10 +1,5 @@
-// Failure cases, written before implementation:
-// - A repository scope omits one clone or admits an unrelated repository.
-// - Narrowing to a project still returns the other clone's sessions.
-// - A project slug resembling the group encoding is interpreted as a group.
-// - Search or a keyset page drops the scope or filters after merging the page.
-// - Turning grouping off makes a stale scope fall back to all projects.
-// - Removing the scoped projects makes an obsolete group scope show other sessions.
+// Failure cases: project scope leaks another clone, search or pagination drops
+// scope, or a removed project falls back to the unscoped list.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -16,7 +11,7 @@ import {
 	ProcessHarness,
 } from "../../helpers/process-harness.js";
 
-// Same isolated Git and built-daemon helpers as repository-grouping.test.ts.
+// Isolate Git discovery from the developer shell.
 const gitEnv = { ...process.env };
 for (const key of [
 	"GIT_DIR",
@@ -30,7 +25,7 @@ function git(cwd: string, ...args: string[]) {
 	execFileSync("git", args, { cwd, env: gitEnv, stdio: "pipe", timeout: 5000 });
 }
 
-describe("repository scope through the built daemon", () => {
+describe("project scope through the daemon", () => {
 	let harness: ProcessHarness | undefined;
 	let browser: ProcessBrowser | undefined;
 	const names = new Map<string, string>();
@@ -75,11 +70,8 @@ describe("repository scope through the built daemon", () => {
 		}
 	});
 
-	it("scopes SSH and HTTPS clones, narrows, searches, pages and rejects stale groups", async () => {
-		harness = ProcessHarness.create({
-			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
-			foregroundCli: true,
-		});
+	it("scopes clones separately through search, paging and project removal", async () => {
+		harness = ProcessHarness.create();
 		await harness.restart();
 		browser = await harness.connect();
 		const client = browser;
@@ -87,7 +79,7 @@ describe("repository scope through the built daemon", () => {
 		const remote = join(root, "remote.git");
 		const ssh = join(root, "ssh-clone");
 		const https = join(root, "https-clone");
-		const unrelated = join(root, "group-[repository-github.com-acme-shared]");
+		const unrelated = join(root, "library-clone");
 		git(root, "init", "--bare", "-q", remote);
 		for (const clone of [ssh, https, unrelated])
 			git(root, "clone", "-q", remote, clone);
@@ -120,18 +112,7 @@ describe("repository scope through the built daemon", () => {
 		const [sshSlug, httpsSlug, unrelatedSlug] = slugs;
 		if (!sshSlug || !httpsSlug || !unrelatedSlug)
 			throw new Error("Missing saved project");
-		expect(unrelatedSlug).toBe("group-repository-github-com-acme-shared");
-		const projects = await Effect.runPromise(client.rpc.GetProjects({}));
-		const group = projects.projects.find(({ slug }) => slug === sshSlug)?.group;
-		expect(group).toMatchObject({
-			label: "Shared",
-			needsProjectQualifier: true,
-		});
-		expect(
-			projects.projects.find(({ slug }) => slug === httpsSlug)?.group,
-		).toEqual(group);
-		if (!group) throw new Error("Missing repository group");
-		const scope = `/group/${group.key}`;
+		const scope = sshSlug;
 		const sessionIds = new Map<string, string[]>();
 		for (const [slug, title] of [
 			[sshSlug, "SSH"],
@@ -147,6 +128,12 @@ describe("repository scope through the built daemon", () => {
 						projectSlug: slug,
 						originId: "repository-scope-test",
 						providerId: "claude",
+						model: {
+							providerId: "claude",
+							modelId: "sonnet",
+							variant: "",
+							contextWindow: "200k",
+						},
 						title: name,
 					}),
 				);
@@ -171,29 +158,24 @@ describe("repository scope through the built daemon", () => {
 			});
 			return result;
 		};
-		const expected = [
-			...(sessionIds.get(sshSlug) ?? []),
-			...(sessionIds.get(httpsSlug) ?? []),
-		].sort();
+		const expected = [...(sessionIds.get(sshSlug) ?? [])].sort();
 		expect(
-			(await read("repository", { scope })).sessions.map(({ id }) => id).sort(),
+			(await read("all-projects", {})).sessions.map(({ id }) => id).sort(),
+		).toEqual([...sessionIds.values()].flat().sort());
+		expect(
+			(await read("project", { scope })).sessions.map(({ id }) => id).sort(),
 		).toEqual(expected);
 		expect(
-			(await read("project", { scope: sshSlug })).sessions
-				.map(({ id }) => id)
-				.sort(),
-		).toEqual([...(sessionIds.get(sshSlug) ?? [])].sort());
-		expect(
-			(await read("group-looking-project", { scope: unrelatedSlug })).sessions
+			(await read("unrelated-project", { scope: unrelatedSlug })).sessions
 				.map(({ id }) => id)
 				.sort(),
 		).toEqual([...(sessionIds.get(unrelatedSlug) ?? [])].sort());
-		const first = await read("first-page", { scope, limit: 2 });
+		const first = await read("first-page", { scope, limit: 1 });
 		expect(first.hasMore).toBe(true);
 		if (!first.nextCursor) throw new Error("Missing browse cursor");
 		const second = await read("next-page", {
 			scope,
-			limit: 2,
+			limit: 1,
 			cursor: first.nextCursor,
 		});
 		expect(second.hasMore).toBe(false);
@@ -202,38 +184,12 @@ describe("repository scope through the built daemon", () => {
 		).toEqual(expected);
 		const matches = await read("search", { scope, search: "needle" });
 		expect(matches.sessions.map(({ id }) => names.get(id)).sort()).toEqual([
-			"needle HTTPS",
 			"needle SSH",
 		]);
-		const searchFirst = await read("search-first-page", {
-			scope,
-			search: "needle",
-			limit: 1,
-		});
-		expect(searchFirst.hasMore).toBe(true);
-		if (!searchFirst.nextCursor) throw new Error("Missing search cursor");
-		const searchNext = await read("search-next-page", {
-			scope,
-			search: "needle",
-			limit: 1,
-			cursor: searchFirst.nextCursor,
-		});
-		expect(searchNext.hasMore).toBe(false);
-		expect(
-			[...searchFirst.sessions, ...searchNext.sessions]
-				.map(({ id }) => id)
-				.sort(),
-		).toEqual(matches.sessions.map(({ id }) => id).sort());
-		await Effect.runPromise(client.rpc.SetDefaultGroupingMode({ mode: "off" }));
-		const stale = await read("stale-after-grouping-off", { scope });
 		const unknown = await read("unknown-project", { scope: "not-registered" });
-		expect(stale).toEqual(unknown);
-		expect(stale.sessions).toEqual([]);
-		expect(stale.hasMore).toBe(false);
-		expect(stale.nextCursor).toBeNull();
-		await Effect.runPromise(
-			client.rpc.SetDefaultGroupingMode({ mode: "repository" }),
-		);
+		expect(unknown.sessions).toEqual([]);
+		expect(unknown.hasMore).toBe(false);
+		expect(unknown.nextCursor).toBeNull();
 		for (const slug of [sshSlug, httpsSlug])
 			await Effect.runPromise(client.rpc.RemoveProject({ slug }));
 		expect(await read("stale-after-project-removal", { scope })).toEqual(

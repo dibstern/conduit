@@ -25,15 +25,7 @@ import {
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	ContinueSessionInMainFolder,
-	CreateSession,
-	ListDaemonSessions,
-	MoveSessionWorkspace,
-	RecreateSessionWorktree,
-	RenameSessionBranch,
-	SubmitInput,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -55,7 +47,7 @@ function git(directory: string, ...args: string[]) {
 }
 
 function workspaceEvents(fixture: ProcessHarness, sessionId: string) {
-	const db = new Database(fixture.projectStorePath(), { readonly: true });
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
 		return (
 			db
@@ -80,7 +72,7 @@ function recordedWorkspace(
 	fixture: ProcessHarness,
 	sessionId: string,
 ): unknown {
-	const db = new Database(fixture.projectStorePath(), { readonly: true });
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
 		const row = db
 			.prepare("SELECT workspace FROM sessions WHERE id = ?")
@@ -171,13 +163,11 @@ const gate = ${JSON.stringify(gate)};
 		});
 		const socket = join(fixture.configDir, "relay.sock");
 		const sessions = () =>
-			sendRpcRequest(
-				socket,
-				new ListDaemonSessions({
-					projectSlug: "process-test",
-					scope: "process-test",
-				}),
-			);
+			sendRpcRequest(socket, {
+				_tag: "ListDaemonSessions",
+				projectSlug: "process-test",
+				scope: "process-test",
+			});
 		const row = async (sessionId: string) => {
 			const session = (await sessions()).sessions.find(
 				({ id }) => id === sessionId,
@@ -186,18 +176,16 @@ const gate = ${JSON.stringify(gate)};
 			return session;
 		};
 		const create = async (title: string, isolated = true) => {
-			const { sessionId } = await sendRpcRequest(
-				socket,
-				new CreateSession({
-					permissionMode: "ask",
-					model: { providerId: "claude", modelId: "sonnet" },
-					projectSlug: "process-test",
-					originId: "missing-worktree-test",
-					providerId: "claude",
-					title,
-					...(isolated ? { newWorktree: true } : {}),
-				}),
-			);
+			const { sessionId } = await sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				permissionMode: "ask",
+				model: { providerId: "claude", modelId: "sonnet" },
+				projectSlug: "process-test",
+				originId: "missing-worktree-test",
+				providerId: "claude",
+				title,
+				...(isolated ? { newWorktree: true } : {}),
+			});
 			names.set(sessionId, title);
 			const session = await row(sessionId);
 			const path = session.workspace?.worktrees[fixture.projectDir];
@@ -213,16 +201,18 @@ const gate = ${JSON.stringify(gate)};
 			return { id: sessionId, path: path ?? fixture.projectDir, session };
 		};
 		const recreate = (sessionId: string) =>
-			sendRpcRequest(socket, new RecreateSessionWorktree({ sessionId }), {
-				requestTimeoutMs: 30_000,
-			});
-		const continueInMain = (sessionId: string) =>
 			sendRpcRequest(
 				socket,
-				new ContinueSessionInMainFolder({
-					sessionId,
-				}),
+				{ _tag: "RecreateSessionWorktree", sessionId },
+				{
+					requestTimeoutMs: 30_000,
+				},
 			);
+		const continueInMain = (sessionId: string) =>
+			sendRpcRequest(socket, {
+				_tag: "ContinueSessionInMainFolder",
+				sessionId,
+			});
 		return { fixture, socket, row, create, recreate, continueInMain, gate };
 	}
 
@@ -352,7 +342,7 @@ const gate = ${JSON.stringify(gate)};
 		if (!harness) return;
 		const fixture = harness;
 		try {
-			if (existsSync(fixture.projectStorePath())) capture("final", fixture);
+			if (existsSync(fixture.daemonStorePath())) capture("final", fixture);
 			evidence["phases"] = phases;
 			evidence["result"] = task.result?.state;
 			evidence["errors"] =
@@ -557,13 +547,11 @@ const gate = ${JSON.stringify(gate)};
 		const path = join(fixture.root, "existing-worktree");
 		git(fixture.projectDir, "worktree", "add", "-b", "feature/existing", path);
 		paths.set(path, "<existing-worktree>");
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId: local.id,
-				path,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId: local.id,
+			path,
+		});
 		expect((await row(local.id)).workspace?.origin).toBe("existing");
 		const browser = await fixture.connect();
 		await browser.view(local.id);
@@ -606,13 +594,11 @@ const gate = ${JSON.stringify(gate)};
 		);
 		const isolated = await create("pruned");
 		if (renamed)
-			await sendRpcRequest(
-				socket,
-				new RenameSessionBranch({
-					sessionId: isolated.id,
-					branchName: "renamed-recovery",
-				}),
-			);
+			await sendRpcRequest(socket, {
+				_tag: "RenameSessionBranch",
+				sessionId: isolated.id,
+				branchName: "renamed-recovery",
+			});
 		const branch = git(isolated.path, "branch", "--show-current");
 		const head = git(isolated.path, "rev-parse", "HEAD");
 		const recorded = recordedWorkspace(fixture, isolated.id);
@@ -762,15 +748,13 @@ const gate = ${JSON.stringify(gate)};
 			});
 			const inputId = randomUUID();
 			const cursor = browser.frames.length;
-			await sendRpcRequest(
-				socket,
-				new SubmitInput({
-					sessionId: isolated.id,
-					inputId,
-					delivery: "queue",
-					text: "workspace-isolation-write raced recreate",
-				}),
-			);
+			await sendRpcRequest(socket, {
+				_tag: "input.submit",
+				sessionId: isolated.id,
+				inputId,
+				delivery: "queue",
+				text: "workspace-isolation-write raced recreate",
+			});
 			expect(
 				workspaceEvents(fixture, isolated.id).some(
 					({ type, data }) =>
@@ -854,15 +838,13 @@ const gate = ${JSON.stringify(gate)};
 			rmSync(isolated.path, { recursive: true, force: true });
 			const inputId = randomUUID();
 			const cursor = browser.frames.length;
-			await sendRpcRequest(
-				socket,
-				new SubmitInput({
-					sessionId: isolated.id,
-					inputId,
-					delivery: "queue",
-					text: "workspace-isolation-write queued after Continue",
-				}),
-			);
+			await sendRpcRequest(socket, {
+				_tag: "input.submit",
+				sessionId: isolated.id,
+				inputId,
+				delivery: "queue",
+				text: "workspace-isolation-write queued after Continue",
+			});
 			const before = workspaceEvents(fixture, isolated.id);
 			const admitted = before.find(
 				({ type, data }) =>

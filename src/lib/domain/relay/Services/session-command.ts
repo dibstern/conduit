@@ -10,11 +10,11 @@
 // See docs/adr/0004-session-mutations-are-canonical-events.md.
 
 import { randomUUID } from "node:crypto";
-import { SqlClient } from "@effect/sql";
 import { type Cause, Data, Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import type { Account } from "../../../contracts/account.js";
 import {
-	getProviderDriver,
+	type KnownProviderDriverKind,
 	PROVIDER_DRIVERS,
 } from "../../../contracts/provider-instance.js";
 import {
@@ -45,6 +45,8 @@ import {
 } from "../../../persistence/fork-history.js";
 import { sameClaudeLogin } from "../../../provider/claude/claude-sdk-env.js";
 import { forkClaudeTranscript } from "../../../provider/claude/claude-session-fork.js";
+import { renderCursorForkDigest } from "../../../provider/cursor/cursor-fork-digest.js";
+import { cursorUpstreamAdapter } from "../../../provider/cursor/cursor-session-upstream.js";
 import { sideThreadPermissionRules } from "../../../provider/opencode-provider-instance.js";
 import {
 	PickRequired,
@@ -62,6 +64,20 @@ import { loadServerSessionPick, sessionPickEvents } from "./session-pick.js";
 import { SessionWorkspaceTag } from "./session-workspace.js";
 
 export const SIDE_THREAD_TITLE_MAX_LENGTH = 120;
+
+export type SessionPlacement =
+	| { parentId?: never; forkedFrom?: never; sideThread?: false }
+	| { parentId: string; forkedFrom?: never; sideThread?: false }
+	| { parentId?: never; forkedFrom: string; sideThread?: false }
+	| { parentId: string; forkedFrom: string; sideThread: true };
+
+export const forkPlacement = (
+	sourceId: string,
+	sideThread: boolean,
+): Extract<SessionPlacement, { forkedFrom: string }> =>
+	sideThread
+		? { parentId: sourceId, forkedFrom: sourceId, sideThread: true }
+		: { forkedFrom: sourceId };
 
 const sideThreadTitle = (question: string) =>
 	normalizeSessionTitle(question)
@@ -91,6 +107,8 @@ type SessionCommandType =
 	| "session.setup_finished"
 	| "session.settled"
 	| "session.unsettled"
+	| "session.archived"
+	| "session.unarchived"
 	| "session.pinned"
 	| "session.unpinned"
 	| "session.snoozed"
@@ -103,23 +121,25 @@ type SessionCommandType =
 export type SessionCommand = {
 	[K in SessionCommandType]: {
 		readonly type: K;
-		readonly data: EventPayloadMap[K];
+		readonly data: K extends "session.created"
+			? Omit<EventPayloadMap[K], keyof SessionPlacement> & SessionPlacement
+			: EventPayloadMap[K];
 	};
 }[SessionCommandType];
 
 /**
  * Upstream sync varies for a real reason: OpenCode keeps its own session
- * registry that has to be told about mutations, and the Claude Agent SDK has no
- * such registry. Two adapters, so the seam is real rather than hypothetical.
+ * registry that has to be told about mutations, Cursor stores local agents,
+ * and the Claude Agent SDK has no such registry.
  *
  * Sync is best-effort by contract — the local write is authoritative, so a
  * failure here is logged, never propagated.
  */
 export interface SessionUpstreamAdapter {
-	readonly provider: "opencode" | "claude";
+	readonly provider: KnownProviderDriverKind;
 	readonly sync: (
 		command: SessionCommand,
-	) => Effect.Effect<void, Cause.UnknownException>;
+	) => Effect.Effect<void, Cause.UnknownError>;
 }
 
 export interface ApplySessionCommandOptions {
@@ -160,6 +180,8 @@ export const openCodeUpstreamAdapter = (
 				return Effect.void;
 			case "session.settled":
 			case "session.unsettled":
+			case "session.archived":
+			case "session.unarchived":
 			case "session.pinned":
 			case "session.unpinned":
 			case "session.snoozed":
@@ -185,6 +207,30 @@ export const claudeUpstreamAdapter: SessionUpstreamAdapter = {
 	// The Claude Agent SDK has no server-side session registry to keep in step.
 	sync: () => Effect.void,
 };
+
+export const sessionUpstreamAdapter = (
+	provider: KnownProviderDriverKind,
+	api: OpenCodeAPI,
+): Effect.Effect<SessionUpstreamAdapter> =>
+	Effect.gen(function* () {
+		switch (provider) {
+			case "opencode":
+				return openCodeUpstreamAdapter(api);
+			case "claude":
+				return claudeUpstreamAdapter;
+			case "cursor": {
+				const config = yield* Effect.serviceOption(ConfigTag);
+				return cursorUpstreamAdapter(
+					config._tag === "Some" && config.value.configDir !== undefined
+						? {
+								workspaceRoot: config.value.projectDir,
+								configDir: config.value.configDir,
+							}
+						: undefined,
+				);
+			}
+		}
+	});
 
 /**
  * Apply a session mutation: append, project, sync.
@@ -303,10 +349,7 @@ export const applySessionCommand = (
 					? options.upstreamAdapter
 					: command.type === "session.renamed" ||
 							command.type === "session.deleted"
-						? getProviderDriver(account?.driver ?? "opencode")
-								?.runsOpenCodeServer
-							? openCodeUpstreamAdapter(api)
-							: claudeUpstreamAdapter
+						? yield* sessionUpstreamAdapter(account?.driver ?? "opencode", api)
 						: null;
 
 			if (adapter !== null) {
@@ -327,7 +370,7 @@ export const applySessionCommand = (
 				yield* sync;
 			}
 		}).pipe(
-			Effect.catchAll((cause) =>
+			Effect.catch((cause) =>
 				Effect.sync(() => {
 					log.warn("Upstream session sync failed", {
 						operation: command.type,
@@ -526,7 +569,7 @@ export const forkOpenCodeSession = (
 			api.session.messagesPage(session.id, { limit: 1 }),
 		).pipe(
 			Effect.map((messages) => messages.at(-1)),
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.logWarning(
 					`Could not determine fork point for ${session.id}: ${String(error)}`,
 				).pipe(Effect.as(undefined)),
@@ -553,10 +596,9 @@ export const forkOpenCodeSession = (
 							sessionId: session.id,
 							title,
 							provider: account.id,
-							parentId: parentSessionId,
+							...forkPlacement(parentSessionId, Boolean(side)),
 							...(side
 								? {
-										sideThread: true,
 										permissionMode: "ask" as const,
 										startInputId: side.inputId,
 									}
@@ -697,9 +739,12 @@ const forkSessionInWorkspace = (
 				provider: "opencode" as const,
 			};
 		}
+		const digestFork =
+			PROVIDER_DRIVERS[account.driver].forkStrategy === "transcript-digest";
 		if (
-			!PROVIDER_DRIVERS[account.driver].supportsNativeResume ||
-			!("folder" in account)
+			!digestFork &&
+			(!PROVIDER_DRIVERS[account.driver].supportsNativeResume ||
+				!("folder" in account))
 		)
 			return yield* new SessionCommandError({
 				operation: "session.forked.unsupported_account",
@@ -711,7 +756,6 @@ const forkSessionInWorkspace = (
 				cause: parentSessionId,
 				message: `Parent session ${parentSessionId} was not found`,
 			});
-		// Claude forks through the turn holding the given message.
 		const stateOption = yield* Effect.serviceOption(ProviderStateEffectTag);
 		const projections = yield* Effect.serviceOption(ProjectionRunnerEffectTag);
 		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
@@ -723,19 +767,30 @@ const forkSessionInWorkspace = (
 			sql._tag === "None"
 		) {
 			return yield* new SessionCommandError({
-				operation: "session.forked.claude",
-				cause: "Claude fork requires provider state persistence",
+				operation: digestFork
+					? "session.forked.transcript"
+					: "session.forked.claude",
+				cause: digestFork
+					? "Transcript fork requires a persisted parent session"
+					: "Claude fork requires provider state persistence",
 			});
 		}
 		const state = stateOption.value;
 		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
-		if (config._tag === "None" || config.value.claudeSdk === undefined) {
-			return yield* new SessionCommandError({
-				operation: "session.forked.claude",
-				cause: "Claude fork requires project SDK configuration",
-			});
-		}
-		const claudeSdk = config.value.claudeSdk;
+		const native = yield* Effect.gen(function* () {
+			if (digestFork) return undefined;
+			if (!("folder" in account))
+				return yield* new SessionCommandError({
+					operation: "session.forked.unsupported_account",
+					cause: account.driver,
+				});
+			if (config._tag === "None" || config.value.claudeSdk === undefined)
+				return yield* new SessionCommandError({
+					operation: "session.forked.claude",
+					cause: "Claude fork requires project SDK configuration",
+				});
+			return { account, config: config.value, sdk: config.value.claudeSdk };
+		});
 		const commitAndSignal = yield* makeCommitAndSignal.pipe(
 			Effect.provideService(EventStoreEffectTag, eventStore.value),
 			Effect.provideService(ProjectionRunnerEffectTag, projections.value),
@@ -750,92 +805,149 @@ const forkSessionInWorkspace = (
 			),
 			Effect.provideService(SqlClient.SqlClient, sql.value),
 		);
-		const { historyMessageId, lastRewindCommitSequence, instanceIds } = source;
 		const side = options?.side;
 		const title = side ? sideThreadTitle(side.title) : `${parent.title} (fork)`;
-		let selected:
-			| {
-					account: Extract<Account, { driver: "claude" }>;
-					thread: NativeThread;
-			  }
-			| undefined;
-		for (const instanceId of instanceIds) {
-			const historical = yield* accounts.resolve({
-				_tag: "Id",
-				id: instanceId,
-			});
-			if (
-				!PROVIDER_DRIVERS[historical.driver].supportsNativeResume ||
-				!("folder" in historical)
-			)
-				continue;
-			const thread = yield* state.nativeThread(parentSessionId, historical.id);
-			if (
-				thread &&
-				(thread.configDir === undefined ||
-					sameClaudeLogin(
-						{ configDir: thread.configDir, root: config.value.projectDir },
-						{ configDir: historical.folder, root: config.value.projectDir },
-					)) &&
-				thread.firstSequence <= source.boundary.sequence &&
-				source.boundary.sequence <= thread.deliveredThrough &&
-				(!selected || thread.firstSequence > selected.thread.firstSequence)
-			)
-				selected = { account: historical, thread };
-		}
-		const forkAccount = selected?.account ?? account;
-		const provider = forkAccount.id;
-		const pick = yield* loadServerSessionPick("claude", provider, parent);
-		const thread = selected?.thread;
-		const forkPointSequence = source.boundary.sequence;
-		const parentThread =
-			thread &&
-			thread.firstSequence <= forkPointSequence &&
-			forkPointSequence <= thread.deliveredThrough &&
-			parent.pending_rewind_message_id == null &&
-			lastRewindCommitSequence <= thread.deliveredThrough
-				? thread
-				: undefined;
-		const claudeConfigDir = forkAccount.folder;
-		// The next launch workspace can differ from the native transcript's folder.
-		// Find the SDK id across the selected account's project directories.
-		const forked = parentThread
-			? yield* Effect.tryPromise({
-					try: () =>
-						forkClaudeTranscript(
-							{
-								parentSdkId: parentThread.resumeSessionId,
-								configDir: claudeConfigDir,
-								title,
-								...(historyMessageId !== undefined && {
-									messageId: historyMessageId,
-								}),
-								...(historyMessageId !== undefined && {
-									fallbackMessageIds: source.retained
-										.slice(
-											0,
-											source.retained.findIndex(
-												(message) => message.id === source.boundary.messageId,
-											),
-										)
-										.flatMap((message) =>
-											message.role === "assistant" ? [message.id] : [],
-										)
-										.reverse(),
-								}),
-							},
-							claudeSdk.fork,
-						),
-					catch: (cause) =>
-						new SessionCommandError({
-							operation: "session.forked.upstream",
-							cause,
-							message: cause instanceof Error ? cause.message : String(cause),
+		const fork = yield* Effect.gen(function* () {
+			if (!native) {
+				const id = randomUUID();
+				const pick = yield* loadServerSessionPick(
+					account.driver,
+					account.id,
+					parent,
+				);
+				return {
+					id,
+					provider: account.id,
+					driver: account.driver,
+					pick,
+					providerSessionId: undefined,
+					forkPointMessageId: `${source.boundary.messageId}_${id}`,
+					saveProviderState: () =>
+						Effect.gen(function* () {
+							const messages =
+								yield* readOption.value.getSessionMessagesWithParts(id);
+							yield* state.saveUpdates(id, [
+								{
+									key: "cursor.forkDigest",
+									value: renderCursorForkDigest(messages),
+								},
+							]);
 						}),
-				})
-			: { sdkSessionId: randomUUID() };
+				};
+			}
+			const { account: nativeAccount, config, sdk } = native;
+			const { historyMessageId, lastRewindCommitSequence, instanceIds } =
+				source;
+			let selected:
+				| {
+						account: Extract<Account, { driver: "claude" }>;
+						thread: NativeThread;
+				  }
+				| undefined;
+			for (const instanceId of instanceIds) {
+				const historical = yield* accounts.resolve({
+					_tag: "Id",
+					id: instanceId,
+				});
+				if (
+					!PROVIDER_DRIVERS[historical.driver].supportsNativeResume ||
+					!("folder" in historical)
+				)
+					continue;
+				const thread = yield* state.nativeThread(
+					parentSessionId,
+					historical.id,
+				);
+				if (
+					thread &&
+					(thread.configDir === undefined ||
+						sameClaudeLogin(
+							{ configDir: thread.configDir, root: config.projectDir },
+							{ configDir: historical.folder, root: config.projectDir },
+						)) &&
+					thread.firstSequence <= source.boundary.sequence &&
+					source.boundary.sequence <= thread.deliveredThrough &&
+					(!selected || thread.firstSequence > selected.thread.firstSequence)
+				)
+					selected = { account: historical, thread };
+			}
+			const forkAccount = selected?.account ?? nativeAccount;
+			const provider = forkAccount.id;
+			const pick = yield* loadServerSessionPick("claude", provider, parent);
+			const thread = selected?.thread;
+			const forkPointSequence = source.boundary.sequence;
+			const parentThread =
+				thread &&
+				thread.firstSequence <= forkPointSequence &&
+				forkPointSequence <= thread.deliveredThrough &&
+				parent.pending_rewind_message_id == null &&
+				lastRewindCommitSequence <= thread.deliveredThrough
+					? thread
+					: undefined;
+			const claudeConfigDir = forkAccount.folder;
+			// The next launch workspace can differ from the native transcript's folder.
+			// Find the SDK id across the selected account's project directories.
+			const forked = parentThread
+				? yield* Effect.tryPromise({
+						try: () =>
+							forkClaudeTranscript(
+								{
+									parentSdkId: parentThread.resumeSessionId,
+									configDir: claudeConfigDir,
+									title,
+									...(historyMessageId !== undefined && {
+										messageId: historyMessageId,
+									}),
+									...(historyMessageId !== undefined && {
+										fallbackMessageIds: source.retained
+											.slice(
+												0,
+												source.retained.findIndex(
+													(message) => message.id === source.boundary.messageId,
+												),
+											)
+											.flatMap((message) =>
+												message.role === "assistant" ? [message.id] : [],
+											)
+											.reverse(),
+									}),
+								},
+								sdk.fork,
+							),
+						catch: (cause) =>
+							new SessionCommandError({
+								operation: "session.forked.upstream",
+								cause,
+								message: cause instanceof Error ? cause.message : String(cause),
+							}),
+					})
+				: { sdkSessionId: randomUUID() };
+			return {
+				id: forked.sdkSessionId,
+				provider,
+				driver: "claude" as const,
+				pick,
+				providerSessionId: parentThread ? forked.sdkSessionId : undefined,
+				forkPointMessageId: source.boundary.messageId,
+				saveProviderState: (firstSequence: number, deliveredThrough: number) =>
+					parentThread
+						? state.saveUpdates(forked.sdkSessionId, [
+								{
+									key: nativeThreadKey(provider),
+									value: JSON.stringify({
+										configDir: claudeConfigDir,
+										resumeSessionId: forked.sdkSessionId,
+										firstSequence,
+										deliveredThrough,
+									}),
+								},
+							])
+						: Effect.void,
+			};
+		});
+		const { id, provider, pick } = fork;
 		const history = yield* source
-			.copy(forked.sdkSessionId)
+			.copy(id)
 			.pipe(Effect.provideService(SqlClient.SqlClient, sql.value));
 		const forkPointEvent = source.boundary.messageId;
 		// A native cursor commits before the row is announced. Without one,
@@ -845,37 +957,39 @@ const forkSessionInWorkspace = (
 				const created = yield* eventStore.value.appendBatch([
 					canonicalEvent(
 						"session.created",
-						forked.sdkSessionId,
+						id,
 						{
-							sessionId: forked.sdkSessionId,
+							sessionId: id,
 							title,
 							provider,
-							...(parentThread
-								? { providerSessionId: forked.sdkSessionId }
+							...(fork.providerSessionId !== undefined
+								? { providerSessionId: fork.providerSessionId }
 								: {}),
-							parentId: parentSessionId,
+							...forkPlacement(parentSessionId, Boolean(side)),
 							...(side
 								? {
-										sideThread: true,
 										permissionMode: "ask" as const,
 										startInputId: side.inputId,
 									}
 								: {}),
 							forkPointEvent,
 							forkPointTimestamp: source.boundary.createdAt,
-							forkPointMessageId: source.boundary.messageId,
-						},
+							forkPointMessageId: fork.forkPointMessageId,
+						} satisfies Extract<
+							SessionCommand,
+							{ type: "session.created" }
+						>["data"],
 						{
 							provider,
 							createdAt: Date.now(),
 							metadata: { source: "relay" },
 						},
 					),
-					...sessionPickEvents(forked.sdkSessionId, pick),
+					...sessionPickEvents(id, pick),
 				]);
 				yield* project(created);
 				if (workspace._tag === "Some")
-					yield* workspace.value.inherit(forked.sdkSessionId, parentSessionId, {
+					yield* workspace.value.inherit(id, parentSessionId, {
 						project,
 					});
 				// The fork has nothing in flight. Copied history can end inside a
@@ -886,44 +1000,36 @@ const forkSessionInWorkspace = (
 							...history,
 							canonicalEvent(
 								"session.status",
-								forked.sdkSessionId,
-								{ sessionId: forked.sdkSessionId, status: "idle" },
+								id,
+								{ sessionId: id, status: "idle" },
 								{ provider, metadata: { source: "relay" } },
 							),
 						])
 					: created;
 				if (history.length) yield* project(stored);
-				if (parentThread)
-					yield* state.saveUpdates(forked.sdkSessionId, [
-						{
-							key: nativeThreadKey(provider),
-							value: JSON.stringify({
-								configDir: claudeConfigDir,
-								resumeSessionId: forked.sdkSessionId,
-								firstSequence: created[0]?.sequence ?? 0,
-								deliveredThrough: stored.at(-1)?.sequence ?? 0,
-							}),
-						},
-					]);
+				yield* fork.saveProviderState(
+					created[0]?.sequence ?? 0,
+					stored.at(-1)?.sequence ?? 0,
+				);
 				// Ask applies before the row is announced, so no send can reach the
 				// Side Thread first.
-				if (side) yield* setPermissionMode(forked.sdkSessionId, "ask");
+				if (side) yield* setPermissionMode(id, "ask");
 			}),
 		);
 		// The copied turns were the parent's to read, so the fork starts seen up
 		// to its last imported turn end rather than with a dot. SessionAttention
 		// caps at the committed turn end, so this has to follow the commit.
-		yield* markSeen(forked.sdkSessionId, Number.MAX_SAFE_INTEGER).pipe(
+		yield* markSeen(id, Number.MAX_SAFE_INTEGER).pipe(
 			Effect.provideService(EventStoreEffectTag, eventStore.value),
 			Effect.provideService(ProjectionRunnerEffectTag, projections.value),
 			Effect.provideService(SqlClient.SqlClient, sql.value),
 		);
 		const now = Date.now();
 		return {
-			id: forked.sdkSessionId,
+			id,
 			title,
 			time: { created: now, updated: now },
-			provider: "claude" as const,
+			provider: fork.driver,
 			forkMessageId: forkPointEvent,
 			forkPointTimestamp: source.boundary.createdAt,
 		};

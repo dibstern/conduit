@@ -19,6 +19,7 @@ const sections = [
 		"Claude",
 		"[data-testid=claude-setting-defaultPermissionMode-select]",
 	],
+	["archived", "Archived", "section[aria-label='Archived sessions']"],
 	["usage", "Usage", "#usage-settings"],
 	["server", "Server", "#instances-settings"],
 ] as const;
@@ -44,7 +45,7 @@ for (const [viewportName, viewport] of [
 	["desktop", { width: 1440, height: 900 }],
 	["phone", { width: 390, height: 844 }],
 ] as const) {
-	test.describe(`Settings five sections on ${viewportName}`, () => {
+	test.describe(`Settings sections on ${viewportName}`, () => {
 		test.use({ recording: "chat-simple", viewport });
 
 		test("visits every section with computer grouping, scroll and focus preserved", async ({
@@ -95,7 +96,7 @@ for (const [viewportName, viewport] of [
 				stale: false,
 			}));
 			const rpc = await mockWsRpc(page, {
-				handlers: {
+				stubs: {
 					GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
 					GetClaudeSettings: () => ({
 						projectSlug: "e2e-replay",
@@ -165,7 +166,7 @@ for (const [viewportName, viewport] of [
 			const back = page.getByTestId("settings-back-btn");
 			await expect(panel).toBeVisible();
 			await expect(panel.locator('[data-testid^="settings-tab-"]')).toHaveCount(
-				5,
+				sections.length,
 			);
 			expect(
 				await panel

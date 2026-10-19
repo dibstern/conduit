@@ -26,6 +26,7 @@ import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Ser
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { makeDaemonStoreTestLayer } from "../../helpers/daemon-rpc.js";
 
 const fixtureDirs: string[] = [];
 afterEach(() => {
@@ -34,7 +35,7 @@ afterEach(() => {
 });
 
 describe("SignalHandlerLayer", () => {
-	it.scoped("installs signal handlers on layer build", () =>
+	it.effect("installs signal handlers on layer build", () =>
 		Effect.gen(function* () {
 			const beforeCount = process.listenerCount("SIGTERM");
 			const layer = SignalHandlerLayer;
@@ -48,7 +49,7 @@ describe("SignalHandlerLayer", () => {
 		}),
 	);
 
-	it.scoped("deferred completes with restart on SIGTERM", () =>
+	it.effect("deferred completes with restart on SIGTERM", () =>
 		Effect.gen(function* () {
 			const deferred = yield* ShutdownSignalTag;
 			const isDone = yield* Deferred.isDone(deferred);
@@ -82,7 +83,7 @@ describe("DaemonLifecycleLayerError", () => {
 });
 
 describe("ProcessErrorHandlerLayer", () => {
-	it.scoped("attaches and removes error handlers on scope lifecycle", () =>
+	it.effect("attaches and removes error handlers on scope lifecycle", () =>
 		Effect.gen(function* () {
 			const beforeCount = process.listenerCount("unhandledRejection");
 			const scope = yield* Scope.make();
@@ -102,7 +103,7 @@ describe("DaemonHandleTag", () => {
 		}),
 	);
 
-	it.scoped(
+	it.effect(
 		"provides an Effect-owned handle backed by daemon config and project registry services",
 		() => {
 			const configDir = mkdtempSync("/tmp/daemon-handle-");
@@ -131,7 +132,7 @@ describe("DaemonHandleTag", () => {
 					},
 				],
 			]);
-			const relayCacheStub = Layer.succeed(RelayCacheTag, {
+			const relayCacheStub = Layer.succeed(RelayCacheTag)({
 				get: (slug: string) =>
 					Effect.succeed({
 						slug,
@@ -178,7 +179,8 @@ describe("DaemonHandleTag", () => {
 				invalidate: () => Effect.void,
 			});
 			const handleDeps = Layer.mergeAll(
-				Layer.succeed(KeepAwakeTag, {
+				makeDaemonStoreTestLayer(),
+				Layer.succeed(KeepAwakeTag)({
 					activate: () => Effect.void,
 					deactivate: () => Effect.void,
 					setCommand: () => Effect.void,
@@ -223,7 +225,7 @@ describe("DaemonHandleTag", () => {
 					},
 				]),
 				relayCacheStub,
-				Layer.succeed(DaemonLifecycleContextTag, lifecycleContext),
+				Layer.succeed(DaemonLifecycleContextTag)(lifecycleContext),
 				makeInstanceManagerStateLive(
 					undefined,
 					[
@@ -297,7 +299,7 @@ describe("DaemonHandleTag", () => {
 				const missingExit = yield* Effect.exit(handle.removeProject("missing"));
 				expect(Exit.isFailure(missingExit)).toBe(true);
 				if (Exit.isFailure(missingExit)) {
-					const failure = Cause.failureOption(missingExit.cause);
+					const failure = Cause.findErrorOption(missingExit.cause);
 					expect(Option.isSome(failure)).toBe(true);
 					if (Option.isSome(failure)) {
 						expect(failure.value._tag).toBe("ProjectNotFound");

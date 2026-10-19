@@ -22,9 +22,6 @@ vi.mock(
 		return {
 			...actual,
 			rootBackgroundTasks: () => navigation.tasks,
-			switchToSession: (id: string) => {
-				actual.sessionState.currentId = id;
-			},
 		};
 	},
 );
@@ -37,11 +34,12 @@ import {
 } from "../../../src/lib/frontend/components/session/background-tasks.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 beforeEach(() => {
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 	returnFromTask();
-	sessionState.currentId = "parent";
+	openSessionForSetup("parent", "project-a");
 	sessionViewState.compact = true;
 	tasksPanel.open = true;
 	navigation.tasks = [
@@ -95,7 +93,7 @@ describe("Background task stop selection", () => {
 	});
 });
 afterEach(() => {
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 	returnFromTask();
 	sessionViewState.compact = false;
 	tasksPanel.open = false;
@@ -132,7 +130,7 @@ describe("Phone task origins", () => {
 
 	it("does not reuse an old origin after unrelated navigation", async () => {
 		openTask({ id: "agent", sessionId: "child-a", description: "Agent A" });
-		sessionState.currentId = "other-parent";
+		openSessionForSetup("other-parent", "project-a");
 		openTask({ id: "other", sessionId: "child-c", description: "Agent C" });
 		expect(returnFromTask()).toBe(true);
 		await tick();

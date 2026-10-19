@@ -32,7 +32,7 @@ export const Picker: Story = {
 		label: "Effort",
 		options: ["low", "medium", "high", "xhigh", "max"].map((value) => ({
 			value,
-			label: value === "medium" ? "med" : value,
+			label: value,
 		})),
 	},
 	play: async ({ canvasElement }) => {

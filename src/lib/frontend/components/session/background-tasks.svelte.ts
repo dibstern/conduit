@@ -1,11 +1,11 @@
 import { tick } from "svelte";
 import type { BackgroundTask } from "../../../shared-types.js";
 import { reveal } from "../../stores/reveal.svelte.js";
+import { selection } from "../../stores/selection.svelte.js";
 import {
 	findSession,
 	rootBackgroundTasks,
 	sessionState,
-	switchToSession,
 } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { toastFailure } from "../../transport/rpc-errors.js";
@@ -47,7 +47,7 @@ export function openTask(
 	const parentId = sessionState.currentId;
 	if (taskReturns.at(-1)?.childId !== parentId) taskReturns.length = 0;
 	if (parentId) taskReturns.push({ parentId, childId: task.sessionId, step });
-	switchToSession(task.sessionId);
+	selection.open(task.sessionId);
 }
 
 /** Back from a task opened on a phone, to the pull-down or launching step it
@@ -58,7 +58,7 @@ export function returnFromTask(): boolean {
 		taskReturns.length = 0;
 		return false;
 	}
-	switchToSession(back.parentId);
+	selection.open(back.parentId);
 	// The header closes its pull-downs as the session changes; reopen after.
 	void tick().then(() => {
 		if (sessionState.currentId !== back.parentId) return;

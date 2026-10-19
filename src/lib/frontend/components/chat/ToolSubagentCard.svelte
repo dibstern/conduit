@@ -2,7 +2,7 @@
 
 <script lang="ts">
 	import type { ToolMessage } from "../../types.js";
-	import { switchToSession } from "../../stores/session.svelte.js";
+	import { selection } from "../../stores/selection.svelte.js";
 	import { subagentSessionId as findSubagentSessionId } from "../../utils/subagent-tools.js";
 
 	import Icon from "../ui/Icon.svelte";
@@ -74,7 +74,7 @@
 	function navigateToSubagent(e: MouseEvent) {
 		e.stopPropagation();
 		if (subagentSessionId) {
-			switchToSession(subagentSessionId);
+			selection.open(subagentSessionId);
 		}
 	}
 
@@ -168,6 +168,11 @@
 					class:hover:text-accent={!!subagentSessionId}
 				>
 					{agentDescription}
+				</span>
+			{/if}
+			{#if typeof message.metadata?.['subagentModel'] === "string" || typeof message.metadata?.['subagentMode'] === "string"}
+				<span class="subagent-details block mt-0.5 text-xs text-text-muted break-words">
+					{[message.metadata?.['subagentModel'], message.metadata?.['subagentMode']].filter((value) => typeof value === "string").join(" · ")}
 				</span>
 			{/if}
 		</div>

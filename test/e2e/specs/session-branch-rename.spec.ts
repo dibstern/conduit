@@ -103,8 +103,6 @@ async function openSession(
 				projectSlug: "e2e-replay",
 				providers: [],
 			}),
-		},
-		handlers: {
 			GetProjects: () => ({ projects, current: projectSlug }),
 		},
 	});

@@ -16,18 +16,18 @@ import { flushSync, tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const rpcSpy = vi.hoisted(() =>
-	vi.fn(async (tag: string, _input: unknown) => {
+	vi.fn((tag: string, _input: unknown) => {
 		switch (tag) {
 			case "GetAgents":
-				return { projectSlug: "project-a", agents: [] };
+				return Promise.resolve({ projectSlug: "project-a", agents: [] });
 			case "GetCommands":
-				return { projectSlug: "project-a", commands: [] };
+				return Promise.resolve({ projectSlug: "project-a", commands: [] });
 			case "GetModels":
-				throw new Error("models unavailable in test");
+				return Promise.reject(new Error("models unavailable in test"));
 			case "SwitchPermissionMode":
-				return { projectSlug: "project-a", mode: "ask" };
+				return Promise.resolve({ projectSlug: "project-a", mode: "ask" });
 			default:
-				return { ok: true as const };
+				return Promise.resolve({ ok: true as const });
 		}
 	}),
 );
@@ -48,6 +48,7 @@ import {
 	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { PermissionId } from "../../../src/lib/frontend/types.js";
 
 /** Create a minimal permission request for the given session. */
@@ -97,7 +98,7 @@ describe("AttentionBanner merge logic", () => {
 		// Clear first: clearSessionState() resets the client half too, so
 		// selecting the session has to come after it.
 		clearSessionState();
-		sessionState.currentId = "ses_current";
+		openSessionForSetup("ses_current", "project-a");
 		routerState.path = "/s/ses_current";
 		attachedProjectState.slug = "project-a";
 	});
@@ -283,7 +284,7 @@ describe("AttentionBanner merge logic", () => {
 		expect(screen.getByRole("status").textContent).toContain("1 session");
 	});
 
-	it("switches session on click through ViewSession", async () => {
+	it("opens the selected session route on click", async () => {
 		permissionsState.pendingPermissions = [makePerm("perm-1", "ses_other1")];
 		setSessionTitles({ ses_other1: "Clickable session" });
 
@@ -292,10 +293,8 @@ describe("AttentionBanner merge logic", () => {
 		const sessionButton = screen.getByText(/Clickable session/);
 		await fireEvent.click(sessionButton);
 
-		expect(rpcSpy).toHaveBeenCalledWith("ViewSession", {
-			sessionId: "ses_other1",
-			originId: expect.any(String),
-		});
+		expect(sessionState.currentId).toBe("ses_other1");
+		expect(routerState.path).toBe("/s/ses_other1");
 	});
 
 	it("hides after dismiss, reappears when new session arrives", async () => {

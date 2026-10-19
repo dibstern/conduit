@@ -6,6 +6,7 @@ import {
 	PubSub,
 	Queue,
 	Ref,
+	Semaphore,
 	Stream,
 } from "effect";
 import { hashPin } from "../../../auth.js";
@@ -28,10 +29,8 @@ import {
 import { getRecent } from "../../../daemon/recent-projects.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { getLogLevel } from "../../../logger.js";
-import {
-	loadRelaySettings,
-	saveRelaySettings,
-} from "../../../relay/relay-settings.js";
+import { PersistenceStore } from "../../../persistence/effect/live.js";
+import { makeCursorAuth } from "../../../provider/cursor/cursor-auth.js";
 import {
 	getRestartAvailable,
 	isServerSupervised,
@@ -47,6 +46,7 @@ import {
 import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { getVersion } from "../../../version.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
+import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { AuthManagerTag } from "../../server/Layers/auth-middleware.js";
 import type { AccountDirectory } from "../Services/account-directory.js";
@@ -62,6 +62,7 @@ import { DaemonHandleTag } from "../Services/daemon-handle.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
 	findOpenCodeSession,
+	listArchivedSessions,
 	listDaemonSessions,
 	resolveDaemonOpenCodeSession,
 	resolveDaemonSession,
@@ -73,6 +74,7 @@ import {
 	applyAccountChange,
 	discoverInstances,
 	getInstance,
+	getInstances,
 	type InstanceManagerStateTag,
 	type PollerFibersTag,
 	persistConfig,
@@ -81,6 +83,7 @@ import {
 	updateInstance,
 } from "../Services/instance-manager-service.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
+import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	allProjects,
 	broadcastProjectList,
@@ -93,6 +96,7 @@ import {
 import { RelayCacheTag } from "../Services/relay-cache.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
 import type { SessionDirectory } from "../Services/session-directory.js";
+import { subscribeDaemonShell } from "../Services/shell-subscription.js";
 import { Usage } from "../Services/usage.js";
 import { KeepAwakeTag } from "./keep-awake-layer.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
@@ -102,18 +106,19 @@ import {
 	type TailscaleCliTag,
 } from "./tailscale-serve-layer.js";
 
-export class DaemonWsRpcHandlersTag extends Context.Tag("DaemonWsRpcHandlers")<
+export class DaemonWsRpcHandlersTag extends Context.Service<
 	DaemonWsRpcHandlersTag,
 	DaemonRpcHandlers
->() {}
+>()("DaemonWsRpcHandlers") {}
 
-export const DaemonWsRpcHandlersLive = Layer.scoped(
+export const DaemonWsRpcHandlersLive = Layer.effect(
 	DaemonWsRpcHandlersTag,
 	Effect.gen(function* () {
 		const { configDir } = yield* Ref.get(yield* DaemonStateTag);
 		const baseContext = yield* Effect.context<
 			| ProjectRegistryTag
 			| SessionDirectory
+			| PersistenceStore
 			| ProjectSaveLockTag
 			| DaemonConfigRefTag
 			| DaemonEventBusTag
@@ -130,21 +135,26 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| TailscaleCliTag
 		>();
 		const activity = yield* SessionActivityTag;
-		const context = Context.add(baseContext, SessionActivityTag, activity);
+		const sessionEventBus = yield* SessionEventBusTag;
+		const context = Context.add(baseContext, SessionActivityTag, activity).pipe(
+			Context.add(SessionEventBusTag, sessionEventBus),
+			Context.merge(yield* persistenceStoreContext),
+		);
+		const shellContext = Context.merge(context, yield* PersistenceStore);
 		const bus = yield* DaemonEventBusTag;
 		const cache = yield* RelayCacheTag;
 		const handle = yield* DaemonHandleTag;
 		const openCodeInstances = yield* OpenCodeInstancesTag;
 		const usage = yield* Usage;
 		// Serialize process changes together with their config/persistence updates.
-		const keepAwakeLock = yield* Effect.makeSemaphore(1);
-		const tailscaleServeLock = yield* Effect.makeSemaphore(1);
+		const keepAwakeLock = yield* Semaphore.make(1);
+		const tailscaleServeLock = yield* Semaphore.make(1);
 		const auth = yield* AuthManagerTag;
 		const browserConnections = yield* BrowserRpcConnectionsTag;
 		const invalidateBrowsers = () => {
 			for (const invalidate of browserConnections) invalidate();
 		};
-		// Every open SubscribeInstances / SubscribeProjects stream, across all
+		// Every open SubscribeInstances / SubscribeShell stream, across all
 		// connections and projects (conduit-test-ni8.14). A change wakes each
 		// one following that list; it re-reads the list itself.
 		const listSubscribers = new Set<{
@@ -155,7 +165,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		// them when it sees a new value (conduit-test-ni8.16.2).
 		let sessionsRevision = 0;
 		const subscription = yield* PubSub.subscribe(bus);
-		yield* Stream.fromQueue(subscription).pipe(
+		yield* Stream.fromSubscription(subscription).pipe(
 			Stream.runForEach((event) => {
 				if (event._tag === "GlobalSettingChanged")
 					return Effect.gen(function* () {
@@ -181,7 +191,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					return Effect.sync(() => {
 						for (const subscriber of listSubscribers)
 							if (subscriber.list === list)
-								Queue.unsafeOffer(subscriber.changed, undefined);
+								Queue.offerUnsafe(subscriber.changed, undefined);
 					});
 				return Effect.void;
 			}),
@@ -193,6 +203,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				E,
 				| ProjectRegistryTag
 				| SessionDirectory
+				| PersistenceStore
 				| ProjectSaveLockTag
 				| DaemonConfigRefTag
 				| DaemonEventBusTag
@@ -264,6 +275,22 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			yield* PubSub.publish(bus, DaemonEvent.InstancesChanged());
 			return Array.from(yield* discoverInstances);
 		});
+		const cursorAuth = yield* makeCursorAuth((authenticated) =>
+			run(
+				Effect.gen(function* () {
+					if (
+						authenticated &&
+						!(yield* getInstances).some(
+							(instance) => instance.driver === "cursor",
+						)
+					) {
+						yield* addInstance({ name: "Cursor", driver: "cursor" });
+						yield* persistConfig;
+					}
+					yield* PubSub.publish(bus, DaemonEvent.InstancesChanged());
+				}),
+			),
+		);
 		// Join the subscriber set BEFORE the first read, so a change landing
 		// between the two still wakes this stream: snapshot, then a fresh list
 		// per change.
@@ -276,10 +303,11 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| InstanceManagerStateTag
 				| ProjectRegistryTag
 				| SessionDirectory
+				| PersistenceStore
 				| DaemonConfigRefTag
 			>,
 		) =>
-			Stream.unwrapScoped(
+			Stream.unwrap(
 				Effect.gen(function* () {
 					const subscriber = { list, changed: yield* Queue.sliding<void>(1) };
 					yield* Effect.acquireRelease(
@@ -305,23 +333,34 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			SubscribeUsage: () =>
 				usage.readings.pipe(Stream.map((readings) => ({ readings }))),
-			SubscribeProjects: () =>
-				followList(
-					"projects",
-					Effect.gen(function* () {
-						const projects = yield* projectInfos;
-						const { newSessionProject } = yield* Ref.get(
-							yield* DaemonConfigRefTag,
-						);
-						return {
-							projects,
-							...(newSessionProject !== undefined && { newSessionProject }),
-						};
-					}),
+			SubscribeShell: (request) =>
+				subscribeDaemonShell(
+					request,
+					followList(
+						"projects",
+						Effect.gen(function* () {
+							const projects = yield* projectInfos;
+							const { newSessionProject } = yield* Ref.get(
+								yield* DaemonConfigRefTag,
+							);
+							return {
+								_tag: "projects" as const,
+								projects,
+								...(newSessionProject !== undefined && { newSessionProject }),
+							};
+						}),
+					),
+				).pipe(
+					Stream.provideContext(shellContext),
+					Stream.mapError((error) =>
+						error instanceof WsRpcError
+							? error
+							: new WsRpcError({ message: formatErrorDetail(error) }),
+					),
 				),
 			sessionCreated: (projectSlug) =>
 				run(rememberNewSessionProject(projectSlug)).pipe(
-					Effect.catchAll((error) =>
+					Effect.catch((error) =>
 						Effect.logWarning(
 							`Could not remember the new-session project: ${error.message}`,
 						),
@@ -508,6 +547,10 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						})),
 					),
 				),
+			GetCursorAuth: () => cursorAuth.read,
+			StartCursorLogin: () => cursorAuth.start,
+			CancelCursorLogin: () => cursorAuth.cancel,
+			LogoutCursor: () => cursorAuth.logout,
 			GetInstanceStatus: (request) =>
 				run(
 					getInstance(request.instanceId).pipe(
@@ -537,9 +580,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						}),
 						...(request.sessionMode !== undefined && {
 							sessionMode: request.sessionMode,
-						}),
-						...(request.groupingMode !== undefined && {
-							groupingMode: request.groupingMode,
 						}),
 					});
 					// Saving without a slug adds a project; its first session goes there.
@@ -691,34 +731,16 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(wsRpcHandlers.SetWorktreeCleanupSetting(request)),
 			CleanUpWorktreesNow: (request) =>
 				run(wsRpcHandlers.CleanUpWorktreesNow(request)),
-			GetDefaultGroupingMode: (_request) =>
-				run(
-					Effect.sync(() => ({
-						mode:
-							loadRelaySettings(configDir).defaultGroupingMode ?? "repository",
-					})),
-				),
-			SetDefaultGroupingMode: ({ mode }) =>
-				run(
-					Effect.gen(function* () {
-						yield* Effect.try(() =>
-							saveRelaySettings({ defaultGroupingMode: mode }, configDir),
-						);
-						yield* PubSub.publish(
-							bus,
-							DaemonEvent.GlobalSettingChanged({
-								originSlug: "",
-								tag: "defaultGroupingMode",
-							}),
-						);
-						yield* PubSub.publish(bus, DaemonEvent.ProjectsChanged());
-						return { mode };
-					}),
-				),
 			GetUsageLimitsSetting: (request) =>
 				run(wsRpcHandlers.GetUsageLimitsSetting(request)),
 			SetUsageLimitsSetting: (request) =>
 				run(wsRpcHandlers.SetUsageLimitsSetting(request)),
+			SetCursorUsageKeychain: (request) =>
+				run(
+					wsRpcHandlers
+						.SetCursorUsageKeychain(request)
+						.pipe(Effect.provideService(Usage, usage)),
+				),
 			ScanNow: (request) =>
 				run(
 					Effect.gen(function* () {
@@ -731,10 +753,13 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			ListDaemonSessions: (request) =>
 				run(
-					listDaemonSessions(configDir, {
+					listDaemonSessions({
 						...(request.limit !== undefined ? { limit: request.limit } : {}),
 						...(request.roots !== undefined ? { roots: request.roots } : {}),
 						...(request.search !== undefined ? { search: request.search } : {}),
+						...(request.includeArchived !== undefined
+							? { includeArchived: request.includeArchived }
+							: {}),
 						...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
 						...(request.scope !== undefined ? { scope: request.scope } : {}),
 						...(request.exclude !== undefined
@@ -747,13 +772,19 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						})),
 					),
 				),
+			ListArchivedSessions: (request) =>
+				run(
+					listArchivedSessions({
+						...(request.limit !== undefined ? { limit: request.limit } : {}),
+						...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
+					}),
+				),
 			ResolveSession: (request) =>
 				run(
 					resolveDaemonSession(request.sessionId).pipe(
 						Effect.mapError(
 							(error) =>
 								new WsRpcError({
-									code: "ambiguous-session",
 									message: error.message,
 								}),
 						),
@@ -782,7 +813,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 								"Declared worktree moves require a Conduit-managed OpenCode instance",
 						});
 					const target = yield* resolveDaemonOpenCodeSession(
-						configDir,
 						request.instanceId,
 						request.providerSessionId,
 					);

@@ -250,7 +250,7 @@ test.describe("Terminal host startup", () => {
 	test("a host that exits at once fails fast with the error shown", async ({
 		page,
 		relayUrl,
-	}) => {
+	}, testInfo) => {
 		const app = new AppPage(page);
 		await app.goto(relayUrl);
 		const nodeOptions = process.env["NODE_OPTIONS"];
@@ -260,11 +260,17 @@ test.describe("Terminal host startup", () => {
 			const started = Date.now();
 			await app.terminalToggleBtn.click();
 			await expect(page.locator(".term-status")).toHaveText(
-				"Failed to create terminal",
+				/^Failed to create terminal: \S/,
 			);
 			// Well under the 15 s backstop for a host that is still alive.
 			expect(Date.now() - started).toBeLessThan(5_000);
 			await expect(page.locator(".term-tab, .term-tab-pending")).toHaveCount(0);
+			const path = testInfo.outputPath("terminal-host-failure.png");
+			await page.screenshot({ path });
+			await testInfo.attach("terminal-host-failure", {
+				path,
+				contentType: "image/png",
+			});
 		} finally {
 			if (nodeOptions === undefined) delete process.env["NODE_OPTIONS"];
 			else process.env["NODE_OPTIONS"] = nodeOptions;

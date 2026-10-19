@@ -33,15 +33,6 @@ import {
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	CreateSession,
-	DeleteSession,
-	ForkSessionForSession,
-	InspectSessionWorktrees,
-	ListDaemonSessions,
-	MoveSessionWorkspace,
-	SaveProject,
-} from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -185,32 +176,35 @@ process.exit(result.status ?? 1);
 		await fixture.restart({ startupTimeoutMs: 120_000 });
 		const socket = join(fixture.configDir, "relay.sock");
 		if (folders.length > 1)
-			await sendRpcRequest(
-				socket,
-				new SaveProject({ slug: "process-test", folders }),
-			);
+			await sendRpcRequest(socket, {
+				_tag: "SaveProject",
+				slug: "process-test",
+				folders,
+			});
 		const sessions = async () =>
-			(await sendRpcRequest(socket, new ListDaemonSessions({ roots: false })))
-				.sessions;
+			(
+				await sendRpcRequest(socket, {
+					_tag: "ListDaemonSessions",
+					roots: false,
+				})
+			).sessions;
 		const create = async (
 			title: string,
 			newWorktree = true,
 			worktreeBase?: string,
 			projectSlug = "process-test",
 		) => {
-			const { sessionId } = await sendRpcRequest(
-				socket,
-				new CreateSession({
-					permissionMode: "ask",
-					model: { providerId: "claude", modelId: "sonnet" },
-					projectSlug,
-					originId: "delete-worktree-test",
-					providerId: "claude",
-					title,
-					...(newWorktree ? { newWorktree: true } : {}),
-					...(worktreeBase ? { worktreeBase } : {}),
-				}),
-			);
+			const { sessionId } = await sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				permissionMode: "ask",
+				model: { providerId: "claude", modelId: "sonnet" },
+				projectSlug,
+				originId: "delete-worktree-test",
+				providerId: "claude",
+				title,
+				...(newWorktree ? { newWorktree: true } : {}),
+				...(worktreeBase ? { worktreeBase } : {}),
+			});
 			names.set(sessionId, title);
 			const session = (await sessions()).find(({ id }) => id === sessionId);
 			if (!session) throw new Error("Created session was not listed");
@@ -233,24 +227,26 @@ process.exit(result.status ?? 1);
 		};
 		const inspect = async (id: string) => {
 			const refs = folders.map((folder) => git(folder, "show-ref"));
-			const result = await sendRpcRequest(
-				socket,
-				new InspectSessionWorktrees({ sessionId: id }),
-			);
+			const result = await sendRpcRequest(socket, {
+				_tag: "InspectSessionWorktrees",
+				sessionId: id,
+			});
 			expect(folders.map((folder) => git(folder, "show-ref"))).toEqual(refs);
 			evidence["inspection"] = result;
 			return result;
 		};
 		const state = () => {
-			const db = new Database(fixture.projectStorePath(), { readonly: true });
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
 			try {
 				return {
 					sessions: db
-						.prepare("SELECT id, title, workspace FROM sessions ORDER BY id")
+						.prepare(
+							"SELECT id, title, workspace FROM sessions WHERE project_id = 'process-test' ORDER BY id",
+						)
 						.all(),
 					deletions: db
 						.prepare(
-							"SELECT session_id, data FROM events WHERE type = 'session.deleted' ORDER BY sequence",
+							"SELECT session_id, data FROM events WHERE project_id = 'process-test' AND type = 'session.deleted' ORDER BY sequence",
 						)
 						.all(),
 					worktrees: [...owned].map(([path, { folder, branch }]) => ({
@@ -275,7 +271,7 @@ process.exit(result.status ?? 1);
 		const remove = async (id: string, removeWorktrees?: boolean) => {
 			const manifest = {
 				payload: {
-					_tag: "DeleteSession",
+					_tag: "DeleteSession" as const,
 					projectSlug: "process-test",
 					sessionId: id,
 					...(removeWorktrees === undefined ? {} : { removeWorktrees }),
@@ -291,10 +287,7 @@ process.exit(result.status ?? 1);
 				`${artifact}-before.json`,
 				`${JSON.stringify(manifest, null, 2)}\n`,
 			);
-			const response = await sendRpcRequest(
-				socket,
-				new DeleteSession(manifest.payload),
-			);
+			const response = await sendRpcRequest(socket, manifest.payload);
 			manifest.response = response;
 			manifest.after = state();
 			writeFileSync(
@@ -305,7 +298,7 @@ process.exit(result.status ?? 1);
 			expect(
 				(await sessions()).some(({ id: sessionId }) => sessionId === id),
 			).toBe(false);
-			const db = new Database(fixture.projectStorePath(), { readonly: true });
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
 			try {
 				expect(
 					db
@@ -506,13 +499,11 @@ process.exit(result.status ?? 1);
 		await inspect(parent.id);
 		const browser = await fixture.connect(parent.id);
 		await browser.send(parent.id, "Reply with pong.");
-		const fork = await sendRpcRequest(
-			socket,
-			new ForkSessionForSession({
-				sessionId: parent.id,
-				originId: browser.originId,
-			}),
-		);
+		const fork = await sendRpcRequest(socket, {
+			_tag: "ForkSession",
+			sessionId: parent.id,
+			originId: browser.originId,
+		});
 		names.set(fork.sessionId, "Fork");
 		expect(await inspect(parent.id)).toMatchObject({
 			removeWorktrees: false,
@@ -536,20 +527,16 @@ process.exit(result.status ?? 1);
 		const secondary = join(fixture.root, "other-project");
 		mkdirSync(secondary);
 		seed(fixture, secondary);
-		const project = await sendRpcRequest(
-			socket,
-			new SaveProject({
-				folders: [secondary, fixture.projectDir],
-			}),
-		);
+		const project = await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			folders: [secondary, fixture.projectDir],
+		});
 		const other = await create("Other", false, undefined, project.savedSlug);
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId: other.id,
-				path: session.path,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId: other.id,
+			path: session.path,
+		});
 		expect(await inspect(session.id)).toMatchObject({
 			removeWorktrees: false,
 			worktrees: [{ inUse: true }],
@@ -565,13 +552,11 @@ process.exit(result.status ?? 1);
 		const existing = join(fixture.root, "existing");
 		git(fixture.projectDir, "worktree", "add", "-b", "user/branch", existing);
 		const session = await create("Existing", false);
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId: session.id,
-				path: realpathSync(existing),
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId: session.id,
+			path: realpathSync(existing),
+		});
 		expect(await inspect(session.id)).toEqual({
 			worktrees: [],
 			removeWorktrees: true,
@@ -631,7 +616,7 @@ process.exit(result.status ?? 1);
 		const { fixture, create, inspect, remove } = await start("legacy");
 		const session = await create("Legacy");
 		await fixture.kill();
-		const db = new Database(fixture.projectStorePath());
+		const db = new Database(fixture.daemonStorePath());
 		try {
 			db.prepare(
 				"UPDATE events SET data = json_remove(data, '$.ownership') WHERE type = 'session.workspace_changed' AND session_id = ?",
@@ -652,17 +637,16 @@ process.exit(result.status ?? 1);
 		);
 		const session = await create("Moved");
 		const original = [...owned.keys()];
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId: session.id,
-				path: fixture.projectDir,
-			}),
-		);
-		await sendRpcRequest(
-			socket,
-			new SaveProject({ slug: "process-test", folders: [fixture.projectDir] }),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId: session.id,
+			path: fixture.projectDir,
+		});
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [fixture.projectDir],
+		});
 		await fixture.kill();
 		await fixture.restart({ startupTimeoutMs: 120_000 });
 		expect(

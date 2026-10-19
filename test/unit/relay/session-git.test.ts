@@ -2,12 +2,15 @@ import { rmSync } from "node:fs";
 import { dirname } from "node:path";
 import { Effect, Fiber, Layer, ManagedRuntime } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { SessionGitLive } from "../../../src/lib/domain/relay/Layers/session-git-layer.js";
 import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionGitServiceTag } from "../../../src/lib/domain/relay/Services/session-git-service.js";
 import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { makeEventStoreEffect } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { makeMockConfig } from "../../helpers/mock-factories.js";
@@ -26,8 +29,7 @@ async function fixture(extraFolders: readonly string[] = []) {
 			Layer.provideMerge(
 				Layer.merge(
 					makePersistenceEffectLayer(path, "test-project"),
-					Layer.succeed(
-						ConfigTag,
+					Layer.succeed(ConfigTag)(
 						makeMockConfig({ projectDir: "/primary", extraFolders }),
 					),
 				),
@@ -75,6 +77,49 @@ async function fixture(extraFolders: readonly string[] = []) {
 }
 
 describe("Session git refresh", () => {
+	it("versions only its own project when foreign sessions share the fallback directory", async () => {
+		const { refresh, runtime } = await fixture();
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const foreignStore = yield* makeEventStoreEffect.pipe(
+					Effect.provideService(PersistenceProjectTag, {
+						projectId: "foreign",
+					}),
+				);
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.projectBatch(
+					yield* foreignStore.appendBatch([
+						canonicalEvent("session.created", "foreign", {
+							sessionId: "foreign",
+							title: "Foreign fallback workspace",
+							provider: "claude",
+						}),
+					]),
+				);
+			}),
+		);
+		const snapshot = () =>
+			runtime.runPromise(
+				Effect.gen(function* () {
+					const read = yield* ReadQueryEffectTag;
+					return {
+						own: yield* read.getSession("one"),
+						foreign: yield* read.getSession("foreign"),
+						sidebar: yield* read.readSessionList({ projectIds: ["foreign"] }),
+					};
+				}),
+			);
+		vi.spyOn(daemonSessionGitCache, "refresh").mockResolvedValue({
+			branch: "refreshed",
+		});
+		const before = await snapshot();
+		await refresh();
+		const after = await snapshot();
+		expect(after.own?.version).toBeGreaterThan(before.own?.version ?? 0);
+		expect(after.foreign).toEqual(before.foreign);
+		expect(after.sidebar.rows).toEqual(before.sidebar.rows);
+	});
+
 	// Secondary-only changes must advance both session and sidebar versions;
 	// each workspace must resolve its attached folders before reading git.
 	it("refreshes attached effective directories and versions sessions on secondary-only changes", async () => {
@@ -307,7 +352,7 @@ describe("Session git refresh", () => {
 			await runtime.runPromise(
 				Effect.gen(function* () {
 					const service = yield* SessionGitServiceTag;
-					const running = yield* Effect.fork(
+					const running = yield* Effect.forkChild(
 						service.refresh({ sessionId: "one" }),
 					);
 					yield* Effect.promise(() => reading);

@@ -1,15 +1,37 @@
+<script module lang="ts">
+	import type { UsageLimitsSetting } from "../../../contracts/limit-recovery.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+
+	// Saves stay ordered across Settings tab mounts, and loads wait for their flush.
+	let usageLimitsSaves: Promise<void> = Promise.resolve();
+
+	async function getUsageLimitsSettingRpc(): Promise<UsageLimitsSetting> {
+		await usageLimitsSaves;
+		const result = await rpc("GetUsageLimitsSetting", {});
+		return result.usageLimits;
+	}
+
+	async function setUsageLimitsSettingRpc(usageLimits: UsageLimitsSetting): Promise<UsageLimitsSetting> {
+		const request = usageLimitsSaves.then(() => rpc("SetUsageLimitsSetting", { usageLimits }));
+		usageLimitsSaves = request.then(() => undefined, () => undefined);
+		const result = await request;
+		return result.usageLimits;
+	}
+</script>
+
 <script lang="ts">
 	import { MediaQuery } from "svelte/reactivity";
-	import type { UsageLimitsSetting, UsageReading, UsageWindow } from "../../../contracts/limit-recovery.js";
+	import type { UsageReading, UsageWindow } from "../../../contracts/limit-recovery.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
+	import { getCachedInstances, getDriverTraits } from "../../stores/instance.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { findSession } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { applyUsageLimitsSetting, orderedSettingsUsageAccounts, usageAlert, usageState } from "../../stores/usage.svelte.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
-	import { getUsageLimitsSettingRpc, setUsageLimitsSettingRpc } from "../../transport/ws-rpc-client.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { usageDisplay, usageForecastDuration, usageForecastTime, usageForecastWindow, usagePaceLine, usageResetTime } from "../../utils/continuation.js";
 	import AccountDot from "../ui/AccountDot.svelte";
 	import Button from "../ui/Button.svelte";
@@ -24,7 +46,8 @@
 	const project = $derived(projectState.projects.find((item) => item.slug === getCurrentSlug()));
 	const refreshSlug = $derived(project?.slug ?? projectState.projects[0]?.slug);
 	const claudeAccounts = $derived(getClaudeAccounts(refreshSlug ?? ""));
-	const accounts = $derived(orderedSettingsUsageAccounts());
+	const accounts = $derived(orderedSettingsUsageAccounts().filter((account) => account.harness === "claude"));
+	const cursorAccounts = $derived(getCachedInstances().filter((account) => getDriverTraits(account.driver)?.usageHarness === "cursor"));
 	const several = $derived(accounts.length > 1);
 	const single = $derived(accounts[0]);
 	const sessionId = $derived(getCurrentSessionId());
@@ -38,6 +61,8 @@
 	let confirmed: UsageLimitsSetting | null = null;
 	let saveTicket = 0;
 	let refreshing = $state(false);
+	let keychainPending = $state<string | null>(null);
+	let keychainErrors = $state<Record<string, string | undefined>>({});
 	let now = $state(Date.now());
 	const readAt = $derived(Math.min(...accounts.map((account) => account.readAt).filter((at) => at > 0)));
 	const updated = $derived(Number.isFinite(readAt) ? Math.floor(Math.max(0, now - readAt) / 60_000) : null);
@@ -57,8 +82,8 @@
 				applyUsageLimitsSetting(loaded);
 				if (current && saveTicket === 0) setting = confirmed = loaded;
 			})
-			.catch(() => {
-				if (current) showToast("Couldn't load usage limit settings", { variant: "error" });
+			.catch((error) => {
+				if (current) toastFailure("Couldn't load usage limit settings")(error);
 			});
 		return () => { current = false; };
 	});
@@ -71,9 +96,9 @@
 		try {
 			confirmed = await setUsageLimitsSettingRpc(next);
 			if (ticket === saveTicket) setting = confirmed;
-		} catch {
+		} catch (error) {
 			if (ticket === saveTicket) setting = confirmed;
-			showToast("Couldn't save usage limit settings", { variant: "error" });
+			toastFailure("Couldn't save usage limit settings")(error);
 		}
 		if (setting) applyUsageLimitsSetting(setting);
 	}
@@ -86,6 +111,21 @@
 			if (!await claudeAccounts.refreshQuotas()) showToast("Couldn't refresh plan usage", { variant: "error" });
 		} finally {
 			refreshing = false;
+		}
+	}
+
+	async function setCursorKeychain(accountId: string, enabled: boolean): Promise<void> {
+		if (keychainPending) return;
+		keychainPending = accountId;
+		keychainErrors[accountId] = undefined;
+		try {
+			const result = await rpc("SetCursorUsageKeychain", { accountId, enabled });
+			if (result.reason) keychainErrors[accountId] = result.reason;
+			else if (enabled) await refresh();
+		} catch {
+			keychainErrors[accountId] = "Couldn't update Keychain usage. Try again.";
+		} finally {
+			keychainPending = null;
 		}
 	}
 
@@ -268,3 +308,40 @@
 	</div>
 	<UsageLimitsSettings {setting} {several} onsave={save} />
 </section>
+
+{#if cursorAccounts.length > 0}
+	<section id="cursor-usage-settings" data-testid="cursor-usage-settings" aria-label="Cursor plan usage" class="mt-[20px] min-w-0 border-t border-border pt-[14px]">
+		<div class="mb-[10px] flex items-baseline gap-[8px]">
+			<h3 class="flex-1 text-[14px] font-semibold text-text">Cursor plan usage</h3>
+			<TextButton tone="dimmer" underline="always" data-testid="cursor-usage-refresh" disabled={refreshing || !refreshSlug} aria-busy={refreshing} onclick={refresh}>Refresh</TextButton>
+		</div>
+		<div class="flex flex-col gap-[8px]">
+			{#each cursorAccounts as account (account.id)}
+				{@const reading = account.usageEligible ? usageState.readings.find((item) => item.accountId === account.id) : undefined}
+				{@const month = reading && (reading.status === "available" || reading.status === "limited") ? reading.windows.find((window) => window.kind === "month") : undefined}
+				<div data-testid="cursor-usage-card-{account.id}" class="rounded-[12px] border border-border bg-bg px-[12px] py-[10px]">
+					<div class="mb-[8px] flex items-center gap-[6px] text-[12px]">
+						<AccountDot instanceId={account.id} size={7} />
+						<span class="min-w-0 flex-1 truncate font-semibold text-text">{account.name}</span>
+						{#if account.cursorUsageSource === "keychain"}
+							<TextButton tone="dimmer" underline="always" data-testid="cursor-usage-disable-{account.id}" disabled={keychainPending !== null} aria-busy={keychainPending === account.id} onclick={() => void setCursorKeychain(account.id, false)}>Disable</TextButton>
+						{/if}
+					</div>
+					{#if reading && month}
+						{@render meter(reading, month, "Month", `cursor-usage-${account.id}-month`, false)}
+						{#if month.resetsAt && Number.isFinite(Date.parse(month.resetsAt))}
+							<div data-testid="cursor-usage-{account.id}-reset" class="mt-[3px] font-mono text-[10.5px] text-text-dimmer">Resets {new Date(month.resetsAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</div>
+						{/if}
+					{:else}
+						<p data-testid="cursor-usage-reason-{account.id}" class="text-[11px] leading-[1.5] text-text-dimmer">{reading?.reason ?? (account.cursorUsageSource === "unsupported" ? "Set CURSOR_AUTH_TOKEN in Accounts to read usage on this computer." : account.cursorUsageSource === "can_enable" ? "Usage isn't enabled." : "Usage hasn't been read yet.")}</p>
+					{/if}
+					{#if account.cursorUsageSource === "can_enable"}
+						<p class="mt-[7px] text-[11px] leading-[1.5] text-text-dimmer">Reads the Cursor CLI login from this Mac's Keychain. macOS asks first; "Always Allow" stops future prompts. Or set CURSOR_AUTH_TOKEN in Accounts.</p>
+						<Button variant="secondary" size="sm" data-testid="cursor-usage-enable-{account.id}" class="mt-[8px]" disabled={keychainPending !== null} onclick={() => void setCursorKeychain(account.id, true)}>{keychainPending === account.id ? "Enabling..." : "Enable"}</Button>
+					{/if}
+					{#if keychainErrors[account.id]}<p role="status" data-testid="cursor-usage-error-{account.id}" class="mt-[7px] text-[11px] leading-[1.5] text-error">{keychainErrors[account.id]}</p>{/if}
+				</div>
+			{/each}
+		</div>
+	</section>
+{/if}

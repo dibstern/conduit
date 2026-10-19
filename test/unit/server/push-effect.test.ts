@@ -11,7 +11,7 @@ import {
 } from "../../../src/lib/domain/server/Services/push-service.js";
 
 describe("Push Notifications Effect", () => {
-	it.scoped("subscribe adds subscription", () => {
+	it.effect("subscribe adds subscription", () => {
 		const mockSend = vi.fn().mockReturnValue(Effect.succeed(undefined));
 		return Effect.gen(function* () {
 			const push = yield* PushManagerTag;
@@ -21,10 +21,12 @@ describe("Push Notifications Effect", () => {
 				keys: { p256dh: "", auth: "" },
 			});
 			// No error = success
-		}).pipe(Effect.provide(PushManagerLive({ sendPush: mockSend })));
+		}).pipe(
+			Effect.provide(PushManagerLive({ sendPush: mockSend }), { local: true }),
+		);
 	});
 
-	it.scoped("broadcast sends to all", () => {
+	it.effect("broadcast sends to all", () => {
 		const mockSend = vi.fn().mockReturnValue(Effect.succeed(undefined));
 		return Effect.gen(function* () {
 			const push = yield* PushManagerTag;
@@ -40,10 +42,12 @@ describe("Push Notifications Effect", () => {
 			});
 			yield* push.broadcast({ title: "Test", body: "Hello" });
 			expect(mockSend).toHaveBeenCalledTimes(2);
-		}).pipe(Effect.provide(PushManagerLive({ sendPush: mockSend })));
+		}).pipe(
+			Effect.provide(PushManagerLive({ sendPush: mockSend }), { local: true }),
+		);
 	});
 
-	it.scoped("individual failure does not block others", () => {
+	it.effect("individual failure does not block others", () => {
 		const mockSend = vi
 			.fn()
 			.mockReturnValueOnce(Effect.fail(new Error("network")))
@@ -62,10 +66,12 @@ describe("Push Notifications Effect", () => {
 			});
 			yield* push.broadcast({ title: "Test", body: "Hello" });
 			expect(mockSend).toHaveBeenCalledTimes(2);
-		}).pipe(Effect.provide(PushManagerLive({ sendPush: mockSend })));
+		}).pipe(
+			Effect.provide(PushManagerLive({ sendPush: mockSend }), { local: true }),
+		);
 	});
 
-	it.scoped(
+	it.effect(
 		"daemon live layer exposes one initialized legacy-compatible sender",
 		() => {
 			const configDir = mkdtempSync(join(tmpdir(), "conduit-push-"));
@@ -80,7 +86,7 @@ describe("Push Notifications Effect", () => {
 					expect(legacy.value.getPublicKey()).toBe(publicKey);
 				}
 			}).pipe(
-				Effect.provide(PushNotificationManagerLive(configDir)),
+				Effect.provide(PushNotificationManagerLive(configDir), { local: true }),
 				Effect.ensuring(
 					Effect.sync(() =>
 						rmSync(configDir, { recursive: true, force: true }),

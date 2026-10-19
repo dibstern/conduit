@@ -14,9 +14,11 @@ export const readProjectFile = (
 		readFile(join(primaryFolder, "conduit.json"), "utf8"),
 	).pipe(
 		Effect.flatMap((contents) =>
-			Schema.decodeUnknown(Schema.parseJson(ProjectFileSchema))(contents).pipe(
+			Schema.decodeUnknownEffect(Schema.fromJsonString(ProjectFileSchema))(
+				contents,
+			).pipe(
 				Effect.map((file): ProjectFileResult => ({ _tag: "parsed", file })),
-				Effect.catchAll((error) =>
+				Effect.catch((error) =>
 					Effect.succeed<ProjectFileResult>({
 						_tag: "invalid",
 						message: `Invalid conduit.json: ${error.message}`,
@@ -24,7 +26,7 @@ export const readProjectFile = (
 				),
 			),
 		),
-		Effect.catchAll((error) =>
+		Effect.catch((error) =>
 			Effect.succeed<ProjectFileResult>(
 				typeof error.cause === "object" &&
 					error.cause !== null &&

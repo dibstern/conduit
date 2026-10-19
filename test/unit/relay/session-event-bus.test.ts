@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Chunk, Effect, Layer, Stream } from "effect";
+import { Effect, Layer, Stream } from "effect";
 import { expect } from "vitest";
 import {
 	makeSessionEventBusLive,
@@ -25,7 +25,7 @@ function stored(sessionId: string, sequence: number): StoredEvent {
 }
 
 describe("SessionEventBus", () => {
-	it.scoped(
+	it.effect(
 		"streams only the filtered session's committed events, in order",
 		() =>
 			Effect.gen(function* () {
@@ -39,14 +39,14 @@ describe("SessionEventBus", () => {
 				]);
 
 				const events = yield* stream.pipe(Stream.take(2), Stream.runCollect);
-				const got = Chunk.toReadonlyArray(events);
+				const got = [...events];
 
 				expect(got.map((e) => e.sequence)).toEqual([1, 3]);
 				expect(got.every((e) => e.sessionId === "session-a")).toBe(true);
 			}).pipe(Effect.provide(Layer.fresh(makeSessionEventBusLive()))),
 	);
 
-	it.scoped("delivers every session when no filter is given", () =>
+	it.effect("delivers every session when no filter is given", () =>
 		Effect.gen(function* () {
 			const bus = yield* SessionEventBusTag;
 			const stream = yield* bus.subscribe();
@@ -54,14 +54,11 @@ describe("SessionEventBus", () => {
 
 			const events = yield* stream.pipe(Stream.take(2), Stream.runCollect);
 
-			expect(Chunk.toReadonlyArray(events).map((e) => e.sessionId)).toEqual([
-				"s1",
-				"s2",
-			]);
+			expect([...events].map((e) => e.sessionId)).toEqual(["s1", "s2"]);
 		}).pipe(Effect.provide(Layer.fresh(makeSessionEventBusLive()))),
 	);
 
-	it.scoped("fans out committed events to every subscriber", () =>
+	it.effect("fans out committed events to every subscriber", () =>
 		Effect.gen(function* () {
 			const bus = yield* SessionEventBusTag;
 			const first = yield* bus.subscribe();
@@ -71,8 +68,8 @@ describe("SessionEventBus", () => {
 			const a = yield* first.pipe(Stream.take(1), Stream.runCollect);
 			const b = yield* second.pipe(Stream.take(1), Stream.runCollect);
 
-			expect(Chunk.toReadonlyArray(a)[0]?.sequence).toBe(1);
-			expect(Chunk.toReadonlyArray(b)[0]?.sequence).toBe(1);
+			expect([...a][0]?.sequence).toBe(1);
+			expect([...b][0]?.sequence).toBe(1);
 		}).pipe(Effect.provide(Layer.fresh(makeSessionEventBusLive()))),
 	);
 

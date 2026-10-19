@@ -50,7 +50,7 @@ type Report = {
 };
 type Reply =
 	| { _tag: "Success"; value: unknown }
-	| { _tag: "Failure"; cause: { _tag: "Fail"; error: unknown } };
+	| { _tag: "Failure"; cause: readonly { _tag: "Fail"; error: unknown }[] };
 type BrowserRpc = {
 	request: (tag: string, payload: Record<string, unknown>) => Promise<Reply>;
 	close: () => void;
@@ -153,10 +153,10 @@ test("project relays retain daemon services and their own default agent", async 
 					const receive = (event: MessageEvent<string>) => {
 						const frame = JSON.parse(event.data) as {
 							_tag: string;
-							requestId?: string;
+							requestId?: string | number;
 							exit?: Reply;
 						};
-						if (frame._tag !== "Exit" || frame.requestId !== id) return;
+						if (frame._tag !== "Exit" || String(frame.requestId) !== id) return;
 						clearTimeout(timer);
 						socket.removeEventListener("message", receive);
 						if (frame.exit) resolve(frame.exit);
@@ -323,8 +323,11 @@ test("project relays retain daemon services and their own default agent", async 
 		expect(invalidSave._tag).toBe("Failure");
 		if (invalidSave._tag !== "Failure")
 			throw new Error("Invalid save succeeded");
-		const projectError = Schema.decodeUnknownSync(SaveProject.failure)(
-			invalidSave.cause.error,
+		expect(invalidSave.cause).toEqual([
+			{ _tag: "Fail", error: expect.anything() },
+		]);
+		const projectError = Schema.decodeUnknownSync(SaveProject.errorSchema)(
+			invalidSave.cause[0]?.error,
 		);
 		await check(
 			"save-invalid-folder",
@@ -405,8 +408,11 @@ test("project relays retain daemon services and their own default agent", async 
 		expect(missingUpdate._tag).toBe("Failure");
 		if (missingUpdate._tag !== "Failure")
 			throw new Error("Missing instance update succeeded");
-		const instanceError = Schema.decodeUnknownSync(UpdateInstance.failure)(
-			missingUpdate.cause.error,
+		expect(missingUpdate.cause).toEqual([
+			{ _tag: "Fail", error: expect.anything() },
+		]);
+		const instanceError = Schema.decodeUnknownSync(UpdateInstance.errorSchema)(
+			missingUpdate.cause[0]?.error,
 		);
 		await check(
 			"update-missing-instance",

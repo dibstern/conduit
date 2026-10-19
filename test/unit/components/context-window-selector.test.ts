@@ -6,7 +6,7 @@ import {
 	clearDiscoveryState,
 	discoveryState,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 
 type SwitchContextWindowInput = Parameters<
@@ -14,14 +14,16 @@ type SwitchContextWindowInput = Parameters<
 >[1];
 
 const switchContextWindowRpcSpy = vi.hoisted(() =>
-	vi.fn(async (input: SwitchContextWindowInput) => ({
-		projectSlug: "project-a",
-		contextWindow: input.contextWindow,
-		options: [
-			{ value: "200k", label: "200K", isDefault: true },
-			{ value: "1m", label: "1M (beta)" },
-		],
-	})),
+	vi.fn((input: SwitchContextWindowInput) =>
+		Promise.resolve({
+			projectSlug: "project-a",
+			contextWindow: input.contextWindow,
+			options: [
+				{ value: "200k", label: "200K", isDefault: true },
+				{ value: "1m", label: "1M (beta)" },
+			],
+		}),
+	),
 );
 const emptyComponent = vi.hoisted(
 	() => async () => import("../../helpers/Empty.svelte"),
@@ -36,13 +38,12 @@ vi.mock(
 	}),
 );
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	rpc: (
-		tag: "SwitchContextWindow" | "QuotaForAccounts",
-		input: SwitchContextWindowInput,
-	) =>
+	rpc: (tag: string, input: SwitchContextWindowInput) =>
 		tag === "QuotaForAccounts"
 			? Promise.resolve([])
-			: switchContextWindowRpcSpy(input),
+			: tag === "SwitchContextWindow"
+				? switchContextWindowRpcSpy(input)
+				: Promise.reject(new Error("Catalog not configured in this fixture")),
 }));
 
 describe("InstanceModelPicker context window", () => {
@@ -67,12 +68,12 @@ describe("InstanceModelPicker context window", () => {
 			},
 			"session-1",
 		);
-		sessionState.currentId = "session-1";
+		openSessionForSetup("session-1", "project-a");
 	});
 
 	afterEach(() => {
 		cleanup();
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 	});
 
 	it("switches context windows through RPC for the active session", async () => {

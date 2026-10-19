@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Data, Effect, Either, Schema } from "effect";
+import { Context, Data, Effect, Result, Schema } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
 import {
 	resolveServerSessionPick,
@@ -80,12 +80,15 @@ export interface ClaudeEventPersistEffect {
 		readonly parentSessionId: string;
 		readonly providerSessionId: string;
 		readonly title: string;
+		readonly instanceId?: string;
+		readonly modelId?: string;
 	}) => Effect.Effect<void, ClaudeEventPersistFailure | PickRejection>;
 }
 
-export class ClaudeEventPersistEffectTag extends Context.Tag(
-	"ClaudeEventPersistEffect",
-)<ClaudeEventPersistEffectTag, ClaudeEventPersistEffect>() {}
+export class ClaudeEventPersistEffectTag extends Context.Service<
+	ClaudeEventPersistEffectTag,
+	ClaudeEventPersistEffect
+>()("ClaudeEventPersistEffect") {}
 
 /**
  * Terminal events that may act on an existing read-model session without a
@@ -165,12 +168,13 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 		readonly parentSessionId: string;
 		readonly providerSessionId: string;
 		readonly title: string;
+		readonly instanceId?: string;
 	}): Effect.Effect<void, SqlError> => {
 		const now = Date.now();
 		return sql`
 			INSERT OR IGNORE INTO sessions
 			(id, project_id, provider, provider_sid, title, status, parent_id, created_at, updated_at)
-			VALUES (${input.childSessionId}, ${eventStore.projectId}, ${input.provider ?? "claude"}, ${input.providerSessionId}, ${input.title}, 'idle', ${input.parentSessionId}, ${now}, ${now})`.pipe(
+			VALUES (${input.childSessionId}, ${eventStore.projectId}, ${input.instanceId ?? input.provider ?? "claude"}, ${input.providerSessionId}, ${input.title}, 'idle', ${input.parentSessionId}, ${now}, ${now})`.pipe(
 			Effect.asVoid,
 		);
 	};
@@ -383,6 +387,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 				.write((project) =>
 					Effect.gen(function* () {
 						const provider = input.provider ?? "claude";
+						const binding = input.instanceId ?? provider;
 						yield* requireSession(
 							input.parentSessionId,
 							"ensureClaudeSubagentSession",
@@ -401,7 +406,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 						const existingChild = existingChildRows[0];
 						if (
 							existingChild &&
-							(existingChild.provider !== provider ||
+							(existingChild.provider !== binding ||
 								existingChild.parent_id !== input.parentSessionId ||
 								existingChild.provider_sid !== input.providerSessionId)
 						) {
@@ -415,7 +420,11 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 							);
 						}
 						let pickEvents: CanonicalEvent[] = [];
-						if (!existingChild?.model_id?.trim()) {
+						if (
+							!existingChild?.model_id?.trim() ||
+							(input.modelId !== undefined &&
+								input.modelId !== existingChild.model_id)
+						) {
 							const [parent] = yield* sql<{
 								model_id: string | null;
 								model_provider: string | null;
@@ -427,8 +436,16 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 								provider,
 								storedSessionPick(parent, provider),
 							);
-							if (Either.isLeft(pick)) return yield* pick.left;
-							pickEvents = sessionPickEvents(input.childSessionId, pick.right);
+							if (Result.isFailure(pick)) return yield* pick.failure;
+							pickEvents = sessionPickEvents(
+								input.childSessionId,
+								input.modelId
+									? {
+											...pick.success,
+											model: { ...pick.success.model, modelId: input.modelId },
+										}
+									: pick.success,
+							);
 						}
 						if (!existingChild) yield* seedClaudeSubagentSession(input);
 
@@ -438,7 +455,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 							{
 								sessionId: input.childSessionId,
 								title: input.title,
-								provider,
+								provider: binding,
 								parentId: input.parentSessionId,
 								providerSessionId: input.providerSessionId,
 							},
@@ -450,8 +467,10 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 								provider,
 							},
 						);
+						const created = yield* sql<{ event_id: string }>`
+							SELECT event_id FROM events WHERE event_id = ${event.eventId} LIMIT 1`;
 						const stored = yield* eventStore.appendBatch([
-							event,
+							...(created.length > 0 ? [] : [event]),
 							...pickEvents,
 						]);
 						yield* project(stored);

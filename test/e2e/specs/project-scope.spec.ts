@@ -6,12 +6,14 @@
 // Frontend served by Vite preview, WebSocket intercepted by page.routeWebSocket().
 
 import { expect, test } from "@playwright/test";
+import { Schema } from "effect";
 import { singleInstanceInitMessages } from "../fixtures/mockup-state.js";
 import { openPickerRoot } from "../helpers/model-picker.js";
 import {
 	mockWsRpc,
 	type RpcMockControl,
 	sendMockDaemonList,
+	sendMockProjects,
 } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
 
@@ -116,15 +118,15 @@ async function setupWithProjectManagement(
 						hasMore && last ? { updatedAt: last.updatedAt, id: last.id } : null,
 				};
 			},
-		},
-		handlers: {
 			AttachProject: async (params) => {
 				// A cold load without ?p attaches the daemon's default project.
-				if (typeof params["projectSlug"] !== "string")
+				if (
+					!("projectSlug" in params) ||
+					typeof params.projectSlug !== "string"
+				)
 					return {
 						projectSlug: "myapp",
-						sessionSlug:
-							typeof params["sessionId"] === "string" ? "myapp" : null,
+						sessionSlug: "sessionId" in params ? "myapp" : null,
 					};
 				// A real attach takes a round trip or two; an instant answer would
 				// hide anything that races it.
@@ -134,17 +136,16 @@ async function setupWithProjectManagement(
 					sessionSlug: null,
 				};
 			},
-			ListSessions: (params) => ({
-				projectSlug: String(params["projectSlug"] ?? "myapp"),
-				sessions: sessions.filter(
-					(session) => session.projectSlug === params["projectSlug"],
-				),
-				roots: true,
-			}),
 			SaveProject: (params) => {
 				const slug = String(params["slug"] ?? "new-project");
 				const title = String(params["title"] ?? "new-project");
-				const folders = params["folders"] as string[];
+				const folders = Schema.decodeUnknownSync(
+					Schema.NonEmptyArray(Schema.String),
+				)(
+					params.folders.map((folder) =>
+						typeof folder === "string" ? folder : folder.path,
+					),
+				);
 				return {
 					projectSlug: String(params["projectSlug"] ?? "myapp"),
 					projects: params["slug"]
@@ -175,31 +176,18 @@ async function setupWithProjectManagement(
 				};
 			},
 		},
-		// Each shell subscription carries only its own project's rows, as the
-		// daemon's does; one broadcast stream would leak the next project's rows
-		// into the previous project's still-open feed.
 		streams: {
-			SubscribeShell: (params) => [
+			SubscribeShell: () => [
 				{
 					_tag: "snapshot",
 					sequence: 1,
-					rows: sessions
-						.filter((session) => session.projectSlug === params["projectSlug"])
-						.map((session) => ({ accountId: null, ...session })),
+					rows: sessions.map((session) => ({ accountId: null, ...session })),
 				},
 				{ _tag: "synchronized" },
 			],
 		},
 	});
-	rpc.setShellRows(
-		sessions.filter(
-			(session) =>
-				session.projectSlug ===
-				(new URL(path, baseURL ?? "http://localhost:4173").searchParams.get(
-					"p",
-				) ?? "myapp"),
-		),
-	);
+	rpc.setShellRows(sessions);
 	const control = await mockRelayWebSocket(page, {
 		initMessages: singleInstanceInitMessages.filter(
 			(message) => message.type !== "shell_snapshot",
@@ -218,12 +206,12 @@ function baseProjects() {
 		{
 			slug: "myapp",
 			title: "myapp",
-			folders: ["/src/myapp"],
+			folders: ["/src/myapp"] as const,
 		},
 		{
 			slug: "mylib",
 			title: "mylib",
-			folders: ["/src/mylib"],
+			folders: ["/src/mylib"] as const,
 		},
 	];
 }
@@ -322,7 +310,7 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 	sendMockDaemonList(page, "SubscribeInstances", {
 		instances: capabilityInstances,
 	});
-	sendMockDaemonList(page, "SubscribeProjects", {
+	sendMockProjects(page, {
 		projects: baseProjects().map((project) =>
 			project.slug === "myapp"
 				? { ...project, folders: ["/src/myapp", "/src/server"] }
@@ -386,7 +374,7 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 		instances: [],
 		providerCapabilities: {},
 	});
-	sendMockDaemonList(page, "SubscribeProjects", {
+	sendMockProjects(page, {
 		projects: baseProjects().map((project) =>
 			project.slug === "myapp"
 				? { ...project, folders: ["/src/myapp", "/src/server"] }
@@ -462,11 +450,9 @@ test("direct project URL scopes the list and another URL switches projects", asy
 	baseURL,
 }) => {
 	const control = await setupWithProjectManagement(page, baseURL, "/?p=mylib");
-	await control.rpc.waitForRequest(
-		(request) =>
-			request.tag === "ListDaemonSessions" &&
-			request.payload["scope"] === "mylib",
-	);
+	expect(
+		control.rpc.getRequests().filter(({ tag }) => tag === "ListDaemonSessions"),
+	).toHaveLength(0);
 	await expect(page.getByTestId("session-scope-chip")).toHaveText("mylib");
 	const sessions = page.locator("#session-list .session-item");
 	await expect(sessions).toHaveCount(1);
@@ -490,11 +476,9 @@ test("direct project URL scopes the list and another URL switches projects", asy
 	]);
 	await page.goto(`${baseURL ?? "http://localhost:4173"}/?p=myapp`);
 	await waitForChatReady(page);
-	await control.rpc.waitForRequest(
-		(request) =>
-			request.tag === "ListDaemonSessions" &&
-			request.payload["scope"] === "myapp",
-	);
+	expect(
+		control.rpc.getRequests().filter(({ tag }) => tag === "ListDaemonSessions"),
+	).toHaveLength(0);
 	await expect(page.getByTestId("session-scope-chip")).toHaveText("myapp");
 	await expect(sessions).toHaveCount(1);
 	await expect(sessions.first()).toContainText("Test session");

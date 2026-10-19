@@ -1,4 +1,4 @@
-import { Chunk, Effect, Layer, PubSub, Queue, Scope } from "effect";
+import { Effect, Layer, PubSub, Scope } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { Alert } from "../../../src/lib/contracts/ws-rpc.js";
 import { AlertsTag } from "../../../src/lib/domain/relay/Services/alerts.js";
@@ -72,19 +72,21 @@ describe("wirePollers", () => {
 			| undefined;
 		const alerts = Effect.runSync(PubSub.unbounded<Alert>());
 		const alertsSeen = Effect.runSync(
-			PubSub.subscribe(alerts).pipe(Scope.extend(Effect.runSync(Scope.make()))),
+			PubSub.subscribe(alerts).pipe(
+				Scope.provide(Effect.runSync(Scope.make())),
+			),
 		);
 		const pushManager = {
 			sendToAll: vi.fn(async () => undefined),
 		};
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(AlertsTag, alerts),
-			Layer.succeed(SessionManagerServiceTag, {
+			Layer.succeed(AlertsTag)(alerts),
+			Layer.succeed(SessionManagerServiceTag)({
 				getSessionParentMap: () =>
 					Effect.succeed(new Map([["child-session", "parent-session"]])),
 			} as never),
-			Layer.succeed(StatusPollerTag, {
+			Layer.succeed(StatusPollerTag)({
 				markMessageActivity: vi.fn(),
 			} as never),
 			makeOverridesStateLive(),
@@ -126,8 +128,8 @@ describe("wirePollers", () => {
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
 		expect(pushManager.sendToAll).not.toHaveBeenCalled();
-		expect(Chunk.toArray(Effect.runSync(Queue.takeAll(alertsSeen)))).toEqual(
-			[],
-		);
+		expect([
+			...Effect.runSync(PubSub.takeUpTo(alertsSeen, Number.POSITIVE_INFINITY)),
+		]).toEqual([]);
 	});
 });

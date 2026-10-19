@@ -82,6 +82,23 @@ describe("Integration: WS Handler Coverage", () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
+		harness.mock.setExactResponse("GET", "/provider", 200, {
+			all: [
+				{
+					id: "test-provider",
+					name: "Test provider",
+					models: {
+						"test-model": {
+							id: "test-model",
+							name: "Test model",
+							limit: { context: 200_000, output: 8_192 },
+						},
+					},
+				},
+			],
+			default: { "test-provider": "test-model" },
+			connected: ["test-provider"],
+		});
 		await client.switchModel("test-model", "test-provider");
 		const { active } = await client.getModels();
 		expect(active).toEqual({ model: "test-model", provider: "test-provider" });

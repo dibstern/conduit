@@ -651,7 +651,10 @@ export const usageSettingsHandlers: StepHandler[] = [
 			const handler = rpc.stubs.QuotaForAccounts;
 			if (!handler) throw new Error("Missing seeded quota check");
 			const readings = await handler(
-				new QuotaForAccounts({ projectSlug: "myapp" }),
+				QuotaForAccounts.payloadSchema.make({
+					_tag: "QuotaForAccounts",
+					projectSlug: "myapp",
+				}),
 			);
 			rpc.setUsageReadings(readings);
 		},
@@ -682,7 +685,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert the five settings sections and computer grouping",
+		name: "assert the six settings sections and computer grouping",
 		match: /^the settings sections place Usage and Server under This computer$/,
 		run: async ({ world }) => {
 			const panel = world.page.locator("#settings-panel");
@@ -694,6 +697,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 				"settings-tab-general",
 				"settings-tab-models",
 				"settings-tab-claude",
+				"settings-tab-archived",
 				"settings-tab-usage",
 				"settings-tab-server",
 			]);

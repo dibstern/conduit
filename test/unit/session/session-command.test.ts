@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { AUTO_TITLE_SOURCE } from "../../../src/lib/contracts/session-title.js";
@@ -118,18 +118,16 @@ describe("applySessionCommand", () => {
 			Effect.provide(
 				Layer.mergeAll(
 					persistenceLayer,
-					Layer.succeed(
-						OpenCodeAPITag,
+					Layer.succeed(OpenCodeAPITag)(
 						partialFake<OpenCodeAPI>({
 							session: partialFake<OpenCodeAPI["session"]>(api.session),
 						}),
 					),
-					Layer.succeed(LoggerTag, log),
-					Layer.succeed(
-						OrchestrationEngineTag,
+					Layer.succeed(LoggerTag)(log),
+					Layer.succeed(OrchestrationEngineTag)(
 						new OrchestrationEngine({ registry: new ProviderRegistry() }),
 					),
-					Layer.succeed(OpenCodeModelServiceTag, {
+					Layer.succeed(OpenCodeModelServiceTag)({
 						listProviders: () =>
 							Effect.succeed({
 								providers: [
@@ -149,8 +147,8 @@ describe("applySessionCommand", () => {
 					}),
 					// An empty config dir keeps provider routing at its defaults instead
 					// of reading the developer's real ~/.config/conduit.
-					Layer.succeed(ConfigTag, makeMockConfig({ configDir: dir })),
-					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+					Layer.succeed(ConfigTag)(makeMockConfig({ configDir: dir })),
+					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					...(projectors
 						? [
 								Layer.effect(
@@ -215,6 +213,7 @@ describe("applySessionCommand", () => {
 						]);
 						const forked = yield* forkOpenCodeSession("ses-parent", {
 							driver: "opencode",
+							usageEligible: false,
 							id: AccountIdSchema.make("opencode"),
 							name: "OpenCode",
 						});
@@ -245,6 +244,7 @@ describe("applySessionCommand", () => {
 
 					const forked = yield* forkOpenCodeSession("ses-parent", {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					});
@@ -270,6 +270,7 @@ describe("applySessionCommand", () => {
 
 					const forked = yield* forkOpenCodeSession("ses-parent", {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					});
@@ -399,7 +400,7 @@ describe("applySessionCommand", () => {
 				Effect.gen(function* () {
 					yield* seedSession("ses-opencode", "opencode");
 
-					const result = yield* Effect.either(
+					const result = yield* Effect.result(
 						applySessionCommand({
 							type: "session.deleted",
 							data: { sessionId: "ses-opencode" },
@@ -408,16 +409,16 @@ describe("applySessionCommand", () => {
 
 					// conduit-test-42k7: the caller must not be told a delete worked
 					// while the row it reads back is still there.
-					expect(result._tag).toBe("Left");
+					expect(result._tag).toBe("Failure");
 					if (
-						result._tag === "Left" &&
-						result.left instanceof SessionCommandError
+						result._tag === "Failure" &&
+						result.failure instanceof SessionCommandError
 					) {
-						expect(result.left).toBeInstanceOf(SessionCommandError);
+						expect(result.failure).toBeInstanceOf(SessionCommandError);
 						// Append and project are one transaction, so the failure names the
 						// commit that rolled back, not a separate project step.
-						expect(result.left.operation).toBe("session.deleted.commit");
-						expect(result.left.cause).toBeInstanceOf(ProjectionRunnerError);
+						expect(result.failure.operation).toBe("session.deleted.commit");
+						expect(result.failure.cause).toBeInstanceOf(ProjectionRunnerError);
 					}
 					expect(yield* sessionIds).toEqual(["ses-opencode"]);
 					expect(api.session.delete).not.toHaveBeenCalled();
@@ -459,6 +460,7 @@ describe("applySessionCommand", () => {
 					"ses-parent",
 					{
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},
@@ -501,15 +503,17 @@ describe("applySessionCommand", () => {
 						id: string;
 						provider: string;
 						parent_id: string | null;
+						forked_from: string | null;
 						fork_point_event: string | null;
-					}>`SELECT id, provider, parent_id, fork_point_event
+					}>`SELECT id, provider, parent_id, forked_from, fork_point_event
 					   FROM sessions WHERE id = ${forked.id}`,
 				).toEqual([
 					{
 						id: "ses-fork",
 						// Inherited from the parent, not assumed.
 						provider: "opencode",
-						parent_id: "ses-parent",
+						parent_id: null,
+						forked_from: "ses-parent",
 						fork_point_event: "msg-7",
 					},
 				]);
@@ -540,6 +544,7 @@ describe("applySessionCommand", () => {
 							"ses-parent",
 							{
 								driver: "opencode",
+								usageEligible: false,
 								id: AccountIdSchema.make("opencode"),
 								name: "OpenCode",
 							},
@@ -565,18 +570,19 @@ describe("applySessionCommand", () => {
 			withHarness(({ api }) =>
 				Effect.gen(function* () {
 					api.session.messages.mockRejectedValueOnce(new Error("unavailable"));
-					const result = yield* Effect.either(
+					const result = yield* Effect.result(
 						forkOpenCodeSession(
 							"ses-parent",
 							{
 								driver: "opencode",
+								usageEligible: false,
 								id: AccountIdSchema.make("opencode"),
 								name: "OpenCode",
 							},
 							"msg-7",
 						),
 					);
-					expect(result._tag).toBe("Left");
+					expect(result._tag).toBe("Failure");
 					expect(api.session.fork).not.toHaveBeenCalled();
 				}),
 			),

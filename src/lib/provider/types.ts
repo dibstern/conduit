@@ -11,6 +11,7 @@ import type {
 	SessionGoalChangedPayload,
 	SessionHandoffDeliveredPayload,
 } from "../contracts/stored-event.js";
+import type { ModelInfo as WireModelInfo } from "../contracts/ws-rpc.js";
 import type { NativeThread } from "../persistence/effect/provider-state-effect.js";
 import type {
 	ProviderPermissionUpdate,
@@ -125,6 +126,12 @@ export interface TurnTokens {
 }
 
 export type TurnErrorCode =
+	| "auth_required"
+	| "agent_busy"
+	| "rate_limited"
+	| "model_unavailable"
+	| "network_error"
+	| "sandbox_unavailable"
 	| "send_failed"
 	| "provider_error"
 	| "interrupted"
@@ -135,6 +142,8 @@ export interface TurnError {
 	readonly code: TurnErrorCode;
 	readonly message: string;
 	readonly retryable?: boolean;
+	/** The provider has already applied its automatic retry policy. */
+	readonly retryHandled?: boolean;
 }
 
 export interface ProviderStateUpdate {
@@ -174,6 +183,7 @@ export interface ModelInfo {
 	readonly resolvedModel?: string;
 	readonly limit?: { context?: number; output?: number };
 	readonly variants?: Record<string, Record<string, unknown>>;
+	readonly parameters?: WireModelInfo["parameters"];
 	/** Full request ids for catalog entries grouped by routing scope. */
 	readonly routingOptions?: readonly ContextWindowOption[];
 	/**
@@ -381,6 +391,7 @@ export interface ProviderInstance {
 		sessionId: string,
 		requestId: string,
 		decision: PermissionDecision,
+		providerProcessId?: string,
 	): Effect.Effect<void, ProviderInstanceFailure>;
 
 	/** Resolve a pending question (from EventSink.requestQuestion) */

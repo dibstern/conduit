@@ -20,6 +20,7 @@ import {
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { WsRpcError } from "../../../src/lib/frontend/transport/ws-rpc.js";
 import { rpc as callRpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import {
@@ -27,8 +28,8 @@ import {
 	formatTimeAgo,
 } from "../../../src/lib/frontend/utils/format.js";
 import {
+	applySessionSnapshot,
 	clearSessionSearch,
-	seedDaemonSessions,
 	seedFamilySessions,
 	seedRootSessions,
 	seedSearchResults,
@@ -45,6 +46,12 @@ vi.mock(
 );
 
 beforeEach(() => {
+	vi.stubGlobal("matchMedia", (media: string) => ({
+		media,
+		matches: false,
+		addEventListener: vi.fn(),
+		removeEventListener: vi.fn(),
+	}));
 	clearSessionState();
 	vi.clearAllMocks();
 	const storage = new Map<string, string>();
@@ -92,10 +99,10 @@ beforeEach(() => {
 		},
 	]);
 	seedFamilySessions([...sessionState.rootSessions]);
-	seedDaemonSessions([]);
+
 	sessionState.searchQuery = "";
 	clearSessionSearch();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 	sessionState.now = Date.now();
 });
 afterEach(() => {
@@ -460,14 +467,17 @@ describe("session triage list", () => {
 	});
 
 	it("addresses another project's row by its session", async () => {
-		seedDaemonSessions([
-			{
-				id: "foreign",
-				title: "Foreign work",
-				projectSlug: "other-project",
-				pinnedAt: 1,
-			},
-		]);
+		applySessionSnapshot(
+			[
+				{
+					id: "foreign",
+					title: "Foreign work",
+					projectSlug: "other-project",
+					pinnedAt: 1,
+				},
+			],
+			"partial",
+		);
 		render(SessionList);
 		const row = screen.getByText("Foreign work").closest("a");
 		if (!row) throw new Error("Missing foreign row");
@@ -647,7 +657,7 @@ describe("sidebar pick", () => {
 	});
 
 	it("reports an unread row seen up to its latest turn end, even when it is already open", async () => {
-		sessionState.currentId = "unread";
+		openSessionForSetup("unread", "current-project");
 		render(SessionList);
 		await pick("unread");
 		expect(callRpc).toHaveBeenCalledExactlyOnceWith("MarkSessionSeen", {

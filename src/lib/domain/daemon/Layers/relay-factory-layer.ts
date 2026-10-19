@@ -11,7 +11,6 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import type http from "node:http";
-import { join } from "node:path";
 import {
 	Context,
 	Data,
@@ -27,8 +26,9 @@ import {
 	ProjectSaveRejected,
 	type SaveProjectInput,
 } from "../../../contracts/ws-rpc.js";
+import type { PersistenceStore } from "../../../persistence/effect/live.js";
 import {
-	projectEventsDbPath,
+	daemonStorePath,
 	projectStorageDir,
 	writeProjectStorageOwner,
 } from "../../../persistence/project-storage.js";
@@ -49,12 +49,17 @@ import {
 	type SaveProjectResult,
 } from "../../relay/Services/project-management-service.js";
 import { ScanServiceTag } from "../../relay/Services/scan-service.js";
+import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
-import { listDaemonSessions as listEffectDaemonSessions } from "../Services/daemon-session-reader.js";
+import {
+	listArchivedSessions,
+	listDaemonSessions as listEffectDaemonSessions,
+} from "../Services/daemon-session-reader.js";
+import { DaemonStoreAvailability } from "../Services/daemon-store-availability.js";
 import type { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
 	addInstance as addEffectInstance,
@@ -67,6 +72,7 @@ import {
 	updateInstance as updateEffectInstance,
 } from "../Services/instance-manager-service.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
+import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	type broadcastProjectList,
 	projectInfos as getEffectProjectInfos,
@@ -99,10 +105,10 @@ export class RelayFactoryError extends Data.TaggedError("RelayFactoryError")<{
  * available until the server layer has built. Both the relay factory and
  * daemon-main read from this Ref.
  */
-export class HttpServerRefTag extends Context.Tag("HttpServerRef")<
+export class HttpServerRefTag extends Context.Service<
 	HttpServerRefTag,
 	Ref.Ref<http.Server | null>
->() {}
+>()("HttpServerRef") {}
 
 /**
  * Layer that creates an HttpServerRef initialized to null.
@@ -133,22 +139,22 @@ export interface RelayFactoryProjectControls {
 		input: SaveProjectInput,
 	) => Effect.Effect<
 		Omit<SaveProjectResult, "projects">,
-		| Effect.Effect.Error<ReturnType<typeof saveProject>>
-		| Effect.Effect.Error<typeof broadcastProjectList>
+		| Effect.Error<ReturnType<typeof saveProject>>
+		| Effect.Error<typeof broadcastProjectList>
 	>;
 	readonly removeProject: (
 		slug: string,
 	) => Effect.Effect<
 		void,
-		| Effect.Effect.Error<ReturnType<typeof removeProjectFromEffectRegistry>>
-		| Effect.Effect.Error<typeof broadcastProjectList>
+		| Effect.Error<ReturnType<typeof removeProjectFromEffectRegistry>>
+		| Effect.Error<typeof broadcastProjectList>
 	>;
 }
 
-export class RelayFactoryTag extends Context.Tag("RelayFactory")<
+export class RelayFactoryTag extends Context.Service<
 	RelayFactoryTag,
 	RelayFactory
->() {}
+>()("RelayFactory") {}
 
 /**
  * Create a Layer providing RelayFactoryTag.
@@ -178,16 +184,20 @@ export const RelayFactoryLive = (
 	| InstanceHealthCheckTag
 	| DaemonEventBusTag
 	| SessionActivityTag
+	| SessionEventBusTag
 	| ConfigPersistenceTag
 	| PortScannerTag
 	| PushManagerTag
 	| OpenCodeInstancesTag
+	| PersistenceStore
 > =>
 	Layer.effect(
 		RelayFactoryTag,
 		Effect.gen(function* () {
 			const accounts = yield* AccountDirectory;
 			const sessionDirectory = yield* Effect.serviceOption(SessionDirectory);
+			const storeContext = yield* persistenceStoreContext;
+			const unavailable = yield* DaemonStoreAvailability;
 			const configRef = yield* DaemonConfigRefTag;
 			const envResolver = Option.getOrUndefined(
 				yield* Effect.serviceOption(ProjectShellEnvTag),
@@ -197,6 +207,7 @@ export const RelayFactoryLive = (
 			const instanceState = yield* InstanceManagerStateTag;
 			const eventBus = yield* DaemonEventBusTag;
 			const activity = yield* SessionActivityTag;
+			const sessionEventBus = yield* SessionEventBusTag;
 			const cleanupQueue = yield* Effect.serviceOption(WorktreeCleanupQueueTag);
 			const configPersistence = yield* ConfigPersistenceTag;
 			const portScanner = yield* PortScannerTag;
@@ -205,7 +216,7 @@ export const RelayFactoryLive = (
 			const usage = Option.getOrUndefined(yield* Effect.serviceOption(Usage));
 			const worktreeService = yield* Effect.serviceOption(WorktreeServiceTag);
 			const tracer = yield* Effect.tracer;
-			const daemonContext = yield* Effect.context<
+			const baseDaemonContext = yield* Effect.context<
 				| AccountDirectory
 				| ProjectRegistryTag
 				| InstanceManagerStateTag
@@ -215,6 +226,7 @@ export const RelayFactoryLive = (
 				| SessionActivityTag
 				| ConfigPersistenceTag
 			>();
+			const daemonContext = Context.merge(baseDaemonContext, storeContext);
 
 			const scanAdapter = Context.make(ScanServiceTag, {
 				scanNow: () => portScanner.scanNow(),
@@ -222,8 +234,15 @@ export const RelayFactoryLive = (
 			const daemonSessionQueryAdapter = Context.make(
 				DaemonSessionQueryServiceTag,
 				{
+					listArchived: (options) =>
+						listArchivedSessions(options).pipe(
+							Effect.provide(daemonContext),
+							Effect.mapError(
+								(cause) => new DaemonSessionQueryServiceError({ cause }),
+							),
+						),
 					list: (options) =>
-						listEffectDaemonSessions(configDir, options).pipe(
+						listEffectDaemonSessions(options).pipe(
 							Effect.provide(daemonContext),
 							Effect.mapError(
 								(cause) => new DaemonSessionQueryServiceError({ cause }),
@@ -334,12 +353,6 @@ export const RelayFactoryLive = (
 					Effect.gen(function* () {
 						const listProjects = getEffectProjectInfos.pipe(
 							Effect.provide(daemonContext),
-							Effect.map((projects) =>
-								projects.map(({ group, ...project }) => ({
-									...project,
-									...(group === undefined ? {} : { group }),
-								})),
-							),
 							Effect.mapError(
 								(cause) =>
 									new ProjectManagementServiceError({
@@ -412,13 +425,19 @@ export const RelayFactoryLive = (
 							});
 						}
 
-						// Create persistence DB directory and open SQLite
+						// Keep storage ownership metadata independently of event-store ownership.
 						if (!existsSync(project.folders[0])) {
 							return yield* new RelayFactoryError({
 								reason: `Project directory does not exist: ${project.folders[0]}`,
 							});
 						}
-						const dbPath = projectEventsDbPath({ configDir, ...project });
+						const unavailableReason = unavailable.get(project.slug);
+						if (unavailableReason !== undefined) {
+							return yield* new RelayFactoryError({
+								reason: unavailableReason,
+							});
+						}
+						const dbPath = daemonStorePath(configDir);
 						const storageDir = projectStorageDir(configDir, project.slug);
 						yield* Effect.try({
 							try: () => {
@@ -434,16 +453,7 @@ export const RelayFactoryLive = (
 									reason: `Failed to prepare project storage at ${storageDir}`,
 									cause,
 								}),
-						}).pipe(
-							Effect.catchAll((error) =>
-								dbPath === join(storageDir, "events.db")
-									? Effect.fail(error)
-									: Effect.logWarning(
-											"Using legacy project history after storage setup failed",
-											{ projectSlug: project.slug, cause: error },
-										),
-							),
-						);
+						});
 
 						// Dynamic import to avoid circular dependency at module load time
 						const { createProjectRelay } = yield* Effect.tryPromise({
@@ -484,9 +494,11 @@ export const RelayFactoryLive = (
 										Context.add(ConfigPersistenceTag, configPersistence),
 										Context.add(AccountDirectory, accounts),
 										Context.add(SessionActivityTag, activity),
+										Context.add(SessionEventBusTag, sessionEventBus),
 										Context.add(DaemonEventBusTag, eventBus),
 										Context.add(ProjectRegistryTag, projectRegistry),
 										Context.add(PortScannerTag, portScanner),
+										Context.merge(storeContext),
 										Context.merge(daemonServices),
 										Context.merge(
 											Option.isSome(sessionDirectory)
@@ -564,7 +576,7 @@ export const RelayFactoryLive = (
 												reason: `Failed to stop cancelled relay for project "${project.slug}"`,
 												cause,
 											}),
-									}).pipe(Effect.catchAll((error) => Effect.logError(error)));
+									}).pipe(Effect.catch((error) => Effect.logError(error)));
 								}),
 							),
 						);

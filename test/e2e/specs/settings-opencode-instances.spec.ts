@@ -1,13 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { test as base, expect } from "@playwright/test";
-import {
-	DetectProxy,
-	GetInstances,
-	GetProjects,
-	RemoveInstance,
-	RemoveProject,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { ProcessHarness } from "../../helpers/process-harness.js";
 import { AppPage } from "../page-objects/app.page.js";
 
@@ -20,7 +14,10 @@ const test = base.extend<{ harness: ProcessHarness }>({
 			});
 			try {
 				await harness.restart({ startupTimeoutMs: 60_000 });
-				await harness.requestRpc(new RemoveProject({ slug: "process-test" }));
+				await harness.requestRpc({
+					_tag: "RemoveProject",
+					slug: "process-test",
+				});
 				await use(harness);
 			} finally {
 				writeFileSync(testInfo.outputPath("daemon.log"), harness.logTail);
@@ -45,13 +42,18 @@ test("OpenCode instances can be added, edited and removed with no project open",
 	page,
 	harness,
 }, testInfo) => {
-	expect((await harness.requestRpc(new GetProjects({}))).projects).toEqual([]);
+	expect((await harness.requestRpc({ _tag: "GetProjects" })).projects).toEqual(
+		[],
+	);
 	// The harness seeds a default OpenCode instance; the empty state needs none.
-	for (const instance of (await harness.requestRpc(new GetInstances({})))
+	for (const instance of (await harness.requestRpc({ _tag: "GetInstances" }))
 		.instances)
 		if (instance.driver !== "claude")
-			await harness.requestRpc(new RemoveInstance({ instanceId: instance.id }));
-	const proxy = await harness.requestRpc(new DetectProxy({}));
+			await harness.requestRpc({
+				_tag: "RemoveInstance",
+				instanceId: instance.id,
+			});
+	const proxy = await harness.requestRpc({ _tag: "DetectProxy" });
 	await new AppPage(page).goto(harness.baseUrl);
 	const listOverflow = page.getByTestId("list-bar-overflow");
 	const titleMenu = page.getByTestId("session-bar-title-menu");
@@ -165,5 +167,7 @@ test("OpenCode instances can be added, edited and removed with no project open",
 	await page.screenshot({
 		path: resolve(artifacts, `${testInfo.project.name}-removed.png`),
 	});
-	expect((await harness.requestRpc(new GetProjects({}))).projects).toEqual([]);
+	expect((await harness.requestRpc({ _tag: "GetProjects" })).projects).toEqual(
+		[],
+	);
 });

@@ -20,8 +20,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcTest } from "@effect/rpc";
-import { Effect, Either, Layer, ManagedRuntime } from "effect";
+import { Effect, Result as Either, Layer, ManagedRuntime } from "effect";
+import { RpcTest } from "effect/rpc";
 import {
 	afterAll,
 	afterEach,
@@ -34,11 +34,7 @@ import {
 } from "vitest";
 import { accountsStateFromConfig } from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
-import {
-	GetInstances,
-	RemoveInstance,
-	WsRpcGroup,
-} from "../../../src/lib/contracts/ws-rpc.js";
+import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	type DaemonConfig,
 	defaultDaemonConfig,
@@ -203,12 +199,13 @@ describe("account defaults and deletions survive persistence", () => {
 			});
 			try {
 				if (start === 0)
-					await sendRpcRequest(
-						socketPath,
-						new RemoveInstance({ instanceId: "claude" }),
-					);
-				const rows = (await sendRpcRequest(socketPath, new GetInstances({})))
-					.instances;
+					await sendRpcRequest(socketPath, {
+						_tag: "RemoveInstance",
+						instanceId: "claude",
+					});
+				const rows = (
+					await sendRpcRequest(socketPath, { _tag: "GetInstances" })
+				).instances;
 				expect(
 					rows
 						.filter(
@@ -301,12 +298,12 @@ describe("account defaults and deletions survive persistence", () => {
 							),
 						).toEqual([]);
 						expect(
-							yield* Effect.either(
+							yield* Effect.result(
 								directory.resolve({ _tag: "DriverDefault", driver: "claude" }),
 							),
 						).toMatchObject({
-							_tag: "Left",
-							left: { _tag: "AccountUnroutable" },
+							_tag: "Failure",
+							failure: { _tag: "AccountUnroutable" },
 						});
 						expect(
 							(yield* directory.resolve({

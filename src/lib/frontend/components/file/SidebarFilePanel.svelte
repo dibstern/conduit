@@ -41,6 +41,7 @@
 
 	function loadDirectory(path: string) {
 		const scope = fileTreeState.scope;
+		if (scope === null) return;
 		const cachedEntries = fileTreeState.browserCache.get(path);
 		if (cachedEntries !== undefined) {
 			fileTreeState.browserEntries = cachedEntries;
@@ -111,9 +112,10 @@
 	}
 
 	function handleDirClick(fullPath: string, root?: string) {
+		const scope = fileTreeState.scope;
+		if (scope === null) return;
 		const slug = getCurrentSlug();
 		const sessionId = getCurrentSessionId();
-		const scope = fileTreeState.scope;
 		if (slug && !fileTreeState.browserChildren.has(fileBrowserKey(fullPath, root))) {
 			void rpc("GetFileList", { ...(sessionId ? { sessionId } : { projectSlug: slug }), path: fullPath, ...(root !== undefined ? { root } : {}) }).then(
 				(response) => { if (fileTreeState.scope === scope) applyGetFileListResponse(response); },

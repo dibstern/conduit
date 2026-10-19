@@ -82,7 +82,7 @@ describe("daemon project shell env lifecycle", () => {
 			makeInstanceManagerStateLive(undefined, [], {
 				launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
 			}),
-			Layer.succeed(RelayCacheTag, {
+			Layer.succeed(RelayCacheTag)({
 				get: () => Effect.die("A relay must not start during env resolution"),
 				peek: () => Effect.succeed(Option.none()),
 				invalidate: () => Effect.void,

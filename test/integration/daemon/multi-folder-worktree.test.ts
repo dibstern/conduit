@@ -10,15 +10,7 @@ import {
 import { basename, join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	CreatePtyForSession,
-	CreateSession,
-	GetFileContentForSession,
-	GetFileTreeForSession,
-	GetProjects,
-	ListDaemonSessions,
-	SaveProject,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
 	type ProcessBrowser,
@@ -160,37 +152,37 @@ process.exit(result.status ?? 1);
 		});
 		const socket = join(fixture.configDir, "relay.sock");
 		const saveFolders = async (next: string[]) => {
-			await sendRpcRequest(
-				socket,
-				new SaveProject({ slug: "process-test", folders: next }),
-			);
+			await sendRpcRequest(socket, {
+				_tag: "SaveProject",
+				slug: "process-test",
+				folders: next,
+			});
 			folders = next;
 		};
 		await saveFolders(folders);
 		const sessions = async () =>
 			(
-				await sendRpcRequest(
-					socket,
-					new ListDaemonSessions({ scope: "process-test" }),
-				)
+				await sendRpcRequest(socket, {
+					_tag: "ListDaemonSessions",
+					scope: "process-test",
+				})
 			).sessions;
 		const create = async (
 			title: string,
 			newWorktree = true,
 			worktreeBase?: string,
 		) => {
-			const { sessionId } = await sendRpcRequest(
-				socket,
-				new CreateSession({
-					permissionMode: "ask",
-					projectSlug: "process-test",
-					originId: "multi-folder-worktree-test",
-					providerId: "claude",
-					title,
-					...(newWorktree ? { newWorktree: true } : {}),
-					...(worktreeBase === undefined ? {} : { worktreeBase }),
-				}),
-			);
+			const { sessionId } = await sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				permissionMode: "ask",
+				projectSlug: "process-test",
+				originId: "multi-folder-worktree-test",
+				providerId: "claude",
+				model: { providerId: "claude", modelId: "sonnet" },
+				title,
+				...(newWorktree ? { newWorktree: true } : {}),
+				...(worktreeBase === undefined ? {} : { worktreeBase }),
+			});
 			names.set(sessionId, title);
 			const session = (await sessions()).find(({ id }) => id === sessionId);
 			if (!session) throw new Error("Created session was not listed");
@@ -230,7 +222,7 @@ process.exit(result.status ?? 1);
 		try {
 			const socket = join(fixture.configDir, "relay.sock");
 			const project = (
-				await sendRpcRequest(socket, new GetProjects({}))
+				await sendRpcRequest(socket, { _tag: "GetProjects" })
 			).projects.find(({ slug }) => slug === "process-test");
 			evidence["project"] = {
 				slug: project?.slug,
@@ -238,10 +230,10 @@ process.exit(result.status ?? 1);
 				repositoryIdentities: project?.repositoryIdentities,
 			};
 			const sessions = (
-				await sendRpcRequest(
-					socket,
-					new ListDaemonSessions({ scope: "process-test" }),
-				)
+				await sendRpcRequest(socket, {
+					_tag: "ListDaemonSessions",
+					scope: "process-test",
+				})
 			).sessions;
 			for (const session of sessions) {
 				names.set(session.id, session.title);
@@ -455,13 +447,13 @@ process.exit(result.status ?? 1);
 			true,
 		);
 		const before = (await sessions()).map(({ id }) => id);
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			const createdCount = () =>
 				(
 					db
 						.prepare(
-							"SELECT count(*) AS count FROM events WHERE type = 'session.created'",
+							"SELECT count(*) AS count FROM events WHERE project_id = 'process-test' AND type = 'session.created'",
 						)
 						.get() as { count: number }
 				).count;
@@ -589,7 +581,10 @@ process.exit(result.status ?? 1);
 			},
 		]);
 		const scope = { sessionId: isolated.id };
-		const tree = await sendRpcRequest(socket, new GetFileTreeForSession(scope));
+		const tree = await sendRpcRequest(socket, {
+			_tag: "GetFileTree",
+			...scope,
+		});
 		evidence["fileTreeRoots"] = tree.roots;
 		expect(tree.roots).toEqual([
 			{ root: fixture.projectDir, label: basename(fixture.projectDir) },
@@ -599,40 +594,34 @@ process.exit(result.status ?? 1);
 		for (const root of [fixture.projectDir, secondary]) {
 			expect(
 				(
-					await sendRpcRequest(
-						socket,
-						new GetFileContentForSession({
-							...scope,
-							root,
-							path: "tracked.txt",
-						}),
-					)
+					await sendRpcRequest(socket, {
+						_tag: "GetFileContent",
+						...scope,
+						root,
+						path: "tracked.txt",
+					})
 				).content,
 			).toBe(`${prompt}\n`);
 			expect(
 				(
-					await sendRpcRequest(
-						socket,
-						new GetFileContentForSession({
-							...scope,
-							sessionId: local.id,
-							root,
-							path: "tracked.txt",
-						}),
-					)
+					await sendRpcRequest(socket, {
+						_tag: "GetFileContent",
+						...scope,
+						sessionId: local.id,
+						root,
+						path: "tracked.txt",
+					})
 				).content,
 			).toBe(`${basename(root)} main\n`);
 		}
 		expect(
 			(
-				await sendRpcRequest(
-					socket,
-					new GetFileContentForSession({
-						...scope,
-						root: scratch,
-						path: "shared.txt",
-					}),
-				)
+				await sendRpcRequest(socket, {
+					_tag: "GetFileContent",
+					...scope,
+					root: scratch,
+					path: "shared.txt",
+				})
 			).content,
 		).toBe("shared notes\n");
 		const choices = [];
@@ -642,10 +631,12 @@ process.exit(result.status ?? 1);
 			[scratch, scratch],
 		] as const) {
 			const cursor = browser.frames.length;
-			await sendRpcRequest(
-				socket,
-				new CreatePtyForSession({ ...scope, originId: browser.originId, root }),
-			);
+			await sendRpcRequest(socket, {
+				_tag: "CreatePty",
+				...scope,
+				originId: browser.originId,
+				root,
+			});
 			const envelope = ptyEnvelope(
 				await browser.waitFor(
 					(message) => ptyEnvelope(message)?._tag === "upsert",
@@ -689,10 +680,11 @@ process.exit(result.status ?? 1);
 		expect(local.workspace ?? null).toBeNull();
 		expect(
 			(
-				await sendRpcRequest(
-					socket,
-					new GetFileTreeForSession({ ...scope, sessionId: local.id }),
-				)
+				await sendRpcRequest(socket, {
+					_tag: "GetFileTree",
+					...scope,
+					sessionId: local.id,
+				})
 			).roots,
 		).toEqual([
 			{ root: fixture.projectDir, label: basename(fixture.projectDir) },
@@ -719,10 +711,10 @@ process.exit(result.status ?? 1);
 		seedRepository(fixture, later);
 		await saveFolders([fixture.projectDir, secondary, scratch, later]);
 		const scope = { sessionId: isolated.id };
-		const attached = await sendRpcRequest(
-			socket,
-			new GetFileTreeForSession(scope),
-		);
+		const attached = await sendRpcRequest(socket, {
+			_tag: "GetFileTree",
+			...scope,
+		});
 		expect(attached.roots).toEqual([
 			{ root: fixture.projectDir, label: basename(fixture.projectDir) },
 			{ root: secondary, label: "library" },
@@ -762,14 +754,12 @@ process.exit(result.status ?? 1);
 			{ timeout: 20_000 },
 		);
 		const cursor = browser.frames.length;
-		await sendRpcRequest(
-			socket,
-			new CreatePtyForSession({
-				...scope,
-				originId: browser.originId,
-				root: later,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "CreatePty",
+			...scope,
+			originId: browser.originId,
+			root: later,
+		});
 		const terminal = ptyEnvelope(
 			await browser.waitFor(
 				(message) => ptyEnvelope(message)?._tag === "upsert",
@@ -783,10 +773,10 @@ process.exit(result.status ?? 1);
 		);
 		await browser.closePty(terminal.item.id);
 		await saveFolders([fixture.projectDir, scratch, later]);
-		const detached = await sendRpcRequest(
-			socket,
-			new GetFileTreeForSession(scope),
-		);
+		const detached = await sendRpcRequest(socket, {
+			_tag: "GetFileTree",
+			...scope,
+		});
 		evidence["attachedRoots"] = attached.roots;
 		evidence["detachedRoots"] = detached.roots;
 		expect(detached.roots).toEqual([
@@ -805,24 +795,20 @@ process.exit(result.status ?? 1);
 			(await sessions()).find(({ id }) => id === isolated.id)?.workspace,
 		).toEqual(isolated.workspace);
 		await expect(
-			sendRpcRequest(
-				socket,
-				new CreatePtyForSession({
-					...scope,
-					originId: browser.originId,
-					root: secondary,
-				}),
-			),
+			sendRpcRequest(socket, {
+				_tag: "CreatePty",
+				...scope,
+				originId: browser.originId,
+				root: secondary,
+			}),
 		).rejects.toThrow(/Unknown terminal root/);
 		await expect(
-			sendRpcRequest(
-				socket,
-				new GetFileContentForSession({
-					...scope,
-					root: secondary,
-					path: "tracked.txt",
-				}),
-			),
+			sendRpcRequest(socket, {
+				_tag: "GetFileContent",
+				...scope,
+				root: secondary,
+				path: "tracked.txt",
+			}),
 		).rejects.toThrow(/Unknown file root/);
 		await vi.waitFor(
 			async () => {
@@ -843,10 +829,10 @@ process.exit(result.status ?? 1);
 			exists: true,
 		};
 		await saveFolders([scratch]);
-		const onlyShared = await sendRpcRequest(
-			socket,
-			new GetFileTreeForSession(scope),
-		);
+		const onlyShared = await sendRpcRequest(socket, {
+			_tag: "GetFileTree",
+			...scope,
+		});
 		const retainedWorkspace = (await sessions()).find(
 			({ id }) => id === isolated.id,
 		)?.workspace;
@@ -903,10 +889,10 @@ process.exit(result.status ?? 1);
 					additionalDirectories: options["additionalDirectories"],
 				})),
 		).toEqual([{ cwd: scratch, additionalDirectories: [secondaryWorktree] }]);
-		const tree = await sendRpcRequest(
-			socket,
-			new GetFileTreeForSession({ sessionId: isolated.id }),
-		);
+		const tree = await sendRpcRequest(socket, {
+			_tag: "GetFileTree",
+			sessionId: isolated.id,
+		});
 		expect(tree.roots).toEqual([
 			{ root: scratch, label: "notes", shared: true },
 			{ root: secondary, label: "library" },
@@ -992,7 +978,10 @@ process.exit(result.status ?? 1);
 			},
 		]);
 		const scope = { sessionId: isolated.id };
-		const tree = await sendRpcRequest(socket, new GetFileTreeForSession(scope));
+		const tree = await sendRpcRequest(socket, {
+			_tag: "GetFileTree",
+			...scope,
+		});
 		expect(tree.roots).toEqual([
 			{ root: fixture.projectDir, label: basename(fixture.projectDir) },
 			{ root: linked, label: "linked" },
@@ -1000,25 +989,21 @@ process.exit(result.status ?? 1);
 			{ root: scratch, label: "notes", shared: true },
 		]);
 		evidence["fileTreeRoots"] = tree.roots;
-		const opened = await sendRpcRequest(
-			socket,
-			new GetFileContentForSession({
-				...scope,
-				root: linked,
-				path: "tracked.txt",
-			}),
-		);
+		const opened = await sendRpcRequest(socket, {
+			_tag: "GetFileContent",
+			...scope,
+			root: linked,
+			path: "tracked.txt",
+		});
 		expect(opened.content).toBe(`${prompt}\n`);
 		evidence["linkedRootContent"] = opened;
 		const cursor = browser.frames.length;
-		await sendRpcRequest(
-			socket,
-			new CreatePtyForSession({
-				...scope,
-				originId: browser.originId,
-				root: linked,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "CreatePty",
+			...scope,
+			originId: browser.originId,
+			root: linked,
+		});
 		const terminal = ptyEnvelope(
 			await browser.waitFor(
 				(message) => ptyEnvelope(message)?._tag === "upsert",

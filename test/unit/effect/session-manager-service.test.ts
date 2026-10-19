@@ -2,7 +2,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import Database from "better-sqlite3";
 import {
@@ -13,11 +12,12 @@ import {
 	HashMap,
 	Layer,
 	Option,
-	Queue,
+	PubSub,
 	Ref,
 	Stream,
-	TestClock,
 } from "effect";
+import { SqlClient } from "effect/sql";
+import { TestClock } from "effect/testing";
 import { assert, expect, vi } from "vitest";
 import { accountsStateFromConfig } from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
@@ -397,15 +397,13 @@ function makeHistoryMessage(
 	};
 }
 
-const sessionConfigLayer = Layer.succeed(
-	ConfigTag,
+const sessionConfigLayer = Layer.succeed(ConfigTag)(
 	makeMockConfig({ configDir: "/tmp/conduit-session-manager-tests" }),
 );
-const sessionLoggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
+const sessionLoggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
 const openCodeApi = makeMockOpenCodeAPI();
 const requiredSessionServices = Layer.mergeAll(
-	Layer.succeed(
-		AccountDirectory,
+	Layer.succeed(AccountDirectory)(
 		makeAccountDirectory(
 			Effect.succeed(
 				accountsStateFromConfig(
@@ -416,20 +414,18 @@ const requiredSessionServices = Layer.mergeAll(
 		),
 	),
 	makePersistenceEffectLayer(":memory:", "test-project"),
-	Layer.succeed(AgentServiceTag, makeMockAgentService()),
+	Layer.succeed(AgentServiceTag)(makeMockAgentService()),
 	sessionConfigLayer,
 	sessionLoggerLayer,
-	Layer.succeed(OpenCodeAPITag, openCodeApi),
-	Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+	Layer.succeed(OpenCodeAPITag)(openCodeApi),
+	Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 	Layer.effect(SessionActivityTag, makeSessionActivity),
 	RelayStatusSnapshotLive,
 	makeOverridesStateLive(),
-	Layer.succeed(
-		OpenCodeInstancesTag,
+	Layer.succeed(OpenCodeInstancesTag)(
 		makeOpenCodeInstancesStub({ opencode: openCodeApi }),
 	),
-	Layer.succeed(
-		OrchestrationEngineTag,
+	Layer.succeed(OrchestrationEngineTag)(
 		new OrchestrationEngine({ registry: new ProviderRegistry() }),
 	),
 );
@@ -442,13 +438,12 @@ describe("SessionManagerService", () => {
 			SessionManagerServiceLive,
 			Layer.mergeAll(
 				requiredSessionServices,
-				Layer.succeed(OpenCodeAPITag, api),
-				Layer.succeed(
-					OpenCodeInstancesTag,
+				Layer.succeed(OpenCodeAPITag)(api),
+				Layer.succeed(OpenCodeInstancesTag)(
 					makeOpenCodeInstancesStub({ opencode: api }),
 				),
-				Layer.succeed(ReadQueryEffectTag, readQuery),
-				Layer.succeed(LoggerTag, makeMockLogger()),
+				Layer.succeed(ReadQueryEffectTag)(readQuery),
+				Layer.succeed(LoggerTag)(makeMockLogger()),
 				makeSessionManagerStateLive(),
 				DaemonEventBusLive,
 			),
@@ -460,10 +455,13 @@ describe("SessionManagerService", () => {
 			expect(yield* service.sessionExists("missing")).toBe(false);
 			expect(readQuery.getSession).toHaveBeenCalledTimes(2);
 			expect(api.session.get).not.toHaveBeenCalled();
-		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
+		}).pipe(
+			Effect.provide(layer),
+			Effect.provide(requiredSessionServices, { local: true }),
+		);
 	});
 
-	it.scoped("cascade delete forgets every descendant it removed", () => {
+	it.effect("cascade delete forgets every descendant it removed", () => {
 		const tmpDir = mkdtempSync(
 			join(tmpdir(), "conduit-session-delete-lineage-"),
 		);
@@ -478,12 +476,11 @@ describe("SessionManagerService", () => {
 			SessionManagerServiceLive,
 			Layer.mergeAll(
 				requiredSessionServices,
-				Layer.succeed(OpenCodeAPITag, api),
-				Layer.succeed(
-					OpenCodeInstancesTag,
+				Layer.succeed(OpenCodeAPITag)(api),
+				Layer.succeed(OpenCodeInstancesTag)(
 					makeOpenCodeInstancesStub({ opencode: api }),
 				),
-				Layer.succeed(LoggerTag, makeMockLogger()),
+				Layer.succeed(LoggerTag)(makeMockLogger()),
 				makeSessionManagerStateLive({
 					cachedParentMap: HashMap.fromIterable([
 						["child-1", "parent-1"],
@@ -510,7 +507,7 @@ describe("SessionManagerService", () => {
 		);
 	});
 
-	it.scoped(
+	it.effect(
 		"live service publishes one SessionCreated after create succeeds",
 		() => {
 			const dbFile = join(
@@ -530,12 +527,11 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeAPITag)(api),
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
-					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile, "test-project"),
@@ -549,6 +545,7 @@ describe("SessionManagerService", () => {
 				const session = yield* service.createSession("Created", {
 					account: {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},
@@ -557,13 +554,13 @@ describe("SessionManagerService", () => {
 
 				expect(session.id).toBe("created-session");
 				expect(api.session.create).toHaveBeenCalledWith({ title: "Created" });
-				const event = yield* Queue.poll(sub);
-				expect(Option.getOrNull(event)).toMatchObject({
+				const event = (yield* PubSub.takeUpTo(sub, 1))[0] ?? null;
+				expect(event).toMatchObject({
 					_tag: "SessionCreated",
 					sessionId: "created-session",
 				});
-				const extra = yield* Queue.poll(sub);
-				expect(Option.isNone(extra)).toBe(true);
+				const extra = yield* PubSub.takeUpTo(sub, 1);
+				expect(extra).toHaveLength(0);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
@@ -571,7 +568,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"live service creates a SQLite-backed session without OpenCode when default provider is Claude",
 		() => {
 			const dbFile = join(
@@ -584,12 +581,11 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeAPITag)(api),
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
-					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
 					makeSessionManagerStateLive(),
 					makeOverridesStateLive(),
 					DaemonEventBusLive,
@@ -621,13 +617,13 @@ describe("SessionManagerService", () => {
 				]);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
-				Effect.provide(requiredSessionServices),
+				Effect.provide(requiredSessionServices, { local: true }),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"live service creates through OpenCode when an OpenCode provider is requested",
 		() => {
 			const dbFile = join(
@@ -651,17 +647,16 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeAPITag)(api),
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
-					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
 					makeSessionManagerStateLive(),
 					makeOverridesStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile, "test-project"),
-					Layer.succeed(OrchestrationEngineTag, engine),
+					Layer.succeed(OrchestrationEngineTag)(engine),
 				),
 			);
 
@@ -671,6 +666,7 @@ describe("SessionManagerService", () => {
 				const session = yield* service.createSession("OpenCode Session", {
 					account: {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},
@@ -733,13 +729,13 @@ describe("SessionManagerService", () => {
 				]);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
-				Effect.provide(requiredSessionServices),
+				Effect.provide(requiredSessionServices, { local: true }),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"creates an OpenCode session when durable persistence is not configured",
 		() => {
 			const api = makeMockOpenCodeAPI();
@@ -755,12 +751,11 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeAPITag)(api),
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
-					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 				),
@@ -768,10 +763,11 @@ describe("SessionManagerService", () => {
 
 			return Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					service.createSession("No persistence", {
 						account: {
 							driver: "opencode",
+							usageEligible: false,
 							id: AccountIdSchema.make("opencode"),
 							name: "OpenCode",
 						},
@@ -780,15 +776,15 @@ describe("SessionManagerService", () => {
 				);
 
 				expect(result).toMatchObject({
-					_tag: "Right",
-					right: expect.objectContaining({ id: "no-persistence-session" }),
+					_tag: "Success",
+					success: expect.objectContaining({ id: "no-persistence-session" }),
 				});
 				expect(api.session.create).toHaveBeenCalledOnce();
 			}).pipe(Effect.provide(Layer.fresh(layer)));
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"establishes a fork-shaped OpenCode child before Claude message persistence",
 		() => {
 			const dbFile = join(
@@ -799,8 +795,8 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
 					makeSessionManagerStateLive(),
 					makeOverridesStateLive(),
 					DaemonEventBusLive,
@@ -859,13 +855,13 @@ describe("SessionManagerService", () => {
 				});
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
-				Effect.provide(requiredSessionServices),
+				Effect.provide(requiredSessionServices, { local: true }),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"fails establishment when projection does not create an active provider binding",
 		() => {
 			const dbFile = join(
@@ -891,8 +887,8 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile, "test-project", projectors),
@@ -901,7 +897,7 @@ describe("SessionManagerService", () => {
 
 			return Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					service.establishOpenCodeSession(
 						{
 							id: "missing-provider-binding",
@@ -924,8 +920,8 @@ describe("SessionManagerService", () => {
 					WHERE session_id = 'missing-provider-binding' AND type = 'session.created'`;
 
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: expect.objectContaining({
+					_tag: "Failure",
+					failure: expect.objectContaining({
 						operation: "establishOpenCodeSession.project",
 					}),
 				});
@@ -939,7 +935,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"removes a newly seeded row when canonical establishment append fails",
 		() => {
 			const dbFile = join(
@@ -950,8 +946,8 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile, "test-project"),
@@ -969,7 +965,7 @@ describe("SessionManagerService", () => {
 					END
 				`);
 				const service = yield* SessionManagerServiceTag;
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					service.establishOpenCodeSession(
 						{
 							id: "append-failed-session",
@@ -988,8 +984,8 @@ describe("SessionManagerService", () => {
 					SELECT event_id AS id FROM events WHERE session_id = 'append-failed-session'`;
 
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: expect.objectContaining({
+					_tag: "Failure",
+					failure: expect.objectContaining({
 						operation: "establishOpenCodeSession.append",
 					}),
 				});
@@ -1002,7 +998,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"keeps native Claude creation singular after first user-message persistence",
 		() => {
 			const dbFile = join(
@@ -1013,8 +1009,8 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
 					makeSessionManagerStateLive(),
 					makeOverridesStateLive(),
 					DaemonEventBusLive,
@@ -1046,7 +1042,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"binds explicitly selected default instances through their config-resolved drivers and persists active bindings",
 		() => {
 			const tmpDir = mkdtempSync(
@@ -1087,22 +1083,20 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeAPITag)(api),
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
-					Layer.succeed(LoggerTag, makeMockLogger()),
-					Layer.succeed(ConfigTag, relayConfig),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
+					Layer.succeed(ConfigTag)(relayConfig),
 					makeSessionManagerStateLive(),
 					makeOverridesStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile, "test-project"),
-					Layer.succeed(OrchestrationEngineTag, engine),
+					Layer.succeed(OrchestrationEngineTag)(engine),
 				),
 			);
 			const claudeInstanceId = AccountIdSchema.make("claude");
@@ -1131,6 +1125,7 @@ describe("SessionManagerService", () => {
 					{
 						account: {
 							driver: "opencode",
+							usageEligible: false,
 							id: openCodeInstanceId,
 							name: "OpenCode",
 						},
@@ -1190,7 +1185,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"persists named OpenCode creation in both the session row and initial provider binding",
 		() => {
 			const tmpDir = mkdtempSync(
@@ -1223,19 +1218,18 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeAPITag)(api),
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
-					Layer.succeed(LoggerTag, makeMockLogger()),
-					Layer.succeed(ConfigTag, makeRelayConfig(tmpDir)),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
+					Layer.succeed(ConfigTag)(makeRelayConfig(tmpDir)),
 					makeSessionManagerStateLive(),
 					makeOverridesStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile, "test-project"),
-					Layer.succeed(OpenCodeInstancesTag, instanceClients),
-					Layer.succeed(OrchestrationEngineTag, engine),
+					Layer.succeed(OpenCodeInstancesTag)(instanceClients),
+					Layer.succeed(OrchestrationEngineTag)(engine),
 				),
 			);
 
@@ -1247,6 +1241,7 @@ describe("SessionManagerService", () => {
 				const session = yield* service.createSession("Named", {
 					account: {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("work-oc"),
 						name: "Work OpenCode",
 					},
@@ -1300,7 +1295,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"live service does not fabricate a local session when requested OpenCode creation fails",
 		() => {
 			const dbFile = join(
@@ -1315,12 +1310,11 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeAPITag)(api),
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
-					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
 					makeSessionManagerStateLive(),
 					makeOverridesStateLive(),
 					DaemonEventBusLive,
@@ -1331,10 +1325,11 @@ describe("SessionManagerService", () => {
 			return Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
 
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					service.createSession("OpenCode Session", {
 						account: {
 							driver: "opencode",
+							usageEligible: false,
 							id: AccountIdSchema.make("opencode"),
 							name: "OpenCode",
 						},
@@ -1343,7 +1338,7 @@ describe("SessionManagerService", () => {
 				);
 				const sessions = yield* service.listSessions();
 
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 				expect(api.session.create).toHaveBeenCalledWith({
 					title: "OpenCode Session",
 				});
@@ -1355,7 +1350,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"rejects creation with PickRequired before model discovery provides a harness default",
 		() => {
 			const dbFile = join(
@@ -1372,30 +1367,29 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeAPITag)(api),
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
-					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
 					makeSessionManagerStateLive(),
 					makeOverridesStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile, "test-project"),
-					Layer.succeed(OrchestrationEngineTag, engine),
+					Layer.succeed(OrchestrationEngineTag)(engine),
 				),
 			);
 
 			return Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
 
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					service.createSession("Local before models"),
 				);
 
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: expect.objectContaining({
+					_tag: "Failure",
+					failure: expect.objectContaining({
 						_tag: "PickRequired",
 						message: expect.stringMatching(/^PickRequired/),
 					}),
@@ -1410,7 +1404,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"deletes locally and records cleanup failure when end_session and provider delete both fail",
 		() => {
 			const tmpDir = mkdtempSync(
@@ -1446,7 +1440,7 @@ describe("SessionManagerService", () => {
 				Effect.sync(() => {
 					dispatchObservations.push(readTombstoneFirstState(dbFile, sessionId));
 				}).pipe(
-					Effect.zipRight(Effect.fail(new Error("orchestration unavailable"))),
+					Effect.andThen(Effect.fail(new Error("orchestration unavailable"))),
 				),
 			);
 			const engine = withDispatchEffect({ dispatchEffect: dispatch });
@@ -1456,18 +1450,17 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeAPITag)(api),
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
-					Layer.succeed(LoggerTag, logger),
-					Layer.succeed(ConfigTag, makeRelayConfig(tmpDir)),
+					Layer.succeed(LoggerTag)(logger),
+					Layer.succeed(ConfigTag)(makeRelayConfig(tmpDir)),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile, "test-project"),
-					Layer.succeed(OpenCodeInstancesTag, instanceClients),
-					Layer.succeed(OrchestrationEngineTag, engine),
+					Layer.succeed(OpenCodeInstancesTag)(instanceClients),
+					Layer.succeed(OrchestrationEngineTag)(engine),
 				),
 			);
 
@@ -1494,7 +1487,7 @@ describe("SessionManagerService", () => {
 				const events = yield* eventStore.readAllBySession(sessionId);
 				const projected = readProjectedDeleteState(dbFile, sessionId);
 				const state = yield* Ref.get(stateRef);
-				const daemonEvent = Option.getOrNull(yield* Queue.poll(sub));
+				const daemonEvent = (yield* PubSub.takeUpTo(sub, 1))[0] ?? null;
 
 				expect({
 					deleteSucceeded: Exit.isSuccess(deleteExit),
@@ -1545,7 +1538,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"cleans up OpenCode driver state and upstream state without writing a failure receipt",
 		() => {
 			const tmpDir = mkdtempSync(
@@ -1575,16 +1568,15 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeAPITag)(api),
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
-					Layer.succeed(LoggerTag, logger),
+					Layer.succeed(LoggerTag)(logger),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile, "test-project"),
-					Layer.succeed(OrchestrationEngineTag, engine),
+					Layer.succeed(OrchestrationEngineTag)(engine),
 				),
 			);
 
@@ -1623,7 +1615,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped("coalesces concurrent deletes of the same session", () => {
+	it.effect("coalesces concurrent deletes of the same session", () => {
 		const tmpDir = mkdtempSync(
 			join(tmpdir(), "conduit-session-delete-single-flight-"),
 		);
@@ -1638,7 +1630,7 @@ describe("SessionManagerService", () => {
 			vi.spyOn(api.session, "delete").mockImplementation(() =>
 				Effect.runPromise(
 					Deferred.succeed(cleanupStarted, undefined).pipe(
-						Effect.zipRight(Deferred.await(releaseCleanup)),
+						Effect.andThen(Deferred.await(releaseCleanup)),
 					),
 				),
 			);
@@ -1652,17 +1644,16 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeAPITag)(api),
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
-					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					RelayStatusSnapshotLive,
 					makePersistenceEffectLayer(dbFile, "test-project"),
-					Layer.succeed(OrchestrationEngineTag, engine),
+					Layer.succeed(OrchestrationEngineTag)(engine),
 				),
 			);
 
@@ -1676,10 +1667,14 @@ describe("SessionManagerService", () => {
 					lastKnownSessionCount: 2,
 				}));
 
-				const winner = yield* Effect.fork(service.deleteSession(sessionId));
+				const winner = yield* Effect.forkChild(
+					service.deleteSession(sessionId),
+				);
 				yield* Deferred.await(cleanupStarted);
-				const follower = yield* Effect.fork(service.deleteSession(sessionId));
-				yield* Effect.yieldNow();
+				const follower = yield* Effect.forkChild(
+					service.deleteSession(sessionId),
+				);
+				yield* Effect.yieldNow;
 				yield* Deferred.succeed(releaseCleanup, undefined);
 
 				const outcomes = [
@@ -1689,7 +1684,7 @@ describe("SessionManagerService", () => {
 				const eventStore = yield* EventStoreEffectTag;
 				const persistedEvents = yield* eventStore.readAllBySession(sessionId);
 				const state = yield* Ref.get(stateRef);
-				const publishedEvents = yield* Queue.takeAll(daemonEvents);
+				const publishedEvents = yield* PubSub.takeUpTo(daemonEvents, Infinity);
 
 				expect(outcomes).toEqual([true, false]);
 				expect(
@@ -1717,7 +1712,7 @@ describe("SessionManagerService", () => {
 		);
 	});
 
-	it.scoped(
+	it.effect(
 		"persists a queryable named-instance cleanup failure receipt with log-safe detail",
 		() => {
 			const tmpDir = mkdtempSync(
@@ -1749,18 +1744,17 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeAPITag)(api),
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
-					Layer.succeed(LoggerTag, makeMockLogger()),
-					Layer.succeed(ConfigTag, makeRelayConfig(tmpDir)),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
+					Layer.succeed(ConfigTag)(makeRelayConfig(tmpDir)),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile, "test-project"),
-					Layer.succeed(OpenCodeInstancesTag, instanceClients),
-					Layer.succeed(OrchestrationEngineTag, engine),
+					Layer.succeed(OpenCodeInstancesTag)(instanceClients),
+					Layer.succeed(OrchestrationEngineTag)(engine),
 				),
 			);
 
@@ -1807,7 +1801,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"still deletes locally and records a receipt when cleanup detail rendering throws",
 		() => {
 			const tmpDir = mkdtempSync(
@@ -1855,18 +1849,17 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeAPITag)(api),
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
-					Layer.succeed(LoggerTag, makeMockLogger()),
-					Layer.succeed(ConfigTag, makeRelayConfig(tmpDir)),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
+					Layer.succeed(ConfigTag)(makeRelayConfig(tmpDir)),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile, "test-project"),
-					Layer.succeed(OpenCodeInstancesTag, instanceClients),
-					Layer.succeed(OrchestrationEngineTag, engine),
+					Layer.succeed(OpenCodeInstancesTag)(instanceClients),
+					Layer.succeed(OrchestrationEngineTag)(engine),
 				),
 			);
 
@@ -1899,7 +1892,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped("bounds the durable provider cleanup failure reason", () => {
+	it.effect("bounds the durable provider cleanup failure reason", () => {
 		const tmpDir = mkdtempSync(
 			join(tmpdir(), "conduit-session-delete-bounded-reason-"),
 		);
@@ -1932,18 +1925,17 @@ describe("SessionManagerService", () => {
 			SessionManagerServiceLive,
 			Layer.mergeAll(
 				requiredSessionServices,
-				Layer.succeed(OpenCodeAPITag, api),
-				Layer.succeed(
-					OpenCodeInstancesTag,
+				Layer.succeed(OpenCodeAPITag)(api),
+				Layer.succeed(OpenCodeInstancesTag)(
 					makeOpenCodeInstancesStub({ opencode: api }),
 				),
-				Layer.succeed(LoggerTag, makeMockLogger()),
-				Layer.succeed(ConfigTag, makeRelayConfig(tmpDir)),
+				Layer.succeed(LoggerTag)(makeMockLogger()),
+				Layer.succeed(ConfigTag)(makeRelayConfig(tmpDir)),
 				makeSessionManagerStateLive(),
 				DaemonEventBusLive,
 				makePersistenceEffectLayer(dbFile, "test-project"),
-				Layer.succeed(OpenCodeInstancesTag, instanceClients),
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OpenCodeInstancesTag)(instanceClients),
+				Layer.succeed(OrchestrationEngineTag)(engine),
 			),
 		);
 
@@ -1969,7 +1961,7 @@ describe("SessionManagerService", () => {
 		);
 	});
 
-	it.scoped(
+	it.effect(
 		"dispatches Claude end_session after the tombstone is projected",
 		() => {
 			const tmpDir = mkdtempSync(
@@ -1994,16 +1986,15 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeAPITag)(api),
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
-					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile, "test-project"),
-					Layer.succeed(OrchestrationEngineTag, engine),
+					Layer.succeed(OrchestrationEngineTag)(engine),
 				),
 			);
 
@@ -2038,7 +2029,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"captures a durable-only provider binding before tombstone projection and targets it for cleanup",
 		() => {
 			const tmpDir = mkdtempSync(
@@ -2138,17 +2129,16 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeAPITag)(api),
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
-					Layer.succeed(LoggerTag, makeMockLogger()),
-					Layer.succeed(ConfigTag, makeRelayConfig(tmpDir)),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
+					Layer.succeed(ConfigTag)(makeRelayConfig(tmpDir)),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					persistenceLayer,
-					Layer.succeed(OpenCodeInstancesTag, instanceClients),
+					Layer.succeed(OpenCodeInstancesTag)(instanceClients),
 					engineLayer,
 				),
 			);
@@ -2186,7 +2176,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"records a cleanup failure receipt when provider cleanup exceeds its timeout",
 		() => {
 			const tmpDir = mkdtempSync(
@@ -2199,7 +2189,7 @@ describe("SessionManagerService", () => {
 			return Effect.gen(function* () {
 				const cleanupStarted = yield* Deferred.make<void>();
 				const neverSettles = Deferred.succeed(cleanupStarted, undefined).pipe(
-					Effect.zipRight(Effect.never),
+					Effect.andThen(Effect.never),
 				);
 				const dispatchEffect = vi.fn(() => neverSettles);
 				const engine = withDispatchEffect({ dispatchEffect });
@@ -2219,18 +2209,17 @@ describe("SessionManagerService", () => {
 					SessionManagerServiceLive,
 					Layer.mergeAll(
 						requiredSessionServices,
-						Layer.succeed(OpenCodeAPITag, api),
-						Layer.succeed(
-							OpenCodeInstancesTag,
+						Layer.succeed(OpenCodeAPITag)(api),
+						Layer.succeed(OpenCodeInstancesTag)(
 							makeOpenCodeInstancesStub({ opencode: api }),
 						),
-						Layer.succeed(LoggerTag, makeMockLogger()),
-						Layer.succeed(ConfigTag, makeRelayConfig(tmpDir)),
+						Layer.succeed(LoggerTag)(makeMockLogger()),
+						Layer.succeed(ConfigTag)(makeRelayConfig(tmpDir)),
 						makeSessionManagerStateLive(),
 						DaemonEventBusLive,
 						makePersistenceEffectLayer(dbFile, "test-project"),
-						Layer.succeed(OpenCodeInstancesTag, instanceClients),
-						Layer.succeed(OrchestrationEngineTag, engine),
+						Layer.succeed(OpenCodeInstancesTag)(instanceClients),
+						Layer.succeed(OrchestrationEngineTag)(engine),
 					),
 				);
 
@@ -2239,13 +2228,23 @@ describe("SessionManagerService", () => {
 						saveDaemonConfig(makeNamedOpenCodeDaemonConfig(), tmpDir),
 					);
 					const service = yield* SessionManagerServiceTag;
-					const fiber = yield* Effect.fork(service.deleteSession(sessionId));
+					const fiber = yield* Effect.forkChild(
+						service.deleteSession(sessionId),
+					);
 					yield* Deferred.await(cleanupStarted);
 					engine.bindSession(sessionId, "claude");
 					yield* TestClock.adjust("1999 millis");
-					expect(Option.isNone(yield* Fiber.poll(fiber))).toBe(true);
+					expect(
+						Option.isNone(
+							yield* Effect.sync(() =>
+								Option.fromUndefinedOr(fiber.pollUnsafe()),
+							),
+						),
+					).toBe(true);
 					yield* TestClock.adjust("1 millis");
-					const completed = yield* Fiber.poll(fiber);
+					const completed = yield* Effect.sync(() =>
+						Option.fromUndefinedOr(fiber.pollUnsafe()),
+					);
 					if (Option.isNone(completed)) {
 						yield* Fiber.interrupt(fiber);
 					}
@@ -2280,7 +2279,7 @@ describe("SessionManagerService", () => {
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"live service updates the relay status session-count snapshot",
 		() => {
 			const dbFile = join(
@@ -2319,12 +2318,11 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeAPITag)(api),
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
-					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					RelayStatusSnapshotLive,
@@ -2371,6 +2369,7 @@ describe("SessionManagerService", () => {
 				yield* service.createSession("Session 3", {
 					account: {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},
@@ -2397,12 +2396,11 @@ describe("SessionManagerService", () => {
 			messages.map((message) => ({ ...message, sessionID: "session-1" })),
 		);
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, api),
-			Layer.succeed(
-				OpenCodeInstancesTag,
+			Layer.succeed(OpenCodeAPITag)(api),
+			Layer.succeed(OpenCodeInstancesTag)(
 				makeOpenCodeInstancesStub({ opencode: api }),
 			),
-			Layer.succeed(LoggerTag, makeMockLogger()),
+			Layer.succeed(LoggerTag)(makeMockLogger()),
 			makeSessionManagerStateLive(),
 		);
 
@@ -2423,9 +2421,8 @@ describe("SessionManagerService", () => {
 		const api = makeMockOpenCodeAPI();
 		const update = vi.spyOn(api.session, "update").mockResolvedValue(undefined);
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, api),
-			Layer.succeed(
-				OpenCodeInstancesTag,
+			Layer.succeed(OpenCodeAPITag)(api),
+			Layer.succeed(OpenCodeInstancesTag)(
 				makeOpenCodeInstancesStub({ opencode: api }),
 			),
 		);
@@ -2447,7 +2444,10 @@ describe("SessionManagerService", () => {
 			expect(
 				(yield* (yield* ReadQueryEffectTag).getSession("session-1"))?.title,
 			).toBe("New Title");
-		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
+		}).pipe(
+			Effect.provide(layer),
+			Effect.provide(requiredSessionServices, { local: true }),
+		);
 	});
 
 	it.effect("projects persisted sessions into frontend session info", () => {
@@ -2463,7 +2463,7 @@ describe("SessionManagerService", () => {
 			[{ session_id: "child-1", type: "question", pending_count: 2 }],
 		);
 		const layer = Layer.mergeAll(
-			Layer.succeed(ReadQueryEffectTag, readQuery),
+			Layer.succeed(ReadQueryEffectTag)(readQuery),
 			makeSessionManagerStateLive({
 				lastMessageAt: HashMap.fromIterable([["child-1", 100]]),
 			}),
@@ -2502,7 +2502,10 @@ describe("SessionManagerService", () => {
 			expect(Array.from(HashMap.toEntries(state.cachedParentMap))).toEqual([
 				["child-1", "root-1"],
 			]);
-		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
+		}).pipe(
+			Effect.provide(layer),
+			Effect.provide(requiredSessionServices, { local: true }),
+		);
 	});
 
 	it.effect("prefers the Effect SQLite read path when available", () => {
@@ -2522,12 +2525,11 @@ describe("SessionManagerService", () => {
 			}),
 		]);
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, api),
-			Layer.succeed(
-				OpenCodeInstancesTag,
+			Layer.succeed(OpenCodeAPITag)(api),
+			Layer.succeed(OpenCodeInstancesTag)(
 				makeOpenCodeInstancesStub({ opencode: api }),
 			),
-			Layer.succeed(ReadQueryEffectTag, readQuery),
+			Layer.succeed(ReadQueryEffectTag)(readQuery),
 			makeSessionManagerStateLive({}),
 		);
 
@@ -2561,7 +2563,10 @@ describe("SessionManagerService", () => {
 					resumes: [],
 				},
 			]);
-		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
+		}).pipe(
+			Effect.provide(layer),
+			Effect.provide(requiredSessionServices, { local: true }),
+		);
 	});
 
 	it.effect("reads durable pending question and permission counts", () => {
@@ -2573,8 +2578,8 @@ describe("SessionManagerService", () => {
 			SessionManagerServiceLive,
 			Layer.mergeAll(
 				requiredSessionServices,
-				Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-				Layer.succeed(LoggerTag, makeMockLogger()),
+				Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+				Layer.succeed(LoggerTag)(makeMockLogger()),
 				makeSessionManagerStateLive(),
 				DaemonEventBusLive,
 				makePersistenceEffectLayer(dbFile, "test-project"),
@@ -2645,8 +2650,8 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile, "test-project"),
@@ -2680,10 +2685,10 @@ describe("SessionManagerService", () => {
 				expect(
 					yield* service.setSessionSettled("settled", { settled: false }),
 				).toBe(true);
-				const blocked = yield* Effect.either(
+				const blocked = yield* Effect.result(
 					service.setSessionSettled("pinned", { settled: true }),
 				);
-				expect(blocked._tag).toBe("Left");
+				expect(blocked._tag).toBe("Failure");
 				expect(yield* store.readAllBySession("pinned")).toHaveLength(2);
 				expect(yield* service.setSessionPinned("pinned", false)).toBe(true);
 				expect(
@@ -2691,7 +2696,7 @@ describe("SessionManagerService", () => {
 				).toBe(true);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
-				Effect.provide(requiredSessionServices),
+				Effect.provide(requiredSessionServices, { local: true }),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		},
@@ -2709,12 +2714,11 @@ describe("SessionManagerService", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeAPITag)(api),
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
-					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile, "test-project"),
@@ -2762,12 +2766,14 @@ describe("SessionManagerService", () => {
 				).toBe(true);
 				expect(yield* service.setSessionPinned("older", true)).toBe(true);
 				expect(yield* service.setSessionPinned("older", true)).toBe(false);
-				const blocked = yield* Effect.either(
+				const blocked = yield* Effect.result(
 					service.setSessionSettled("older", { settled: true }),
 				);
-				expect(blocked._tag).toBe("Left");
-				if (blocked._tag === "Left")
-					expect(String(blocked.left.cause)).toMatch(/pinned.*unpinned first/);
+				expect(blocked._tag).toBe("Failure");
+				if (blocked._tag === "Failure")
+					expect(String(blocked.failure.cause)).toMatch(
+						/pinned.*unpinned first/,
+					);
 				const pinned = (yield* service.listSessions()).find(
 					(s) => s.id === "older",
 				);
@@ -2810,7 +2816,7 @@ describe("SessionManagerService", () => {
 				expect(api.session.delete).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
-				Effect.provide(requiredSessionServices),
+				Effect.provide(requiredSessionServices, { local: true }),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		},
@@ -2825,8 +2831,8 @@ describe("SessionManagerService", () => {
 			SessionManagerServiceLive,
 			Layer.mergeAll(
 				requiredSessionServices,
-				Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-				Layer.succeed(LoggerTag, makeMockLogger()),
+				Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+				Layer.succeed(LoggerTag)(makeMockLogger()),
 				makeSessionManagerStateLive(),
 				DaemonEventBusLive,
 				makePersistenceEffectLayer(dbFile, "test-project"),
@@ -2869,7 +2875,7 @@ describe("SessionManagerService", () => {
 			expect((yield* service.listSessions())[0]?.unread).toBe(true);
 		}).pipe(
 			Effect.provide(Layer.fresh(layer)),
-			Effect.provide(requiredSessionServices),
+			Effect.provide(requiredSessionServices, { local: true }),
 			Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 		);
 	});
@@ -2886,8 +2892,8 @@ describe("SessionManagerService", () => {
 			],
 		);
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-			Layer.succeed(ReadQueryEffectTag, readQuery),
+			Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+			Layer.succeed(ReadQueryEffectTag)(readQuery),
 			makeSessionManagerStateLive(),
 		);
 
@@ -2898,7 +2904,10 @@ describe("SessionManagerService", () => {
 			});
 
 			expect(sessions[0]?.pendingQuestionCount).toBe(1);
-		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
+		}).pipe(
+			Effect.provide(layer),
+			Effect.provide(requiredSessionServices, { local: true }),
+		);
 	});
 
 	it.effect("keeps the parent map when fetching roots only", () => {
@@ -2908,12 +2917,11 @@ describe("SessionManagerService", () => {
 			makeRow("child-1", { parent_id: "root-1" }),
 		]);
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, api),
-			Layer.succeed(
-				OpenCodeInstancesTag,
+			Layer.succeed(OpenCodeAPITag)(api),
+			Layer.succeed(OpenCodeInstancesTag)(
 				makeOpenCodeInstancesStub({ opencode: api }),
 			),
-			Layer.succeed(ReadQueryEffectTag, readQuery),
+			Layer.succeed(ReadQueryEffectTag)(readQuery),
 			makeSessionManagerStateLive({
 				cachedParentMap: HashMap.fromIterable([["child-1", "root-1"]]),
 			}),
@@ -2941,14 +2949,17 @@ describe("SessionManagerService", () => {
 				},
 			);
 			expect(api.session.list).not.toHaveBeenCalled();
-		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
+		}).pipe(
+			Effect.provide(layer),
+			Effect.provide(requiredSessionServices, { local: true }),
+		);
 	});
 
 	it.effect("exposes parent map reads and writes through service state", () => {
 		const layer = Layer.mergeAll(
 			makeSessionManagerStateLive(),
-			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-			Layer.succeed(LoggerTag, makeMockLogger()),
+			Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+			Layer.succeed(LoggerTag)(makeMockLogger()),
 			DaemonEventBusLive,
 		);
 
@@ -2968,7 +2979,7 @@ describe("SessionManagerService", () => {
 		}).pipe(
 			Effect.provide(SessionManagerServiceLive),
 			Effect.provide(layer),
-			Effect.provide(requiredSessionServices),
+			Effect.provide(requiredSessionServices, { local: true }),
 		);
 	});
 
@@ -2983,7 +2994,10 @@ describe("SessionManagerService", () => {
 			const state = yield* Ref.get(stateRef);
 
 			expect(HashMap.get(state.lastMessageAt, "s1")).toEqual(Option.some(300));
-		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
+		}).pipe(
+			Effect.provide(layer),
+			Effect.provide(requiredSessionServices, { local: true }),
+		);
 	});
 
 	it.effect("refreshes the lineage caches", () => {
@@ -2997,11 +3011,11 @@ describe("SessionManagerService", () => {
 			getClientSession: vi.fn(() => "root"),
 		});
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-			Layer.succeed(ReadQueryEffectTag, readQuery),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(StatusPollerTag, makeMockStatusPoller()),
-			Layer.succeed(LoggerTag, makeMockLogger()),
+			Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+			Layer.succeed(ReadQueryEffectTag)(readQuery),
+			Layer.succeed(WebSocketHandlerTag)(ws),
+			Layer.succeed(StatusPollerTag)(makeMockStatusPoller()),
+			Layer.succeed(LoggerTag)(makeMockLogger()),
 			makeSessionManagerStateLive(),
 			DaemonEventBusLive,
 			RelayStatusSnapshotLive,
@@ -3023,7 +3037,7 @@ describe("SessionManagerService", () => {
 		}).pipe(
 			Effect.provide(SessionManagerServiceLive),
 			Effect.provide(layer),
-			Effect.provide(requiredSessionServices),
+			Effect.provide(requiredSessionServices, { local: true }),
 		);
 	});
 
@@ -3035,15 +3049,13 @@ describe("SessionManagerService", () => {
 		const layer = SessionManagerServiceLive.pipe(
 			Layer.provide(
 				Layer.mergeAll(
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeAPITag)(api),
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
-					Layer.succeed(ReadQueryEffectTag, readQuery),
-					Layer.succeed(LoggerTag, makeMockLogger()),
-					Layer.succeed(
-						StatusPollerTag,
+					Layer.succeed(ReadQueryEffectTag)(readQuery),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
+					Layer.succeed(StatusPollerTag)(
 						makeMockStatusPoller({
 							isProcessing: vi.fn(() => Effect.succeed(true)),
 							clearMessageActivity: vi.fn(() => Effect.void),
@@ -3073,7 +3085,10 @@ describe("SessionManagerService", () => {
 					status: "busy",
 				},
 			]);
-		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
+		}).pipe(
+			Effect.provide(layer),
+			Effect.provide(requiredSessionServices, { local: true }),
+		);
 	});
 });
 
@@ -3089,8 +3104,8 @@ describe("snooze session commands", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					requiredSessionServices,
-					Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-					Layer.succeed(LoggerTag, makeMockLogger()),
+					Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+					Layer.succeed(LoggerTag)(makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile, "test-project"),
@@ -3120,19 +3135,19 @@ describe("snooze session commands", () => {
 				if (reason === "permission" || reason === "question") {
 					yield* sql`INSERT INTO pending_approvals (id, session_id, type, created_at) VALUES ('a1', 's1', ${reason}, 2)`;
 				}
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					service.snoozeSession(
 						"s1",
 						reason === "past" ? Date.now() - 1 : null,
 					),
 				);
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left")
-					expect(String(result.left.cause)).toMatch(expected);
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure")
+					expect(String(result.failure.cause)).toMatch(expected);
 				expect(yield* store.readAllBySession("s1")).toEqual([]);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
-				Effect.provide(requiredSessionServices),
+				Effect.provide(requiredSessionServices, { local: true }),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		});
@@ -3156,7 +3171,7 @@ describe("snooze session commands", () => {
 			).toEqual(["session.snoozed", "session.snoozed", "session.unsnoozed"]);
 		}).pipe(
 			Effect.provide(Layer.fresh(layer)),
-			Effect.provide(requiredSessionServices),
+			Effect.provide(requiredSessionServices, { local: true }),
 			Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 		);
 	});
@@ -3182,7 +3197,7 @@ describe("snooze session commands", () => {
 				]);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
-				Effect.provide(requiredSessionServices),
+				Effect.provide(requiredSessionServices, { local: true }),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		});

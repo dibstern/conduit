@@ -21,12 +21,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EventPayloadMap } from "../../../src/lib/contracts/stored-event.js";
-import {
-	CreateSession,
-	GetProjects,
-	ListDaemonSessions,
-	SaveProject,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -75,7 +70,7 @@ function processExists(pid: number): boolean {
 }
 
 function setupEvents(fixture: ProcessHarness, sessionId: string): SetupEvent[] {
-	const db = new Database(fixture.projectStorePath(), { readonly: true });
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
 		const rows = db
 			.prepare(
@@ -142,33 +137,28 @@ describe("Project setup scripts through the built daemon", () => {
 		});
 		const socket = join(fixture.configDir, "relay.sock");
 		const save = (setupScript: string) =>
-			sendRpcRequest(
-				socket,
-				new SaveProject({
-					slug: "process-test",
-					folders: [fixture.projectDir],
-					setupScript,
-				}),
-			);
+			sendRpcRequest(socket, {
+				_tag: "SaveProject",
+				slug: "process-test",
+				folders: [fixture.projectDir],
+				setupScript,
+			});
 		const create = async (title: string, newWorktree = true) => {
-			const created = await sendRpcRequest(
-				socket,
-				new CreateSession({
-					permissionMode: "ask",
-					projectSlug: "process-test",
-					originId: "project-setup-test",
-					providerId: "claude",
-					title,
-					...(newWorktree ? { newWorktree: true } : {}),
-				}),
-			);
-			const rows = await sendRpcRequest(
-				socket,
-				new ListDaemonSessions({
-					projectSlug: "process-test",
-					scope: "process-test",
-				}),
-			);
+			const created = await sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				permissionMode: "ask",
+				projectSlug: "process-test",
+				originId: "project-setup-test",
+				providerId: "claude",
+				model: { providerId: "claude", modelId: "sonnet" },
+				title,
+				...(newWorktree ? { newWorktree: true } : {}),
+			});
+			const rows = await sendRpcRequest(socket, {
+				_tag: "ListDaemonSessions",
+				projectSlug: "process-test",
+				scope: "process-test",
+			});
 			const session = rows.sessions.find(({ id }) => id === created.sessionId);
 			const path = newWorktree
 				? session?.workspace?.worktrees[fixture.projectDir]
@@ -190,7 +180,7 @@ describe("Project setup scripts through the built daemon", () => {
 		if (task.result?.errors?.length)
 			evidence["diagnosticLogs"] = fixture.logTail.slice(-4_000);
 		try {
-			if (existsSync(fixture.projectStorePath()))
+			if (existsSync(fixture.daemonStorePath()))
 				evidence["sessions"] = [...sessions]
 					.sort(([, a], [, b]) => a.title.localeCompare(b.title))
 					.map(([id, { title, path }]) => {
@@ -292,7 +282,7 @@ describe("Project setup scripts through the built daemon", () => {
 			});
 		// Handle teardown rejection if an assertion fails before the turn is awaited.
 		void firstTurn.catch(() => undefined);
-		const admissionDb = new Database(fixture.projectStorePath(), {
+		const admissionDb = new Database(fixture.daemonStorePath(), {
 			readonly: true,
 		});
 		try {
@@ -363,7 +353,7 @@ describe("Project setup scripts through the built daemon", () => {
 		});
 		expect(succeededParts[0]?.text).toContain("setup stdout");
 		expect(succeededParts[0]?.text).toContain("setup stderr");
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			const events = db
 				.prepare(
@@ -457,7 +447,7 @@ describe("Project setup scripts through the built daemon", () => {
 			"printf 'daemon' > setup-marker.txt; printf 'daemon output\\n'";
 		await save(script);
 		expect(
-			(await sendRpcRequest(socket, new GetProjects({}))).projects.find(
+			(await sendRpcRequest(socket, { _tag: "GetProjects" })).projects.find(
 				({ slug }) => slug === "process-test",
 			)?.setupScript,
 		).toBe(script);
@@ -478,7 +468,7 @@ describe("Project setup scripts through the built daemon", () => {
 			runnerStartupTimeoutMs: 90_000,
 		});
 		expect(
-			(await sendRpcRequest(socket, new GetProjects({}))).projects.find(
+			(await sendRpcRequest(socket, { _tag: "GetProjects" })).projects.find(
 				({ slug }) => slug === "process-test",
 			)?.setupScript,
 		).toBe(script);
@@ -493,7 +483,7 @@ describe("Project setup scripts through the built daemon", () => {
 		);
 		await save(" \n\t ");
 		expect(
-			(await sendRpcRequest(socket, new GetProjects({}))).projects.find(
+			(await sendRpcRequest(socket, { _tag: "GetProjects" })).projects.find(
 				({ slug }) => slug === "process-test",
 			)?.setupScript,
 		).toBeUndefined();

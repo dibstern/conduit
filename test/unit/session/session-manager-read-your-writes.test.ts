@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Cause, Effect, Exit, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
@@ -61,6 +61,9 @@ type OperationsOutsideReadModelParity = keyof Pick<
 	| "addToParentMap"
 	| "getSessionParentMap"
 	| "refreshSessionLineage"
+	// Archive's read-model parity is covered by the real-relay session-archive E2E.
+	| "setSessionArchived"
+	| "restoreSessionForSend"
 >;
 
 type ReadModelMutation = Exclude<
@@ -135,6 +138,7 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 				yield* service.createSession(created.title, {
 					account: {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},
@@ -305,7 +309,8 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 
 				expect(yield* readQuery.getSession(forked.id)).toEqual(
 					expect.objectContaining({
-						parent_id: parentId,
+						parent_id: null,
+						forked_from: parentId,
 						fork_point_event: forkMessageId,
 					}),
 				);
@@ -325,11 +330,10 @@ describe("SessionManager read-your-writes parity", () => {
 			() => {
 				const dir = mkdtempSync(join(tmpdir(), "conduit-session-parity-"));
 				const api = makeMockOpenCodeAPI();
-				const configLayer = Layer.succeed(
-					ConfigTag,
+				const configLayer = Layer.succeed(ConfigTag)(
 					makeMockConfig({ configDir: dir, projectDir: dir }),
 				);
-				const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
+				const loggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
 				const persistenceLayer = makePersistenceEffectLayer(
 					join(dir, "events.db"),
 					"test-project",
@@ -337,23 +341,21 @@ describe("SessionManager read-your-writes parity", () => {
 				const layer = Layer.provideMerge(
 					SessionManagerServiceLive,
 					Layer.mergeAll(
-						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+						Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 						makeSessionManagerStateLive(),
-						Layer.succeed(OpenCodeAPITag, api),
+						Layer.succeed(OpenCodeAPITag)(api),
 						loggerLayer,
 						configLayer,
-						Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+						Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 						Layer.effect(SessionActivityTag, makeSessionActivity),
 						RelayStatusSnapshotLive,
 						makeOverridesStateLive(),
-						Layer.succeed(
-							OpenCodeInstancesTag,
+						Layer.succeed(OpenCodeInstancesTag)(
 							makeOpenCodeInstancesStub({ opencode: api }),
 						),
 						DaemonEventBusLive,
 						persistenceLayer,
-						Layer.succeed(
-							OrchestrationEngineTag,
+						Layer.succeed(OrchestrationEngineTag)(
 							new OrchestrationEngine({ registry: new ProviderRegistry() }),
 						),
 					),
@@ -416,8 +418,12 @@ describe("SessionManager read-your-writes parity", () => {
 					expect(Exit.isFailure(outcome)).toBe(true);
 					if (Exit.isFailure(outcome)) {
 						const errors = [
-							...Cause.failures(outcome.cause),
-							...Cause.defects(outcome.cause),
+							...outcome.cause.reasons
+								.filter(Cause.isFailReason)
+								.map((reason) => reason.error),
+							...outcome.cause.reasons
+								.filter(Cause.isDieReason)
+								.map((reason) => reason.defect),
 						];
 						expect(errors).toHaveLength(1);
 						expect((errors[0] as Error).name).toBe("AssertionError");

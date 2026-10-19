@@ -387,10 +387,10 @@ test("opens the heavy session after a restart under load", async ({
 
 	// Seed into the store the first daemon created, then start on it.
 	await harness.terminate();
-	const fixture = await seedSessionLoadFixture(harness.projectStorePath(), {
+	const fixture = await seedSessionLoadFixture(harness.daemonStorePath(), {
 		projectId: "process-test",
 	});
-	const storeBytes = statSync(harness.projectStorePath()).size;
+	const storeBytes = statSync(harness.daemonStorePath()).size;
 	const warmMetrics = join(harness.root, "server-metrics-warm.json");
 	// The harness probe opens a detail stream per sidebar row; skip it here and
 	// confirm the fake SDK once the driver has attached instead.
@@ -406,7 +406,7 @@ test("opens the heavy session after a restart under load", async ({
 	for (let index = 0; index < STREAMS; index++) {
 		const sessionId = await driver.createSession(`Stream ${index}`);
 		await Effect.runPromise(
-			driver.rpc.input.submit({
+			driver.rpc["input.submit"]({
 				sessionId,
 				originId: driver.originId,
 				inputId: randomUUID(),
@@ -507,7 +507,7 @@ test("opens the heavy session after a restart under load", async ({
 	await harness.terminate();
 	const stoppedAt = Date.now();
 	const storeRow = (query: string, ...params: (number | string)[]) => {
-		const db = new DatabaseSync(harness.projectStorePath(), { readOnly: true });
+		const db = new DatabaseSync(harness.daemonStorePath(), { readOnly: true });
 		try {
 			return db.prepare(query).get(...params) as {
 				n: number;
@@ -575,7 +575,7 @@ test("opens the heavy session after a restart under load", async ({
 	const moved =
 		"SELECT session_id FROM events WHERE sequence > ? AND session_id IS NOT NULL UNION SELECT ?";
 	const stamped = storeRow(
-		`SELECT count(*) AS n, group_concat(id) AS ids FROM sessions WHERE version > ? AND id NOT IN (${moved})`,
+		`SELECT count(*) AS n, group_concat(id) AS ids FROM sessions WHERE project_id = 'process-test' AND version > ? AND id NOT IN (${moved})`,
 		counterAtStop,
 		seqAtStop,
 		HEAVY_SESSION_ID,
@@ -586,7 +586,7 @@ test("opens the heavy session after a restart under load", async ({
 		sessions: stamped.n,
 		sessionIds: stamped.ids ?? "",
 		sidebarRows: storeRow(
-			`SELECT count(*) AS n FROM session_sidebar WHERE version > ? AND session_id NOT IN (SELECT root_id FROM sessions WHERE id IN (${moved}))`,
+			`SELECT count(*) AS n FROM session_sidebar WHERE session_id IN (SELECT id FROM sessions WHERE project_id = 'process-test') AND version > ? AND session_id NOT IN (SELECT root_id FROM sessions WHERE id IN (${moved}))`,
 			counterAtStop,
 			seqAtStop,
 			HEAVY_SESSION_ID,
@@ -610,7 +610,7 @@ test("opens the heavy session after a restart under load", async ({
 		`${harness.baseUrl}/s/${toolSession}?p=process-test`,
 	);
 	await Effect.runPromise(
-		toolDriver.rpc.input.submit({
+		toolDriver.rpc["input.submit"]({
 			sessionId: toolSession,
 			originId: toolDriver.originId,
 			inputId: randomUUID(),

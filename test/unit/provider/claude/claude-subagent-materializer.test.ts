@@ -3,10 +3,10 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Reactivity } from "@effect/experimental";
-import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Effect, Layer } from "effect";
+import { Reactivity } from "effect/reactivity";
+import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PersistenceProjectTag } from "../../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { sessionPickEvents } from "../../../../src/lib/domain/relay/Services/session-pick.js";
@@ -740,7 +740,7 @@ describe("Claude subagent transcripts and session establishment", () => {
 				Effect.gen(function* () {
 					yield* establishCanonicalSession("parent-session", "claude");
 					const persist = yield* ClaudeEventPersistEffectTag;
-					const result = yield* Effect.either(
+					const result = yield* Effect.result(
 						persist.ensureClaudeSubagentSession({
 							childSessionId: "invalid-child",
 							parentSessionId: "parent-session",
@@ -750,8 +750,8 @@ describe("Claude subagent transcripts and session establishment", () => {
 						}),
 					);
 					expect(result).toMatchObject({
-						_tag: "Left",
-						left: {
+						_tag: "Failure",
+						failure: {
 							_tag: "ClaudeEventPersistEffectError",
 							operation: "ensureClaudeSubagentSession",
 							cause: {
@@ -780,7 +780,7 @@ describe("Claude subagent transcripts and session establishment", () => {
 			const result = await Effect.runPromise(
 				Effect.gen(function* () {
 					const persist = yield* ClaudeEventPersistEffectTag;
-					const outcome = yield* Effect.either(
+					const outcome = yield* Effect.result(
 						persist.ensureClaudeSubagentSession({
 							childSessionId: "missing-parent-child",
 							parentSessionId: "missing-parent",
@@ -806,7 +806,7 @@ describe("Claude subagent transcripts and session establishment", () => {
 							}),
 						),
 					);
-					const missingPickOutcome = yield* Effect.either(
+					const missingPickOutcome = yield* Effect.result(
 						persist.ensureClaudeSubagentSession({
 							childSessionId: "legacy-parent-child",
 							parentSessionId: "legacy-parent",
@@ -830,8 +830,8 @@ describe("Claude subagent transcripts and session establishment", () => {
 			);
 
 			expect(result.outcome).toMatchObject({
-				_tag: "Left",
-				left: expect.objectContaining({
+				_tag: "Failure",
+				failure: expect.objectContaining({
 					_tag: "ClaudeSessionLifecycleError",
 					operation: "ensureClaudeSubagentSession",
 					sessionId: "missing-parent",
@@ -842,8 +842,8 @@ describe("Claude subagent transcripts and session establishment", () => {
 			expect(result.sessions).toBe(0);
 			expect(result.events).toBe(0);
 			expect(result.missingPickOutcome).toMatchObject({
-				_tag: "Left",
-				left: { _tag: "PickRequired" },
+				_tag: "Failure",
+				failure: { _tag: "PickRequired" },
 			});
 			expect(result.legacyChildSessions).toBe(0);
 			expect(result.legacyChildEvents).toBe(0);
@@ -869,7 +869,7 @@ describe("Claude subagent transcripts and session establishment", () => {
 							'conflicting-child', 'opencode', 'upstream-child', 'Existing', 'idle', 'parent-session', 1, 1
 						)`;
 					const persist = yield* ClaudeEventPersistEffectTag;
-					const outcome = yield* Effect.either(
+					const outcome = yield* Effect.result(
 						persist.ensureClaudeSubagentSession({
 							childSessionId: "conflicting-child",
 							parentSessionId: "parent-session",
@@ -892,8 +892,8 @@ describe("Claude subagent transcripts and session establishment", () => {
 			);
 
 			expect(result.outcome).toMatchObject({
-				_tag: "Left",
-				left: expect.objectContaining({
+				_tag: "Failure",
+				failure: expect.objectContaining({
 					_tag: "ClaudeSessionLifecycleError",
 					operation: "ensureClaudeSubagentSession",
 					sessionId: "conflicting-child",

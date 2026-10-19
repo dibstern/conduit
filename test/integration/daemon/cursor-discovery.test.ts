@@ -1,13 +1,10 @@
 // Failure modes: discovery leaks a credential, a failed probe breaks other
-// drivers, a stale catalog survives refresh, or a selectable Cursor turn runs.
+// drivers, a stale catalog survives refresh, or a selectable Cursor turn fails.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-	AddInstance,
-	CreateSession,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import type { ProviderInfo } from "../../../src/lib/shared-types.js";
 import {
 	ProcessHarness,
@@ -19,8 +16,7 @@ const scenarios = [
 	{ name: "model-list-failed", reason: "Cursor model list failed" },
 	{
 		name: "no-credential",
-		reason:
-			"Cursor has no credential; set CURSOR_API_KEY or log in with the Cursor SDK",
+		reason: "Cursor authentication required. Log in to Cursor in Settings.",
 	},
 	{ name: "sdk-load-failed", reason: "Cursor SDK could not load" },
 	{ name: "node-old", reason: "Cursor requires Node.js 22.13 or newer" },
@@ -123,6 +119,11 @@ describe("Cursor discovery through the built daemon and SDK trace port", () => {
 								},
 				},
 				{ kind: "auth.status", data: { status: "logged-in" } },
+				...seedRows.filter(
+					({ kind }) =>
+						kind !== undefined &&
+						!["models.list", "auth.status"].includes(kind),
+				),
 				...(scenario.name === "model-list-failed"
 					? [
 							{
@@ -144,9 +145,11 @@ describe("Cursor discovery through the built daemon and SDK trace port", () => {
 					CONDUIT_CURSOR_SDK_CAPTURE: capturePath,
 				},
 			});
-			const added = await fixture.requestRpc(
-				new AddInstance({ name: "Cursor", driver: "cursor" }),
-			);
+			const added = await fixture.requestRpc({
+				_tag: "AddInstance",
+				name: "Cursor",
+				driver: "cursor",
+			});
 			const accountId = added.addedInstanceId;
 			if (!accountId) throw new Error("Missing Cursor account");
 			const browser = await fixture.connect();
@@ -159,6 +162,10 @@ describe("Cursor discovery through the built daemon and SDK trace port", () => {
 			});
 			if (scenario.reason)
 				expect(cursor?.unavailableReason).toBe(scenario.reason);
+			// Only an auth failure offers login as its remedy.
+			expect(cursor?.unavailableCode).toBe(
+				scenario.name === "no-credential" ? "auth_required" : undefined,
+			);
 
 			const catalogCursor = browser.frames.length;
 			await browser.getModels(accountId);
@@ -184,38 +191,43 @@ describe("Cursor discovery through the built daemon and SDK trace port", () => {
 					"cursor",
 					{ modelId: "composer-2.5", contextWindow: "" },
 				);
-				const failed = await browser.send(
-					sessionId,
-					"not implemented yet",
-					90_000,
-				);
-				expect(failed.done["status"]).toBe("idle");
-				const db = new Database(fixture.projectStorePath(), { readonly: true });
+				const reply = await browser.send(sessionId, "Say hi.", 90_000);
+				expect(reply.done["status"]).toBe("idle");
+				const db = new Database(fixture.daemonStorePath(), { readonly: true });
 				try {
 					const turn = db
 						.prepare<[string], { state: string }>(
 							"SELECT state FROM turns WHERE session_id = ?",
 						)
 						.get(sessionId);
-					expect(turn?.state).toBe("error");
+					expect(turn?.state).toBe("completed");
 					const errors = db
 						.prepare<[string], { data: string }>(
 							"SELECT data FROM events WHERE session_id = ? AND type = 'turn.error'",
 						)
 						.all(sessionId);
-					expect(errors).toHaveLength(1);
-					expect(errors[0]?.data).toContain(
-						"Cursor turn preparation not installed",
-					);
+					expect(errors).toHaveLength(0);
 					evidence["cursorTurn"] = turn?.state;
 				} finally {
 					db.close();
 				}
-				// A fresh failed response must evict the old catalog and change the
-				// rail's availability; restoring the trace must recover both.
+				// Rotating the credential must miss the catalog cache. A failed list
+				// clears the rail; restoring the original credential recovers it.
+				const rotatedRows = rows.map((row) =>
+					"kind" in row && row.kind === "credential.store"
+						? {
+								...row,
+								data: {
+									apiKey: "[REDACTED:rotated]",
+									backendUrl: "https://api2.cursor.sh",
+									createdAtMs: 0,
+								},
+							}
+						: row,
+				);
 				writeFileSync(
 					tracePath,
-					`${[...rows.slice(0, -1), { kind: "models.list.error", data: { message: "catalog refresh failed" } }].map((row) => JSON.stringify(row)).join("\n")}\n`,
+					`${[...rotatedRows.slice(0, -1), { kind: "models.list.error", data: { message: "catalog refresh failed" } }].map((row) => JSON.stringify(row)).join("\n")}\n`,
 				);
 				const refreshCursor = browser.frames.length;
 				await browser.getModels(accountId);
@@ -245,7 +257,11 @@ describe("Cursor discovery through the built daemon and SDK trace port", () => {
 						({ id }) => id === accountId,
 					),
 				).toMatchObject({ available: true });
-				evidence["refresh"] = { failedCatalogCount: 0, recovered: true };
+				evidence["refresh"] = {
+					credentialRotationMiss: true,
+					failedCatalogCount: 0,
+					recovered: true,
+				};
 			} else {
 				await expect(
 					browser.createSession("Unavailable Cursor", accountId, "cursor", {
@@ -294,16 +310,15 @@ describe("Cursor discovery through the built daemon and SDK trace port", () => {
 				.flatMap(({ models }) => models);
 			const model = opencodeModels[0];
 			if (!model) throw new Error("Missing OpenCode catalog");
-			const { sessionId: opencodeId } = await fixture.requestRpc(
-				new CreateSession({
-					projectSlug: "process-test",
-					title: "OpenCode unaffected",
-					originId: browser.originId,
-					providerId: "opencode",
-					permissionMode: "ask",
-					model: { providerId: model.provider, modelId: model.id },
-				}),
-			);
+			const { sessionId: opencodeId } = await fixture.requestRpc({
+				_tag: "CreateSession",
+				projectSlug: "process-test",
+				title: "OpenCode unaffected",
+				originId: browser.originId,
+				providerId: "opencode",
+				permissionMode: "ask",
+				model: { providerId: model.provider, modelId: model.id },
+			});
 			const opencode = await browser.send(
 				opencodeId,
 				"Say hello in one sentence.",

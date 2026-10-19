@@ -4,11 +4,9 @@ import {
 	applyApprovalEnvelope,
 	clearAllPermissions,
 } from "../../stores/permissions.svelte.js";
-import {
-	clearSessionState,
-	sessionState,
-} from "../../stores/session.svelte.js";
+import { clearSessionState } from "../../stores/session.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import type {
 	PermissionId,
@@ -63,7 +61,7 @@ function setupAttention(opts: {
 	sessionTitles?: Record<string, string>;
 }) {
 	flushSync(() => {
-		sessionState.currentId = "ses_current";
+		openSessionForSetup("ses_current", "conduit");
 		seedSessions(
 			Object.entries(opts.sessionTitles ?? {}).map(([id, title]) => ({
 				id,

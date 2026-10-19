@@ -1,9 +1,9 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Option, Ref, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { listDaemonSessions } from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
@@ -23,11 +23,14 @@ import { emptySessionManagerState } from "../../../src/lib/domain/relay/Services
 import { subscribeShell } from "../../../src/lib/domain/relay/Services/shell-subscription.js";
 import { createSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
-import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import {
+	makePersistenceEffectLayer,
+	PersistenceStore,
+	type PersistenceStoreContext,
+} from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import {
 	makeMockAccountDirectory,
@@ -60,16 +63,14 @@ describe("Session Rows read paths", () => {
 		["local_bash", "monitoring"],
 		["workflow", "working"],
 	] as const) {
-		it.scoped(
+		it.effect(
 			`shares ${attention} activity and hint dismissals across all four readers`,
 			() => {
 				const configDir = mkdtempSync(join(tmpdir(), "conduit-session-rows-"));
 				const projectDir = join(configDir, "project-folder");
 				const slug = "project";
 				const folders: [string] = [projectDir];
-				const storageDir = projectStorageDir(configDir, slug);
 				mkdirSync(projectDir);
-				mkdirSync(storageDir, { recursive: true });
 				return Effect.gen(function* () {
 					yield* Effect.addFinalizer(() =>
 						Effect.sync(() =>
@@ -77,22 +78,25 @@ describe("Session Rows read paths", () => {
 						),
 					);
 					const activity = yield* makeSessionActivity;
-					const activityLayer = Layer.succeed(SessionActivityTag, activity);
+					const activityLayer = Layer.succeed(SessionActivityTag)(activity);
 					const persistence = makePersistenceEffectLayer(
-						join(storageDir, "events.db"),
+						join(configDir, "events.db"),
 						slug,
 						undefined,
 						SessionEventBusLive,
 					).pipe(Layer.provide(activityLayer));
+					const store = Layer.effect(
+						PersistenceStore,
+						Effect.context<PersistenceStoreContext>(),
+					).pipe(Layer.provideMerge(persistence));
 					const layer = Layer.mergeAll(
-						persistence,
+						store,
 						activityLayer,
 						SessionEventBusLive,
-						Layer.succeed(
-							ConfigTag,
+						Layer.succeed(ConfigTag)(
 							makeMockConfig({ configDir, projectDir, slug }),
 						),
-						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+						Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 						makeProjectRegistryLive([{ slug, title: "Project", folders }]),
 					);
 					yield* Effect.gen(function* () {
@@ -149,11 +153,15 @@ describe("Session Rows read paths", () => {
 						const cache = createSessionGitCache(async () => undefined);
 						const readAll = Effect.gen(function* () {
 							const relay = yield* operations.serviceListSessions();
-							const shell = yield* Stream.runHead(subscribeShell());
+							const shell = yield* Stream.runHead(
+								subscribeShell().pipe(
+									Stream.filter((frame) => frame._tag !== "projects"),
+								),
+							);
 							const family = yield* Stream.runHead(
 								subscribeSessionFamily({ sessionId }),
 							);
-							const daemon = yield* listDaemonSessions(configDir, {}, cache);
+							const daemon = yield* listDaemonSessions({}, cache);
 							expect(daemon.availability).toEqual([
 								{ projectSlug: slug, available: true },
 							]);
@@ -187,7 +195,7 @@ describe("Session Rows read paths", () => {
 								workspaceHint: undefined,
 							});
 						}
-					}).pipe(Effect.provide(layer));
+					}).pipe(Effect.provide(layer, { local: true }));
 				});
 			},
 		);

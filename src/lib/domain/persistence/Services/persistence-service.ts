@@ -1,8 +1,7 @@
-// Thin wrapper around @effect/sql-sqlite-node providing schema migration,
-// health checking and transaction helpers for the relay event store.
+// Store preparation, project binding and transaction helpers for the event store.
 
-import { SqlClient } from "@effect/sql";
 import { Context, Data, Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	MAX_PURGEABLE_SKELETON_SESSIONS,
 	makeEffectSqlMigrator,
@@ -22,36 +21,25 @@ export interface PersistenceService {
 	readonly sql: SqlClient.SqlClient;
 }
 
-export class PersistenceServiceTag extends Context.Tag("PersistenceService")<
+export class PersistenceServiceTag extends Context.Service<
 	PersistenceServiceTag,
 	PersistenceService
->() {}
+>()("PersistenceService") {}
 
-/** Required when constructing a store; write call sites inherit its owner. */
-export class PersistenceProjectTag extends Context.Tag("PersistenceProject")<
+/** Required when constructing project services; write call sites inherit its owner. */
+export class PersistenceProjectTag extends Context.Service<
 	PersistenceProjectTag,
 	{ readonly projectId: string }
->() {}
+>()("PersistenceProject") {}
 
-export const makePersistenceServiceLive: Layer.Layer<
-	PersistenceServiceTag,
-	PersistenceError,
-	SqlClient.SqlClient | PersistenceProjectTag
-> = Layer.effect(
-	PersistenceServiceTag,
+export const stampProjectProvenance = (
+	projectId: string,
+): Effect.Effect<void, PersistenceError, SqlClient.SqlClient> =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
-		const { projectId } = yield* PersistenceProjectTag;
-		if (projectId.trim().length === 0) {
-			return yield* new PersistenceError({
-				operation: "stampProjectProvenance",
-				cause: "A store requires a non-empty project id",
-			});
-		}
-
 		// Schema expansion cannot know the slug. Stamp legacy rows before any
 		// consumer can obtain this store, atomically across every write table.
-		const stampProjectProvenance = sql.withTransaction(
+		yield* sql.withTransaction(
 			Effect.gen(function* () {
 				const events = yield* sql`SELECT 1 FROM events
 					WHERE project_id IS NULL OR project_id = '' LIMIT 1`;
@@ -98,60 +86,121 @@ export const makePersistenceServiceLive: Layer.Layer<
 				}
 			}),
 		);
+	}).pipe(
+		Effect.mapError(
+			(cause) => new PersistenceError({ operation: "migrate", cause }),
+		),
+	);
 
-		const migrate = makeEffectSqlMigrator().pipe(
-			Effect.provideService(SqlClient.SqlClient, sql),
-			Effect.zipRight(stampProjectProvenance),
-			Effect.asVoid,
+export const preparePersistenceStore: Effect.Effect<
+	void,
+	PersistenceError,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const migrate = makeEffectSqlMigrator().pipe(
+		Effect.provideService(SqlClient.SqlClient, sql),
+		Effect.asVoid,
+		Effect.mapError(
+			(e) => new PersistenceError({ operation: "migrate", cause: e }),
+		),
+		Effect.withSpan("persistence.migrate"),
+	);
+
+	yield* sql
+		.unsafe("PRAGMA foreign_keys = OFF")
+		.pipe(
 			Effect.mapError(
 				(e) => new PersistenceError({ operation: "migrate", cause: e }),
 			),
-			Effect.withSpan("persistence.migrate"),
 		);
+	yield* migrate.pipe(
+		Effect.ensuring(sql.unsafe("PRAGMA foreign_keys = ON").pipe(Effect.ignore)),
+	);
+	// Session deletes rely on ON DELETE CASCADE. Enforcement must come from the
+	// pragma above, not better-sqlite3's SQLITE_DEFAULT_FOREIGN_KEYS build flag,
+	// and a SQLite that ignores the pragma must not open the store.
+	const [enforcement] = yield* sql<{ foreign_keys: number }>`
+		PRAGMA foreign_keys`.pipe(
+		Effect.mapError(
+			(e) => new PersistenceError({ operation: "foreignKeys", cause: e }),
+		),
+	);
+	if (enforcement?.foreign_keys !== 1)
+		return yield* new PersistenceError({
+			operation: "foreignKeys",
+			cause: "PRAGMA foreign_keys = ON did not enable enforcement",
+		});
 
-		yield* sql
-			.unsafe("PRAGMA foreign_keys = OFF")
-			.pipe(
-				Effect.mapError(
-					(e) => new PersistenceError({ operation: "migrate", cause: e }),
-				),
-			);
-		yield* migrate.pipe(
-			Effect.ensuring(
-				sql.unsafe("PRAGMA foreign_keys = ON").pipe(Effect.ignore),
-			),
-		);
+	// Boot diagnostic: if the 0010 purge circuit breaker tripped, the cohort is still
+	// present and must stay noticeable on every boot, not just the boot that tripped it.
+	// catchCause must swallow DEFECTS too, or a throw inside
+	// the query would defeat the whole point of the wrapper and turn a safety check
+	// into the outage it exists to avoid.
+	yield* selectLegacySkeletonSessionIds.pipe(
+		Effect.flatMap((ids) =>
+			ids.length > MAX_PURGEABLE_SKELETON_SESSIONS
+				? Effect.logError(
+						`Legacy skeleton purge circuit breaker is TRIPPED: ${ids.length} sessions match ` +
+							`the purge predicate, above the ${MAX_PURGEABLE_SKELETON_SESSIONS} threshold. ` +
+							`Nothing has been deleted. Review the predicate before raising the threshold; ` +
+							`the full id list was logged once by migration 0010_purge_legacy_skeleton_sessions.`,
+					)
+				: Effect.void,
+		),
+		Effect.provideService(SqlClient.SqlClient, sql),
+		Effect.catchCause(() => Effect.void),
+		Effect.withSpan("persistence.legacySkeletonBreakerCheck"),
+	);
+});
 
-		// Boot diagnostic: if the 0010 purge circuit breaker tripped, the cohort is still
-		// present and must stay noticeable on every boot, not just the boot that tripped it.
-		// catchAllCause, not catchAll: this must swallow DEFECTS too, or a throw inside
-		// the query would defeat the whole point of the wrapper and turn a safety check
-		// into the outage it exists to avoid.
-		yield* selectLegacySkeletonSessionIds.pipe(
-			Effect.flatMap((ids) =>
-				ids.length > MAX_PURGEABLE_SKELETON_SESSIONS
-					? Effect.logError(
-							`Legacy skeleton purge circuit breaker is TRIPPED: ${ids.length} sessions match ` +
-								`the purge predicate, above the ${MAX_PURGEABLE_SKELETON_SESSIONS} threshold. ` +
-								`Nothing has been deleted. Review the predicate before raising the threshold; ` +
-								`the full id list was logged once by migration 0010_purge_legacy_skeleton_sessions.`,
-						)
-					: Effect.void,
-			),
-			Effect.provideService(SqlClient.SqlClient, sql),
-			Effect.catchAllCause(() => Effect.void),
-			Effect.withSpan("persistence.legacySkeletonBreakerCheck"),
-		);
+export const makePersistenceService: Effect.Effect<
+	PersistenceService,
+	PersistenceError,
+	SqlClient.SqlClient | PersistenceProjectTag
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const { projectId } = yield* PersistenceProjectTag;
+	if (projectId.trim().length === 0) {
+		return yield* new PersistenceError({
+			operation: "stampProjectProvenance",
+			cause: "A store requires a non-empty project id",
+		});
+	}
 
-		const healthCheck = sql`SELECT 1 AS ok`.pipe(
-			Effect.map((rows) => rows.length > 0),
-			Effect.mapError(
-				(e) => new PersistenceError({ operation: "healthCheck", cause: e }),
-			),
-			Effect.withSpan("persistence.healthCheck"),
-		);
+	const migrate = makeEffectSqlMigrator().pipe(
+		Effect.provideService(SqlClient.SqlClient, sql),
+		Effect.asVoid,
+		Effect.mapError(
+			(e) => new PersistenceError({ operation: "migrate", cause: e }),
+		),
+		Effect.withSpan("persistence.migrate"),
+	);
 
-		return { projectId, migrate, healthCheck, sql };
+	const healthCheck = sql`SELECT 1 AS ok`.pipe(
+		Effect.map((rows) => rows.length > 0),
+		Effect.mapError(
+			(e) => new PersistenceError({ operation: "healthCheck", cause: e }),
+		),
+		Effect.withSpan("persistence.healthCheck"),
+	);
+
+	return { projectId, migrate, healthCheck, sql };
+});
+
+// Legacy per-file consumers still prepare and stamp before reading cold stores.
+// Project tiers use makePersistenceService over their already prepared store.
+export const makePersistenceServiceLive: Layer.Layer<
+	PersistenceServiceTag,
+	PersistenceError,
+	SqlClient.SqlClient | PersistenceProjectTag
+> = Layer.effect(
+	PersistenceServiceTag,
+	Effect.gen(function* () {
+		const service = yield* makePersistenceService;
+		yield* preparePersistenceStore;
+		yield* stampProjectProvenance(service.projectId);
+		return service;
 	}),
 );
 

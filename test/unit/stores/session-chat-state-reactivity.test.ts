@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // Mutates getOrCreateSessionActivity(id).phase; asserts a $derived(currentChat().phase)
 // observer re-runs. Validates that SvelteMap + $state proxy reactivity propagates
 // through the composeChatState Proxy.
@@ -42,7 +43,7 @@ import {
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 const TEST_ID = "test-reactivity-session";
 
@@ -51,7 +52,7 @@ beforeEach(() => {
 	sessionActivity.clear();
 	sessionMessages.clear();
 	_resetLRU();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 });
 
 describe("two-tier reactivity", () => {
@@ -93,14 +94,14 @@ describe("two-tier reactivity", () => {
 	});
 
 	it("currentChat() returns EMPTY_STATE when currentId is null", () => {
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		const chat = currentChat();
 		expect(chat.phase).toBe("idle");
 		expect(chat.messages).toEqual([]);
 	});
 
 	it("currentChat() returns EMPTY_STATE when activity slot does not exist", () => {
-		sessionState.currentId = "nonexistent";
+		openSessionForSetup("nonexistent", "project-a");
 		const chat = currentChat();
 		expect(chat.phase).toBe("idle");
 	});
@@ -108,7 +109,7 @@ describe("two-tier reactivity", () => {
 	it("currentChat() reads from the correct activity slot", () => {
 		const activity = getOrCreateSessionActivity(TEST_ID);
 		getOrCreateSessionMessages(TEST_ID);
-		sessionState.currentId = TEST_ID;
+		openSessionForSetup(TEST_ID, "project-a");
 
 		activity.phase = "streaming";
 		const chat = currentChat();

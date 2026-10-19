@@ -92,15 +92,13 @@ async function capture(options: {
 			commandId: string,
 			delivery: "queue" | "steer",
 		) =>
-			browser.rpc.input
-				.submit({
-					...target,
-					originId: browser.originId,
-					inputId: commandId,
-					delivery,
-					text,
-				})
-				.pipe(Effect.timeout(240_000));
+			browser.rpc["input.submit"]({
+				...target,
+				originId: browser.originId,
+				inputId: commandId,
+				delivery,
+				text,
+			}).pipe(Effect.timeout(240_000));
 		// A steer is refused while a tool approval is still open, so retry until
 		// the approval has landed and the provider takes it.
 		const steer = <A extends { readonly ok: boolean }, E>(
@@ -119,9 +117,9 @@ async function capture(options: {
 					? steer(submit(text, commandId, "steer"))
 					: options.later === "sendNow"
 						? submit(text, commandId, "queue").pipe(
-								Effect.zipRight(
+								Effect.andThen(
 									steer(
-										browser.rpc.input.sendNow({
+										browser.rpc["input.sendNow"]({
 											...target,
 											originId: browser.originId,
 											inputId: commandId,

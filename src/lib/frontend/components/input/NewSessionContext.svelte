@@ -6,7 +6,7 @@
 	import { getAvailableInstances, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
 	import { getInstanceById } from "../../stores/instance.svelte.js";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
-	import { DRAFT_PROJECT_PARAM, getCurrentSearchParams, replaceRoute } from "../../stores/router.svelte.js";
+	import { selection } from "../../stores/selection.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
@@ -28,7 +28,7 @@
 		modeChosen?: boolean;
 		sessionModeDefault?: Awaited<ReturnType<typeof rpc<"ResolveSessionMode">>> | undefined;
 		focusComposer?: (() => void) | undefined;
-		loadWorktrees?: (projectSlug: string) => Promise<{ readonly worktrees: readonly WorktreeInfo[] }>;
+		loadWorktrees?: (projectSlug: string) => ReturnType<typeof rpc<"ListWorktrees">>;
 		loadBranches?: (projectSlug: string) => ReturnType<typeof rpc<"ListBranches">>;
 	} = $props();
 	let showWorktrees = $state(false);
@@ -78,8 +78,9 @@
 		multiFolder && instance?.capabilities?.supportsMultiFolder === false ? explanationId : "",
 		sessionModeDefault?.warning ? warningId : "",
 	].filter(Boolean).join(" ") || undefined);
-	const available = $derived(projectState.projects.filter((p) => !p.missing));
+	const available = $derived(projectState.projects.filter((p) => !p.missing && !p.unavailableReason));
 	const missing = $derived(projectState.projects.filter((p) => p.missing));
+	const unavailable = $derived(projectState.projects.filter((p) => !p.missing && p.unavailableReason));
 	const presentation = $derived(sessionViewState.compact ? "sheet" : "popover");
 
 	const chipClass =
@@ -104,9 +105,7 @@
 		newWorktree = false;
 		worktreeBase = null;
 		modeChosen = false;
-		const params = getCurrentSearchParams();
-		params.set(DRAFT_PROJECT_PARAM, next);
-		replaceRoute(`/new?${params}`);
+		selection.openDraft(next);
 	}
 
 	async function openWorktrees() {
@@ -168,6 +167,14 @@
 			<MenuGroup label="Folder missing">
 				{#each missing as p (p.slug)}
 					<MenuItem disabled class={rowClass}>{p.title || p.slug}</MenuItem>
+				{/each}
+			</MenuGroup>
+		{/if}
+		{#if unavailable.length > 0}
+			<MenuSeparator />
+			<MenuGroup label="History unavailable">
+				{#each unavailable as p (p.slug)}
+					<MenuItem disabled class={rowClass} title={p.unavailableReason}>{p.title || p.slug}</MenuItem>
 				{/each}
 			</MenuGroup>
 		{/if}

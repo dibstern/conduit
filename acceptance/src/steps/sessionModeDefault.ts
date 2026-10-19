@@ -19,12 +19,12 @@ export const sessionModeDefaultHandlers: StepHandler[] = [
 				{
 					slug: "myapp",
 					title: "myapp",
-					folders: ["/myapp"],
+					folders: ["/myapp"] as const,
 					git: { branch: "main" },
 				},
 			];
-			rpc.setResponse("GetProjects", { projects, current: "myapp" });
-			rpc.setDaemonList("SubscribeProjects", { projects });
+			rpc.setStubs({ GetProjects: () => ({ projects, current: "myapp" }) });
+			rpc.setProjects({ projects });
 			rpc.setDaemonList("SubscribeInstances", {
 				instances: [
 					{

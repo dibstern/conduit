@@ -1,4 +1,4 @@
-import { Either, Option, ParseResult, Record as Records, Schema } from "effect";
+import { Option, Record as Records, Result, Schema, SchemaIssue } from "effect";
 import {
 	type Account,
 	AccountAddInputSchema,
@@ -107,6 +107,7 @@ export function accountsStateFromInstances(
 		if (getProviderDriver(instance.driver)?.accountKind === "server")
 			return {
 				driver: "opencode",
+				usageEligible: false,
 				id,
 				name: instance.name,
 				...(instance.managed && instance.id !== MANAGED_OPENCODE_ACCOUNT_ID
@@ -129,7 +130,7 @@ export function accountsStateFromInstances(
 				name: instance.name,
 				...(configuredFolder === undefined ? {} : { configuredFolder }),
 				...(instance.env === undefined ? {} : { env: instance.env }),
-				usageEligible: false,
+				usageEligible: Boolean(instance.env?.["CURSOR_AUTH_TOKEN"]?.trim()),
 			};
 		return {
 			driver: "claude",
@@ -186,7 +187,7 @@ function materializeDefault(
 			return Option.some(AccountIdSchema.make(account.id));
 	}
 	return Option.map(
-		Option.fromNullable(accounts.find((account) => account.driver === driver)),
+		Option.fromNullishOr(accounts.find((account) => account.driver === driver)),
 		(account) => AccountIdSchema.make(account.id),
 	);
 }
@@ -196,10 +197,10 @@ export function apply(
 	state: AccountsState,
 	change: AccountChange,
 	usageOrder: ReadonlyArray<string>,
-): Either.Either<AccountsState, AccountChangeRejected> {
+): Result.Result<AccountsState, AccountChangeRejected> {
 	const id = change.id ?? (change._tag === "Add" ? change.name : "");
 	const reject = (reason: string) =>
-		Either.left(new AccountChangeRejected({ id, reason }));
+		Result.fail(new AccountChangeRejected({ id, reason }));
 	if (change._tag === "Add") {
 		const name = change.name.trim();
 		if (!name) return reject("AddInstance failed: name is required");
@@ -207,19 +208,21 @@ export function apply(
 			return reject(
 				`Unknown account driver "${change.driver}"; expected ${Object.keys(PROVIDER_DRIVERS).join(" or ")}`,
 			);
-		const decoded = Schema.decodeUnknownEither(AccountAddInputSchema)({
+		const decoded = Schema.decodeUnknownResult(AccountAddInputSchema)({
 			...change,
 			name,
 			driver: change.driver ?? "opencode",
 		});
-		if (Either.isLeft(decoded))
+		if (Result.isFailure(decoded))
 			return reject(
-				ParseResult.ArrayFormatter.formatErrorSync(decoded.left)
-					.filter((issue) => !issue.message.startsWith("Expected undefined"))
+				SchemaIssue.makeFormatterStandardSchemaV1()(decoded.failure.issue)
+					.issues.filter(
+						(issue) => !issue.message.startsWith("Expected undefined"),
+					)
 					.map((issue) =>
-						issue.path.length === 0
+						(issue.path?.length ?? 0) === 0
 							? issue.message
-							: `${issue.path.map(String).join(".")}: ${issue.message}`,
+							: `${issue.path?.map(String).join(".")}: ${issue.message}`,
 					)
 					.join("; "),
 			);
@@ -250,7 +253,7 @@ export function apply(
 			state.deleted.some((account) => account.id === allocated)
 		)
 			allocated = `${base}-${counter++}`;
-		const input = decoded.right;
+		const input = decoded.success;
 		const account = accountsStateFromInstances(
 			[
 				{
@@ -265,7 +268,7 @@ export function apply(
 			state.launchLogin,
 		).accounts[0];
 		if (account === undefined) return reject("Account allocation failed");
-		return Either.right({
+		return Result.succeed({
 			...state,
 			accounts: [...state.accounts, account],
 			defaults:
@@ -283,7 +286,7 @@ export function apply(
 	if (change._tag === "SetDefault") {
 		if (PROVIDER_DRIVERS[current.driver].defaultAccountSource !== "selection")
 			return reject("This account type does not support a selected default");
-		return Either.right({
+		return Result.succeed({
 			...state,
 			defaults: {
 				...state.defaults,
@@ -295,7 +298,7 @@ export function apply(
 		const accounts = state.accounts.filter(
 			(account) => account.id !== change.id,
 		);
-		return Either.right({
+		return Result.succeed({
 			...state,
 			accounts,
 			defaults: isDefault
@@ -331,7 +334,17 @@ export function apply(
 		updates.configDir === undefined
 			? current.configuredFolder
 			: updates.configDir.trim() || undefined;
-	const env = updates.env ?? current.env;
+	const env =
+		updates.env === undefined
+			? current.env
+			: current.driver === "cursor" &&
+					!Object.hasOwn(updates.env, "CURSOR_AUTH_TOKEN") &&
+					current.env?.["CURSOR_AUTH_TOKEN"] !== undefined
+				? {
+						...updates.env,
+						CURSOR_AUTH_TOKEN: current.env["CURSOR_AUTH_TOKEN"],
+					}
+				: updates.env;
 	const updated = accountsStateFromInstances(
 		[
 			{
@@ -359,7 +372,7 @@ export function apply(
 		state.launchLogin,
 	).accounts[0];
 	if (updated === undefined) return reject("Account update failed");
-	return Either.right({
+	return Result.succeed({
 		...state,
 		accounts: state.accounts.map((account) =>
 			account.id === current.id ? updated : account,
@@ -438,13 +451,16 @@ export function normalizeAccountConfig(config: DaemonConfig): DaemonConfig {
 		...config,
 		accountDefaults: Records.filterMap(PROVIDER_DRIVERS, (traits, driver) =>
 			traits.defaultAccountSource === "selection"
-				? materializeDefault(
-						accounts,
-						driver,
-						config.accountDefaults?.[driver],
-						config.usageLimits?.order ?? [],
+				? Result.fromOption(
+						materializeDefault(
+							accounts,
+							driver,
+							config.accountDefaults?.[driver],
+							config.usageLimits?.order ?? [],
+						),
+						() => undefined,
 					)
-				: Option.none(),
+				: Result.failVoid,
 		),
 		deletedAccounts: config.deletedAccounts ?? [],
 	};
@@ -475,7 +491,7 @@ export function defaultFor(
 			? state.defaults[driver]
 			: Option.some(MANAGED_OPENCODE_ACCOUNT_ID);
 	return Option.flatMap(id, (accountId) =>
-		Option.fromNullable(
+		Option.fromNullishOr(
 			state.accounts.find(
 				(account) => account.id === accountId && account.driver === driver,
 			),
@@ -496,23 +512,23 @@ export function list(state: AccountsState): ReadonlyArray<AccountListItem> {
 export function resolve(
 	state: AccountsState,
 	ref: AccountRef,
-): Either.Either<Account, AccountUnroutable> {
+): Result.Result<Account, AccountUnroutable> {
 	if (ref._tag === "Id") {
 		const live = state.accounts.find((account) => account.id === ref.id);
-		if (live !== undefined) return Either.right(live);
+		if (live !== undefined) return Result.succeed(live);
 		const driver =
 			state.deleted.find((account) => account.id === ref.id)?.driver ??
 			accountDriverAlias(ref.id);
 		if (driver !== undefined)
 			return Option.match(defaultFor(state, driver), {
-				onNone: () => Either.left(new AccountUnroutable({ ref })),
-				onSome: Either.right,
+				onNone: () => Result.fail(new AccountUnroutable({ ref })),
+				onSome: Result.succeed,
 			});
 	} else {
 		return Option.match(defaultFor(state, ref.driver), {
-			onNone: () => Either.left(new AccountUnroutable({ ref })),
-			onSome: Either.right,
+			onNone: () => Result.fail(new AccountUnroutable({ ref })),
+			onSome: Result.succeed,
 		});
 	}
-	return Either.left(new AccountUnroutable({ ref }));
+	return Result.fail(new AccountUnroutable({ ref }));
 }

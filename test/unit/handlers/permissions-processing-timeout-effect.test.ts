@@ -67,22 +67,21 @@ describe("permission/question processing timeouts through Effect state", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					AlertsLive,
-					Layer.succeed(OpenCodeAPITag, client),
-					Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
-					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-					Layer.succeed(ConfigTag, makeMockConfig()),
+					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(WebSocketHandlerTag)(makeWsHandler()),
+					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+					Layer.succeed(ConfigTag)(makeMockConfig()),
 					PendingInteractionServiceLive,
-					Layer.succeed(LoggerTag, createSilentLogger()),
-					Layer.succeed(
-						SessionManagerServiceTag,
+					Layer.succeed(LoggerTag)(createSilentLogger()),
+					Layer.succeed(SessionManagerServiceTag)(
 						makeMockSessionManagerService(),
 					),
 					makeOverridesStateLive(),
 					persistence,
 					makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
-					Layer.succeed(AgentServiceTag, makeMockAgentService()),
-					Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-					Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
+					Layer.succeed(AgentServiceTag)(makeMockAgentService()),
+					Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
+					Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({})),
 				),
 			);
 
@@ -93,7 +92,10 @@ describe("permission/question processing timeouts through Effect state", () => {
 				});
 
 				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(true);
-			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+			}).pipe(
+				Effect.provide(PassThroughSessionInbox, { local: true }),
+				Effect.provide(layer, { local: true }),
+			);
 		},
 	);
 
@@ -104,24 +106,23 @@ describe("permission/question processing timeouts through Effect state", () => {
 				question: { reject: vi.fn(async () => undefined) },
 			});
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
-				Layer.succeed(LoggerTag, createSilentLogger()),
-				Layer.succeed(
-					SessionManagerServiceTag,
+				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(WebSocketHandlerTag)(makeWsHandler()),
+				Layer.succeed(LoggerTag)(createSilentLogger()),
+				Layer.succeed(SessionManagerServiceTag)(
 					makeMockSessionManagerService(),
 				),
 				makeOverridesStateLive(),
 				PendingInteractionServiceLive,
 				NoopProviderRuntimeIngestionLive,
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
+				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({})),
 			);
 
 			return Effect.gen(function* () {
 				yield* handleQuestionReject("client-1", { toolId: "que-1" });
 
 				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(true);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 });

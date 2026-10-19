@@ -75,7 +75,7 @@ describe("Managed OpenCode starts on first use", () => {
 	};
 
 	function historyComplete(fixture: ProcessHarness, sessionId: string) {
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			return (
 				db
@@ -88,7 +88,7 @@ describe("Managed OpenCode starts on first use", () => {
 	}
 
 	function persistedStatus(fixture: ProcessHarness, sessionId: string) {
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			const row = db
 				.prepare("SELECT status FROM sessions WHERE id = ?")
@@ -434,7 +434,7 @@ describe("Managed OpenCode starts on first use", () => {
 			// This fixture emits session status updates without a stored turn terminal.
 			const cursor = browser.frames.length;
 			const accepted = await Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId,
 					text: "hello",
 					inputId: randomUUID(),

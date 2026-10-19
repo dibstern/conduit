@@ -73,7 +73,7 @@ it("records one admitted-to-socket timeline through the fake Claude process", as
 		["runner-ready", "prompt-delivered"].includes(entry.phase),
 	))
 		expect(phase.approximation).toBe("first-frame-received");
-	const db = new Database(harness.projectStorePath(), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		const admitted = db
 			.prepare(
@@ -109,7 +109,7 @@ it("leaves socket write missing when the browser leaves before assistant output"
 	const inputId = randomUUID();
 	expect(
 		await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId,
 				originId: "timeline-disconnect",
 				inputId,
@@ -119,13 +119,13 @@ it("leaves socket write missing when the browser leaves before assistant output"
 		),
 	).toMatchObject({ ok: true });
 	await browser.close();
-	const db = new Database(harness.projectStorePath(), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		await vi.waitFor(
 			() => {
 				const completed = db
 					.prepare(
-						"SELECT COUNT(*) AS n FROM provider_command_outbox WHERE command_id = ? AND status = 'completed'",
+						"SELECT COUNT(*) AS n FROM provider_command_outbox WHERE project_key = 'process-test' AND command_id = ? AND status = 'completed'",
 					)
 					.get(inputId);
 				expect(completed).toEqual({ n: 1 });

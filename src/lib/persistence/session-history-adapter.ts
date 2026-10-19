@@ -52,8 +52,21 @@ function snapshotRowToHistory(
 				: undefined;
 		const metadata =
 			state && "metadata" in state && typeof state.metadata === "object"
-				? browserMetadata(state.metadata ?? undefined)
+				? browserMetadata(
+						state.metadata ?? undefined,
+						!("output" in state && state.output != null) &&
+							!(
+								"status" in state &&
+								(state.status === "completed" || state.status === "error")
+							),
+					)
 				: undefined;
+		// The RPC wire rejects an own undefined property, so drop the provider's
+		// metadata and add back only the filtered metadata when there is one.
+		const { metadata: _providerMetadata, ...providerState } = {
+			...state,
+			metadata,
+		};
 		return {
 			...part,
 			id: part.id,
@@ -62,8 +75,8 @@ function snapshotRowToHistory(
 				? {}
 				: {
 						state: {
-							...state,
-							metadata,
+							...providerState,
+							...(metadata === undefined ? {} : { metadata }),
 							...projectTool({
 								name:
 									"tool" in part && typeof part.tool === "string"
@@ -147,17 +160,36 @@ const BROWSER_METADATA_KEYS = new Set([
 	"toolUses",
 ]);
 
+const CURSOR_PRESENTATION_KEYS = new Set([
+	"cursorToolType",
+	"progress",
+	"truncated",
+	"movedToBackground",
+	"exitCode",
+	"isError",
+	"fileChange",
+	"plan",
+	"computerUse",
+	"media",
+]);
+
 function browserMetadata(
 	metadata: object | undefined,
-): Record<string, string | number | boolean> | undefined {
+	inFlight: boolean,
+): Record<string, unknown> | undefined {
 	if (metadata === undefined) return undefined;
+	const cursor =
+		"cursorToolType" in metadata && typeof metadata.cursorToolType === "string";
 	const kept = Object.fromEntries(
 		Object.entries(metadata).filter(
-			(entry): entry is [string, string | number | boolean] =>
-				BROWSER_METADATA_KEYS.has(entry[0]) &&
-				(typeof entry[1] === "string" ||
-					typeof entry[1] === "number" ||
-					typeof entry[1] === "boolean"),
+			([key, value]) =>
+				(BROWSER_METADATA_KEYS.has(key) ||
+					(cursor && CURSOR_PRESENTATION_KEYS.has(key)) ||
+					(cursor && inFlight && key === "output")) &&
+				(typeof value === "string" ||
+					typeof value === "number" ||
+					typeof value === "boolean" ||
+					["fileChange", "plan", "computerUse", "media"].includes(key)),
 		),
 	);
 	return Object.keys(kept).length > 0 ? kept : undefined;
@@ -273,8 +305,15 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 		if (status) stateObj["status"] = status;
 		const metadata = browserMetadata(
 			row.metadata == null ? undefined : parseObjectJson(row.metadata),
+			row.result == null &&
+				row.status !== "completed" &&
+				row.status !== "error",
 		);
 		if (metadata) stateObj["metadata"] = metadata;
+		if (metadata?.["isError"] === true) {
+			stateObj["status"] = "error";
+			stateObj["error"] = stateObj.output?.text ?? "Tool failed";
+		}
 		if (Object.keys(stateObj).length > 0) {
 			state = stateObj;
 		}

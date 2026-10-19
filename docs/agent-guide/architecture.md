@@ -43,12 +43,14 @@ Mermaid diagram: docs/agent-guide/per-project-relay-flow-diagram.mermaid
 |---|---|
 | Relay composition | Each relay combines provider instances, session services, event pipeline modules, `WebSocketHandler`, pollers, PTY wiring, and permission/question handling. Legacy relay composition still has bridge layers while the Effect migration is in progress. |
 | Source of truth | Durable conversation state lives in conduit's SQLite event store. Provider instances are stateless execution engines that stream events into the store. |
-| Relay-owned state | The event store and its projections (sessions, messages, turns, providers, approvals) are the primary record. Projectors maintain materialized views from the append-only event log. |
-| Daemon-owned state | The config directory holds the protected local RPC socket, daemon config, recent projects, push settings, and project history at `<configDir>/projects/<slug>/events.db`. |
+| Relay-owned state | Project services, provider activity and client subscriptions borrow the daemon store. Projectors maintain materialized views from the append-only event log. |
+| Daemon-owned state | The config directory holds the protected local RPC socket, daemon config, recent projects, push settings, and all project history in one daemon store at `<configDir>/events.db`. Relays borrow this store for their lifetime. |
 | Frontend delivery | Frontend assets are built separately with Vite and served as static files by the relay server. |
 
-Before relays start, a one-time migration checkpoints and copies legacy `<project>/.conduit/events.db` stores, verifies each copy, and archives the originals as `events.db.migrated`; failed copies keep using the legacy store and retry on the next startup.
-Each storage directory records its main folder in `project.json`, so re-adding that folder reuses its inactive slug and history, while other folders reserve occupied or unowned storage slugs; removing a project keeps its history.
+Before relays start, offline startup migration imports registered and retained per-project stores from `<configDir>/projects/<slug>/events.db`, including legacy `<project>/.conduit/events.db` sources. The importer normalizes private copies, commits history to the daemon store, and archives the sources as described in [ADR-0006](../adr/0006-daemon-store-import-normalises-copies-and-keeps-the-first-owner.md). A failed import makes only its project unavailable until restart retries it; committed imports with backup-only failures remain usable, as specified in [ADR-0008](../adr/0008-a-failed-import-blocks-its-project-and-removed-history-stays-hidden.md).
+Each project storage directory retains its main folder in `project.json`, so re-adding that folder reuses its inactive slug and history, while other folders reserve occupied or unowned storage slugs. Removing a project disposes its relay and retains its rows in the daemon store; the history stays hidden until the project is registered again.
+
+`SessionDirectory` exposes only `projectOf(sessionId)`. The daemon queries `sessions.project_id` in the shared store at lookup time and returns an owner only while that project is registered. Session IDs are primary keys, so each stored session has one owner. Standalone relays keep their own store and resolve only rows whose `project_id` matches their slug for WebSocket routing.
 
 Read-model subscribers detect dropped advance publications after a bus overflow.
 Catch-up sources read a shared window through the newest queued advance, including
@@ -62,6 +64,7 @@ detail resumes keep their existing policy.
 
 ## Effect Ownership Guardrails
 
+- The codebase runs on Effect 4, pinned to an exact `effect` version. RPC, SQL, HTTP and socket modules come from `effect/*` subpaths; only platform-node and opentelemetry remain separate `@effect/*` packages.
 - Daemon and relay internals should be owned by scoped Effect Layers and services. Do not add app-internal `Effect.runPromise`, `Effect.runSync`, `Runtime.runPromise`, `Runtime.runSync`, or object `.runPromise` / `.runSync` calls.
 - The surviving runtime boundaries are explicit compatibility edges: standalone HTTP handler construction, OpenCode SDK fetch, Claude SDK permission callback, frontend transport Promise API, and the public `createProjectRelay()` startup Promise API.
 - `relay-stack.ts` must not regain `Layer.succeed(Tag, alreadyConstructedInstance)` bridge composition. Relay state belongs in self-constructing domain Layers under `src/lib/domain/relay/*`.
@@ -230,6 +233,14 @@ preserves default-session bootstrap when attaching to its initial relay.
 `test/unit/effect/http-router-layer.test.ts`, and the router/server tests under
 `test/unit/server/`. Browser project lists and project removal use daemon RPC.
 The dashboard's `DELETE /api/projects/:slug` endpoint has been removed.
+
+The sidebar Scope is one project selected by `?p=<slug>`, or all projects when
+`p` is absent. Search, paging and live rows filter by project slug. Project
+arrangement shows one heading per project using its title, even when projects
+share Repository Identity. Identity belongs to folders and remains visible in
+the project dialog. Project Groups and their settings have retired; old group
+scope URLs are replaced with an unscoped URL at the router boundary. Existing
+configuration ignores retired settings and drops them on the next save.
 
 ## Provider Runtime Notes
 

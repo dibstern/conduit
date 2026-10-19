@@ -1,6 +1,6 @@
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { RpcTest } from "effect/rpc";
 import { afterEach, expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { ScanServiceTag } from "../../../src/lib/domain/relay/Services/scan-service.js";
@@ -67,6 +67,7 @@ describe("WsRpcServerLayer instance management", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ instanceMgmt, wsHandler })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -101,6 +102,7 @@ describe("WsRpcServerLayer instance management", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ instanceMgmt, wsHandler })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -130,6 +132,7 @@ describe("WsRpcServerLayer instance management", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ instanceMgmt, wsHandler })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -166,6 +169,7 @@ describe("WsRpcServerLayer instance management", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ instanceMgmt, wsHandler })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -200,6 +204,7 @@ describe("WsRpcServerLayer instance management", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ instanceMgmt, wsHandler })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -231,6 +236,7 @@ describe("WsRpcServerLayer instance management", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(makeTestHandlerLayer({ instanceMgmt, wsHandler })),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -262,10 +268,11 @@ describe("WsRpcServerLayer instance management", () => {
 					Layer.provideMerge(
 						Layer.merge(
 							makeTestHandlerLayer(),
-							Layer.succeed(ScanServiceTag, { scanNow: triggerScan }),
+							Layer.succeed(ScanServiceTag)({ scanNow: triggerScan }),
 						),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -291,6 +298,7 @@ describe("WsRpcServerLayer instance management", () => {
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(Layer.provideMerge(makeTestHandlerLayer())),
+				{ local: true },
 			),
 		);
 	});

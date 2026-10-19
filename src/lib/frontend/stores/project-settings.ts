@@ -4,7 +4,6 @@
 // another tab, or by the CLI, shows here with no refetch.
 
 import { Effect, Fiber, Stream } from "effect";
-import type { RuntimeFiber } from "effect/Fiber";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { supervise } from "../transport/supervise.js";
@@ -13,17 +12,18 @@ import { handleClaudeSettingsInfo } from "./claude-settings.svelte.js";
 import {
 	applyDefaultPermissionMode,
 	applyDefaultSessionMode,
-	discoveryState,
 	handleDefaultModelInfo,
 	handleHarnessDefaults,
 	handleModelList,
 	handleVisibilityInfo,
 } from "./discovery.svelte.js";
-import { getDriverTraits } from "./instance.svelte.js";
-import { projectState } from "./project-state.svelte.js";
+import { getCurrentSlug } from "./router.svelte.js";
 import { setClientCount, uiState } from "./ui.svelte.js";
 
-export const applyProjectSetting = (setting: ProjectSetting): void => {
+export const applyProjectSetting = (
+	setting: ProjectSetting,
+	project = getCurrentSlug() ?? "",
+): void => {
 	switch (setting._tag) {
 		case "defaultModel":
 			handleDefaultModelInfo(setting);
@@ -40,10 +40,6 @@ export const applyProjectSetting = (setting: ProjectSetting): void => {
 		case "defaultSessionMode":
 			applyDefaultSessionMode(setting.mode);
 			break;
-		case "defaultGroupingMode":
-			projectState.defaultGroupingMode = setting.mode;
-			projectState.defaultGroupingRevision++;
-			break;
 		case "claudeSettings":
 			handleClaudeSettingsInfo(setting);
 			break;
@@ -54,25 +50,14 @@ export const applyProjectSetting = (setting: ProjectSetting): void => {
 			uiState.opencodeConnections[setting.instanceId] = setting.status;
 			break;
 		case "providerModels":
-			handleModelList({
-				...(setting.accountId === undefined
-					? {}
-					: { accountId: setting.accountId }),
-				providers: [
-					...discoveryState.providers.filter(
-						(provider) =>
-							getDriverTraits(provider.id)?.catalogSource !== "discovery",
-					),
-					...setting.providers,
-				],
-			});
+			handleModelList(setting, project);
 			break;
 	}
 };
 
 let viewed: string | null = null;
 let generation = 0;
-let fiber: RuntimeFiber<void, never> | null = null;
+let fiber: Fiber.Fiber<void, never> | null = null;
 
 /** Follow `project`'s settings until the attached project moves; `null` stops. */
 export function viewProjectSettings(project: string | null): void {
@@ -99,9 +84,11 @@ export function viewProjectSettings(project: string | null): void {
 								Effect.sync(() => {
 									if (currentGeneration !== generation) return;
 									if (envelope._tag === "snapshot")
-										envelope.rows.forEach(applyProjectSetting);
+										envelope.rows.forEach((setting) => {
+											applyProjectSetting(setting, project);
+										});
 									if (envelope._tag === "upsert")
-										applyProjectSetting(envelope.item);
+										applyProjectSetting(envelope.item, project);
 								}),
 						),
 					),

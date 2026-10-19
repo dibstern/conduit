@@ -1,27 +1,17 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+// @vitest-environment jsdom
+import { beforeEach, describe, expect, it } from "vitest";
 import {
-	clearSessionChatState,
-	currentChat,
 	getOrCreateSessionSlot,
-	inputSyncState,
 	sessionActivity,
 	sessionMessages,
-	setMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import {
-	applyGetAgentsResponse,
-	choosePermissionMode,
-	clearDiscoveryState,
-	discoveryState,
-} from "../../../src/lib/frontend/stores/discovery.svelte.js";
-import { projectState } from "../../../src/lib/frontend/stores/project.svelte.js";
+import { clearDiscoveryState } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import {
 	attachedProjectState,
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	applyFamilyChange,
-	applyListDaemonSessionsResponse,
 	clearSessionState,
 	findSession,
 	getFilteredSessions,
@@ -33,24 +23,18 @@ import {
 	parentOf,
 	rootBackgroundTasks,
 	sessionState,
-	setCurrentSession,
 	setSearchQuery,
-	switchToSession,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { todoState } from "../../../src/lib/frontend/stores/todo.svelte.js";
-import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import {
 	applySessionChange,
 	sessionSubscription,
 } from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
-import * as sessionRpc from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
-import { createToolMessage } from "../../../src/lib/frontend/utils/tool-message-factory.js";
 import {
 	applySessionRemoved,
 	applySessionSnapshot,
 	applySessionUpsert,
-	seedDaemonSessions,
 	seedSearchResults,
 	seedSessions,
 } from "./session-fixtures.js";
@@ -92,7 +76,7 @@ function daysAgoAt(ref: Date, days: number, hour: number): Date {
 
 beforeEach(() => {
 	clearSessionState();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 	sessionState.searchQuery = "";
 	clearDiscoveryState();
 	routerState.path = "/s/old-session";
@@ -101,7 +85,7 @@ beforeEach(() => {
 });
 
 it.each([
-	"daemon",
+	"shell",
 	"search",
 ] as const)("keeps project ownership for a loaded %s row before attachment changes", (source) => {
 	attachedProjectState.slug = "conduit";
@@ -109,8 +93,8 @@ it.each([
 		id: "dotfiles-session",
 		projectSlug: "dotfiles",
 	});
-	sessionState.currentId = foreign.id;
-	if (source === "daemon") seedDaemonSessions([foreign]);
+	openSessionForSetup(foreign.id, foreign.projectSlug);
+	if (source === "shell") applySessionSnapshot([foreign], "partial");
 	else seedSearchResults([foreign]);
 	expect(findSession(foreign.id)?.projectSlug).toBe("dotfiles");
 });
@@ -309,7 +293,7 @@ it("a project switch forgets the family, and the next project's family applies",
 	expect(sessionState.familySessions.map((row) => row.id)).toEqual(["other"]);
 });
 
-it("forgets chat and selection when the subscription snapshot omits a session", () => {
+it("preserves chat and route when a subscription snapshot omits a session", () => {
 	applySessionChange({
 		_tag: "snapshot",
 		sequence: 10,
@@ -324,14 +308,14 @@ it("forgets chat and selection when the subscription snapshot omits a session", 
 		],
 	});
 	getOrCreateSessionSlot("gone");
-	sessionState.currentId = "gone";
+	openSessionForSetup("gone", "project-a");
 
 	applySessionChange({ _tag: "snapshot", sequence: 11, rows: [] });
 
 	expect(sessionState.sessions.has("gone")).toBe(false);
-	expect(sessionActivity.has("gone")).toBe(false);
-	expect(sessionMessages.has("gone")).toBe(false);
-	expect(sessionState.currentId).toBeNull();
+	expect(sessionActivity.has("gone")).toBe(true);
+	expect(sessionMessages.has("gone")).toBe(true);
+	expect(sessionState.currentId).toBe("gone");
 });
 
 it("keeps chat and selection when a root only leaves the list", () => {
@@ -347,7 +331,7 @@ it("keeps chat and selection when a root only leaves the list", () => {
 		},
 	});
 	getOrCreateSessionSlot("forked");
-	sessionState.currentId = "forked";
+	openSessionForSetup("forked", "project-a");
 
 	// It gained a parent: out of the sidebar, but not deleted.
 	applySessionChange({ _tag: "remove", sequence: 11, id: "forked" });
@@ -370,7 +354,7 @@ it("forgets chat and selection when the subscription removes a session", () => {
 		},
 	});
 	getOrCreateSessionSlot("gone");
-	sessionState.currentId = "gone";
+	openSessionForSetup("gone", "project-a");
 
 	applySessionChange({
 		_tag: "remove",
@@ -417,182 +401,6 @@ it("keeps the family list owned by the family feed", () => {
 	expect(sessionState.familySessions).toEqual([original]);
 	applySessionRemoved("root");
 	expect(sessionState.familySessions).toEqual([original]);
-});
-
-describe("switchToSession", () => {
-	it("keeps the list query when the URL already names the session", () => {
-		const pushState = vi.fn();
-		vi.stubGlobal("window", { history: { pushState } });
-		try {
-			routerState.path = "/s/current";
-			routerState.search = "?group=project";
-			switchToSession(
-				"current",
-				"project-a",
-				vi.fn().mockResolvedValue({ ok: true }),
-			);
-			expect(routerState.search).toBe("?group=project");
-			expect(pushState).not.toHaveBeenCalled();
-		} finally {
-			vi.unstubAllGlobals();
-		}
-	});
-
-	it("ignores session discovery returned after attaching another project", async () => {
-		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
-		let finish: (
-			response: Awaited<ReturnType<typeof sessionRpc.rpc<"GetAgents">>>,
-		) => void = () => {};
-		const spy = vi.spyOn(sessionRpc, "rpc").mockImplementationOnce(
-			() =>
-				new Promise((resolve) => {
-					finish = resolve;
-				}),
-		);
-		try {
-			attachedProjectState.slug = "project-a";
-			switchToSession(
-				"session-a",
-				undefined,
-				vi.fn().mockResolvedValue({ ok: true }),
-			);
-			attachedProjectState.slug = "project-b";
-			clearSessionState();
-			applyGetAgentsResponse({
-				projectSlug: "project-b",
-				providerScope: { id: "b", name: "B" },
-				agents: [],
-				activeAgentId: "agent-b",
-			});
-			finish({
-				projectSlug: "project-a",
-				providerScope: { id: "a", name: "A" },
-				agents: [],
-				activeAgentId: "agent-a",
-			});
-			await Promise.resolve();
-			expect(discoveryState.activeAgentId).toBe("agent-b");
-		} finally {
-			spy.mockRestore();
-			vi.unstubAllGlobals();
-		}
-	});
-	it("builds the session route and addresses the RPC by session", () => {
-		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
-		try {
-			const viewSession = vi.fn().mockResolvedValue({ ok: true });
-			attachedProjectState.slug = "attached-project";
-			routerState.path = "/";
-			switchToSession("new-session", undefined, viewSession);
-			expect(routerState.path).toBe("/s/new-session");
-			expect(viewSession).toHaveBeenCalledWith("ViewSession", {
-				sessionId: "new-session",
-				originId: expect.any(String),
-			});
-		} finally {
-			vi.unstubAllGlobals();
-		}
-	});
-
-	it("views a foreign row by its session id", () => {
-		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
-		try {
-			const viewSession = vi.fn().mockResolvedValue({ ok: true });
-			switchToSession("foreign", "project-b", viewSession);
-			expect(viewSession).toHaveBeenCalledWith("ViewSession", {
-				sessionId: "foreign",
-				originId: expect.any(String),
-			});
-		} finally {
-			vi.unstubAllGlobals();
-		}
-	});
-	it("views the session through RPC after changing local state", () => {
-		const viewSession = vi.fn().mockResolvedValue({ ok: true });
-		sessionState.currentId = "old-session";
-		routerState.path = "/s/new-session";
-		attachedProjectState.slug = "project-a";
-
-		switchToSession("new-session", "project-a", viewSession);
-
-		expect(viewSession).toHaveBeenCalledWith("ViewSession", {
-			sessionId: "new-session",
-			originId: expect.any(String),
-		});
-	});
-
-	it("keeps cached target session messages visible while loading fresh history", () => {
-		const viewSession = vi.fn().mockResolvedValue({ ok: true });
-		const target = getOrCreateSessionSlot("parent-with-subagents");
-		setMessages(target.messages, [
-			createToolMessage({
-				uuid: "tool-uuid",
-				id: "task-tool-1",
-				name: "Task",
-				status: "completed",
-				metadata: { childSessionId: "claude-subagent-abc" },
-			}),
-		]);
-		sessionState.currentId = "child-subagent";
-		routerState.path = "/s/parent-with-subagents";
-		attachedProjectState.slug = "project-a";
-
-		switchToSession("parent-with-subagents", "project-a", viewSession);
-
-		const tool = currentChat().messages.find((m) => m.type === "tool");
-		expect(tool?.type).toBe("tool");
-		if (tool?.type !== "tool") throw new Error("expected tool message");
-		expect(tool.metadata?.["childSessionId"]).toBe("claude-subagent-abc");
-		expect(tool.status).toBe("completed");
-
-		clearSessionChatState("parent-with-subagents");
-		clearSessionChatState("child-subagent");
-	});
-
-	it("applies the returned draft without sending a session permission switch", async () => {
-		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
-		const sendMode = vi.spyOn(sessionRpc, "rpc");
-		try {
-			choosePermissionMode("acceptEdits");
-			switchToSession("draft-session", "project-a", () =>
-				Promise.resolve({ ok: true, draft: "saved text" }),
-			);
-			await Promise.resolve();
-			expect(inputSyncState.text).toBe("saved text");
-			expect(sessionState.currentId).toBe("draft-session");
-			expect(sendMode).not.toHaveBeenCalledWith(
-				"SwitchPermissionMode",
-				expect.anything(),
-			);
-		} finally {
-			sendMode.mockRestore();
-			vi.unstubAllGlobals();
-		}
-	});
-
-	it("replaces a superseded session URL and resets session chrome", () => {
-		const replaceState = vi.fn();
-		vi.stubGlobal("window", { history: { replaceState, pushState: vi.fn() } });
-		try {
-			sessionState.currentId = "old-session";
-			routerState.path = "/s/old-session";
-			uiState.contextPercent = 70;
-			todoState.items = [{ id: "one", subject: "old", status: "pending" }];
-			switchToSession(
-				"replacement",
-				"project-a",
-				() => Promise.resolve({ ok: true }),
-				{ replace: true },
-			);
-			expect(sessionState.currentId).toBe("replacement");
-			expect(routerState.path).toBe("/s/replacement");
-			expect(replaceState).toHaveBeenCalledTimes(1);
-			expect(uiState.contextPercent).toBe(0);
-			expect(todoState.items).toEqual([]);
-		} finally {
-			vi.unstubAllGlobals();
-		}
-	});
 });
 
 // groupSessionsByDate (pure function)
@@ -720,50 +528,6 @@ describe("attention placement and daemon rows", () => {
 		expect(isSessionWoken(timed, 100)).toBe(true);
 	});
 
-	it("combines local roots with foreign daemon roots without duplicating local rows", () => {
-		projectState.projects = [];
-		seedSessions([
-			makeSession({ id: "local", title: "Warm title", updatedAt: 100 }),
-		]);
-		applyListDaemonSessionsResponse({
-			projectSlug: "project-a",
-			sessions: [
-				makeSession({
-					id: "local",
-					title: "Cold title",
-					projectSlug: "project-a",
-				}),
-				makeSession({
-					id: "foreign",
-					projectSlug: "project-b",
-					updatedAt: 400,
-				}),
-				makeSession({
-					id: "foreign-created",
-					projectSlug: "project-b",
-					createdAt: 300,
-				}),
-				makeSession({
-					id: "foreign-child",
-					parentID: "foreign",
-					projectSlug: "project-b",
-					updatedAt: 500,
-				}),
-			],
-			availability: [{ projectSlug: "project-b", available: true }],
-			hasMore: false,
-			nextCursor: null,
-		});
-		expect(getFilteredSessions().map((row) => row.id)).toEqual([
-			"foreign",
-			"foreign-created",
-			"local",
-		]);
-		expect(getFilteredSessions().find((row) => row.id === "local")?.title).toBe(
-			"Warm title",
-		);
-	});
-
 	it("returns only reconciled root search results, never family children", () => {
 		const root = makeSession({ id: "root", title: "Match" });
 		const child = makeSession({
@@ -773,19 +537,6 @@ describe("attention placement and daemon rows", () => {
 		});
 		seedSessions([root]);
 		applyFamilyChange({ _tag: "snapshot", sequence: 1, rows: [root, child] });
-		applyListDaemonSessionsResponse({
-			projectSlug: "project-a",
-			sessions: [
-				makeSession({
-					id: "foreign-match",
-					title: "Match abroad",
-					projectSlug: "project-b",
-				}),
-			],
-			availability: [{ projectSlug: "project-b", available: true }],
-			hasMore: false,
-			nextCursor: null,
-		});
 		sessionState.searchQuery = "match";
 		seedSearchResults([root, child]);
 		expect(getFilteredSessions().map((row) => row.id)).toEqual(["root"]);
@@ -802,19 +553,6 @@ describe("setSearchQuery", () => {
 		setSearchQuery("something");
 		setSearchQuery("");
 		expect(sessionState.searchQuery).toBe("");
-	});
-});
-
-describe("setCurrentSession", () => {
-	it("sets currentId", () => {
-		setCurrentSession("sess-1");
-		expect(sessionState.currentId).toBe("sess-1");
-	});
-
-	it("can set to null", () => {
-		sessionState.currentId = "something";
-		setCurrentSession(null);
-		expect(sessionState.currentId).toBeNull();
 	});
 });
 

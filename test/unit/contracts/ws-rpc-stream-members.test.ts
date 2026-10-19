@@ -1,5 +1,5 @@
-import { RpcSchema } from "@effect/rpc";
 import { Schema } from "effect";
+import { RpcSchema } from "effect/rpc";
 import { describe, expect, it } from "vitest";
 import * as Contracts from "../../../src/lib/contracts/ws-rpc.js";
 import * as Frontend from "../../../src/lib/frontend/transport/ws-rpc.js";
@@ -33,7 +33,7 @@ describe("subscription RPC contracts", () => {
 			expect(() => decodePayload(payload)).toThrow();
 		}
 		expect(RpcSchema.isStreamSchema(member.successSchema)).toBe(true);
-		expect(member.successSchema.failure).toBe(Contracts.WsRpcError);
+		expect(member.successSchema.error).toBe(Contracts.WsRpcError);
 		const decode = Schema.decodeUnknownSync(member.successSchema.success);
 		const message = {
 			_tag: "message",
@@ -123,17 +123,12 @@ describe("subscription RPC contracts", () => {
 		expect(Contracts.WsRpcGroup.requests.get("SubscribeShell")).toBe(member);
 		expect(Frontend.SubscribeShell).toBe(member);
 		const decodePayload = Schema.decodeUnknownSync(member.payloadSchema);
-		for (const payload of [
-			{ projectSlug: "project" },
-			{ projectSlug: "project", resumeFromSequence: 42 },
-		]) {
+		for (const payload of [{}, { resumeFromSequence: 42 }]) {
 			expect(decodePayload(payload)).toEqual(payload);
 		}
-		expect(() =>
-			decodePayload({ projectSlug: "project", resumeFromSequence: "42" }),
-		).toThrow();
+		expect(() => decodePayload({ resumeFromSequence: "42" })).toThrow();
 		expect(RpcSchema.isStreamSchema(member.successSchema)).toBe(true);
-		expect(member.successSchema.failure).toBe(Contracts.WsRpcError);
+		expect(member.successSchema.error).toBe(Contracts.WsRpcError);
 		const decode = Schema.decodeUnknownSync(member.successSchema.success);
 		const session = {
 			id: "session-1",
@@ -170,7 +165,7 @@ describe("subscription RPC contracts", () => {
 		expect(() => decodePayload({})).toThrow();
 		expect(() => decodePayload({ projectSlug: "" })).toThrow();
 		expect(RpcSchema.isStreamSchema(member.successSchema)).toBe(true);
-		expect(member.successSchema.failure).toBe(Contracts.WsRpcError);
+		expect(member.successSchema.error).toBe(Contracts.WsRpcError);
 		const decode = Schema.decodeUnknownSync(member.successSchema.success);
 		const visibility = {
 			_tag: "visibility",

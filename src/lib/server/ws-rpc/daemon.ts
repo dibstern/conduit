@@ -16,13 +16,13 @@ export const daemonOnlyHandlers = {
 	SetAgent: (_request) => daemonRequired("SetAgent"),
 	RestartWithConfig: (_request) => daemonRequired("RestartWithConfig"),
 	GetInstances: (_request) => daemonRequired("GetInstances"),
+	GetCursorAuth: (_request) => daemonRequired("GetCursorAuth"),
+	StartCursorLogin: (_request) => daemonRequired("StartCursorLogin"),
+	CancelCursorLogin: (_request) => daemonRequired("CancelCursorLogin"),
+	LogoutCursor: (_request) => daemonRequired("LogoutCursor"),
 	GetInstanceStatus: (_request) => daemonRequired("GetInstanceStatus"),
 	OpenCodeUseWorktree: (_request) => daemonRequired("OpenCodeUseWorktree"),
 	ResolveSessionMode: (_request) => daemonRequired("ResolveSessionMode"),
-	SetDefaultGroupingMode: (_request) =>
-		daemonRequired("SetDefaultGroupingMode"),
-	GetDefaultGroupingMode: (_request) =>
-		daemonRequired("GetDefaultGroupingMode"),
 } satisfies Pick<
 	WsRpcHandlerMap,
 	| "GetStatus"
@@ -34,9 +34,11 @@ export const daemonOnlyHandlers = {
 	| "SetAgent"
 	| "RestartWithConfig"
 	| "GetInstances"
+	| "GetCursorAuth"
+	| "StartCursorLogin"
+	| "CancelCursorLogin"
+	| "LogoutCursor"
 	| "GetInstanceStatus"
 	| "OpenCodeUseWorktree"
 	| "ResolveSessionMode"
-	| "SetDefaultGroupingMode"
-	| "GetDefaultGroupingMode"
 >;

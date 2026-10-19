@@ -18,7 +18,6 @@ import {
 	FiberMap,
 	Layer,
 	Ref,
-	Runtime,
 } from "effect";
 import type { SessionPermissionMode } from "../../../shared-types.js";
 
@@ -50,16 +49,15 @@ export interface OverridesState {
 	defaultContextWindow: string;
 }
 
-export const PROCESSING_TIMEOUT_DURATION =
-	"2 minutes" satisfies Duration.DurationInput;
+export const PROCESSING_TIMEOUT_DURATION = "2 minutes" satisfies Duration.Input;
 
-export class OverridesStateTag extends Context.Tag("OverridesState")<
+export class OverridesStateTag extends Context.Service<
 	OverridesStateTag,
 	Ref.Ref<OverridesState>
->() {}
+>()("OverridesState") {}
 
 export const makeOverridesStateLive = (): Layer.Layer<OverridesStateTag> =>
-	Layer.scoped(
+	Layer.effect(
 		OverridesStateTag,
 		Effect.gen(function* () {
 			const processingTimeoutFibers = yield* FiberMap.make<string, void>();
@@ -125,7 +123,7 @@ const completeProcessingTimeout = (
 const makeProcessingTimeoutEffect = (
 	ref: Ref.Ref<OverridesState>,
 	sessionId: string,
-	duration: Duration.DurationInput,
+	duration: Duration.Input,
 	token: symbol,
 	onTimeout: () => Effect.Effect<void>,
 ) =>
@@ -364,7 +362,7 @@ export const clearSession = (sessionId: string) =>
  */
 export const startProcessingTimeout = (
 	sessionId: string,
-	duration: Duration.DurationInput,
+	duration: Duration.Input,
 	onTimeout: () => Effect.Effect<void>,
 ) =>
 	Effect.gen(function* () {
@@ -396,7 +394,7 @@ export const startProcessingTimeout = (
  */
 export const resetProcessingTimeout = (
 	sessionId: string,
-	duration: Duration.DurationInput,
+	duration: Duration.Input,
 ) =>
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;
@@ -440,10 +438,10 @@ export const resetProcessingTimeout = (
 
 /** Sink hooks that keep a turn's processing timeout in step with its output. */
 export const makeProcessingTimeoutHooks = (
-	runtime: Runtime.Runtime<OverridesStateTag>,
+	runtime: Context.Context<OverridesStateTag>,
 	sessionId: string,
 ) => {
-	const run = Runtime.runFork(runtime);
+	const run = Effect.runForkWith(runtime);
 	return {
 		clearTimeout: () => {
 			run(clearProcessingTimeout(sessionId));

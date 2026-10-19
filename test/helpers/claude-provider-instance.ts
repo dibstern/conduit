@@ -20,7 +20,7 @@ export function makeTestClaudeProviderInstance(
 ): ClaudeProviderInstance {
 	const scope = Effect.runSync(Scope.make());
 	const runtime = Effect.runSync(
-		Scope.extend(
+		Scope.provide(
 			makeClaudeProviderRuntime({
 				runnerFactory: makeClaudeSessionRunner,
 				// Never fall back to the developer's real ~/.config/conduit.

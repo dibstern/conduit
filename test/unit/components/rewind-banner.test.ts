@@ -7,32 +7,40 @@ import {
 	getOrCreateSessionActivity,
 	getOrCreateSessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	applyTranscriptEnvelope,
 	deriveTranscriptMessages,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import { detailRowsOf } from "../../helpers/detail-rows.js";
 
 const rpcSpy = vi.hoisted(() =>
-	vi.fn<typeof rpc<"RewindSession">>(async (_tag, input) => ({
-		ok: true as const,
-		sessionId: input.sessionId,
-		messageId: input.messageId,
-	})),
+	vi.fn<typeof rpc<"RewindSession">>((_tag, input) =>
+		Promise.resolve({
+			ok: true as const,
+			sessionId: input.sessionId,
+			messageId: input.messageId,
+		}),
+	),
 );
 const emptyComponent = vi.hoisted(
 	() => async () => import("../../helpers/Empty.svelte"),
 );
 
 vi.mock("../../../src/lib/frontend/components/ui/Icon.svelte", emptyComponent);
-vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
-	DRAFT_PROJECT_PARAM: "project",
-	getCurrentSlug: () => "project-a",
-	getCurrentSearchParams: () => new URLSearchParams(),
-}));
+vi.mock(
+	"../../../src/lib/frontend/stores/router.svelte.js",
+	async (importOriginal) => ({
+		...(await importOriginal<
+			typeof import("../../../src/lib/frontend/stores/router.svelte.js")
+		>()),
+		DRAFT_PROJECT_PARAM: "project",
+		getCurrentSlug: () => "project-a",
+		getCurrentSearchParams: () => new URLSearchParams(),
+	}),
+);
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	rpc: rpcSpy,
 }));
@@ -40,7 +48,7 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 describe("RewindBanner", () => {
 	beforeEach(() => {
 		rpcSpy.mockClear();
-		sessionState.currentId = "session-1";
+		openSessionForSetup("session-1", "project-a");
 		getOrCreateSessionActivity("session-1");
 		uiState.rewindActive = true;
 		uiState.toasts = [];
@@ -59,7 +67,7 @@ describe("RewindBanner", () => {
 	afterEach(() => {
 		cleanup();
 		clearMessages();
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		uiState.rewindActive = false;
 		uiState.rewindSelectedUuid = null;
 	});

@@ -1,6 +1,6 @@
-import type { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Effect } from "effect";
+import type { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import {
 	DURABLE_COMMAND_RECEIPT_STATUSES,
 	type DurableCommandReceiptStatus,
@@ -141,13 +141,15 @@ export class CommandReadModelRepository {
 			receiptRows: this.sql<CommandReceiptRow>`
 				SELECT project_key, command_id, session_id, status, result_sequence, error, created_at
 				FROM command_receipts
+				WHERE project_key = ${this.projectId}
 				ORDER BY command_id`,
 			lastSequence: this.sql<LastSequenceRow>`
 				SELECT MAX(sequence) AS last_sequence FROM events`,
 			tombstoneRows: this.sql<{
 				readonly scope_kind: string;
 				readonly scope_id: string;
-			}>`SELECT scope_kind, scope_id FROM provider_command_tombstones`,
+			}>`SELECT scope_kind, scope_id FROM provider_command_tombstones
+				WHERE project_key = ${this.projectId}`,
 		}).pipe(
 			Effect.map(({ receiptRows, lastSequence, tombstoneRows }) => ({
 				projectId: this.projectId,

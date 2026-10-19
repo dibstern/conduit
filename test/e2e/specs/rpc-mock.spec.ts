@@ -1,8 +1,14 @@
 import { writeFile } from "node:fs/promises";
-import { RpcSchema } from "@effect/rpc";
 import { expect, test } from "@playwright/test";
-import { Arbitrary, Schema, Stream } from "effect";
-import fc from "fast-check";
+import {
+	Arbitrary,
+	Effect,
+	Exit,
+	Schema,
+	type SchemaAST,
+	Stream,
+} from "effect";
+import { RpcSchema } from "effect/rpc";
 import { build } from "vite";
 import {
 	ProjectSaveRejected,
@@ -78,37 +84,52 @@ test("every declared error class reaches the browser", async ({
 	const checked = new Set<string>();
 	const results: unknown[] = [];
 	for (const rpc of WsRpcGroup.requests.values()) {
-		const stream = RpcSchema.getStreamSchemas(rpc.successSchema.ast);
-		const variants =
-			stream._tag === "Some"
-				? [rpc.errorSchema.ast, stream.value.failure.ast]
-				: [rpc.errorSchema.ast];
+		const streaming = RpcSchema.isStreamSchema(rpc.successSchema);
+		const variants: SchemaAST.AST[] = streaming
+			? [rpc.errorSchema.ast, rpc.successSchema.error.ast]
+			: [rpc.errorSchema.ast];
 		for (const ast of variants) {
 			if (ast._tag === "Union") {
 				variants.push(...ast.types);
 				continue;
 			}
 			if (ast._tag === "Suspend") {
-				variants.push(ast.f());
+				variants.push(ast.thunk());
 				continue;
 			}
-			if (ast._tag === "NeverKeyword") continue;
-			const error = fc.sample(Arbitrary.make(Schema.make(ast)), {
-				seed: 42,
-				numRuns: 1,
-			})[0];
+			if (ast._tag === "Never") continue;
+			const [error] = await Effect.runPromise(
+				Arbitrary.sampleEffect(Arbitrary.schema(Schema.make(ast)), {
+					seed: 42,
+					count: 1,
+				}),
+			);
 			if (typeof error !== "object" || error === null || !("_tag" in error))
 				throw new Error("Untagged declared error");
 			if (checked.has(String(error._tag))) continue;
 			checked.add(String(error._tag));
-			const payload = fc.sample(
-				Arbitrary.make(Schema.make(rpc.payloadSchema.ast)),
-				{ seed: 42, numRuns: 1 },
+			// Arbitrary cannot derive the decoded closedPayload declaration, so
+			// generate the JSON wire form and decode it, as the stub tests do.
+			const payloadSchema = Schema.toCodecJson(rpc.payloadSchema);
+			const payload: unknown = (
+				await Effect.runPromise(
+					Arbitrary.sampleEffect(
+						Arbitrary.schema(Schema.toEncoded(payloadSchema)).pipe(
+							Arbitrary.filter((payload) =>
+								Exit.isSuccess(
+									Schema.decodeUnknownExit(payloadSchema)(payload),
+								),
+							),
+							Arbitrary.map(Schema.decodeUnknownSync(payloadSchema)),
+						),
+						{ seed: 42, count: 1 },
+					),
+				)
 			)[0];
 			await mockWsRpc(page, {
 				stubs: {
 					[rpc._tag]: () => {
-						if (stream._tag === "Some") return Stream.fail(error);
+						if (streaming) return Stream.fail(error);
 						throw error;
 					},
 				},
@@ -131,11 +152,12 @@ test("every declared error class reaches the browser", async ({
 	await testInfo.attach("all-declared-errors", { path: artifact });
 });
 
-test("typed and legacy entries coexist with control overrides", async ({
+test("typed stubs accept runtime updates and record submitted input", async ({
 	page,
 }) => {
 	const control = await mockWsRpc(page, {
 		stubs: {
+			GetStatus: () => MOCK_SERVER_STATUS,
 			SetLogLevel: () => ({ ok: true }),
 			"input.submit": ({ sessionId }) => ({
 				ok: true,
@@ -143,7 +165,6 @@ test("typed and legacy entries coexist with control overrides", async ({
 				handedOff: true,
 			}),
 		},
-		handlers: { GetStatus: () => MOCK_SERVER_STATUS },
 	});
 	let submitted: Record<string, unknown> | undefined;
 	control.onSendMessage = (payload) => {
@@ -174,21 +195,12 @@ test("typed and legacy entries coexist with control overrides", async ({
 	expect(await page.evaluate(() => window.callRpc("GetStatus", {}))).toEqual({
 		value: MOCK_SERVER_STATUS,
 	});
-	control.setResponse("GetStatus", { ...MOCK_SERVER_STATUS, clientCount: 9 });
+	control.setStubs({
+		GetStatus: () => ({ ...MOCK_SERVER_STATUS, clientCount: 9 }),
+	});
 	expect(await page.evaluate(() => window.callRpc("GetStatus", {}))).toEqual({
 		value: { ...MOCK_SERVER_STATUS, clientCount: 9 },
 	});
-});
-
-test("a legacy invalid reply warns and becomes a defect", async ({ page }) => {
-	await mockWsRpc(page, {
-		handlers: {
-			GetStatus: () => ({ ...MOCK_SERVER_STATUS, clientCount: "invalid" }),
-		},
-	});
-	await openClient(page);
-	const result = await page.evaluate(() => window.callRpc("GetStatus", {}));
-	expect(result).toHaveProperty("defect");
 });
 
 test("an invalid typed reply fails its owning spec", async ({ page }) => {
