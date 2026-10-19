@@ -63,7 +63,10 @@ describe("session command presentation model", () => {
 	});
 
 	it.each<[Partial<SessionInfo>, string]>([
-		[{ snoozedAt: now, snoozedUntil: until }, "until 18:00"],
+		[
+			{ snoozedAt: now, snoozedUntil: until },
+			`until ${new Date(until).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`,
+		],
 		[{ snoozedAt: now }, "No timer"],
 		[{ snoozedAt: now, snoozedUntil: until, pinnedAt: now }, "Unpin to snooze"],
 		[
