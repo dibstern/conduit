@@ -33,6 +33,12 @@ export interface ProjectionContext {
 	 */
 	readonly version: number;
 	readonly replaying?: boolean;
+	/**
+	 * Set by a batch: message stamps collect here and run once at the end. A
+	 * batch shares one version, so stamping a message per event repeats the same
+	 * write, and a forked history makes that tens of thousands of statements.
+	 */
+	readonly deferredMessageStamps?: Set<string>;
 }
 
 /**
@@ -194,11 +200,17 @@ const stampSessions = (
 // message is stored against the subagent session and that is the row a
 // subscriber must re-query. A part write stamps the part itself and also
 // advances the message that owns it, whose updated_at moved with it.
-const stampMessage = (
+export const stampMessage = (
 	messageIds: readonly string[],
-	version: number,
+	ctx: ProjectionContext,
 ): Effect.Effect<ProjectionTouch, SqlError, SqlClient.SqlClient> =>
 	Effect.gen(function* () {
+		if (ctx.deferredMessageStamps) {
+			for (const messageId of messageIds)
+				ctx.deferredMessageStamps.add(messageId);
+			return { stamped: [], removed: [], collections: [] };
+		}
+		const { version } = ctx;
 		const sql = yield* SqlClient.SqlClient;
 		const stamped: string[] = [];
 		const changedSessions: string[] = [];
@@ -1093,7 +1105,7 @@ export const makeMessageProjector = defineProjector(() => ({
 								collections: [...touch.collections, "messages"] as const,
 							})),
 						)
-					: stampMessage(written, ctx.version),
+					: stampMessage(written, ctx),
 			),
 		),
 }));
@@ -1470,7 +1482,7 @@ export const makeTurnProjector = defineProjector(() => ({
 			Effect.flatMap((written) =>
 				Effect.gen(function* () {
 					return mergeTouches([
-						yield* stampMessage(written.messages, ctx.version),
+						yield* stampMessage(written.messages, ctx),
 						yield* stampSessions(written.sessions, ctx.version),
 					]);
 				}),
@@ -1570,7 +1582,7 @@ export const makeApprovalProjector = defineProjector(() => ({
 					}
 					const sessions = yield* stampSessions(owners(written), ctx.version);
 					return mergeTouches([
-						yield* stampMessage(messageIds, ctx.version),
+						yield* stampMessage(messageIds, ctx),
 						// The pending counts roll up into the family's row.
 						{
 							...sessions,
