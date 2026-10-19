@@ -3,6 +3,12 @@ Feature: Phone Auto-settle explains the server outlook and saves in place
 Background:
   Given the viewport is a phone
 
+Scenario: The default mock outlook is deterministic without scenario seeding
+  Given the conduit app is served with the long-transcript mockup
+  When I open the overflow session sheet
+  Then the auto-settle status line is On · turned off for all sessions in Settings
+  And the session sheet stays open with Auto-settle on
+
 Scenario Outline: Every server outlook has exact copy
   Given the conduit app is served with the long-transcript mockup
   And the phone session sheet state is idle
