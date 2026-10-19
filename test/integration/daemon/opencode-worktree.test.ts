@@ -465,6 +465,7 @@ describe("OpenCode declared worktree moves", () => {
 			"External",
 			undefined,
 			"opencode",
+			{ modelProviderId: "anthropic", modelId: "claude-opus-4-5-20251101" },
 		);
 		await browser.send(sessionId, "Reply with pong.");
 		const sent = fixture

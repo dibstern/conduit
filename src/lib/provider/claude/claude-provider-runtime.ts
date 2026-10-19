@@ -988,13 +988,6 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					}),
 				);
 			}
-			const expectedApiModelId = yield* expectedApiModelIdEffect(
-				this.deps.capabilitiesService,
-				input.model?.modelId,
-				input.contextWindow,
-				input.workspaceRoot,
-				input.agent,
-			);
 			yield* markStreamLive(this.stateRef, sessionId);
 
 			const deferred = yield* Deferred.make<TurnResult, Error>();
@@ -1010,6 +1003,15 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			let promptQueue: PromptQueueController | undefined;
 			let activeQuery: Query | undefined;
 			const setup = Effect.gen(this, function* () {
+				// The capability lookup is async: the lock above must already hold,
+				// or a concurrent send sees no session and starts a second query.
+				const expectedApiModelId = yield* expectedApiModelIdEffect(
+					this.deps.capabilitiesService,
+					input.model?.modelId,
+					input.contextWindow,
+					input.workspaceRoot,
+					input.agent,
+				);
 				const userMessage = yield* Effect.try({
 					try: () => validateUserMessage(this.buildUserMessage(input)),
 					catch: (cause) =>
@@ -1241,6 +1243,14 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			});
 
 			yield* setup.pipe(
+				Effect.raceFirst(
+					Deferred.await(setupLock).pipe(
+						Effect.mapError(
+							(cause) =>
+								new ClaudeBoundaryError({ operation: "awaitSetup", cause }),
+						),
+					),
+				),
 				Effect.tap(() =>
 					Deferred.succeed(setupLock, undefined).pipe(Effect.ignore),
 				),
@@ -2125,14 +2135,23 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				// A queued lifecycle start can change the active admission while Stop
 				// waits for message ownership. Select its candidate under that permit.
 				const boundTurnId = bound ? ctx?.currentTurnId : undefined;
-				if (
-					bound &&
-					(!ctx ||
+				if (bound) {
+					if (!ctx) {
+						// Stop setup too: it may still be placing the user message and
+						// otherwise create a cold query after the warm query is discarded.
+						const waiters = yield* pendingTurnWaiters(this.stateRef, sessionId);
+						if (!turnIds.some((turnId) => waiters.has(turnId)))
+							return Effect.void;
+						const setupLock = yield* getSetupLock(this.stateRef, sessionId);
+						if (setupLock)
+							yield* Deferred.fail(setupLock, new Error("Turn interrupted"));
+					} else if (
 						!boundTurnId ||
 						!turnIds.includes(boundTurnId) ||
-						!(yield* isCurrentSession(this.stateRef, ctx)))
-				)
-					return Effect.void;
+						!(yield* isCurrentSession(this.stateRef, ctx))
+					)
+						return Effect.void;
+				}
 				yield* FiberMap.remove(this.shutdownFibers, sessionId);
 				yield* this.warmedQueries.discardEffect(sessionId);
 				if (!ctx) return Effect.void;

@@ -11,6 +11,7 @@ import {
 	Shutdown,
 } from "../lib/contracts/ws-rpc.js";
 import type { SendRPC } from "../lib/daemon/daemon-rpc-client.js";
+import { normalizeProjectDirectory } from "../lib/domain/daemon/Services/project-registry-service.js";
 import { ENV } from "../lib/env.js";
 import { formatErrorDetail } from "../lib/errors.js";
 import type { CLIOptions } from "./cli-core.js";
@@ -238,7 +239,10 @@ export async function handleRemove(ctx: CommandContext): Promise<void> {
 		exit(1);
 		return;
 	}
-	const match = listResponse.projects.find((p) => p.folders[0] === cwd);
+	const directory = normalizeProjectDirectory(cwd);
+	const match = listResponse.projects.find(
+		(project) => project.folders[0] === directory,
+	);
 
 	if (!match) {
 		stderr.write(`Current directory is not registered: ${cwd}\n`);
@@ -316,8 +320,9 @@ export async function handleTitle(ctx: CommandContext): Promise<void> {
 		exit(1);
 		return;
 	}
+	const directory = normalizeProjectDirectory(cwd);
 	const match = listResponse.projects.find(
-		(project) => project.folders[0] === resolve(cwd),
+		(project) => project.folders[0] === directory,
 	);
 
 	if (!match) {

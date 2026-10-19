@@ -134,8 +134,9 @@ async function stagePreProvenanceStore(
 		const names = db
 			.prepare(`SELECT name FROM sqlite_master
 			WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-			AND name != 'effect_sql_migrations' ORDER BY name`)
+			AND name NOT IN ('effect_sql_migrations', 'activities') ORDER BY name`)
 			.all() as Array<{ name: string }>;
+		// The retired activities projection no longer exists in the current store.
 		db.transaction(() => {
 			for (const { name } of names) {
 				const columns = (

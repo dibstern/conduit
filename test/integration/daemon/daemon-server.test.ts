@@ -23,7 +23,11 @@ import {
 	it,
 	vi,
 } from "vitest";
-import { AttachProject, GetStatus } from "../../../src/lib/contracts/ws-rpc.js";
+import {
+	AttachProject,
+	GetStatus,
+	StartInstance,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
 	type ForegroundDaemonHandle,
@@ -130,7 +134,10 @@ describe("daemon project readiness and socket routing", () => {
 			).toBe("registering");
 
 			releaseRelay();
-			expect(await attachment).toEqual({ projectSlug: slug });
+			expect(await attachment).toEqual({
+				projectSlug: slug,
+				sessionSlug: null,
+			});
 
 			await vi.waitFor(() => {
 				expect(
@@ -319,7 +326,7 @@ describe("instance status broadcast", () => {
 		// The daemon wires status_changed events internally.
 		// Verify getInstances works and the daemon was started successfully.
 		const instances = daemon.getInstances();
-		expect(instances).toHaveLength(1);
+		expect(instances.map(({ id }) => id)).toEqual(["opencode", "claude"]);
 		const instance = instances[0];
 		assert.exists(instance, "expected an OpenCode instance");
 		expect(instance.id).toBe("opencode");
@@ -356,8 +363,11 @@ describe("instance status broadcast", () => {
 			opencodeUrl,
 		});
 
-		// The default instance was added as unmanaged, so health polling
-		// starts immediately (every 5s). Wait for it to transition to healthy.
+		// External instances are probed on first use too.
+		await sendRpcRequest(
+			join(tmpDir, "relay.sock"),
+			new StartInstance({ instanceId: "opencode" }),
+		);
 		await new Promise<void>((resolve) => {
 			const check = setInterval(() => {
 				const inst = daemon?.getInstances()[0];
@@ -373,7 +383,7 @@ describe("instance status broadcast", () => {
 		});
 
 		const instances = daemon.getInstances();
-		expect(instances).toHaveLength(1);
+		expect(instances.map(({ id }) => id)).toEqual(["opencode", "claude"]);
 		const instance = instances[0];
 		assert.exists(instance, "expected an OpenCode instance");
 		expect(instance.id).toBe("opencode");

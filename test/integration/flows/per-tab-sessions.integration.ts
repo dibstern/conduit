@@ -200,11 +200,8 @@ describe("Integration: Per-Tab Sessions", () => {
 		);
 
 		client2.clearReceived();
-		await client1.switchModel(
-			"per-tab-test-model",
-			"per-tab-test-provider",
-			sharedId,
-		);
+		// A model the recorded OpenCode catalog offers: picks are validated.
+		await client1.switchModel("gpt-5-nano", "opencode", sharedId);
 
 		// The peer sees the pick on its shell subscription: no refetch, no reconnect.
 		const upsert = await client2.waitFor("shell", {
@@ -218,8 +215,8 @@ describe("Integration: Per-Tab Sessions", () => {
 			},
 		});
 		expect((upsert["item"] as Record<string, unknown>)["model"]).toEqual({
-			model: "per-tab-test-model",
-			provider: "per-tab-test-provider",
+			model: "gpt-5-nano",
+			provider: "opencode",
 		});
 		expect(upsert["sequence"]).toBeGreaterThan(lastSequence);
 

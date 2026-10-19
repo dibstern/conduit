@@ -42,6 +42,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 		harness = ProcessHarness.create({
 			rootPrefix: join(realpathSync(tmpdir()), "conduit-usg5-7-"),
 			opencodeRecording: recording,
+			opencodeInitiallyIdle: true,
 		});
 		evidence["main"] = harness.projectDir;
 		await harness.restart();
@@ -112,6 +113,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 			"Extra folder marker",
 			undefined,
 			"opencode",
+			{ modelProviderId: "opencode", modelId: "nemotron-3-ultra-free" },
 		);
 		evidence["sessionId"] = sessionId;
 		rmSync(missing, { recursive: true });
@@ -164,6 +166,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 			"Single folder",
 			undefined,
 			"opencode",
+			{ modelProviderId: "anthropic", modelId: "claude-opus-4-5-20251101" },
 		);
 		evidence["sessionId"] = sessionId;
 		const first = await browser.send(
@@ -199,6 +202,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 			"Unchanged folder",
 			undefined,
 			"opencode",
+			{ modelProviderId: "anthropic", modelId: "claude-opus-4-5-20251101" },
 		);
 		evidence["sessionId"] = sessionId;
 		const first = await browser.send(
@@ -250,6 +254,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 			"Folder removal",
 			undefined,
 			"opencode",
+			{ modelProviderId: "anthropic", modelId: "claude-opus-4-5-20251101" },
 		);
 		evidence["sessionId"] = sessionId;
 		const first = await before.send(
@@ -306,6 +311,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 			"Missing main folder",
 			undefined,
 			"opencode",
+			{ modelProviderId: "anthropic", modelId: "claude-opus-4-5-20251101" },
 		);
 		evidence["sessionId"] = sessionId;
 		rmSync(fixture.projectDir, { recursive: true });

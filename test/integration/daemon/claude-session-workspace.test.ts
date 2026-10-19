@@ -177,6 +177,14 @@ describe("Claude declared workspace moves through the built daemon", () => {
 		if (!harness) return;
 		const fixture = harness;
 		try {
+			evidence["queryLaunches"] = fixture.claudeOptions().map((query) => ({
+				pid: query.pid,
+				cwd: query.options["cwd"],
+				resume: query.options["resume"] ?? query.resumeId,
+				agent: query.options["agent"],
+				configDir: query.configDir,
+				prompt: query.prompt,
+			}));
 			evidence["events"] = existsSync(fixture.daemonStorePath())
 				? events(fixture)
 				: [];
@@ -343,6 +351,14 @@ describe("Claude declared workspace moves through the built daemon", () => {
 		writeFileSync(join(fixture.root, "claude-replay-release"), "release\n");
 		await exitTurn;
 		await browser.send(sessionId, "Reply with pong back in the main folder.");
+		expect(
+			fixture.claudeOptions().flatMap(({ prompt }) => (prompt ? [prompt] : [])),
+		).toEqual([
+			"Enter a worktree.",
+			"Reply with pong in the worktree.",
+			"Exit the worktree and keep it.",
+			"Reply with pong back in the main folder.",
+		]);
 		expect(runnerStarts()).toBe(1);
 		expect(moves(fixture, sessionId)).toEqual([
 			{
@@ -634,8 +650,10 @@ exec '${realGit}' "$@"
 		await fixture.restart({ buildId: "q5u6-14-upgraded" });
 		await vi.waitFor(
 			() =>
-				expect(fixture.logTail).toContain(
-					"Changed Claude settings cannot be replayed without changing trust tiers or filesystem discovery; retaining the old runner",
+				expect(fixture.logTail).toMatch(
+					new RegExp(
+						`Claude runner upgrade deferred for session ${sessionId}: (?:Changed Claude settings cannot be replayed without changing trust tiers or filesystem discovery|Original Claude file settings could not be captured); retaining the old runner`,
+					),
 				),
 			{ timeout: 15_000 },
 		);
@@ -1036,27 +1054,29 @@ exec '${realGit}' "$@"
 				text: "Enter a worktree.",
 			}),
 		);
-		await vi.waitFor(
-			async () =>
-				expect(
-					(await list()).sessions.find(({ id }) => id === sessionId)
-						?.limitRecovery?.cutOffMessageId,
-				).toBeDefined(),
-			{ timeout: 15_000 },
-		);
 		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		let nativeSessionId: unknown;
 		try {
-			nativeSessionId = db
-				.prepare(
-					"SELECT json_extract(value, '$.resumeSessionId') FROM provider_state WHERE session_id = ? AND key = ?",
-				)
-				.pluck()
-				.get(sessionId, `nativeThread:${addedInstanceId}`);
+			await vi.waitFor(
+				async () => {
+					expect(
+						(await list()).sessions.find(({ id }) => id === sessionId)
+							?.limitRecovery?.cutOffMessageId,
+					).toBeDefined();
+					// The usage-limit event precedes the completed turn's native receipt.
+					nativeSessionId = db
+						.prepare(
+							"SELECT json_extract(value, '$.resumeSessionId') FROM provider_state WHERE session_id = ? AND key = ?",
+						)
+						.pluck()
+						.get(sessionId, `nativeThread:${addedInstanceId}`);
+					expect(nativeSessionId).toEqual(expect.any(String));
+				},
+				{ timeout: 15_000 },
+			);
 		} finally {
 			db.close();
 		}
-		expect(nativeSessionId).toEqual(expect.any(String));
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({

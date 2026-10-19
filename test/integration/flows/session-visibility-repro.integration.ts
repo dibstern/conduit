@@ -12,7 +12,6 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
 import {
 	afterAll,
-	assert,
 	beforeAll,
 	beforeEach,
 	describe,
@@ -237,16 +236,13 @@ async function projectedHistory(
 	};
 }
 
-// These repros model a user whose default is a Claude model: sessions start
-// as local Claude rows and materialize into OpenCode on the first send.
 /**
- * Bind a fresh session to the OpenCode engine (REPRO-C's materialization
- * pattern). Without this the default session runs on the Claude provider and
- * never touches the mock — the "differential" would silently compare the
- * projection with itself. Returns the local session id; the first sendMessage
- * to it materializes an OpenCode session returned by input.submit.
+ * Create a session on the OpenCode harness, which is fixed at creation.
+ * Without this the session runs on the Claude provider and never touches the
+ * mock — the "differential" would silently compare the projection with
+ * itself. Picks the first OpenCode model, as the picker does.
  */
-async function bindOpenCodeSession(
+async function createOpenCodeSession(
 	client: TestWsClient,
 	title: string,
 ): Promise<string> {
@@ -258,26 +254,32 @@ async function bindOpenCodeSession(
 	const model = provider.models[0];
 	if (!model) throw new Error("OpenCode provider has no models");
 
-	const created = await client.createSession(title, { instanceId: "claude" });
-	const localId = created["id"] as string;
-	if (!localId) throw new Error("createSession returned no id");
+	const created = await client.createSession(title, {
+		instanceId: "opencode",
+		model: {
+			providerId: provider.id,
+			modelId: model.id,
+			variant: "",
+			contextWindow: "",
+		},
+	});
+	const sessionId = created["id"] as string;
+	if (!sessionId) throw new Error("createSession returned no id");
 	client.clearReceived();
-	await client.switchModel(model.id, provider.id, localId);
-	client.clearReceived();
-	return localId;
+	return sessionId;
 }
 
-/** Send the first message to a bound session and wait for materialization. */
-async function materializeOpenCodeTurn(
+/** Send the first message to an OpenCode session; it keeps its id. */
+async function firstOpenCodeTurn(
 	client: TestWsClient,
-	localId: string,
+	sessionId: string,
 	prompt: string,
 ): Promise<string> {
 	const dispatchedId = await client.sendMessage(prompt, {
-		sessionId: localId,
+		sessionId,
 		originId: client.getClientId(),
 	});
-	expect(dispatchedId).not.toBe(localId);
+	expect(dispatchedId).toBe(sessionId);
 	return dispatchedId;
 }
 
@@ -293,12 +295,15 @@ async function runPaginationDifferential(count: number) {
 	try {
 		client1 = await paginationHarness.connectWsClient();
 		await client1.waitForInitialState();
-		const localId = await bindOpenCodeSession(client1, `Pagination ${count}`);
-		// The real prompt fires the mock's first SSE segment (the synthetic
-		// stream), remapped onto the materialized OpenCode session id.
-		const sessionId = await materializeOpenCodeTurn(
+		const createdId = await createOpenCodeSession(
 			client1,
-			localId,
+			`Pagination ${count}`,
+		);
+		// The real prompt fires the mock's first SSE segment (the synthetic
+		// stream), remapped onto the OpenCode session id.
+		const sessionId = await firstOpenCodeTurn(
+			client1,
+			createdId,
 			synthetic.prompt,
 		);
 		const lastMessageId = `msg-${String(count).padStart(3, "0")}`;
@@ -454,52 +459,25 @@ describe("Integration: Session Visibility Repros", () => {
 		await client1.close();
 	}, 20_000);
 
-	it("materialized session: first send keeps message visible, refreshes its family, and survives a second tab", async () => {
+	it("OpenCode session: first send keeps message visible, refreshes its family, and survives a second tab", async () => {
 		const client1 = await harness.connectWsClient();
 		await client1.waitForInitialState();
 		// A relay-owned detour, not the initial session: resetQueues() re-armed
-		// the POST /session entry relay startup consumed, so the materialized
-		// OpenCode session below receives the initial session's id.
+		// the POST /session entry relay startup consumed, so the OpenCode
+		// session below receives the initial session's id.
 		const detour = await client1.createSession("Detour", {
 			instanceId: "claude",
 		});
 		const detourId = detour["id"] as string;
 
-		const { providers } = await client1.getModels();
-		const provider = providers.find(
-			(p) => p.id !== "claude" && p.models.length > 0,
-		);
-		expect(provider).toBeDefined();
-		assert.exists(provider, "expected a provider with models");
-		const model = provider.models[0];
-		assert.exists(model, "expected the provider to have a model");
+		// 1. New session on the OpenCode harness, fixed at creation.
+		const newId = await createOpenCodeSession(client1, "Materialize Repro");
+		expect(newId).toBeTruthy();
 
-		// 1. New session → local claude placeholder row.
-		const created = await client1.createSession("Materialize Repro", {
-			instanceId: "claude",
-		});
-		const localId = created["id"] as string;
-		expect(localId).toBeTruthy();
+		// 2. First message runs on that session; it keeps its id.
+		await firstOpenCodeTurn(client1, newId, "Reply with just the word 'pong'.");
 
-		// 2. User selects an OpenCode model for the session (unbinds/rebinds engine).
-		const providerId = provider.id;
-		client1.clearReceived();
-		await client1.switchModel(model.id, providerId, localId);
-		client1.clearReceived();
-
-		// 3. First message → prepareTurnSession materializes an OpenCode session.
-		const newId = await client1.sendMessage(
-			"Reply with just the word 'pong'.",
-			{
-				sessionId: localId,
-				originId: client1.getClientId(),
-			},
-		);
-		// eslint-disable-next-line no-console
-		console.log(`[REPRO-C] materialized ${localId} -> ${newId}`);
-		expect(newId).not.toBe(localId);
-
-		// The materialized session must publish a renderable user row to the sender.
+		// The session must publish a renderable user row to the sender.
 		const userMsg = await client1.waitForTranscriptMessage(
 			(message) =>
 				message.role === "user" && JSON.stringify(message).includes("pong"),
@@ -508,12 +486,12 @@ describe("Integration: Session Visibility Repros", () => {
 		expect(userMsg.role).toBe("user");
 		expect(JSON.stringify(userMsg)).toContain("pong");
 
-		// Bug 2: the viewed family after materialization includes the session.
+		// Bug 2: the viewed family after the first send includes the session.
 		const ids = (
 			await client1.waitForFamilyRows(newId, (row) => row.id === newId)
 		).map((s) => s.id);
 		// eslint-disable-next-line no-console
-		console.log(`[REPRO-C] post-materialize list=${JSON.stringify(ids)}`);
+		console.log(`[REPRO-C] post-send list=${JSON.stringify(ids)}`);
 		expect(ids).toContain(newId);
 
 		// Let the turn complete and the pipeline persist.
@@ -535,7 +513,7 @@ describe("Integration: Session Visibility Repros", () => {
 			{ timeout: 10_000 },
 		);
 
-		// Bug 4: a second tab opening the materialized session URL must get
+		// Bug 4: a second tab opening the session URL must get
 		// populated history.
 		const client2 = new TestWsClient(
 			`ws://127.0.0.1:${harness.relayPort}/rpc?p=integration-test&session=${newId}`,
@@ -583,10 +561,10 @@ describe("Integration: Session Visibility Repros", () => {
 		const textDbPath = textHarness.eventsDbPath;
 		const client1 = await textHarness.connectWsClient();
 		await client1.waitForInitialState();
-		const localId = await bindOpenCodeSession(client1, "Text Differential");
-		const sessionId = await materializeOpenCodeTurn(
+		const createdId = await createOpenCodeSession(client1, "Text Differential");
+		const sessionId = await firstOpenCodeTurn(
 			client1,
-			localId,
+			createdId,
 			"Reply with just the word 'pong'.",
 		);
 		await client1.waitForTurnEnd(sessionId);
@@ -669,10 +647,13 @@ describe("Integration: Session Visibility Repros", () => {
 		try {
 			const client1 = await toolHarness.connectWsClient();
 			await client1.waitForInitialState();
-			const localId = await bindOpenCodeSession(client1, "Tool Differential");
-			const sessionId = await materializeOpenCodeTurn(
+			const createdId = await createOpenCodeSession(
 				client1,
-				localId,
+				"Tool Differential",
+			);
+			const sessionId = await firstOpenCodeTurn(
+				client1,
+				createdId,
 				"List the files in the current directory.",
 			);
 			// This recording has no trailing turn end; wait for its completed tool.
@@ -841,10 +822,10 @@ describe("Integration: Session Visibility Repros", () => {
 		try {
 			client1 = await metadataHarness.connectWsClient();
 			await client1.waitForInitialState();
-			const localId = await bindOpenCodeSession(client1, "Metadata Repro");
-			const sessionId = await materializeOpenCodeTurn(
+			const createdId = await createOpenCodeSession(client1, "Metadata Repro");
+			const sessionId = await firstOpenCodeTurn(
 				client1,
-				localId,
+				createdId,
 				synthetic.prompt,
 			);
 			await client1.waitForToolState(
@@ -973,10 +954,10 @@ describe("Integration: Session Visibility Repros", () => {
 		try {
 			client1 = await fileHarness.connectWsClient();
 			await client1.waitForInitialState();
-			const localId = await bindOpenCodeSession(client1, "File Part Repro");
-			const sessionId = await materializeOpenCodeTurn(
+			const createdId = await createOpenCodeSession(client1, "File Part Repro");
+			const sessionId = await firstOpenCodeTurn(
 				client1,
-				localId,
+				createdId,
 				synthetic.prompt,
 			);
 			// The synthetic stream has no done marker; wait for final assistant text.
@@ -1051,10 +1032,13 @@ describe("Integration: Session Visibility Repros", () => {
 		try {
 			client1 = await permissionHarness.connectWsClient();
 			await client1.waitForInitialState();
-			const localId = await bindOpenCodeSession(client1, "Permission Repro");
-			const sessionId = await materializeOpenCodeTurn(
+			const createdId = await createOpenCodeSession(
 				client1,
-				localId,
+				"Permission Repro",
+			);
+			const sessionId = await firstOpenCodeTurn(
+				client1,
+				createdId,
 				"List the files in the current directory using bash: ls -la",
 			);
 			// The card reaches browsers through the approvals subscription (ni8.9),

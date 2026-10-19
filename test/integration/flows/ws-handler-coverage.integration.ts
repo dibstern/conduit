@@ -82,9 +82,10 @@ describe("Integration: WS Handler Coverage", () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
-		await client.switchModel("test-model", "test-provider");
+		// A model the recorded OpenCode catalog offers: picks are validated.
+		await client.switchModel("gpt-5-nano", "opencode");
 		const { active } = await client.getModels();
-		expect(active).toEqual({ model: "test-model", provider: "test-provider" });
+		expect(active).toEqual({ model: "gpt-5-nano", provider: "opencode" });
 		await client.close();
 	});
 
