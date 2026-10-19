@@ -1362,6 +1362,7 @@ function query(params: {
 				if (request === "upgrade-long-turn" && index === 1 && proof) {
 					const release = join(dirname(proof), "release-upgrade-turn");
 					turnHeld = true;
+					mark({ kind: "assistant-held", prompt, queryId });
 					while (!existsSync(release) && !closed) {
 						yield* outOfBand.splice(0);
 						await new Promise<void>((done) => setTimeout(done, 20));

@@ -199,19 +199,34 @@ describe("Claude pending steer recovery through the process seam", () => {
 			}),
 		);
 		const before = inbox(harness, sessionId);
-		await vi.waitFor(() =>
-			expect(running.marks.some((mark) => mark.kind === "runner-started")).toBe(
-				true,
-			),
+		// SDK output can precede the daemon's runner-started IPC mark. Read the
+		// PID that consumed this prompt rather than an obsolete prewarm mark.
+		const pid = running
+			.claudeOptions()
+			.filter(({ prompt }) => prompt?.includes("upgrade-long-turn"))
+			.at(-1)?.pid;
+		if (pid === undefined) throw new Error("Missing prompt consumer PID");
+		const runner = await running.waitForMark(
+			(mark) =>
+				mark.kind === "runner-started" &&
+				mark.sessionId === sessionId &&
+				mark.pid === pid,
 		);
-		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started")
 			throw new Error("Missing verified runner PID");
 		if (mode !== "live") {
 			await harness.signal("SIGINT");
 			if (mode === "adopted") {
+				const markCursor = harness.marks.length;
 				await harness.restart();
 				browser = await harness.connect(sessionId);
+				await running.waitForMark(
+					(mark) =>
+						mark.kind === "runner-started" &&
+						mark.sessionId === sessionId &&
+						mark.pid === runner.pid,
+					markCursor,
+				);
 			}
 		}
 		process.kill(runner.pid, "SIGKILL");
@@ -226,15 +241,15 @@ describe("Claude pending steer recovery through the process seam", () => {
 				expect(
 					state.commands.every((command) => command.status === "failed"),
 				).toBe(true);
+				expect(
+					state.inputs
+						.filter((input) => input.state === "queued")
+						.map((input) => input.input_id),
+				).toEqual([steerId, queuedId]);
 			},
 			{ timeout: 10_000 },
 		);
 		const after = inbox(harness, sessionId);
-		expect(
-			after.inputs
-				.filter((input) => input.state === "queued")
-				.map((input) => input.input_id),
-		).toEqual([steerId, queuedId]);
 		const details = () =>
 			browser.frames.flatMap(({ message }) => {
 				if (

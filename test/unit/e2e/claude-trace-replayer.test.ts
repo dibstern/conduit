@@ -163,9 +163,16 @@ function envelopeIds(messages: readonly SDKMessage[]): string[] {
 }
 
 function traceLineCount(name: ClaudeTraceName): number {
-	return readFileSync(join(TRACES_DIR, `${name}.jsonl`), "utf8")
-		.split("\n")
-		.filter((line) => line.trim() !== "").length;
+	const lines = traceJson(name);
+	const recordsInput = lines.some(
+		(line) =>
+			line["type"] === "command_lifecycle" ||
+			(line["type"] === "result" &&
+				(line["user_message_uuid"] !== undefined ||
+					(Array.isArray(line["user_message_uuids"]) &&
+						line["user_message_uuids"].length > 0))),
+	);
+	return lines.length + (recordsInput ? 0 : 1);
 }
 
 const TWO_INPUTS = "second-input-held-to-turn-end";
@@ -228,7 +235,11 @@ function writeTrace(lines: readonly Raw[]): string {
 describe("createClaudeTraceReplayer", () => {
 	it("plays one planned trace per prompt, in plan order", async () => {
 		const replayer = createClaudeTraceReplayer({
-			turns: ["pong-thinking-text-turn", "subagent-task-turn"],
+			turns: [
+				"enter-worktree-turn",
+				"pong-thinking-text-turn",
+				"subagent-task-turn",
+			],
 		});
 		const prompts = promptQueue();
 		const iterator = replayer.sdk
@@ -238,15 +249,23 @@ describe("createClaudeTraceReplayer", () => {
 			})
 			[Symbol.asyncIterator]();
 
-		prompts.push("first");
-		const first = await readTurn(iterator);
+		prompts.push("first", SENT_A);
+		const first = await readTurn(iterator, "enter-worktree-turn");
 		prompts.push("second");
-		const second = await readTurn(iterator, "subagent-task-turn");
+		const second = await readTurn(iterator);
+		prompts.push("third");
+		const third = await readTurn(iterator, "subagent-task-turn");
 		prompts.close();
 
-		expect(first).toHaveLength(traceLineCount("pong-thinking-text-turn"));
-		expect(second).toHaveLength(traceLineCount("subagent-task-turn"));
-		expect(first.find((message) => message.type === "result")).toMatchObject({
+		expect(first).toHaveLength(traceLineCount("enter-worktree-turn"));
+		expect(first[0]).toMatchObject({
+			type: "command_lifecycle",
+			state: "started",
+			command_uuid: SENT_A,
+		});
+		expect(second).toHaveLength(traceLineCount("pong-thinking-text-turn"));
+		expect(third).toHaveLength(traceLineCount("subagent-task-turn"));
+		expect(second.find((message) => message.type === "result")).toMatchObject({
 			result: "pong",
 		});
 		expect(await iterator.next()).toEqual({ done: true, value: undefined });
@@ -925,9 +944,11 @@ describe("createClaudeTraceReplayer", () => {
 		};
 		const lengths: string[] = [];
 		const expected: string[] = [];
-		for (let played = 1; played <= traceLineCount(name); played++) {
+		const compatibilityFrames = traceLineCount(name) - traceJson(name).length;
+		for (let emitted = 1; emitted <= traceLineCount(name); emitted++) {
 			const next = await iterator.next();
 			if (next.done) throw new Error("trace ended early");
+			const played = emitted - compatibilityFrames;
 			const sessionId = next.value.session_id ?? "";
 			const listed = await replayer.sdk.subagentSdk.listSubagents(
 				sessionId,
@@ -1110,8 +1131,9 @@ describe("createClaudeTraceReplayer", () => {
 
 		replayer.release();
 		await playUntilStall();
-		expect(played).toHaveLength(112);
-		expect(firstResult).toBeLessThan(112);
+		const beforeHold = 112 + traceLineCount(name) - traceJson(name).length;
+		expect(played).toHaveLength(beforeHold);
+		expect(firstResult).toBeLessThan(beforeHold);
 		expect(await holding()).toBe(true);
 
 		// Played out, it waits for the next prompt: a stall, but not a hold.

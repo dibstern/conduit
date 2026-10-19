@@ -619,6 +619,15 @@ export const runSessionRunner = (
 					if (connection === peer) {
 						attached = false;
 						connection = undefined;
+						const proof =
+							process.env["NODE_ENV"] === "test"
+								? process.env["CONDUIT_TEST_PROCESS_PROOF"]
+								: undefined;
+						if (proof)
+							appendFileSync(
+								proof,
+								`${JSON.stringify({ kind: "runner-detached", sessionId, pid: process.pid, at: process.hrtime.bigint().toString() })}\n`,
+							);
 						if (exiting) finishExit();
 					}
 				},
